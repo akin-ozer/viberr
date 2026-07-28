@@ -8,9 +8,9 @@ Severity: C=critical H=high M=medium L=low D=doc/copy.
 
 | id | sev | status | finding (detail in NOTES.md) |
 |----|-----|--------|------------------------------|
-| F15-01 | M | OPEN | Credential card: `assumed` scopes dodge both the `unverified` branch and proven chips → green "Every provable scope verified" with ZERO proven scopes; attach-at-project-creation never ran the write probes ([credential-card.tsx:77-121](app/features/github/credential-card.tsx:77)) |
+| F15-01 | M | DONE (S4) card + PARTIAL/HANDBACK creation-probe | Credential card: `assumed` scopes dodge both the `unverified` branch and proven chips → green "Every provable scope verified" with ZERO proven scopes; attach-at-project-creation never ran the write probes ([credential-card.tsx:77-121](app/features/github/credential-card.tsx:77)) |
 | F15-02 | M | DONE 7d602ea | Project GitHub panel "Synced: not yet synced with GitHub" renders while PR/merge state is clearly live; "Update status" gives zero feedback (14ms no-op POST). Sync-freshness copy + action need truth |
-| F15-03 | L | OPEN | Watcher logs "reconciled removed directory" for a project dir at creation (transient race; verify no state-loss path) |
+| F15-03 | L | DONE (S4 — benign, HANDBACK patch) | `fs.watch` emits `rename` on directory CREATION too and `rebuildDir` never checks existence, so a new project dir runs the removal sweep and logs it. NO state-loss path (250 ms debounce lands after creation's own rebuild; atomic task writes are never transiently absent) — false log + wasted per-project reproject. Patch in handbacks/S4-github.md |
 | F15-04 | M(UX) | OPEN | Create-project returns to home grid instead of opening the new project |
 | F15-05 | H | OPEN | Profile DETAIL panel auto-shows `reviewer-expertise` + wrong default caps for NEW profiles (display layer; stored grants honest — matrix disagrees with detail panel). Org "1 context resource" count same bug |
 | F15-06 | H | OPEN | Same panel shows verdict caps ("Approve the review", "Request changes") as ACTS DIRECTLY for any new profile; capability matrix correctly shows Not granted |
@@ -36,13 +36,13 @@ Facts (not defects) worth keeping: Developer-Claude pushes its branch at creatio
 | id | sev | status | item |
 |----|-----|--------|------|
 | B-GH1 | H | DONE 7d602ea | Non-FF push: detect distinctly, stop blaming credentials, offer recovery (rename/reset-branch packet) — github-credentials §5 + F15-15 |
-| B-GH2 | M | OPEN | `failureMessage` still names dropped `workflow` scope (connections.server.ts:190-195) |
-| B-GH3 | M | OPEN | Rotate/Attach rebinds to DEFAULT connection regardless of repo owner (github-actions.server.ts:110-119) — multi-connection footgun |
+| B-GH2 | M | DONE (S4) | `failureMessage` still names dropped `workflow` scope (connections.server.ts:190-195) |
+| B-GH3 | M | DONE (S4) | Rotate/Attach rebinds to DEFAULT connection regardless of repo owner (github-actions.server.ts:110-119) — multi-connection footgun |
 | B-GH4 | L | DONE 7d602ea | `github.pr.opened` audit row on every reuse (pr-open.server.ts:369-377) |
-| B-GH5 | M | OPEN | Reconciler: unbounded parallel task reconcile per tick; no concurrency cap/backoff |
-| B-GH6 | L | OPEN | Required-scope set defined twice (pat-store vs connections) — unify |
-| B-GH7 | M | OPEN | Connection `valid` state trusted forever; no periodic revalidation of org connections |
-| B-GH8 | L | OPEN | `revalidateProjectCredential` resolves write-scope violations on read-only "assumed" evidence (pat-validator.server.ts:406-523) |
+| B-GH5 | M | DONE (S4) | Reconciler: unbounded parallel task reconcile per tick; no concurrency cap/backoff |
+| B-GH6 | L | DONE (S4) | Required-scope set defined twice (pat-store vs connections) — unify |
+| B-GH7 | M | DONE (S4; store-files caller = HANDBACK) | Connection `valid` state trusted forever; no periodic revalidation of org connections |
+| B-GH8 | L | HANDBACK (S4 — pat-validator not in stream) | `revalidateProjectCredential` resolves write-scope violations on read-only "assumed" evidence (pat-validator.server.ts:406-523) |
 
 ### Workflow core / acceptance (pairs with F15-19)
 | id | sev | status | item |
@@ -103,7 +103,7 @@ Facts (not defects) worth keeping: Developer-Claude pushes its branch at creatio
 - **R15-3 (F15-12)**: A task owner may apply/dismiss ANY operator recommendation on their own task, including stage transitions — the click is the authorization (FR37 spirit).
 - **R15-4 (B-FD3)**: Projects are MEMBERS-ONLY: non-members cannot open boards/tasks (404-style); WI-13 secrecy wins; FR4's app-wide commenting applies within projects the user can see.
 - **R15-5 (F15-16)**: Build the global ⌘K palette (tasks/branches/agents/projects, visibility-scoped, quick-jump).
-- **R15-6**: Delete-remote-branch-on-merge as a per-project setting (default on).
+- **R15-6**: Delete-remote-branch-on-merge as a per-project setting (default on). — DONE (S4): `delete-branch-after-merge` project.md guardrail (absence = ON), toggle on Settings → Repository & credentials (`edit-policy` tier), enforced inside `mergeTaskPr`'s success path so all three acceptance writers get it; refusals stay refusals and land as plain-words notes.
 - **R15-7 (B-AG4)**: Ghost/undeployed-profile runs are fully conservative — no comments/ask-human/evidence, matching the tool posture.
 - **R15-8 (C-D1)**: Re-sync `design/prd.md` with all canon amendments (both copies maintained; README sentence becomes true again).
 

@@ -74,28 +74,45 @@ export interface SearchableTask {
   title: string;
   branch: string | null;
   owner: { name: string } | null;
-  specialist: { name: string; role: string } | null;
-  reviewers: { name: string; role: string }[];
+  specialist: { name: string; role: string; profileId: string } | null;
+  reviewers: { name: string; role: string; profileId: string }[];
   operator: { name: string } | null;
 }
 
-/** Topbar search: case-insensitive substring over key, title, branch and
- * agent/owner identities ("Search tasks, branches, agents…"). */
+/**
+ * BOARD filter (R15-5: "Filter this board…", not a global search — the ⌘K
+ * palette answers that): case-insensitive substring over key, title, branch and
+ * the identities on the card.
+ *
+ * F15-16: an agent's own NAME never matched. `AgentRender.name` is the BACKEND
+ * label ("Codex" / "Claude Code") — the profile's name is not projected onto a
+ * task summary at all — so typing "reviewer" or "docs writer" hit nothing while
+ * the placeholder promised agents. The profile ID is the identity the board
+ * does carry, so it joins the haystack, hyphen-normalized on both sides:
+ * "docs writer" matches the `docs-writer` deployment.
+ */
 export function matchesSearch(task: SearchableTask, query: string): boolean {
-  const q = query.trim().toLowerCase();
+  const q = normalizeIdentity(query);
   if (!q) return true;
-  const haystack = [
-    task.key,
-    task.title,
-    task.branch ?? "",
-    task.owner?.name ?? "",
-    task.specialist ? `${task.specialist.name} ${task.specialist.role}` : "",
-    ...task.reviewers.map((c) => `${c.name} ${c.role}`),
-    task.operator?.name ?? "",
-  ]
-    .join(" ")
-    .toLowerCase();
+  const haystack = normalizeIdentity(
+    [
+      task.key,
+      task.title,
+      task.branch ?? "",
+      task.owner?.name ?? "",
+      task.specialist
+        ? `${task.specialist.name} ${task.specialist.role} ${task.specialist.profileId}`
+        : "",
+      ...task.reviewers.map((c) => `${c.name} ${c.role} ${c.profileId}`),
+      task.operator?.name ?? "",
+    ].join(" "),
+  );
   return haystack.includes(q);
+}
+
+/** Lowercase and treat `-`/`_` as spaces, so a profile id reads as its name. */
+function normalizeIdentity(value: string): string {
+  return value.trim().toLowerCase().replace(/[-_]+/g, " ");
 }
 
 export function isBoardFilterId(value: string | null): value is BoardFilterId {

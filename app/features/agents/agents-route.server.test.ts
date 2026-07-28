@@ -411,6 +411,58 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     });
   });
 
+  /**
+   * B-AG1: save-time normalization used to rewrite an EXPLICIT headline `off`
+   * to `direct` whenever any scoped delivery grant was actionable — silently,
+   * with no audit row, and in the opposite direction from the enforcement layer
+   * (`grantModes`), which honors the `off`. An admin who deliberately withheld
+   * repo writes got them back on the next save.
+   */
+  it("an EXPLICIT headline `off` survives the save, and the contradiction is recorded (B-AG1)", async () => {
+    const result = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Withheld Dev",
+        role: "No repo writes",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Headline explicitly off; scoped delivery left on.",
+        caps: {
+          "execute-code-or-write-repo": "off",
+          "create-task-branch": "direct",
+          "commit-push-branch": "direct",
+        },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    const created = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "withheld-dev",
+    )!;
+    const mode = (id: string) =>
+      created.capabilities.find((c) => c.capabilityId === id)?.mode;
+    expect(mode("execute-code-or-write-repo")).toBe("off");
+    // The scoped grants the admin left on are untouched — the contradiction is
+    // reported, not resolved behind their back in either direction.
+    expect(mode("create-task-branch")).toBe("direct");
+
+    const audit = listAuditEvents(app.db, {
+      action: "project.agent_profile.created",
+    }).find((e) => e.subjectId === "withheld-dev")!;
+    const details = (audit.details ?? {}) as {
+      deliveryGrants?: string;
+      deliveryNote?: string;
+    };
+    expect(details.deliveryGrants).toBe("withheld");
+    expect(details.deliveryNote).toContain("cannot deliver");
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: "withheld-dev",
+    });
+  });
+
   it("R7-5 — a specialist `recommend` grant coerces to `direct` ('Allowed') on create", async () => {
     // The specialist picker no longer offers `recommend`, but a hostile/legacy
     // form might still submit it. `recommend` is operator-only (runtime-
@@ -860,5 +912,79 @@ describe("AP-07 — a project-level edit FORKS the profile (the modal now says s
       profileId: templateId,
     });
     rmSync(templatePath(), { force: true });
+  });
+});
+
+/**
+ * F15-05/F15-06 (live, 2026-07-28): a profile created in org settings — the one
+ * surface with NO capability UI — and then added to a project rendered on the
+ * project Agents page holding "Approve the review", "Request changes" and
+ * "Post quality-flag events" under ACTS DIRECTLY, because the conservative
+ * defaults granted every advisory catalog id at its `direct` default while
+ * `report-validation-verdict` stayed `off`. An admin reading that panel was told
+ * a docs writer could approve reviews.
+ */
+describe("F15-05/06 — a brand-new profile claims no verdict authority", () => {
+  const orgProfileId = "org-docs-writer";
+
+  it("org-created → library-deployed: no verdict outcomes, no unasked resources", async () => {
+    const { saveGlobalAgentProfile } = await import("~/server/org/gagents.server");
+    saveGlobalAgentProfile(
+      app.db,
+      {
+        name: "Org docs writer",
+        backend: "codex",
+        summary: "Writes documentation only.",
+        persona: "You improve documentation.",
+        stages: ["impl"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+      },
+      { userId: ids.arda, label: "Arda" },
+      { dataRoot: app.dataRoot },
+    );
+    const deployed = (await postAction(ids.arda, {
+      intent: "deploy-profile",
+      profileId: orgProfileId,
+    })) as { ok: boolean };
+    expect(deployed.ok).toBe(true);
+
+    const view = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === orgProfileId,
+    )!;
+    for (const label of [
+      "Approve the review",
+      "Request changes",
+      "Post quality-flag events",
+    ]) {
+      expect(view.actions.direct, label).not.toContain(label);
+      expect(view.actions.recommend, label).not.toContain(label);
+    }
+    // Delivery stays withheld too (the pre-existing conservative posture).
+    expect(view.actions.direct).not.toContain("Execute code or write to the repo");
+    expect(view.actions.direct).not.toContain("Commit & push to the branch");
+    // Verdict authority is explicit-only, and it was never granted.
+    expect(view.actions.direct).not.toContain("Report a validation verdict");
+    // Nothing chose a context resource for it.
+    expect(view.resources).toEqual({ skills: [], mcps: [], kb: [] });
+
+    // The stored template is honest at rest as well — the outcomes are `off`,
+    // not `direct`-with-a-withheld-verdict.
+    const template = readFileSync(
+      path.join(app.dataRoot, "agents", "profiles", `${orgProfileId}.md`),
+      "utf8",
+    );
+    expect(template).toMatch(/capabilityId: approve-review\n\s+mode: off/);
+    expect(template).toMatch(/capabilityId: request-changes\n\s+mode: off/);
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: orgProfileId,
+    });
+    rmSync(
+      path.join(app.dataRoot, "agents", "profiles", `${orgProfileId}.md`),
+      { force: true },
+    );
   });
 });

@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { readFileSync, rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
@@ -188,5 +189,93 @@ describe("the sink redacts before it persists", () => {
     const command = (line!.display.input as { command: string }).command;
     expect(command).not.toContain(CLAUDE_KEY);
     expect(command).toContain("Bearer [redacted]");
+  });
+});
+
+/**
+ * B-FD7: two writers can reach one run — the adapter's own exit and a human's
+ * interrupt taking `interruptRun`'s no-live-handle path — and the sink used to
+ * let whichever landed last define the outcome.
+ */
+describe("finalize state precedence", () => {
+  const exit = (outcome: "finished" | "error" | "interrupted") => ({
+    outcome,
+    effectiveBackend: "claude" as const,
+    sessionId: "sess_1",
+  });
+
+  function runRow(runId: string) {
+    return store.db
+      .prepare(`SELECT state, finished_at FROM agent_runs WHERE id = ?`)
+      .get(runId) as { state: string; finished_at: string | null };
+  }
+
+  it("does not overwrite a run already recorded as interrupted", () => {
+    const sink = sinkFor("run_interrupted");
+    sink.markRunning();
+    // Another writer stamped the human's stop while the adapter was still alive.
+    store.db
+      .prepare(`UPDATE agent_runs SET state = 'interrupted', finished_at = ? WHERE id = ?`)
+      .run("2026-07-28T10:00:00.000Z", "run_interrupted");
+
+    sink.finalize(exit("finished"));
+
+    const row = runRow("run_interrupted");
+    expect(row.state).toBe("interrupted");
+    // The recorded finish time is the interrupt's, not this exit's.
+    expect(row.finished_at).toBe("2026-07-28T10:00:00.000Z");
+    // Facts the exit carried still land.
+    expect(
+      (store.db.prepare(`SELECT session_id FROM agent_runs WHERE id = ?`).get("run_interrupted") as {
+        session_id: string | null;
+      }).session_id,
+    ).toBe("sess_1");
+  });
+
+  it("finalizes normally from a live (non-terminal) state", () => {
+    const sink = sinkFor("run_live");
+    sink.markRunning();
+    sink.finalize(exit("error"));
+    const row = runRow("run_live");
+    expect(row.state).toBe("error");
+    expect(row.finished_at).not.toBeNull();
+  });
+
+  it("a second finalize never rewrites the first terminal answer", () => {
+    const sink = sinkFor("run_double");
+    sink.markRunning();
+    sink.finalize(exit("finished"));
+    const first = runRow("run_double").finished_at;
+    sink.finalize(exit("error"));
+    expect(runRow("run_double")).toEqual({ state: "finished", finished_at: first });
+  });
+});
+
+describe("silent line loss is surfaced (B-FD7)", () => {
+  it("marks the run's console as incomplete, once, when lines cannot be persisted", () => {
+    // Raw transcripts are keyed by run id under the AMBIENT data root, so the
+    // id has to be unique per run of this test or the appends accumulate.
+    const runId = `run_lossy_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    // A DB write failure AFTER the successful raw append — the exact divergence
+    // shape: emulate it by removing the row `run_log_lines` FKs to.
+    store.db.prepare(`DELETE FROM agent_runs WHERE id = ?`).run(runId);
+    try {
+      sink.line(emitted({ t: "10:00:00", ev: "out", tag: "x", text: "one" }, '{"say":"one"}'));
+      sink.line(emitted({ t: "10:00:01", ev: "out", tag: "x", text: "two" }, '{"say":"two"}'));
+
+      const raw = readFileSync(rawLogPath("claude", runId), "utf8")
+        .split("\n")
+        .filter(Boolean);
+      // Both lines still reached the canonical transcript...
+      expect(raw.filter((l) => l.includes('"say"'))).toHaveLength(2);
+      // ...and the divergence is stated ONCE, not per dropped line.
+      const markers = raw.filter((l) => l.includes("line_lost"));
+      expect(markers).toHaveLength(1);
+      expect(markers[0]).toContain("INCOMPLETE");
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
   });
 });

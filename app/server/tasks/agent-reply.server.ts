@@ -135,19 +135,84 @@ function agentActorRef(
 }
 
 /**
- * Does a set of @handles target this deployed specialist? Matches on the
- * specialist's name, profile id, or backend — all case-insensitive. `@agent`
- * matches the PRIMARY specialist only (resolved by the caller); it is not
- * matched here so a two-specialist task does not ambiguously match both.
+ * Does a set of @handles NAME this deployed specialist — by display name or
+ * profile id, case-insensitively? `@agent` matches the PRIMARY specialist only
+ * (resolved by the caller); it is not matched here so a two-specialist task does
+ * not ambiguously match both.
  */
-function handleMatchesSpecialist(
+function handleNamesSpecialist(
   handles: Set<string>,
   sp: DeployedSpecialistView,
 ): boolean {
+  return handles.has(sp.name.toLowerCase()) || handles.has(sp.id.toLowerCase());
+}
+
+/**
+ * The deployed specialists a BACKEND handle (`@claude` / `@codex`) covers.
+ *
+ * B-AG2: a backend handle names a runtime, not an agent. It used to be folded
+ * into the same `find` as name/id, so on a project running two claude profiles
+ * "@claude, please look" deterministically engaged whichever the project file
+ * listed FIRST — a profile that may never have been intended for this task, and
+ * one the human had no way to predict. It resolves only when the backend
+ * identifies exactly one deployed specialist; several is an ambiguity the caller
+ * reports instead of guessing at.
+ */
+function specialistsForBackendHandle(
+  handles: Set<string>,
+  specialists: readonly DeployedSpecialistView[],
+): DeployedSpecialistView[] {
+  return specialists.filter((sp) => handles.has(sp.backend));
+}
+
+/** An unresolvable `@claude`/`@codex` mention: the backend runs several deployed
+ * specialists here, so nothing is engaged until the human names one. */
+export interface AmbiguousBackendHandle {
+  backend: RealBackend;
+  /** Every deployed specialist of that backend, in project-file order. */
+  candidates: { profileId: string; name: string }[];
+}
+
+/**
+ * Why a mention that carried an agent handle engaged nobody — when the reason is
+ * "the backend handle covers more than one deployed specialist". Returns null
+ * for every other case (no handle, a name that matched, a single candidate).
+ * The caller turns it into the policy-note reply that asks for a profile name.
+ */
+export function ambiguousBackendHandle(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  text: string,
+): AmbiguousBackendHandle | null {
+  const specialists = listDeployedSpecialists(projectSlug, ctx);
+  const handles = new Set(
+    mentionHandles(text, [
+      ...specialists.flatMap(specialistHandles),
+      ...RESERVED_AGENT_HANDLES,
+    ]),
+  );
+  if (handles.size === 0) return null;
+  if (specialists.some((sp) => handleNamesSpecialist(handles, sp))) return null;
+  const candidates = specialistsForBackendHandle(handles, specialists);
+  if (candidates.length < 2) return null;
+  return {
+    backend: candidates[0]!.backend,
+    candidates: candidates.map((sp) => ({ profileId: sp.id, name: sp.name })),
+  };
+}
+
+/** The policy-note copy for an ambiguous backend mention — one sentence naming
+ * every candidate, so the human can re-tag precisely. */
+export function ambiguousBackendHandleNote(
+  ambiguous: AmbiguousBackendHandle,
+): string {
+  const names = ambiguous.candidates
+    .map((c) => `@${c.profileId} (${c.name})`)
+    .join(" · ");
   return (
-    handles.has(sp.name.toLowerCase()) ||
-    handles.has(sp.id.toLowerCase()) ||
-    handles.has(sp.backend)
+    `No agent was engaged: **@${ambiguous.backend}** names a runtime, and ` +
+    `${ambiguous.candidates.length} profiles run on it here — ${names}. ` +
+    `Tag the profile you want (or @agent for this task's primary specialist).`
   );
 }
 
@@ -293,8 +358,12 @@ export function resolveMentionedAgent(
     };
   }
 
-  // 3. A deployed specialist by name / id / backend.
-  const matched = specialists.find((s) => handleMatchesSpecialist(handleSet, s));
+  // 3. A deployed specialist NAMED by the mention (display name or profile id),
+  //    else the single specialist a backend handle identifies (B-AG2).
+  const backendCandidates = specialistsForBackendHandle(handleSet, specialists);
+  const matched =
+    specialists.find((s) => handleNamesSpecialist(handleSet, s)) ??
+    (backendCandidates.length === 1 ? backendCandidates[0] : undefined);
   if (matched) {
     const isPrimary = primaryRef?.profileId === matched.id;
     return {
@@ -314,6 +383,11 @@ export function resolveMentionedAgent(
       }),
     };
   }
+
+  // Several deployed specialists share the tagged backend: engage NOBODY rather
+  // than guess (B-AG2). The primary fallback below must not fire either — it
+  // would resolve exactly the arbitrary pick this branch exists to refuse.
+  if (backendCandidates.length > 1) return null;
 
   // A backend handle (`@claude`/`@codex`) with no deployed specialist of that
   // backend still targets "the agent" if the primary matches that backend.

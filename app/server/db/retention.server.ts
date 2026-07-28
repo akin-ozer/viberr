@@ -21,6 +21,28 @@ import { logger } from "~/server/logging/logger.server";
 export const RUN_LOG_RETENTION_DAYS = 30;
 /** Audit events: governance record — kept much longer (90 days). */
 export const AUDIT_RETENTION_DAYS = 90;
+
+/**
+ * B-FD10: audit actions that double as IDEMPOTENCY KEYS, exempt from the window
+ * above. Boot recovery decides whether an effect already happened by asking
+ * whether its audit row exists (`NOT EXISTS (SELECT 1 FROM audit_events …)`),
+ * so deleting one of these rows does not merely lose history — it makes the
+ * next boot redo the work. A >90-day-old task still sitting at `waiting=agent`
+ * would have its finished run's reply posted a second time.
+ *
+ * Explicitly listed, not pattern-matched, so adding a recovery marker is a
+ * deliberate act. Readers (app/server/runtimes/run-recovery.server.ts):
+ *  - `task.agent.replied`            → recoverUnreactedAgentRuns
+ *  - `runtime.operator.plan_executed`→ recoverStrandedOperatorPlans
+ *
+ * The rolling-window recovery counters (`run.recovery.reinvoked`,
+ * `run.recovery.reply_replayed`) are deliberately NOT here: they are counted
+ * inside a 30-minute window, so a 90-day-old row can never affect a budget.
+ */
+export const IDEMPOTENCY_AUDIT_ACTIONS = [
+  "task.agent.replied",
+  "runtime.operator.plan_executed",
+] as const;
 /** Notifications: keep the newest N per user (the UI reads far fewer). */
 export const NOTIFICATION_MAX_PER_USER = 500;
 
@@ -46,8 +68,13 @@ export function applyRetention(
 
   const auditEvents = Number(
     db
-      .prepare(`DELETE FROM audit_events WHERE occurred_at < ?`)
-      .run(isoDaysAgo(now, AUDIT_RETENTION_DAYS)).changes,
+      .prepare(
+        `DELETE FROM audit_events
+          WHERE occurred_at < ?
+            AND action NOT IN (${IDEMPOTENCY_AUDIT_ACTIONS.map(() => "?").join(", ")})`,
+      )
+      .run(isoDaysAgo(now, AUDIT_RETENTION_DAYS), ...IDEMPOTENCY_AUDIT_ACTIONS)
+      .changes,
   );
 
   // Keep only the newest N notifications per user (window function — SQLite

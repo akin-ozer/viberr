@@ -133,6 +133,80 @@ export function ProjectPanel({
 
 // ------------------------------------------------------------------- stages
 
+/**
+ * Name-FIRST stage creation (2026-07-28 UX ruling). "Add stage" used to POST on
+ * the click and commit a stage literally called "New stage" — a real workflow
+ * stage, spliced into the governed transition chain, from one stray press. The
+ * button now opens an inline field and nothing is written until a name is
+ * committed; Escape or Cancel leaves the board untouched.
+ */
+function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (naming) inputRef.current?.focus();
+  }, [naming]);
+
+  const cancel = () => {
+    setNaming(false);
+    setName("");
+  };
+  const commit = () => {
+    const v = name.trim();
+    if (!v) return;
+    onAdd(v);
+    cancel();
+  };
+
+  if (!naming) {
+    return (
+      <button
+        type="button"
+        className="btn ghost sm"
+        style={{ width: "100%", marginTop: ".8rem" }}
+        onClick={() => setNaming(true)}
+      >
+        <Icon name="plus" />
+        Add stage
+      </button>
+    );
+  }
+  return (
+    <div className="stg-add" style={{ marginTop: ".8rem" }}>
+      <input
+        ref={inputRef}
+        className="stg-input"
+        value={name}
+        placeholder="Stage name"
+        aria-label="New stage name"
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancel();
+          }
+        }}
+      />
+      <button type="button" className="btn ghost sm" onClick={cancel}>
+        Cancel
+      </button>
+      <button
+        type="button"
+        className="btn primary sm"
+        disabled={name.trim().length === 0}
+        aria-disabled={name.trim().length === 0}
+        onClick={commit}
+      >
+        Add stage
+      </button>
+    </div>
+  );
+}
+
 export function StagesPanel({
   stages,
   counts,
@@ -152,7 +226,7 @@ export function StagesPanel({
   setEditingId: (id: string | null) => void;
   onRename: (stageId: string, name: string) => void;
   onReorder: (orderedIds: string[]) => void;
-  onAdd: () => void;
+  onAdd: (name: string) => void;
   onRemove: (stageId: string) => void;
   onNavPolicy: () => void;
 }) {
@@ -297,17 +371,7 @@ export function StagesPanel({
           );
         })}
       </div>
-      {canManage && (
-        <button
-          type="button"
-          className="btn ghost sm"
-          style={{ width: "100%", marginTop: ".8rem" }}
-          onClick={onAdd}
-        >
-          <Icon name="plus" />
-          Add stage
-        </button>
-      )}
+      {canManage && <AddStageControl onAdd={onAdd} />}
       {/* P13-D-1: this used to point at Policy for "who may move tasks between
           stages" as if transitions were authored there — Policy only flips the
           boundary ON an existing rule. The chain itself is maintained HERE, by
@@ -604,9 +668,11 @@ export function RepoPanel({
   credBusy,
   canRepair,
   footprintTasks,
+  branchCleanup,
   repairBusy,
   repairResult,
   onRepair,
+  onSetBranchCleanup,
   onGrantScope,
   onSetCredential,
   onClearCredential,
@@ -621,9 +687,12 @@ export function RepoPanel({
    *  credential actions. */
   canRepair: boolean;
   footprintTasks: number;
+  /** R15-6: delete the task branch on GitHub once its review PR merges. */
+  branchCleanup: boolean;
   repairBusy: boolean;
   repairResult: { ok: boolean; toast?: string; error?: string } | undefined;
   onRepair: (repo: string, confirmFootprint: boolean) => void;
+  onSetBranchCleanup: (enabled: boolean) => void;
   onGrantScope: () => void;
   onSetCredential: () => void;
   onClearCredential: () => void;
@@ -685,6 +754,33 @@ export function RepoPanel({
             }}
           >
             every task uses this repository
+          </span>
+        </div>
+        {/* R15-6: merged task branches piled up on the repo (vib-1..4, 7, 9 were
+            still there when the ruling landed). Default ON; the deletion itself
+            still refuses the default branch and any branch with an open PR. */}
+        <div className="kv-row">
+          <span className="k">After merge</span>
+          <span className="v" style={{ fontWeight: 400 }}>
+            <label
+              style={{
+                display: "flex",
+                gap: ".45rem",
+                alignItems: "center",
+                fontFamily: "var(--font-body)",
+                fontSize: ".8rem",
+                color: "var(--muted)",
+                cursor: canRepair ? "pointer" : "default",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={branchCleanup}
+                disabled={!canRepair || repairBusy}
+                onChange={(e) => onSetBranchCleanup(e.target.checked)}
+              />
+              delete the task branch on GitHub
+            </label>
           </span>
         </div>
       </div>
@@ -999,9 +1095,9 @@ export function SettingsPage({
                 { method: "post" },
               )
             }
-            onAdd={() =>
+            onAdd={(name) =>
               stageFetcher.submit(
-                { intent: "add-stage", _csrf: csrf },
+                { intent: "add-stage", _csrf: csrf, name },
                 { method: "post" },
               )
             }
@@ -1043,6 +1139,7 @@ export function SettingsPage({
             credBusy={credFetcher.state !== "idle"}
             canRepair={isAdmin}
             footprintTasks={data.repoFootprintTasks}
+            branchCleanup={data.branchCleanupOnMerge}
             repairBusy={repoFetcher.state !== "idle"}
             repairResult={repoFetcher.data}
             onRepair={(repoInput, confirmFootprint) =>
@@ -1052,6 +1149,16 @@ export function SettingsPage({
                   _csrf: csrf,
                   repo: repoInput,
                   ...(confirmFootprint ? { confirmFootprint: "1" } : {}),
+                },
+                { method: "post" },
+              )
+            }
+            onSetBranchCleanup={(enabled) =>
+              repoFetcher.submit(
+                {
+                  intent: "set-branch-cleanup",
+                  _csrf: csrf,
+                  enabled: enabled ? "1" : "0",
                 },
                 { method: "post" },
               )

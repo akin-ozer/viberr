@@ -4,7 +4,11 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { createConnection } from "~/server/org/connections.server";
+import {
+  createConnection,
+  getConnection,
+  getDefaultConnection,
+} from "~/server/org/connections.server";
 import { getProjectCredential } from "~/server/secrets/pat-store.server";
 import { runReconcile, runSetCredential } from "./github-actions.server";
 import { latestProjectReconcileAt } from "~/server/provenance/provenance-query.server";
@@ -140,5 +144,81 @@ describe("runReconcile on a project with no branched tasks", () => {
     expect(outcome.result).toBe("no_branched_tasks");
     expect(outcome.toast).toContain("no task has a delivery branch");
     expect(latestProjectReconcileAt(store.db, store.slug)).not.toBeNull();
+  });
+});
+
+/**
+ * B-GH3: project creation binds the connection matching the repo OWNER, but
+ * Attach/Rotate bound `getDefaultConnection` unconditionally. In a
+ * multi-connection org that silently swapped a project onto another owner's
+ * PAT — and the damage only surfaced later, as a repo-access miss blamed on
+ * the token.
+ */
+describe("runSetCredential binds by repo owner, not by org default", () => {
+  const CLASSIC = (owner: string) =>
+    fakeGithubFetch({
+      "GET /user": {
+        body: { login: owner },
+        headers: { "x-oauth-scopes": "repo" },
+      },
+      [`GET /users/${owner}`]: { body: { public_repos: 2 } },
+    });
+
+  it("picks the connection that owns the project's repo", async () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+
+    // "hepapi" is created FIRST, so it is the org default…
+    await createConnection(
+      store.db,
+      { owner: "hepapi", token: "ghp_hepapi_token_1111", userId: actor.userId },
+      actor,
+      { fetchImpl: CLASSIC("hepapi").fetchImpl },
+    );
+    // …while the project's repo (akin-ozer/viberr) lives under this one.
+    await createConnection(
+      store.db,
+      { owner: "akin-ozer", token: "ghp_akinozer_token_2222", userId: actor.userId },
+      actor,
+      { fetchImpl: CLASSIC("akin-ozer").fetchImpl },
+    );
+    expect(getDefaultConnection(store.db)!.id).toBe("hepapi");
+
+    const attach = fakeGithubFetch({
+      "GET /user": { body: { login: "akin-ozer" }, headers: { "x-oauth-scopes": "repo" } },
+      [`GET /repos/${REPO}`]: { body: { full_name: REPO } },
+    });
+    const outcome = await runSetCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: attach.fetchImpl,
+    });
+    expect(outcome.result).toBe("attached");
+    // Fails on main: the bound PAT was hepapi's (the default).
+    expect(getProjectCredential(store.db, store.slug)!.id).toBe(
+      getConnection(store.db, "akin-ozer")!.patId,
+    );
+    expect(outcome.toast).toContain("akin-ozer");
+  });
+
+  it("refuses — with the owner named — when no connection covers the repo owner", async () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    await createConnection(
+      store.db,
+      { owner: "hepapi", token: "ghp_hepapi_token_3333", userId: actor.userId },
+      actor,
+      { fetchImpl: CLASSIC("hepapi").fetchImpl },
+    );
+
+    const outcome = await runSetCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch({}).fetchImpl,
+    });
+    // Fails on main: it happily bound hepapi's PAT to an akin-ozer repo.
+    expect(outcome.result).toBe("no_owner_connection");
+    expect(outcome.toast).toContain("akin-ozer");
+    expect(getProjectCredential(store.db, store.slug)).toBeNull();
   });
 });

@@ -215,6 +215,51 @@ describe("CredentialCard states", () => {
     );
   });
 
+  /**
+   * F15-01 (live repro): a fine-grained PAT attached at project creation is
+   * validated with `repo: null`, so EVERY chip comes back `assumed` — which
+   * dodged the all-"unchecked" test and fell straight through to the green
+   * footer. The card affirmed "Every provable scope verified" while proving
+   * exactly nothing.
+   */
+  it("all-assumed scopes are the unverified state, never the green line", () => {
+    const assumed: ProjectCredentialHealth = {
+      ...healthyCredential,
+      scopes: [
+        { id: "repo", ok: true, source: "assumed" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ],
+    };
+    const { container } = render(
+      <CredentialCard credential={assumed} onOpenTask={() => {}} />,
+    );
+    // Fails on main: `.cred-ok` rendered with the "Every provable scope
+    // verified" affirmation and no warn banner at all.
+    expect(container.querySelector(".cred-ok")).toBeNull();
+    expect(container.textContent).not.toContain("Every provable scope verified");
+    const warn = container.querySelector(".cred-warn")!;
+    expect(warn.textContent).toContain("scopes not yet verified");
+    expect(warn.textContent).toContain("repo, pull_request:write");
+    // No pseudo-chips either — nothing here is evidence.
+    expect(container.querySelectorAll(".scope-chip")).toHaveLength(0);
+  });
+
+  it("keeps the green line when at least one scope is proven and none miss", () => {
+    const mixed: ProjectCredentialHealth = {
+      ...healthyCredential,
+      scopes: [
+        { id: "repo", ok: true, source: "probe" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ],
+    };
+    const { container } = render(
+      <CredentialCard credential={mixed} onOpenTask={() => {}} />,
+    );
+    expect(container.querySelector(".cred-ok")!.textContent).toContain(
+      "Every provable scope verified.",
+    );
+  });
+
   it("renders the warnActions slot inside the banner", () => {
     const { container } = render(
       <CredentialCard

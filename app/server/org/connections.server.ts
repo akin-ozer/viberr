@@ -6,6 +6,7 @@ import {
 } from "~/schemas/github-pat.schema";
 import {
   recordAudit,
+  SYSTEM_ACTOR,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { getPatValidationRateLimiter } from "~/server/auth/rate-limit.server";
@@ -13,6 +14,7 @@ import { createGithubClient } from "~/server/github/github-client.server";
 import {
   createPat,
   deletePat,
+  DEFAULT_REQUIRED_SCOPES,
   getPatToken,
   recordPatValidation,
   replacePatToken,
@@ -38,15 +40,18 @@ import { formatCalendarDate } from "~/shared/dates/format";
  * validator semantics, unchanged.
  */
 
-/** The minimum a connection must hold for Viberr's own writes (branch push,
+/**
+ * The minimum a connection must hold for Viberr's own writes (branch push,
  * PR open, PR merge). Owner ruling 2026-07-25: the mock-era `workflow`
  * requirement is gone — it blocked classic tokens that were perfectly able to
  * deliver, and it is unprovable for fine-grained ones; a workflow-file push
- * that GitHub refuses surfaces as a scope violation at the moment it matters. */
-export const CONNECTION_REQUIRED_SCOPES = [
-  "repo",
-  "pull_request:write",
-] as const;
+ * that GitHub refuses surfaces as a scope violation at the moment it matters.
+ *
+ * B-GH6: ONE definition, aliased. The connection gate and the project scope
+ * chips must never be able to disagree about what "the minimum" is, and two
+ * identical `as const` tuples in two modules made that a one-edit mistake.
+ */
+export const CONNECTION_REQUIRED_SCOPES = DEFAULT_REQUIRED_SCOPES;
 
 export type ConnectionValidationState = "valid" | "failed" | "unvalidated";
 
@@ -173,6 +178,94 @@ export function getDefaultConnectionToken(
   return token ? { connection, token } : null;
 }
 
+/**
+ * How long a connection's cached `valid` verdict is trusted before the next
+ * consumer re-proves it (B-GH7). Nothing polls GitHub for connection health,
+ * so without this a token revoked on github.com keeps clearing every gate that
+ * reads `validationState` until a human opens org settings and re-checks by
+ * hand — and token expiry only ever showed as a ≤30-day badge.
+ */
+export const CONNECTION_REVALIDATE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+export interface FreshnessOptions extends ConnectionOptions {
+  /** Clock hook for tests. */
+  now?: () => number;
+}
+
+/**
+ * Opportunistic staleness check for one connection, run where a token is about
+ * to be USED. At most ONE probe: only a `valid` verdict older than
+ * `CONNECTION_REVALIDATE_AFTER_MS` is re-asked, with `repo: null` — the same
+ * question the connection modal asked — and the answer replaces the cache that
+ * every connection surface renders.
+ *
+ * A `network_error` is NOT a downgrade: it evaluated nothing, and caching it
+ * would turn twenty unreachable seconds into "this connection failed" on the
+ * org page. Only GitHub's own verdict can demote a connection.
+ */
+export async function ensureConnectionFresh(
+  db: DatabaseSync,
+  id: string,
+  options: FreshnessOptions = {},
+): Promise<ConnectionRecord | null> {
+  const connection = getConnection(db, id);
+  if (!connection || connection.validationState !== "valid") return connection;
+
+  const now = (options.now ?? Date.now)();
+  const age =
+    connection.lastValidatedAt !== null
+      ? now - Date.parse(connection.lastValidatedAt)
+      : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(age) && age >= 0 && age < CONNECTION_REVALIDATE_AFTER_MS) {
+    return connection;
+  }
+
+  const token = getPatToken(db, connection.patId);
+  if (!token) return connection;
+  const validation = await validatePatToken(token, {
+    requiredScopes: [...CONNECTION_REQUIRED_SCOPES],
+    repo: null,
+    knownExpiresAt: connection.expiresAt,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
+  if (validation.status === "network_error") return connection;
+
+  recordPatValidation(db, connection.patId, validation);
+  db.prepare(
+    `UPDATE github_connections SET expires_at = ?, updated_at = ? WHERE id = ?`,
+  ).run(validation.expiresAt, new Date(now).toISOString(), connection.id);
+  if (validation.status !== "valid") {
+    recordAudit(db, {
+      action: "org.connection.validation_downgraded",
+      actor: SYSTEM_ACTOR,
+      subjectKind: "github_connection",
+      subjectId: connection.id,
+      details: {
+        owner: connection.owner,
+        status: validation.status,
+        detail: validation.detail,
+      },
+    });
+  }
+  return getConnection(db, connection.id);
+}
+
+/**
+ * `getDefaultConnectionToken` with the staleness check in front of it — the
+ * async form for callers that can await (store import, credential attach).
+ * A connection GitHub has since rejected returns null here instead of handing
+ * out a dead token.
+ */
+export async function getDefaultConnectionTokenFresh(
+  db: DatabaseSync,
+  options: FreshnessOptions = {},
+): Promise<{ connection: ConnectionRecord; token: string } | null> {
+  const current = getDefaultConnection(db);
+  if (!current) return null;
+  await ensureConnectionFresh(db, current.id, options);
+  return getDefaultConnectionToken(db);
+}
+
 // -------------------------------------------------------------- mutations
 
 export interface ConnectionOptions {
@@ -188,9 +281,12 @@ export type SaveConnectionResult =
 function failureMessage(validation: PatValidation): string {
   if (validation.status === "insufficient_scope") {
     const missing = validation.missingScopes.join(" · ") || "required scopes";
+    // B-GH2: the minimum is READ off the required set, never re-typed. This
+    // sentence named `workflow` for three passes after the owner dropped it —
+    // telling people to widen a token Viberr no longer wants.
     return (
       `Validation failed — token is missing ${missing}. ` +
-      `Minimum scopes: repo · workflow · pull_request:write. Nothing was saved.`
+      `Minimum scopes: ${CONNECTION_REQUIRED_SCOPES.join(" · ")}. Nothing was saved.`
     );
   }
   const detail = validation.detail.trim().replace(/\.?$/, ".");

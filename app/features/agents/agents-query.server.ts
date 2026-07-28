@@ -18,6 +18,7 @@ import {
 } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
+  applyVerdictOutcomeGate,
   capabilityById,
   coerceSpecialistCapabilityMode,
 } from "~/shared/capabilities";
@@ -88,7 +89,12 @@ export function parseDeploymentDefinition(
 
 /** Id-based capability policy → the mock's display-label buckets.
  * Catalog labels first (stored order), then extras — order deviation from
- * the mock (extras were interleaved there) noted in the phase report. */
+ * the mock (extras were interleaved there) noted in the phase report.
+ *
+ * F15-06: the grants are read through `applyVerdictOutcomeGate` first, so the
+ * ONE derivation every surface renders (profile detail, capability matrix,
+ * policy counts) can never show a profile approving reviews it holds no verdict
+ * authority for. */
 export function capabilitiesToActionLabels(
   capabilities: { capabilityId: string; mode: CapabilityMode }[],
   extras: { label: string; mode: CapabilityMode }[],
@@ -110,7 +116,7 @@ export function capabilitiesToActionLabels(
       : mode === "off"
         ? buckets.off
         : buckets[mode];
-  for (const grant of capabilities) {
+  for (const grant of applyVerdictOutcomeGate(capabilities)) {
     const def = capabilityById(grant.capabilityId);
     bucketOf(grant.mode).push(def ? def.label : grant.capabilityId);
   }

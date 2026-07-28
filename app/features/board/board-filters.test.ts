@@ -101,8 +101,10 @@ const task: SearchableTask = {
   title: "Attach execution workspace to task runtime",
   branch: "vib-142-attach-workspace",
   owner: { name: "Arda Kaya" },
-  specialist: { name: "Codex", role: "Developer" },
-  reviewers: [{ name: "Claude Code", role: "Reviewer" }],
+  specialist: { name: "Codex", role: "Developer", profileId: "docs-writer" },
+  reviewers: [
+    { name: "Claude Code", role: "Reviewer", profileId: "senior-reviewer" },
+  ],
   operator: { name: "Operator" },
 };
 
@@ -122,8 +124,17 @@ describe("matchesSearch", () => {
     expect(matchesSearch(task, "arda")).toBe(true);
     expect(matchesSearch(task, "operator")).toBe(true);
   });
+  // F15-16: `AgentRender.name` is the BACKEND label, so the only thing on a
+  // card that carries an agent's own identity is its profile id. Typing the
+  // deployment's name used to match nothing while the box promised agents.
+  it("matches an assigned/engaged agent by its profile name", () => {
+    expect(matchesSearch(task, "docs-writer")).toBe(true);
+    expect(matchesSearch(task, "docs writer")).toBe(true);
+    expect(matchesSearch(task, "senior reviewer")).toBe(true);
+  });
   it("misses unrelated text", () => {
     expect(matchesSearch(task, "billing")).toBe(false);
+    expect(matchesSearch(task, "junior-reviewer")).toBe(false);
   });
 });
 

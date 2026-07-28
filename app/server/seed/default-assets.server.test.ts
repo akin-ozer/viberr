@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -64,6 +64,19 @@ describe("shipped default assets", () => {
     expect(hits, `Vite-only ?raw imports found:\n${hits}`).toBe("");
   }, 20_000);
 
+  it("F15-14: the shipped operator doctrine carries the triage quality gate", () => {
+    // The gate the New-task dialog promises ("underspecified goals get flagged")
+    // lived nowhere in the persona, and live a textbook-vague goal walked
+    // straight through Triage.
+    const definition = readFileSync(
+      path.join(REPO_ROOT, "app/server/seed/assets/operator.definition.md"),
+      "utf8",
+    );
+    expect(definition).toContain("triage quality gate");
+    expect(definition).toContain("MUST NOT transition forward");
+    expect(definition).toContain("acceptance criteria");
+  });
+
   it("`npm run seed` completes on a clean data root", () => {
     const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-seed-cli-"));
     roots.push(dataRoot);
@@ -85,4 +98,100 @@ describe("shipped default assets", () => {
     );
     expect(developer).toContain("You are the Developer");
   }, 120_000);
+});
+
+/**
+ * B-OP1: `seedDefaultAgentAssets` only ever wrote MISSING files, so a store
+ * seeded before a doctrine rewrite kept running the old one forever — live, the
+ * operator followed a standard operating procedure naming tools that no longer
+ * exist, because the runtime prefers the store copy over the shipped asset. A
+ * copy that still hashes to something this app shipped is refreshed; a copy a
+ * human edited is not.
+ */
+describe("shipped-asset refresh (B-OP1)", () => {
+  const OPERATOR_REL = path.join("agents", "definitions", "operator.md");
+
+  function freshStore(): string {
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-assets-"));
+    roots.push(dataRoot);
+    return dataRoot;
+  }
+
+  const storeCopy = (dataRoot: string): string =>
+    readFileSync(path.join(dataRoot, OPERATOR_REL), "utf8");
+
+  const shipped = (): string =>
+    readFileSync(
+      path.join(REPO_ROOT, "app/server/seed/assets/operator.definition.md"),
+      "utf8",
+    );
+
+  it("refreshes an UNEDITED copy of an older shipped version", async () => {
+    const { seedDefaultAgentAssets } = await import("./default-assets.server");
+    const dataRoot = freshStore();
+    seedDefaultAgentAssets(dataRoot);
+    expect(storeCopy(dataRoot)).toBe(shipped());
+
+    // Roll the store back to a previous release's doctrine, exactly as that
+    // release wrote it (its hash recorded in the manifest it maintained).
+    const manifestPath = path.join(dataRoot, "state", "shipped-assets.json");
+    const oldDoctrine = "---\nid: operator\n---\n\nCall assign_specialist, then prompt_specialist.\n";
+    writeFileSync(path.join(dataRoot, OPERATOR_REL), oldDoctrine, "utf8");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, string>;
+    const { assetHash } = await import("./default-assets.server");
+    manifest[OPERATOR_REL] = assetHash(oldDoctrine);
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+
+    seedDefaultAgentAssets(dataRoot);
+
+    expect(storeCopy(dataRoot)).toBe(shipped());
+    const after = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, string>;
+    expect(after[OPERATOR_REL]).toBe(assetHash(shipped()));
+  });
+
+  it("never touches a copy a human edited", async () => {
+    const { seedDefaultAgentAssets } = await import("./default-assets.server");
+    const dataRoot = freshStore();
+    seedDefaultAgentAssets(dataRoot);
+
+    const edited = `${shipped()}\n\nOur team also always tags the on-call reviewer.\n`;
+    writeFileSync(path.join(dataRoot, OPERATOR_REL), edited, "utf8");
+
+    seedDefaultAgentAssets(dataRoot);
+    expect(storeCopy(dataRoot)).toBe(edited);
+  });
+
+  it("adopts a pre-manifest store that is already current, so the NEXT rewrite reaches it", async () => {
+    const { seedDefaultAgentAssets, assetHash } = await import("./default-assets.server");
+    const dataRoot = freshStore();
+    // A store written by a build with no manifest: the file is there, the
+    // bookkeeping is not.
+    mkdirSync(path.dirname(path.join(dataRoot, OPERATOR_REL)), { recursive: true });
+    writeFileSync(path.join(dataRoot, OPERATOR_REL), shipped(), "utf8");
+
+    seedDefaultAgentAssets(dataRoot);
+
+    const manifest = JSON.parse(
+      readFileSync(path.join(dataRoot, "state", "shipped-assets.json"), "utf8"),
+    ) as Record<string, string>;
+    expect(manifest[OPERATOR_REL]).toBe(assetHash(shipped()));
+  });
+
+  it("recognizes the versions shipped before the manifest existed", async () => {
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
+      "./default-assets.server"
+    );
+    const known = PRIOR_SHIPPED_HASHES[OPERATOR_REL] ?? [];
+    // The pre-pass-15 doctrine is in the list, so a store seeded from it — the
+    // docker-data copy this finding was raised against — converges on boot.
+    expect(known).toContain(
+      "849d977503fe2a3b04776379b4017d40e50d95ed394770f28ef825e8513085d6",
+    );
+    expect(shippedCopyIsUnedited(OPERATOR_REL, known[0]!, {})).toBe(true);
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "f".repeat(64), {})).toBe(false);
+    // The manifest is the other half: whatever this app last wrote counts.
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "a".repeat(64), {
+      [OPERATOR_REL]: "a".repeat(64),
+    })).toBe(true);
+  });
 });

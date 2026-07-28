@@ -298,8 +298,18 @@ h1, h2, h3, h4 {
   color: var(--placeholder);
 }
 .top-search .ico { flex: none; }
+/* R15-5: in the WORKSPACE topbar the box is a BUTTON that opens the ⌘K palette
+   — it keeps the input's silhouette so the topbar's layout tiers are untouched.
+   Home's box stays a real input (a project finder), so scope this to the
+   button. */
+button.top-search { text-align: left; cursor: pointer; transition: border-color .14s ease; }
+button.top-search:hover { border-color: var(--border); }
+.top-search-label { flex: 1; font-size: .88rem; color: var(--placeholder); }
 .top-search input { border: 0; outline: 0; background: transparent; width: 100%; color: var(--fg); font-size: .88rem; }
 .top-search input::placeholder { color: var(--placeholder); }
+/* The shortcut chip is the palette's affordance on Home (R15-5), so it reacts. */
+button.kbd { cursor: pointer; transition: border-color .14s ease, color .14s ease; }
+button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .kbd {
   font-family: var(--font-mono);
   font-size: .68rem;
@@ -523,6 +533,27 @@ h1, h2, h3, h4 {
 .fchip:hover:not(:disabled) { border-color: var(--border); color: var(--fg); }
 .fchip.on { background: var(--fg); color: var(--surface); border-color: var(--fg); }
 .fchip .ico { width: 14px; height: 14px; }
+
+/* R15-5: the board's own term filter, moved off the topbar (whose box now
+   opens the global palette). Sized to sit in the chip row without dominating
+   it, and it wraps with the chips at narrow widths. */
+.board-filter-input {
+  display: inline-flex; align-items: center; gap: .4rem;
+  flex: 0 1 260px; min-width: 140px;
+  padding: .3rem .62rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-chip);
+  background: var(--surface);
+  color: var(--placeholder);
+}
+.board-filter-input:focus-within { border-color: var(--border); }
+.board-filter-input .ico { width: 14px; height: 14px; flex: none; }
+.board-filter-input input {
+  border: 0; outline: 0; background: transparent;
+  width: 100%; min-width: 0;
+  color: var(--fg); font-size: .8rem; font-weight: 600;
+}
+.board-filter-input input::placeholder { color: var(--placeholder); font-weight: 600; }
 
 .board {
   display: grid;
@@ -1463,6 +1494,66 @@ dialog[data-closing]::backdrop {
   border-radius: var(--radius-panel); box-shadow: var(--shadow-pop);
   overflow: hidden; animation: pop-center .18s var(--ease-out);
 }
+/* R15-5 — the ⌘K palette. Same top-layer <dialog> mechanics as .modal-card
+   (pop-center + the shared [data-closing] exit), anchored high instead of
+   centered: a jump list is read from its first row, and typing must not shift
+   the card as results arrive. */
+.cmdk-card {
+  position: fixed; z-index: 61;
+  top: 12vh; left: 50%; transform: translate(-50%, 0);
+  width: min(620px, calc(100vw - 2rem)); max-height: 70vh;
+  display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-panel); box-shadow: var(--shadow-pop);
+  overflow: hidden; animation: cmdk-in .18s var(--ease-out);
+}
+@keyframes cmdk-in {
+  from { opacity: 0; transform: translate(-50%, -6px) scale(.985); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+/* The shared exit rule re-centers vertically (translate(-50%, -46%)); this card
+   is top-anchored, so it needs its own closing transform. */
+.cmdk-card[data-closing] { transform: translate(-50%, -6px) scale(.985); }
+.cmdk-head {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .85rem 1rem; border-bottom: 1px solid var(--hairline);
+  color: var(--placeholder);
+}
+.cmdk-head .ico { flex: none; }
+.cmdk-input {
+  flex: 1; min-width: 0;
+  border: 0; outline: 0; background: transparent;
+  color: var(--fg); font-size: 1rem;
+}
+.cmdk-input::placeholder { color: var(--placeholder); }
+.cmdk-list { overflow-y: auto; padding: .4rem; }
+.cmdk-empty { padding: 1.1rem 1rem; font-size: .84rem; color: var(--faint); }
+.cmdk-group {
+  padding: .55rem .6rem .25rem;
+  font-size: .66rem; font-weight: 900; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--placeholder);
+}
+.cmdk-row {
+  display: flex; align-items: center; gap: .6rem;
+  width: 100%; padding: .5rem .6rem;
+  border: 1px solid transparent; border-radius: var(--radius-button);
+  background: none; text-align: left; color: var(--fg);
+}
+.cmdk-row .ico { width: 16px; height: 16px; flex: none; color: var(--placeholder); }
+.cmdk-row[data-active="true"] {
+  background: color-mix(in srgb, var(--blue), transparent 92%);
+  border-color: color-mix(in srgb, var(--blue), transparent 78%);
+}
+.cmdk-main { min-width: 0; display: flex; flex-direction: column; }
+.cmdk-label {
+  font-size: .88rem; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cmdk-sub {
+  font-size: .74rem; color: var(--faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 .modal-head { display: flex; align-items: center; gap: .7rem; padding: 1.1rem 1.3rem; border-bottom: 1px solid var(--hairline); }
 .modal-head .agent-glyph { flex: none; }
 .modal-head h2 { font-size: 1.12rem; }
@@ -1908,6 +1999,11 @@ dialog[data-closing]::backdrop {
   background: var(--surface); outline: none; min-width: 0; width: 150px;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%);
 }
+/* Name-first "Add stage" row — the field replaces the button in place, so the
+   panel does not jump when the control expands. */
+.stg-add { display: flex; align-items: center; gap: .5rem; }
+.stg-add .stg-input { flex: 1; width: auto; margin: 0; }
+
 .stg-count { margin-left: auto; font-family: var(--font-mono); font-size: .74rem; color: var(--faint); flex: none; }
 .stg-x {
   display: grid; place-items: center;
@@ -2427,6 +2523,52 @@ dialog[data-closing]::backdrop {
   .top-search { flex-basis: 200px; min-width: 110px; }
   .top-search input { font-size: .82rem; }
 }
+
+/* F15-18 (D-29 "the same surface, reflowed") — mobile workspace shell.
+   Above the breakpoint the rail is a permanent 232px column and none of this
+   applies; below it the column would leave a 375px viewport ~140px of content,
+   so the rail becomes an overlay behind a topbar toggle. `.app` drops to a
+   single column, which is what stops the page scrolling sideways. */
+.rail-toggle { display: none; }
+.rail-scrim { display: none; }
+@media (max-width: 720px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .rail {
+    position: fixed;
+    z-index: 45;
+    top: 0; bottom: 0; left: 0;
+    width: min(var(--rail-w), 84vw);
+    transform: translateX(-101%);
+    transition: transform .2s var(--ease-out);
+    box-shadow: var(--shadow-pop);
+    background: var(--surface);
+  }
+  .app[data-rail-open="true"] .rail { transform: none; }
+  .app[data-rail-open="true"] .rail-scrim {
+    display: block;
+    position: fixed; inset: 0; z-index: 44;
+    background: color-mix(in srgb, var(--fg), transparent 70%);
+    border: 0;
+  }
+  .rail-toggle {
+    display: inline-grid; place-items: center;
+    width: 34px; height: 34px; flex: none;
+    border: 1px solid var(--hairline); border-radius: var(--radius-button);
+    background: var(--surface); color: var(--muted);
+  }
+  .rail-toggle .ico { width: 17px; height: 17px; }
+  /* The crumb trail is already reduced to the current view at this width; the
+     palette trigger keeps its icon + shortcut chip and drops the label. */
+  .topbar { gap: .5rem; padding: 0 .7rem; }
+  .top-search { flex: 0 0 auto; min-width: 0; padding: .42rem .55rem; }
+  .top-search-label { display: none; }
+  .filter-bar, .board { padding-left: .8rem; padding-right: .8rem; }
+  .board-filter-input { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail { transition: none; }
+}
+
 
 /* Runtime and page styles. */
 

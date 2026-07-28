@@ -3,6 +3,10 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
 import { getEnv } from "./config/env.server";
+import {
+  acquireDataRootLock,
+  forceDataRootTakeover,
+} from "./db/data-root-lock.server";
 import { getDb } from "./db/sqlite.server";
 import { applyRetention } from "./db/retention.server";
 import { startEventPublisher } from "./events/event-publisher.server";
@@ -146,6 +150,12 @@ export async function bootServer(): Promise<void> {
   }
 
   ensureDataRootDirs();
+  // B-FD1: BEFORE anything opens the database or writes a file — one app
+  // process per data root, ever. A second writer is not a slow path, it is
+  // corruption (WAL clobbering over a shared mount, per-process run handles
+  // finalizing each other's runs), and it has happened twice on this project.
+  // Throwing here stops the boot with a message naming the holder.
+  acquireDataRootLock({ force: forceDataRootTakeover(env) });
   // Ship the default agent assets (each agent's expertise skill + its detailed
   // definition + the base profile templates) into the store when a store lacks
   // them — before anything reads them. Idempotent and best-effort (never blocks

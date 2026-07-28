@@ -16,6 +16,7 @@ import {
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { WorkflowBoundary } from "~/schemas/project-file.schema";
+import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
 import {
   addStage,
   removeStage,
@@ -23,6 +24,7 @@ import {
   reorderStages,
   repairProjectRepo,
   repoFootprintTasks,
+  setBranchCleanup,
 } from "./settings-actions.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -86,7 +88,7 @@ function setup(): TestStore {
 describe("addStage", () => {
   it("splices the new stage into the transition chain instead of stranding the column", async () => {
     const store = setup();
-    const { stageId } = await addStage(store.db, { projectSlug: store.slug }, admin(store), {
+    const { stageId } = await addStage(store.db, { projectSlug: store.slug, name: "QA" }, admin(store), {
       dataRoot: store.dataRoot,
     });
 
@@ -118,10 +120,10 @@ describe("addStage", () => {
 
   it("two adds in a row keep extending the same chain (the second is not stranded)", async () => {
     const store = setup();
-    const first = await addStage(store.db, { projectSlug: store.slug }, admin(store), {
+    const first = await addStage(store.db, { projectSlug: store.slug, name: "QA" }, admin(store), {
       dataRoot: store.dataRoot,
     });
-    const second = await addStage(store.db, { projectSlug: store.slug }, admin(store), {
+    const second = await addStage(store.db, { projectSlug: store.slug, name: "Staging" }, admin(store), {
       dataRoot: store.dataRoot,
     });
     expect(edges(workflowOf(store)).slice(3)).toEqual([
@@ -130,6 +132,37 @@ describe("addStage", () => {
       [second.stageId, "done", "human"],
     ]);
     expectChainCoversStages(store);
+  });
+});
+
+// 2026-07-28 UX ruling: "Add stage" is name-first. A stage is a governed edge
+// in the transition chain; a nameless request must not mint one.
+describe("addStage names the stage (name-first)", () => {
+  it("stores the caller's name instead of the old default 'New stage'", async () => {
+    const store = setup();
+    const { stageId, toast } = await addStage(
+      store.db,
+      { projectSlug: store.slug, name: "  QA sweep  " },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    const stage = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.stages.find((s) => s.id === stageId);
+    expect(stage?.name).toBe("QA sweep");
+    expect(toast).toContain("QA sweep");
+  });
+
+  it("refuses an empty name and writes nothing", async () => {
+    const store = setup();
+    const before = stageIdsOf(store);
+    await expect(
+      addStage(store.db, { projectSlug: store.slug, name: "   " }, admin(store), {
+        dataRoot: store.dataRoot,
+      }),
+    ).rejects.toThrow(/name is required/i);
+    expect(stageIdsOf(store)).toEqual(before);
   });
 });
 
@@ -178,7 +211,7 @@ describe("removeStage", () => {
   it("add then remove round-trips back to the preset's 4 rules", async () => {
     const store = setup();
     const before = workflowOf(store);
-    const { stageId } = await addStage(store.db, { projectSlug: store.slug }, admin(store), {
+    const { stageId } = await addStage(store.db, { projectSlug: store.slug, name: "QA" }, admin(store), {
       dataRoot: store.dataRoot,
     });
     await removeStage(
@@ -231,7 +264,7 @@ describe("reorderStages", () => {
       admin(store),
       { dataRoot: store.dataRoot },
     );
-    const { stageId } = await addStage(store.db, { projectSlug: store.slug }, admin(store), {
+    const { stageId } = await addStage(store.db, { projectSlug: store.slug, name: "QA" }, admin(store), {
       dataRoot: store.dataRoot,
     });
     expect(edges(workflowOf(store)).slice(-2)).toEqual([
@@ -419,5 +452,73 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+/**
+ * R15-6 (owner ruling 2026-07-28): post-merge branch cleanup is a per-project
+ * setting, default ON. Persisted as a project.md guardrail row, so it travels
+ * with the file like every other per-project switch.
+ */
+describe("setBranchCleanup (R15-6)", () => {
+  it("defaults ON for a project that has never touched the setting", () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // Fails on main: `branchCleanupOnMerge` did not exist — nothing deleted a
+    // merged task's branch, on any project.
+    expect(branchCleanupOnMerge(store.db, store.slug)).toBe(true);
+  });
+
+  it("persists the opt-out into project.md and the projection", async () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const result = await setBranchCleanup(
+      store.db,
+      { projectSlug: store.slug, enabled: false },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.enabled).toBe(false);
+    expect(result.toast).toContain("kept on GitHub");
+
+    const guardrails = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.guardrails;
+    expect(guardrails.find((g) => g.id === "delete-branch-after-merge")).toMatchObject(
+      { on: false },
+    );
+    expect(branchCleanupOnMerge(store.db, store.slug)).toBe(false);
+    expect(
+      listAuditEvents(store.db, { action: "project.settings.updated" }),
+    ).toHaveLength(1);
+  });
+
+  it("turning it back on rewrites the single row, never a duplicate", async () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = admin(store);
+    const ref = { projectSlug: store.slug, dataRoot: store.dataRoot };
+    await setBranchCleanup(store.db, { projectSlug: store.slug, enabled: false }, actor, ref);
+    await setBranchCleanup(store.db, { projectSlug: store.slug, enabled: true }, actor, ref);
+    const guardrails = readProjectFile(ref)!.parsed.frontmatter.guardrails.filter(
+      (g) => g.id === "delete-branch-after-merge",
+    );
+    expect(guardrails).toHaveLength(1);
+    expect(guardrails[0]!.on).toBe(true);
+    expect(branchCleanupOnMerge(store.db, store.slug)).toBe(true);
+  });
+
+  it("refuses a non-admin — this is policy, not credential hygiene", async () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await expect(
+      setBranchCleanup(
+        store.db,
+        { projectSlug: store.slug, enabled: false },
+        { userId: store.users.murat.id, label: store.users.murat.email },
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow();
   });
 });

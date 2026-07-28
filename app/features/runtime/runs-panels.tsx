@@ -19,6 +19,7 @@ import {
   runStatePill,
   useElapsed,
 } from "./runs-helpers";
+import { localLogClock } from "./log-clock";
 import { collapseTelemetry, telemetryLabel } from "./log-noise";
 import { isRunBoundary, type RunView } from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
@@ -579,7 +580,11 @@ export function AgentLogsPanel({
             </div>
           ) : (
             <div className={"log-line " + entry.line.display.ev} key={i}>
-              <span className="lt">{entry.line.display.t}</span>
+              {/* F15-08: the stored `t` is a UTC wall clock; the timeline on
+                  the same page is local. One story per page. */}
+              <span className="lt">
+                {localLogClock(entry.line.display.t, cur!.startedAt)}
+              </span>
               <span className="ltag">{entry.line.display.tag}</span>
               <span className="lx">
                 {raw ? (

@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { listProjects } from "~/server/projections/board-query.server";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
-import { isTerminalStage } from "~/shared/workflow/stage-roles";
+import { isTerminalStage, resolveStageRoles } from "~/shared/workflow/stage-roles";
 
 /**
  * THE single source of "which open decisions require a given user's action".
@@ -13,9 +13,24 @@ import { isTerminalStage } from "~/shared/workflow/stage-roles";
  * consults THIS helper instead of its own predicate — so the numbers can never
  * disagree (pass-8 R8-3, replacing three independent non-member-scoped counts).
  *
- * An OPEN decision is one task, in a NON-terminal stage, that carries either an
- * open packet OR ≥1 pending operator recommendation. A task needs exactly one
- * human action, so it contributes exactly one decision (dedupe by task).
+ * An OPEN decision is one task, in a NON-terminal stage, that carries an open
+ * packet, ≥1 pending operator recommendation, OR is sitting at the review stage
+ * ready for this user's ACCEPTANCE. A task needs exactly one human action, so it
+ * contributes exactly one decision (dedupe by task).
+ *
+ * B-FD5: acceptance used to be missing here. A review-stage task waiting on a
+ * human can carry no packet and no recommendation (the operator could not open
+ * a completion packet), so `decisionsRequiring` — the "single source" — did not
+ * see it, while the review queue listed it under "Waiting on your acceptance".
+ * The board patched over that by unioning the two predicates in its own loader
+ * (UI-48); Home's per-project count and the notifications inbox did not, so the
+ * one task most in need of a person was invisible everywhere but the board and
+ * the queue. The union belongs HERE, in the shared helper, so every surface
+ * inherits it. The acceptance predicate mirrors the review queue's `isReady`:
+ * the resolved review stage, `waiting = human`, no projected acceptance block
+ * (`validation_block_reason` — failing verdict / awaiting reviewer / no
+ * delivered revision), and a review PR that was not closed unmerged (a rejected
+ * PR needs a rework/reopen/archive call, not acceptance).
  *
  * Member-scoping (the fix): a decision is `mine` iff the user can actually act
  * on it — maintainer+ on that project (resolve-packet / accept-completion /
@@ -39,7 +54,7 @@ import { isTerminalStage } from "~/shared/workflow/stage-roles";
 export interface DecisionRef {
   projectSlug: string;
   taskKey: string;
-  kind: "packet" | "recommendation";
+  kind: "packet" | "recommendation" | "acceptance";
   stage: string;
 }
 
@@ -76,8 +91,14 @@ export function decisionsRequiring(
   );
 
   // The project stage lists (to exclude terminal-stage tasks — a Done task's
-  // leftover packet/recommendation is a resolved decision, not a pending one).
-  const stagesBySlug = new Map(listProjects(db).map((p) => [p.slug, p.stages]));
+  // leftover packet/recommendation is a resolved decision, not a pending one)
+  // and each project's RESOLVED review stage (the acceptance boundary — never
+  // the literal id "review", which a customized board need not use).
+  const projects = listProjects(db);
+  const stagesBySlug = new Map(projects.map((p) => [p.slug, p.stages]));
+  const reviewIdBySlug = new Map(
+    projects.map((p) => [p.slug, resolveStageRoles(p.stages, p.workflow).reviewId]),
+  );
 
   const rows = db
     .prepare(
@@ -95,23 +116,39 @@ export function decisionsRequiring(
     )
     .all(...(opts.projectSlug ? [opts.projectSlug] : [])) as unknown as OpenDecisionRow[];
 
+  // B-FD5: acceptance-ready review-stage tasks — the class that carries no
+  // decision OBJECT. Predicate parity with the review queue's `isReady`
+  // (review-queue.server.ts): resolved review stage, waiting on a human, no
+  // projected acceptance block, and no PR closed unmerged.
+  const acceptanceRows = db
+    .prepare(
+      `SELECT project_slug, task_key, stage, owner_user_id
+         FROM task_projections
+        WHERE archived = 0
+          AND waiting = 'human'
+          AND (validation_block_reason IS NULL OR validation_block_reason = '')
+          AND (pr_json IS NULL OR json_extract(pr_json, '$.state') <> 'closed')
+          ${opts.projectSlug ? "AND project_slug = ?" : ""}`,
+    )
+    .all(...(opts.projectSlug ? [opts.projectSlug] : [])) as unknown as {
+    project_slug: string;
+    task_key: string;
+    stage: string;
+    owner_user_id: string | null;
+  }[];
+
   const mine: DecisionRef[] = [];
   const overrideEligible: DecisionRef[] = [];
+  // A task needs exactly one human action, so it contributes exactly one
+  // decision even when it carries a packet AND is acceptance-ready.
+  const seen = new Set<string>();
 
-  for (const row of rows) {
-    const stages = stagesBySlug.get(row.project_slug);
-    if (!stages || isTerminalStage(row.stage, stages)) continue;
+  const classify = (ref: DecisionRef, ownerUserId: string | null): void => {
+    const taskId = `${ref.projectSlug}::${ref.taskKey}`;
+    if (seen.has(taskId)) return;
+    seen.add(taskId);
 
-    const role = roleBySlug.get(row.project_slug) ?? null;
-    const ref: DecisionRef = {
-      projectSlug: row.project_slug,
-      taskKey: row.task_key,
-      // A task carries at most one open packet; recommendations are otherwise
-      // pending. Prefer the packet as the operative decision when both exist.
-      kind: row.has_packet ? "packet" : "recommendation",
-      stage: row.stage,
-    };
-
+    const role = roleBySlug.get(ref.projectSlug) ?? null;
     // Maintainer+ holds every governing action (resolve-packet / accept-
     // completion / approve-transition / dismiss-recommendation all share the
     // maintainer+ tier), so a maintainer+ can act on ANY open decision.
@@ -121,7 +158,7 @@ export function decisionsRequiring(
     // hold the inner authority for, and always dismiss. The old narrow rule
     // counted only packets and `accept_completion` recommendations — and the
     // server honored neither, which is exactly the dead-end this widening ends.
-    const ownerCanAct = row.owner_user_id === userId && roleCan(role, "own-task");
+    const ownerCanAct = ownerUserId === userId && roleCan(role, "own-task");
 
     if (canGovern || ownerCanAct) {
       mine.push(ref);
@@ -134,6 +171,35 @@ export function decisionsRequiring(
     }
     // viewer / contributor-non-owner (or owner of a maintainer-only rec) with no
     // org-admin override → nothing.
+  };
+
+  for (const row of rows) {
+    const stages = stagesBySlug.get(row.project_slug);
+    if (!stages || isTerminalStage(row.stage, stages)) continue;
+    classify(
+      {
+        projectSlug: row.project_slug,
+        taskKey: row.task_key,
+        // A task carries at most one open packet; recommendations are otherwise
+        // pending. Prefer the packet as the operative decision when both exist.
+        kind: row.has_packet ? "packet" : "recommendation",
+        stage: row.stage,
+      },
+      row.owner_user_id,
+    );
+  }
+
+  for (const row of acceptanceRows) {
+    if (row.stage !== reviewIdBySlug.get(row.project_slug)) continue;
+    classify(
+      {
+        projectSlug: row.project_slug,
+        taskKey: row.task_key,
+        kind: "acceptance",
+        stage: row.stage,
+      },
+      row.owner_user_id,
+    );
   }
 
   return { mine, overrideEligible };

@@ -4,6 +4,7 @@ import {
   getProjectCredentialHealth,
   type ProjectCredentialHealth,
 } from "~/server/secrets/pat-store.server";
+import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
 import { repoFootprintTasks } from "./settings-actions.server";
 import { listMembershipViews, type MembershipView } from "./membership.server";
 
@@ -35,6 +36,8 @@ export interface SettingsViewData {
   /** Tasks whose GitHub records (linked PR / pushed commits) point at the
    * current repo — drives the repair dialog's footprint acknowledgment. */
   repoFootprintTasks: number;
+  /** R15-6: delete a task's branch on GitHub once its PR merges (default on). */
+  branchCleanupOnMerge: boolean;
 }
 
 export function getSettingsViewData(
@@ -74,5 +77,6 @@ export function getSettingsViewData(
     members: listMembershipViews(db, projectSlug, ctx),
     credential: getProjectCredentialHealth(db, projectSlug),
     repoFootprintTasks: repoFootprintTasks(db, projectSlug),
+    branchCleanupOnMerge: branchCleanupOnMerge(db, projectSlug),
   };
 }

@@ -38,6 +38,8 @@ import {
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   agentMentionHandle,
+  ambiguousBackendHandle,
+  ambiguousBackendHandleNote,
   extractReplyText,
   normalizeWorkspacePaths,
   resumeWorkdir,
@@ -188,6 +190,80 @@ describe("resolveMentionedAgent", () => {
   it("resolves by backend (@claude)", () => {
     const target = call("@claude please continue");
     expect(target).toMatchObject({ profileId: "dev", backend: "claude" });
+  });
+
+  /**
+   * B-AG2: a backend handle names a RUNTIME, not an agent. It used to be folded
+   * into the same lookup as name/id, so on a project running two claude
+   * profiles "@claude please look" deterministically engaged whichever
+   * project.md listed first — an arbitrary pick the human could not predict and
+   * a profile that may never have been meant for this task.
+   */
+  it("refuses an AMBIGUOUS backend handle instead of engaging the first-listed profile", () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const specialist = (profileId: string, name: string) => ({
+      profileId,
+      capabilities: [],
+      extras: [],
+      definition: {
+        kind: "specialist",
+        name,
+        role: name,
+        backends: ["claude"],
+        model: "sonnet",
+      },
+    });
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        specialist("docs-writer", "Docs Writer"),
+        specialist("security-reviewer", "Security Reviewer"),
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // Two claude profiles here → nobody is engaged on a bare backend handle.
+    expect(call("@claude please look at this")).toBeNull();
+    // …and the caller can say exactly why, naming both candidates.
+    const ambiguous = ambiguousBackendHandle(
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "@claude please look at this",
+    )!;
+    expect(ambiguous.backend).toBe("claude");
+    expect(ambiguous.candidates.map((c) => c.profileId)).toEqual([
+      "docs-writer",
+      "security-reviewer",
+    ]);
+    const note = ambiguousBackendHandleNote(ambiguous);
+    expect(note).toContain("@docs-writer");
+    expect(note).toContain("@security-reviewer");
+
+    // Naming one still works, and so does the generic primary handle.
+    expect(call("@security-reviewer take a look")).toMatchObject({
+      profileId: "security-reviewer",
+    });
+    expect(
+      ambiguousBackendHandle(
+        { dataRoot: store.dataRoot },
+        store.slug,
+        "@security-reviewer take a look",
+      ),
+    ).toBeNull();
+  });
+
+  it("a backend handle that identifies exactly ONE deployed specialist still resolves", () => {
+    // The base fixture deploys a single claude `dev` — unambiguous.
+    expect(call("@claude please continue")).toMatchObject({ profileId: "dev" });
+    expect(
+      ambiguousBackendHandle(
+        { dataRoot: store.dataRoot },
+        store.slug,
+        "@claude please continue",
+      ),
+    ).toBeNull();
+    // A backend nobody is deployed on resolves to nothing here.
+    expect(call("@codex please continue")).toBeNull();
   });
 
   it("resolves the generic @agent to the primary specialist", () => {

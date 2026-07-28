@@ -182,14 +182,11 @@ function TaskCard({
         <div className="card-top">
           <span className="key">{task.key}</span>
           <span className="spacer" />
-          {task.waiting === "agent" &&
-          task.displayReadiness === "input_required" ? (
-            <Pill kind="agent" sm dot>
-              agent working
-            </Pill>
-          ) : (
-            <ReadinessPill value={task.displayReadiness} sm />
-          )}
+          {/* F15-09: this slot used to swap in a second "agent working" pill
+              whenever the card's foot was ALREADY drawing one via WaitTag —
+              the same claim twice, at the cost of the readiness the slot
+              exists for. Readiness here, wait state in the foot, once each. */}
+          <ReadinessPill value={task.displayReadiness} sm />
         </div>
         <h3>{task.title}</h3>
         <div className="owner-row">
@@ -441,14 +438,9 @@ function ListView({
             )}
             <OwnerLine task={t} />
             <ReviewerStack task={t} label />
-            {t.waiting === "agent" &&
-            t.displayReadiness === "input_required" ? (
-              <Pill kind="agent" sm dot>
-                agent working
-              </Pill>
-            ) : (
-              <ReadinessPill value={t.displayReadiness} sm />
-            )}
+            {/* F15-09: same duplicate as the card — the row's own WaitTag below
+                already says "agent working". */}
+            <ReadinessPill value={t.displayReadiness} sm />
             {/* P13-D-6: same omission in the list row — readiness cannot stand
                 in for validation (deriveReadiness folds only parse
                 diagnostics). Ordered readiness → validation, as task detail. */}
@@ -751,7 +743,7 @@ function FilterBar({
   onClear,
 }: {
   filter: BoardFilterId;
-  /** Topbar search term (`?q=`) — it hides cards exactly like the filter does. */
+  /** Board filter term (`?q=`) — it hides cards exactly like the chips do. */
   query: string;
   /** R8-3: member-scoped count for the "Waiting on me" chip. */
   waitingOnMe: number;
@@ -783,10 +775,23 @@ function FilterBar({
           )}
         </button>
       ))}
+      {/* R15-5: the term input lives on the BOARD now. The topbar's box read
+          "Search tasks, branches, agents…" while only ever filtering the open
+          board; the global question moved to the ⌘K palette and this one says
+          exactly what it does. */}
+      <label className="board-filter-input">
+        <Icon name="filter" />
+        <input
+          type="search"
+          value={query}
+          placeholder="Filter this board…"
+          aria-label="Filter this board"
+          onChange={(e) => setParam("q", e.target.value || null)}
+        />
+      </label>
       {/* P13-D-34: the board's clear-filter affordance. "All tasks" resets the
-          filter but NOT `?q=` — the search input lives in the topbar, so a
-          board hidden by a stale query had no recovery on this screen at all.
-          One chip per board, not one per empty column. */}
+          filter but NOT `?q=`, so a board hidden by a stale term needs one
+          control that resets both. One chip per board, not one per column. */}
       {(filter !== "all" || query.trim() !== "") && (
         <button
           type="button"

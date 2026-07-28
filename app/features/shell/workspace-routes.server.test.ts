@@ -71,6 +71,80 @@ describe("workspace layout loader (seeded)", () => {
     expect(thrown?.init?.status ?? thrown?.status).toBe(404);
   });
 
+  // R15-4: projects are members-only. The layout loader is the chokepoint for
+  // EVERY project surface (board + task detail + the six config views are its
+  // children), and the refusal must be indistinguishable from an unknown slug.
+  describe("R15-4 members-only", () => {
+    it("a project MEMBER sees the board", async () => {
+      const { loader } = await import("~/routes/project");
+      const { cookie } = await app.cookieFor(seedIds.selin); // contributor
+      const result = (await loader(
+        (await loaderArgs(
+          "/projects/viberr-core/board",
+          { slug: "viberr-core" },
+          cookie,
+        )) as never,
+      )) as { myRole: string; orgAdminOverride: boolean };
+      expect(result.myRole).toBe("contributor");
+      expect(result.orgAdminOverride).toBe(false);
+    });
+
+    it("a non-member org member gets the unknown-slug 404, not a 403", async () => {
+      const { loader } = await import("~/routes/project");
+      // deniz is an org MEMBER with no membership on any seeded project.
+      const { cookie } = await app.cookieFor(seedIds.deniz);
+      const thrown = await loader(
+        (await loaderArgs(
+          "/projects/viberr-core/board",
+          { slug: "viberr-core" },
+          cookie,
+        )) as never,
+      ).catch((e) => e);
+      expect(thrown?.init?.status ?? thrown?.status).toBe(404);
+      // Byte-identical to the unknown-slug refusal — the response must not
+      // confirm that `viberr-core` exists (WI-13).
+      const unknown = await loader(
+        (await loaderArgs("/projects/nope", { slug: "nope" }, cookie)) as never,
+      ).catch((e) => e);
+      expect(String(thrown?.data ?? thrown)).toBe(
+        String(unknown?.data ?? unknown).replace("nope", "viberr-core"),
+      );
+    });
+
+    it("the task-detail surface is refused too (the layout gate covers children)", async () => {
+      const { loader } = await import("~/routes/project");
+      const { cookie } = await app.cookieFor(seedIds.deniz);
+      const thrown = await loader(
+        (await loaderArgs(
+          "/projects/viberr-core/tasks/VIB-142",
+          { slug: "viberr-core" },
+          cookie,
+        )) as never,
+      ).catch((e) => e);
+      expect(thrown?.init?.status ?? thrown?.status).toBe(404);
+    });
+
+    it("an ORG ADMIN who is not a member keeps access, with the override pill", async () => {
+      const { loader } = await import("~/routes/project");
+      const { updateUserFields } = await import("~/server/auth/user-store.server");
+      updateUserFields(app.db, seedIds.deniz, { role: "admin" });
+      try {
+        const { cookie } = await app.cookieFor(seedIds.deniz);
+        const result = (await loader(
+          (await loaderArgs(
+            "/projects/viberr-core/board",
+            { slug: "viberr-core" },
+            cookie,
+          )) as never,
+        )) as { myRole: string; orgAdminOverride: boolean };
+        expect(result.myRole).toBe("admin");
+        expect(result.orgAdminOverride).toBe(true);
+      } finally {
+        updateUserFields(app.db, seedIds.deniz, { role: "member" });
+      }
+    });
+  });
+
   it("returns the seeded board: 5 columns, VIB-142 in Review with its chips", async () => {
     const { loader } = await import("~/routes/project");
     const { cookie } = await app.cookieFor(seedIds.arda);
@@ -166,10 +240,19 @@ describe("workspace layout loader (seeded)", () => {
       viewerUserId: seedIds.arda,
     }).ready.map((r) => r.key);
     expect(ready).toContain("VIB-990");
-    const byDecisionObject = decisionsRequiring(app.db, seedIds.arda, {
+    // B-FD5 (pass 15) moved the acceptance predicate INTO the shared helper, so
+    // it now sees this task too — but only as an `acceptance` decision: the task
+    // still carries no packet and no recommendation, which is what made the two
+    // surfaces disagree in the first place.
+    const mine = decisionsRequiring(app.db, seedIds.arda, {
       projectSlug: "viberr-core",
-    }).mine.map((d) => d.taskKey);
-    expect(byDecisionObject).not.toContain("VIB-990");
+    }).mine;
+    expect(mine.find((d) => d.taskKey === "VIB-990")?.kind).toBe("acceptance");
+    expect(
+      mine.filter(
+        (d) => d.taskKey === "VIB-990" && d.kind !== "acceptance",
+      ),
+    ).toEqual([]);
 
     const { cookie } = await app.cookieFor(seedIds.arda);
     const result = (await loader(

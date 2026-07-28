@@ -186,6 +186,78 @@ describe("ProfileDetail", () => {
     expect(onOpen).toHaveBeenCalledWith("VIB-142");
   });
 
+  /**
+   * F15-05/F15-06 (live): admins read this panel as policy truth. A profile
+   * created with nothing granted showed a full ACTS DIRECTLY column — "Approve
+   * the review", "Request changes", "Post quality-flag events" and the rest of
+   * the advisory catalog — plus a context resource nobody picked. The columns
+   * now render GOVERNED policy only (the partition the matrix draws), and
+   * advisory guidance says what it is.
+   */
+  it("a fresh minimal profile claims no verdict authority and no skills", () => {
+    const { container, getByText, queryByText } = render(
+      <ProfileDetail
+        a={mkProfile({
+          id: "docs-writer",
+          name: "Docs writer",
+          role: "Docs",
+          // What the honest derivation yields for a newly created profile: the
+          // governed toggles withheld, advisory guidance at its catalog default.
+          actions: {
+            direct: [
+              "Read the repository & diff",
+              "Read the task & repository",
+            ],
+            recommend: [],
+            forbidden: [
+              "Merge a pull request",
+              "Transition a task to Done",
+              "Change project policy",
+            ],
+            off: [
+              "Execute code or write to the repo",
+              "Report a validation verdict",
+              "Approve the review",
+              "Request changes",
+              "Post quality-flag events",
+            ],
+          },
+          capabilities: [
+            { capabilityId: "execute-code-or-write-repo", mode: "off" },
+            { capabilityId: "report-validation-verdict", mode: "off" },
+          ],
+          resources: { skills: [], mcps: [], kb: [] },
+        })}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    // No verdict authority anywhere in the capability columns.
+    const cols = container.querySelector(".cap-cols")!;
+    expect(cols.textContent).not.toContain("Approve the review");
+    expect(cols.textContent).not.toContain("Request changes");
+    expect(cols.textContent).not.toContain("Post quality-flag events");
+    // Advisory guidance is segregated and labelled, never "Acts directly".
+    expect(
+      container.querySelector(".cap-col.direct")!.textContent,
+    ).not.toContain("Read the repository & diff");
+    expect(getByText(/Advisory guidance, not policy/)).toBeTruthy();
+    // The structural human-only locks still render as such.
+    expect(
+      container.querySelector(".cap-col.forbidden")!.textContent,
+    ).toContain("Merge a pull request");
+    // Nothing was granted as a context resource — all three groups say None.
+    expect(container.querySelectorAll(".res-group").length).toBe(3);
+    expect(queryByText("reviewer-expertise")).toBeNull();
+    expect(container.querySelectorAll(".res-chip").length).toBe(0);
+  });
+
   it("operator: no Delete button, real backend + autonomy cells, lifecycle hint", () => {
     const { container, getByText, queryByText } = render(
       <ProfileDetail

@@ -75,6 +75,13 @@ const envSchema = z.object({
   /** Runtime data root (canonical files, sqlite projections, logs). */
   VIBERR_DATA_ROOT: z.string().min(1).default("./data"),
 
+  // B-FD1: boot takes an exclusive single-writer lock on the data root, so a
+  // second process pointed at the same volume refuses to start instead of
+  // clobbering the WAL. Set to 1/true to take a live-looking lock over — for a
+  // lock orphaned by a host that no longer exists, which no liveness probe on
+  // this machine can rule out.
+  VIBERR_FORCE_DATA_ROOT_LOCK: z.string().optional(),
+
   // Optional OAuth providers — the login buttons stay disabled when unset.
   GITHUB_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GITHUB_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),

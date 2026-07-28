@@ -111,6 +111,21 @@ export const OPERATOR_CAP_DEFAULTS: Readonly<Record<string, CapMode>> =
     ).map((e) => [e.id, e.defaultMode]),
   );
 
+/**
+ * Every capability label that carries an editor toggle for SOME kind — i.e. the
+ * governed policy surface, operator and agent alike.
+ *
+ * F15-05/F15-06: the profile detail panel used to pour every stored grant into
+ * its three capability columns, so the matrix-only advisory ids (`group: null` —
+ * "Approve the review", "Read the repository & diff", …) rendered as held
+ * authority beside the real ones. The matrix already segregates them ("Other
+ * actions"); this is the same partition, so both surfaces read one policy the
+ * same way.
+ */
+export const GOVERNED_CAP_LABELS: ReadonlySet<string> = new Set(
+  UNIFIED_CAP_CATALOG.filter((e) => e.group !== null).map((e) => e.label),
+);
+
 /** The OPERATOR capability picker's modes — all 4, because `recommend`
  * (propose a card a human applies) has real semantics for the operator. */
 export const OPERATOR_CAP_MODES: readonly { id: CapMode; label: string }[] = [

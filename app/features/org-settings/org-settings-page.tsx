@@ -34,11 +34,21 @@ export function OrgSettingsPage({
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = resolveOrgTab(searchParams.get("tab"));
+  // The badge counts RESOURCES — knowledge bases, MCP servers, skills. It used
+  // to fold agent templates in too, so the same concept was counted two ways one
+  // click apart: the Home tile presents "N agent profiles" separately from the
+  // KB/MCP/skill line. Profiles are disclosed in the tooltip instead of being
+  // silently added to a number labelled "Agent resources".
+  const resourceCount = view.kbs.length + view.mcps.length + view.skills.length;
   const counts: Record<OrgSettingsTab, number> = {
     connections: view.connections.length,
     users: view.users.length,
-    resources:
-      view.kbs.length + view.mcps.length + view.skills.length + view.gagents.length,
+    resources: resourceCount,
+  };
+  const countHint: Record<OrgSettingsTab, string> = {
+    connections: `${view.connections.length} GitHub connection${view.connections.length === 1 ? "" : "s"}`,
+    users: `${view.users.length} user${view.users.length === 1 ? "" : "s"}`,
+    resources: `${view.kbs.length} knowledge bases · ${view.mcps.length} MCP · ${view.skills.length} skills — plus ${view.gagents.length} agent profile${view.gagents.length === 1 ? "" : "s"}`,
   };
 
   return (
@@ -68,7 +78,9 @@ export function OrgSettingsPage({
             >
               <Icon name={t.icon} className="ico" />
               {t.label}
-              <span className="count">{counts[t.id]}</span>
+              <span className="count" title={countHint[t.id]}>
+                {counts[t.id]}
+              </span>
             </button>
           ))}
         </nav>

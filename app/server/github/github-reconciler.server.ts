@@ -32,6 +32,7 @@ import {
   getProjectGithubContext,
   type GithubContextFailure,
 } from "./github-context.server";
+import { branchCleanupOnMerge } from "./branch-cleanup.server";
 import { deriveMergeable, findPrForBranch, type PrFacts } from "./pr-linker.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
@@ -76,6 +77,11 @@ export interface GithubActionContext {
    *  unboundedly with heartbeats. When set, poller ticks record provenance ONLY
    *  when the task cache actually changed. */
   skipUnchangedProvenance?: boolean;
+  /** B-GH5: cap the tasks ONE `reconcileProject` pass may reconcile. The
+   *  background poller sets it (the rest carry over to the next tick); a
+   *  human-triggered "Update status" leaves it unset — someone is waiting for
+   *  the whole board's truth, not a slice of it. */
+  taskBudget?: number;
 }
 
 function taskRefOf(
@@ -528,7 +534,34 @@ export interface ProjectReconcileSummary {
   reconciled: number;
   changed: number;
   failed: number;
+  /** B-GH5: branched tasks this pass deliberately deferred to the next tick
+   *  (budgeted passes only — a human-triggered sweep never skips). */
+  skipped: number;
 }
+
+/**
+ * B-GH5: how many task reconciles may be in flight at once. Each task costs
+ * 3-6 GitHub calls, and `Promise.all` over the whole board fired every one of
+ * them simultaneously against a SINGLE PAT's rate limit — every five minutes,
+ * for every project. Four in flight keeps a human-triggered sweep fast without
+ * spending the hour's budget in one burst.
+ */
+export const RECONCILE_TASK_CONCURRENCY = 4;
+
+/**
+ * Per-project task budget for one BUDGETED pass (the background poller).
+ * The remainder is not dropped: the cursor below resumes the next pass where
+ * this one stopped, so a 200-task board is still fully visited — just spread
+ * across ticks instead of burning the rate limit in one.
+ */
+export const RECONCILE_POLL_TASK_BUDGET = 20;
+
+/**
+ * projectSlug → the task key the next budgeted pass starts at. In-memory by
+ * design: losing it (restart, HMR) costs one pass that begins at the first key
+ * again, never correctness.
+ */
+const reconcileCursors = new Map<string, string>();
 
 /**
  * Reconciles every task of the project that has a branch (the GitHub
@@ -545,7 +578,14 @@ export async function reconcileProject(
     ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
   });
   if (gh.status !== "ok") {
-    return { status: gh.status, results: [], reconciled: 0, changed: 0, failed: 0 };
+    return {
+      status: gh.status,
+      results: [],
+      reconciled: 0,
+      changed: 0,
+      failed: 0,
+      skipped: 0,
+    };
   }
 
   const rows = db
@@ -556,9 +596,43 @@ export async function reconcileProject(
     )
     .all(projectSlug) as { task_key: string }[];
 
-  const results: TaskReconcileResult[] = await Promise.all(
-    rows.map((row) =>
-      reconcileTask(db, { projectSlug, taskKey: row.task_key }, actor, ctx),
+  const allKeys = rows.map((row) => row.task_key);
+  const budget = ctx.taskBudget ?? 0;
+  let selected = allKeys;
+  if (budget > 0 && allKeys.length > budget) {
+    // Resume where the last budgeted pass stopped and wrap — every task gets
+    // its turn instead of the first N being reconciled forever.
+    const cursor = reconcileCursors.get(projectSlug);
+    const at = cursor ? allKeys.findIndex((key) => key >= cursor) : 0;
+    const start = at < 0 ? 0 : at;
+    const rotated = [...allKeys.slice(start), ...allKeys.slice(0, start)];
+    selected = rotated.slice(0, budget);
+    reconcileCursors.set(projectSlug, rotated[budget] ?? allKeys[0]!);
+  } else if (budget > 0) {
+    reconcileCursors.delete(projectSlug);
+  }
+  const skipped = allKeys.length - selected.length;
+
+  // Bounded worker pool, not Promise.all — see RECONCILE_TASK_CONCURRENCY.
+  const results: TaskReconcileResult[] = new Array(selected.length);
+  let cursorIndex = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = cursorIndex++;
+      const taskKey = selected[index];
+      if (taskKey === undefined) return;
+      results[index] = await reconcileTask(
+        db,
+        { projectSlug, taskKey },
+        actor,
+        ctx,
+      );
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(RECONCILE_TASK_CONCURRENCY, selected.length) },
+      worker,
     ),
   );
   let reconciled = 0;
@@ -580,7 +654,7 @@ export async function reconcileProject(
       subjectKind: "project",
       subjectId: projectSlug,
       projectSlug,
-      details: { tasks: rows.length, reconciled, changed, failed },
+      details: { tasks: rows.length, reconciled, changed, failed, skipped },
     });
   }
   // F15-02: a successful pass over ZERO branched tasks is still an observation
@@ -601,7 +675,7 @@ export async function reconcileProject(
       details: { repo: gh.repo, heartbeat: true, tasks: 0 },
     });
   }
-  return { status: "ok", results, reconciled, changed, failed };
+  return { status: "ok", results, reconciled, changed, failed, skipped };
 }
 
 // ------------------------------------------------------------------ merge
@@ -790,6 +864,35 @@ export async function mergeTaskPr(
         actor,
         { dataRoot: ctx.dataRoot },
       );
+    }
+    // R15-6: post-merge branch cleanup, per project policy (default ON). The
+    // merge is done and recorded above — cleanup is housekeeping that must
+    // never turn a successful merge into a failed one, so every outcome
+    // (including a refusal) lands as a plain-words note and the result stays
+    // `merged`. `deleteTaskRemoteBranch` re-reads the task, so it sees the
+    // `merged` state just written and its open-PR refusal correctly stands down.
+    if (branchCleanupOnMerge(db, input.projectSlug)) {
+      const cleanup = await deleteTaskRemoteBranch(db, input, actor, ctx);
+      const note =
+        cleanup.status === "deleted" || cleanup.status === "no_branch"
+          ? null
+          : cleanup.status === "already_gone"
+            ? `Branch \`${cleanup.branch}\` was already gone on GitHub — nothing left to clean up.`
+            : cleanup.status === "refused"
+              ? `Branch \`${cleanup.branch}\` was **not** deleted after the merge — ${cleanup.message}`
+              : "The merged branch was **not** deleted — this project has no GitHub repo or credential configured.";
+      if (note) {
+        await appendTimelineEvent(ref, {
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: POLICY_ENGINE_ACTOR,
+          title: null,
+          text: note,
+          toAgent: false,
+          evidence: null,
+        });
+        rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+      }
     }
     return { status: "merged", prNumber, sha };
   }

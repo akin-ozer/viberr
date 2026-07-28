@@ -133,6 +133,12 @@ export function defaultGrantsFor(
  * was visible rather than silent (an improvement on `capabilities: []`), but a
  * dangerous default is still a dangerous default. Delivery starts WITHHELD; the
  * project-level editor, which does have the capability matrix, opens it up.
+ *
+ * F15-06: the review-verdict OUTCOMES start withheld for the same reason. Their
+ * catalog default is `direct` (they describe what a reviewer does), so an org
+ * template for a docs writer was created holding "Approve the review" and
+ * "Request changes" while `report-validation-verdict` was `off` — an incoherent
+ * pair the agents page rendered as granted authority.
  */
 export function conservativeGrantsFor(
   kind: CapabilityKind,
@@ -140,6 +146,7 @@ export function conservativeGrantsFor(
   const withheld = new Set<string>([
     "execute-code-or-write-repo",
     ...SCOPED_DELIVERY_CAPABILITY_IDS,
+    ...VERDICT_OUTCOME_CAPABILITY_IDS,
   ]);
   return defaultGrantsFor(kind).map((g) =>
     withheld.has(g.capabilityId) ? { ...g, mode: "off" as const } : g,
@@ -226,6 +233,49 @@ export function capabilityEnforcement(id: string): EnforcementScope {
   return "advisory";
 }
 
+/**
+ * The three advisory capabilities that are REVIEW-VERDICT OUTCOMES: they have no
+ * runtime consumer of their own and are reachable only through
+ * `report-validation-verdict`, which the completion pipeline gates server-side
+ * (the engage-time `verdictCapable` snapshot).
+ */
+export const VERDICT_OUTCOME_CAPABILITY_IDS: readonly string[] = [
+  "approve-review",
+  "request-changes",
+  "post-quality-flags",
+];
+
+const VERDICT_OUTCOMES = new Set<string>(VERDICT_OUTCOME_CAPABILITY_IDS);
+
+/**
+ * Read the stored grants the way the RUNTIME reads them before rendering them:
+ * a verdict outcome is only as granted as the verdict capability that carries
+ * it.
+ *
+ * F15-06 (live): every profile created in a surface with no capability UI is
+ * seeded from the catalog defaults, which grant the advisory outcomes `direct`
+ * while `report-validation-verdict` defaults to `off`. The agents page therefore
+ * showed a freshly created docs-writer holding "Approve the review" and "Request
+ * changes" under ACTS DIRECTLY — acceptance-veto authority the runtime would
+ * refuse it, read by admins as policy truth. Withheld verdict ⇒ its outcomes
+ * render as not granted, everywhere the buckets are rendered.
+ */
+export function applyVerdictOutcomeGate<
+  G extends { capabilityId: string; mode: string },
+>(grants: readonly G[]): G[] {
+  const verdict = grants.find(
+    (g) => g.capabilityId === "report-validation-verdict",
+  )?.mode;
+  // Same polarity as `effectiveCollabMode`: only an explicit `direct` carries
+  // verdict authority (absent and `recommend` fall to the catalog default, off).
+  if (verdict === "direct") return grants.map((g) => ({ ...g }));
+  return grants.map((g) =>
+    VERDICT_OUTCOMES.has(g.capabilityId) && g.mode !== "human"
+      ? ({ ...g, mode: "off" } as G)
+      : { ...g },
+  );
+}
+
 /** Specialists have no recommend mode; coerce it to the equivalent direct mode. */
 export function coerceSpecialistCapabilityMode<M extends string>(mode: M): M {
   return (mode === "recommend" ? "direct" : mode) as M;
@@ -240,40 +290,87 @@ export const SCOPED_DELIVERY_CAPABILITY_IDS: readonly string[] = [
   "open-review-pr",
 ];
 
-/** Keep the delivery headline enabled whenever any scoped delivery grant is active. */
-export function normalizeDeliveryGrants<
+/** What the save layer did — or deliberately did NOT do — with a delivery
+ * headline that disagrees with the scoped delivery grants below it. */
+export interface DeliveryGrantNotice {
+  /** `repaired` = the absent headline was materialized `direct`;
+   *  `withheld` = an explicit headline withholding was respected, so the scoped
+   *  grants below it cannot run. */
+  kind: "repaired" | "withheld";
+  /** The scoped delivery grants that are actionable. */
+  scoped: string[];
+  /** Human copy: what was written and why. */
+  message: string;
+}
+
+/**
+ * Materialize the delivery headline for a profile whose scoped delivery grants
+ * are actionable but whose `execute-code-or-write-repo` grant is ABSENT.
+ *
+ * B-AG1 (2026-07-28): this used to repair an explicit `off` as well, so an admin
+ * who set "Execute code or write to the repo: Off" while leaving
+ * `commit-push-branch: Allowed` had the withholding flipped to `direct` on the
+ * next save — silently, with no audit row, and in the opposite direction from
+ * the ENFORCEMENT layer (`grantModes`, specialist-tool-policy), which honors the
+ * explicit `off`. Two layers disagreeing about the same stored grants is the
+ * P14-LV-01 polarity bug in mirror image: permission appearing from something
+ * other than a grant. An explicit `off` (like an explicit `human`) is now
+ * respected here too — the save layer only fills in what nobody ever set.
+ *
+ * The remaining repair is the real editor artifact (a form that submits scoped
+ * grants and omits the headline — the shape that produced VIB-1), and it is
+ * reported so the caller can audit it and tell the admin.
+ */
+export function repairDeliveryGrants<
   G extends { capabilityId: string; mode: string },
->(grants: readonly G[]): G[] {
+>(grants: readonly G[]): { grants: G[]; notice: DeliveryGrantNotice | null } {
   const actionable = (m: string | undefined) =>
     m === "direct" || m === "recommend";
   const byCapId = new Map(grants.map((g) => [g.capabilityId, g.mode]));
-  const deliversScoped = SCOPED_DELIVERY_CAPABILITY_IDS.some((id) =>
+  const scoped = SCOPED_DELIVERY_CAPABILITY_IDS.filter((id) =>
     actionable(byCapId.get(id)),
   );
   const headline = byCapId.get("execute-code-or-write-repo");
-  // Repair ONLY the accidental contradiction — headline ABSENT or `off` (the
-  // default an editor materialized, which produced VIB-1). An explicit `human`
-  // is a DELIBERATE human-gate ("repo writes are human-only") and is respected,
-  // not silently flipped to direct.
-  if (
-    !deliversScoped ||
-    actionable(headline) ||
-    headline === "human"
-  ) {
-    return grants.map((g) => ({ ...g }));
+  if (scoped.length === 0 || actionable(headline)) {
+    return { grants: grants.map((g) => ({ ...g })), notice: null };
   }
-  let found = false;
-  const out = grants.map((g) => {
-    if (g.capabilityId === "execute-code-or-write-repo") {
-      found = true;
-      return { ...g, mode: "direct" } as G;
-    }
-    return { ...g };
-  });
-  if (!found) {
-    out.push({ capabilityId: "execute-code-or-write-repo", mode: "direct" } as G);
+  const labels = scoped.map((id) => capabilityById(id)?.label ?? id).join(", ");
+  // An EXPLICIT withholding stands. It leaves the profile contradictory — the
+  // scoped steps are granted but the gate above them is shut — so the save says
+  // so instead of resolving it behind the admin's back in either direction.
+  if (headline !== undefined) {
+    return {
+      grants: grants.map((g) => ({ ...g })),
+      notice: {
+        kind: "withheld",
+        scoped: [...scoped],
+        message:
+          `${labels} stays granted but "Execute code or write to the repo" is ` +
+          `${headline === "human" ? "human-only" : "off"} — this profile cannot ` +
+          `deliver until the headline capability is granted.`,
+      },
+    };
   }
-  return out;
+  const out = grants.map((g) => ({ ...g }));
+  out.push({ capabilityId: "execute-code-or-write-repo", mode: "direct" } as G);
+  return {
+    grants: out,
+    notice: {
+      kind: "repaired",
+      scoped: [...scoped],
+      message:
+        `"Execute code or write to the repo" was granted to match ${labels} — ` +
+        `the delivery steps above it cannot run without it.`,
+    },
+  };
+}
+
+/** Keep the delivery headline enabled whenever any scoped delivery grant is
+ * active and nobody ever set the headline (repair detail dropped). */
+export function normalizeDeliveryGrants<
+  G extends { capabilityId: string; mode: string },
+>(grants: readonly G[]): G[] {
+  return repairDeliveryGrants(grants).grants;
 }
 
 export function capabilityById(id: string): CapabilityDef | null {

@@ -16,7 +16,11 @@ import {
   type AgentProfileView,
   type LibraryProfileView,
 } from "./agent-types";
-import { CAP_META, type ResCatalogGroup } from "./capability-catalog";
+import {
+  CAP_META,
+  GOVERNED_CAP_LABELS,
+  type ResCatalogGroup,
+} from "./capability-catalog";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
 import {
   CreateProfileModal,
@@ -487,6 +491,24 @@ export function ProfileDetail({
 }) {
   const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
   const [confirm, setConfirm] = useState(false);
+  // F15-05/F15-06: the capability columns show GOVERNED policy only — the same
+  // partition the matrix draws between its curated groups and "Other actions".
+  // A grant with no runtime consumer (advisory catalog id, bespoke extra) is
+  // guidance and says so; it never renders as "Acts directly" beside the
+  // capabilities that actually bind. The buckets themselves already come from
+  // the one server-side interpretation of the stored grants
+  // (`capabilitiesToActionLabels`), verdict outcomes gated included.
+  const isGoverned = (label: string) => GOVERNED_CAP_LABELS.has(label);
+  const governed = {
+    direct: a.actions.direct.filter(isGoverned),
+    recommend: a.actions.recommend.filter(isGoverned),
+    forbidden: a.actions.forbidden.filter(isGoverned),
+  };
+  const advisory = [
+    ...a.actions.direct,
+    ...a.actions.recommend,
+    ...a.actions.forbidden,
+  ].filter((label) => !isGoverned(label));
   // P14-KM-11: what the store actually holds, per resource kind. Absent catalog
   // ⇒ undefined ⇒ nothing is marked missing (see ResGroup).
   const known = (key: string): ReadonlySet<string> | undefined => {
@@ -559,10 +581,19 @@ export function ProfileDetail({
           <h2>Capability policy</h2>
         </div>
         <div className="cap-cols">
-          <CapColumn group="direct" items={a.actions.direct} />
-          <CapColumn group="recommend" items={a.actions.recommend} />
-          <CapColumn group="forbidden" items={a.actions.forbidden} />
+          <CapColumn group="direct" items={governed.direct} />
+          <CapColumn group="recommend" items={governed.recommend} />
+          <CapColumn group="forbidden" items={governed.forbidden} />
         </div>
+        {advisory.length > 0 && (
+          <div className="def-note">
+            <Icon name="shield" />
+            <span>
+              Advisory guidance, not policy: {advisory.join(" · ")}. These
+              describe how the profile works; nothing in the runtime reads them.
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="panel">

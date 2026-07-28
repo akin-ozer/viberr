@@ -4,6 +4,7 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -12,6 +13,7 @@ import {
   type FakeResponder,
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import {
@@ -22,7 +24,12 @@ import {
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
+  BRANCH_CLEANUP_GUARDRAIL_DESC,
+  BRANCH_CLEANUP_GUARDRAIL_ID,
+} from "./branch-cleanup.server";
+import {
   mergeTaskPr,
+  RECONCILE_TASK_CONCURRENCY,
   reconcileProject,
   reconcileTask,
 } from "./github-reconciler.server";
@@ -847,6 +854,10 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
       [`PUT ${REPO_PATH}/pulls/318/merge`]: {
         body: { merged: true, sha: "mergesha01", message: "Pull Request successfully merged" },
       },
+      // R15-6: cleanup rides the merge now (project policy default ON).
+      [`DELETE ${REPO_PATH}/git/refs/heads/vib-142-attach-workspace`]: {
+        status: 204,
+      },
     });
     const result = await mergeTaskPr(
       store.db,
@@ -862,13 +873,14 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
       dataRoot: store.dataRoot,
     })!;
     expect(file.parsed.frontmatter.pr).toMatchObject({ number: 318, state: "merged" });
-    // Newest events: policy update (violation resolved) above the merge event.
-    const [first, second] = file.parsed.timeline;
-    expect(first).toMatchObject({
+    // Newest first: branch cleanup, policy update (violation resolved), merge.
+    const texts = file.parsed.timeline.map((e) => e.text);
+    expect(texts[0]).toContain("Deleted branch `vib-142-attach-workspace`");
+    expect(file.parsed.timeline[1]).toMatchObject({
       type: "policy",
       text: expect.stringContaining("**Policy update:** `pull_request:write` granted"),
     });
-    expect(second).toMatchObject({
+    expect(file.parsed.timeline[2]).toMatchObject({
       type: "github",
       text: "Merged **PR #318** into `main`.",
       actor: { kind: "human", userId: actor.userId },
@@ -1180,5 +1192,234 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
         { dataRoot: bare.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
       ),
     ).toEqual({ status: "no_pat_configured", repo: "akin-ozer/viberr" });
+  });
+});
+
+/**
+ * R15-6 (owner ruling 2026-07-28): merged task branches piled up on the repo
+ * (vib-1..4, 7, 9 were still sitting there). Cleanup is a per-project setting,
+ * default ON, and it rides the successful merge — but it is housekeeping: it
+ * can never turn a merge that happened into a failure.
+ */
+describe("R15-6 post-merge branch cleanup", () => {
+  function mergeableTask(): ReturnType<typeof setup> {
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-410", {
+        title: "Cleanup after merge",
+        stage: "review",
+        branch: "vib-410",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 410, state: "review", title: "Cleanup after merge" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    return { store, actor };
+  }
+
+  const mergeRoutes = (extra: Record<string, FakeResponder> = {}) => ({
+    [`PUT ${REPO_PATH}/pulls/410/merge`]: {
+      body: { merged: true, sha: "mergesha410" },
+    },
+    ...extra,
+  });
+
+  it("deletes the task branch on GitHub by default", async () => {
+    const { store, actor } = mergeableTask();
+    const gh = fakeGithubFetch(
+      mergeRoutes({
+        [`DELETE ${REPO_PATH}/git/refs/heads/vib-410`]: { status: 204 },
+      }),
+    );
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-410" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result.status).toBe("merged");
+    // Fails on main: nothing ever deleted a merged task's branch.
+    expect(
+      gh.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/vib-410`),
+    ).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, { action: "github.branch.deleted" }),
+    ).toHaveLength(1);
+  });
+
+  it("respects the project's opt-out — the branch stays", async () => {
+    const { store, actor } = mergeableTask();
+    const file = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(
+      store.dataRoot,
+      {
+        ...file.parsed.frontmatter,
+        guardrails: [
+          {
+            id: BRANCH_CLEANUP_GUARDRAIL_ID,
+            desc: BRANCH_CLEANUP_GUARDRAIL_DESC,
+            on: false,
+          },
+        ],
+      },
+      file.parsed.description,
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const gh = fakeGithubFetch(mergeRoutes());
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-410" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result.status).toBe("merged");
+    expect(
+      gh.calls.filter((c) => c.method === "DELETE"),
+    ).toHaveLength(0);
+  });
+
+  it("a failed cleanup never demotes the merge — it lands as a plain-words note", async () => {
+    const { store, actor } = mergeableTask();
+    const gh = fakeGithubFetch(
+      mergeRoutes({
+        [`DELETE ${REPO_PATH}/git/refs/heads/vib-410`]: {
+          status: 403,
+          body: { message: "Resource not accessible" },
+        },
+      }),
+    );
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-410" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result.status).toBe("merged");
+    const task = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-410",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(task.parsed.timeline[0]).toMatchObject({
+      type: "note",
+      text: expect.stringContaining("was **not** deleted after the merge"),
+    });
+  });
+});
+
+/**
+ * B-GH5: `reconcileProject` fired `Promise.all` over EVERY branched task, each
+ * costing 3-6 GitHub calls, every five minutes, per project — one PAT's whole
+ * rate-limit budget in a single burst on a large board.
+ */
+describe("reconcileProject fan-out control", () => {
+  function boardOf(count: number): ReturnType<typeof setup> {
+    const { store, actor } = setup();
+    for (let i = 0; i < count; i++) {
+      const key = `VIB-9${String(i).padStart(2, "0")}`;
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, {
+          stage: "review",
+          branch: key.toLowerCase(),
+          ownerUserId: store.users.arda.id,
+        }),
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    return { store, actor };
+  }
+
+  /** Records the peak number of simultaneously in-flight GitHub requests. */
+  function concurrencyProbe() {
+    let inFlight = 0;
+    let peak = 0;
+    const fetchImpl = (async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return new Response(JSON.stringify({}), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    return { fetchImpl, peak: () => peak };
+  }
+
+  it("keeps at most RECONCILE_TASK_CONCURRENCY reconciles in flight", async () => {
+    const { store, actor } = boardOf(12);
+    const probe = concurrencyProbe();
+    const summary = await reconcileProject(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: probe.fetchImpl,
+    });
+    expect(summary.results).toHaveLength(13); // 12 + the setup task
+    // Fails on main: Promise.all put all 13 in flight at once.
+    expect(probe.peak()).toBeLessThanOrEqual(RECONCILE_TASK_CONCURRENCY);
+  });
+
+  /** Every branch compares clean and carries no PR — enough for a real
+   *  `reconciled` result per task, so the budget slices are identifiable. */
+  function boardRoutes(store: TestStore): Record<string, FakeResponder> {
+    const branches = (
+      store.db
+        .prepare(
+          `SELECT branch FROM task_projections
+            WHERE project_slug = ? AND branch IS NOT NULL`,
+        )
+        .all(store.slug) as { branch: string }[]
+    ).map((r) => r.branch);
+    const routes: Record<string, FakeResponder> = {
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+    };
+    for (const branch of branches) {
+      routes[`GET ${REPO_PATH}/compare/main...${branch}`] = {
+        body: { ahead_by: 0, behind_by: 0, status: "identical", commits: [] },
+      };
+    }
+    return routes;
+  }
+
+  const reconciledKeys = (summary: {
+    results: { status: string; taskKey?: string }[];
+  }) => summary.results.flatMap((r) => (r.taskKey ? [r.taskKey] : []));
+
+  it("a budgeted pass reconciles a slice and carries the rest to the next pass", async () => {
+    const { store, actor } = boardOf(9); // 10 branched tasks in total
+    const routes = boardRoutes(store);
+
+    const first = await reconcileProject(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch(routes).fetchImpl,
+      taskBudget: 4,
+    });
+    // Fails on main: `taskBudget` did not exist and every task ran every tick.
+    expect(first.results).toHaveLength(4);
+    expect(first.skipped).toBe(6);
+
+    const second = await reconcileProject(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch(routes).fetchImpl,
+      taskBudget: 4,
+    });
+    expect(second.results).toHaveLength(4);
+    // The second pass resumes where the first stopped — no task is starved.
+    const before = reconciledKeys(first);
+    expect(before).toHaveLength(4);
+    expect(reconciledKeys(second).some((k) => before.includes(k))).toBe(false);
+  });
+
+  it("a human-triggered pass has no budget — the whole board is the answer", async () => {
+    const { store, actor } = boardOf(9);
+    const summary = await reconcileProject(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch(boardRoutes(store)).fetchImpl,
+    });
+    expect(summary.results).toHaveLength(10);
+    expect(summary.skipped).toBe(0);
   });
 });

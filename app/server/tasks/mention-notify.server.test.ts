@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, type TestStore } from "../../../test-support/test-store";
-import { notifyMentionedUsers } from "./mention-notify.server";
+import { insertUser } from "~/server/auth/user-store.server";
+import {
+  ambiguousMentionNote,
+  fanOutMentions,
+  notifyMentionedUsers,
+  resolveMentionTargets,
+} from "./mention-notify.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 
 /**
@@ -103,5 +109,127 @@ describe("notifyMentionedUsers", () => {
     expect(row!.text.length).toBeLessThan(300);
     expect(row!.text).toContain("mentioned you");
     expect(row!.text).toContain("…");
+  });
+});
+
+/**
+ * B-FD2: a mention addresses ONE person. On a team with two Ardas the flat
+ * first-name OR notified both, and neither could tell who was meant.
+ */
+describe("mention disambiguation (B-FD2)", () => {
+  /** A second Arda: same first name, distinct local-part and full name. */
+  function addSecondArda(store: TestStore) {
+    return insertUser(store.db, {
+      id: "u_arda_second",
+      email: "arda.yilmaz@viberr.test",
+      name: "Arda Yilmaz",
+      role: "member",
+    });
+  }
+
+  it("an ambiguous FIRST-NAME mention notifies nobody and is reported back", () => {
+    const store = setupTestStore(ctx);
+    addSecondArda(store);
+    const result = fanOutMentions(store.db, {
+      text: "@arda can you take acceptance?",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    expect(result.mentioned).toEqual([]);
+    expect(result.ambiguous).toEqual(["arda"]);
+    expect(notificationRows(store)).toHaveLength(0);
+  });
+
+  it("the full display name and its dashed form each route to exactly one Arda", () => {
+    const store = setupTestStore(ctx);
+    const second = addSecondArda(store);
+    expect(
+      notifyMentionedUsers(store.db, {
+        text: `@${store.users.arda.name} please look`,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        from: OPERATOR_FROM,
+      }),
+    ).toEqual([store.users.arda.id]);
+    expect(
+      notifyMentionedUsers(store.db, {
+        text: "@arda-yilmaz please look",
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        from: OPERATOR_FROM,
+      }),
+    ).toEqual([second.id]);
+  });
+
+  it("an exact email local-part outranks another user's first name", () => {
+    const store = setupTestStore(ctx);
+    // A user whose local-part IS someone else's first name: the handle belongs
+    // to its owner, not to the person who happens to be called that.
+    const impostor = insertUser(store.db, {
+      id: "u_localpart_owner",
+      email: "murat@viberr.test",
+      name: "Deniz Kara",
+      role: "member",
+    });
+    const matched = notifyMentionedUsers(store.db, {
+      text: "@murat over to you",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    expect(matched).toEqual([impostor.id]);
+  });
+
+  it("one person tagged twice in a comment gets ONE notification", () => {
+    const store = setupTestStore(ctx);
+    const local = store.users.selin.email.split("@")[0]!;
+    const matched = notifyMentionedUsers(store.db, {
+      text: `@${local} and @${store.users.selin.name} — same person, one ping.`,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    expect(matched).toEqual([store.users.selin.id]);
+    expect(notificationRows(store)).toHaveLength(1);
+  });
+
+  it("ambiguity is judged before the author exclusion", () => {
+    const store = setupTestStore(ctx);
+    addSecondArda(store);
+    // One Arda writing "@arda" must NOT be silently redirected to the other.
+    const result = fanOutMentions(store.db, {
+      text: "@arda take it from here",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+      excludeUserId: store.users.arda.id,
+    });
+    expect(result.mentioned).toEqual([]);
+    expect(result.ambiguous).toEqual(["arda"]);
+  });
+
+  it("resolveMentionTargets is pure and keeps users-table order", () => {
+    const users = [
+      { id: "u1", email: "arda.kaya@x.test", name: "Arda Kaya" },
+      { id: "u2", email: "selin@x.test", name: "Selin Ay" },
+      { id: "u3", email: "arda.yilmaz@x.test", name: "Arda Yilmaz" },
+    ];
+    expect(resolveMentionTargets(users, "@selin @arda-kaya ship it")).toEqual({
+      userIds: ["u1", "u2"],
+      ambiguous: [],
+    });
+    expect(resolveMentionTargets(users, "@arda ship it")).toEqual({
+      userIds: [],
+      ambiguous: ["arda"],
+    });
+  });
+
+  it("the non-delivery note names the handle and both unambiguous forms", () => {
+    expect(ambiguousMentionNote([])).toBe("");
+    const note = ambiguousMentionNote(["arda"]);
+    expect(note).toContain("@arda");
+    expect(note).toContain("nobody was notified");
+    expect(note).toContain("email handle");
   });
 });

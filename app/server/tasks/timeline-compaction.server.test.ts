@@ -49,6 +49,7 @@ describe("compactTimelineEvents", () => {
     const markers = out.filter((e) => e.title === COMPACTION_TITLE);
     expect(markers).toHaveLength(1);
     expect(markers[0]!.text).toContain("20 earlier routine comments");
+    expect(markers[0]!.text).toContain("human comments are never compacted");
     expect(out.length).toBeLessThan(events.length);
   });
 
@@ -78,5 +79,70 @@ describe("compactTimelineEvents", () => {
     expect(twice.filter((e) => e.title === COMPACTION_TITLE).length).toBe(
       once.filter((e) => e.title === COMPACTION_TITLE).length,
     );
+  });
+});
+
+/**
+ * B-FD9: compaction rewrites canonical `task.md`, so what it deletes is gone.
+ */
+describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
+  const human = (i: number, opts: Partial<TaskFileEvent> = {}) =>
+    comment(i, { actor: { kind: "human", userId: "u_arda", nameHint: "Arda" }, ...opts });
+  const agent = (i: number, opts: Partial<TaskFileEvent> = {}) =>
+    comment(i, {
+      actor: { kind: "agent", backend: "claude", profileId: "developer", roleHint: null },
+      ...opts,
+    });
+
+  it("never folds a HUMAN comment out of the canonical file", () => {
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(100 + i)),
+      ...Array.from({ length: 6 }, (_, i) => comment(20 + i)),
+      human(9, { text: "the acceptance criteria changed — see the ticket" }),
+      ...Array.from({ length: 6 }, (_, i) => comment(i)),
+    ];
+    const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    expect(out.length).toBeLessThan(events.length); // machine prose still folded
+    expect(
+      out.some((e) => e.text === "the acceptance criteria changed — see the ticket"),
+    ).toBe(true);
+  });
+
+  it("folds an AGENT-reply flood but keeps the newest reply of each run", () => {
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(100 + i)),
+      ...Array.from({ length: 8 }, (_, i) => agent(50 - i)), // newest agent reply first
+    ];
+    const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    // Before B-FD9 an agent-only tail compacted to nothing at all.
+    expect(out.length).toBeLessThan(events.length);
+    const agentReplies = out.filter((e) => e.actor.kind === "agent");
+    expect(agentReplies).toHaveLength(1);
+    expect(agentReplies[0]!.text).toBe("routine comment 50"); // the newest one
+  });
+
+  it("keeps ordering newest-first when an agent reply is preserved mid-run", () => {
+    // Two-digit seconds only — the fixture's timestamps are compared as strings.
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(90 - i)),
+      comment(40),
+      comment(39),
+      agent(38),
+      comment(37),
+      comment(36),
+    ];
+    const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    const times = out.map((e) => e.occurredAt);
+    expect([...times].sort().reverse()).toEqual(times);
+  });
+
+  it("stays idempotent with agent replies in the mix", () => {
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(100 + i)),
+      ...Array.from({ length: 8 }, (_, i) => agent(50 - i)),
+    ];
+    const once = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    const twice = compactTimelineEvents(once, { threshold: 12, keepRecent: 10 });
+    expect(twice).toEqual(once);
   });
 });

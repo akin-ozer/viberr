@@ -113,8 +113,10 @@ export interface ResolvedSpecialist {
   kb: string[];
   /** The agent's declared MCP servers — wired into the selected SDK. */
   mcps: string[];
-  /** The profile's long persona/instructions (template body, D6). A shipped
-   *  agents/definitions/<id>.md still overrides it (built-in transition aid). */
+  /** The profile's long persona/instructions (template body, D6) — the SINGLE
+   *  persona source. F10-30 removed the `agents/definitions/<id>.md` override
+   *  (`buildSpecialistPersona` documents the removal); this comment still
+   *  promised it (B-AG5). */
   definition: string;
   /** The deployment's stored capability grants — drive run-time tool
    *  confinement (specialist-tool-policy). Empty for the list/display path. */
@@ -737,7 +739,17 @@ export async function startAgentRun(
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
-  const collab = resolveAgentCollab(resolved?.capabilities ?? []);
+  //
+  // R15-7 (owner ruling, 2026-07-28): a run whose profile CANNOT be resolved is
+  // fully conservative, matching the withheld tool posture two blocks up. It
+  // used to pass `[]`, which the catalog defaults read as comment/ask/evidence
+  // GRANTED — so a ghost profile kept a mid-run comment channel, could open a
+  // question packet in a vanished profile's name, and could assert evidence,
+  // while everything the tool layer governs was denied. `withheldAgentGrants()`
+  // states the withholding explicitly rather than relying on an absent grant.
+  const collab = resolveAgentCollab(
+    resolved ? resolved.capabilities : withheldAgentGrants(),
+  );
   // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
   const agentActorRef: FileActorRef = {
     kind: "agent",
@@ -834,11 +846,23 @@ export async function startAgentRun(
         "- `report_outcome` — REQUIRED at the end of your review: report `approve` or `request_changes` with a one-paragraph justification, then finish with your full findings.",
       );
     }
-  } else if (backend === "codex" && realBackend && (collab.verdict || collab.ask)) {
+  } else if (
+    backend === "codex" &&
+    realBackend &&
+    // B-AG3: the note must cover EVERY grant that mounts the envelope schema
+    // (see `useEnvelopeSchema` below), evidence included. An evidence-only Codex
+    // profile had its final reply constrained to the JSON envelope with nothing
+    // in the prompt explaining the shape — the schema descriptions were the only
+    // hint, which is exactly how a prose report degrades into a stub.
+    (collab.verdict || collab.ask || collab.evidence)
+  ) {
     collabNotes.push(
       '- Your FINAL message must be the structured outcome JSON: {"summary": "<your full report, markdown>"' +
         (collab.verdict ? ', "verdict": "approve" | "request_changes" (required when you judged the work)' : "") +
         (collab.ask ? ', "question": {"title", "body", "options"} (only when blocked on a human decision)' : "") +
+        (collab.evidence
+          ? ', "evidence": [{"label", "add", "del"}] (short REFERENCES to what you checked — a suite, a file, a check — never raw output)'
+          : "") +
         "}.",
     );
   }

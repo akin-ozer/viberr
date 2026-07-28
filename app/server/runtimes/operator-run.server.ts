@@ -82,6 +82,8 @@ export interface RunOperatorInput {
    *   agent-reply → REACT: an agent the operator prompted just replied — read its
    *     report and propose the next state change (recommend/perform the transition
    *     or accept completion), rather than re-prompting.
+   *   scheduled → RE-CHECK: a human scheduled this run earlier; `scheduleNote`
+   *     carries the reason they gave, which the turn instruction honors.
    *   pr-diverged → RECOVER: GitHub reported an out-of-band PR state change
    *     (closed without merge / merged uncelebrated / reopened) — assess it and
    *     open the recovery decision, withdraw a moot packet, or recommend
@@ -93,7 +95,13 @@ export interface RunOperatorInput {
     | "agent-reply"
     | "goal-updated"
     | "pr-diverged"
+    | "scheduled"
     | "manual";
+  /** `scheduled` trigger: the note the human wrote when they set the re-run
+   *  ("re-check the flaky test"). It is the REASON the run exists, so it rides
+   *  into the turn instruction — a scheduled run that arrives as a bare
+   *  "manual" trigger cannot honor the reason it was scheduled for (B-WF3). */
+  scheduleNote?: string;
   /** Depth of the react re-invocation chain (bounds the prompt↔react loop). */
   reactDepth?: number;
   /** Depth of the CONSECUTIVE operator-authored transition chain (bounds the
@@ -159,9 +167,14 @@ function inFlightOperatorRun(
  *
  * The lease is held from runOperator entry through provider completion and,
  * for Codex, structured-plan execution.
- * A trigger arriving while held is QUEUED (newest wins — the operator re-reads
- * the full task anyway, so the latest trigger subsumes older ones) and fired
- * exactly once on release.
+ * A trigger arriving while held is QUEUED and fired exactly once on release.
+ * Coalescing is per KIND: a machine trigger (create/transition/agent-reply/…)
+ * is newest-wins — the operator re-reads the full task anyway, so the latest
+ * one subsumes older ones — but a human `@operator …` comment carries a
+ * question that exists NOWHERE else in the run's input, so human triggers are
+ * kept in a queue and drained oldest-first ahead of the machine trigger
+ * (B-OP2: a transition landing behind a queued question used to overwrite it,
+ * and the person was never answered).
  */
 interface OperatorLeaseState {
   held: Map<
@@ -185,7 +198,7 @@ interface OperatorLeaseState {
       stageAtStart: string | null;
     }
   >;
-  pending: Map<string, RunOperatorInput>;
+  pending: Map<string, PendingTriggers>;
 }
 
 const LEASE_KEY = Symbol.for("viberr.operatorLease");
@@ -202,6 +215,61 @@ function leaseState(): OperatorLeaseState {
 
 function leaseKeyFor(projectSlug: string, taskKey: string): string {
   return `${projectSlug}/${taskKey}`;
+}
+
+/** One task's queued triggers (see the lease doc above for the coalescing
+ *  rule). */
+interface PendingTriggers {
+  /** The newest queued MACHINE trigger, or null. */
+  latest: RunOperatorInput | null;
+  /** Queued human `@operator …` triggers, oldest first. */
+  humanComments: RunOperatorInput[];
+}
+
+/** Bound on queued human triggers per task. Beyond this the OLDEST are
+ *  dropped: the newest questions are the ones still awaiting an answer, and
+ *  every dropped one still sits on the timeline the next drive reads. */
+const MAX_PENDING_HUMAN_TRIGGERS = 8;
+
+/** Queue a trigger that arrived while the lease was held. */
+function queueOperatorTrigger(key: string, input: RunOperatorInput): void {
+  const state = leaseState();
+  const queue = state.pending.get(key) ?? { latest: null, humanComments: [] };
+  if (input.humanComment?.trim()) {
+    queue.humanComments.push(input);
+    while (queue.humanComments.length > MAX_PENDING_HUMAN_TRIGGERS) {
+      const dropped = queue.humanComments.shift();
+      logger.warn("dropping the oldest queued @operator comment — queue is full", {
+        key,
+        by: dropped?.humanCommentBy ?? "unknown",
+        cap: MAX_PENDING_HUMAN_TRIGGERS,
+      });
+    }
+  } else {
+    queue.latest = input;
+  }
+  state.pending.set(key, queue);
+}
+
+/**
+ * Take the next queued trigger: human questions first (oldest first), then the
+ * newest machine trigger. One per release — the fired drive takes the lease and
+ * drains the rest on its own release, so the order is preserved and no two
+ * drives overlap.
+ */
+function takePendingTrigger(key: string): RunOperatorInput | null {
+  const state = leaseState();
+  const queue = state.pending.get(key);
+  if (!queue) return null;
+  let next: RunOperatorInput | null = null;
+  if (queue.humanComments.length > 0) {
+    next = queue.humanComments.shift() ?? null;
+  } else if (queue.latest) {
+    next = queue.latest;
+    queue.latest = null;
+  }
+  if (queue.humanComments.length === 0 && !queue.latest) state.pending.delete(key);
+  return next;
 }
 
 /**
@@ -222,7 +290,7 @@ function releaseOperatorLease(
   const current = state.held.get(key);
   if (token !== undefined && current !== token) return; // stale release — ignore
   state.held.delete(key);
-  const queued = state.pending.get(key);
+  const queued = takePendingTrigger(key);
   if (!queued) {
     // Last drive for now: flip `waiting: agent` back to human once nothing is
     // live on the task (runOperator set it at drive start; a specialist the
@@ -231,10 +299,10 @@ function releaseOperatorLease(
     settleWaitingAfterOperator(db, current ?? leaseRefFromKey(key));
     return;
   }
-  state.pending.delete(key);
   logger.info("operator lease released — firing the queued trigger", {
     key,
     trigger: queued.trigger ?? "manual",
+    queuedHumanComments: leaseState().pending.get(key)?.humanComments.length ?? 0,
   });
   void runOperator(db, queued).catch((error) => {
     logger.error("queued operator trigger failed", {
@@ -254,15 +322,15 @@ function releaseOperatorLease(
 function drainPendingAfterInFlight(db: DatabaseSync, key: string): void {
   const state = leaseState();
   if (state.held.has(key)) return; // a live successor owns the lease — leave it.
-  const queued = state.pending.get(key);
+  const queued = takePendingTrigger(key);
   if (!queued) {
     settleWaitingAfterOperator(db, leaseRefFromKey(key));
     return;
   }
-  state.pending.delete(key);
   logger.info("cross-boot in-flight finished — firing the queued trigger", {
     key,
     trigger: queued.trigger ?? "manual",
+    queuedHumanComments: state.pending.get(key)?.humanComments.length ?? 0,
   });
   void runOperator(db, queued).catch((error) => {
     logger.error("queued operator trigger failed", {
@@ -322,8 +390,12 @@ async function maybeResumeStrandedOperator(
     stageAtStart?: string | null;
   },
 ): Promise<boolean> {
-  // Only the tracked-lease path resumes (it knows the drive's starting stage);
-  // fallback refs (cross-boot drains, key-derived) stay conservative.
+  // Only a ref that knows the drive's STARTING stage resumes — the live lease
+  // and the stranded-plan recovery, which reads it before executing (B-OP3).
+  // Key-derived fallback refs (a cross-boot drain, where the finished run's
+  // starting stage is unknowable) stay conservative: reading the stage there
+  // would read it AFTER the move and resume on top of the transition's own
+  // re-trigger.
   if (ref.stageAtStart === undefined || ref.stageAtStart === null) return false;
   const stateRow = ref.runId
     ? (db.prepare(`SELECT state FROM agent_runs WHERE id = ?`).get(ref.runId) as
@@ -513,7 +585,7 @@ export async function runOperator(
   const lease = leaseState();
   const heldByProcess = lease.held.get(leaseKey);
   if (heldByProcess) {
-    lease.pending.set(leaseKey, input);
+    queueOperatorTrigger(leaseKey, input);
     logger.info("operator run queued — one already in flight (process lease)", {
       taskKey: input.taskKey,
       trigger: input.trigger ?? "manual",
@@ -529,7 +601,7 @@ export async function runOperator(
   // when that run finishes.
   const inflight = inFlightOperatorRun(db, input.projectSlug, input.taskKey);
   if (inflight) {
-    lease.pending.set(leaseKey, input);
+    queueOperatorTrigger(leaseKey, input);
     const { chainRunCompletion } = await import("./run-service.server");
     chainRunCompletion(inflight.id, () => drainPendingAfterInFlight(db, leaseKey));
     logger.info("operator run queued — DB row already in flight", {
@@ -825,7 +897,12 @@ export function authoredPacketOptions(
 
 function defaultPacketOptions(
   packetType: "input" | "blocked",
-): { kind: PacketOptionKind; title: string; recommended?: boolean }[] {
+): {
+  kind: PacketOptionKind;
+  title: string;
+  detail?: string;
+  recommended?: boolean;
+}[] {
   return packetType === "blocked"
     ? [
         { kind: "block_on_policy", title: "Update the policy / credential and unblock", recommended: true },
@@ -835,6 +912,15 @@ function defaultPacketOptions(
     : [
         { kind: "request_edit", title: "Send back to the specialist for changes", recommended: true },
         { kind: "redirect", title: "Reassign or redirect the work" },
+        // B-OP4: a genuine multi-way decision rarely fits "send back" or
+        // "redirect". Without a free-form path the fallback card forced the
+        // human to pick a wrong option or leave the packet open, so the
+        // resolver's own words become the operator's next steer.
+        {
+          kind: "custom",
+          title: "Something else — say what should happen",
+          detail: "Your note becomes the operator's instruction for the next turn.",
+        },
       ];
 }
 
@@ -855,6 +941,7 @@ async function startCodexOperatorRun(
     input.agentReply,
     input.humanCommentBy,
     transitionContextOf(input),
+    input.scheduleNote,
   );
   // P14-RT-04 / KM-02: the operator's DECLARED org MCP servers mount on Codex
   // too. P13-KM-03 wired them into the Claude toolkit only, so the same grant
@@ -973,11 +1060,21 @@ export async function executeStrandedCodexPlan(
     projectSlug: ref.projectSlug,
     taskKey: ref.taskKey,
     ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-    // Cross-boot resume of a persisted plan — no prior chain depth survives
-    // the restart; stageAtStart null keeps the stranded-resume backstop out
-    // of this recovery path entirely (conservative).
+    // No prior chain depth survives a restart, so the resume chain starts at 0
+    // — it is still bounded by OPERATOR_TRANSITION_CHAIN_CAP from there.
     transitionDepth: 0,
-    stageAtStart: null,
+    // B-OP3: the REAL stage this recovery starts from. It used to be null,
+    // which switched the stranded-resume backstop off for every cross-boot
+    // path — a task left at an `auto` stage by a plan that never ran came back
+    // from the restart stamped "waiting on a human" with nothing for a human
+    // to do. The stage is what makes "this drive did not move the task"
+    // decidable; reading it here costs one file read.
+    stageAtStart:
+      readTaskFile({
+        projectSlug: ref.projectSlug,
+        taskKey: ref.taskKey,
+        dataRoot: ctx.dataRoot,
+      })?.parsed.frontmatter.stage ?? null,
   };
   lease.held.set(leaseKey, leaseToken);
   try {
@@ -1323,6 +1420,7 @@ async function startRealOperatorRun(
     input.agentReply,
     input.humanCommentBy,
     transitionContextOf(input),
+    input.scheduleNote,
   );
 
   const { runId } = await startRun(db, {
@@ -1581,6 +1679,32 @@ function agentReportBlock(trigger: OperatorTrigger, agentReply?: string): string
   return `\n\n# Agent report${suffix}\n\n\`\`\`text\n${report}\n\`\`\``;
 }
 
+/**
+ * The TRIAGE QUALITY GATE block (F15-14). Live failure: the goal "The
+ * documentation could be improved. Make it better." — no file, no change, no
+ * acceptance criteria — advanced Triage → Ready with the reason "goal and scope
+ * are set", after which the operator invented a scope and burned a 91-turn run.
+ * The New-task dialog promises this gate flags underspecified goals, so the
+ * doctrine has to be in the TURN, not only in the persona a project can
+ * override. Emitted only at the entry stage, and never when the board is so
+ * short that the entry stage is also where work or acceptance happens.
+ */
+function triageQualityGate(snapshot: OperatorTaskSnapshot): string {
+  const entryStageId = snapshot.stageIds[0] ?? null;
+  if (entryStageId === null || snapshot.stage !== entryStageId) return "";
+  if (snapshot.stage === snapshot.workStageId || snapshot.stage === snapshot.doneStageId) {
+    return "";
+  }
+  return (
+    "TRIAGE QUALITY GATE — this is the first stage, so scoping is this turn's job and no forward transition happens until the goal survives it. " +
+    "A goal is CONCRETE only when it names a deliverable (what changes, and where) AND the signal that proves it done. " +
+    '"The documentation could be improved. Make it better." is a wish, not a goal: no file, no change, no acceptance criteria. ' +
+    "While the goal is that vague you MUST NOT `transition_stage` forward: either `set_goal` with real scope when the task text, comments, and repository make it unambiguous, " +
+    'or `open_decision_packet` (type "input") proposing 2–4 concrete scopes for the human to choose between. Reading the repository is not scoping — a scope you invented is the failure this gate exists to stop. ' +
+    "If the goal IS concrete, say why in the transition `reason`: name the deliverable and the acceptance signal. If you cannot write that sentence, it is not concrete. "
+  );
+}
+
 /** The turn-specific instruction shared by both operator backends. */
 function operatorTurnInstruction(
   snapshot: OperatorTaskSnapshot,
@@ -1588,6 +1712,7 @@ function operatorTurnInstruction(
   humanComment?: string,
   humanCommentBy?: string,
   transition?: TransitionContext,
+  scheduleNote?: string,
 ): string {
   if (humanComment?.trim()) {
     const by = humanCommentBy?.trim();
@@ -1659,13 +1784,26 @@ function operatorTurnInstruction(
           `If you cannot tell WHY the task moved, ask them in ONE comment — tag "@${transition.byHuman}" so they are notified — and stop. Never guess a rework direction. `
         : `You moved this task from "${transition.fromName}" to "${transition.toName}" — continue coordinating at the new stage. `
       : "";
+  // B-WF3: a scheduled re-run used to reach the operator as a bare `manual`
+  // trigger, so the reason a human scheduled it ("re-check the flaky test")
+  // existed only in a timeline note the turn never pointed at.
+  const scheduleContext =
+    trigger === "scheduled"
+      ? "This run fired from a SCHEDULED re-check a human set earlier" +
+        (scheduleNote?.trim()
+          ? `, for this stated reason: "${scheduleNote.trim()}". Honor that reason first — check what it asks about and act on what you find. `
+          : " with no stated reason. Re-read the live state and continue the stage below. ") +
+        "A schedule firing is not new evidence by itself: if nothing changed since the last turn, say so in one concise comment rather than re-prompting an agent that already reported. "
+      : "";
   const scope = goalIsUnspecified(snapshot.goal)
     ? "The goal is unspecified. First use `set_goal` to add concrete scope and acceptance criteria, or request genuinely missing scope with one decision packet. " +
       "Drafting the goal is SETUP, not this turn's action — after `set_goal`, continue with the stage rule below in the SAME run; nothing re-invokes you for your own `set_goal`. "
     : "";
   return (
+    scheduleContext +
     moveContext +
     scope +
+    triageQualityGate(snapshot) +
     `You are at stage "${snapshot.stageName}". Do the ONE thing this stage calls for, from the live snapshot:\n` +
     "- Pre-work stage with an `auto` outbound boundary (e.g. Triage → Ready, Ready → In Progress): advance it with `transition_stage`. " +
     "Every transition re-invokes you at the new stage, so advancing one boundary and stopping is fine — you (or a queued follow-up) will pick the task up at the next stage and continue.\n" +
@@ -1688,6 +1826,7 @@ export function buildCodexOperatorPrompt(
   agentReply?: string,
   humanCommentBy?: string,
   transition?: TransitionContext,
+  scheduleNote?: string,
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
@@ -1696,7 +1835,14 @@ export function buildCodexOperatorPrompt(
     "\n\n# Your decision\n\n" +
     "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
     "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
-    operatorTurnInstruction(snapshot, trigger, humanComment, humanCommentBy, transition) +
+    operatorTurnInstruction(
+      snapshot,
+      trigger,
+      humanComment,
+      humanCommentBy,
+      transition,
+      scheduleNote,
+    ) +
     "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend`, `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
@@ -1711,12 +1857,20 @@ export function buildOperatorTurnPrompt(
   agentReply?: string,
   humanCommentBy?: string,
   transition?: TransitionContext,
+  scheduleNote?: string,
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
     `Goal: ${snapshot.goal}\n\nCall \`get_task\` first; its live state and offered tools are authoritative.` +
     agentReportBlock(trigger, agentReply) +
     "\n\n" +
-    operatorTurnInstruction(snapshot, trigger, humanComment, humanCommentBy, transition)
+    operatorTurnInstruction(
+      snapshot,
+      trigger,
+      humanComment,
+      humanCommentBy,
+      transition,
+      scheduleNote,
+    )
   );
 }

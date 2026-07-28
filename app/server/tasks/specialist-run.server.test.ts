@@ -841,6 +841,85 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(prompt).not.toContain("Commit your work locally");
   });
 
+  /**
+   * R15-7 (owner ruling, 2026-07-28): a ghost profile's run is fully
+   * conservative. The collaboration gates used to resolve from `[]`, which the
+   * catalog defaults read as comment/ask/evidence GRANTED — so a run of a
+   * profile nobody can resolve still mounted `post_comment`/`ask_human` and
+   * could open a question packet in a vanished profile's name, while everything
+   * the tool layer governs was denied. One posture, both layers.
+   */
+  it("R15-7: mounts NO collaboration channel and promises none in the prompt", async () => {
+    undeployAll();
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const spec = specs.at(-1)!;
+    // The Claude agent toolkit (post_comment / ask_human / report_outcome) is
+    // the collaboration channel; a ghost run gets none of it.
+    expect(Object.keys(spec.mcpServers ?? {})).not.toContain("viberr_agent");
+    expect(spec.prompt).not.toContain("post_comment");
+    expect(spec.prompt).not.toContain("ask_human");
+    expect(spec.prompt).not.toContain("## Collaboration");
+  });
+
+  /**
+   * B-AG3: `useEnvelopeSchema` mounts the Codex outcome envelope for
+   * verdict OR ask OR evidence, but the prompt note that explains the shape
+   * only fired for verdict/ask — so an evidence-only Codex profile had its
+   * final reply constrained to JSON with nothing but schema descriptions to go
+   * on, which is how a prose report degrades into a stub.
+   */
+  it("B-AG3: an evidence-only Codex profile is TOLD about the envelope it is constrained to", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [
+            { capabilityId: "attach-evidence-references", mode: "direct" },
+            { capabilityId: "report-validation-verdict", mode: "off" },
+            { capabilityId: "ask-human", mode: "off" },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["codex"],
+            model: "gpt-5-codex",
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const spec = specs.at(-1)!;
+    // The envelope IS mounted for an evidence grant (P13-D-26) …
+    expect(spec.outputSchema).toBeTruthy();
+    // … so the prompt has to describe it, evidence field included.
+    expect(spec.prompt).toContain("## Collaboration");
+    expect(spec.prompt).toContain("structured outcome JSON");
+    expect(spec.prompt).toContain('"evidence"');
+    // Nothing it wasn't granted is offered.
+    expect(spec.prompt).not.toContain('"verdict"');
+    expect(spec.prompt).not.toContain('"question"');
+  });
+
   it("a run of a LIVE deployment still follows its own grants", async () => {
     // A GRANTED profile is the control: the withheld fallback must not leak
     // onto a profile that resolves, or every deliverer would lose its tools.

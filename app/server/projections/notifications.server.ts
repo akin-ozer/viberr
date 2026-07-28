@@ -94,6 +94,32 @@ export function createNotification(
   return id;
 }
 
+/**
+ * B-FD6: where a notification row actually goes when clicked. The inbox routed
+ * only rows carrying BOTH a project and a task, so an org- or project-level row
+ * (a policy notification, a project-scoped quality alert) rendered exactly like
+ * a clickable one and did nothing — a dead click with no explanation. Resolving
+ * the destination here, once, lets every surface either navigate or render the
+ * row as plainly non-clickable instead of each one re-deriving the rule.
+ */
+export function notificationHref(
+  record: Pick<NotificationRecord, "projectSlug" | "taskKey">,
+): string | null {
+  if (record.projectSlug && record.taskKey) {
+    return `/projects/${record.projectSlug}/tasks/${record.taskKey}`;
+  }
+  // A project-scoped row still has a surface it concerns: that project's board.
+  if (record.projectSlug) return `/projects/${record.projectSlug}`;
+  // Org-wide rows (no project ref) concern no single page — never clickable.
+  return null;
+}
+
+export interface NotificationListItem extends NotificationRecord {
+  /** Resolved destination, or null when this row concerns no navigable
+   *  surface — the signal a renderer uses to style it as non-clickable. */
+  href: string | null;
+}
+
 /** Newest-first by real timestamp (deliberate divergence from the mock's
  * splice order — ruling 9). Joins project display names where resolvable,
  * plus the LIVE task decision state (F7-NOTIF1): packet/approval rows are
@@ -106,7 +132,7 @@ export function listNotifications(
   db: DatabaseSync,
   userId: string,
   options: { limit?: number } = {},
-): NotificationRecord[] {
+): NotificationListItem[] {
   const rows = db
     .prepare(
       `SELECT n.*, p.name AS project_name, p.stages_json AS project_stages_json,
@@ -136,13 +162,14 @@ export function listNotifications(
   );
   return rows.map((row) => {
     const record = mapNotificationRow(row);
-    const scoped: NotificationRecord = {
+    const scoped: NotificationListItem = {
       ...record,
       waitingOnYou:
         (record.kind === "packet" || record.kind === "approval") &&
         record.projectSlug != null &&
         record.taskKey != null &&
         mine.has(`${record.projectSlug}::${record.taskKey}`),
+      href: notificationHref(record),
     };
     return scoped.from ? { ...scoped, from: overlay(scoped.from) } : scoped;
   });

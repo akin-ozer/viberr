@@ -29,9 +29,11 @@ import type { TaskFileEvent, TaskSchedule } from "~/schemas/task-file.schema";
  * `schedules_json` projection column lets the runner find due entries without
  * reading every file.
  *
- * Idempotency / crash-safety: a fired entry is flipped `pending → fired` in the
- * file BEFORE `runOperator` is invoked, so a crash mid-run can't re-fire it, and
- * a fired entry stays fired across restarts (the file is canonical).
+ * Idempotency / crash-safety: an occurrence is CLAIMED in the file
+ * (`pending → claimed`) before `runOperator` is invoked and finalized to
+ * `fired` only once the enqueue returned, so a crash mid-run can neither
+ * re-fire it nor lose it — a claim whose lease expired is re-driven by a later
+ * tick, and every terminal state stays across restarts (the file is canonical).
  */
 
 const SCHEDULE_TICK_MS = 60_000;
@@ -203,13 +205,38 @@ export async function cancelScheduledAction(
 
 // ------------------------------------------------------------------ runner
 
-interface DueRow {
+export interface DueRow {
   project_slug: string;
   task_key: string;
   stage: string;
   /** R14-3 projection column; 1 = archived (P14-RV-03). */
   archived: number;
   schedules_json: string;
+}
+
+/**
+ * Tasks holding an UNRESOLVED schedule occurrence (`pending` or `claimed`) —
+ * the candidate set each tick then filters by due time in JS.
+ *
+ * B-WF5: ask SQLite about the JSON as JSON. This used to be
+ * `schedules_json LIKE '%"status":"pending"%'`, a substring match over
+ * serialized bytes: it depended on key order and spacing the writer never
+ * promised, and any schedule NOTE quoting that text made an unrelated task a
+ * candidate. `json_each` reads the array element-wise, so an element's own
+ * `status` is what selects the row.
+ */
+export function tasksWithUnresolvedSchedules(db: DatabaseSync): DueRow[] {
+  return db
+    .prepare(
+      `SELECT project_slug, task_key, stage, archived, schedules_json
+         FROM task_projections
+        WHERE json_valid(schedules_json)
+          AND EXISTS (
+                SELECT 1 FROM json_each(task_projections.schedules_json)
+                 WHERE json_extract(value, '$.status') IN ('pending', 'claimed')
+              )`,
+    )
+    .all() as unknown as DueRow[];
 }
 
 /** F10-16: a claim older than this is treated as crashed and re-driven. Longer
@@ -230,14 +257,7 @@ export async function fireDueSchedules(
   ctx: TaskMutationContext = {},
 ): Promise<{ fired: number; skipped: number }> {
   const nowMs = Date.now();
-  const rows = db
-    .prepare(
-      `SELECT project_slug, task_key, stage, archived, schedules_json
-         FROM task_projections
-        WHERE schedules_json LIKE '%"status":"pending"%'
-           OR schedules_json LIKE '%"status":"claimed"%'`,
-    )
-    .all() as unknown as DueRow[];
+  const rows = tasksWithUnresolvedSchedules(db);
   if (rows.length === 0) return { fired: 0, skipped: 0 };
 
   const terminalCache = new Map<string, string | null>();
@@ -262,6 +282,9 @@ export async function fireDueSchedules(
     backend: "claude" | "codex";
     autonomy: "supervised" | "full";
     scheduleId: string;
+    /** The scheduler's stated reason — the operator's turn instruction quotes
+     *  it, so a scheduled re-run knows WHY it exists (B-WF3). */
+    note: string;
   }[] = [];
 
   for (const row of rows) {
@@ -350,6 +373,7 @@ export async function fireDueSchedules(
             backend: s.backend,
             autonomy: s.autonomy,
             scheduleId: s.id,
+            note: s.note ?? "",
           });
           fired += 1;
         }
@@ -374,7 +398,12 @@ export async function fireDueSchedules(
             taskKey: t.taskKey,
             backend: t.backend,
             autonomy: t.autonomy,
-            trigger: "manual",
+            // B-WF3: a scheduled re-run is not a human pressing "Run operator".
+            // It used to arrive as a bare `manual` trigger, so the reason the
+            // human scheduled it never reached the turn — the operator re-read
+            // the task with no idea what it was asked to re-check.
+            trigger: "scheduled",
+            ...(t.note ? { scheduleNote: t.note } : {}),
             dataRoot: ctx.dataRoot,
           });
           ok = true;
