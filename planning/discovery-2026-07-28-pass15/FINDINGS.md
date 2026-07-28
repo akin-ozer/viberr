@@ -116,3 +116,12 @@ Facts (not defects) worth keeping: Developer-Claude pushes its branch at creatio
 6. **F15-04**: Land on the new project after creation? (Recommended: yes.)
 7. **Post-merge branch cleanup**: merged task branches accumulate (vib-1..4,7,9 remain) — auto-delete option?
 8. **B-AG4**: Undeployed-profile runs: keep permissive collab defaults or go conservative?
+
+## E. Known environmental flake (not a product defect)
+
+`app/server/files/file-watch.service.server.test.ts` failed twice across ~8 full-suite runs with
+`EMFILE: too many open files`, always under load (docker container + several Chromium instances +
+parallel vitest workers in one session). The file passes alone, and two consecutive full runs
+immediately afterwards were clean at **2419/2419**. macOS per-process descriptor pressure, not a
+watcher leak — recorded here so a future pass recognizes it instead of chasing it. If it ever
+fails on an idle machine, THAT is a real leak and worth the hunt.
