@@ -127,3 +127,22 @@ Rebuilt the compose image and re-ran the repros against the real app on the SAME
 | **F15-17** | with QA inserted after Review, acceptance is refused from the wrong stage with a rendered reason ("VIB-10 is at In Progress, not QA — a completion can only be accepted from the boundary the workflow puts before Done") |
 
 Final gates on the merged tree: typecheck clean · **2418 unit tests** · build · **25 e2e** (incl. WCAG in both themes).
+
+## Closing the never-live-proven cases (2026-07-29, on the fixed build)
+
+Prompted by an honesty audit of this very table — 33 rows still read "planned" while the
+ledger already carried their verdicts, and four cases had no verdict anywhere. The ones whose
+behavior THIS PASS CHANGED were re-proven on the running app rather than trusted from before.
+
+| case | evidence |
+|------|----------|
+| **UC-17 / R15-4 (re-proven, regression risk I introduced)** | Cem (contributor, member of `viberr`, NOT of `viberr-autonomy-lab`): viberr board **200**, viberr task **200** — members unaffected. VAL board **404**, and `VAL-1.data?_routes=routes/project.task` — the single-fetch bypass the verifier found — also **404**. Home lists only the projects he can see. Vera (viewer, member): task **200**, comment box present (FR4 within visible projects), **zero** privileged buttons rendered, permissions panel honest per action |
+| **UC-25 (re-proven after the capability rewrite)** | VIB-11's specialist run init: `time-mcp: connected`, `search-mcp: failed` (granted but down — honest, not silently advertised), `viberr_agent: connected`; the operator's own runs mount only the in-proc `viberr` server, whose toolkit now carries `mcp__viberr__deliver_for_review` (R15-2 live) |
+| **UC-21 validation lifecycle** | VIB-10: `awaiting verdict` while delivered-but-unreviewed → `validation healthy` only after a real reviewer verdict bound to the revision. VIB-11: stayed `awaiting verdict` with no reviewer, and the force dialog reported exactly that |
+| **UC-31 force-accept — never live-proven in pass 14 or earlier in this pass** | VIB-11 wedged with "delivered work but no review pull request". The affordance appeared with that rendered reason; the dialog named MERGES / REVISION `5136f7a3d827` / VERDICT `awaiting verdict` / **BYPASSING** the exact gate + "Admin override — the bypassed gate is recorded to the audit log"; clicking it closed the task and wrote `task.acceptance.forced` carrying the bypassed reason verbatim |
+| **B-OP2 in production logs** | the lease line now reads `operator lease released — firing the queued trigger … queuedHumanComments:0` — the human-comment queue the fix preserves |
+
+One honest caveat: the audit row above quotes the PRE-fix refusal copy, because the container
+image predates commit 9888063. Verified deterministically instead of by another live run —
+after `npm run build`, `build/server/assets/task-actions.server-*.js` contains the corrected
+sentence and **zero** occurrences of "ask an admin to force-accept it".
