@@ -882,7 +882,7 @@ export async function startAgentRun(
     }
     if (collab.ask) {
       collabNotes.push(
-        "- `ask_human` — raise a question you are blocked on as a decision card for the humans (you will not get the answer in this run; note it in your report).",
+        "- `ask_human` — raise a question you are blocked on as a decision card for the humans. The answer does not arrive during this run; note it in your report and finish. You will be RESUMED in this same session with the decision, so do not restart your work when that happens.",
       );
     }
     if (collab.verdict) {

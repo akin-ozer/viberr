@@ -233,9 +233,24 @@ had in mind, and the instance held a state I had not imagined (npm as pid 1; a c
 row; a board whose only task is archived). **Tests check the rule; only the instance checks the
 assumption.**
 
-**One more unexplained single-test failure (2026-07-29)**, recorded because guessing would be worse
-than admitting it: one test failed in a combined gate run that immediately followed a docker image
-rebuild. The reporter output captured only the summary, so **the test's name was never captured**
-and I cannot attribute it to the §E EMFILE flake, however well the circumstances match. Four full
-suites since — including a byte-identical re-run of the same combined command — are clean at
-**2434/2434**. Recorded as unexplained rather than filed under a known flake it merely resembles.
+**The unexplained single-test failure now has a name (2026-07-29).** It first showed up in a
+combined gate run right after a docker rebuild, with only the summary captured — recorded then as
+unexplained rather than filed under a flake it merely resembled. It recurred later, and running the
+suite in a loop while capturing the FAIL line identified it:
+
+`app/server/files/kb-watch.service.server.test.ts > startKbWatcher — live watcher > re-indexes an
+'on change' KB when a store file changes (debounced)`
+
+Same family as the EMFILE flake above and **already known**: the test's own comment records that two
+separate work streams hit it independently, and a prior pass bounded it with a 30 s deadline. It
+still fails occasionally in a full parallel run. Its subject is a real OS filesystem event —
+FSEvents delivery + a 250 ms debounce + a re-index — and macOS coalesces FSEvents under the load of
+~206 test files churning temp directories. Measured rate here: **2 failures in 12 full-suite runs**,
+never in isolation (that file passed 5/5 alone, and the suite is clean at 2445/2445 on a quiet
+machine).
+
+Not fixed, and deliberately not re-bounded: raising a deadline that is already 30 s trades a real
+signal for a longer wait. The fix that would actually work is to stop depending on real FSEvents in
+this test (inject the watcher event instead), which is a refactor of someone else's test and not
+this turn's job. **Named here so the next pass recognises it in one grep instead of re-deriving
+it** — and so a future failure in a DIFFERENT file is not waved through as "probably the watcher".

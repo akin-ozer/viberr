@@ -392,6 +392,11 @@ export const taskPacketSchema = z
     /** Set when an `edit_goal` option was confirmed: the packet is decided
      *  and auto-clears when the edited goal lands (updateTaskGoal). */
     awaiting: z.enum(["goal_edit"]).optional(),
+    /** R15-14: profileId of the AGENT that raised this question, when one did.
+     *  Resolving such a packet resumes that agent's own session with the answer
+     *  rather than handing it to the operator to re-engage a cold run. Absent on
+     *  operator packets and on anything written before this field existed. */
+    askedBy: z.string().optional(),
   })
   .loose();
 export type TaskPacket = z.infer<typeof taskPacketSchema>;
