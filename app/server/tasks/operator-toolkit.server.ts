@@ -7,8 +7,10 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { TaskMutationContext } from "./task-actions.server";
 import {
+  deliverGate,
   gate,
   operatorAcceptCompletion,
+  operatorDeliverForReview,
   operatorEngageAgent,
   operatorOpenPacket,
   operatorResolvePacket,
@@ -318,6 +320,34 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "prompt_agent",
+    );
+  }
+
+  // R15-2: delivery (push the branch + open the review PR) is the operator's
+  // decision, gated by `deliver-review-pr` (absent = granted — the capability
+  // postdates live deployments; see deliverGate).
+  if (deliverGate(authority) !== "deny") {
+    add(
+      tool(
+        "deliver_for_review",
+        "DELIVER the task: push the delivering agent's committed branch and open (or reuse) the review pull request. Delivery is YOUR decision, not a stage side-effect — deliver when the work is committed and plausible for review, weighing the task's REMAINING stages (a later stage like QA need not gate delivery for this task; offer early delivery when so). When unsure whether the branch should be pushed, open a decision packet instead. The result reports the push status and PR number honestly: a `push_conflict` means the remote branch diverged (a history conflict, NOT a credential problem) and no PR was opened — open a decision packet naming the branch so a human resolves it. Never instruct a specialist to push or open a PR; this tool is how delivery happens.",
+        {
+          reason: z
+            .string()
+            .optional()
+            .describe("One line on why delivery is right now — shown on the recommendation card when your policy recommends instead of performs."),
+        },
+        async (args) =>
+          resultText(
+            await operatorDeliverForReview(
+              db,
+              ctx,
+              { ...base, ...(args.reason ? { reason: prose(args.reason) } : {}) },
+              authority,
+            ),
+          ),
+      ),
+      "deliver_for_review",
     );
   }
 

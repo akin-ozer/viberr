@@ -5,7 +5,8 @@ import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   coerceSpecialistCapabilityMode,
   conservativeGrantsFor,
-  normalizeDeliveryGrants,
+  repairDeliveryGrants,
+  type DeliveryGrantNotice,
 } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -27,6 +28,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import {
   effectiveProfileView,
+  VIEW_WITHOUT_POLICY,
   type AgentDeploymentDefinition,
 } from "./agents-query.server";
 import {
@@ -56,6 +58,16 @@ import {
 export interface ProfileActor {
   userId: string;
   label: string;
+}
+
+/** What a profile save produced. `notice` is present only when the saved grants
+ * needed a delivery-headline decision — materialized (`repaired`) or refused
+ * (`withheld`, an explicit withholding that leaves the profile unable to
+ * deliver). Callers surface its `message` next to the success toast. */
+export interface ProfileSaveResult {
+  profileId: string;
+  name: string;
+  notice?: DeliveryGrantNotice;
 }
 
 export interface ProfileMutationContext {
@@ -153,7 +165,10 @@ function grantsFor(
   caps: Record<string, CapMode>,
   defaults: Readonly<Record<string, CapMode>>,
   { specialist }: { specialist: boolean },
-): { capabilityId: string; mode: CapabilityMode }[] {
+): {
+  grants: { capabilityId: string; mode: CapabilityMode }[];
+  notice: DeliveryGrantNotice | null;
+} {
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
   for (const [capabilityId, def] of Object.entries(defaults)) {
     let mode = caps[capabilityId] ?? def;
@@ -175,11 +190,11 @@ function grantsFor(
     // withholding real (the operator gate already treats stored-off = deny).
     grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
-  // F14: never persist a contradictory deliverer (scoped delivery actionable but
-  // the headline `execute-code-or-write-repo` withheld). The edit path used to
-  // materialize the absent headline to `off` from the defaults map, silently
-  // vetoing all delivery — this repairs it.
-  return normalizeDeliveryGrants(grants);
+  // F14: never persist a deliverer whose headline `execute-code-or-write-repo`
+  // is merely ABSENT while its scoped delivery grants are actionable (the edit
+  // path used to materialize that absence as `off` and silently veto delivery).
+  // B-AG1: an EXPLICIT withholding is reported, never overturned.
+  return repairDeliveryGrants(grants);
 }
 
 /** CREATE-path grants: persist the modal caps the form submitted, with the
@@ -204,15 +219,31 @@ function grantsFor(
  * `direct` ('Allowed') per R7-5; always-human ids stay `human`. */
 function createModalGrants(
   caps: Record<string, CapMode>,
-): { capabilityId: string; mode: CapabilityMode }[] {
+): {
+  grants: { capabilityId: string; mode: CapabilityMode }[];
+  notice: DeliveryGrantNotice | null;
+} {
+  // The delivery headline is decided from what the form SUBMITTED, before the
+  // omitted ids are materialized as `off` below — otherwise the editor artifact
+  // (scoped delivery submitted, headline key absent: the shape that produced
+  // VIB-1) becomes indistinguishable from an admin's explicit withholding, and
+  // B-AG1's respect-the-`off` rule would veto the delivery the creator just
+  // chose. An explicit `off` here IS the admin's, and stands.
+  const submittedDelivery = repairDeliveryGrants(
+    Object.entries(caps).map(([capabilityId, mode]) => ({ capabilityId, mode })),
+  );
+  const headlineRepaired = submittedDelivery.notice?.kind === "repaired";
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
   for (const capabilityId of MODAL_CAP_IDS) {
     const submitted = caps[capabilityId];
     const mode = ALWAYS_HUMAN.has(capabilityId)
       ? "human"
       : submitted === undefined
-        ? // Omitted by the form → withheld, and stored as such.
-          "off"
+        ? // Omitted by the form → withheld, and stored as such (except the
+          //   delivery headline a submitted scoped grant just repaired).
+          headlineRepaired && capabilityId === "execute-code-or-write-repo"
+          ? "direct"
+          : "off"
         : capabilityId === "report-validation-verdict"
           ? // F10-07/F10-14: verdict is explicit-only — direct or nothing.
             submitted === "direct"
@@ -222,7 +253,8 @@ function createModalGrants(
     grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
   // F14: a deliverer must hold the headline repo-write capability (master gate).
-  return normalizeDeliveryGrants(grants);
+  // The headline is materialized above, so this only re-checks and reports.
+  return { grants, notice: submittedDelivery.notice };
 }
 
 // ------------------------------------------------------------------ create
@@ -232,7 +264,7 @@ export async function createAgentProfile(
   input: { projectSlug: string; form: unknown },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
-): Promise<{ profileId: string; name: string }> {
+): Promise<ProfileSaveResult> {
   const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
 
@@ -242,6 +274,9 @@ export async function createAgentProfile(
   };
 
   let profileId = "";
+  // A holder, not a `let`: the grants are decided inside the file-writer
+  // callback, and narrowing would otherwise type the result as `null` here.
+  const delivery: { notice: DeliveryGrantNotice | null } = { notice: null };
   await updateProjectFile(ref, (parsed) => {
     const taken = new Set(parsed.frontmatter.agents.map((a) => a.profileId));
     // Server-generated slug id with a uniqueness check (agents spec §4.5) —
@@ -278,9 +313,11 @@ export async function createAgentProfile(
       stages: form.stages,
       resources: form.resources,
     };
+    const created = createModalGrants(form.caps);
+    delivery.notice = created.notice;
     const deployment: AgentDeployment = {
       profileId,
-      capabilities: createModalGrants(form.caps),
+      capabilities: created.grants,
       extras: [],
     };
     (deployment as Record<string, unknown>).definition = definition;
@@ -294,9 +331,26 @@ export async function createAgentProfile(
     subjectKind: "agent_profile",
     subjectId: profileId,
     projectSlug: input.projectSlug,
-    details: { name: form.name, role: form.role, backend: form.backend, projectName },
+    details: {
+      name: form.name,
+      role: form.role,
+      backend: form.backend,
+      projectName,
+      // B-AG1: a delivery-headline decision the save made (or refused to make)
+      // is never silent — the audit row carries it and the caller shows it.
+      ...(delivery.notice
+        ? {
+            deliveryGrants: delivery.notice.kind,
+            deliveryNote: delivery.notice.message,
+          }
+        : {}),
+    },
   });
-  return { profileId, name: form.name };
+  return {
+    profileId,
+    name: form.name,
+    ...(delivery.notice ? { notice: delivery.notice } : {}),
+  };
 }
 
 // --------------------------------------------------- deploy from library
@@ -331,7 +385,7 @@ export async function deployAgentProfileFromLibrary(
   input: { projectSlug: string; profileId: string },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
-): Promise<{ profileId: string; name: string }> {
+): Promise<ProfileSaveResult> {
   const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
   const profileId = input.profileId.trim();
   if (!profileId) throw AppError.validation("Pick a profile to add.");
@@ -358,6 +412,25 @@ export async function deployAgentProfileFromLibrary(
     );
   }
   const fm = parsed.frontmatter;
+
+  // AP-06 / P14-LV-01: explicit grants, never an empty list — the template's own
+  // grants when it has them, else the CONSERVATIVE set (delivery withheld), the
+  // same list org-level create persists. B-AG1: the delivery-headline decision
+  // is REPORTED here too. `normalizeDeliveryGrants` drops the notice, which is
+  // the no-audit shape B-AG1 was filed against: a template whose scoped delivery
+  // is on with the headline explicitly off deploys as a profile that cannot
+  // deliver, and nothing said so.
+  const deployDelivery = repairDeliveryGrants(
+    (fm.capabilities.length
+      ? fm.capabilities
+      : conservativeGrantsFor("agent")
+    ).map((g) => ({
+      capabilityId: g.capabilityId,
+      mode: (ALWAYS_HUMAN.has(g.capabilityId)
+        ? "human"
+        : coerceSpecialistCapabilityMode(g.mode)) as CapabilityMode,
+    })),
+  );
 
   await updateProjectFile(
     { projectSlug: input.projectSlug, dataRoot: ctx.dataRoot },
@@ -389,20 +462,7 @@ export async function deployAgentProfileFromLibrary(
       };
       const deployment: AgentDeployment = {
         profileId,
-        // AP-06 / P14-LV-01: explicit grants, never an empty list — the
-        // template's own grants when it has them, else the CONSERVATIVE set
-        // (delivery withheld), the same list org-level create persists.
-        capabilities: normalizeDeliveryGrants(
-          (fm.capabilities.length
-            ? fm.capabilities
-            : conservativeGrantsFor("agent")
-          ).map((g) => ({
-            capabilityId: g.capabilityId,
-            mode: (ALWAYS_HUMAN.has(g.capabilityId)
-              ? "human"
-              : coerceSpecialistCapabilityMode(g.mode)) as CapabilityMode,
-          })),
-        ),
+        capabilities: deployDelivery.grants,
         extras: fm.extras.map((e) => ({ label: e.label, mode: e.mode })),
       };
       (deployment as Record<string, unknown>).definition = definition;
@@ -417,9 +477,23 @@ export async function deployAgentProfileFromLibrary(
     subjectKind: "agent_profile",
     subjectId: profileId,
     projectSlug: input.projectSlug,
-    details: { name: fm.name, source: "library", projectName },
+    details: {
+      name: fm.name,
+      source: "library",
+      projectName,
+      ...(deployDelivery.notice
+        ? {
+            deliveryGrants: deployDelivery.notice.kind,
+            deliveryNote: deployDelivery.notice.message,
+          }
+        : {}),
+    },
   });
-  return { profileId, name: fm.name };
+  return {
+    profileId,
+    name: fm.name,
+    ...(deployDelivery.notice ? { notice: deployDelivery.notice } : {}),
+  };
 }
 
 // ------------------------------------------------------------------ update
@@ -429,9 +503,10 @@ export async function updateAgentProfile(
   input: { projectSlug: string; profileId: string; form: unknown },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
-): Promise<{ profileId: string; name: string }> {
+): Promise<ProfileSaveResult> {
   requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
+  const delivery: { notice: DeliveryGrantNotice | null } = { notice: null };
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -445,7 +520,7 @@ export async function updateAgentProfile(
     if (!deployment) {
       throw AppError.notFound(`No agent profile ${input.profileId} in this project.`);
     }
-    const current = effectiveProfileView(deployment, ctx.dataRoot);
+    const current = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     const isOperator = current.kind === "operator";
 
     // Grants come from the form for the GOVERNED capability set of this kind
@@ -456,10 +531,11 @@ export async function updateAgentProfile(
     const preserved = deployment.capabilities.filter(
       (c) => !governedIds.has(c.capabilityId),
     );
-    deployment.capabilities = [
-      ...grantsFor(form.caps, governedDefaults, { specialist: !isOperator }),
-      ...preserved,
-    ];
+    const saved = grantsFor(form.caps, governedDefaults, {
+      specialist: !isOperator,
+    });
+    delivery.notice = saved.notice;
+    deployment.capabilities = [...saved.grants, ...preserved];
 
     // Full-definition override. Both kinds now store the picked backend + model
     // + effort (the operator no longer keeps the "orchestration runtime"
@@ -505,9 +581,23 @@ export async function updateAgentProfile(
     subjectKind: "agent_profile",
     subjectId: input.profileId,
     projectSlug: input.projectSlug,
-    details: { name: form.name, role: form.role, backend: form.backend },
+    details: {
+      name: form.name,
+      role: form.role,
+      backend: form.backend,
+      ...(delivery.notice
+        ? {
+            deliveryGrants: delivery.notice.kind,
+            deliveryNote: delivery.notice.message,
+          }
+        : {}),
+    },
   });
-  return { profileId: input.profileId, name: form.name };
+  return {
+    profileId: input.profileId,
+    name: form.name,
+    ...(delivery.notice ? { notice: delivery.notice } : {}),
+  };
 }
 
 // ------------------------------------------------------------------ delete
@@ -533,7 +623,7 @@ export async function deleteAgentProfile(
     if (!deployment) {
       throw AppError.notFound(`No agent profile ${input.profileId} in this project.`);
     }
-    const current = effectiveProfileView(deployment, ctx.dataRoot);
+    const current = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     if (current.kind === "operator") {
       // The operator is a system profile — never deletable (agents §4.3),
       // enforced server-side, not just by hiding the button.

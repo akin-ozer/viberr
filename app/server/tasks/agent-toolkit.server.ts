@@ -22,7 +22,10 @@ import {
   type AgentCollab,
 } from "./agent-outcome.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
-import { notifyMentionedUsers } from "./mention-notify.server";
+import {
+  notifyMentionedUsers,
+  withAmbiguityDisclosure,
+} from "./mention-notify.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
 import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
 import {
@@ -90,13 +93,17 @@ export async function postAgentComment(
     text: string;
   },
 ): Promise<void> {
+  // S5-G3: an @handle that matches several people notifies nobody. A mid-run
+  // agent comment is machine-authored — nothing else would ever say the tag
+  // reached no one — so the disclosure rides the comment itself.
+  const text = withAmbiguityDisclosure(db, input.text);
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
       type: "comment",
       actor: input.actorRef,
       title: null,
-      text: input.text,
+      text,
       toAgent: false,
       evidence: null,
     });
@@ -119,7 +126,7 @@ export async function postAgentComment(
   // any other comment — the tag is a real ping, not decoration. NEW-5: the
   // `from` chip is the agent's own name, not its runtime label.
   notifyMentionedUsers(db, {
-    text: input.text,
+    text,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     from: createActorResolver(db, {

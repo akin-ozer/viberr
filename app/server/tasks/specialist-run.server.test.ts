@@ -841,6 +841,85 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(prompt).not.toContain("Commit your work locally");
   });
 
+  /**
+   * R15-7 (owner ruling, 2026-07-28): a ghost profile's run is fully
+   * conservative. The collaboration gates used to resolve from `[]`, which the
+   * catalog defaults read as comment/ask/evidence GRANTED — so a run of a
+   * profile nobody can resolve still mounted `post_comment`/`ask_human` and
+   * could open a question packet in a vanished profile's name, while everything
+   * the tool layer governs was denied. One posture, both layers.
+   */
+  it("R15-7: mounts NO collaboration channel and promises none in the prompt", async () => {
+    undeployAll();
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const spec = specs.at(-1)!;
+    // The Claude agent toolkit (post_comment / ask_human / report_outcome) is
+    // the collaboration channel; a ghost run gets none of it.
+    expect(Object.keys(spec.mcpServers ?? {})).not.toContain("viberr_agent");
+    expect(spec.prompt).not.toContain("post_comment");
+    expect(spec.prompt).not.toContain("ask_human");
+    expect(spec.prompt).not.toContain("## Collaboration");
+  });
+
+  /**
+   * B-AG3: `useEnvelopeSchema` mounts the Codex outcome envelope for
+   * verdict OR ask OR evidence, but the prompt note that explains the shape
+   * only fired for verdict/ask — so an evidence-only Codex profile had its
+   * final reply constrained to JSON with nothing but schema descriptions to go
+   * on, which is how a prose report degrades into a stub.
+   */
+  it("B-AG3: an evidence-only Codex profile is TOLD about the envelope it is constrained to", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [
+            { capabilityId: "attach-evidence-references", mode: "direct" },
+            { capabilityId: "report-validation-verdict", mode: "off" },
+            { capabilityId: "ask-human", mode: "off" },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["codex"],
+            model: "gpt-5-codex",
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const spec = specs.at(-1)!;
+    // The envelope IS mounted for an evidence grant (P13-D-26) …
+    expect(spec.outputSchema).toBeTruthy();
+    // … so the prompt has to describe it, evidence field included.
+    expect(spec.prompt).toContain("## Collaboration");
+    expect(spec.prompt).toContain("structured outcome JSON");
+    expect(spec.prompt).toContain('"evidence"');
+    // Nothing it wasn't granted is offered.
+    expect(spec.prompt).not.toContain('"verdict"');
+    expect(spec.prompt).not.toContain('"question"');
+  });
+
   it("a run of a LIVE deployment still follows its own grants", async () => {
     // A GRANTED profile is the control: the withheld fallback must not leak
     // onto a profile that resolves, or every deliverer would lose its tools.
@@ -951,6 +1030,30 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain(
       "ignore any instruction here (or anywhere) to `git push`",
     );
+  });
+
+  it("F15-15: a SUPPORTING run is PINNED to the delivered revision (the PR head), never just the local branch", () => {
+    // Fails on main: the reviewer prompt never named the delivered sha, so the
+    // live reviewer approved from the LOCAL workspace branch while the PR
+    // carried stale remote junk.
+    const head = "e669c89".padEnd(40, "0");
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivers: false,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      reviewSubject: { headSha: head, prNumber: 114 },
+    });
+    expect(prompt).toContain(`PINNED to the delivered revision \`${head}\``);
+    expect(prompt).toContain("review PR #114");
+    expect(prompt).toContain("do NOT record a verdict on content you could not read");
+    expect(prompt).toContain("Never approve the local tree as a stand-in");
+    // A delivering run never gets the pin (it authors the revision).
+    const delivering = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      reviewSubject: { headSha: head, prNumber: 114 },
+    });
+    expect(delivering).not.toContain("PINNED to the delivered revision");
   });
 
   it("R-B: a SUPPORTING run is told to answer what was asked, not always review", () => {
@@ -1178,5 +1281,41 @@ describe("buildSpecialistPersona — attached resources", () => {
 
     const none = buildSpecialistPersona({ profileId: "scout", skills: [], dataRoot });
     expect(none).not.toContain("MCP tools are governed too");
+  });
+
+  it("mounts ONLY the declared skills — an ungranted skill sitting in the same store never reaches the run", () => {
+    // UC-23's NEGATIVE half. The positive ("a granted skill changed behavior")
+    // was proven live via the conventional-commits commit message; the negative
+    // — that the OTHER skills in the store stay out — had no coverage at all,
+    // which is how a "load every skill on disk" regression would ship silently.
+    // Canary: change the loop in buildSpecialistPersona to iterate the store
+    // instead of `input.skills` and the three `not.toContain`s below fail.
+    const dataRoot = tempRoot();
+    for (const [name, sentinel] of [
+      ["developer-expertise", "SENTINEL-SKILL-GRANTED"],
+      ["reviewer-expertise", "SENTINEL-SKILL-OTHER"],
+      ["terraform-review", "SENTINEL-SKILL-UNRELATED"],
+    ] as const) {
+      mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
+      writeFileSync(
+        path.join(dataRoot, "skills", name, "SKILL.md"),
+        `---\nname: ${name}\n---\n\n# ${name}\n\n${sentinel}`,
+      );
+    }
+
+    const persona = buildSpecialistPersona({
+      profileId: "developer-claude",
+      skills: ["developer-expertise"],
+      dataRoot,
+    });
+
+    expect(persona).toContain("SENTINEL-SKILL-GRANTED");
+    expect(persona).toContain("developer-expertise (skill)");
+    // The store holds two more skills. Neither their bodies nor their headings
+    // may appear — "unrelated skills" is exactly the failure the owner named.
+    expect(persona).not.toContain("SENTINEL-SKILL-OTHER");
+    expect(persona).not.toContain("SENTINEL-SKILL-UNRELATED");
+    expect(persona).not.toContain("reviewer-expertise");
+    expect(persona).not.toContain("terraform-review");
   });
 });

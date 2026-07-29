@@ -162,6 +162,10 @@ export const RECOMMENDATION_KINDS = [
   // symmetric with the other stage transitions; applying it (admin|maintainer)
   // accepts completion into Done.
   "accept_completion",
+  // R15-2: an operator whose `deliver-review-pr` capability is `recommend`
+  // proposes DELIVERY — push the task branch + open the review PR — and a human
+  // applies it (performDelivery runs under their authority).
+  "delivery",
 ] as const;
 export type RecommendationKind = (typeof RECOMMENDATION_KINDS)[number];
 

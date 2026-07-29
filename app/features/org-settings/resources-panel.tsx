@@ -914,9 +914,13 @@ function KbPanel({
                   six text extensions, so a KB of PDFs advertised a healthy count
                   and injected nothing. Count what a run reads, and name the rest
                   rather than folding it in. */}
+              {/* The two lines read as one sentence split across them —
+                  "…docs agents read" / "read live" — which said "read" twice
+                  and left the live-folder promise dangling. One clause each. */}
               <span className="sub mono">
                 store://kb/{kb.dir}/ · {kb.injectableCount} doc
-                {kb.injectableCount === 1 ? "" : "s"} agents read
+                {kb.injectableCount === 1 ? "" : "s"} · agents read the live
+                folder
                 {kb.fileCount > kb.injectableCount
                   ? " · " +
                     (kb.fileCount - kb.injectableCount) +
@@ -926,7 +930,7 @@ function KbPanel({
                   : ""}
               </span>
               <span className="sub">
-                read live · re-scanned {rel(kb.lastIndexedAt)}
+                re-scanned {rel(kb.lastIndexedAt)}
                 {usedBy(kb.dir) > 0
                   ? " · " + usedBy(kb.dir) + " template" + (usedBy(kb.dir) === 1 ? "" : "s")
                   : ""}

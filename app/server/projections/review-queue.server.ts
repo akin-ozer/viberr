@@ -43,7 +43,9 @@ export interface ReviewQueueRow {
   /** F10-11/F10-15: null = the current revision is acceptance-ready (all
    *  required reviewers approved it, none requesting changes). A non-null reason
    *  means the task is NOT ready for acceptance (failing / awaiting a reviewer /
-   *  no delivered revision) — it must NOT sit under "Waiting on your acceptance".*/
+   *  no delivered revision, or R15-1's verdict gate: delivered work with no PR
+   *  or no approving verdict) — it must NOT sit under "Waiting on your
+   *  acceptance". */
   blockReason: string | null;
 }
 
@@ -71,9 +73,10 @@ export function getReviewQueue(
 
   // F10-11/F10-15: acceptance readiness comes from the revision-bound review
   // model, not just `waiting`. The reason (a failing verdict, an outstanding
-  // required reviewer, or no delivered revision) is PROJECTED into
-  // `task_projections.validation_block_reason` at rebuild time (P11-50), so this
-  // read model no longer re-reads task files on a loader path.
+  // required reviewer, no delivered revision, or R15-1's verdict gate on
+  // delivered work) is PROJECTED into `task_projections.validation_block_reason`
+  // at rebuild time (P11-50), so this read model no longer re-reads task files
+  // on a loader path — and reads the SAME gate the server enforces.
 
   // Newest event per task in one shot (position 0 = newest, file order).
   const latestByKey = new Map<string, string>();

@@ -14,6 +14,10 @@ import {
   readProjectFile,
   updateProjectFile,
 } from "~/server/files/project-writer.server";
+import {
+  BRANCH_CLEANUP_GUARDRAIL_DESC,
+  BRANCH_CLEANUP_GUARDRAIL_ID,
+} from "~/server/github/branch-cleanup.server";
 import { getProjectGithubContext } from "~/server/github/github-context.server";
 import { invalidateRepoAccess } from "~/features/github/github-query.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
@@ -147,6 +151,61 @@ export async function updateProjectIdentity(
     details: { fields: changedFields },
   });
   return { toast: "Project settings saved", changed: true };
+}
+
+// ----------------------------------------------------------- branch cleanup
+
+/**
+ * R15-6: "delete the task branch after its review PR merges", per project,
+ * default ON. Persisted as the `delete-branch-after-merge` guardrail row in
+ * project.md (see branch-cleanup.server.ts for why that home and why absence
+ * means ON) — writing the row explicitly either way keeps the file a statement
+ * of the project's actual policy rather than a silence to interpret.
+ *
+ * `edit-policy` tier: this decides what Viberr does to a GitHub repository
+ * after every merge, which is policy, not credential hygiene.
+ */
+export async function setBranchCleanup(
+  db: DatabaseSync,
+  input: { projectSlug: string; enabled: boolean },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; enabled: boolean }> {
+  requireProjectAction(
+    db,
+    ctx,
+    "edit-policy",
+    input.projectSlug,
+    actor,
+    "change project settings",
+  );
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    parsed.frontmatter.guardrails = [
+      ...parsed.frontmatter.guardrails.filter(
+        (g) => g.id !== BRANCH_CLEANUP_GUARDRAIL_ID,
+      ),
+      {
+        id: BRANCH_CLEANUP_GUARDRAIL_ID,
+        desc: BRANCH_CLEANUP_GUARDRAIL_DESC,
+        on: input.enabled,
+      },
+    ];
+  });
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.settings.updated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { fields: ["branchCleanup"], enabled: input.enabled },
+  });
+  return {
+    toast: input.enabled
+      ? "Merged task branches will be deleted on GitHub"
+      : "Merged task branches will be kept on GitHub",
+    enabled: input.enabled,
+  };
 }
 
 // -------------------------------------------------------------- repo repair
@@ -346,11 +405,17 @@ export async function renameStage(
 
 export async function addStage(
   db: DatabaseSync,
-  input: { projectSlug: string },
+  input: { projectSlug: string; name: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; stageId: string }> {
   requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow stages");
+  // Name-FIRST (2026-07-28 UX ruling): the button used to commit a stage called
+  // "New stage" on the click, so a stray press wrote a workflow stage — a
+  // governed edge in the transition chain — that then had to be removed. The
+  // name is the request now, and an empty one is not a request.
+  const name = input.name.trim();
+  if (!name) throw AppError.validation("Stage name is required.");
 
   // Server-generated id (spec §5.2 — never the mock's Date.now scheme).
   const stageId = newId("stage").toLowerCase().replace(/_/g, "-");
@@ -358,7 +423,7 @@ export async function addStage(
     const stages = parsed.frontmatter.stages;
     const stage = {
       id: stageId,
-      name: "New stage",
+      name,
       color: NEW_STAGE_COLORS[stages.length % NEW_STAGE_COLORS.length]!,
     };
     // Inserted immediately before the terminal (last) stage so Done stays last,
@@ -387,7 +452,10 @@ export async function addStage(
     projectSlug: input.projectSlug,
     details: {},
   });
-  return { toast: "Stage added — it appears on the board immediately", stageId };
+  return {
+    toast: `"${name}" added — it appears on the board immediately`,
+    stageId,
+  };
 }
 
 export async function removeStage(

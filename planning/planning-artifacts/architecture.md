@@ -424,7 +424,9 @@ This keeps scaffold convenience separate from actual product architecture.
 
 ### Decision Impact Analysis
 
-**Implementation Sequence:**
+**Implementation Sequence** (historical build order — step 3 predates the 2026-07-25
+Authentication revision above; the shipped default is email+password via better-auth with
+OAuth optional, see §Authentication):
 
 1. Initialize the React Router starter and lock runtime/tooling baseline.
 2. Implement typed environment configuration and secret handling.

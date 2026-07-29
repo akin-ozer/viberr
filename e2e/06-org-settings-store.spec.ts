@@ -20,6 +20,27 @@ test("org settings tabs render", async ({ page }) => {
   await expect(page.getByText("Agent resources").first()).toBeVisible();
 });
 
+/**
+ * R15-13. Instance settings used to be titled "Viberr settings", which collides
+ * with a project literally named Viberr — and the project's own settings page
+ * was titled just "Settings". The surface that was NOT about that project
+ * carried its name; the one that WAS did not. Asserted live against both real
+ * pages because the collision only exists between them.
+ */
+test("settings headings name their own scope (R15-13)", async ({ page }) => {
+  await page.goto("/org/settings");
+  const orgH1 = page.locator("h1");
+  await expect(orgH1).toHaveCount(1);
+  await expect(orgH1).toHaveText("Instance settings");
+
+  // The project's settings page names the project in its own heading.
+  await page.goto("/projects/viberr-core/settings");
+  const projH1 = page.locator("h1");
+  await expect(projH1).toHaveCount(1);
+  await expect(projH1).toContainText("· settings");
+  await expect(projH1).toContainText("Viberr Core");
+});
+
 test("StoreBrowser creates a folder through the UI", async ({ page }) => {
   await page.goto("/org/settings?tab=resources");
 

@@ -101,8 +101,10 @@ const task: SearchableTask = {
   title: "Attach execution workspace to task runtime",
   branch: "vib-142-attach-workspace",
   owner: { name: "Arda Kaya" },
-  specialist: { name: "Codex", role: "Developer" },
-  reviewers: [{ name: "Claude Code", role: "Reviewer" }],
+  specialist: { name: "Codex", role: "Developer", profileId: "docs-writer" },
+  reviewers: [
+    { name: "Claude Code", role: "Reviewer", profileId: "senior-reviewer" },
+  ],
   operator: { name: "Operator" },
 };
 
@@ -122,8 +124,17 @@ describe("matchesSearch", () => {
     expect(matchesSearch(task, "arda")).toBe(true);
     expect(matchesSearch(task, "operator")).toBe(true);
   });
+  // F15-16: `AgentRender.name` is the BACKEND label, so the only thing on a
+  // card that carries an agent's own identity is its profile id. Typing the
+  // deployment's name used to match nothing while the box promised agents.
+  it("matches an assigned/engaged agent by its profile name", () => {
+    expect(matchesSearch(task, "docs-writer")).toBe(true);
+    expect(matchesSearch(task, "docs writer")).toBe(true);
+    expect(matchesSearch(task, "senior reviewer")).toBe(true);
+  });
   it("misses unrelated text", () => {
     expect(matchesSearch(task, "billing")).toBe(false);
+    expect(matchesSearch(task, "junior-reviewer")).toBe(false);
   });
 });
 
@@ -160,5 +171,110 @@ describe("boardEmptyCopy (P13-D-34)", () => {
     expect(boardEmptyCopy({ total: 3, filterLabel: null, query: "   " })).toBe(
       "No tasks",
     );
+  });
+});
+
+describe("boardEmptyCopy — the first empty board teaches (R15-10)", () => {
+  const bare = "No tasks";
+  const teach = "No tasks yet — create one to start the flow";
+
+  it("teaches ONCE on a project with no tasks: entry column only", () => {
+    // The owner's call: five columns each saying "No tasks" is the one empty
+    // state in the app that does not teach, and it is the first thing a new
+    // user sees. One message, in the column where the first task lands.
+    // Canary: drop `isEntryColumn` from the condition and the second
+    // expectation starts teaching too — five messages again.
+    expect(
+      boardEmptyCopy({
+        total: 0,
+        filterLabel: null,
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: true,
+      }),
+    ).toBe(teach);
+    expect(
+      boardEmptyCopy({
+        total: 0,
+        filterLabel: null,
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: false,
+      }),
+    ).toBe(bare);
+  });
+
+  it("stops teaching the moment ANY task exists — P13-D-34 still holds", () => {
+    // The ruling P13-D-34 protected is "do not repeat an explanation five times
+    // beside real work". That is untouched: with even one task on the board, an
+    // empty entry column is bare again.
+    expect(
+      boardEmptyCopy({
+        total: 0,
+        filterLabel: null,
+        query: "",
+        boardTotal: 1,
+        isEntryColumn: true,
+      }),
+    ).toBe(bare);
+  });
+
+  it("never teaches when a filter or search is what emptied the column", () => {
+    // The ordering must not let a teaching line pre-empt the "N tasks hidden
+    // by …" explanation, which is strictly more informative.
+    expect(
+      boardEmptyCopy({
+        total: 4,
+        filterLabel: "Waiting on me",
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: true,
+      }),
+    ).toBe("All 4 tasks here are hidden by the “Waiting on me” filter.");
+    expect(
+      boardEmptyCopy({
+        total: 4,
+        filterLabel: null,
+        query: "auth",
+        boardTotal: 0,
+        isEntryColumn: true,
+      }),
+    ).toBe("All 4 tasks here are hidden by the search “auth”.");
+  });
+
+  it("still teaches when the board's only tasks are ARCHIVED", () => {
+    // Caught live, not by a test: DevOps Skills held exactly one archived task,
+    // sitting in the entry column. `total` counts archived tasks, but
+    // matchesBoardFilter hides them under every filter except "Archived" — so
+    // the column rendered nothing, read as non-empty, and the board that most
+    // needed the teaching line was the only board that never got it. The
+    // decision is keyed on the board's LIVE count, and this column's own
+    // archived-inclusive `total` must not veto it.
+    // Canary: add `total === 0 &&` back to the condition.
+    expect(
+      boardEmptyCopy({
+        total: 1,
+        filterLabel: null,
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: true,
+      }),
+    ).toBe(teach);
+    // …and a non-entry column with the same shape still stays bare.
+    expect(
+      boardEmptyCopy({
+        total: 1,
+        filterLabel: null,
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: false,
+      }),
+    ).toBe(bare);
+  });
+
+  it("omitting boardTotal keeps the pre-R15-10 bare behavior", () => {
+    expect(
+      boardEmptyCopy({ total: 0, filterLabel: null, query: "", isEntryColumn: true }),
+    ).toBe(bare);
   });
 });

@@ -1,10 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
-  acceptanceBlockedReason,
-  closedPrBlockedReason,
   deliveringEngagement,
-  deriveValidation,
   supportingEngagements,
   type PacketOption,
   type PrState,
@@ -26,7 +23,11 @@ import {
   isMeaninglessComment,
   separateEvidence,
 } from "./comment-guardrails.server";
-import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { absentDeliverReviewPrMode } from "~/shared/capabilities";
+import {
+  humanGatesPreWorkAdvance,
+  resolveStageRoles,
+} from "~/shared/workflow/stage-roles";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -37,9 +38,15 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { effectiveProfileView } from "~/features/agents/agents-query.server";
+import {
+  effectiveProfileView,
+  VIEW_WITHOUT_POLICY,
+} from "~/features/agents/agents-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { notifyMentionedUsers } from "./mention-notify.server";
+import {
+  notifyMentionedUsers,
+  withAmbiguityDisclosure,
+} from "./mention-notify.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   defaultModelFor,
@@ -50,8 +57,10 @@ import {
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
   acceptanceRefusalFor,
+  applyAcceptanceWrite,
   notifyTaskWatchers,
   operatorPromptAgent,
+  performDelivery,
   transitionStage,
   type TaskMutationContext,
 } from "./task-actions.server";
@@ -100,6 +109,12 @@ export interface OperatorAuthority {
   persona: string | null;
   /** false when no operator profile is deployed in the project. */
   deployed: boolean;
+  /**
+   * R15-9 — true when this project human-gates every pre-work advance (the
+   * `strict` preset's signature in the workflow graph). Used ONLY to resolve a
+   * capability the deployment never persisted; an explicit grant always wins.
+   */
+  humanGatedBeforeWork: boolean;
 }
 
 /** How a gated capability resolves for the current authority. */
@@ -133,6 +148,18 @@ function readAutonomy(definition: unknown): OperatorAutonomy {
  * operator actually runs on, not a hardcoded "claude". Falls back to "claude"
  * when no operator is deployed (the same default the run path uses).
  */
+/**
+ * The ONE rule for "which backend does a deployment run on" (B-OP5): the first
+ * declared real backend, Claude when nothing declares one. Both the standalone
+ * lookup below and the authority resolver read it, so a change to the picking
+ * rule cannot land in one place and miss the other.
+ */
+export function deploymentBackend(view: { backends: readonly string[] }): RealBackend {
+  return view.backends.find((b) => b === "claude" || b === "codex") === "codex"
+    ? "codex"
+    : "claude";
+}
+
 export function operatorBackendFor(
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -140,13 +167,12 @@ export function operatorBackendFor(
   try {
     const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
     const deployment = file?.parsed.frontmatter.agents.find(
-      (a) => effectiveProfileView(a, ctx.dataRoot).kind === "operator",
+      (a) => effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY).kind === "operator",
     );
     if (!deployment) return "claude";
-    const view = effectiveProfileView(deployment, ctx.dataRoot);
-    return view.backends.find((b) => b === "claude" || b === "codex") === "codex"
-      ? "codex"
-      : "claude";
+    return deploymentBackend(
+      effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY),
+    );
   } catch {
     return "claude";
   }
@@ -163,8 +189,14 @@ export function resolveOperatorAuthority(
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
+  // R15-9: read off the graph, not a stored preset — see humanGatesPreWorkAdvance.
+  const humanGatedBeforeWork = humanGatesPreWorkAdvance(
+    file.parsed.frontmatter.stages,
+    file.parsed.frontmatter.workflow,
+  );
+
   const deployment = file.parsed.frontmatter.agents.find((a) => {
-    const view = effectiveProfileView(a, ctx.dataRoot);
+    const view = effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     return view.kind === "operator";
   });
 
@@ -181,19 +213,17 @@ export function resolveOperatorAuthority(
       persona: null,
       mcps: [],
       deployed: false,
+      humanGatedBeforeWork,
     };
   }
 
-  const view = effectiveProfileView(deployment, ctx.dataRoot);
+  const view = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
   const policy = new Map<string, CapabilityMode>(
     deployment.capabilities.map((c) => [c.capabilityId, c.mode]),
   );
   const definition = (deployment as Record<string, unknown>).definition;
-  const deploymentBackend: RealBackend =
-    view.backends.find((b) => b === "claude" || b === "codex") === "codex"
-      ? "codex"
-      : "claude";
-  const backend: RealBackend = overrides.backend ?? deploymentBackend;
+  const declaredBackend = deploymentBackend(view);
+  const backend: RealBackend = overrides.backend ?? declaredBackend;
 
   // The deployment's model is specific to its own backend (e.g. a Claude model).
   // When a run overrides to a DIFFERENT backend, the stored model is invalid for
@@ -201,7 +231,7 @@ export function resolveOperatorAuthority(
   // resolveRunModel also rejects display placeholders ("orchestration runtime")
   // and any other non-catalog value, so nothing invalid leaks into the run.
   const model =
-    backend === deploymentBackend
+    backend === declaredBackend
       ? resolveRunModel(backend, view.model)
       : defaultModelFor(backend);
 
@@ -210,7 +240,7 @@ export function resolveOperatorAuthority(
     autonomy: overrides.autonomy ?? readAutonomy(definition),
     backend,
     model,
-    effort: backend === deploymentBackend ? view.effort || "" : "",
+    effort: backend === declaredBackend ? view.effort || "" : "",
     name: view.name || "Operator",
     skills: view.resources.skills,
     kb: view.resources.kb ?? [],
@@ -220,6 +250,7 @@ export function resolveOperatorAuthority(
         ? definition.persona.trim() || null
         : null,
     deployed: true,
+    humanGatedBeforeWork,
   };
 }
 
@@ -238,6 +269,29 @@ export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
   }
   // human (reserved for a human) and off (withheld) both mean "operator can't".
   return "deny";
+}
+
+/**
+ * R15-2: the `deliver-review-pr` gate with ABSENT-means-granted polarity. The
+ * capability postdates many live operator deployments (whose grant lists were
+ * persisted at deploy time), and its catalog default is `direct` — an absent
+ * grant must not silently kill delivery on every pre-R15-2 project. An explicit
+ * mode goes through the normal gate (full autonomy promotes recommend→direct).
+ * Same deliberate polarity as `use-web-search-fetch` (operatorWebWithheld).
+ */
+export function deliverGate(authority: OperatorAuthority): Gate {
+  if (authority.policy.has("deliver-review-pr")) {
+    return gate(authority, "deliver-review-pr");
+  }
+  // R15-9 — `deliver-review-pr` postdates every deployment created before
+  // R15-2, so an absent grant is the norm on existing projects, not an edge
+  // case. Resolving it to a flat `direct` meant two projects with identical
+  // governance behaved differently purely by creation date: a strict project
+  // made today asks a human before pushing, while one made last week pushes on
+  // its own. Derive the same answer the preset would have given instead, so the
+  // rule is "what does this project's governance say", not "when was it made".
+  // Shared with the policy surface so the two can never disagree (F15-20).
+  return absentDeliverReviewPrMode(authority.humanGatedBeforeWork);
 }
 
 // ------------------------------------------------------------- helpers
@@ -304,6 +358,11 @@ async function writeOperatorComment(
   if (guardrailOn(ctx, projectSlug, "operator-brevity")) {
     text = enforceOperatorBrevity(text);
   }
+  // S5-G3: the operator is instructed to tag the human it answers, so a handle
+  // that matches two people is a NEW-4 failure the operator cannot fix on its
+  // own — the comment discloses the non-delivery instead of dropping it in
+  // silence. Applied after brevity so the disclosure is never trimmed away.
+  text = withAmbiguityDisclosure(db, text);
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
@@ -405,6 +464,12 @@ async function addRecommendation(
     ...(rec.profileId ? { profileId: rec.profileId } : {}),
     ...(rec.toStageId ? { toStageId: rec.toStageId } : {}),
   };
+  // Same disclosure the narration path carries (S5-G3): the reasoning is
+  // operator prose and can tag a human, so an ambiguous handle must not vanish.
+  const commentText = withAmbiguityDisclosure(
+    db,
+    `**Recommendation:** ${rec.label}. ${reasoning}`,
+  );
   let wasNew = false;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     const dup = parsed.frontmatter.recommendations.some(
@@ -423,7 +488,7 @@ async function addRecommendation(
       type: "comment",
       actor: { kind: "operator" },
       title: null,
-      text: `**Recommendation:** ${rec.label}. ${reasoning}`,
+      text: commentText,
       toAgent: false,
       evidence: null,
     });
@@ -440,7 +505,7 @@ async function addRecommendation(
   });
   // NEW-4: recommendation reasoning that tags a person pings them too.
   notifyMentionedUsers(db, {
-    text: `**Recommendation:** ${rec.label}. ${reasoning}`,
+    text: commentText,
     projectSlug,
     taskKey,
     from: { kind: "agent", name: "Operator" },
@@ -1529,6 +1594,102 @@ export async function operatorPromptAgentGeneric(
     : operatorPromptReviewer(db, ctx, base, authority);
 }
 
+/**
+ * R15-2: DELIVER the task — push the deliverer's branch and open (or reuse) the
+ * review PR. Delivery is the operator's decision, gated by `deliver-review-pr`:
+ * `direct` performs it via the shared `performDelivery` core and reports the
+ * push + PR outcome honestly (including `push_conflict`); `recommend` posts a
+ * `delivery` recommendation card a human applies. The server executes the
+ * mechanics either way; agents never push or open PRs themselves.
+ */
+export async function operatorDeliverForReview(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; reason?: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const g = deliverGate(authority);
+  if (g === "deny") {
+    return {
+      outcome: "denied",
+      message: "Delivering the branch & opening the review PR is not permitted for the operator here.",
+    };
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) {
+    return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
+  }
+  const pr = existing.parsed.frontmatter.pr;
+  if (pr && pr.state !== "closed" && pr.state !== "merged") {
+    // Idempotent: a live PR already stands for review. performDelivery would
+    // reuse it, but a fresh push of an unchanged workspace is wasted motion —
+    // report the live PR instead.
+    return {
+      outcome: "noop",
+      message: `PR #${pr.number} is already open for review — nothing to deliver.`,
+    };
+  }
+  if (g === "recommend") {
+    await addRecommendation(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      { kind: "delivery", label: "Deliver the branch & open the review PR" },
+      input.reason ??
+        "The work is committed and ready for review; delivering pushes the task branch and opens the review PR.",
+    );
+    return {
+      outcome: "recommended",
+      message: "Recommended delivering the branch & opening the review PR.",
+    };
+  }
+  const outcome = await performDelivery(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    OPERATOR_TASK_ACTOR,
+  );
+  recordAudit(db, {
+    action: "github.delivery.operator",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      status: outcome.status,
+      ...(outcome.status === "delivered" ? { prNumber: outcome.prNumber } : {}),
+    },
+  });
+  switch (outcome.status) {
+    case "delivered":
+      return {
+        outcome: "done",
+        message:
+          `Delivered: push ${outcome.pushStatus === "pushed" ? "succeeded" : `skipped (${outcome.pushStatus})`}, ` +
+          (outcome.created
+            ? `opened review PR #${outcome.prNumber}.`
+            : `reusing open review PR #${outcome.prNumber}.`),
+      };
+    case "push_conflict":
+      return {
+        outcome: "noop",
+        message:
+          `Delivery push CONFLICTED: ${outcome.message}. No PR was opened. This is a ` +
+          `branch-history conflict on \`${outcome.branch}\`, not a credential problem — ` +
+          `open a decision packet so a human resolves the remote branch (delete/rename ` +
+          `or deliberate force-push) or archives the task.`,
+      };
+    case "grant_withheld":
+    case "push_failed":
+    case "nothing_to_review":
+    case "failed":
+      return { outcome: "noop", message: `Delivery did not complete: ${outcome.message}` };
+  }
+}
+
 export async function operatorTransitionStage(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -1654,67 +1815,30 @@ export async function operatorAcceptCompletion(
   });
   if (!project) throw AppError.notFound(`Project ${input.projectSlug} not found.`);
   const stages = project.parsed.frontmatter.stages;
-  const doneStageId = stages[stages.length - 1]?.id ?? "done";
+  // B-WF4: the STRUCTURAL terminal stage (one resolver everywhere), positional
+  // only as the degenerate fallback.
+  const doneStageId =
+    resolveStageRoles(stages, project.parsed.frontmatter.workflow).terminalId ??
+    stages[stages.length - 1]?.id ??
+    "done";
 
   if (file.parsed.frontmatter.stage === doneStageId) {
     return { outcome: "noop", message: `${input.taskKey} is already Done.` };
   }
 
-  // F10-15: the operator may accept only when every required reviewer approved
-  // the CURRENT work revision (and none requested changes on it). This stops the
-  // operator from auto-accepting work that a reviewer rejected, or that a
-  // required reviewer hasn't approved yet, under full autonomy.
-  {
-    const blockReason = acceptanceBlockedReason(file.parsed.frontmatter);
-    if (blockReason) {
-      return { outcome: "noop", message: `${input.taskKey}: ${blockReason}` };
-    }
-  }
-
-  // P13-D-4: the closed-PR gate the human `acceptCompletion` path applies. The
-  // operator was structurally blind here — it never read `pr` at all (the
-  // snapshot did not expose it), so under full autonomy it overwrote a PR a
-  // human had closed on GitHub to "accepted" and moved the task to Done. The
-  // reconciler restores `pr.state` on the next poll; `stage = done` is durable.
-  // Checked BEFORE the recommend branch too, so a supervised operator does not
-  // post an "Accept completion" card that acceptance would then refuse.
-  {
-    const closedReason = closedPrBlockedReason(
-      file.parsed.frontmatter,
-      input.taskKey,
-    );
-    if (closedReason) return { outcome: "noop", message: closedReason };
-  }
-
-  // P14-LV-02: the same graph gate the human writers take. This is the half that
-  // produced the live defect — the operator offered "Accept completion" on a
-  // TRIAGE task with no branch, no PR and no reviewer, and the card rendered as
-  // an ordinary one-click action. Checked before BOTH branches below, so a
-  // supervised operator never posts a card acceptance would refuse and a
-  // full-autonomy one never closes a task off-boundary.
+  // P14-LV-02/B-WF6: ONE shared gate — `acceptanceRefusalFor` reads the same
+  // helper every human writer does (graph position, required reviewers, the
+  // R15-1 verdict gate, blocked packet, closed/conflicting PR, archived task).
+  // The per-gate copies this function used to stack on top had already drifted
+  // in wording and would drift in behavior next. Checked before BOTH branches
+  // below, so a supervised operator never posts a card acceptance would refuse
+  // and a full-autonomy one never closes a task off-gate.
   {
     const refusal = acceptanceRefusalFor(
       { projectSlug: input.projectSlug, taskKey: input.taskKey },
       ctx,
     );
     if (refusal) return { outcome: "noop", message: refusal };
-  }
-
-  // Never accept a task with an open BLOCKED decision (mirrors the human
-  // acceptCompletion guard, task-actions.server.ts). F7-VAL1 decoupled a blocked
-  // packet from validation="failing" (blocked-ness lives on `readiness` now), so
-  // the `validation` check above no longer catches it — without this guard the
-  // full-autonomy operator would auto-accept a task whose operator-raised
-  // decision (a denied commit, a crashed run) is still unresolved, silently
-  // burying it. Recommend and auto-accept are BOTH suppressed until it clears.
-  if (
-    file.parsed.frontmatter.readiness === "blocked" &&
-    file.parsed.packet?.type === "blocked"
-  ) {
-    return {
-      outcome: "noop",
-      message: `${input.taskKey} has an open blocked decision — not accepting until the packet is resolved.`,
-    };
   }
 
   // Supervised (or without the completion capability) → recommend only: post an
@@ -1755,26 +1879,17 @@ export async function operatorAcceptCompletion(
   // A REAL PR merge is attributed to a human (mergeTaskPr requires a user
   // identity), so the operator cannot merge — it records the PR as "accepted"
   // (merge pending), never a false "merged". A human merges / reconciles later.
+  // B-WF6: the Done write itself is the SHARED acceptance core
+  // (`applyAcceptanceWrite`) — this inlined mutation historically mirrored the
+  // human path gate by gate and shipped with a subset more than once. The core
+  // also re-checks the refusal gates inside the write lock (B-WF1).
   const hasPr = !!file.parsed.frontmatter.pr;
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.stage = doneStageId;
-    parsed.frontmatter.readiness = "ready";
-    parsed.frontmatter.waiting = "none";
-    // P14-LV-02: DERIVE the validation state, never assert it. This said
-    // `"healthy"` — "accepted work is validated (FR24)" — which is a claim about
-    // work nothing may have validated: an operator closing a task with no
-    // reviewer and no revision stamped a green pill onto an empty record. The
-    // human writers moved to `deriveValidation` in this pass; this one carried
-    // the old line plus a comment claiming parity it no longer had.
-    parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
-    // Acceptance consumes any standing recommendations (a leftover transition
-    // card on a Done task would move it back OUT of Done if applied).
-    parsed.frontmatter.recommendations = [];
-    if (parsed.frontmatter.pr) {
-      parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: "accepted" };
-    }
-    parsed.packet = null;
-    parsed.timeline.unshift({
+  await applyAcceptanceWrite(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    doneStageId,
+    prState: "accepted",
+    event: {
       occurredAt: new Date().toISOString(),
       type: "completion",
       actor: { kind: "operator" },
@@ -1784,9 +1899,8 @@ export async function operatorAcceptCompletion(
         : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`,
       toAgent: false,
       evidence: null,
-    });
+    },
   });
-  reproject(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.operator.accepted_completion",
     actor: OPERATOR_AUDIT_ACTOR,

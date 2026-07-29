@@ -6,7 +6,9 @@ import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   acceptanceBlockedReason,
   deliveringEngagement,
+  deriveValidation,
   supportingEngagements,
+  type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
@@ -269,6 +271,41 @@ function listTaskDirs(slug: string, dataRoot?: string): string[] {
   );
 }
 
+/**
+ * Why the CURRENT revision cannot be accepted, or null — the whole revision
+ * dimension of the acceptance gate, projected into `validation_block_reason`.
+ *
+ * That column is what every acceptance-readiness surface reads: the review
+ * queue's "Waiting on your acceptance" panel, `decisionsRequiring`'s acceptance
+ * decision, and through it Home's per-project count and the notifications inbox.
+ * It carried `acceptanceBlockedReason` ALONE, which only binds once a
+ * verdict-capable reviewer is engaged — so a delivered revision with zero
+ * engaged reviewers projected as acceptance-ready while the server refused it
+ * under R15-1 (proved live: `canAccept: false` with a blockedReason, and the
+ * decision listed anyway). An inbox that promises a decision the server declines
+ * is the dead end R14-2/P14-LV-06 exist to abolish.
+ *
+ * Mirrors `acceptanceRefusalReason` (task-actions.server.ts) in the same order,
+ * and must move with it. The other gates there — archived, stage boundary, open
+ * blocked packet, closed/conflicting PR — are per-reader state the consumers
+ * already filter on, so they stay out of this column.
+ */
+function acceptanceBlockReason(fm: TaskFrontmatter): string | null {
+  // F10-15: every required reviewer must have approved the current revision.
+  const reviewerBlock = acceptanceBlockedReason(fm);
+  if (reviewerBlock) return reviewerBlock;
+  // R15-1: delivered work needs a healthy verdict. No revision = planning /
+  // non-repo work, which stays acceptable.
+  if (!fm.workRevision) return null;
+  if (!fm.pr) {
+    return `${fm.key} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
+  }
+  const validation = deriveValidation(fm);
+  // `healthy` clears the gate; `failing` was already named precisely above.
+  if (validation === "healthy" || validation === "failing") return null;
+  return `${fm.key}'s delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.`;
+}
+
 export function rebuildTaskFile(
   db: DatabaseSync,
   slug: string,
@@ -418,7 +455,7 @@ export function rebuildTaskFile(
     fm.urgent ? 1 : 0,
     fm.archived ? 1 : 0,
     fm.validation,
-    acceptanceBlockedReason(fm),
+    acceptanceBlockReason(fm),
     fm.ownerUserId,
     // Derived legacy projection shapes (G1): the delivering engagement fills
     // the `specialist` column, the supporting engagements fill `reviewers`.

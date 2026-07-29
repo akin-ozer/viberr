@@ -209,6 +209,11 @@ describe("openTaskPr", () => {
     expect(res.prNumber).toBe(7);
     // Never attempted to create a second PR.
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+    // B-GH4: a reuse pass records NO "github.pr.opened" audit — that row means
+    // a PR was opened. (Failed on main: every reuse appended another row.)
+    expect(
+      listAuditEvents(store.db, {}).filter((a) => a.action === "github.pr.opened"),
+    ).toHaveLength(0);
   });
 
   it("a 403 opens a pull_request:write scope violation, does not fabricate a PR", async () => {

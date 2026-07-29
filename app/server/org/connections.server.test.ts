@@ -6,10 +6,14 @@ import {
   PAT_VALIDATION_RATE_LIMIT,
 } from "~/server/auth/rate-limit.server";
 import { insertUser } from "~/server/auth/user-store.server";
+import { DEFAULT_REQUIRED_SCOPES } from "~/server/secrets/pat-store.server";
 import {
+  CONNECTION_REQUIRED_SCOPES,
   createConnection,
+  ensureConnectionFresh,
   getDefaultConnection,
   getDefaultConnectionToken,
+  getDefaultConnectionTokenFresh,
   listConnections,
   removeConnection,
   replaceConnectionToken,
@@ -329,5 +333,106 @@ describe("PAT-validation rate limit", () => {
       { fetchImpl: validTransport().fetchImpl },
     );
     expect(other.status).toBe("saved");
+  });
+});
+
+/**
+ * B-GH2/B-GH6: the connection gate and the project scope chips must agree on
+ * what "the minimum" is, and the refusal copy must NAME that same set. The
+ * sentence hard-coded "repo · workflow · pull_request:write" for three passes
+ * after the owner dropped `workflow` — telling people to widen a token Viberr
+ * no longer wants.
+ */
+describe("required-scope set (single source)", () => {
+  it("is the same tuple the project chips use", () => {
+    expect(CONNECTION_REQUIRED_SCOPES).toBe(DEFAULT_REQUIRED_SCOPES);
+  });
+
+  it("names the live minimum in the insufficient-scope refusal, never `workflow`", async () => {
+    const db = makeDbWithUser();
+    const gh = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "x" },
+        headers: { "x-oauth-scopes": "gist" },
+      },
+    });
+    const result = await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_missing_scopes_0002", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(result.status).toBe("validation_failed");
+    if (result.status !== "validation_failed") return;
+    expect(result.message).toContain(
+      `Minimum scopes: ${CONNECTION_REQUIRED_SCOPES.join(" · ")}.`,
+    );
+    // Fails on main: the copy shipped the dropped scope.
+    expect(result.message).not.toContain("workflow");
+  });
+});
+
+/**
+ * B-GH7: nothing polls GitHub for connection health, so a `valid` verdict was
+ * trusted forever — a token revoked on github.com kept clearing every gate that
+ * reads `validationState` until a human re-checked by hand.
+ */
+describe("stale connection revalidation", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("leaves a fresh verdict alone — no probe at all", async () => {
+    const db = makeDbWithUser();
+    await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    const gh = fakeGithubFetch({});
+    const fresh = await ensureConnectionFresh(db, "akin-ozer", {
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(fresh!.validationState).toBe("valid");
+    expect(gh.calls).toHaveLength(0);
+  });
+
+  it("re-probes past the staleness window and DOWNGRADES a revoked token", async () => {
+    const db = makeDbWithUser();
+    await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    const revoked = fakeGithubFetch({
+      "GET /user": {
+        status: 401,
+        body: { message: "Bad credentials" },
+      },
+    });
+    // Fails on main: `getDefaultConnectionTokenFresh` did not exist and the
+    // cached "valid" was handed out unconditionally.
+    const info = await getDefaultConnectionTokenFresh(db, {
+      fetchImpl: revoked.fetchImpl,
+      now: () => Date.now() + 2 * DAY,
+    });
+    expect(info).toBeNull();
+    expect(getDefaultConnection(db)!.validationState).toBe("failed");
+    expect(revoked.callsTo("GET /user")).toHaveLength(1);
+  });
+
+  it("an unreachable GitHub is NOT a downgrade", async () => {
+    const db = makeDbWithUser();
+    await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    const after = await ensureConnectionFresh(db, "akin-ozer", {
+      fetchImpl: unreachableFetch(),
+      now: () => Date.now() + 2 * DAY,
+    });
+    expect(after!.validationState).toBe("valid");
   });
 });

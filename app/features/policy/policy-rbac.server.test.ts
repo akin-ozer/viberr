@@ -429,3 +429,25 @@ describe("D2 org-admin emergency override (R7-1)", () => {
     expect(overrideRows()).toHaveLength(0);
   });
 });
+
+/**
+ * B-WF7: `reorderTask` requires `reorder-board`, then delegates a cross-stage
+ * drop to a `manual: true` transition requiring `approve-transition`. The two
+ * are the same tier TODAY, so the split cannot 403 halfway — but nothing said
+ * so, and a future tier change on either one would fail a drag AFTER the
+ * visible gate had already passed. This is that statement, in code.
+ */
+describe("B-WF7: reorder-board and approve-transition stay one tier", () => {
+  it("every role that may reorder the board may also authorize the transition it implies", () => {
+    const reorder = rolesForAction("reorder-board");
+    const transition = rolesForAction("approve-transition");
+    for (const role of reorder) {
+      expect(
+        transition,
+        `role "${role}" can reorder the board but could not authorize the ` +
+          `cross-stage move a drag performs — reorderTask would 403 after the ` +
+          `visible gate passed`,
+      ).toContain(role);
+    }
+  });
+});

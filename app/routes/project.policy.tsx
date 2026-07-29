@@ -1,5 +1,6 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.policy";
+import { requireVisibleProject } from "./project-visibility.server";
 import type { loader as projectLoader } from "./project";
 import {
   appErrorResponse,
@@ -36,6 +37,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
 export async function action({ request, params }: Route.ActionArgs) {
   const { db, formData, actor, intent } = await requireFormAction(request);
+  // R15-4: this action runs WITHOUT the layout loader's membership gate
+  // (React Router does not run parent loaders for a child action), so refuse a
+  // non-member here with the same unknown-slug 404 the loader gives.
+  requireVisibleProject(db, params.slug, actor, "change this project's policy");
 
   try {
     if (intent === "set-role") {

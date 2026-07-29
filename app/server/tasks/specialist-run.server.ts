@@ -45,7 +45,10 @@ import {
   getPatToken,
   getProjectCredential,
 } from "~/server/secrets/pat-store.server";
-import { effectiveProfileView } from "~/features/agents/agents-query.server";
+import {
+  effectiveProfileView,
+  VIEW_WITHOUT_POLICY,
+} from "~/features/agents/agents-query.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
 import {
   isBackendAvailable,
@@ -113,8 +116,10 @@ export interface ResolvedSpecialist {
   kb: string[];
   /** The agent's declared MCP servers — wired into the selected SDK. */
   mcps: string[];
-  /** The profile's long persona/instructions (template body, D6). A shipped
-   *  agents/definitions/<id>.md still overrides it (built-in transition aid). */
+  /** The profile's long persona/instructions (template body, D6) — the SINGLE
+   *  persona source. F10-30 removed the `agents/definitions/<id>.md` override
+   *  (`buildSpecialistPersona` documents the removal); this comment still
+   *  promised it (B-AG5). */
   definition: string;
   /** The deployment's stored capability grants — drive run-time tool
    *  confinement (specialist-tool-policy). Empty for the list/display path. */
@@ -228,7 +233,7 @@ export function resolveDeployedSpecialist(
       `No agent \`${profileId}\` is deployed in this project.`,
     );
   }
-  const view = effectiveProfileView(deployment, ctx.dataRoot);
+  const view = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
   if (view.kind !== "specialist") {
     throw AppError.validation(
       `Agent \`${profileId}\` is not a specialist and cannot be assigned as one.`,
@@ -737,7 +742,17 @@ export async function startAgentRun(
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
-  const collab = resolveAgentCollab(resolved?.capabilities ?? []);
+  //
+  // R15-7 (owner ruling, 2026-07-28): a run whose profile CANNOT be resolved is
+  // fully conservative, matching the withheld tool posture two blocks up. It
+  // used to pass `[]`, which the catalog defaults read as comment/ask/evidence
+  // GRANTED — so a ghost profile kept a mid-run comment channel, could open a
+  // question packet in a vanished profile's name, and could assert evidence,
+  // while everything the tool layer governs was denied. `withheldAgentGrants()`
+  // states the withholding explicitly rather than relying on an absent grant.
+  const collab = resolveAgentCollab(
+    resolved ? resolved.capabilities : withheldAgentGrants(),
+  );
   // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
   const agentActorRef: FileActorRef = {
     kind: "agent",
@@ -792,6 +807,15 @@ export async function startAgentRun(
     // F24: unify the delivery commit author across codex/claude.
     ...agentGitIdentityEnv(engagement.profileId),
   };
+  // F15-15: a reviewing run judges the DELIVERED revision (the PR head), not
+  // whatever the local workspace branch holds — pin it into the prompt.
+  const reviewSubject =
+    !delivers && existing.parsed.frontmatter.workRevision
+      ? {
+          headSha: existing.parsed.frontmatter.workRevision.headSha,
+          prNumber: existing.parsed.frontmatter.pr?.number ?? null,
+        }
+      : null;
   const basePrompt = buildAnalyzePrompt({
     role: engagement.role,
     taskKey: input.taskKey,
@@ -802,6 +826,7 @@ export async function startAgentRun(
     cloned: !!clone,
     delivery,
     delivers,
+    ...(reviewSubject ? { reviewSubject } : {}),
     ...(input.directive ? { directive: input.directive } : {}),
     ...(input.directiveFrom ? { directiveFrom: input.directiveFrom } : {}),
   });
@@ -824,11 +849,23 @@ export async function startAgentRun(
         "- `report_outcome` — REQUIRED at the end of your review: report `approve` or `request_changes` with a one-paragraph justification, then finish with your full findings.",
       );
     }
-  } else if (backend === "codex" && realBackend && (collab.verdict || collab.ask)) {
+  } else if (
+    backend === "codex" &&
+    realBackend &&
+    // B-AG3: the note must cover EVERY grant that mounts the envelope schema
+    // (see `useEnvelopeSchema` below), evidence included. An evidence-only Codex
+    // profile had its final reply constrained to the JSON envelope with nothing
+    // in the prompt explaining the shape — the schema descriptions were the only
+    // hint, which is exactly how a prose report degrades into a stub.
+    (collab.verdict || collab.ask || collab.evidence)
+  ) {
     collabNotes.push(
       '- Your FINAL message must be the structured outcome JSON: {"summary": "<your full report, markdown>"' +
         (collab.verdict ? ', "verdict": "approve" | "request_changes" (required when you judged the work)' : "") +
         (collab.ask ? ', "question": {"title", "body", "options"} (only when blocked on a human decision)' : "") +
+        (collab.evidence
+          ? ', "evidence": [{"label", "add", "del"}] (short REFERENCES to what you checked — a suite, a file, a check — never raw output)'
+          : "") +
         "}.",
     );
   }
@@ -1159,6 +1196,12 @@ export function buildAnalyzePrompt(input: {
   /** The human who wrote `directive`, when it is a person's comment rather than
    *  an operator hand-off (P14-RT-02). */
   directiveFrom?: string;
+  /** F15-15: the delivered revision a SUPPORTING (reviewing) run must judge —
+   *  pinned so the reviewer verifies it is reading the delivered content, not
+   *  whatever the local workspace branch happens to hold. Live failure: a PR
+   *  opened over stale remote junk was APPROVED by a reviewer that only ever
+   *  read the local branch. */
+  reviewSubject?: { headSha: string; prNumber: number | null };
 }): string {
   let prompt =
     `You are the ${input.role} specialist on task ${input.taskKey}: ` +
@@ -1187,6 +1230,13 @@ export function buildAnalyzePrompt(input: {
       // and wastes the run (the XS-4 failure). It reads and reports only.
       prompt +=
         `- You are a SUPPORTING agent: this workspace is READ-ONLY for you. Do NOT create a branch, edit files, run \`git commit\`/\`git push\`, or open a PR — even if a directive says to. The tool layer blocks these. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n` +
+        (input.reviewSubject
+          ? `- The review subject is PINNED to the delivered revision \`${input.reviewSubject.headSha}\`` +
+            (input.reviewSubject.prNumber
+              ? ` — the head of review PR #${input.reviewSubject.prNumber}`
+              : "") +
+            `. Before judging, verify the content you read IS that revision: \`git rev-parse HEAD\` on the branch must equal it (or contain it — check \`git merge-base --is-ancestor ${input.reviewSubject.headSha} HEAD\`). If the local branch does NOT match, review \`${input.reviewSubject.headSha}\` directly (\`git diff <default-branch>...${input.reviewSubject.headSha}\`, \`git show\`) — and if you cannot reach that commit at all, say so and do NOT record a verdict on content you could not read. Never approve the local tree as a stand-in for the delivered revision.\n`
+          : "") +
         `- Respond to what you were actually asked (see the directive below): if it asks for a review, give one — approve or request changes, with specific reasons and file/line references; if it asks a question or for advice, answer it directly and concisely. You are a conversational teammate, not a boilerplate reviewer — do the thing that was asked. When no directive is given, default to reviewing the change on the branch.`;
     } else {
       if (canBranch) {
@@ -1720,7 +1770,7 @@ export function listDeployedSpecialists(
   if (!file) return [];
   const out: DeployedSpecialistView[] = [];
   for (const deployment of file.parsed.frontmatter.agents) {
-    const view = effectiveProfileView(deployment, ctx.dataRoot);
+    const view = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     if (view.kind !== "specialist") continue;
     const resolved = toResolved(view);
     // Same empty-grant resolution the run path uses (AP-06), so what the

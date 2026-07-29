@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { HomePage, type HomePageData } from "./home-page";
@@ -223,5 +229,101 @@ describe("LV-07: the New-project modal explains itself", () => {
     // …and Create says WHY it is disabled instead of being a dead button.
     const foot = container.querySelector(".modal-foot")!;
     expect(within(foot as HTMLElement).getByText(/Enter a project name/)).toBeTruthy();
+  });
+});
+
+describe("B-FD4: the Settings tiles are admin-only links", () => {
+  it("an org admin gets the Manage links", () => {
+    const { getAllByText, container } = renderHome(baseData([card()]));
+    expect(getAllByText("Manage").length).toBe(3);
+    expect(container.querySelectorAll('a[href^="/org/settings"]').length).toBe(3);
+  });
+
+  it("a member keeps the counts but gets no link into an admin-403 route", () => {
+    const data = baseData([card()]);
+    const { container, getAllByText, getByText } = renderHome({
+      ...data,
+      user: { ...data.user, role: "member" } as HomePageData["user"],
+    });
+    // The tiles still summarize the org…
+    expect(getByText("5 users")).toBeTruthy();
+    // …but the route they linked to hard-requires the org admin role.
+    expect(container.querySelectorAll('a[href^="/org/settings"]').length).toBe(0);
+    expect(getAllByText("Org admins manage this").length).toBe(3);
+  });
+
+  it("a member's New-project hint drops the host store path", () => {
+    const data = baseData([card()]);
+    const { getAllByText, container } = renderHome({
+      ...data,
+      user: { ...data.user, role: "member" } as HomePageData["user"],
+      // The loader ships null for a non-admin (B-FD4).
+      storeRoot: null,
+    });
+    fireEvent.click(getAllByText("New project")[0]!.closest("button")!);
+    const hint = container.querySelector(".modal-foot .foot-hint.mono")!;
+    expect(hint.textContent).toBe("creates projects/…/");
+    expect(hint.textContent).not.toContain("/data");
+  });
+});
+
+describe("F15-04: creating a project lands you in it", () => {
+  it("navigates to the new project's board instead of the home grid", async () => {
+    let landedOn: string | null = null;
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <HomePage data={baseData([card()])} theme="system" />
+          </ToastProvider>
+        ),
+        action: () => ({
+          ok: true,
+          key: "NEW",
+          slug: "new-project",
+          storePath: "/data/projects/new-project",
+          repoWarning: null,
+        }),
+      },
+      {
+        path: "/projects/:slug/board",
+        Component: () => {
+          landedOn = "board";
+          return <p>board</p>;
+        },
+      },
+    ]);
+    const { getAllByText, getByText, getByPlaceholderText } = render(
+      <Stub initialEntries={["/"]} />,
+    );
+    fireEvent.click(getAllByText("New project")[0]!.closest("button")!);
+    fireEvent.change(getByPlaceholderText("e.g. Payments Gateway"), {
+      target: { value: "New Project" },
+    });
+    fireEvent.click(getByText("Create project").closest("button")!);
+    await waitFor(() => expect(landedOn).toBe("board"));
+  });
+});
+
+describe("R15-5: ⌘K is one shortcut app-wide", () => {
+  it("opens the palette from Home instead of focusing the project finder", () => {
+    const { container } = renderHome(baseData([card()]));
+    expect(container.querySelector("dialog.cmdk-card")).toBeNull();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(container.querySelector("dialog.cmdk-card")).toBeTruthy();
+    // Home's own box keeps its honest, board-local job.
+    expect(
+      (container.querySelector(".top-search input") as HTMLInputElement)
+        .placeholder,
+    ).toBe("Find a project…");
+  });
+
+  it("makes the shortcut chip the palette's affordance, not a label", () => {
+    const { getByLabelText, container } = renderHome(baseData([card()]));
+    const chip = getByLabelText("Search everything");
+    expect(chip.tagName).toBe("BUTTON");
+    fireEvent.click(chip);
+    expect(container.querySelector("dialog.cmdk-card")).toBeTruthy();
   });
 });

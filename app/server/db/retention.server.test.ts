@@ -94,3 +94,33 @@ describe("applyRetention (F10-29)", () => {
     ).toBe(1);
   });
 });
+
+describe("idempotency-keyed audit rows survive retention (B-FD10)", () => {
+  it("keeps the recovery marker actions past the window and prunes the rest", () => {
+    const db = ctx.makeDb();
+    const audit = (id: string, action: string, at: string) =>
+      db
+        .prepare(
+          `INSERT INTO audit_events (id, occurred_at, actor_user_id, actor_label,
+             action, subject_kind, subject_id, project_slug, task_key, details_json)
+           VALUES (?, ?, null, 'system', ?, 'task', 'VIB-1', 'p', 'VIB-1', '{}')`,
+        )
+        .run(id, at, action);
+    const ancient = iso(AUDIT_RETENTION_DAYS + 30);
+    // Boot recovery asks "does this row exist?" to decide whether the effect
+    // already happened — pruning it makes the next boot repost the reply.
+    audit("keep_reply", "task.agent.replied", ancient);
+    audit("keep_plan", "runtime.operator.plan_executed", ancient);
+    // Ordinary history, and a rolling-window counter that is never consulted
+    // beyond 30 minutes: both prune normally.
+    audit("prune_plain", "task.comment", ancient);
+    audit("prune_counter", "run.recovery.reinvoked", ancient);
+
+    expect(applyRetention(db).auditEvents).toBe(2);
+    expect(
+      (db.prepare(`SELECT id FROM audit_events ORDER BY id`).all() as { id: string }[]).map(
+        (r) => r.id,
+      ),
+    ).toEqual(["keep_plan", "keep_reply"]);
+  });
+});

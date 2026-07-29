@@ -31,6 +31,34 @@ test("review queue lists VIB-142 with the agents, not awaiting acceptance", asyn
   await expect(agentsPanel.getByText("VIB-142")).toBeVisible();
 });
 
+/**
+ * R15-11. The queue's whole job is deciding, yet its rows were unlabeled
+ * clickable regions with no named action. Asserted against a rendered queue
+ * that actually has rows, because "the row names its action" is a claim about
+ * what a reader sees, not about a component's props.
+ */
+test("review queue rows name their primary action (R15-11)", async ({ page }) => {
+  await page.goto("/projects/viberr-core/review");
+  const rows = page.locator(".rq-row");
+  await expect(rows.first()).toBeVisible();
+
+  const go = rows.first().locator(".rq-go");
+  await expect(go).toHaveText(/Review/);
+  // Decorative for assistive tech — the row's own aria-label already names the
+  // target, so the label must not be announced twice.
+  await expect(go).toHaveAttribute("aria-hidden", "true");
+  await expect(rows.first()).toHaveAttribute("aria-label", /^Review VIB-\d+: /);
+
+  // Never "Accept": acceptance is verdict-gated (R15-1) and can refuse, and this
+  // surface does not evaluate that gate — naming it would promise an outcome it
+  // cannot deliver.
+  await expect(go).not.toHaveText(/Accept/);
+
+  // And it still navigates to the task, where the evidence and the decision are.
+  await rows.first().click();
+  await page.waitForURL("**/projects/viberr-core/tasks/**");
+});
+
 test("activity feed renders day-grouped events", async ({ page }) => {
   await page.goto("/projects/viberr-core/activity");
 

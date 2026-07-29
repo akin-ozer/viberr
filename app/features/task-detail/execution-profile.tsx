@@ -47,6 +47,23 @@ export interface DeployedSpecialistView {
 
 export type OwnerAction = "take" | "assign" | "release";
 
+/**
+ * UC-13 — what the engagements cell is actually holding. "Reviewing agents"
+ * unless EVERY engaged agent is known to hold no verdict capability, in which
+ * case they are supporting the work, not gating it.
+ */
+export function reviewingAgentsLabel(
+  engaged: readonly { profileId: string }[],
+  deployed: readonly DeployedSpecialistView[],
+): "Reviewing agents" | "Supporting agents" {
+  if (engaged.length === 0) return "Reviewing agents";
+  const allSupporting = engaged.every((e) => {
+    const profile = deployed.find((s) => s.id === e.profileId);
+    return profile?.capabilities?.verdict === false;
+  });
+  return allSupporting ? "Supporting agents" : "Reviewing agents";
+}
+
 export interface TaskMemberView {
   userId: string;
   role: string;
@@ -536,6 +553,13 @@ function OperatorRunControl({
         <Icon name="shield" />
         {busy ? "Running…" : "Run operator"}
       </button>
+      {/* P14 ruling: a `title` is unreachable on a DISABLED control (no hover
+          target for keyboard or touch), so the reason a control is dead has to
+          be rendered copy — the reviewer panel already says this for its own
+          closed state. */}
+      {disabled && (
+        <span className="sub">Task closed — reopen it to run the operator.</span>
+      )}
     </span>
   );
 }
@@ -618,14 +642,26 @@ export function ExecutionProfile({
   // the agent is no longer deployed.
   const agentNameOf = (profileId: string, fallback: string) =>
     deployedSpecialists.find((s) => s.id === profileId)?.name ?? fallback;
+  // UC-13: the cell was headed "Reviewing agents" whatever was engaged, so a
+  // task whose only engagements are SUPPORTING agents (no
+  // `report-validation-verdict` grant — they can read, validate and comment but
+  // their opinion gates nothing) read as if it had reviewers holding the
+  // acceptance gate. Label by what the engagements actually are, and only
+  // downgrade on positive evidence: an engaged profile whose capabilities are
+  // unknown here (no longer deployed, older loader payload) keeps the
+  // review framing rather than being silently demoted.
+  const reviewersLabel = reviewingAgentsLabel(task.reviewers, deployedSpecialists);
   const sp = task.specialist;
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
   // G9: a task at the terminal (Done) stage is closed — its runtime action
   // buttons (Run operator / Run specialist / Run reviewer) are disabled so a
-  // closed task doesn't advertise live controls.
+  // closed task doesn't advertise live controls. F15-11: an ARCHIVED task is
+  // out of the flow too — it must not advertise them either.
   const closed =
-    task.displayReadiness === "accepted" || task.displayReadiness === "merged";
+    task.displayReadiness === "accepted" ||
+    task.displayReadiness === "merged" ||
+    task.archived;
   return (
     <div className="panel">
       <div className="panel-head">
@@ -728,7 +764,7 @@ export function ExecutionProfile({
           </div>
         </div>
         <div className="profile-cell">
-          <div className="lbl">Reviewing agents</div>
+          <div className="lbl">{reviewersLabel}</div>
           {/* Each reviewer renders as a row identical to the delivering agent
               above (glyph · name / role·backend · Run), with a release (×). */}
           <div className="val revs">

@@ -4,9 +4,12 @@ import {
   CAP_CATALOG,
   CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS,
   ENFORCED_CAPABILITY_IDS,
+  applyVerdictOutcomeGate,
   capabilityByLabel,
   capabilityEnforcement,
+  conservativeGrantsFor,
   normalizeDeliveryGrants,
+  repairDeliveryGrants,
 } from "./capabilities";
 
 describe("capability catalog", () => {
@@ -101,33 +104,49 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
   });
 });
 
-describe("normalizeDeliveryGrants (F14 — headline is the master delivery gate)", () => {
+describe("delivery grants (F14 headline gate · B-AG1 no silent escalation)", () => {
   const mode = (capabilityId: string, m: string) => ({ capabilityId, mode: m });
 
-  it("repairs a deliverer whose scoped delivery is granted but the headline is explicit off", () => {
+  it("RESPECTS an explicit headline `off` and reports the contradiction instead of escalating", () => {
     const grants = [
       mode("execute-code-or-write-repo", "off"),
       mode("create-task-branch", "direct"),
       mode("commit-push-branch", "direct"),
       mode("open-review-pr", "direct"),
     ];
-    const out = normalizeDeliveryGrants(grants);
-    expect(out.find((g) => g.capabilityId === "execute-code-or-write-repo")?.mode).toBe("direct");
-    // Idempotent.
-    expect(normalizeDeliveryGrants(out)).toEqual(out);
+    const { grants: out, notice } = repairDeliveryGrants(grants);
+    expect(out.find((g) => g.capabilityId === "execute-code-or-write-repo")?.mode).toBe("off");
+    expect(notice?.kind).toBe("withheld");
+    expect(notice?.message).toContain("cannot deliver");
+    expect(notice?.scoped).toEqual([
+      "create-task-branch",
+      "commit-push-branch",
+      "open-review-pr",
+    ]);
+    // Idempotent: a second save does not drift either.
+    expect(normalizeDeliveryGrants(out)).toEqual(grants);
   });
 
-  it("adds the headline grant when it is absent but scoped delivery is actionable", () => {
-    const grants = [mode("commit-push-branch", "direct")];
-    const out = normalizeDeliveryGrants(grants);
-    expect(out.some((g) => g.capabilityId === "execute-code-or-write-repo" && g.mode === "direct")).toBe(true);
-  });
-
-  it("treats a specialist `recommend` scoped grant as actionable (repairs the headline)", () => {
+  it("RESPECTS an explicit headline `human` (deliberate human gate)", () => {
     const grants = [
-      mode("open-review-pr", "recommend"),
-      mode("execute-code-or-write-repo", "off"),
+      mode("execute-code-or-write-repo", "human"),
+      mode("commit-push-branch", "direct"),
     ];
+    const { grants: out, notice } = repairDeliveryGrants(grants);
+    expect(out.find((g) => g.capabilityId === "execute-code-or-write-repo")?.mode).toBe("human");
+    expect(notice?.kind).toBe("withheld");
+  });
+
+  it("adds the headline grant when it is ABSENT but scoped delivery is actionable — and says so", () => {
+    const grants = [mode("commit-push-branch", "direct")];
+    const { grants: out, notice } = repairDeliveryGrants(grants);
+    expect(out.some((g) => g.capabilityId === "execute-code-or-write-repo" && g.mode === "direct")).toBe(true);
+    expect(notice?.kind).toBe("repaired");
+    expect(notice?.message).toContain("Commit & push to the branch");
+  });
+
+  it("treats a specialist `recommend` scoped grant as actionable (absent headline repaired)", () => {
+    const grants = [mode("open-review-pr", "recommend")];
     const out = normalizeDeliveryGrants(grants);
     expect(out.find((g) => g.capabilityId === "execute-code-or-write-repo")?.mode).toBe("direct");
   });
@@ -149,5 +168,60 @@ describe("normalizeDeliveryGrants (F14 — headline is the master delivery gate)
       mode("create-task-branch", "direct"),
     ];
     expect(normalizeDeliveryGrants(grants)).toEqual(grants);
+    expect(repairDeliveryGrants(grants).notice).toBeNull();
+  });
+});
+
+describe("applyVerdictOutcomeGate (F15-06 — verdict outcomes follow the verdict)", () => {
+  const mode = (capabilityId: string, m: string) => ({ capabilityId, mode: m });
+
+  it("withholds approve/request-changes/quality-flags when the verdict grant is off", () => {
+    const out = applyVerdictOutcomeGate([
+      mode("report-validation-verdict", "off"),
+      mode("approve-review", "direct"),
+      mode("request-changes", "direct"),
+      mode("post-quality-flags", "direct"),
+      mode("read-repo-diff", "direct"),
+    ]);
+    const modeOf = (id: string) => out.find((g) => g.capabilityId === id)?.mode;
+    expect(modeOf("approve-review")).toBe("off");
+    expect(modeOf("request-changes")).toBe("off");
+    expect(modeOf("post-quality-flags")).toBe("off");
+    // Unrelated advisory guidance is untouched.
+    expect(modeOf("read-repo-diff")).toBe("direct");
+  });
+
+  it("withholds them when the verdict grant is ABSENT (catalog default is off)", () => {
+    const out = applyVerdictOutcomeGate([mode("approve-review", "direct")]);
+    expect(out[0]!.mode).toBe("off");
+  });
+
+  it("leaves them alone for a profile that explicitly holds the verdict", () => {
+    const grants = [
+      mode("report-validation-verdict", "direct"),
+      mode("approve-review", "direct"),
+      mode("request-changes", "recommend"),
+    ];
+    expect(applyVerdictOutcomeGate(grants)).toEqual(grants);
+  });
+});
+
+describe("conservativeGrantsFor (surfaces with no capability UI)", () => {
+  it("starts delivery AND the review-verdict outcomes withheld (F15-06)", () => {
+    const byId = new Map(
+      conservativeGrantsFor("agent").map((g) => [g.capabilityId, g.mode]),
+    );
+    for (const id of [
+      "execute-code-or-write-repo",
+      "create-task-branch",
+      "commit-push-branch",
+      "open-review-pr",
+      "approve-review",
+      "request-changes",
+      "post-quality-flags",
+    ]) {
+      expect(byId.get(id), id).toBe("off");
+    }
+    expect(byId.get("report-validation-verdict")).toBe("off");
   });
 });

@@ -271,3 +271,54 @@ describe("P13-D-37: current location is programmatic, not just visual", () => {
     expect(cur.textContent).toContain("VIB-1");
   });
 });
+
+/**
+ * R15-5 — the topbar box is the ⌘K palette trigger, not a board filter.
+ * F15-18 — the rail collapses behind a topbar toggle on mobile.
+ */
+describe("Topbar: palette trigger + rail toggle", () => {
+  it("is a button that opens the palette, not an input that filtered the board", () => {
+    const { container, getByLabelText } = topbarAt("/projects/viberr-core/board");
+    const trigger = getByLabelText("Search tasks, branches, agents, projects");
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+    // The old input lived here and wrote ?q= on every keystroke.
+    expect(container.querySelector(".top-search input")).toBeNull();
+    fireEvent.click(trigger);
+    expect(container.querySelector("dialog.cmdk-card")).toBeTruthy();
+  });
+
+  it("opens the palette on ⌘K / Ctrl-K", () => {
+    const { container } = topbarAt("/projects/viberr-core/board");
+    expect(container.querySelector("dialog.cmdk-card")).toBeNull();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(container.querySelector("dialog.cmdk-card")).toBeTruthy();
+  });
+
+  it("renders the rail toggle only when the layout supplies one", () => {
+    const { queryByLabelText } = topbarAt("/projects/viberr-core/board");
+    expect(queryByLabelText("Project navigation")).toBeNull();
+  });
+
+  it("reports the rail's open state to assistive tech", () => {
+    let toggled = 0;
+    const { getByLabelText } = renderAt(
+      <Topbar
+        projectSlug="viberr-core"
+        projectName="Viberr Core"
+        openTask={null}
+        user={USER}
+        theme="system"
+        notifications={[]}
+        unread={0}
+        railOpen={false}
+        onToggleRail={() => (toggled += 1)}
+      />,
+      "/projects/viberr-core/board",
+    );
+    const toggle = getByLabelText("Project navigation");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggled).toBe(1);
+  });
+});

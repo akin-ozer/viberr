@@ -53,7 +53,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     org: getHomeOrgSummary(db),
     notifications: listNotifications(db, user.id, { limit: 100 }),
     unread: countUnreadNotifications(db, user.id),
-    storeRoot: getEnv().VIBERR_DATA_ROOT,
+    // B-FD4: `VIBERR_DATA_ROOT` is a HOST filesystem path. It exists here only
+    // for the New-project modal's "creates …/projects/<slug>/" hint, and every
+    // control that acts on the store is org-admin gated — so a member gets the
+    // store-relative form of the same hint and no host layout. Loader-side, not
+    // a render-time hide.
+    storeRoot: user.role === "admin" ? getEnv().VIBERR_DATA_ROOT : null,
   };
 }
 

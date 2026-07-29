@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 /**
@@ -74,7 +75,8 @@ const SPECIALIST_PERSONA_BY_ID: Record<string, string> = {
  * skill, its detailed definition (persona), and its profile template. Writes
  * each into `${VIBERR_DATA_ROOT}` the first time a store lacks it, so the agent
  * runtimes can load them from the store (file-native, so a user can then edit
- * them). Only writes when the destination is missing — never clobbers edits.
+ * them), and refreshes a copy that is still byte-identical to an older shipped
+ * version. An edited file is never clobbered.
  *
  * Every agent run has a baked-in fallback persona, so a store without these
  * assets still works; this makes the richer, editable, skill-backed versions
@@ -100,6 +102,121 @@ const STATIC_ASSETS: { rel: string; content: string }[] = [
   // makes the operator preinstalled everywhere.
   { rel: path.join("agents", "profiles", "operator.md"), content: operatorProfileMd },
 ];
+
+// ------------------------------------------- shipped-version refresh (B-OP1)
+
+/**
+ * Where the store records the SHA-256 of the asset bytes this app last shipped
+ * into it, per store-relative path. It is the app's own bookkeeping, not user
+ * content, so it lives beside the other machine state.
+ */
+const SHIPPED_MANIFEST_REL = path.join("state", "shipped-assets.json");
+
+/**
+ * Hashes of asset versions this app shipped BEFORE the manifest existed —
+ * generated from the git history of `assets/` (`git log --follow` per file,
+ * hashing each blob). A store whose copy still hashes to one of these was
+ * written by an older Viberr and never touched by a human, so refreshing it is
+ * safe; anything else is treated as user-owned and left alone.
+ *
+ * When you edit a shipped asset, APPEND the outgoing version's hash here so
+ * stores seeded before the manifest keep converging. Stores seeded from the
+ * manifest onward need no maintenance — they carry their own record. A hash we
+ * cannot recognize only ever fails SAFE: the store copy is preserved.
+ */
+export const PRIOR_SHIPPED_HASHES: Record<string, readonly string[]> = {
+  [path.join("agents", "definitions", "operator.md")]: [
+    "128c0e733d181ce93c6b3c15c71e890fc629c592f39b08d03a44b6b77afd0d1c",
+    "197eaf0b400f61d690d0ec32198fafbd120fa518ef27f00e13b4b427f8bf5856",
+    "2693d1381b637cac935db3b2d95f9fd8f6e4a1eb6228ea3d331e8a890e8e7a32",
+    "429216ebbe1d9b413608c34dd83e04794351915d1b9e2cc535f3e97b64c95a1b",
+    "5340ad240553d280336600b1f3341931158a8b0926e487ace802d5e00bfa71ae",
+    "70501e7100afef430d79e8d63497326b8e6504258a4743002217c920867cf96f",
+    "71cff546b99aeb53b340c3ae2b4c6359c7f7c4cb3d5e9126b96b6f2ff3ab3e57",
+    "849d977503fe2a3b04776379b4017d40e50d95ed394770f28ef825e8513085d6",
+    "94f27a1217287b14e8f7e83283dbf96b0e30ea6d5952dd705d4d1061b9bcfc3c",
+    "9aac2f1a1617cc40aa38da67837c1db4698be80ed45585609078a1041a6bb411",
+    "a6a8db269d6eb547e220cbef22c03b00ddcfc48b70a0c31562f48adcdf4f19c7",
+    "d0475c39c69c6055ce5bf86e2fb0fd98c1488b473919f8dd205a125f83b55f46",
+    "da9cf46677bd3987796585ec45c683d48e1885ad723b190cd612693fffe6ac6f",
+    "ef9e653a6bd7e19fa78a34a0dfdc48c26cbc0cdba8c83493ad9789642cb289b4",
+  ],
+  [path.join("agents", "profiles", "operator.md")]: [
+    "339ad23dd69f63e57bf52d110b263a2da4ae683bdbf5b020039eaf075115dec4",
+    "36120600048af6ca9c1d54b8d7354a960364073e4f744be76dbffb218440891a",
+    "95077f7f75564d1d53fb8dca1e03ad1612594edf4107a31e7eb5eeffb055ac46",
+    "cc78f1ebfe2088ba67176ce7d05a129fdc1606cfc35a7b4ad508d7447c77d611",
+    "f2e7ad4f9164b6cccf22c43b6705b64c61136180866908b29ff2881687a40d71",
+    "ffd61e7721ce8550571d22692bab521b4c60bafa1c3d81b536ba0ce1c58ee07c",
+  ],
+  [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    "2350a2f50e425868056d9866d885b70078b183e9934b925f1469ea0e7cc5f989",
+    "4b92cd7cb4b0c050faca518f76cb3328119d26c5f76c8b12367c2fd053f5fa26",
+    "73d05eb921a0763f0f3f2312e90fdc367dbe820d740008f884fb17c7c619b40e",
+    "766312af226010792d1f34583e252de853e336d8ceb801b303d7e0c84efd5a6a",
+    "809d3b3bc666c1cd8c0e64d6d5a5a1d68037d040854d925a429e3b19a022776d",
+    "aba6b1e161806c63097a88e88d5c48c0cc47613afa3616500111f6ffda298294",
+    "c7343d37eb460545861218a9b312d25f8e3884423e92da1329c2169c0acde227",
+    "e64e110e43b851b7e8809973a7f060d95e35b4e723648749f1b57bf4528ea07a",
+  ],
+  [path.join("skills", "developer-expertise", "SKILL.md")]: [
+    "2cd21e2f0b11a3d35ca0188bf1d42af66f4149b5d7ad3bbb2162cdeb712d91fa",
+    "9eed9c7c574b54491362374b8feff9760ab3401b48b60d077b889e60999ebe1f",
+  ],
+  [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
+    "67b14be125a5f8b213a9ad3de6682c4762bdef703a40dc32ba1c907a267e1c31",
+    "7aa79a7c54156f0556f437f525a31a5c12b2dd89a5465282974da61337bc041c",
+    "c32401d03e628093ddaec888efdac35ad79e4ee3604502104fb5bf016adda025",
+  ],
+};
+
+export function assetHash(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+/**
+ * Whether a store's copy of a shipped asset is still EXACTLY something this app
+ * wrote — the manifest's record of the last write, or a version shipped before
+ * the manifest existed. Anything else belongs to a human and is never rewritten.
+ */
+export function shippedCopyIsUnedited(
+  rel: string,
+  onDiskHash: string,
+  manifest: Record<string, string>,
+): boolean {
+  if (manifest[rel] === onDiskHash) return true;
+  return (PRIOR_SHIPPED_HASHES[rel] ?? []).includes(onDiskHash);
+}
+
+/** The store's shipped-asset manifest; `{}` when absent or unreadable. */
+function readShippedManifest(store: string): Record<string, string> {
+  try {
+    const raw = readFileSync(path.join(store, SHIPPED_MANIFEST_REL), "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [rel, hash] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof hash === "string") out[rel] = hash;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeShippedManifest(store: string, manifest: Record<string, string>): void {
+  try {
+    const dest = path.join(store, SHIPPED_MANIFEST_REL);
+    mkdirSync(path.dirname(dest), { recursive: true });
+    writeFileSync(dest, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  } catch (error) {
+    // Bookkeeping only — a store that cannot record it simply falls back to the
+    // historical hash list on the next boot.
+    logger.warn("failed writing the shipped-asset manifest", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
 
 /**
  * The canonical on-disk bytes for ONE built-in agent profile template.
@@ -155,16 +272,55 @@ function specialistProfileAssets(): { rel: string; content: string }[] {
   }));
 }
 
-/** Write the default agent assets into the store if absent. Never throws. */
+/**
+ * Write the default agent assets into the store: absent ones are created, and
+ * an UNEDITED copy of an older shipped version is refreshed to the current one.
+ * Never throws.
+ *
+ * B-OP1: "only writes when the destination is missing" meant a store seeded
+ * before a doctrine rewrite ran the OLD doctrine forever — live, an operator
+ * kept following a standard operating procedure whose tools (`assign_specialist`,
+ * `prompt_specialist`) no longer exist, because `readOperatorDefinition` prefers
+ * the store copy over the shipped asset. A store copy is refreshed only when its
+ * hash still matches something this app shipped (the manifest it wrote, or a
+ * historical version); anything a human edited is left exactly as it is.
+ */
 export function seedDefaultAgentAssets(dataRoot?: string): void {
   const store = getDataRoot(dataRoot);
   const assets = [...STATIC_ASSETS, ...specialistProfileAssets()];
+  const manifest = readShippedManifest(store);
+  let manifestChanged = false;
+  const record = (rel: string, hash: string): void => {
+    if (manifest[rel] === hash) return;
+    manifest[rel] = hash;
+    manifestChanged = true;
+  };
   for (const asset of assets) {
     try {
       const dest = path.join(store, asset.rel);
-      if (existsSync(dest)) continue;
+      const shippedHash = assetHash(asset.content);
+      if (existsSync(dest)) {
+        const onDiskHash = assetHash(readFileSync(dest, "utf8"));
+        if (onDiskHash === shippedHash) {
+          // Already current — adopt it into the manifest so a store that
+          // predates the manifest is refreshable from the NEXT rewrite on.
+          record(asset.rel, shippedHash);
+          continue;
+        }
+        // A human owns an edited file — never clobber it.
+        if (!shippedCopyIsUnedited(asset.rel, onDiskHash, manifest)) continue;
+        writeFileSync(dest, asset.content, "utf8");
+        record(asset.rel, shippedHash);
+        logger.info("refreshed an unedited shipped agent asset", {
+          asset: asset.rel,
+          was: onDiskHash.slice(0, 12),
+          now: shippedHash.slice(0, 12),
+        });
+        continue;
+      }
       mkdirSync(path.dirname(dest), { recursive: true });
       writeFileSync(dest, asset.content, "utf8");
+      record(asset.rel, shippedHash);
       logger.info("seeded default agent asset", { asset: asset.rel });
     } catch (error) {
       logger.error("failed seeding default agent asset", {
@@ -173,4 +329,5 @@ export function seedDefaultAgentAssets(dataRoot?: string): void {
       });
     }
   }
+  if (manifestChanged) writeShippedManifest(store, manifest);
 }

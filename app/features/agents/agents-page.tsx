@@ -16,7 +16,11 @@ import {
   type AgentProfileView,
   type LibraryProfileView,
 } from "./agent-types";
-import { CAP_META, type ResCatalogGroup } from "./capability-catalog";
+import {
+  CAP_META,
+  GOVERNED_CAP_LABELS,
+  type ResCatalogGroup,
+} from "./capability-catalog";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
 import {
   CreateProfileModal,
@@ -487,6 +491,34 @@ export function ProfileDetail({
 }) {
   const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
   const [confirm, setConfirm] = useState(false);
+  // F15-05/F15-06: the capability columns show GOVERNED policy only — the same
+  // partition the matrix draws between its curated groups and "Other actions".
+  // A grant with no runtime consumer (advisory catalog id, bespoke extra) is
+  // guidance and says so; it never renders as "Acts directly" beside the
+  // capabilities that actually bind. The buckets themselves already come from
+  // the one server-side interpretation of the stored grants
+  // (`capabilitiesToActionLabels`), verdict outcomes gated included.
+  const isGoverned = (label: string) => GOVERNED_CAP_LABELS.has(label);
+  const governed = {
+    direct: a.actions.direct.filter(isGoverned),
+    recommend: a.actions.recommend.filter(isGoverned),
+    forbidden: a.actions.forbidden.filter(isGoverned),
+  };
+  // The advisory line keeps each label's MODE. Concatenating the three buckets
+  // lost it, so an advisory capability an admin explicitly set to human-only
+  // read exactly like one left at "acts directly" — the matrix still tells them
+  // apart, which is the F15-05 disagreement class one level quieter.
+  const advisory = [
+    ...a.actions.direct.map((label) => ({ label, mode: CAP_META.direct.label })),
+    ...a.actions.recommend.map((label) => ({
+      label,
+      mode: CAP_META.recommend.label,
+    })),
+    ...a.actions.forbidden.map((label) => ({
+      label,
+      mode: CAP_META.forbidden.label,
+    })),
+  ].filter(({ label }) => !isGoverned(label));
   // P14-KM-11: what the store actually holds, per resource kind. Absent catalog
   // ⇒ undefined ⇒ nothing is marked missing (see ResGroup).
   const known = (key: string): ReadonlySet<string> | undefined => {
@@ -513,7 +545,10 @@ export function ProfileDetail({
         <ProfileGlyph a={a} lg />
         <div className="ag-hero-main">
           <div className="ag-hero-top">
-            <h1>{a.name}</h1>
+            {/* The page's ONE h1 is "Agents" (this is a master-detail layout, and
+                every other surface in the app has exactly one). The selected
+                profile is a section within it. */}
+            <h2 className="ag-hero-name">{a.name}</h2>
             <Pill kind={a.kind === "operator" ? "agent" : "neutral"} sm>
               {profileRoleLabel(a.name, a.role, a.kind)}
             </Pill>
@@ -559,10 +594,43 @@ export function ProfileDetail({
           <h2>Capability policy</h2>
         </div>
         <div className="cap-cols">
-          <CapColumn group="direct" items={a.actions.direct} />
-          <CapColumn group="recommend" items={a.actions.recommend} />
-          <CapColumn group="forbidden" items={a.actions.forbidden} />
+          <CapColumn group="direct" items={governed.direct} />
+          <CapColumn group="recommend" items={governed.recommend} />
+          <CapColumn group="forbidden" items={governed.forbidden} />
         </div>
+        {advisory.length > 0 && (
+          /* R15-12: these were disclosed inline, above the fold, next to the
+             grants that actually bind — so a Docs writer's panel led with
+             "Move the task to Review (acts directly)" as advisory, which reads
+             as a contradiction of the policy right above it. Hiding them was
+             the other option and was rejected: an omission the reader cannot
+             see is worse than an awkward truth. Collapsed, not removed — the
+             count is always visible and one click shows every line. */
+          <details className="cap-advisory">
+            <summary>
+              <Icon name="shield" />
+              <span>
+                Advisory only · {advisory.length}{" "}
+                {advisory.length === 1 ? "line" : "lines"} the runtime does not
+                read
+              </span>
+            </summary>
+            <div className="cap-advisory-body">
+              <p>
+                These describe how the profile is meant to work. Nothing in the
+                runtime enforces them, so they never grant or refuse anything —
+                the binding policy is the three columns above.
+              </p>
+              <ul>
+                {advisory.map((x) => (
+                  <li key={x.label}>
+                    {x.label} <span className="fhint">({x.mode.toLowerCase()})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </details>
+        )}
       </div>
 
       <div className="panel">
@@ -815,7 +883,16 @@ export function LiveRoster({
 // ------------------------------------------------------------------- page
 
 type ProfileActionResult =
-  | { ok: true; toast: string; profileId: string }
+  | {
+      ok: true;
+      toast: string;
+      profileId: string;
+      /** A delivery-headline decision the save had to make (B-AG1). `withheld`
+       *  = the profile was saved as asked and cannot deliver until the headline
+       *  capability is granted — shown as its own failure-toned toast, because
+       *  the green "updated" tick alone reads as "nothing to see here". */
+      notice?: { kind: "repaired" | "withheld"; message: string };
+    }
   | { ok: false; error: string };
 
 export function AgentsPage({
@@ -935,6 +1012,9 @@ export function AgentsPage({
     const d = fetcher.data;
     if (d.ok) {
       push(d.toast);
+      if (d.notice) {
+        push(d.notice.message, d.notice.kind === "withheld" ? "error" : "success");
+      }
       setCreating(false);
       setLibraryOpen(false);
       setEditing(null);

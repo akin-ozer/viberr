@@ -13,10 +13,10 @@ stepsCompleted:
   - step-09-functional
   - step-10-nonfunctional
   - step-11-polish
-inputDocuments:
-  - /Users/akinozer/projects/viberr/_bmad-output/planning-artifacts/product-brief-viberr.md
-  - /Users/akinozer/projects/viberr/_bmad-output/planning-artifacts/product-brief-viberr-distillate.md
-  - /Users/akinozer/projects/viberr/_bmad-output/brainstorming/brainstorming-session-2026-03-29-12-02-32.md
+# The input documents (product brief, its distillate, and the 2026-03-29 brainstorming
+# session) were consumed into this PRD at drafting time; their _bmad-output copies were
+# deleted in the pre-pass-13 cleanup. This document is self-standing.
+inputDocuments: []
 workflowType: 'prd'
 documentCounts:
   briefCount: 1
@@ -33,7 +33,7 @@ classification:
 # Product Requirements Document - Viberr
 
 **Author:** akin-ozer
-**Date:** 2026-03-30 (scope simplified 2026-06-08; reviewer & commenting amendments 2026-07-04)
+**Date:** 2026-03-30 (scope simplified 2026-06-08; reviewer & commenting amendments 2026-07-04; live-use amendments 2026-07-25; delivery, acceptance & visibility rulings 2026-07-28)
 
 ## Executive Summary
 
@@ -204,8 +204,8 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 - FR1: Team members can sign in to Viberr and access shared workspaces.
 - FR2: Admin users can manage team membership and human roles, and the system enforces project and task permissions based on those roles.
 - FR3: Users can collaborate in the same project with shared visibility into task state changes.
-- FR4: Users can comment on tasks, addressing instructions or questions to specific agents or teammates in one unified timeline. *(Amended 2026-07-04)* Commenting is app-wide: every registered user may comment on any task, including tasks in projects they are not a member of, and non-member comments are visibly labeled as such.
-- FR37 *(added 2026-07-04, revised)*: Each task can have one human owner who acts as its reviewer and acceptance authority; owner rights are scoped to that task only — they may comment, review, and accept or reject that task's boundaries, but gain no rights over other tasks or project configuration. A task may be unowned until a member takes it. Extends FR14/FR27. *(Amended 2026-07-25 — the "partly implemented" annotation was itself stale, and the requirement is now WIDER than it was written.)* The acceptance-authority clause ships: a task's live owner (contributor or above) accepts its completion at every acceptance writer, alongside the project's admins and maintainers. Owner ruling R14-2 then widened it — the owner governs **any** open decision on their own task, not only acceptance: resolving decision packets, applying the recommendations whose underlying action they hold, and dismissing any recommendation. The scoping clause is unchanged and is what keeps the widening safe: the authority is over that task's decisions only, and each decision's inner action keeps its own capability gate (an owner who is not a maintainer still cannot run agents or edit project policy). This closes the dead-end where the decisions inbox counted an owned task as "waiting on you" and every action on it returned 403.
+- FR4: Users can comment on tasks, addressing instructions or questions to specific agents or teammates in one unified timeline. *(Amended 2026-07-04)* Commenting is app-wide: every registered user may comment on any task, including tasks in projects they are not a member of, and non-member comments are visibly labeled as such. *(Amended 2026-07-28 — owner ruling R15-4.)* Projects are members-only surfaces: a user who is not a member of a project cannot open its board or tasks at all — the routes behave as if the project does not exist, because workflow secrecy (WI-13) wins. "App-wide" therefore means across the projects the user can see; within that visibility, cross-project commenting and its labeling stand as written.
+- FR37 *(added 2026-07-04, revised)*: Each task can have one human owner who acts as its reviewer and acceptance authority; owner rights are scoped to that task only — they may comment, review, and accept or reject that task's boundaries, but gain no rights over other tasks or project configuration. A task may be unowned until a member takes it. Extends FR14/FR27. *(Amended 2026-07-25 — the "partly implemented" annotation was itself stale, and the requirement is now WIDER than it was written.)* The acceptance-authority clause ships: a task's live owner (contributor or above) accepts its completion at every acceptance writer, alongside the project's admins and maintainers. Owner ruling R14-2 then widened it — the owner governs **any** open decision on their own task, not only acceptance: resolving decision packets, applying the recommendations whose underlying action they hold, and dismissing any recommendation. The scoping clause is unchanged and is what keeps the widening safe: the authority is over that task's decisions only, and each decision's inner action keeps its own capability gate (an owner who is not a maintainer still cannot run agents or edit project policy). This closes the dead-end where the decisions inbox counted an owned task as "waiting on you" and every action on it returned 403. *(Amended 2026-07-28 — owner ruling R15-3.)* The widening now covers stage-transition recommendations too: a task's owner may apply or dismiss **any** operator recommendation on their own task, including a move the owner's own role could not authorize from the stage menu. The Apply click IS the authorization for that one recommended move — it does not grant the underlying action anywhere else, and every other capability gate still applies.
 - FR38 *(added 2026-07-04, revised)*: Any member assigned to the project can take or release task ownership (self-service, no admin involvement); project admins can additionally release any owner. Ownership changes are recorded as typed events in the task timeline, and admin releases also land in the audit trail. Extends FR2/FR16.
 
 ### Project Governance & Policy
@@ -242,14 +242,14 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 - FR24: Users can view tasks on a board organized by workflow stage, with each card showing current stage, assigned agent, waiting state (human vs agent), and validation status.
 - FR25: Users can open a task detail view that prioritizes current state, execution profile, and latest decision packet before the ongoing timeline.
 - FR26: The system can generate structured blocking and decision packets for human review when agent work requires intervention.
-- FR27: Human users can approve, reject, or redirect consequential task changes (including stage advancement and completion). Transition to `done` is human by default and enforced server-side; the single exception is a project running its operator at full autonomy with an explicit `direct` completion-for-acceptance grant, in which case that operator accepts and closes the task itself (it still refuses a task with failing validation). Raising autonomy alone never confers this — the capability must be granted deliberately, and it is audited.
+- FR27: Human users can approve, reject, or redirect consequential task changes (including stage advancement and completion). Transition to `done` is human by default and enforced server-side; the single exception is a project running its operator at full autonomy with an explicit `direct` completion-for-acceptance grant, in which case that operator accepts and closes the task itself (it still refuses a task with failing validation). Raising autonomy alone never confers this — the capability must be granted deliberately, and it is audited. *(Amended 2026-07-28 — owner ruling R15-1.)* Human acceptance is verdict-gated: accepting completion requires a review PR whose head carries the delivered revision and a healthy reviewer verdict on that revision, enforced at every acceptance writer. An explicit Force-accept is the only bypass for a missing or failing verdict — audited as such, and never a bypass for a PR head that does not match the delivered work. Every acceptance, gated or forced, passes through a confirmation dialog stating what will merge and naming any missing signals before the click counts.
 - FR28: Users can review current task progress without needing raw provider logs or raw validation output.
 
 ### GitHub Delivery & Traceability
 
 - FR29: The system can authenticate to GitHub and access authorized repositories for task execution.
 - FR30: Each task executes against its project's repository. One repository per project in V1; there is no per-task override (see FR7).
-- FR31: The system can create and manage task-key execution branches and associate commits, changed-file references, and review-stage pull requests with the originating task.
+- FR31: The system can create and manage task-key execution branches and associate commits, changed-file references, and review-stage pull requests with the originating task. *(Amended 2026-07-28 — owner ruling R15-2.)* Delivery — pushing the task branch and opening the review pull request — is an operator decision, not a side-effect bound to any fixed stage. The operator weighs the task's remaining stages and delivers when it judges the work plausibly ready for review; when unsure, it opens a decision packet asking whether to push and open the PR, and it may offer early delivery when later stages (such as QA) are not needed for the task. The server still executes the mechanics, a human can trigger delivery directly (audited), and specialist agents never push or open PRs themselves. Reaching a review stage with no PR is announced with a typed event, never silently.
 - FR32: Users can view branch and pull request status alongside task state.
 
 ### Integrity, Audit & Recovery

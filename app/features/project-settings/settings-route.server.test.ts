@@ -153,18 +153,35 @@ describe("stage editor", () => {
   let newStageId = "";
 
   it("add-stage inserts before done, returns the id for inline rename", async () => {
-    const result = (await postAction(ids.arda, { intent: "add-stage" })) as {
+    // Name-first (2026-07-28 ruling): the intent carries the name; the old
+    // no-name POST minted a stage called "New stage" and is now refused.
+    const refused = (await postAction(ids.arda, { intent: "add-stage" })) as {
+      init?: { status?: number };
+      data?: { error?: string };
+    };
+    expect(refused.init?.status).toBe(400);
+    expect(refused.data?.error).toMatch(/name is required/i);
+
+    const result = (await postAction(ids.arda, {
+      intent: "add-stage",
+      name: "Hardening pass",
+    })) as {
       ok: boolean;
       toast: string;
       stageId: string;
     };
     expect(result.ok).toBe(true);
-    expect(result.toast).toBe("Stage added — it appears on the board immediately");
+    expect(result.toast).toBe(
+      '"Hardening pass" added — it appears on the board immediately',
+    );
     newStageId = result.stageId;
 
     const { view } = await runLoader(ids.arda);
     expect(view.stages).toHaveLength(6);
-    expect(view.stages[4]).toMatchObject({ id: newStageId, name: "New stage" });
+    expect(view.stages[4]).toMatchObject({
+      id: newStageId,
+      name: "Hardening pass",
+    });
     expect(view.stages[5]!.id).toBe("done");
     // Board columns read the same projection (stages_json).
     const row = app.db

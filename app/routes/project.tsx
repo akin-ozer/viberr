@@ -1,4 +1,11 @@
-import { data, Outlet, useMatches, useRouteLoaderData } from "react-router";
+import { useEffect, useState } from "react";
+import {
+  data,
+  Outlet,
+  useLocation,
+  useMatches,
+  useRouteLoaderData,
+} from "react-router";
 import type { Route } from "./+types/project";
 import type { loader as rootLoader } from "../root";
 import { requireUser } from "~/server/auth/require-user.server";
@@ -25,9 +32,18 @@ import { Topbar } from "~/features/shell/topbar";
  * counts + topbar + child view Outlet. Children read this loader's data via
  * useRouteLoaderData("routes/project").
  *
- * Rail counts: board = ALL tasks incl. Done (ruling 16), review = tasks in
- * the literal "review" stage, settings = open policy violations (Phase-4
- * derivation — see policy-violations.server.ts).
+ * Rail counts: board = ALL tasks incl. Done (ruling 16), review = tasks in the
+ * STRUCTURAL review stage (`resolveStageRoles`, not the stage literally named
+ * "review"), settings = open policy violations (Phase-4 derivation — see
+ * policy-violations.server.ts).
+ *
+ * R15-4 (owner ruling, 2026-07-28): projects are MEMBERS-ONLY. This loader is
+ * the single chokepoint for every project surface — board, task detail and the
+ * six config views are all its children — so the membership refusal lives here
+ * and nowhere else. WI-13 secrecy wins over FR4's app-wide read: a non-member
+ * gets the SAME 404 as a slug that does not exist, so the response can never
+ * confirm a project's existence. Org admins keep access through the audited D2
+ * override (the topbar shows the honest pill).
  */
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -41,6 +57,21 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const db = getDb();
   const raw = getBoard(db, params.slug);
   if (!raw) {
+    throw data(`No project at projects/${params.slug}.`, { status: 404 });
+  }
+  // R15-4: refuse BEFORE any viewer-scoped projection work — the decision and
+  // review-queue scans below are per-viewer reads a non-member must never
+  // trigger, and the message must stay byte-identical to the unknown-slug one.
+  const memberRole =
+    raw.members.find((m) => m.userId === user.id)?.role ?? null;
+  // D2 (R7-1): an ORG admin holds audited emergency project-admin authority on
+  // every project. When they view a project they're NOT a member of, the UI
+  // unlocks the admin affordances the server would grant anyway (each use is
+  // audited server-side as `project.org_admin.override`) and the topbar shows
+  // an honest "org-admin override" pill instead of silently pretending
+  // membership. `user.role` is the session's resolved org role.
+  const orgAdminOverride = memberRole === null && user.role === "admin";
+  if (memberRole === null && !orgAdminOverride) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
   // R8-3: annotate each task with whether an open decision here needs THIS
@@ -76,15 +107,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     orphanTasks: raw.orphanTasks.map(annotate),
   };
   const tasks = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks];
-  const memberRole =
-    board.members.find((m) => m.userId === user.id)?.role ?? null;
-  // D2 (R7-1): an ORG admin holds audited emergency project-admin authority on
-  // every project. When they view a project they're NOT a member of, the UI
-  // unlocks the admin affordances the server would grant anyway (each use is
-  // audited server-side as `project.org_admin.override`) and the topbar shows
-  // an honest "org-admin override" pill instead of silently pretending
-  // membership. `user.role` is the session's resolved org role.
-  const orgAdminOverride = memberRole === null && user.role === "admin";
   const myRole = memberRole ?? (orgAdminOverride ? ("admin" as const) : null);
   return {
     user,
@@ -131,8 +153,18 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
       : [sseScopes.project(slug), sseScopes.user()],
   );
 
+  // F15-18: under the mobile breakpoint the 232px rail is an overlay behind a
+  // topbar toggle, not a permanent column (at 375px it left the content ~140px
+  // wide). Above the breakpoint CSS ignores this flag entirely — the rail is
+  // always on screen, so there is nothing to open or close.
+  const [railOpen, setRailOpen] = useState(false);
+  const location = useLocation();
+  // Following a rail link IS the reason the overlay was opened; leaving it up
+  // over the view it just navigated to would hide the answer.
+  useEffect(() => setRailOpen(false), [location.pathname]);
+
   return (
-    <div className="app">
+    <div className="app" data-rail-open={railOpen ? "true" : "false"}>
       {/* UI-12: bypass block — the rail + topbar sit ahead of the content on
           every workspace navigation and there was no way past them. */}
       <SkipLink />
@@ -144,6 +176,16 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
         boardCount={loaderData.taskCount}
         reviewCount={loaderData.reviewCount}
         violations={loaderData.violations}
+      />
+      {/* F15-18: dismiss layer for the mobile rail overlay. CSS keeps it out of
+          the layout above the breakpoint AND while the rail is closed, so it can
+          never swallow a click on the desktop shell. */}
+      <button
+        type="button"
+        className="rail-scrim"
+        tabIndex={-1}
+        aria-hidden="true"
+        onClick={() => setRailOpen(false)}
       />
       {/* UI-12: a real `main` landmark. The eight workspace routes rendered
           this as a bare <div>, so screen-reader users had no landmark to jump
@@ -166,6 +208,8 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           unread={loaderData.unread}
           livePaused={live.paused}
           onReconnect={live.reconnect}
+          railOpen={railOpen}
+          onToggleRail={() => setRailOpen((open) => !open)}
         />
         {board.project.archived ? (
           <div className="archived-banner" role="status">

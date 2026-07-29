@@ -8,7 +8,10 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import {
+  installFakeRuntime,
+  startedRunSpecs,
+} from "../../../test-support/fake-runtime";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { getProject } from "~/server/projections/board-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
@@ -16,6 +19,7 @@ import {
   cancelScheduledAction,
   fireDueSchedules,
   scheduleTaskAction,
+  tasksWithUnresolvedSchedules,
 } from "./schedule.server";
 
 let ctx: TestDbContext;
@@ -244,5 +248,79 @@ describe("fireDueSchedules", () => {
     expect(schedules("VIB-3")[0]!.status).toBe("fired");
     const ev = listAuditEvents(store.db).find((e) => e.action === "task.schedule.fired");
     expect(ev!.details?.outcome).toBe("skipped-done");
+  });
+
+  it("B-WF3: the operator run says it is SCHEDULED and carries the note", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        schedules: [
+          rawSchedule({ id: "sch_note", note: "re-check whether CI went green" }),
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    expect((await fireDueSchedules(store.db, dctx())).fired).toBe(1);
+    await waitForSchedule("VIB-1", "sch_note", "fired");
+
+    // The reason a human scheduled the re-run has to reach the turn: as a bare
+    // `manual` trigger the operator could not tell a scheduled re-check from
+    // someone pressing "Run operator", and the note existed only in a timeline
+    // entry the prompt never pointed at.
+    const prompt = startedRunSpecs().find((s) => s.kind === "operator")?.prompt ?? "";
+    expect(prompt).toContain("SCHEDULED re-check");
+    expect(prompt).toContain("re-check whether CI went green");
+  });
+
+});
+
+describe("tasksWithUnresolvedSchedules (B-WF5)", () => {
+  it("selects on the schedule's own status, whatever the JSON formatting", () => {
+    // A fired occurrence is not a candidate; a pending one is.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-4", {
+        stage: "impl",
+        schedules: [
+          rawSchedule({
+            id: "sch_fired",
+            status: "fired",
+            firedAt: new Date().toISOString(),
+          }),
+        ],
+      }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-5", {
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_pending" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(tasksWithUnresolvedSchedules(store.db).map((r) => r.task_key)).toEqual([
+      "VIB-5",
+    ]);
+
+    // Same data, formatted differently. The old scan matched the literal bytes
+    // `"status":"pending"`, so one space after a colon silently dropped a due
+    // schedule from every tick — it would never fire and never be reported.
+    const raw = store.db
+      .prepare(`SELECT schedules_json FROM task_projections WHERE task_key = 'VIB-5'`)
+      .get() as { schedules_json: string };
+    store.db
+      .prepare(`UPDATE task_projections SET schedules_json = ? WHERE task_key = 'VIB-5'`)
+      .run(JSON.stringify(JSON.parse(raw.schedules_json), null, 2));
+
+    expect(tasksWithUnresolvedSchedules(store.db).map((r) => r.task_key)).toEqual([
+      "VIB-5",
+    ]);
+  });
+
+  it("ignores a task with no schedules at all", () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-6", { stage: "impl" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(tasksWithUnresolvedSchedules(store.db)).toEqual([]);
   });
 });

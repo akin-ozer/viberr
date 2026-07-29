@@ -268,6 +268,8 @@ describe("RepoPanel", () => {
     const { container, getByText, queryByText } = render(
       <RepoPanel
         canRepair
+        branchCleanup
+        onSetBranchCleanup={() => {}}
         footprintTasks={0}
         repairBusy={false}
         repairResult={undefined}
@@ -312,6 +314,8 @@ describe("RepoPanel", () => {
     const { container, getByText } = render(
       <RepoPanel
         canRepair
+        branchCleanup
+        onSetBranchCleanup={() => {}}
         footprintTasks={0}
         repairBusy={false}
         repairResult={undefined}
@@ -338,6 +342,73 @@ describe("RepoPanel", () => {
     expect(onSet).toHaveBeenCalled();
   });
 
+  /**
+   * R15-6 (owner ruling 2026-07-28): merged task branches accumulated on the
+   * repo, so post-merge cleanup became a per-project setting — default ON,
+   * admin-tier (`edit-policy`), stated on the repository panel rather than
+   * hidden in a doc.
+   */
+  it("R15-6: the after-merge branch-cleanup toggle reflects and submits the policy", () => {
+    const onSetBranchCleanup = vi.fn();
+    const { container, getByText } = render(
+      <RepoPanel
+        canRepair
+        branchCleanup
+        onSetBranchCleanup={onSetBranchCleanup}
+        footprintTasks={0}
+        repairBusy={false}
+        repairResult={undefined}
+        onRepair={() => {}}
+        repo="akin-ozer/viberr"
+        credential={CREDENTIAL}
+        canGrant
+        busy={false}
+        credBusy={false}
+        onGrantScope={() => {}}
+        onSetCredential={() => {}}
+        onClearCredential={() => {}}
+        onOpenTask={() => {}}
+      />,
+    );
+    // Fails on main: no such control existed anywhere in project settings.
+    expect(getByText("After merge")).toBeTruthy();
+    const box = container.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    )!;
+    expect(box.checked).toBe(true);
+    fireEvent.click(box);
+    expect(onSetBranchCleanup).toHaveBeenCalledWith(false);
+  });
+
+  it("R15-6: a non-admin sees the policy but cannot change it", () => {
+    const onSetBranchCleanup = vi.fn();
+    const { container } = render(
+      <RepoPanel
+        canRepair={false}
+        branchCleanup={false}
+        onSetBranchCleanup={onSetBranchCleanup}
+        footprintTasks={0}
+        repairBusy={false}
+        repairResult={undefined}
+        onRepair={() => {}}
+        repo="akin-ozer/viberr"
+        credential={CREDENTIAL}
+        canGrant={false}
+        busy={false}
+        credBusy={false}
+        onGrantScope={() => {}}
+        onSetCredential={() => {}}
+        onClearCredential={() => {}}
+        onOpenTask={() => {}}
+      />,
+    );
+    const box = container.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    )!;
+    expect(box.checked).toBe(false);
+    expect(box.disabled).toBe(true);
+  });
+
   it("a configured credential offers Rotate + a confirmed Remove (finding #13)", () => {
     const onSet = vi.fn();
     const onClear = vi.fn();
@@ -350,6 +421,8 @@ describe("RepoPanel", () => {
     const { container, getByText, queryByText } = render(
       <RepoPanel
         canRepair
+        branchCleanup
+        onSetBranchCleanup={() => {}}
         footprintTasks={0}
         repairBusy={false}
         repairResult={undefined}
@@ -385,6 +458,8 @@ describe("RepoPanel", () => {
     const { container, getByText } = render(
       <RepoPanel
         canRepair
+        branchCleanup
+        onSetBranchCleanup={() => {}}
         footprintTasks={0}
         repairBusy={false}
         repairResult={undefined}

@@ -1,25 +1,23 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  Link,
-  useLocation,
-  useNavigate,
-  useSearchParams,
-} from "react-router";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Icon } from "~/ui/icon";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import type { NotificationView } from "~/features/notifications/notification-item";
+import { CommandPalette } from "./command-palette";
 import { TopBell } from "./top-bell";
 import { UserMenu, type MenuUser } from "./user-menu";
 import { boardHref, workspaceViewFromPathname, workspaceViewLabel } from "./nav";
 
 /**
  * Workspace topbar (shell spec §4.2): brand → Home, crumbs (CSS truncation
- * tiers ported verbatim in viberr.css), REAL search (filters the board via
- * the `?q=` param; ⌘K focuses it), bell popover, account menu.
+ * tiers ported verbatim in viberr.css), the ⌘K palette trigger, bell popover,
+ * account menu.
  *
- * Typing in the search while on a non-board view navigates to the board
- * with the query applied (mirrors Home's "typing leaves settings" rule).
+ * R15-5: the trigger used to be an input that filtered the OPEN BOARD via `?q=`
+ * while promising a global "tasks, branches, agents" search. It opens the real
+ * palette now (`command-palette.tsx`); the per-board filter moved onto the board
+ * itself, where its scope is visible.
  */
 export function Topbar({
   projectSlug,
@@ -32,6 +30,8 @@ export function Topbar({
   unread,
   livePaused = false,
   onReconnect,
+  railOpen = false,
+  onToggleRail,
 }: {
   projectSlug: string;
   projectName: string;
@@ -47,59 +47,28 @@ export function Topbar({
   /** UI-03: the SSE stream is down — everything on screen is a stale snapshot. */
   livePaused?: boolean;
   onReconnect?: () => void;
+  /** F15-18: the rail is collapsed behind a toggle under the mobile breakpoint;
+   *  this is the layout's state, so the button can report it (aria-expanded). */
+  railOpen?: boolean;
+  onToggleRail?: () => void;
 }) {
   const location = useLocation();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const modifierHint = useModifierHint();
   const view = workspaceViewFromPathname(location.pathname);
-  const onBoard =
-    view === "board" && !openTask && location.pathname.endsWith("/board");
   // P13-D-35: the crumbs' board links kept the filter/search only if the URL
   // carried it — they were bare paths, so clicking the project crumb from a
   // filtered board silently reset it. `boardHref` carries `?filter/view/q` when
   // (and only when) we are already on this project's board.
   const boardPath = boardHref(projectSlug, location);
-  const urlQuery = onBoard ? (searchParams.get("q") ?? "") : "";
-  const [query, setQuery] = useState(urlQuery);
+  const [palette, setPalette] = useState(false);
 
-  // Leaving the board (or an external URL change) resets the input.
-  useEffect(() => {
-    setQuery(urlQuery);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onBoard ? urlQuery : location.pathname]);
-
-  const onSearch = (value: string) => {
-    setQuery(value);
-    if (onBoard) {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (value) next.set("q", value);
-          else next.delete("q");
-          return next;
-        },
-        { replace: true, preventScrollReset: true },
-      );
-    } else {
-      // UI-55: the first keystroke on a non-board view PUSHES (so Back returns
-      // to the view you were on); every keystroke after that REPLACES. Without
-      // it, fast typing pushed `?q=a`, `?q=ab`, `?q=abc` and Back walked the
-      // user backwards through their own partial queries.
-      navigate(value ? `${boardPath}?q=${encodeURIComponent(value)}` : boardPath, {
-        replace: query.length > 0,
-      });
-    }
-  };
-
-  // ⌘K / Ctrl-K focuses the search (mock Home behavior, shell requirement).
+  // ⌘K / Ctrl-K opens the palette (R15-5 — it used to focus a board filter).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        inputRef.current?.focus();
+        setPalette(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -108,6 +77,19 @@ export function Topbar({
 
   return (
     <div className="topbar">
+      {/* F15-18: only rendered by CSS under the mobile breakpoint — above it the
+          rail is always on screen and a toggle would be noise. */}
+      {onToggleRail && (
+        <button
+          type="button"
+          className="rail-toggle"
+          aria-label="Project navigation"
+          aria-expanded={railOpen}
+          onClick={onToggleRail}
+        >
+          <Icon name="board" />
+        </button>
+      )}
       <Link className="home-brand" to="/" title="Home — all projects">
         <span className="mark">V</span>
         <b>Viberr</b>
@@ -171,23 +153,26 @@ export function Topbar({
           live updates paused — retry
         </button>
       )}
-      <div className="top-search">
+      {/* R15-5: a BUTTON, not an input — everything typed here is answered by
+          the palette, across every project the viewer can open. */}
+      <button
+        type="button"
+        className="top-search"
+        aria-haspopup="dialog"
+        aria-label="Search tasks, branches, agents, projects"
+        onClick={() => setPalette(true)}
+      >
         <Icon name="search" />
-        <input
-          ref={inputRef}
-          placeholder="Search tasks, branches, agents…"
-          aria-label="Search tasks, branches, agents"
-          value={query}
-          onChange={(e) => onSearch(e.target.value)}
-        />
+        <span className="top-search-label">Search…</span>
         {/* UI-55: the handler accepts Ctrl as well; show what the viewer's
             keyboard actually has. */}
         <span className="kbd" suppressHydrationWarning>
           {modifierHint}
         </span>
-      </div>
+      </button>
       <TopBell notifications={notifications} unread={unread} />
       <UserMenu user={user} theme={theme} showSwitchProject />
+      {palette && <CommandPalette onClose={() => setPalette(false)} />}
     </div>
   );
 }

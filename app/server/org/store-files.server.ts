@@ -20,7 +20,7 @@ import { AppError } from "~/server/errors/app-error.server";
 import { createGithubClient } from "~/server/github/github-client.server";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { getDefaultConnectionToken } from "./connections.server";
+import { getDefaultConnectionTokenFresh } from "./connections.server";
 
 /**
  * StoreBrowser server layer (kb-browser spec §5): every operation is a
@@ -576,7 +576,12 @@ export async function importGithubSnapshot(
 
   // Real import needs a connection with a validated token (the DEFAULT
   // one) — otherwise the honest "needs a connection" state.
-  const tokenInfo = getDefaultConnectionToken(db);
+  // B-GH7: re-prove a stale `valid` verdict before handing the token out — the
+  // other consumer (runSetCredential) already does, and this one could import
+  // with a token GitHub revoked months ago.
+  const tokenInfo = await getDefaultConnectionTokenFresh(db, {
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
   if (!tokenInfo) {
     return {
       status: "no_connection",

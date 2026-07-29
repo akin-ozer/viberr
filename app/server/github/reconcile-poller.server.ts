@@ -3,6 +3,7 @@ import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   reconcileProject,
+  RECONCILE_POLL_TASK_BUDGET,
   type GithubActionContext,
 } from "./github-reconciler.server";
 
@@ -114,6 +115,9 @@ export async function pollGithubReconcile(
   for (const slug of slugs) {
     try {
       const summary = await reconcileProject(db, slug, SYSTEM_ACTOR, {
+        // B-GH5: a background tick spends a bounded slice of the PAT's rate
+        // limit per project; whatever it defers is picked up next tick.
+        taskBudget: RECONCILE_POLL_TASK_BUDGET,
         ...ctx,
         skipProjectAudit: true,
         skipUnchangedProvenance: true,

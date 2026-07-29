@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore } from "../../../test-support/test-store";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+} from "../../../test-support/test-store";
 import { createPat } from "~/server/secrets/pat-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -64,5 +68,54 @@ describe("listHomeProjectsForUser — membership scoping (D10/Q6)", () => {
       role: "admin", // ...but org admin
     });
     expect(all.length).toBeGreaterThan(0);
+  });
+
+  it("B-FD5: the card's `waiting on you` counts an acceptance-ready task with no packet", () => {
+    const store = setupTestStore(ctx);
+    const revision = {
+      id: "rev_1",
+      headSha: "b".repeat(40),
+      treeSha: "u".repeat(40),
+      branch: "vib-400-work",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      sourceProfileId: "developer",
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-400", {
+        stage: "review",
+        waiting: "human",
+        branch: revision.branch,
+        pr: { number: 400, state: "review", title: "Approved work" },
+        workRevision: revision,
+        engagements: [
+          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ],
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: revision.id,
+            headSha: revision.headSha,
+            result: "approve",
+            reason: "looks good",
+            at: "2026-07-04T01:00:00.000Z",
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // murat = maintainer → holds the acceptance. Home used to read 0 here while
+    // the board chip and the review queue both showed the task (UI-48 union was
+    // applied only in the board loader).
+    const [card] = listHomeProjectsForUser(store.db, {
+      id: store.users.murat.id,
+      role: "member",
+    });
+    expect(card!.waiting).toBe(1);
+    // elif = viewer → no acceptance authority, so still nothing waits on her.
+    const [viewerCard] = listHomeProjectsForUser(store.db, {
+      id: store.users.elif.id,
+      role: "member",
+    });
+    expect(viewerCard!.waiting).toBe(0);
   });
 });

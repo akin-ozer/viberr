@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -6,6 +7,12 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { insertUser } from "~/server/auth/user-store.server";
+import { writeFileAtomic } from "~/server/files/atomic-file.server";
+import { projectFilePath } from "~/server/files/file-store-root.server";
+import {
+  parseProjectFileContent,
+  serializeProjectFile,
+} from "~/server/files/project-file.server";
 import { rebuildAll } from "./rebuilder.server";
 import { decisionsRequiring } from "./decisions.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
@@ -33,6 +40,21 @@ function seedOpenDecision(
     frontmatter: baseTaskFrontmatter(key, { stage: "review", ...patch }),
     packet: PACKET,
   });
+  rebuildAll(store.db, { dataRoot: store.dataRoot });
+}
+
+/** Archive the fixture PROJECT through its canonical file, membership and all
+ *  else untouched — the projection follows the store, as in the real action. */
+function archiveProject(store: ReturnType<typeof setupTestStore>): void {
+  const filePath = projectFilePath(store.slug, store.dataRoot);
+  const { parsed } = parseProjectFileContent(readFileSync(filePath, "utf8"));
+  writeFileAtomic(
+    filePath,
+    serializeProjectFile({
+      ...parsed,
+      frontmatter: { ...parsed.frontmatter, archived: true },
+    }),
+  );
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
 
@@ -186,5 +208,198 @@ describe("decisionsRequiring (R8-3 single member-scoped source)", () => {
       projectSlug: "no-such-project",
     });
     expect(scoped.mine).toHaveLength(0);
+  });
+});
+
+/**
+ * B-FD5: a review-stage task ready for acceptance carries NO decision object.
+ * It belongs in the one shared source, so Home's card count and the
+ * notifications inbox see what the board and the review queue already saw.
+ */
+describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
+  const REVISION = {
+    id: "rev_1",
+    headSha: "b".repeat(40),
+    treeSha: "u".repeat(40),
+    branch: "vib-300-work",
+    createdAt: "2026-07-04T00:00:00.000Z",
+    sourceProfileId: "developer",
+  };
+
+  /** A review-stage task with an approved delivered revision and NO packet or
+   *  recommendation — exactly the review queue's `ready` shape. */
+  function seedAcceptanceReady(
+    store: ReturnType<typeof setupTestStore>,
+    key: string,
+    patch: Record<string, unknown> = {},
+  ) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(key, {
+        stage: "review",
+        waiting: "human",
+        branch: REVISION.branch,
+        pr: { number: 300, state: "review", title: `Task ${key}` },
+        workRevision: REVISION,
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ],
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: REVISION.id,
+            headSha: REVISION.headSha,
+            result: "approve",
+            reason: "looks good",
+            at: "2026-07-04T01:00:00.000Z",
+          },
+        ],
+        ...patch,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("counts an acceptance-ready task with no packet and no recommendation", () => {
+    const store = setupTestStore(ctx);
+    seedAcceptanceReady(store, "VIB-300");
+    const murat = decisionsRequiring(store.db, store.users.murat.id);
+    expect(murat.mine.map((d) => [d.taskKey, d.kind])).toEqual([["VIB-300", "acceptance"]]);
+    // Acceptance authority is the same tier as the rest: a viewer holds nothing.
+    expect(decisionsRequiring(store.db, store.users.elif.id).mine).toHaveLength(0);
+  });
+
+  it("a contributor OWNER holds their own task's acceptance; a contributor non-owner does not", () => {
+    const store = setupTestStore(ctx);
+    seedAcceptanceReady(store, "VIB-301", { ownerUserId: store.users.selin.id });
+    expect(
+      decisionsRequiring(store.db, store.users.selin.id).mine.map((d) => d.taskKey),
+    ).toEqual(["VIB-301"]);
+
+    seedAcceptanceReady(store, "VIB-301", { ownerUserId: null });
+    expect(decisionsRequiring(store.db, store.users.selin.id).mine).toHaveLength(0);
+  });
+
+  it("does not count a task blocked from acceptance, nor one whose PR was closed unmerged", () => {
+    const store = setupTestStore(ctx);
+    // Awaiting the required reviewer's verdict on the delivered revision.
+    seedAcceptanceReady(store, "VIB-302", { verdicts: [] });
+    expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
+
+    // Approved, but the PR was rejected on GitHub — that needs a rework/archive
+    // call, not an acceptance.
+    seedAcceptanceReady(store, "VIB-302", {
+      pr: { number: 300, state: "closed", title: "Rejected" },
+    });
+    expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
+  });
+
+  it("a task that is BOTH acceptance-ready and packet-bearing still counts once", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-303", {
+        stage: "review",
+        waiting: "human",
+        branch: REVISION.branch,
+        pr: { number: 303, state: "review", title: "Both" },
+        workRevision: REVISION,
+        engagements: [
+          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ],
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: REVISION.id,
+            headSha: REVISION.headSha,
+            result: "approve",
+            reason: "looks good",
+            at: "2026-07-04T01:00:00.000Z",
+          },
+        ],
+      }),
+      packet: PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const mine = decisionsRequiring(store.db, store.users.murat.id).mine;
+    expect(mine).toHaveLength(1);
+    // The packet is the operative decision when a task carries both.
+    expect(mine[0]!.kind).toBe("packet");
+  });
+
+  it("an archived acceptance-ready task, and a non-review-stage human-waiting task, are not decisions", () => {
+    const store = setupTestStore(ctx);
+    seedAcceptanceReady(store, "VIB-304", { archived: true });
+    expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
+
+    // Human-waiting in triage is not an acceptance boundary.
+    seedAcceptanceReady(store, "VIB-305", { stage: "triage" });
+    expect(
+      decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.taskKey),
+    ).not.toContain("VIB-305");
+  });
+
+  it("does NOT count a delivered revision with zero verdict-capable engagements (R15-1)", () => {
+    const store = setupTestStore(ctx);
+    // The live hole: no reviewer is ENGAGED, so `acceptanceBlockedReason` has
+    // nothing to require and the task read as acceptance-ready — while the
+    // server's own affordance answered canAccept:false with R15-1's verdict
+    // gate. Home's count and the notifications inbox promised a decision the
+    // accept action then refused.
+    seedAcceptanceReady(store, "VIB-307", {
+      engagements: [
+        {
+          profileId: "developer",
+          backend: "claude",
+          role: "developer",
+          delivers: true,
+          verdictCapable: false,
+        },
+      ],
+      verdicts: [],
+    });
+    expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
+    // Same shape, one approving verdict from an engaged reviewer → a real
+    // decision again (the gate blocks the unverdicted case, not acceptance).
+    seedAcceptanceReady(store, "VIB-307");
+    expect(
+      decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.kind),
+    ).toEqual(["acceptance"]);
+  });
+
+  it("does NOT count delivered work that has no review PR (R15-1 gate 1)", () => {
+    const store = setupTestStore(ctx);
+    seedAcceptanceReady(store, "VIB-308", { pr: null });
+    expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
+  });
+
+  it("an ARCHIVED PROJECT yields no decisions at all — it is read-only (R6-3)", () => {
+    const store = setupTestStore(ctx);
+    seedAcceptanceReady(store, "VIB-309");
+    seedOpenDecision(store, "VIB-310");
+    expect(
+      decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.taskKey).sort(),
+    ).toEqual(["VIB-309", "VIB-310"]);
+
+    archiveProject(store);
+
+    const after = decisionsRequiring(store.db, store.users.murat.id);
+    expect(after.mine).toHaveLength(0);
+    // Not an override case either: nobody can act inside an archived project.
+    expect(after.overrideEligible).toHaveLength(0);
+    expect(decisionsRequiring(store.db, store.users.arda.id).mine).toHaveLength(0);
+  });
+
+  it("a non-member ORG ADMIN gets acceptance as overrideEligible, never `mine`", () => {
+    const store = setupTestStore(ctx);
+    seedAcceptanceReady(store, "VIB-306");
+    const admin = insertUser(store.db, {
+      id: "u_orgadmin_accept",
+      email: "orgadmin-accept@viberr.test",
+      name: "Org Admin Accept",
+      role: "admin",
+    });
+    const result = decisionsRequiring(store.db, admin.id);
+    expect(result.mine).toHaveLength(0);
+    expect(result.overrideEligible.map((d) => d.kind)).toEqual(["acceptance"]);
   });
 });

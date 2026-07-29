@@ -11,6 +11,19 @@ import type { TaskFileEvent } from "~/schemas/task-file.schema";
  * quality, completion, github, assign, agent) and the most-recent window intact.
  * Pure + exported so its behavior is fully unit-tested; the canonical file is
  * only rewritten when this actually reduced the event count.
+ *
+ * B-FD9 — what compaction may and may not delete:
+ *
+ *  - A HUMAN's comment is NEVER folded. Compaction rewrites canonical `task.md`
+ *    and the marker keeps only a count, so folding a person's prose deletes it
+ *    from the source of truth permanently, to save noise the person did not
+ *    make. Machine prose is regenerable and cheap to lose; a person's is not.
+ *  - AGENT replies now DO fold, except the newest one in each run. Excluding
+ *    agents outright meant an agent-heavy timeline — the flood case anti-noise
+ *    exists for — never compacted at all. Keeping the newest reply of every run
+ *    preserves what `hasReworkSinceLastRejection` scans for (a specialist's
+ *    reply is the rework evidence; compacting it away could re-strand a task at
+ *    "failing"), while the repetitive tail behind it collapses.
  */
 
 /** A compaction marker is a plain comment whose title is exactly this. */
@@ -45,22 +58,30 @@ export function compactTimelineEvents(
 
   const compactedOlder: TaskFileEvent[] = [];
   let run: TaskFileEvent[] = [];
+  const marker = (anchor: TaskFileEvent, count: number): TaskFileEvent => ({
+    occurredAt: anchor.occurredAt,
+    type: "comment",
+    actor: { kind: "operator" },
+    title: COMPACTION_TITLE,
+    text: `_${count} earlier routine comments compacted to keep the task readable — human comments are never compacted._`,
+    toAgent: false,
+    evidence: null,
+  });
   const flush = () => {
     if (run.length === 0) return;
-    if (run.length === 1) {
-      // A lone routine comment isn't worth a marker — keep it as-is.
-      compactedOlder.push(run[0]!);
+    // The newest AGENT reply in this run stays verbatim (rework evidence);
+    // everything else in the run folds. `run` is newest-first.
+    const keepIdx = run.findIndex((e) => e.actor.kind === "agent");
+    const folded = run.filter((_, i) => i !== keepIdx);
+    if (folded.length <= 1) {
+      // Nothing worth a marker — one event replaced by one marker is no saving.
+      compactedOlder.push(...run);
+    } else if (keepIdx === 0) {
+      compactedOlder.push(run[0]!, marker(folded[0]!, folded.length));
     } else {
       // Anchor the marker at the newest comment's time so ordering is stable.
-      compactedOlder.push({
-        occurredAt: run[0]!.occurredAt,
-        type: "comment",
-        actor: { kind: "operator" },
-        title: COMPACTION_TITLE,
-        text: `_${run.length} earlier routine comments compacted to keep the task readable._`,
-        toAgent: false,
-        evidence: null,
-      });
+      compactedOlder.push(marker(run[0]!, folded.length));
+      if (keepIdx > 0) compactedOlder.push(run[keepIdx]!);
     }
     run = [];
   };
@@ -72,10 +93,8 @@ export function compactTimelineEvents(
       e.title !== COMPACTION_TITLE &&
       // a to-agent prompt is a governance hand-off, not routine chatter
       !e.toAgent &&
-      // NEVER fold an AGENT-authored reply (adversarial-review #13): a
-      // specialist's reply is the rework evidence hasReworkSinceLastRejection
-      // scans for, so compacting it away could re-strand a task at "failing".
-      e.actor.kind !== "agent";
+      // B-FD9: a person's prose is never deleted from canonical task.md.
+      e.actor.kind !== "human";
     if (isRoutineComment) {
       run.push(e);
     } else {

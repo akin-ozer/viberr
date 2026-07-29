@@ -80,6 +80,7 @@ function renderPage(props: {
   myRole?: string;
   meId?: string;
   task?: Partial<TaskDetail>;
+  canDeliver?: boolean;
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -111,6 +112,7 @@ function renderPage(props: {
             archived={props.archived ?? false}
             acceptance={{ ...ACCEPTANCE, ...(props.acceptance ?? {}) }}
             githubHost="https://github.com"
+            canDeliver={props.canDeliver ?? false}
           />
         </ToastProvider>
       ),
@@ -133,14 +135,49 @@ const findButton = (container: HTMLElement, text: string) =>
   ) as HTMLButtonElement | undefined;
 
 describe("P14-LV-06: the acceptance affordance", () => {
-  it("renders an Accept control naming the terminal stage, and submits accept-completion", async () => {
-    const { container, submitted } = renderPage({});
+  it("renders an Accept control naming the terminal stage; it CONFIRMS first, then submits accept-completion (F15-10)", async () => {
+    const { container, submitted, getByText } = renderPage({});
     const btn = findButton(container, "Accept completion → Done");
     expect(btn).toBeDefined();
     expect(btn!.disabled).toBe(false);
     fireEvent.click(btn!);
+    // R15-1/F15-10: accepting merges — nothing submits until the confirm,
+    // which states what merges (this task has no PR, so no merge line).
+    expect(getByText("Accept this completion?")).toBeTruthy();
+    expect(submitted).toHaveLength(0);
+    fireEvent.click(findButton(container, "Accept → Done")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("accept-completion");
+  });
+
+  it("the confirm names the PR, revision, verdict state and target branch (R15-1)", () => {
+    const { container, getByText } = renderPage({
+      task: {
+        pr: { number: 117, state: "review", title: "[VIB-151] x" } as TaskDetail["pr"],
+      },
+    });
+    fireEvent.click(findButton(container, "Accept completion → Done")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    );
+    expect(dialog?.textContent).toContain("PR #117");
+    expect(dialog?.textContent).toContain("main");
+    expect(getByText("Accept this completion?")).toBeTruthy();
+    // The confirm button is explicit that accepting merges.
+    expect(findButton(container, "Accept → Done & merge")).toBeDefined();
+  });
+
+  it("the confirm does not promise a merge on a task with no pull request", () => {
+    // Live (VAL-2): the dialog correctly said "No linked pull request — the
+    // task closes without a merge" and offered "Accept → Done", while its
+    // footer still read "Merging is one-way … the merge are recorded".
+    const { container } = renderPage({});
+    fireEvent.click(findButton(container, "Accept completion → Done")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    );
+    expect(dialog?.textContent).toContain("Nothing is merged");
+    expect(dialog?.textContent).not.toContain("Merging is one-way");
   });
 
   it("a contributor who OWNS the task gets it — R6-2/R14-2, not just maintainers", () => {
@@ -170,8 +207,62 @@ describe("P14-LV-06: the acceptance affordance", () => {
     const noAuth = renderPage({ acceptance: { hasAuthority: false } });
     expect(findButton(noAuth.container, "Accept completion")).toBeUndefined();
     cleanup();
-    const earlyStage = renderPage({ acceptance: { atBoundary: false } });
+    const earlyStage = renderPage({
+      acceptance: { atBoundary: false, canAccept: false },
+    });
     expect(findButton(earlyStage.container, "Accept completion")).toBeUndefined();
+  });
+
+  it("F15-19: the refusal TEXT still renders off-boundary — a refusal is never silent", () => {
+    // Fails on main: the whole acceptance block (button AND reason) was gated
+    // on atBoundary, so an off-boundary refusal rendered nothing at all.
+    const { container, getByText } = renderPage({
+      acceptance: {
+        atBoundary: false,
+        canAccept: false,
+        blockedReason: "VIB-151's delivered revision has no approving verdict yet",
+      },
+    });
+    expect(findButton(container, "Accept completion")).toBeUndefined();
+    expect(getByText(/no approving verdict yet/)).toBeTruthy();
+  });
+
+  it("F15-11: an ARCHIVED task renders no Accept control, no schedule form, and disabled run controls", () => {
+    const { container, queryByText } = renderPage({
+      archived: true,
+      task: { archived: true } as Partial<TaskDetail>,
+      acceptance: { atBoundary: true, canAccept: true },
+    });
+    // Fails on main: the Accept button and the schedule form stayed live.
+    expect(findButton(container, "Accept completion")).toBeUndefined();
+    expect(queryByText("Schedule operator re-run")).toBeNull();
+    const runOperator = findButton(container, "Run operator");
+    expect(runOperator?.disabled).toBe(true);
+  });
+});
+
+describe("R15-2 safety net (b): the manual delivery control", () => {
+  it("renders for a viewer with delivery authority when no live PR stands, and submits deliver-review", async () => {
+    const { container, submitted, getByText } = renderPage({ canDeliver: true });
+    const btn = findButton(container, "Deliver branch & open PR");
+    expect(btn).toBeDefined();
+    fireEvent.click(btn!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("deliver-review");
+    expect(getByText).toBeTruthy();
+  });
+
+  it("hides once a live PR stands, and entirely without delivery authority", () => {
+    const withPr = renderPage({
+      canDeliver: true,
+      task: { pr: { number: 9, state: "review", title: "x" } as TaskDetail["pr"] },
+    });
+    expect(findButton(withPr.container, "Deliver branch & open PR")).toBeUndefined();
+    cleanup();
+    const noAuthority = renderPage({ canDeliver: false });
+    expect(
+      findButton(noAuthority.container, "Deliver branch & open PR"),
+    ).toBeUndefined();
   });
 });
 

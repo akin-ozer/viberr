@@ -69,14 +69,6 @@ export function CredentialCard({
   }
 
   const missing = credential.scopes.find((s) => !s.ok);
-  // A freshly-attached PAT that has never been validated has every scope chip
-  // at source "unchecked" (ok by absence-of-violation, not by evidence). Don't
-  // claim "All required scopes granted" for a credential no GitHub probe has
-  // confirmed — say it's unverified and point at Grant scope, which runs the
-  // real check.
-  const unverified =
-    credential.scopes.length > 0 &&
-    credential.scopes.every((s) => s.source === "unchecked");
   // Owner ruling 2026-07-25: a chip is a PROVEN verdict — a scope header, a
   // live probe (writes via the empty-payload dry-run), or an open violation.
   // `assumed`/`unchecked` entries are not evidence, so they render as the
@@ -87,6 +79,13 @@ export function CredentialCard({
   const unproven = credential.scopes.filter(
     (s: ScopeChip) => s.source === "assumed" || s.source === "unchecked",
   );
+  // F15-01: NOTHING has been proven — a freshly-attached PAT nobody validated
+  // (every chip "unchecked"), or a fine-grained token validated without repo
+  // context (every chip "assumed"). The `assumed` shape dodged the old
+  // all-"unchecked" test and fell straight through to the green footer, so a
+  // card with zero evidence affirmed "Every provable scope verified". Zero
+  // proven scopes is the unverified state, whatever the excuse.
+  const unverified = proven.length === 0;
   return (
     <div className="cred-card">
       <div className="cred-top">
@@ -143,8 +142,11 @@ export function CredentialCard({
         <div className="cred-warn">
           <Icon name="alert" />
           <span>
-            Credential attached — scopes not yet verified against GitHub. Run
-            Grant scope to validate.
+            Credential attached — scopes not yet verified against GitHub
+            {unproven.length > 0
+              ? ` (${unproven.map((s) => s.id).join(", ")})`
+              : ""}
+            . Run Grant scope to validate.
           </span>
           {warnActions}
         </div>

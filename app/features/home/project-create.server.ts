@@ -16,6 +16,7 @@ import { getConnection } from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { proveAttachedCredential } from "~/features/github/github-actions.server";
 import {
   DEFAULT_GUARDRAILS,
   GOVERNED_TEMPLATE,
@@ -68,6 +69,25 @@ function presetAgents(
   preset: PolicyPreset,
   agents: AgentDeployment[],
 ): AgentDeployment[] {
+  // `strict` preset -> delivery (push + review PR) is recommend-only: the
+  // preset whose point is a human gating every advance must not ship an
+  // operator that pushes branches at its own discretion (R15-2; the shipped
+  // template default is `direct` for the balanced/auto presets).
+  if (preset === "strict") {
+    return agents.map((a) =>
+      a.profileId === "operator"
+        ? {
+            ...a,
+            capabilities: [
+              ...a.capabilities.filter(
+                (c) => c.capabilityId !== "deliver-review-pr",
+              ),
+              { capabilityId: "deliver-review-pr", mode: "recommend" as const },
+            ],
+          }
+        : a,
+    );
+  }
   if (preset !== "auto") return agents;
   return agents.map((a) =>
     a.profileId === "operator"
@@ -170,7 +190,7 @@ export async function createProject(
   db: DatabaseSync,
   input: CreateProjectInput,
   actor: { userId: string; label: string },
-  ctx: { dataRoot?: string } = {},
+  ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
 ): Promise<CreateProjectResult> {
   const name = input.name.trim();
   if (name.length < 2) {
@@ -188,7 +208,7 @@ export async function createProject(
   // therefore gated behind adding a PAT connection.
   if (!owner || !repoName) {
     throw AppError.validation(
-      "A GitHub repository is required — pick a GitHub connection and a repository name. Add a PAT in Viberr settings → GitHub connections first.",
+      "A GitHub repository is required — pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first.",
     );
   }
   const slug = slugifyProjectName(name);
@@ -220,7 +240,7 @@ export async function createProject(
   const connection = getConnection(db, owner);
   if (!connection) {
     throw AppError.validation(
-      `No GitHub connection for "${owner}" — add a PAT for that owner in Viberr settings → GitHub connections first.`,
+      `No GitHub connection for "${owner}" — add a PAT for that owner in Instance settings → GitHub connections first.`,
     );
   }
   let defaultBranch = "main";
@@ -287,6 +307,17 @@ export async function createProject(
   // Bind the selected connection's PAT to the project so credential health,
   // branch creation, and PR sync work against the real repo.
   setProjectCredential(db, { projectSlug: slug, patId: connection.patId }, actor);
+  // F15-01: creation is the first moment this PAT meets the project's REAL
+  // repository, and a fine-grained token's chips stay `assumed` until something
+  // probes it. Attach/rotate has always followed the bind with that
+  // revalidation; creation did not, which is why a brand-new project showed a
+  // credential card affirming scopes nothing had proven. Best-effort by
+  // contract — the bind has already happened, and a degraded GitHub must not
+  // fail the creation.
+  await proveAttachedCredential(db, slug, actor, {
+    ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+  });
 
   recordAudit(db, {
     action: "project.created",

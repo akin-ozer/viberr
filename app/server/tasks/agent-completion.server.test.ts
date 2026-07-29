@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -19,6 +19,8 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { insertUser } from "~/server/auth/user-store.server";
+import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
 import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
@@ -290,6 +292,55 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(quality).toBeTruthy();
   });
 
+  it("still detects a verbatim repeat when the report tags an AMBIGUOUS name (G-A-1)", async () => {
+    // The stored comment carries `withAmbiguityDisclosure`, but the no-progress
+    // check compared that stored form against the RAW reply — so any repeating
+    // agent whose report tagged an ambiguous handle never tripped the guard and
+    // kept buying an operator run + an agent run per cycle until the depth cap.
+    // Two enabled users share the first name, which is what makes "@arda"
+    // ambiguous.
+    insertUser(store.db, {
+      id: "u_arda_second",
+      email: "arda.other@viberr.test",
+      name: "Arda Other",
+      role: "member",
+    });
+    writeReviewTask();
+    const reply = "@arda the diff is unchanged since my last pass.";
+    const effects = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "claude" as const,
+      profileId: "reviewer",
+      role: "Reviewer",
+      delivers: false,
+      workdir: null,
+      agentHandle: "reviewer",
+    };
+    const first = await finishedRunWith(reply);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      effects,
+      { id: first, state: "finished" },
+    );
+    const noProgressLog = vi.spyOn(logger, "info");
+    const second = await finishedRunWith(reply);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      effects,
+      { id: second, state: "finished" },
+    );
+    // The branch itself is the observable: with the comparison forms out of
+    // sync the repeat reads as NEW work and this never logs.
+    expect(
+      noProgressLog.mock.calls.some(([msg]) =>
+        String(msg).includes("agent made no progress"),
+      ),
+    ).toBe(true);
+  });
+
   it("records a required reviewer's verdict from the ENGAGEMENT snapshot even if its LIVE grant was removed (adversarial-review: no stuck task)", async () => {
     // The required-reviewer set (acceptanceBlockedReason) uses the engage-time
     // `verdictCapable` snapshot. If verdict RECORDING used the live grant
@@ -336,6 +387,55 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(fm.verdicts).toHaveLength(1);
     expect(fm.verdicts[0]).toMatchObject({ profileId: "reviewer", result: "approve" });
     expect(fm.validation).toBe("healthy");
+  });
+
+  /**
+   * R15-7 (owner ruling): a run whose profile cannot be resolved is fully
+   * conservative. The RUN layer withholds its toolkit, but completion re-derived
+   * the gates from `[]`, which the catalog defaults read as comment/ask/evidence
+   * GRANTED — so the same ghost profile's envelope could still open a question
+   * packet and assert evidence rows in a vanished profile's name, one layer
+   * later and out of sight.
+   */
+  it("R15-7: an UNRESOLVABLE profile's finished run opens no question packet and asserts no evidence", async () => {
+    const runId = await finishedRunWith(
+      JSON.stringify({
+        summary: "Reviewed the change; one thing is unclear.",
+        question: {
+          title: "Which API surface should this use?",
+          body: "Two candidates.",
+        },
+        evidence: [{ label: "unit suite", add: 12, del: 0 }],
+      }),
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        // The Codex transport: the envelope rides the final reply text.
+        backend: "codex",
+        // Never deployed here — `resolveDeployedSpecialist` throws for it.
+        profileId: "ghost-profile",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "ghost-profile",
+      },
+      { id: runId, state: "finished" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.packet, "a ghost profile must not open a decision").toBeNull();
+    expect(
+      parsed.timeline.some((e) => e.text.includes("Question for a human")),
+    ).toBe(false);
+    const reply = parsed.timeline.find(
+      (e) => e.type === "comment" && e.actor.kind === "agent",
+    )!;
+    // Its report still lands (the run happened); the ASSERTIONS it carries do not.
+    expect(reply.text).toContain("one thing is unclear");
+    expect(reply.evidence ?? []).toHaveLength(0);
   });
 
   it("posts the reviewer's OWN reply comment atomically with the verdict — pass AND fail", async () => {

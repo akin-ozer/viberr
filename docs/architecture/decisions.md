@@ -132,6 +132,9 @@ it is regenerated from the filesystem rather than restated here.
    lives in one place, `app/shared/rbac.ts`, which both the guards and the Policy page
    render from. `view` and `comment` are app-wide by FR4: any authenticated user holds
    them, member or not.
+   **Superseded in part** (ruling 25, 2026-07-28) — projects are members-only: `view` and
+   `comment` apply within projects the user is a member of; non-members get a
+   404-equivalent. The FR4 sentence above is kept for history.
 3. **Task-file store** at `$VIBERR_DATA_ROOT/projects/<slug>/tasks/<KEY>/task.md`. The UI
    renders the REAL store-relative path wherever the mock showed `.viberr/...`.
 4. **Timestamps.** UTC ISO at all boundaries; one shared formatter in `app/shared/dates/`
@@ -190,6 +193,76 @@ it is regenerated from the filesystem rather than restated here.
     list-view empty state; Escape-close, focus-trap and scrim-click on every dialog (markup
     unchanged); `operator` stores the stage id and the UI renders "stage \<1-based index\>";
     login keeps the mock's copy but the password minimum is 8 characters.
+
+17. **PR divergence recovery** (2026-07-25, recorded 2026-07-28 — previously commit-only).
+    Out-of-band PR transitions are coordination events: the reconciler fires a
+    `pr-diverged` operator trigger (closed / merged / reopened). On a closed PR the
+    operator opens ONE recovery packet: rework (custom + note), `archive_task`, or
+    `archive_task` + `deleteBranch`. Remote-branch deletion exists only as that packet
+    resolution (refuses open PRs and the default branch).
+18. **Minimum GitHub scopes are exactly `repo` + `pull_request:write`** (2026-07-25,
+    recorded 2026-07-28). `workflow` and `read:org` were dropped; a refused workflow-file
+    push surfaces as a scope violation when it matters. Fine-grained tokens prove write
+    permissions via empty-payload dry-run probes (422 = authorized, 403 = refused).
+19. **Scope chips render proven verdicts only** (2026-07-25, recorded 2026-07-28). A chip
+    is evidence: scope header, live probe, or open violation. `assumed`/`unchecked` render
+    as an honest "unproven" line, never as a pseudo-check.
+20. **R15-1 (2026-07-28): acceptance requires a verdict.** Human acceptance of a
+    completion requires a healthy reviewer verdict on the delivered revision; the audited
+    admin Force-accept is the only bypass (it never bypasses the PR-head-must-contain-the-
+    delivered-commit check). Every accept — including force — shows a confirm dialog
+    stating what merges and any missing signals.
+21. **R15-2 (2026-07-28): delivery is an operator decision.** Push + review-PR opening is
+    no longer a stage side-effect. The operator holds a `deliver-review-pr` capability and
+    decides when delivery is plausible, weighing the task's remaining stages; it opens a
+    decision packet when unsure and may offer early delivery when later stages don't gate
+    this task. The server still executes the mechanics; specialists still never push or
+    open PRs. Entering the review-role stage with no PR writes a typed event — never
+    silence. A human delivery button (maintainer+ / task owner) is the escape hatch.
+22. **R15-3 (2026-07-28): owner authority covers recommendations.** A task's owner may
+    apply or dismiss ANY operator recommendation on their own task, including stage
+    transitions — the click is the authorization (FR37 spirit; extends R14-2/R6-2).
+23. **R15-5 (2026-07-28): global ⌘K palette.** Real workspace-wide search (tasks,
+    branches, agents, projects), scoped to projects the user can see.
+24. **R15-6 (2026-07-28): per-project delete-branch-on-merge setting** (default on): a
+    successful accept-merge deletes the remote task branch.
+25. **R15-4 (2026-07-28): projects are members-only.** Non-members cannot open a project's
+    board, tasks, or any project surface (404-style; WI-13 secrecy generalized). FR4's
+    app-wide commenting applies within visible projects.
+26. **R15-7 (2026-07-28): ghost profiles are fully conservative.** A run whose profile can
+    no longer be resolved gets nothing permissive — no delivery, no comments, no
+    ask-human, no evidence.
+27. **R15-8 (2026-07-28): `design/prd.md` is re-synced** with the canon PRD and both are
+    maintained; `planning/README.md`'s sync claim must stay true.
+28. **R15-9 (2026-07-29): an absent `deliver-review-pr` grant resolves from the project's
+    own governance, not from a constant.** The capability postdates R15-2, so "absent" is
+    the normal state on every pre-existing project. Resolving it to a flat `direct` meant
+    two projects with identical governance behaved differently by creation date alone.
+    The preset is not stored anywhere — it is a creation-time shaping input — so the rule
+    reads its EFFECT off the workflow graph (`humanGatesPreWorkAdvance`: no pre-terminal
+    boundary advances automatically ⇒ `recommend`). Deriving beats a stored field here
+    precisely because it is already true of projects that predate the capability. The gate
+    and the policy surface share one function (`absentDeliverReviewPrMode`) so they cannot
+    drift — that drift was F15-20. An explicit grant always wins.
+29. **R15-10 (2026-07-29): the first empty board teaches, once.** A project with zero
+    tasks shows one teaching line in the entry column; every other column stays bare, and
+    the moment any task exists every column is bare again. This narrows P13-D-34 rather
+    than reversing it: that ruling protected against repeating an explanation five times
+    beside real work, which this does not do.
+30. **R15-11 (2026-07-29): the Review queue stays a triage list, but its rows name their
+    action.** Decisions belong with their evidence (diff, verdict, packet), so acceptance
+    stays on the task page — the queue was simply an unlabeled clickable region. The row
+    says "Review", deliberately not "Accept": acceptance is verdict-gated (R15-1) and may
+    refuse, and a control must not name an outcome its surface cannot promise.
+31. **R15-12 (2026-07-29): unenforced capability lines are collapsed, never hidden.**
+    They render in a `<details>` labelled with their count. Hiding "unenforced and
+    role-irrelevant" capabilities was the alternative and was rejected: an omission the
+    reader cannot see is worse than an awkward truth, and "role-irrelevant" is a judgment
+    the code should not be making about policy.
+32. **R15-13 (2026-07-29): settings headings name their own scope.** Instance settings are
+    titled "Instance settings" (was "Viberr settings", which collided with a project named
+    Viberr) and a project's are "<name> · settings" (was bare "Settings"). Every wayfinding
+    string that pointed at the old title was updated with it.
 
 ## Route map
 

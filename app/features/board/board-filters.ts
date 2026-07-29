@@ -74,28 +74,45 @@ export interface SearchableTask {
   title: string;
   branch: string | null;
   owner: { name: string } | null;
-  specialist: { name: string; role: string } | null;
-  reviewers: { name: string; role: string }[];
+  specialist: { name: string; role: string; profileId: string } | null;
+  reviewers: { name: string; role: string; profileId: string }[];
   operator: { name: string } | null;
 }
 
-/** Topbar search: case-insensitive substring over key, title, branch and
- * agent/owner identities ("Search tasks, branches, agents…"). */
+/**
+ * BOARD filter (R15-5: "Filter this board…", not a global search — the ⌘K
+ * palette answers that): case-insensitive substring over key, title, branch and
+ * the identities on the card.
+ *
+ * F15-16: an agent's own NAME never matched. `AgentRender.name` is the BACKEND
+ * label ("Codex" / "Claude Code") — the profile's name is not projected onto a
+ * task summary at all — so typing "reviewer" or "docs writer" hit nothing while
+ * the placeholder promised agents. The profile ID is the identity the board
+ * does carry, so it joins the haystack, hyphen-normalized on both sides:
+ * "docs writer" matches the `docs-writer` deployment.
+ */
 export function matchesSearch(task: SearchableTask, query: string): boolean {
-  const q = query.trim().toLowerCase();
+  const q = normalizeIdentity(query);
   if (!q) return true;
-  const haystack = [
-    task.key,
-    task.title,
-    task.branch ?? "",
-    task.owner?.name ?? "",
-    task.specialist ? `${task.specialist.name} ${task.specialist.role}` : "",
-    ...task.reviewers.map((c) => `${c.name} ${c.role}`),
-    task.operator?.name ?? "",
-  ]
-    .join(" ")
-    .toLowerCase();
+  const haystack = normalizeIdentity(
+    [
+      task.key,
+      task.title,
+      task.branch ?? "",
+      task.owner?.name ?? "",
+      task.specialist
+        ? `${task.specialist.name} ${task.specialist.role} ${task.specialist.profileId}`
+        : "",
+      ...task.reviewers.map((c) => `${c.name} ${c.role} ${c.profileId}`),
+      task.operator?.name ?? "",
+    ].join(" "),
+  );
   return haystack.includes(q);
+}
+
+/** Lowercase and treat `-`/`_` as spaces, so a profile id reads as its name. */
+function normalizeIdentity(value: string): string {
+  return value.trim().toLowerCase().replace(/[-_]+/g, " ");
 }
 
 export function isBoardFilterId(value: string | null): value is BoardFilterId {
@@ -126,13 +143,38 @@ export function boardEmptyCopy({
   total,
   filterLabel,
   query,
+  boardTotal,
+  isEntryColumn = false,
 }: {
   /** Tasks in this column (or list) BEFORE the filter and search ran. */
   total: number;
   /** Label of the active filter, or null when it is "all". */
   filterLabel: string | null;
   query: string;
+  /** LIVE (non-archived) tasks on the whole board, before filtering — R15-10.
+   *  Live, not total: an archived task is hidden under every filter except
+   *  "Archived" (see matchesBoardFilter), so a board whose only task is
+   *  archived looks — and for this purpose IS — empty. Counting it made the one
+   *  board that most needed the teaching line the one board that never got it.
+   *  Omitted → treated as a board that has tasks, i.e. the pre-R15-10 bare
+   *  behavior. */
+  boardTotal?: number;
+  /** True for the entry (first) stage column — the only one allowed to teach. */
+  isEntryColumn?: boolean;
 }): string {
+  // R15-10: a brand-new project showed five columns each saying "No tasks" —
+  // the one empty state in the app that did not teach, and the first thing a
+  // new user sees. P13-D-34's point stands (do not repeat an explanation five
+  // times beside real work), so the teaching line is scoped to the case where
+  // there is nothing to repeat beside: the whole board is empty, and only the
+  // entry column speaks. The moment ANY task exists, every column is bare again.
+  // Keyed on `boardTotal`, NOT on this column's `total`: `total` counts archived
+  // tasks, which are invisible here, so an archived-only entry column reads as
+  // non-empty and would silently skip the teaching line. A filter or search that
+  // is actively hiding something still wins — that message is more informative.
+  if (boardTotal === 0 && isEntryColumn && !filterLabel && !query.trim()) {
+    return "No tasks yet — create one to start the flow";
+  }
   if (total === 0) return "No tasks";
   const subject = total === 1 ? "The 1 task here is" : `All ${total} tasks here are`;
   const q = query.trim();

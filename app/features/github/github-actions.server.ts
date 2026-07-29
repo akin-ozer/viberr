@@ -1,12 +1,20 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
-import { getDefaultConnection } from "~/server/org/connections.server";
+import {
+  ensureConnectionFresh,
+  getConnection,
+  getDefaultConnection,
+} from "~/server/org/connections.server";
+import { getProject } from "~/server/projections/board-query.server";
+import { slugify } from "~/shared/ids/slugify";
+import { createGithubClient } from "~/server/github/github-client.server";
 import {
   reconcileProject,
   type GithubActionContext,
 } from "~/server/github/github-reconciler.server";
 import {
   clearProjectCredential,
+  getPatToken,
   getProjectCredential,
   setProjectCredential,
 } from "~/server/secrets/pat-store.server";
@@ -40,6 +48,15 @@ export async function runReconcile(
   ctx: GithubActionContext = {},
 ): Promise<GithubActionOutcome> {
   const summary = await reconcileProject(db, projectSlug, actor, ctx);
+  // F15-02: a pass that scanned nothing must not read as "synced" — name the
+  // no-branched-tasks case; degraded contexts keep their own honest copy below.
+  if (summary.status === "ok" && summary.results.length === 0) {
+    return {
+      ok: true,
+      toast: "Checked GitHub — no task has a delivery branch yet, nothing to sync.",
+      result: "no_branched_tasks",
+    };
+  }
   const failures = summary.results.filter(
     (r) => r.status !== "reconciled" && r.status !== "no_branch",
   );
@@ -95,38 +112,24 @@ export async function runGrantScope(
 }
 
 /**
- * Attach / rotate the project's GitHub credential (finding #13): binds the
- * org DEFAULT connection's PAT to the project via the phase-7 set-PAT flow.
- * "Rotate" is the same operation on an already-bound project — it re-points at
- * the current default (the org connection is where a token is actually
- * replaced). No default connection is a degraded VALUE, never a throw.
+ * Prove the freshly-bound PAT against the project's REAL repository.
+ *
+ * The connection modal necessarily validates with `repo: null`, which pins a
+ * fine-grained token at all-"assumed" (`~`) scope chips forever — on the org
+ * card too, since both surfaces render the same per-PAT cache. A project-scoped
+ * run upgrades `repo` and `pull_request:write` to dry-run-probe verdicts.
+ *
+ * Best-effort by contract: the bind has already happened, and a degraded GitHub
+ * must not fail it. Exported so EVERY path that binds a credential (attach,
+ * rotate, project creation) proves it the same way — F15-01 was exactly one
+ * such path skipping the probes, leaving a card with zero proven scopes.
  */
-export async function runSetCredential(
+export async function proveAttachedCredential(
   db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
-  ctx: GithubActionContext = {},
-): Promise<GithubActionOutcome> {
-  const connection = getDefaultConnection(db);
-  if (!connection) {
-    return {
-      ok: true,
-      toast: "No GitHub connection to attach — add one in org settings first",
-      result: "no_connection",
-    };
-  }
-  const wasBound = getProjectCredential(db, projectSlug) !== null;
-  setProjectCredential(db, { projectSlug, patId: connection.patId }, actor);
-  // LV-05: the connection pill is derived from a 30 s memoized `checkRepoAccess`
-  // probe. Without this the row kept saying "no credential" after a full reload.
-  invalidateRepoAccess(db, projectSlug);
-  // Attaching is the first moment this PAT meets a real repository, so refresh
-  // its cached validation WITH that context. The connection modal necessarily
-  // validated with `repo: null`, which pins a fine-grained token at
-  // all-"assumed" (`~`) scope chips forever — on the org card too, since both
-  // surfaces render the same per-PAT cache. A project-scoped run upgrades
-  // `repo` (and pull-read) to probe-backed verdicts. Best-effort: a degraded
-  // GitHub must not fail the attach — the bind above already happened.
+  ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
+): Promise<void> {
   try {
     await revalidateProjectCredential(db, projectSlug, actor, {
       dataRoot: ctx.dataRoot,
@@ -135,13 +138,161 @@ export async function runSetCredential(
   } catch {
     // tolerated — the credential works; chips upgrade on the next re-check
   }
-  return {
-    ok: true,
-    toast: wasBound
-      ? `Credential rotated to ${connection.owner}'s connection — sync uses it now`
-      : `Credential attached from ${connection.owner}'s connection`,
-    result: wasBound ? "rotated" : "attached",
-  };
+}
+
+/**
+ * Can THIS connection's token actually see the project's repository?
+ *
+ * `connection.owner` is a LABEL (which account the PAT was added under), never
+ * an access boundary: one token routinely reaches org repos and collaborator
+ * repos under other owners. So the only honest answer is GitHub's — one
+ * `GET /repos/{repo}` with the candidate token.
+ *
+ * Three outcomes, because "we could not ask" is not "the answer is no": an
+ * unreachable GitHub returns `unverified` and never blocks a bind (the same
+ * rule `ensureConnectionFresh` applies to a network error).
+ */
+type RepoProbe =
+  | { status: "reachable" }
+  | { status: "access_miss"; detail: string }
+  | { status: "unverified"; detail: string };
+
+async function probeRepoWithConnection(
+  db: DatabaseSync,
+  patId: string,
+  repo: string,
+  fetchImpl?: typeof fetch,
+): Promise<RepoProbe> {
+  const token = getPatToken(db, patId);
+  if (!token) {
+    return { status: "unverified", detail: "its stored token could not be read" };
+  }
+  const client = createGithubClient({
+    token,
+    ...(fetchImpl ? { fetchImpl } : {}),
+  });
+  const result = await client.request<unknown>("GET", `/repos/${repo}`);
+  if (result.ok) return { status: "reachable" };
+  if (result.kind === "network") {
+    return {
+      status: "unverified",
+      detail: `GitHub is unreachable (${result.message})`,
+    };
+  }
+  if (result.kind === "http") {
+    if (result.status === 404) {
+      return { status: "access_miss", detail: "GitHub answered 404 (not found)" };
+    }
+    if (result.status === 401) {
+      return { status: "access_miss", detail: "GitHub rejected the token (401)" };
+    }
+    if (result.status === 403) {
+      return {
+        status: "access_miss",
+        detail: `GitHub refused it with 403 (${result.message})`,
+      };
+    }
+    return {
+      status: "unverified",
+      detail: `GitHub answered ${result.status}`,
+    };
+  }
+  return { status: "unverified", detail: "GitHub gave no usable answer" };
+}
+
+/**
+ * Attach / rotate the project's GitHub credential (finding #13): binds an org
+ * connection to the project via the phase-7 set-PAT flow. "Rotate" is the same
+ * operation on an already-bound project — the org connection is where a token
+ * is actually replaced. A missing connection is a degraded VALUE, never a throw.
+ *
+ * B-GH3: this used to bind `getDefaultConnection` unconditionally, so in a
+ * multi-connection org a project whose repo lives under a non-default owner was
+ * silently swapped onto another owner's PAT — the failure arrived later, as a
+ * repo-access miss blamed on the token. The connection matching the repo owner
+ * is therefore PREFERRED.
+ *
+ * It is not REQUIRED, though: owner-matching was briefly a hard refusal, which
+ * stranded the entirely legitimate one-PAT-many-owners setup (org repos,
+ * collaborator repos) that `repairProjectRepo` explicitly supports — it accepts
+ * any `owner/name` and infers nothing from connection owners. So a project with
+ * no owner-matched connection falls back to the org default and asks GitHub
+ * whether that token reaches the repo; only a real access miss refuses.
+ */
+export async function runSetCredential(
+  db: DatabaseSync,
+  projectSlug: string,
+  actor: AuditActor,
+  ctx: GithubActionContext = {},
+): Promise<GithubActionOutcome> {
+  const repo = getProject(db, projectSlug)?.repo?.trim() || null;
+  const repoOwner = repo ? (repo.split("/")[0]?.trim() ?? null) : null;
+  const owned = repoOwner ? getConnection(db, slugify(repoOwner)) : null;
+  // Repo-less projects predate the repo-bound ruling; the org default is still
+  // the only meaningful answer for them.
+  const connection = owned ?? getDefaultConnection(db);
+  if (!connection) {
+    return {
+      ok: true,
+      toast: "No GitHub connection to attach — add one in org settings first",
+      result: "no_connection",
+    };
+  }
+  // B-GH7: binding is a token USE. A connection whose cached "valid" has gone
+  // stale gets re-proved here, so a token revoked on github.com is refused now
+  // instead of being handed to a project as if it were healthy.
+  const fresh = await ensureConnectionFresh(db, connection.id, {
+    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+  });
+  // Only GitHub's own rejection refuses the bind — a never-validated connection
+  // keeps its historical benefit of the doubt.
+  if (fresh && fresh.validationState === "failed") {
+    return {
+      ok: true,
+      toast: `GitHub rejected ${connection.owner}'s token — replace it in org settings, then attach it here`,
+      result: "connection_invalid",
+    };
+  }
+
+  // Borrowing another owner's connection is the only case that has to be
+  // proved before the bind — an owner match is the setup this flow is built on.
+  let borrowedUnverified: string | null = null;
+  if (!owned && repo) {
+    const probe = await probeRepoWithConnection(
+      db,
+      connection.patId,
+      repo,
+      ctx.fetchImpl,
+    );
+    if (probe.status === "access_miss") {
+      return {
+        ok: true,
+        toast: `${connection.owner}'s token cannot reach ${repo} — ${probe.detail}. Add a PAT for ${repoOwner} in org settings, or fix the repository here.`,
+        result: "no_repo_access",
+      };
+    }
+    borrowedUnverified = probe.status === "unverified" ? probe.detail : null;
+  }
+
+  const wasBound = getProjectCredential(db, projectSlug) !== null;
+  setProjectCredential(db, { projectSlug, patId: connection.patId }, actor);
+  // LV-05: the connection pill is derived from a 30 s memoized `checkRepoAccess`
+  // probe. Without this the row kept saying "no credential" after a full reload.
+  invalidateRepoAccess(db, projectSlug);
+  await proveAttachedCredential(db, projectSlug, actor, {
+    dataRoot: ctx.dataRoot,
+    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+  });
+  const head = wasBound
+    ? `Credential rotated to ${connection.owner}'s connection`
+    : `Credential attached from ${connection.owner}'s connection`;
+  let toast = wasBound ? `${head} — sync uses it now` : head;
+  if (!owned && repo) {
+    toast = borrowedUnverified
+      ? `${head} — no ${repoOwner} PAT, and ${borrowedUnverified}, so its access to ${repo} is unverified`
+      : `${head} — no ${repoOwner} PAT, but this token reaches ${repo}`;
+  }
+  return { ok: true, toast, result: wasBound ? "rotated" : "attached" };
 }
 
 /**

@@ -3,9 +3,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type RefObject,
 } from "react";
-import { Link, useFetcher } from "react-router";
+import { Link, useFetcher, useNavigate } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import type { SessionUser } from "~/server/auth/require-user.server";
 import type { HomePrefs } from "~/server/prefs/user-prefs.server";
@@ -22,6 +23,7 @@ import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import type { NotificationView } from "~/features/notifications/notification-item";
+import { CommandPalette } from "~/features/shell/command-palette";
 import { TopBell } from "~/features/shell/top-bell";
 import { UserMenu } from "~/features/shell/user-menu";
 import type {
@@ -437,8 +439,8 @@ function NewProjectConnectionField({
           <Icon name="alert" />
           <span>
             {picked === "failed"
-              ? "This connection's token failed validation. The project will be created, but agents won't be able to push until it's replaced in Viberr settings → GitHub connections."
-              : "This connection hasn't been validated yet — check it in Viberr settings → GitHub connections if delivery fails."}
+              ? "This connection's token failed validation. The project will be created, but agents won't be able to push until it's replaced in Instance settings → GitHub connections."
+              : "This connection hasn't been validated yet — check it in Instance settings → GitHub connections if delivery fails."}
           </span>
         </div>
       )}
@@ -449,7 +451,7 @@ function NewProjectConnectionField({
             No GitHub connections yet — every project needs a repository. Add
             a PAT in{" "}
             <Link to="/org/settings?tab=connections">
-              <b>Viberr settings → GitHub connections</b>
+              <b>Instance settings → GitHub connections</b>
             </Link>
             , then come back.
           </span>
@@ -581,7 +583,9 @@ function NewProjectFooter({
   onClose,
   submit,
 }: {
-  storeRoot: string;
+  /** B-FD4: null for a non-admin — the host path is admin-only, the hint falls
+   *  back to the store-relative form. */
+  storeRoot: string | null;
   slug: string;
   ok: boolean;
   /** LV-07: why Create is disabled — never a dead button with no explanation. */
@@ -593,7 +597,7 @@ function NewProjectFooter({
   return (
     <div className="modal-foot">
       <span className="foot-hint mono">
-        creates {storeRoot}/projects/{slug || "…"}/
+        creates {storeRoot ? storeRoot + "/" : ""}projects/{slug || "…"}/
       </span>
       <span className="foot-actions">
         {!ok && blockedReason && (
@@ -631,7 +635,7 @@ function NewProjectModal({
   connections: string[];
   /** UI-09: per-owner credential health for the chip list. */
   connectionHealth: Record<string, "valid" | "unvalidated" | "failed">;
-  storeRoot: string;
+  storeRoot: string | null;
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
@@ -656,6 +660,7 @@ function NewProjectModal({
   }>();
   const csrf = useCsrfToken();
   const push = useToast();
+  const navigate = useNavigate();
   const { ref: panelRef, close } = useDialog(onClose);
   const closedRef = useRef(false);
 
@@ -724,8 +729,11 @@ function NewProjectModal({
       // report unqualified success even for a repo GitHub has never heard of.
       if (fetcher.data.repoWarning) push(fetcher.data.repoWarning, "error");
       onClose();
+      // F15-04: land IN the project you just made. Creation used to drop the
+      // modal and leave you on the home grid, hunting for the new card.
+      if (fetcher.data.slug) navigate(`/projects/${fetcher.data.slug}/board`);
     }
-  }, [fetcher.data, onClose, push]);
+  }, [fetcher.data, onClose, push, navigate]);
 
   const submit = () => {
     if (!ok || busy) return;
@@ -832,7 +840,8 @@ export interface HomePageData {
   org: HomeOrgSummary;
   notifications: NotificationView[];
   unread: number;
-  storeRoot: string;
+  /** B-FD4: the host data root, org admins only (null otherwise). */
+  storeRoot: string | null;
 }
 
 /* Focused sections of HomePage — same-file extraction, state stays in
@@ -848,6 +857,7 @@ function HomeTopBar({
   theme,
   livePaused = false,
   onReconnect,
+  onOpenPalette,
 }: {
   searchRef: RefObject<HTMLInputElement | null>;
   query: string;
@@ -859,6 +869,8 @@ function HomeTopBar({
   /** UI-03: the SSE stream is down — the cards are a stale snapshot. */
   livePaused?: boolean;
   onReconnect?: () => void;
+  /** R15-5: the shortcut chip is the palette's affordance, not decoration. */
+  onOpenPalette: () => void;
 }) {
   const modifierHint = useModifierHint();
   return (
@@ -897,10 +909,21 @@ function HomeTopBar({
             value={query}
             onChange={(e) => onQuery(e.target.value)}
           />
-          {/* UI-55: platform-aware — the handler accepts Ctrl too. */}
-          <span className="kbd" suppressHydrationWarning>
+          {/* R15-5: ⌘K no longer focuses this box — it opens the global
+              palette — so the chip is the button that does that, not a label
+              for a shortcut that goes somewhere else. UI-55: platform-aware,
+              the handler accepts Ctrl too. */}
+          <button
+            type="button"
+            className="kbd"
+            aria-haspopup="dialog"
+            aria-label="Search everything"
+            title="Search tasks, branches, agents and projects"
+            onClick={onOpenPalette}
+            suppressHydrationWarning
+          >
             {modifierHint}
-          </span>
+          </button>
         </div>
         <TopBell notifications={notifications} unread={unread} />
         <UserMenu
@@ -1225,7 +1248,48 @@ function ProjectSections({
   );
 }
 
-function SettingsPanel({ org }: { org: HomeOrgSummary }) {
+/**
+ * B-FD4: every tile linked into `/org/settings`, which hard-requires the ORG
+ * ADMIN role — so a plain member's "Manage →" was a click into a 403. The
+ * counts are org-wide summary and stay readable; only the link is admin-only,
+ * and a member is told why instead of finding out at the boundary. The user
+ * menu has always gated its own entry this way.
+ */
+function OrgTile({
+  isAdmin,
+  to,
+  children,
+}: {
+  isAdmin: boolean;
+  to: string;
+  children: ReactNode;
+}) {
+  if (!isAdmin) {
+    return (
+      <div className="org-tile" aria-disabled="true">
+        {children}
+        <span className="foot go-hint muted">Org admins manage this</span>
+      </div>
+    );
+  }
+  return (
+    <Link className="org-tile go" to={to}>
+      {children}
+      <span className="foot go-hint">
+        Manage
+        <Icon name="arrow" />
+      </span>
+    </Link>
+  );
+}
+
+function SettingsPanel({
+  org,
+  isAdmin,
+}: {
+  org: HomeOrgSummary;
+  isAdmin: boolean;
+}) {
   return (
     <section className="panel" data-screen-label="Settings">
       <div className="panel-head">
@@ -1233,7 +1297,7 @@ function SettingsPanel({ org }: { org: HomeOrgSummary }) {
         <h2>Settings</h2>
       </div>
       <div className="org-tiles">
-        <Link className="org-tile go" to="/org/settings?tab=connections">
+        <OrgTile isAdmin={isAdmin} to="/org/settings?tab=connections">
           <span className="lbl">
             <Icon name="github" />
             GitHub connections
@@ -1249,12 +1313,8 @@ function SettingsPanel({ org }: { org: HomeOrgSummary }) {
               </div>
             </span>
           </span>
-          <span className="foot go-hint">
-            Manage
-            <Icon name="arrow" />
-          </span>
-        </Link>
-        <Link className="org-tile go" to="/org/settings?tab=users">
+        </OrgTile>
+        <OrgTile isAdmin={isAdmin} to="/org/settings?tab=users">
           <span className="lbl">
             <Icon name="user" />
             Users &amp; access
@@ -1274,12 +1334,8 @@ function SettingsPanel({ org }: { org: HomeOrgSummary }) {
               </div>
             </span>
           </span>
-          <span className="foot go-hint">
-            Manage
-            <Icon name="arrow" />
-          </span>
-        </Link>
-        <Link className="org-tile go" to="/org/settings?tab=resources">
+        </OrgTile>
+        <OrgTile isAdmin={isAdmin} to="/org/settings?tab=resources">
           <span className="lbl">
             <Icon name="memory" />
             Agent resources
@@ -1300,11 +1356,7 @@ function SettingsPanel({ org }: { org: HomeOrgSummary }) {
               </div>
             </span>
           </span>
-          <span className="foot go-hint">
-            Manage
-            <Icon name="arrow" />
-          </span>
-        </Link>
+        </OrgTile>
       </div>
     </section>
   );
@@ -1378,12 +1430,15 @@ export function HomePage({
     error?: string;
   }>();
 
-  // ⌘K / Ctrl-K focuses the project search (mock behavior).
+  // R15-5: ⌘K is ONE shortcut app-wide — it opens the palette here exactly as it
+  // does inside a project. Home's own box stays what it says it is ("Find a
+  // project…"), a filter over the grid on screen.
+  const [palette, setPalette] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        searchRef.current?.focus();
+        setPalette(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1524,6 +1579,7 @@ export function HomePage({
       <SkipLink />
       <HomeTopBar
         searchRef={searchRef}
+        onOpenPalette={() => setPalette(true)}
         query={query}
         onQuery={setQuery}
         notifications={data.notifications}
@@ -1562,7 +1618,7 @@ export function HomePage({
           />
         )}
 
-        <SettingsPanel org={org} />
+        <SettingsPanel org={org} isAdmin={user.role === "admin"} />
 
         <StoreStrip
           scanning={scanning}
@@ -1588,6 +1644,8 @@ export function HomePage({
           onClose={() => setModal(false)}
         />
       )}
+
+      {palette && <CommandPalette onClose={() => setPalette(false)} />}
     </div>
   );
 }

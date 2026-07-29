@@ -9,6 +9,7 @@ import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { ToastProvider } from "~/ui/toast";
 import { ConnectionsPanel } from "./connections-panel";
+import { OrgSettingsPage } from "./org-settings-page";
 import { ResourcesPanel } from "./resources-panel";
 import { UsersPanel } from "./users-panel";
 
@@ -315,8 +316,12 @@ function renderResources() {
 describe("ResourcesPanel", () => {
   it("renders the four panels with store paths, health and usage lines", () => {
     const { getByText } = renderResources();
-    expect(getByText("store://kb/architecture-notes/ · 2 docs agents read")).toBeTruthy();
-    expect(getByText(/read live · re-scanned just now/)).toBeTruthy();
+    expect(
+      getByText(
+        "store://kb/architecture-notes/ · 2 docs · agents read the live folder",
+      ),
+    ).toBeTruthy();
+    expect(getByText(/re-scanned just now/)).toBeTruthy();
     expect(getByText(/14 tools · checked just now · auth: configured/)).toBeTruthy();
     expect(getByText(/unreachable · checked just now/)).toBeTruthy();
     expect(
@@ -344,6 +349,35 @@ describe("ResourcesPanel", () => {
     );
     expect(getByText(/1 context resource · used in 1 project$/)).toBeTruthy();
     expect(getByText(/2 context resources · used in 3 projects$/)).toBeTruthy();
+  });
+
+  /**
+   * F15-05 guard: a profile created with nothing granted counts ZERO context
+   * resources — the row never invents one. (Live, two org profiles DID carry a
+   * `reviewer-expertise` grant in their template files; the count was reading
+   * the store faithfully, and this pins that it keeps doing so.)
+   */
+  it("a profile with no granted resources reads '0 context resources'", () => {
+    const { getByText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={[
+          {
+            ...GAGENTS[0]!,
+            id: "docs-writer",
+            name: "Docs writer",
+            skills: [],
+            mcps: [],
+            kbs: [],
+            used: 0,
+          },
+        ]}
+        stages={STAGES}
+      />,
+    );
+    expect(getByText(/0 context resources · not deployed$/)).toBeTruthy();
   });
 
   it("renders a stale health check as amber (not a fresh-green 'up') with a retest hint", () => {
@@ -441,7 +475,7 @@ describe("ResourcesPanel", () => {
     // nothing, because only six text extensions ever reach a run.
     expect(
       getByText(
-        "store://kb/architecture-notes/ · 2 docs agents read · 1 non-text file skipped",
+        "store://kb/architecture-notes/ · 2 docs · agents read the live folder · 1 non-text file skipped",
       ),
     ).toBeTruthy();
   });
@@ -639,5 +673,62 @@ describe("SkillModal — one entry point, two content modes", () => {
         contentMode: "write",
       }),
     );
+  });
+});
+
+describe("resources tab badge counts resources, not resources+templates", () => {
+  it("shows the resource count and discloses profiles in the tooltip", () => {
+    const { getByRole } = renderPanel(
+      <OrgSettingsPage
+        view={{
+          connections: CONNECTIONS,
+          users: [ME],
+          domains: DOMAINS,
+          kbs: KBS,
+          mcps: MCPS,
+          skills: SKILLS,
+          gagents: GAGENTS,
+          stages: STAGES,
+        }}
+        meId={ME.id}
+      />,
+    );
+    // 1 KB + 2 MCP + 1 skill = 4. It used to add the 2 agent templates and
+    // read 6 — a number the Home tile presents as a separate concept.
+    const tab = getByRole("button", { name: /Agent resources/ });
+    const badge = tab.querySelector(".count")!;
+    expect(badge.textContent).toBe("4");
+    expect(badge.getAttribute("title")).toContain("2 agent profiles");
+  });
+});
+
+describe("R15-13: instance settings name their scope, not a project's name", () => {
+  it("titles itself 'Instance settings' — never the product name", () => {
+    // "Viberr settings" collided with a PROJECT named Viberr: the surface that
+    // is NOT about that project was the one carrying its name, while the
+    // project's own settings page said only "Settings". Both now answer
+    // "settings for what?" on their own, like every other heading in the app.
+    // Canary: put "Viberr settings" back and both halves fail.
+    const { container } = renderPanel(
+      <OrgSettingsPage
+        view={{
+          connections: CONNECTIONS,
+          users: [ME],
+          domains: DOMAINS,
+          kbs: KBS,
+          mcps: MCPS,
+          skills: SKILLS,
+          gagents: GAGENTS,
+          stages: STAGES,
+        }}
+        meId={ME.id}
+      />,
+    );
+    const h1s = container.querySelectorAll("h1");
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.textContent).toBe("Instance settings");
+    expect(h1s[0]!.textContent).not.toContain("Viberr");
+    // The subtitle already carried the scope; it must keep doing so.
+    expect(container.textContent).toContain("Instance level — shared by every project");
   });
 });

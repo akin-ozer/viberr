@@ -11,6 +11,45 @@ import {
   patchRun,
 } from "./run-store.server";
 
+/** Terminal run states — reaching one is the run's final answer. */
+const TERMINAL_STATES: readonly RunState[] = ["finished", "error", "interrupted"];
+
+/**
+ * B-FD7: the FIRST terminal state a run reaches is its outcome.
+ *
+ * `finalize` used to overwrite the state unconditionally, so a run another
+ * writer had already stamped `interrupted` (the "no live handle" path in
+ * `interruptRun`, taken whenever the interrupting process is not the one
+ * driving the adapter — the two-processes-one-data-root shape, or a stop issued
+ * after a restart) came back as `finished`/`error` when the still-live adapter
+ * exited. The recorded human intervention lost to a race with the thing it was
+ * stopping. Precedence, not ordering, decides now.
+ */
+export function resolveTerminalState(
+  current: RunState | null,
+  desired: RunState,
+): RunState {
+  return current !== null && TERMINAL_STATES.includes(current) ? current : desired;
+}
+
+function currentRunState(db: DatabaseSync, runId: string): RunState | null {
+  try {
+    const row = db
+      .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
+      .get(runId) as { state: RunState } | undefined;
+    return row?.state ?? null;
+  } catch {
+    // An unreadable row must not stop a run from finalizing; the desired state
+    // is then the best information available.
+    return null;
+  }
+}
+
+/** The `err` tag marking a run whose DB projection is missing lines the raw
+ *  `.jsonl` has. Mirrors `run·session_missing`: a durable classified line, no
+ *  column, no migration. */
+export const LINE_LOST_TAG = "run·line_lost";
+
 /**
  * The RunSink turns adapter callbacks into durable state + live SSE. For
  * every emitted line it: (1) redacts secrets from the line (P13-U-1),
@@ -139,6 +178,58 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
     });
   };
 
+  /**
+   * B-FD7: a persist failure used to be logged to stdout and nothing else — the
+   * console silently missed a line the raw `.jsonl` has, while the footer count
+   * (read from the DB) claimed completeness. Record the divergence ON the run,
+   * once, so a reader of the log sees that it is incomplete. Best-effort by
+   * construction: the failure we are reporting may be the same one that stops
+   * us reporting it.
+   */
+  let divergenceReported = false;
+  const markDivergent = (cause: unknown) => {
+    if (divergenceReported) return;
+    divergenceReported = true;
+    const now = new Date().toISOString();
+    const text =
+      "At least one line of this run could not be written to the projection database, so this console is INCOMPLETE — the run's raw .jsonl transcript under the data root holds the full stream.";
+    const raw = JSON.stringify({
+      type: "error",
+      source: "viberr",
+      reason: "line_lost",
+      message: text,
+      cause: cause instanceof Error ? cause.message : String(cause),
+    });
+    try {
+      appendRawLine(effectiveBackend, spec.runId, raw);
+    } catch {
+      // The raw file is the failing half in this branch — the DB marker below
+      // is then the only surface left.
+    }
+    try {
+      const seq = nextSeq(db, spec.runId);
+      insertRunLine(db, {
+        runId: spec.runId,
+        seq,
+        occurredAt: now,
+        raw,
+        display: { t: now.slice(11, 19), ev: "err", tag: LINE_LOST_TAG, text },
+      });
+      publishRunLogAppended({
+        projectSlug: spec.projectSlug,
+        taskKey: spec.taskKey,
+        runId: spec.runId,
+        threadId: spec.threadId,
+        seq,
+      });
+    } catch (error) {
+      logger.error("run divergence marker could not be persisted", {
+        runId: spec.runId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  };
+
   return {
     markRunning(startedAtIso?: string) {
       if (started) return;
@@ -213,21 +304,35 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
           runId: spec.runId,
           err: error instanceof Error ? error : new Error(String(error)),
         });
+        markDivergent(error);
       }
     },
 
     finalize(exit: RunExit, byInterrupt?: { userId: string }) {
       if (exit.sessionId) sessionId = exit.sessionId;
-      const state: RunState =
+      const desired: RunState =
         exit.outcome === "finished"
           ? "finished"
           : exit.outcome === "error"
             ? "error"
             : "interrupted";
       effectiveBackend = exit.effectiveBackend;
+      // B-FD7: never demote an already-terminal run. Another writer (a human's
+      // interrupt taking the no-live-handle path) got there first and its
+      // finish time is the real one, so neither the state nor `finishedAt` is
+      // restamped; the facts this exit carries (session id) still land.
+      const current = currentRunState(db, spec.runId);
+      const state = resolveTerminalState(current, desired);
+      if (state !== desired) {
+        logger.warn("run already terminal at finalize — keeping the recorded outcome", {
+          runId: spec.runId,
+          recorded: state,
+          adapterOutcome: desired,
+        });
+      }
       patchRun(db, spec.runId, {
         state,
-        finishedAt: new Date().toISOString(),
+        ...(state === desired ? { finishedAt: new Date().toISOString() } : {}),
         sessionId,
         phase: null,
         step: null,

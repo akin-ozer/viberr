@@ -71,4 +71,11 @@ EXPOSE 3000
 ENTRYPOINT ["sh", "/app/scripts/docker-entrypoint.sh"]
 
 # react-router-serve honors $PORT (default above: 3000).
-CMD ["npm", "run", "start"]
+#
+# The server binary directly, NOT `npm run start`: with npm in between, npm is
+# pid 1 and node is its child, and a `docker compose stop` SIGTERM never
+# reaches node. That is not cosmetic — node's shutdown handler is what
+# checkpoints the WAL and RELEASES the data-root writer lock (B-FD1), so an
+# npm-wrapped server left a lock file behind on every stop and the next boot
+# could refuse to start. `exec` in the entrypoint makes this pid 1.
+CMD ["node", "/app/node_modules/@react-router/serve/bin.cjs", "./build/server/index.js"]

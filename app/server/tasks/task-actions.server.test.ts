@@ -15,6 +15,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { insertUser } from "~/server/auth/user-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { setPref } from "~/server/prefs/user-prefs.server";
@@ -398,6 +399,52 @@ describe("appendComment", () => {
     });
   });
 
+  /**
+   * B-FD2 (H3): the ladder drops a handle that matches several people, so the
+   * comment reached nobody. The author is the only one who can retag and is
+   * still on the page, so the non-delivery lands beside their comment instead
+   * of being visible only in the fan-out's return value.
+   */
+  it("a HUMAN comment whose @handle matches two people carries the non-delivery note", async () => {
+    const store = prepared();
+    withTask(store);
+    insertUser(store.db, {
+      id: "u_arda_second",
+      email: "arda.yilmaz@viberr.test",
+      name: "Arda Yilmaz",
+      role: "member",
+    });
+    const firstName = store.users.arda.name.split(" ")[0]!.toLowerCase();
+    const result = await appendComment(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: `@${firstName} can you take the acceptance gate?`,
+      },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.mentionedUserIds).toEqual([]);
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    const note = timeline.find((e) => e.type === "note");
+    expect(note, "the dropped mention must be visible").toBeTruthy();
+    expect(note!.text).toContain(`@${firstName}`);
+    expect(note!.text).toContain("nobody was notified");
+    expect(note!.actor).toMatchObject({ kind: "system", systemId: "policy-engine" });
+    // The comment itself is still recorded, unmodified.
+    expect(
+      timeline.find((e) => e.type === "comment")!.text,
+    ).toBe(`@${firstName} can you take the acceptance gate?`);
+    expect(
+      store.db.prepare(`SELECT COUNT(*) c FROM notifications`).get() as { c: number },
+    ).toMatchObject({ c: 0 });
+  });
+
   // NEW-4: an AGENT reply that tags a human must fan out the same `mention`
   // notification a human comment would — otherwise the tag the agents are now
   // instructed to write pings no one. The `from` chip is the agent, not a human.
@@ -420,6 +467,38 @@ describe("appendComment", () => {
     expect(rows[0]!.kind).toBe("mention");
     // Attributed to the reviewer agent (kind agent + backend), NOT a human.
     expect(JSON.parse(rows[0]!.actor_json!)).toMatchObject({ kind: "agent", backend: "claude" });
+  });
+
+  // S5-G3: same reply, ambiguous handle. The agent was told to tag the person
+  // it answers; when that tag routes to nobody the reply itself has to say so,
+  // because the agent cannot retag and nothing else reports it.
+  it("an agent reply whose @tag is ambiguous discloses the non-delivery in the reply", async () => {
+    const store = prepared();
+    withTask(store);
+    insertUser(store.db, {
+      id: "u_arda_second",
+      email: "arda.yilmaz@viberr.test",
+      name: "Arda Yilmaz",
+      role: "member",
+    });
+    const firstName = store.users.arda.name.split(" ")[0]!.toLowerCase();
+    await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      runId: "run_test_ambiguous",
+      actorRef: REVIEWER_REF,
+      replyText: `@${firstName} the review is clean — over to you for acceptance.`,
+    });
+    const reply = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.actor.kind === "agent")!;
+    expect(reply.text).toContain("the review is clean");
+    expect(reply.text).toContain("nobody was notified");
+    expect(
+      store.db.prepare(`SELECT COUNT(*) c FROM notifications`).get() as { c: number },
+    ).toMatchObject({ c: 0 });
   });
 });
 
@@ -465,6 +544,50 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
       kind: "agent",
       name: "Operator",
     });
+  });
+
+  // S5-G3: the POSTED directive discloses an ambiguous tag; the RUN's directive
+  // stays the operator's own words (the note addresses the humans reading the
+  // timeline, not the agent about to work).
+  it("discloses an ambiguous @tag on the posted directive without notifying anyone", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    insertUser(store.db, {
+      id: "u_arda_second",
+      email: "arda.yilmaz@viberr.test",
+      name: "Arda Yilmaz",
+      role: "member",
+    });
+    const firstName = store.users.arda.name.split(" ")[0]!.toLowerCase();
+    await expect(
+      operatorPromptAgent(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          role: "developer",
+          backend: "claude",
+          directive: `Implement the fix and coordinate with @${firstName} on the copy.`,
+          kind: "primary",
+          handle: "dev",
+        },
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toBeTruthy();
+
+    const posted = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.actor.kind === "operator" && e.type === "comment")!;
+    expect(posted.text).toContain("coordinate with");
+    expect(posted.text).toContain("nobody was notified");
+    expect(
+      store.db.prepare(`SELECT COUNT(*) c FROM notifications`).get() as { c: number },
+    ).toMatchObject({ c: 0 });
   });
 });
 

@@ -17,9 +17,10 @@ import {
   setBackendAvailability,
   type AdapterSet,
 } from "./runtime-registry.server";
-import { insertRunLine } from "./run-store.server";
+import { insertRunLine, upsertRun } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import {
+  executeStrandedCodexPlan,
   operatorPlanToolsFor,
   resetOperatorLeasesForTests,
   runOperator,
@@ -397,6 +398,40 @@ describe("Codex structured operator completion", () => {
     expect(titles).not.toContain("Send back to the specialist for changes");
   });
 
+  // B-OP4: the flat Codex plan may leave `packetOptions` null on a genuine
+  // multi-way decision. The fallback card then offered only "send back" and
+  // "redirect" — neither of which is the real answer to "which of these should
+  // we do?", so the human had to pick a wrong option or leave it open.
+  it("B-OP4: the fallback INPUT packet offers a free-form option too", async () => {
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Which config should this target?",
+            reason: "The task names no specific endpoint.",
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      expect(task().packet).not.toBeNull();
+    });
+    const options = task().packet!.options;
+    expect(options.map((o) => o.kind)).toContain("custom");
+    expect(options.find((o) => o.kind === "custom")!.t).toContain("Something else");
+  });
+
   // P14-RT-04 / KM-02: P13-KM-03 wired the operator's declared org MCP servers
   // into the CLAUDE toolkit only, so `startCodexOperatorRun` passed none and
   // `codexConfigForRun` wrote `mcp_servers: {}` — the same grant was real on one
@@ -476,6 +511,7 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
       mcps: [],
       persona: null,
       deployed: true,
+      humanGatedBeforeWork: false,
     };
   }
 
@@ -514,7 +550,27 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
   it("an all-denied operator falls back to the full list (an enum may not be empty)", () => {
     // A misconfiguration rather than an expressible run shape — every action it
     // then proposes is refused VISIBLY by the executor rather than silently.
-    expect(operatorPlanToolsFor(authority({}))).toHaveLength(9);
+    // R15-2: `deliver-review-pr` must be EXPLICITLY off here — an absent grant
+    // means granted (the capability postdates live deployments).
+    expect(
+      operatorPlanToolsFor(authority({ "deliver-review-pr": "off" })),
+    ).toHaveLength(10);
+  });
+
+  it("R15-2: deliver_for_review is offered when the grant is absent (absent = granted), withheld only when explicitly off", () => {
+    // Fails on pre-R15-2 main twice over: the tool did not exist, and a plain
+    // gate() would read an absent grant as deny.
+    expect(operatorPlanToolsFor(authority({ "append-typed-events": "direct" }))).toContain(
+      "deliver_for_review",
+    );
+    expect(
+      operatorPlanToolsFor(
+        authority({
+          "append-typed-events": "direct",
+          "deliver-review-pr": "off",
+        }),
+      ),
+    ).not.toContain("deliver_for_review");
   });
 });
 
@@ -888,5 +944,413 @@ describe("transition trigger carries from → to and who moved it", () => {
       { fromName: "Review", toName: "In Progress", byHuman: "Arda" },
     );
     expect(prompt).toContain('A human (Arda) moved this task');
+  });
+});
+
+/* ---------------- triage quality gate + scheduled origin (F15-14 / B-WF3) --------------- */
+
+describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
+  const snap = (
+    over: Partial<import("~/server/tasks/operator-actions.server").OperatorTaskSnapshot> = {},
+  ): import("~/server/tasks/operator-actions.server").OperatorTaskSnapshot => ({
+    key: "VIB-6",
+    title: "Improve the docs",
+    // The live goal that sailed through the gate: no file, no change, no
+    // acceptance criteria — and NOT the unspecified placeholder, so the
+    // goal-drafting branch never fired either.
+    goal: "The documentation could be improved. Make it better.",
+    stage: "triage",
+    stageName: "Triage",
+    readiness: "ready",
+    waiting: "human",
+    owner: null,
+    specialist: null,
+    reviewers: [],
+    nextStages: [{ id: "ready", name: "Ready", boundary: "auto" }],
+    stageIds: ["triage", "ready", "impl", "review", "done"],
+    doneStageId: "done",
+    reviewStageId: "review",
+    workStageId: "impl",
+    deployedSpecialists: [],
+    openPacket: false,
+    packet: null,
+    recentTimeline: [],
+    pr: null,
+    branch: null,
+    liveRuns: [],
+    autonomy: "supervised" as OperatorAutonomy,
+    policy: {},
+    ...over,
+  });
+
+  it("F15-14: the entry stage carries the gate — no forward move on a vague goal", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
+    expect(prompt).toContain("TRIAGE QUALITY GATE");
+    expect(prompt).toContain("MUST NOT `transition_stage` forward");
+    expect(prompt).toContain("`set_goal`");
+    expect(prompt).toContain("2–4 concrete scopes");
+    // Advancing requires SAYING why the goal is concrete.
+    expect(prompt).toContain("name the deliverable and the acceptance signal");
+  });
+
+  it("F15-14: the gate is stage-scoped — a work stage never carries it", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(
+      snap({ stage: "impl", stageName: "In Progress", goal: "Ship the parser." }),
+      "transition",
+    );
+    expect(prompt).not.toContain("TRIAGE QUALITY GATE");
+  });
+
+  it("F15-14: the Codex plan prompt carries the same gate", () => {
+    const prompt = operatorPrompts.buildCodexOperatorPrompt(snap(), "create");
+    expect(prompt).toContain("TRIAGE QUALITY GATE");
+    expect(prompt).toContain("MUST NOT `transition_stage` forward");
+  });
+
+  it("F15-14: the GOAL-EDIT turn carries the gate — a still-vague edit buys no move", () => {
+    // The turn right after a human edits a vague goal is where the gate is most
+    // needed, and it had its own branch that returned before the gate spliced in.
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "goal-updated");
+    expect(prompt).toContain("The goal was edited");
+    expect(prompt).toContain("TRIAGE QUALITY GATE");
+    expect(prompt).toContain("MUST NOT `transition_stage` forward");
+    // Still stage-scoped: a work-stage goal edit gets the plain branch.
+    expect(
+      operatorPrompts.buildOperatorTurnPrompt(
+        snap({ stage: "impl", stageName: "In Progress", goal: "Ship the parser." }),
+        "goal-updated",
+      ),
+    ).not.toContain("TRIAGE QUALITY GATE");
+  });
+
+  it("F15-14: the Codex goal-edit turn carries it too", () => {
+    const prompt = operatorPrompts.buildCodexOperatorPrompt(snap(), "goal-updated");
+    expect(prompt).toContain("TRIAGE QUALITY GATE");
+  });
+
+  it("S3-1: a question answered while a packet is open must not open a SECOND one", () => {
+    // Each queued question drains as its own governed turn and
+    // `open_decision_packet` REPLACES the open packet — the human answering the
+    // first is then told their decision "was replaced by a newer one".
+    const withPacket = operatorPrompts.buildOperatorTurnPrompt(
+      snap({ stage: "impl", stageName: "In Progress", openPacket: true }),
+      "manual",
+      "@operator should we ship without the migration?",
+      undefined,
+      "Arda",
+    );
+    expect(withPacket).toContain("A decision packet is ALREADY OPEN");
+    expect(withPacket).toContain("REPLACES the open one");
+    expect(withPacket).toContain("ONE reply that answers everything quoted");
+    // No open packet → no clause, so the turn never invents a packet to defer to.
+    expect(
+      operatorPrompts.buildOperatorTurnPrompt(
+        snap({ stage: "impl", stageName: "In Progress" }),
+        "manual",
+        "@operator should we ship without the migration?",
+        undefined,
+        "Arda",
+      ),
+    ).not.toContain("A decision packet is ALREADY OPEN");
+  });
+
+  it("B-WF3: a scheduled run says so and quotes the note that scheduled it", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(
+      snap({ stage: "impl", stageName: "In Progress" }),
+      "scheduled",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "re-check whether CI went green",
+    );
+    expect(prompt).toContain("SCHEDULED re-check");
+    expect(prompt).toContain('"re-check whether CI went green"');
+    // A bare tick is not new evidence.
+    expect(prompt).toContain("not new evidence by itself");
+  });
+
+  it("B-WF3: a scheduled run with no note still names its origin", () => {
+    const prompt = operatorPrompts.buildCodexOperatorPrompt(
+      snap({ stage: "impl", stageName: "In Progress" }),
+      "scheduled",
+    );
+    expect(prompt).toContain("SCHEDULED re-check");
+    expect(prompt).toContain("no stated reason");
+  });
+});
+
+/* -------- queued triggers: a human's question is never overwritten (B-OP2) -------- */
+
+describe("pending trigger queue", () => {
+  let ctx3: TestDbContext;
+  let store3: TestStore;
+  let adapter3: ControlledAdapter;
+
+  const seedOperatorProject = (): void => {
+    const project = readProjectFile({
+      projectSlug: store3.slug,
+      dataRoot: store3.dataRoot,
+    })!;
+    writeProject(store3.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: OPERATOR_POLICY,
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ] as never,
+    });
+  };
+
+  beforeEach(() => {
+    ctx3 = createTestDbContext();
+    store3 = setupTestStore(ctx3);
+    seedOperatorProject();
+    // A work stage (impl → review is an APPROVAL boundary), so nothing here is
+    // "stranded" and the only re-runs are the queued triggers under test.
+    writeTask(store3.dataRoot, store3.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        waiting: "agent",
+        ownerUserId: store3.users.arda.id,
+      }),
+      goal: "Ship the parser.",
+    });
+    rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
+    resetSseBrokerForTests();
+    resetOperatorLeasesForTests();
+    adapter3 = new ControlledAdapter();
+    configureRunServiceForTests({ claude: adapter3, codex: adapter3 });
+    setBackendAvailability("codex", true);
+  });
+
+  afterEach(() => {
+    resetOperatorLeasesForTests();
+    resetSseBrokerForTests();
+    ctx3.cleanup();
+  });
+
+  const drive = (over: Partial<Parameters<typeof runOperator>[1]> = {}) =>
+    runOperator(store3.db, {
+      projectSlug: store3.slug,
+      taskKey: "VIB-1",
+      backend: "codex",
+      autonomy: "supervised",
+      dataRoot: store3.dataRoot,
+      ...over,
+    });
+
+  const emptyPlan = JSON.stringify({ reasoning: "Nothing to do.", actions: [] });
+  const operatorRuns = () =>
+    store3.db
+      .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
+      .all() as { id: string }[];
+
+  it("B-OP2: a queued @operator question survives a later machine trigger", async () => {
+    await drive({ trigger: "manual" });
+    expect(adapter3.pending).not.toBeNull();
+
+    // A human asks the operator something WHILE a drive holds the lease…
+    await drive({
+      trigger: "manual",
+      humanComment: "@operator why is this still in progress?",
+      humanCommentBy: "Arda",
+    });
+    // …and a machine trigger lands behind it. Newest-wins used to overwrite the
+    // question here, so the person was never answered at all.
+    await drive({
+      trigger: "transition",
+      transitionFromName: "Ready",
+      transitionToName: "In Progress",
+    });
+
+    adapter3.finish(store3, emptyPlan, "finished");
+
+    // The HUMAN's trigger fires first, question intact.
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(2);
+      expect(adapter3.pending?.spec.prompt).toContain(
+        "why is this still in progress?",
+      );
+    });
+    expect(adapter3.pending?.spec.prompt).toContain('tag them "@Arda"');
+
+    // The machine trigger is still queued behind it — nothing was lost either way.
+    adapter3.finish(store3, emptyPlan, "finished");
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(3);
+      expect(adapter3.pending?.spec.prompt).toContain(
+        'moved this task from "Ready" to "In Progress"',
+      );
+    });
+  });
+
+  it("S3-1: consecutive questions from the SAME human are ONE turn", async () => {
+    await drive({ trigger: "manual" });
+    await drive({
+      trigger: "manual",
+      humanComment: "@operator first question",
+      humanCommentBy: "Arda",
+    });
+    await drive({
+      trigger: "manual",
+      humanComment: "@operator and while you are at it, the second",
+      humanCommentBy: "Arda",
+    });
+
+    adapter3.finish(store3, emptyPlan, "finished");
+    // ONE follow-up drive carrying BOTH messages — not two governed turns, each
+    // able to open a packet that replaces the other's.
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(2);
+      expect(adapter3.pending?.spec.prompt).toContain("first question");
+    });
+    expect(adapter3.pending?.spec.prompt).toContain("the second");
+
+    adapter3.finish(store3, emptyPlan, "finished");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(operatorRuns()).toHaveLength(2);
+    expect(adapter3.pending).toBeNull();
+  });
+
+  it("B-OP2: two queued questions both get a turn, oldest first", async () => {
+    await drive({ trigger: "manual" });
+    await drive({
+      trigger: "manual",
+      humanComment: "@operator first question",
+      humanCommentBy: "Arda",
+    });
+    await drive({
+      trigger: "manual",
+      humanComment: "@operator second question",
+      humanCommentBy: "Murat",
+    });
+
+    adapter3.finish(store3, emptyPlan, "finished");
+    await eventually(() => {
+      expect(adapter3.pending?.spec.prompt).toContain("first question");
+    });
+    adapter3.finish(store3, emptyPlan, "finished");
+    await eventually(() => {
+      expect(adapter3.pending?.spec.prompt).toContain("second question");
+    });
+  });
+});
+
+/* ---- cross-boot stranded-plan recovery resumes an auto stage (B-OP3) ---- */
+
+describe("stranded codex plan recovery", () => {
+  let ctx4: TestDbContext;
+  let store4: TestStore;
+  let adapter4: ControlledAdapter;
+
+  beforeEach(() => {
+    ctx4 = createTestDbContext();
+    store4 = setupTestStore(ctx4);
+    const project = readProjectFile({
+      projectSlug: store4.slug,
+      dataRoot: store4.dataRoot,
+    })!;
+    writeProject(store4.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: OPERATOR_POLICY,
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ] as never,
+    });
+    // The cross-boot shape: an AUTO stage (triage → ready) the restart left
+    // idle, with no packet and no recommendation for a human to act on.
+    writeTask(store4.dataRoot, store4.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "triage",
+        readiness: "ready",
+        waiting: "agent",
+        ownerUserId: store4.users.arda.id,
+      }),
+      goal: "Add the changelog entry for 2.4.",
+    });
+    rebuildAll(store4.db, { dataRoot: store4.dataRoot, force: true });
+    resetSseBrokerForTests();
+    resetOperatorLeasesForTests();
+    adapter4 = new ControlledAdapter();
+    configureRunServiceForTests({ claude: adapter4, codex: adapter4 });
+    setBackendAvailability("codex", true);
+  });
+
+  afterEach(() => {
+    resetOperatorLeasesForTests();
+    resetSseBrokerForTests();
+    ctx4.cleanup();
+  });
+
+  it("B-OP3: a plan replayed after a restart still resumes the stranded stage", async () => {
+    // A previous boot's operator run: finished, its plan never executed.
+    upsertRun(store4.db, {
+      id: "run_prev_boot",
+      taskKey: "VIB-1",
+      projectSlug: store4.slug,
+      threadId: "op-prevboot",
+      role: "Operator",
+      kind: "operator",
+      backend: "codex",
+      agentProfileId: "operator",
+      model: defaultModelFor("codex"),
+      sdk: "Codex SDK",
+      state: "finished",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+    } as Parameters<typeof upsertRun>[1]);
+    insertRunLine(store4.db, {
+      runId: "run_prev_boot",
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: "{}",
+      display: {
+        t: "1",
+        ev: "text",
+        tag: "agent_message",
+        // A plan that changes nothing: the exact shape that used to leave the
+        // task stamped "waiting on a human" at an auto stage forever, because
+        // the recovery path passed stageAtStart: null and switched the
+        // stranded-resume backstop off.
+        text: JSON.stringify({ reasoning: "", actions: [] }),
+      },
+    });
+
+    const executed = await executeStrandedCodexPlan(
+      store4.db,
+      { dataRoot: store4.dataRoot },
+      { projectSlug: store4.slug, taskKey: "VIB-1", runId: "run_prev_boot" },
+    );
+    expect(executed).toBe(true);
+
+    // The backstop drives the task again instead of leaving the auto stage idle.
+    await eventually(() => {
+      const runs = store4.db
+        .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
+        .all() as { id: string }[];
+      expect(runs).toHaveLength(2);
+      expect(adapter4.pending).not.toBeNull();
+    });
   });
 });

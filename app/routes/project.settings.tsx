@@ -23,6 +23,7 @@ import {
   renameStage,
   reorderStages,
   repairProjectRepo,
+  setBranchCleanup,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
 import { getSettingsViewData } from "~/features/project-settings/settings-query.server";
@@ -80,7 +81,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         return { ok: true as const, toast: result.toast };
       }
       case "add-stage": {
-        const result = await addStage(db, { projectSlug: slug }, actor);
+        const result = await addStage(
+          db,
+          { projectSlug: slug, name: field("name") },
+          actor,
+        );
         return {
           ok: true as const,
           toast: result.toast,
@@ -138,6 +143,15 @@ export async function action({ request, params }: Route.ActionArgs) {
             repo: field("repo"),
             confirmFootprint: field("confirmFootprint") === "1",
           },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      // R15-6: post-merge branch cleanup, per project (default on).
+      case "set-branch-cleanup": {
+        const result = await setBranchCleanup(
+          db,
+          { projectSlug: slug, enabled: field("enabled") === "1" },
           actor,
         );
         return { ok: true as const, toast: result.toast };

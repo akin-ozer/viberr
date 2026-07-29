@@ -92,7 +92,9 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       },
     },
     {
-      direct: ["Assign the primary specialist", "Summon reviewer specialists", "Generate decision & blocking packets", "Append typed important events"],
+      // R15-2: delivery (push + review PR) is an operator decision — direct in
+      // the shipped template (the Strict preset maps it to recommend).
+      direct: ["Assign the primary specialist", "Summon reviewer specialists", "Generate decision & blocking packets", "Append typed important events", "Deliver the branch & open the review PR"],
       recommend: ["Stage transitions", "Accept completion into Done"],
       forbidden: ["Execute code or write to the repo", "Transition a task to Done", "Change project policy"],
     },

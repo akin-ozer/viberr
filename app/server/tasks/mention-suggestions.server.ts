@@ -14,15 +14,19 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  *
  *   - agents   : the task/project's deployed specialists. The composer's
  *                handle is the specialist's `id` (space-free and stable); the
- *                resolver matches on name / id / backend, and multi-word names
- *                now resolve whole (P13-LV-11).
+ *                resolver matches on name or id, and multi-word names resolve
+ *                whole (P13-LV-11). A BACKEND handle is not an agent name: it
+ *                resolves only while exactly one specialist runs on that
+ *                backend (B-AG2), which is why the reserved group below is
+ *                derived from the deployment rather than fixed.
  *   - users    : project members + every registered app user, keyed by the
  *                handle the fan-out resolves on: the email local-part (before
  *                `@`) OR the first name, both lowercased. We surface the email
  *                local-part as the canonical handle (stable, unambiguous) and
  *                keep name for the row label + Avatar initials.
- *   - reserved : the generic backend/role handles the routing regex honours —
- *                `operator`, `agent`, `claude`, `codex` — with a short label.
+ *   - reserved : the generic role/backend handles the routing regex honours —
+ *                `operator`, `agent`, and the backend handles that still name
+ *                ONE agent here — with a short label.
  *
  * This is READ-ONLY loader data: it never mutates the store. It is a NEW file
  * so the sibling *.server.ts mutation modules stay untouched.
@@ -52,14 +56,47 @@ export interface Mentionables {
   reserved: MentionableReserved[];
 }
 
-/** The generic backend/role handles, in the order the composer lists them.
- *  Mirrors task-actions.server.ts `RESERVED_HANDLES`. */
-const RESERVED: MentionableReserved[] = [
+/** The role handles that route regardless of what is deployed. Mirrors
+ *  task-actions.server.ts `RESERVED_HANDLES`; the backend handles are appended
+ *  per project by `backendHandles` below. */
+const RESERVED_ROLES: MentionableReserved[] = [
   { handle: "operator", label: "Operator" },
   { handle: "agent", label: "Primary specialist" },
-  { handle: "claude", label: "Claude specialist" },
-  { handle: "codex", label: "Codex specialist" },
 ];
+
+const BACKEND_LABEL: Record<RealBackend, string> = {
+  claude: "Claude",
+  codex: "Codex",
+};
+
+/**
+ * The backend handles this project can still be tagged by, with the profile
+ * each one reaches.
+ *
+ * B-AG2: `@claude` names a RUNTIME, not an agent, so it engages nobody once two
+ * claude profiles are deployed. The composer used to offer it unconditionally,
+ * so on exactly that project every suggested `@claude` produced a comment that
+ * routed nowhere — the suggestion promised a target the resolver refuses. An
+ * ambiguous backend is therefore not offered at all (its profiles are listed
+ * individually in the agents group, which is what the human must tag); an
+ * unambiguous one names the specialist it reaches so the promise is checkable.
+ */
+function backendHandles(
+  specialists: readonly { name: string; backend: RealBackend }[],
+): MentionableReserved[] {
+  const out: MentionableReserved[] = [];
+  for (const backend of ["claude", "codex"] as const) {
+    const covered = specialists.filter((sp) => sp.backend === backend);
+    if (covered.length > 1) continue;
+    out.push({
+      handle: backend,
+      label: covered[0]
+        ? `${BACKEND_LABEL[backend]} specialist — ${covered[0].name}`
+        : `${BACKEND_LABEL[backend]} specialist`,
+    });
+  }
+  return out;
+}
 
 /** Email local-part (before the first `@`), lowercased — the handle the
  *  server's mention fan-out resolves users on. */
@@ -131,5 +168,9 @@ export function getMentionables(
     users.push({ handle, name: u.name, email: u.email });
   }
 
-  return { agents, users, reserved: RESERVED };
+  return {
+    agents,
+    users,
+    reserved: [...RESERVED_ROLES, ...backendHandles(agents)],
+  };
 }

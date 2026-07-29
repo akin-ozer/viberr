@@ -43,7 +43,15 @@ const M = "maintainer" as const;
 const C = "contributor" as const;
 const V = "viewer" as const;
 
-/** One source for enforcement and the Policy/Profile permission tables. */
+/**
+ * One source for enforcement and the Policy/Profile permission tables.
+ *
+ * `appWide` means NOT ROLE-GATED — every project role holds it, including
+ * viewer. Since R15-4 it does NOT mean "membership not required": projects are
+ * members-only, so view/comment reach exactly as far as the project does
+ * (routes/project's loader and `requireVisibleProject` on the action side both
+ * refuse a non-member with the unknown-slug 404).
+ */
 export const RBAC_DEFINITIONS = [
   { id: "view", label: "View board, tasks & timelines", roles: [A, M, C, V], appWide: true },
   { id: "comment", label: "Comment on tasks", roles: [A, M, C, V], appWide: true },

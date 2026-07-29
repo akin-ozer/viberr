@@ -345,6 +345,59 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
     expect(await validatePat(store.db, "pat_missing", {})).toBeNull();
   });
 
+  it("B-GH8: a WRITE violation survives read-only evidence — 'assumed' never clears it", async () => {
+    // Fails before B-GH8: the sweep resolved every violation whose scope the
+    // fresh run reported `ok`, including `ok: true, source: "assumed"`. For a
+    // fine-grained token whose write dry-run never answered, "Grant scope"
+    // turned "we don't know" into "granted" and the human found out at the
+    // next failed delivery.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-142", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    openScopeViolation(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      scope: "pull_request:write",
+      detail: "Project credential is missing pull_request:write.",
+    });
+    const actor = { userId: store.users.arda.id, label: "arda" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: FINE },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+
+    // READ works; the write dry-run answers 500 — unknown, not proof.
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+      "GET /user/orgs": { body: [] },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+      "PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe": {
+        status: 500,
+        body: { message: "boom" },
+      },
+      "POST /repos/akin-ozer/viberr/pulls": { status: 500, body: { message: "boom" } },
+    });
+    const result = await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("revalidated");
+    if (result.status === "revalidated") {
+      expect(result.resolvedViolations).toHaveLength(0);
+    }
+    expect(
+      findOpenScopeViolation(store.db, store.slug, "pull_request:write", "VIB-142"),
+    ).not.toBeNull();
+  });
+
   it("grant flow: revalidation resolves the seeded VIB-142 violation and writes the policy event", async () => {
     const store = setupTestStore(ctx); // slug = viberr-core
     writeTask(store.dataRoot, store.slug, {
@@ -387,14 +440,27 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
     expect(offline.status).toBe("network_unavailable");
     expect(countOpenPolicyViolations(store.db, store.slug)).toBe(1);
 
-    // Healthy validation (fine-grained: pull_request:write is assumed
-    // granted per the documented optimistic contract) → violation resolves,
-    // typed policy event lands on VIB-142, projections update.
+    // Healthy validation → violation resolves, typed policy event lands on
+    // VIB-142, projections update.
+    //
+    // B-GH8: a WRITE scope now needs WRITE evidence. The dry-run probes are
+    // what supply it — an empty payload GitHub authorizes before validating,
+    // so 422 means "the permission is held". Without them this token proves
+    // only READ and the `pull_request:write` violation correctly stays open
+    // (asserted in its own test below).
     const gh = fakeGithubFetch({
       "GET /user": { body: { login: "viberr-bot" } },
       "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
       "GET /user/orgs": { body: [] },
       "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+      "PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe": {
+        status: 422,
+        body: { message: "Validation Failed" },
+      },
+      "POST /repos/akin-ozer/viberr/pulls": {
+        status: 422,
+        body: { message: "Validation Failed" },
+      },
     });
     const result = await revalidateProjectCredential(store.db, store.slug, actor, {
       dataRoot: store.dataRoot,

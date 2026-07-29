@@ -33,7 +33,19 @@ function RQRow({
 }) {
   const sub = reviewRowSub(t);
   return (
-    <button type="button" className="rq-row" onClick={() => onOpen(t.key)}>
+    <button
+      type="button"
+      className="rq-row"
+      onClick={() => onOpen(t.key)}
+      // R15-11: the queue's whole job is deciding, yet the row was an unlabeled
+      // clickable region — the surface read as actionless. It stays a triage
+      // list (a decision belongs with its evidence: the diff, the verdict, the
+      // packet), but the row now NAMES where it goes. Deliberately "Review",
+      // not "Accept": acceptance is verdict-gated (R15-1) and may refuse, and a
+      // control must not name an outcome this surface cannot promise — the same
+      // rule F15-22 was filed under.
+      aria-label={`Review ${t.key}: ${t.title}`}
+    >
       <span className="rq-key">{t.key}</span>
       <span className="rq-main">
         <div className="ttl">{t.title}</div>
@@ -74,6 +86,10 @@ function RQRow({
             agent working
           </span>
         )}
+        <span className="rq-go" aria-hidden="true">
+          Review
+          <Icon name="chevron" />
+        </span>
       </span>
     </button>
   );

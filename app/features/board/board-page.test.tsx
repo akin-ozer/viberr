@@ -356,3 +356,46 @@ describe("P13-D-10: a rejected board action must not render the success tick", (
     );
   });
 });
+
+describe("F15-09: the 'agent working' badge renders once per card", () => {
+  it("keeps the readiness pill in the card top and the wait tag in the foot", () => {
+    const { container } = renderBoard([
+      task({ waiting: "agent", readiness: "input_required", displayReadiness: "input_required" }),
+    ]);
+    // Before the fix the card top swapped in a SECOND "agent working" pill for
+    // exactly this state, so the card said it twice and dropped the readiness.
+    const working = [...container.querySelectorAll(".card .pill, .card .wait-tag")]
+      .filter((el) => el.textContent!.trim() === "agent working");
+    expect(working).toHaveLength(1);
+    expect(container.querySelector(".card-top .pill")!.textContent).toBe(
+      "input required",
+    );
+  });
+
+  it("does the same in the list view", () => {
+    const { container } = renderBoard(
+      [task({ waiting: "agent", readiness: "input_required", displayReadiness: "input_required" })],
+      { view: "list" },
+    );
+    const working = [...container.querySelectorAll(".pill, .wait-tag")].filter(
+      (el) => el.textContent!.trim() === "agent working",
+    );
+    expect(working).toHaveLength(1);
+  });
+});
+
+describe("R15-5: the board owns its own filter box", () => {
+  it("renders a board-scoped field that writes ?q= (the topbar now opens the palette)", async () => {
+    const { getByLabelText, queryByText } = renderBoard([
+      task({ key: "VIB-1", title: "Attach a project credential" }),
+      task({ key: "VIB-2", title: "Rotate the PAT" }),
+    ]);
+    const input = getByLabelText("Filter this board") as HTMLInputElement;
+    // The placeholder no longer promises a global "tasks, branches, agents"
+    // search it never performed.
+    expect(input.getAttribute("placeholder")).toBe("Filter this board…");
+    fireEvent.change(input, { target: { value: "rotate" } });
+    await waitFor(() => expect(queryByText("Attach a project credential")).toBeNull());
+    expect(queryByText("Rotate the PAT")).toBeTruthy();
+  });
+});

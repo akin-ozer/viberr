@@ -149,11 +149,13 @@ describe("loader", () => {
     expect(operator.model).toBe("orchestration runtime");
     // Operator action-bucket sizes after the role-bindings prune (removed the
     // never-gated `compress-timelines` from direct and `owner-reassignment` from
-    // recommend): 4 direct / 2 recommend / 3 forbidden.
-    expect(operator.actions.direct).toHaveLength(4);
+    // recommend), plus R15-2's `deliver-review-pr` (direct in the shipped
+    // template): 5 direct / 2 recommend / 3 forbidden.
+    expect(operator.actions.direct).toHaveLength(5);
     expect(operator.actions.recommend).toHaveLength(2);
     expect(operator.actions.forbidden).toHaveLength(3);
     expect(operator.actions.direct).toContain("Assign the primary specialist");
+    expect(operator.actions.direct).toContain("Deliver the branch & open the review PR");
     expect(operator.actions.direct).not.toContain("Compress long-running timelines");
 
     // The Reviewer's push restriction is now a REAL enforced grant (D4): it uses
@@ -407,6 +409,120 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       intent: "delete-profile",
       profileId: "minimal-dev",
     });
+  });
+
+  /**
+   * B-AG1: save-time normalization used to rewrite an EXPLICIT headline `off`
+   * to `direct` whenever any scoped delivery grant was actionable — silently,
+   * with no audit row, and in the opposite direction from the enforcement layer
+   * (`grantModes`), which honors the `off`. An admin who deliberately withheld
+   * repo writes got them back on the next save.
+   */
+  it("an EXPLICIT headline `off` survives the save, and the contradiction is recorded (B-AG1)", async () => {
+    const result = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Withheld Dev",
+        role: "No repo writes",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Headline explicitly off; scoped delivery left on.",
+        caps: {
+          "execute-code-or-write-repo": "off",
+          "create-task-branch": "direct",
+          "commit-push-branch": "direct",
+        },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    const created = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "withheld-dev",
+    )!;
+    const mode = (id: string) =>
+      created.capabilities.find((c) => c.capabilityId === id)?.mode;
+    expect(mode("execute-code-or-write-repo")).toBe("off");
+    // The scoped grants the admin left on are untouched — the contradiction is
+    // reported, not resolved behind their back in either direction.
+    expect(mode("create-task-branch")).toBe("direct");
+
+    const audit = listAuditEvents(app.db, {
+      action: "project.agent_profile.created",
+    }).find((e) => e.subjectId === "withheld-dev")!;
+    const details = (audit.details ?? {}) as {
+      deliveryGrants?: string;
+      deliveryNote?: string;
+    };
+    expect(details.deliveryGrants).toBe("withheld");
+    expect(details.deliveryNote).toContain("cannot deliver");
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: "withheld-dev",
+    });
+  });
+
+  /**
+   * B-AG1's other half: the notice reached the AUDIT LOG only. The route dropped
+   * `result.notice` and answered with the plain success toast, so the single
+   * outcome a live admin can produce from the editor (`withheld` — the modal
+   * materializes every capability id, so the headline is never merely absent)
+   * was silent non-repair: the profile saves, cannot deliver, and says nothing.
+   */
+  it("the action result carries the delivery notice so the save is not silently non-repairing (B-AG1)", async () => {
+    const contradictory = (name: string) => ({
+      name,
+      role: "No repo writes",
+      backend: "claude",
+      stages: ["impl"],
+      definition: "Headline explicitly off; scoped delivery left on.",
+      caps: {
+        "execute-code-or-write-repo": "off",
+        "commit-push-branch": "direct",
+      },
+      resources: { skills: [], mcps: [], kb: [] },
+    });
+    const created = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify(contradictory("Silent Dev")),
+    })) as {
+      ok: boolean;
+      toast: string;
+      notice?: { kind: string; message: string };
+    };
+    expect(created.ok).toBe(true);
+    expect(created.notice?.kind).toBe("withheld");
+    expect(created.notice?.message).toContain("cannot deliver");
+
+    // Editing it (the real path an admin walks into a legacy VIB-1 profile on)
+    // reports the same thing rather than a bare "updated" tick.
+    const updated = (await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "silent-dev",
+      payload: JSON.stringify(contradictory("Silent Dev")),
+    })) as {
+      ok: boolean;
+      toast: string;
+      notice?: { kind: string; message: string };
+    };
+    expect(updated.ok).toBe(true);
+    expect(updated.notice?.kind).toBe("withheld");
+    expect(updated.notice?.message).toContain("Commit");
+
+    // A profile with nothing to decide carries no notice at all.
+    const clean = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        ...contradictory("Plain Dev"),
+        caps: { "execute-code-or-write-repo": "direct" },
+      }),
+    })) as { ok: boolean; notice?: unknown };
+    expect(clean.notice).toBeUndefined();
+
+    for (const profileId of ["silent-dev", "plain-dev"]) {
+      await postAction(ids.arda, { intent: "delete-profile", profileId });
+    }
   });
 
   it("R7-5 — a specialist `recommend` grant coerces to `direct` ('Allowed') on create", async () => {
@@ -726,6 +842,72 @@ describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
     });
   });
 
+  /**
+   * B-AG1's shape, one call site over: the library deploy ran the grants through
+   * `normalizeDeliveryGrants`, which throws the notice away. A template whose
+   * scoped delivery is on while the headline is explicitly off deploys as a
+   * profile that CANNOT deliver, and nothing — toast or audit — said so.
+   */
+  it("deploy-profile reports a contradictory template's delivery withholding (B-AG1 shape)", async () => {
+    const templateId = "withheld-template";
+    const templatePath = path.join(
+      app.dataRoot,
+      "agents",
+      "profiles",
+      `${templateId}.md`,
+    );
+    const { serializeAgentProfile } = await import(
+      "~/server/files/agent-profile-file.server"
+    );
+    writeFileSync(
+      templatePath,
+      serializeAgentProfile({
+        frontmatter: {
+          id: templateId,
+          kind: "specialist",
+          name: "Withheld Template",
+          role: "Probe",
+          desc: "Scoped delivery on, headline off.",
+          icon: "cpu",
+          backends: ["claude"],
+          model: "",
+          scope: "Global base",
+          stages: ["impl"],
+          spanAll: false,
+          capabilities: [
+            { capabilityId: "execute-code-or-write-repo", mode: "off" },
+            { capabilityId: "commit-push-branch", mode: "direct" },
+          ],
+          extras: [],
+          resources: { skills: [], mcps: [], kb: [] },
+        },
+        description: "Probe persona.",
+      }),
+      "utf8",
+    );
+
+    const result = (await postAction(ids.arda, {
+      intent: "deploy-profile",
+      profileId: templateId,
+    })) as { ok: boolean; notice?: { kind: string; message: string } };
+    expect(result.ok).toBe(true);
+    expect(result.notice?.kind).toBe("withheld");
+    expect(result.notice?.message).toContain("cannot deliver");
+
+    const audit = listAuditEvents(app.db, {
+      action: "project.agent_profile.deployed",
+    }).find((e) => e.subjectId === templateId)!;
+    expect((audit.details ?? {}) as { deliveryGrants?: string }).toMatchObject({
+      deliveryGrants: "withheld",
+    });
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: templateId,
+    });
+    rmSync(templatePath, { force: true });
+  });
+
   it("refuses a duplicate deploy, an unknown id, and a non-admin", async () => {
     const dup = (await postAction(ids.arda, {
       intent: "deploy-profile",
@@ -858,5 +1040,79 @@ describe("AP-07 — a project-level edit FORKS the profile (the modal now says s
       profileId: templateId,
     });
     rmSync(templatePath(), { force: true });
+  });
+});
+
+/**
+ * F15-05/F15-06 (live, 2026-07-28): a profile created in org settings — the one
+ * surface with NO capability UI — and then added to a project rendered on the
+ * project Agents page holding "Approve the review", "Request changes" and
+ * "Post quality-flag events" under ACTS DIRECTLY, because the conservative
+ * defaults granted every advisory catalog id at its `direct` default while
+ * `report-validation-verdict` stayed `off`. An admin reading that panel was told
+ * a docs writer could approve reviews.
+ */
+describe("F15-05/06 — a brand-new profile claims no verdict authority", () => {
+  const orgProfileId = "org-docs-writer";
+
+  it("org-created → library-deployed: no verdict outcomes, no unasked resources", async () => {
+    const { saveGlobalAgentProfile } = await import("~/server/org/gagents.server");
+    saveGlobalAgentProfile(
+      app.db,
+      {
+        name: "Org docs writer",
+        backend: "codex",
+        summary: "Writes documentation only.",
+        persona: "You improve documentation.",
+        stages: ["impl"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+      },
+      { userId: ids.arda, label: "Arda" },
+      { dataRoot: app.dataRoot },
+    );
+    const deployed = (await postAction(ids.arda, {
+      intent: "deploy-profile",
+      profileId: orgProfileId,
+    })) as { ok: boolean };
+    expect(deployed.ok).toBe(true);
+
+    const view = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === orgProfileId,
+    )!;
+    for (const label of [
+      "Approve the review",
+      "Request changes",
+      "Post quality-flag events",
+    ]) {
+      expect(view.actions.direct, label).not.toContain(label);
+      expect(view.actions.recommend, label).not.toContain(label);
+    }
+    // Delivery stays withheld too (the pre-existing conservative posture).
+    expect(view.actions.direct).not.toContain("Execute code or write to the repo");
+    expect(view.actions.direct).not.toContain("Commit & push to the branch");
+    // Verdict authority is explicit-only, and it was never granted.
+    expect(view.actions.direct).not.toContain("Report a validation verdict");
+    // Nothing chose a context resource for it.
+    expect(view.resources).toEqual({ skills: [], mcps: [], kb: [] });
+
+    // The stored template is honest at rest as well — the outcomes are `off`,
+    // not `direct`-with-a-withheld-verdict.
+    const template = readFileSync(
+      path.join(app.dataRoot, "agents", "profiles", `${orgProfileId}.md`),
+      "utf8",
+    );
+    expect(template).toMatch(/capabilityId: approve-review\n\s+mode: off/);
+    expect(template).toMatch(/capabilityId: request-changes\n\s+mode: off/);
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: orgProfileId,
+    });
+    rmSync(
+      path.join(app.dataRoot, "agents", "profiles", `${orgProfileId}.md`),
+      { force: true },
+    );
   });
 });

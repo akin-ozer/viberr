@@ -371,3 +371,77 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
     expect(row.pr).toEqual({ number: 77, state: "closed" }); // closed preserved, not coerced to "review"
   });
 });
+
+/**
+ * R15-1 (owner ruling, 2026-07-28): delivered work needs a HEALTHY verdict
+ * before a human may accept it. The required-reviewer gate only binds when a
+ * verdict-capable reviewer is ENGAGED, so an unreviewed delivery used to sit in
+ * "Waiting on your acceptance" while the server refused to accept it.
+ */
+describe("R15-1: the verdict gate reaches the queue through the projection", () => {
+  const REV = {
+    id: "rev_1",
+    headSha: "c".repeat(40),
+    treeSha: "v".repeat(40),
+    branch: "vib-6-work",
+    createdAt: "2026-07-04T00:00:00.000Z",
+    sourceProfileId: "developer",
+  };
+
+  function seedDelivered(
+    store: ReturnType<typeof setupTestStore>,
+    key: string,
+    patch: Record<string, unknown> = {},
+  ) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(key, {
+        title: "Delivered, unreviewed",
+        stage: "review",
+        waiting: "human",
+        branch: REV.branch,
+        pr: { number: 66, state: "review", title: "Delivered, unreviewed" },
+        workRevision: REV,
+        // The delivering agent only — NOBODY is engaged to give a verdict.
+        engagements: [
+          {
+            profileId: "developer",
+            backend: "claude",
+            role: "developer",
+            delivers: true,
+            verdictCapable: false,
+          },
+        ],
+        verdicts: [],
+        ...patch,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("a delivered revision with ZERO verdict-capable engagements is not `ready`", () => {
+    const store = setupTestStore(ctx);
+    seedDelivered(store, "VIB-6");
+    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    expect(q.ready.map((t) => t.key)).not.toContain("VIB-6");
+    const row = q.working.find((t) => t.key === "VIB-6")!;
+    expect(row.blockReason).toMatch(/no approving verdict yet/i);
+  });
+
+  it("delivered work with NO review PR is not `ready` either", () => {
+    const store = setupTestStore(ctx);
+    seedDelivered(store, "VIB-5", { pr: null });
+    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    expect(q.ready.map((t) => t.key)).not.toContain("VIB-5");
+    expect(
+      q.working.find((t) => t.key === "VIB-5")!.blockReason,
+    ).toMatch(/no review pull request/i);
+  });
+
+  it("an UNDELIVERED task (no revision) stays acceptable — planning work is not gated", () => {
+    const store = setupTestStore(ctx);
+    seedDelivered(store, "VIB-4", { workRevision: null, pr: null, branch: null });
+    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    expect(q.ready.map((t) => t.key)).toContain("VIB-4");
+    expect(q.ready.find((t) => t.key === "VIB-4")!.blockReason).toBeNull();
+  });
+});

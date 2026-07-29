@@ -366,13 +366,17 @@ async function writePrToTask(
       dataRoot: ctx.dataRoot,
     });
   }
-  recordAudit(db, {
-    action: "github.pr.opened",
-    actor,
-    subjectKind: "pull_request",
-    subjectId: `${gh.repo}#${pr.number}`,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details: { repo: gh.repo, prNumber: pr.number, created },
-  });
+  // B-GH4: the audit row records the PR being OPENED — a reuse pass that merely
+  // re-confirmed an existing PR must not append another "opened" row per visit.
+  if (created) {
+    recordAudit(db, {
+      action: "github.pr.opened",
+      actor,
+      subjectKind: "pull_request",
+      subjectId: `${gh.repo}#${pr.number}`,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: { repo: gh.repo, prNumber: pr.number, created },
+    });
+  }
 }

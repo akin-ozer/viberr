@@ -263,9 +263,11 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
     expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(true);
 
     // Packet resolved (cleared from the file) — the notification leaves the
-    // waiting bucket WITHOUT being deleted or auto-read.
+    // waiting bucket WITHOUT being deleted or auto-read. Resolution hands the
+    // task back to an agent; a review-stage task still waiting on a HUMAN is a
+    // pending acceptance and stays in the bucket by design (B-FD5).
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-101", { stage: "review" }),
+      frontmatter: baseTaskFrontmatter("VIB-101", { stage: "review", waiting: "agent" }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const after = listNotifications(store.db, uid);
@@ -283,9 +285,11 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
     createNotification(store.db, { id: "a", userId: uid, kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-102" });
     expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(true);
 
-    // Recommendation applied/dismissed (cleared from the file).
+    // Recommendation applied/dismissed (cleared from the file) and the task
+    // handed to an agent — a review-stage task still waiting on a human is a
+    // pending acceptance and would legitimately stay in the bucket (B-FD5).
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-102", { stage: "review" }),
+      frontmatter: baseTaskFrontmatter("VIB-102", { stage: "review", waiting: "agent" }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(false);
@@ -359,5 +363,65 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
       false,
       false,
     ]);
+  });
+});
+
+describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () => {
+  it("B-FD6: rows resolve to a task, a project, or NOTHING (never a dead click)", () => {
+    const store = setupTestStore(ctx);
+    const uid = store.users.murat.id;
+    createNotification(store.db, { id: "n_task", userId: uid, kind: "quality", text: "t", projectSlug: store.slug, taskKey: "VIB-1", occurredAt: "2026-07-01T03:00:00.000Z" });
+    createNotification(store.db, { id: "n_proj", userId: uid, kind: "policy", text: "t", projectSlug: store.slug, occurredAt: "2026-07-01T02:00:00.000Z" });
+    createNotification(store.db, { id: "n_org", userId: uid, kind: "policy", text: "t", occurredAt: "2026-07-01T01:00:00.000Z" });
+    expect(listNotifications(store.db, uid).map((n) => [n.id, n.href])).toEqual([
+      ["n_task", `/projects/${store.slug}/tasks/VIB-1`],
+      ["n_proj", `/projects/${store.slug}`],
+      ["n_org", null],
+    ]);
+  });
+
+  it("B-FD5: an approval row on an acceptance-ready task with NO packet is waiting on the acceptor", () => {
+    const store = setupTestStore(ctx);
+    const revision = {
+      id: "rev_1",
+      headSha: "b".repeat(40),
+      treeSha: "u".repeat(40),
+      branch: "vib-106-work",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      sourceProfileId: "developer",
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-106", {
+        stage: "review",
+        waiting: "human",
+        branch: revision.branch,
+        pr: { number: 106, state: "review", title: "Approved work" },
+        workRevision: revision,
+        engagements: [
+          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ],
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: revision.id,
+            headSha: revision.headSha,
+            result: "approve",
+            reason: "looks good",
+            at: "2026-07-04T01:00:00.000Z",
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const uid = store.users.murat.id; // maintainer → holds acceptance
+    createNotification(store.db, { id: "acc", userId: uid, kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-106" });
+    // The task carries no packet and no recommendation: before B-FD5 the shared
+    // decision source could not see it, so the inbox read "not waiting" while
+    // the review queue listed it under "Waiting on your acceptance".
+    expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(true);
+    // A viewer has no acceptance authority → still not waiting on them.
+    const elif = store.users.elif.id;
+    createNotification(store.db, { id: "acc2", userId: elif, kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-106" });
+    expect(listNotifications(store.db, elif)[0]?.waitingOnYou).toBe(false);
   });
 });

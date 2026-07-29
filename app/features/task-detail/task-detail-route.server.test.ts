@@ -252,17 +252,40 @@ describe("comment action — @agent routing detection", () => {
     expect(plain.toast).toBe("Comment posted");
   });
 
-  it("non-members may comment app-wide and project as guests", async () => {
-    const result = (await postIntent("VIB-153", ids.deniz, {
+  it("R15-4: a NON-MEMBER's comment is refused with the unknown-slug 404", async () => {
+    // The layout loader refuses the read, but React Router runs a child ACTION
+    // without its parent's loader — so this POST used to land a comment (and
+    // could @mention an agent) inside a project the actor must not know exists.
+    const before = (await runLoader("VIB-153", ids.arda)).task.timeline.length;
+    const thrown = (await postIntent("VIB-153", ids.deniz, {
       intent: "comment", text: "Following from the platform side.",
-    })) as { ok: true };
-    expect(result.ok).toBe(true);
-    const after = await runLoader("VIB-153", ids.deniz);
-    expect(after.task.timeline[0]!.actor).toMatchObject({
-      kind: "human",
-      name: "Deniz Şahin",
-      guest: true,
-    });
+    }).catch((e) => e)) as { init?: { status: number }; data?: unknown };
+    expect(thrown?.init?.status).toBe(404);
+    // Byte-identical to the unknown-slug refusal — no existence confirmation.
+    expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
+    // …and nothing was written.
+    expect((await runLoader("VIB-153", ids.arda)).task.timeline).toHaveLength(
+      before,
+    );
+  });
+
+  it("R15-4: an ORG ADMIN who is not a member still acts (audited D2 override)", async () => {
+    const { updateUserFields } = await import("~/server/auth/user-store.server");
+    updateUserFields(app.db, ids.deniz, { role: "admin" });
+    try {
+      const result = (await postIntent("VIB-153", ids.deniz, {
+        intent: "comment", text: "Checking in from the org-admin override.",
+      })) as { ok: true };
+      expect(result.ok).toBe(true);
+      const after = await runLoader("VIB-153", ids.deniz);
+      expect(after.task.timeline[0]!.actor).toMatchObject({
+        kind: "human",
+        name: "Deniz Şahin",
+        guest: true,
+      });
+    } finally {
+      updateUserFields(app.db, ids.deniz, { role: "member" });
+    }
   });
 
   it("rejects empty comments", async () => {
@@ -286,12 +309,12 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(result.data.error).toContain("accept completion into Done");
   });
 
-  it("rejects non-members entirely", async () => {
-    const result = (await postIntent("VIB-142", ids.deniz, {
+  it("rejects non-members entirely (R15-4: as an unknown slug, not a 403)", async () => {
+    const thrown = (await postIntent("VIB-142", ids.deniz, {
       intent: "resolve-packet", option: "1",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
-    expect(result.init.status).toBe(403);
-    expect(result.data.error).toContain("Only project members");
+    }).catch((e) => e)) as { init?: { status: number }; data?: unknown };
+    expect(thrown?.init?.status).toBe(404);
+    expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
   });
 
   it("block_on_policy: blocks + KEEPS the packet + navigates to settings", async () => {
@@ -490,11 +513,13 @@ describe("ownership actions", () => {
   });
 
   it("non-members are denied ownership; hand-off to a non-member is denied", async () => {
+    // R15-4: a non-member never gets past the route's visibility gate, so the
+    // refusal is the unknown-slug 404 rather than the mutation's own 403.
     const take = (await postIntent("VIB-148", ids.deniz, {
       intent: "owner-take",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
-    expect(take.init.status).toBe(403);
-    expect(take.data.error).toContain("Only project members");
+    }).catch((e) => e)) as { init?: { status: number }; data?: unknown };
+    expect(take?.init?.status).toBe(404);
+    expect(String(take?.data)).toBe("No project at projects/viberr-core.");
 
     const toGuest = (await postIntent("VIB-148", ids.murat, {
       intent: "owner-assign", userId: ids.deniz,
@@ -692,10 +717,14 @@ describe("acceptance affordance (P14-LV-06)", () => {
     expect(atTriage.acceptance.blockedReason).toBeTruthy();
   });
 
-  it("a non-member holds no acceptance authority", async () => {
-    const result = await runLoader("VIB-142", ids.deniz);
-    expect(result.acceptance.hasAuthority).toBe(false);
-    expect(result.acceptance.canAccept).toBe(false);
+  it("a non-member never gets as far as an acceptance affordance (R15-4)", async () => {
+    // Before R15-4 a non-member loaded the page and saw `hasAuthority: false`.
+    // Members-only projects refuse the read outright, so the affordance is not
+    // "denied" — it is unreachable.
+    await expect(runLoader("VIB-142", ids.deniz)).rejects.toMatchObject({
+      init: { status: 404 },
+      data: "No project at projects/viberr-core.",
+    });
   });
 
   it("accept-completion refuses when the task is not at the boundary", async () => {

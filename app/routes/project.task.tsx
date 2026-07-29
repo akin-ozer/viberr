@@ -24,6 +24,7 @@ import {
   completeTaskMerge,
   dismissRecommendation,
   forceAcceptCompletion,
+  manualDeliverForReview,
   releaseOwner,
   resolveAcceptanceAffordance,
   resolvePacket,
@@ -54,6 +55,7 @@ import {
   type OperatorAutonomy,
 } from "~/server/tasks/operator-actions.server";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
+import { requireVisibleProject } from "./project-visibility.server";
 import {
   requireRunAgents,
   type AuthorityProject,
@@ -69,6 +71,7 @@ import {
   clampTimelineLimit,
   sliceTimeline,
 } from "~/features/task-detail/timeline-slice";
+import { roleCan } from "~/shared/rbac";
 import { Icon } from "~/ui/icon";
 
 /**
@@ -91,6 +94,18 @@ import { Icon } from "~/ui/icon";
 export async function loader({ request, params }: Route.LoaderArgs) {
   const user = await requireUser(request);
   const db = getDb();
+  // R15-4 on the READ side of THIS loader, not only the layout's.
+  // Single-fetch honors a client-supplied `?_routes=` filter, so
+  // `GET /projects/<slug>/tasks/<key>.data?_routes=routes/project.task` runs
+  // this loader ALONE — the layout's membership refusal never executes. The
+  // gate has to live on every loader that serves project content, exactly as
+  // it already does on this route's action.
+  requireVisibleProject(
+    db,
+    params.slug,
+    { userId: user.id, label: user.email },
+    "read this project",
+  );
   const detail = getTaskDetail(db, params.slug, params.key);
   if (!detail) {
     throw data(`No task ${params.key} in projects/${params.slug}.`, {
@@ -183,6 +198,23 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     (s) => s.status === "pending",
   );
 
+  // R15-1: the accept confirm names exactly what merges — the delivered
+  // revision (task file) and the merge target (project default branch).
+  const workRevisionSha =
+    taskFile?.parsed.frontmatter.workRevision?.headSha ?? null;
+  const project = getProject(db, params.slug);
+  const defaultBranch = project?.defaultBranch || "main";
+  // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
+  // the task's own owner — mirror of manualDeliverForReview's server gate.
+  const myProjectRole =
+    listProjectMembers(db, params.slug).find((m) => m.userId === user.id)
+      ?.role ?? null;
+  const canDeliver =
+    roleCan(myProjectRole, "run-agents") ||
+    user.role === "admin" ||
+    (taskFile?.parsed.frontmatter.ownerUserId === user.id &&
+      roleCan(myProjectRole, "own-task"));
+
   return {
     task: { ...detail, timeline: slice.events },
     recommendations,
@@ -227,6 +259,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // architecture.md. It now goes through app/server/provenance/, which owns
     // the table.
     githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
+    // R15-1 accept confirm + R15-2 manual-delivery affordance.
+    workRevisionSha,
+    defaultBranch,
+    canDeliver,
     // Host for GitHub browse links (PR/branch/repo), derived server-side.
     // UI-11: today this always resolves to `https://github.com` — nothing
     // stores a GHE API base URL — so the value is honest, but the "GHE
@@ -269,6 +305,11 @@ export async function action({ request, params }: Route.ActionArgs) {
   } = await requireFormAction(request);
   const projectSlug = params.slug;
   const taskKey = params.key;
+  // R15-4: the layout loader's membership refusal does NOT cover this action —
+  // React Router runs a child action without its parent's loader. Outside the
+  // try so the refusal stays a thrown 404 Response (the unknown-slug body),
+  // never an `appErrorResponse` 403 that would confirm the project exists.
+  requireVisibleProject(db, projectSlug, actor, "act on this project");
 
   try {
     switch (intent) {
@@ -401,6 +442,31 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast: `Completion accepted · ${taskKey} moved to ${toName}`,
         };
+      }
+      case "deliver-review": {
+        // R15-2 safety net (b): a human performs delivery (push + review PR)
+        // directly. Maintainer+ or the task's own owner — enforced (and
+        // audited as github.delivery.manual) inside manualDeliverForReview.
+        const outcome = await manualDeliverForReview(
+          db,
+          { projectSlug, taskKey },
+          actor,
+        );
+        return outcome.status === "delivered"
+          ? {
+              ok: true as const,
+              intent,
+              toast: outcome.created
+                ? `Delivered · opened review PR #${outcome.prNumber}`
+                : `Delivered · reusing open review PR #${outcome.prNumber}`,
+            }
+          : data(
+              {
+                ok: false as const,
+                error: `Delivery did not complete — ${outcome.message}`,
+              },
+              { status: 409 },
+            );
       }
       case "archive-task":
       case "restore-task": {
@@ -773,6 +839,9 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
+      workRevisionSha={loaderData.workRevisionSha}
+      defaultBranch={loaderData.defaultBranch}
+      canDeliver={loaderData.canDeliver}
     />
   );
 }
