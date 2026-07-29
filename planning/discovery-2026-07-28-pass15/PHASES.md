@@ -21,17 +21,28 @@ Every phase of this pass, with artifacts you can open and verify.
 closed/rejected, a branch-name collision staged on purpose.
 
 ## 3. Findings + rulings
-`NOTES.md` (raw observations) → `FINDINGS.md` (19 live findings F15-01..19 + ~35 promoted
-code-map items + 5 doc items, each with a status and the commit that closed it).
+`NOTES.md` (raw observations) → `FINDINGS.md` (**23 live findings**: F15-01..19 from the live phase,
+F15-21 ledgered late from UC-19, and F15-20/22/23 found while live-proving my own fixes — plus ~35
+promoted code-map items and 5 doc items, each with a status and the commit that closed it).
 **8 owner rulings** R15-1..8 answered in two question rounds, recorded in FINDINGS §D,
 `docs/architecture/decisions.md` 20–27, and PRD FR4/FR27/FR31/FR37.
 
 ## 4. Implementation
 `PLAN.md` (workstreams + the binding W1 design). Three waves: the delivery re-architecture,
 five feature streams, four gap-repair streams — each stream followed by an adversarial verifier
-that had to revert fixes and report the failure output. 17 commits, PR #119.
+that had to revert fixes and report the failure output. **20 commits**, PR #119.
 
 ## 5. Validation
-Gates green at every step (final: typecheck · **2,419 unit tests** · build · **25 e2e** incl. WCAG
-in both themes). Every ledger id audited against the diff individually. Container rebuilt and
-every original repro re-run live — see the two verification sections at the end of `USECASES.md`.
+Gates green at every step (final: typecheck clean · **2,421 unit tests / 206 files** · build ·
+**25 e2e** incl. WCAG in both themes). Container rebuilt and every original repro re-run live —
+see the two verification sections at the end of `USECASES.md`.
+
+The ledger was audited **in both directions**, which is the part worth copying:
+- **ledger → diff** (during the pass): every row id grepped against `git diff main..HEAD`, every
+  zero hand-checked. Proves no row lies about being fixed. Six showed zero; all six resolved.
+- **diff → ledger** (`FINDINGS.md` §F, run last, after the branch was already "done"): every
+  changed non-test file checked for *any* row citing a commit that touched it, plus every cited
+  hash validated as a real commit on this branch. Proves the ledger is **complete**, which the
+  first direction is structurally blind to. It found six drifts in the evidence trail and zero in
+  the product — two wrong commit citations, a missing hash, and three real fixes that had shipped
+  with no row at all.

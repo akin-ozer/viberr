@@ -4,11 +4,11 @@ Sources: live use (USECASES.md, NOTES.md), 10 code maps + CRITIC (docs/), produc
 Status legend: OPEN → DONE (commit) / DEFER (why) / RULED (owner decision recorded).
 Severity: C=critical H=high M=medium L=low D=doc/copy.
 
-## A. Live-found (F15-01..19) — all repro'd on the fresh compose instance
+## A. Live-found (F15-01..19, F15-21) — all repro'd on the fresh compose instance
 
 | id | sev | status | finding (detail in NOTES.md) |
 |----|-----|--------|------------------------------|
-| F15-01 | M | DONE 5e8b000 (card) + 9827ab7 (creation now probes, handback applied) | Credential card: `assumed` scopes dodge both the `unverified` branch and proven chips → green "Every provable scope verified" with ZERO proven scopes; attach-at-project-creation never ran the write probes ([credential-card.tsx:77-121](app/features/github/credential-card.tsx:77)) |
+| F15-01 | M | DONE 5e8b000 (card) + e1cb8bb (creation now probes, handback applied) | Credential card: `assumed` scopes dodge both the `unverified` branch and proven chips → green "Every provable scope verified" with ZERO proven scopes; attach-at-project-creation never ran the write probes ([credential-card.tsx:77-121](app/features/github/credential-card.tsx:77)) |
 | F15-02 | M | DONE 7d602ea | Project GitHub panel "Synced: not yet synced with GitHub" renders while PR/merge state is clearly live; "Update status" gives zero feedback (14ms no-op POST). Sync-freshness copy + action need truth |
 | F15-03 | L | DONE 9827ab7 (traced benign first — no state-loss path — then the false reconcile removed) | `fs.watch` emits `rename` on directory CREATION too and `rebuildDir` never checks existence, so a new project dir runs the removal sweep and logs it. NO state-loss path (250 ms debounce lands after creation's own rebuild; atomic task writes are never transiently absent) — false log + wasted per-project reproject. Patch in handbacks/S4-github.md |
 | F15-04 | M(UX) | DONE 5e8b000 | Create-project returns to home grid instead of opening the new project |
@@ -27,6 +27,7 @@ Severity: C=critical H=high M=medium L=low D=doc/copy.
 | F15-17 | H | DONE 7d602ea (R15-2) | Delivery binds to structural final-adjacent stage (`reviewStageIdOf`): inserting QA after Review silently moves push+PR to QA; entering literal "Review" delivers nothing, no event. Needs ruling + a visible signal either way |
 | F15-18 | M | DONE 5e8b000 | 375px viewport keeps fixed sidebar; content ~140px. D-29 "reflow" unmet |
 | F15-19 | H | DONE 7d602ea (R15-1, all 3 writers) | Human acceptance succeeds with NO verdict on the delivered revision (chip "awaiting verdict"), async with zero feedback (~30s), then merges. Verdict requirement only binds operator-direct path + blockReason wedges. Owner Q on required gate |
+| F15-21 | M | DONE 5e8b000 (ledgered late — see §F) | Stage editor: "Add stage" committed on the *click*, minting a workflow stage literally named "New stage". A stray press wrote a **governed edge in the transition chain** that then had to be removed by hand. Observed live in UC-19. Fixed name-first: the name IS the request, and an empty one is refused ([settings-actions.server.ts:414](app/features/project-settings/settings-actions.server.ts:414)) |
 
 Facts (not defects) worth keeping: Developer-Claude pushes its branch at creation, Codex doesn't (parity nuance; made F15-17 visible). Operator honored backward-move-without-note by asking via one @tag (ruling working). Archive cancelled packets+schedules provably (RV-03 live-verified). Full-autonomy self-accept requires the explicit grant and discloses correctly; merge stays human. Strict preset lives in workflow rules, not operator caps.
 
@@ -41,7 +42,7 @@ Facts (not defects) worth keeping: Developer-Claude pushes its branch at creatio
 | B-GH4 | L | DONE 7d602ea | `github.pr.opened` audit row on every reuse (pr-open.server.ts:369-377) |
 | B-GH5 | M | DONE (S4) | Reconciler: unbounded parallel task reconcile per tick; no concurrency cap/backoff |
 | B-GH6 | L | DONE (S4) | Required-scope set defined twice (pat-store vs connections) — unify |
-| B-GH7 | M | DONE 5e8b000 + 9827ab7 (store-files caller upgraded too) | Connection `valid` state trusted forever; no periodic revalidation of org connections |
+| B-GH7 | M | DONE 5e8b000 + e1cb8bb (store-files caller upgraded too) | Connection `valid` state trusted forever; no periodic revalidation of org connections |
 | B-GH8 | L | DONE 9827ab7 | `revalidateProjectCredential` resolves write-scope violations on read-only "assumed" evidence (pat-validator.server.ts:406-523) |
 
 ### Workflow core / acceptance (pairs with F15-19)
@@ -77,7 +78,7 @@ Facts (not defects) worth keeping: Developer-Claude pushes its branch at creatio
 ### Foundation / UI / interpretation
 | id | sev | status | item |
 |----|-----|--------|------|
-| B-FD1 | H | DONE 5e8b000 + e440fe9 (SIGTERM release, eager arming, bootId identity) | Boot-time single-writer lock on the data root (dual-writer incident twice; foundation map) |
+| B-FD1 | H | DONE 5e8b000 + e440fe9 (SIGTERM release, eager arming, bootId identity) + **8a95d92 (the one that made it real: node as pid 1)** | Boot-time single-writer lock on the data root (dual-writer incident twice; foundation map). The in-process half passed every unit test while the container still leaked the lock on `docker compose stop` — `npm run start` made npm pid 1, so SIGTERM never reached the lock holder |
 | B-FD2 | M | DONE 5e8b000 + e440fe9 (machine callers disclose too) | First-name mention fan-out ("@arda" notifies every Arda; no dedup/priority) |
 | B-FD3 | M | DONE under R15-4 (members-only supersedes the FR4-vs-WI-13 tension) | WI-13 vs FR4: board/task readable app-wide while review/activity 403 "must not learn project exists" — coherence ruling needed (critic + ui-routes §7) |
 | B-FD4 | M | DONE 5e8b000 | Home Settings tiles link every member to admin-403 routes; storeRoot path leaks to non-admins (ui-routes §1/§4) |
@@ -121,7 +122,9 @@ Facts (not defects) worth keeping: Developer-Claude pushes its branch at creatio
 
 | id | sev | status | finding |
 |----|-----|--------|---------|
-| F15-20 | MED | DONE (this pass) | `deliver-review-pr` postdates every pre-R15-2 operator deployment; the runtime gate reads an absent grant as `direct`, so delivery worked while the Agents panel — which renders only persisted grants — showed no row for it. A capability governing real behavior was invisible AND uneditable. Materialized in `effectiveProfileView` at the mode the runtime applies, never overriding an explicit one. Canary-proven, verified live on the strict project |
+| F15-20 | MED | DONE 04ca24e | `deliver-review-pr` postdates every pre-R15-2 operator deployment; the runtime gate reads an absent grant as `direct`, so delivery worked while the Agents panel — which renders only persisted grants — showed no row for it. A capability governing real behavior was invisible AND uneditable. Materialized in `effectiveProfileView` at the mode the runtime applies, never overriding an explicit one. Canary-proven, verified live on the strict project |
+| F15-22 | L(D) | DONE 9888063 (ledgered late — see §F) | The not-at-the-boundary acceptance refusal ended with "or ask an admin to force-accept it", but the DG-2 override is surfaced only for a **wedged** acceptance (unrecordable verdict / stale blocked packet). A task that merely has stages left to cross is not wedged, so the copy sent an admin hunting for a button that is not there. Same class as the R15-1 refusal work: a refusal must not name an escape hatch this surface does not offer |
+| F15-23 | L(D) | DONE 6620e4e (ledgered late — see §F) | Accept-confirm dialog on a no-delivery task (VAL-2): the body correctly adapted — "No linked pull request — the task closes without a merge" with an "Accept → Done" action — while the **footer** still read "Merging is one-way … the merge are recorded". The dialog adapted its facts but not its fine print |
 
 ## E. Known environmental flake (not a product defect)
 
@@ -131,3 +134,66 @@ parallel vitest workers in one session). The file passes alone, and two consecut
 immediately afterwards were clean at **2419/2419**. macOS per-process descriptor pressure, not a
 watcher leak — recorded here so a future pass recognizes it instead of chasing it. If it ever
 fails on an idle machine, THAT is a real leak and worth the hunt.
+
+## F. Ledger integrity audit (2026-07-29, after the branch was already "done")
+
+The pass-15 close-out ran a **ledger → diff** audit (for each row id, `git diff main..HEAD | grep`,
+hand-check every zero). That direction proves *no row lies about being fixed*. It cannot catch the
+opposite failure, so this audit ran the other direction: **diff → ledger** — for every non-test file
+changed on the branch, does any ledger row cite a commit that touched it?
+
+Method (zsh caveat worth keeping: `for c in $commits` does **not** word-split an unquoted string in
+zsh the way bash does — the first run of this audit silently reported everything as unclaimed):
+
+```
+for f in $(git diff --name-only main..HEAD -- app/ | grep -v '\.test\.'); do
+  claimed=0
+  for c in ${(f)"$(git log --format=%h main..HEAD -- $f)"}; do
+    grep -q "$c" FINDINGS.md && claimed=1
+  done
+  [ $claimed -eq 0 ] && echo "UNCLAIMED: $f"
+done
+```
+
+Then: validate every hash cited in this file resolves to a commit **on this branch**, and list the
+branch's code commits that no row cites at all.
+
+**What it found — six defects in the evidence trail, zero in the product:**
+
+| # | drift | correction |
+|---|-------|------------|
+| 1 | F15-01 cited `9827ab7` for the creation-probe half; it landed in `e1cb8bb` | citation fixed |
+| 2 | B-GH7 cited `9827ab7` for the store-files caller; it landed in `e1cb8bb` | citation fixed |
+| 3 | B-FD1 cited only the in-process SIGTERM work — **not `8a95d92`, the pid-1 fix that made release actually happen in the container** | citation + the reason it matters |
+| 4 | F15-20 said "DONE (this pass)" with no hash | cites `04ca24e` |
+| 5 | The stray-press "New stage" defect was found live (UC-19), fixed in `5e8b000`, and **never entered as a row** | ledgered as F15-21 |
+| 6 | Two post-fix live copy defects were fixed (`9888063`, `6620e4e`) and recorded only in `UX-ASSESSMENT.md`'s prose table, not in the ledger | ledgered as F15-22 / F15-23 |
+
+**The pattern**: every drift is in the last six commits. Up to `9827ab7` the loop was
+find → ledger → fix → cite. After that it became find → fix → write it up *somewhere else*
+(a shots commit message, the UX assessment). The ledger stayed *true* — nothing in it was false —
+but it stopped being *complete*, which is the failure mode a ledger→diff audit is structurally
+blind to. **Run both directions, and run them last.**
+
+Also closed here: the one live-phase question left hanging with a ⚠ and never answered —
+`search-mcp` (registry row with `up: false`) is still passed to the SDK and reports `status: failed`
+in-run. That is **the design, not a defect**: pass-14 ruled LV-09b as honesty-not-removal ("a probe
+can be stale, and the CLI may connect where the probe could not"). Verified the disclosure half
+survived this pass's capability rewrite —
+[specialist-run.server.ts:1148](app/server/tasks/specialist-run.server.ts:1148) still emits
+"# MCP servers that may be unavailable … the last connection check failed", and
+[specialist-mcp.server.ts:107](app/server/tasks/specialist-mcp.server.ts:107) still distinguishes
+that from a grant reaching no server at all. USECASES UC-23/24/25 updated.
+
+**Third thing the audit found — a coverage gap on an explicitly-requested behavior.** The directive
+named "correct skill loading (**not unrelated skills**)". UC-23's row claimed "Run mounts ONLY
+granted skills ✅", but every piece of evidence behind it was *positive* — a granted skill visibly
+changed the agent's behavior. Nothing anywhere proved the **negative**, and a run log cannot: the
+persona travels as `systemPrompt` and never lands in the run's jsonl. The behavior was correct
+(`buildSpecialistPersona` iterates the profile's declared list, never the store; `Skill` is in
+`BASE_DENIED_BUILTINS`), so this was a *proof* gap, not a defect — but a "load everything in the
+store" regression would have shipped silently. Now pinned and canary-proven; see USECASES UC-23.
+
+**The generalizable lesson**: a ✅ that rests only on positive evidence is half a proof. "X reaches
+the run" and "only X reaches the run" are different claims, and the second is the one a capability
+system actually promises.

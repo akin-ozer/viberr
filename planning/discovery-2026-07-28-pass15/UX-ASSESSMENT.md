@@ -44,8 +44,8 @@ build as an end user and harvesting the actual rendered copy rather than reading
 | The **⌘K promise** — topbar said "Search tasks, branches, agents" and filtered one board | the most visible control in the app did not do what it said | fixed (R15-5 palette; the board filter now says "Filter this board…") |
 | **Two `h1`s on Agents** — every other surface has exactly one | master-detail page announced itself twice; heading structure inconsistent with the rest of the app | fixed this pass, verified live on the rebuilt image |
 | **A disabled control explaining itself only via `title`** | a `title` is unreachable on a disabled element for keyboard and touch — the reason effectively did not exist | fixed: rendered copy, matching the reviewer panel's existing pattern |
-| **A refusal naming an escape hatch it does not offer** ("ask an admin to force-accept it" where force-accept is not surfaced) | sends the reader hunting for a button that is not there | fixed, verified live |
-| **A confirm dialog promising a merge with nothing to merge** | the dialog adapted its facts but not its footer | fixed |
+| **A refusal naming an escape hatch it does not offer** ("ask an admin to force-accept it" where force-accept is not surfaced) | sends the reader hunting for a button that is not there | fixed, verified live (F15-22) |
+| **A confirm dialog promising a merge with nothing to merge** | the dialog adapted its facts but not its footer | fixed (F15-23) |
 | **Timestamps in two timezones on one page** (agent logs UTC, timeline local) | the same event appeared to happen 3 hours apart | fixed |
 | **Duplicated status badge** on the board card | same state asserted twice | fixed |
 | **375px kept the 232px rail** | content squeezed to ~140px; the "same surface reflowed" promise unmet | fixed (off-canvas rail + toggle, 0 horizontal overflow) |

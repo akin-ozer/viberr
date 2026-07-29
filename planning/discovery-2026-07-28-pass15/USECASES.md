@@ -28,7 +28,7 @@ Status: ☐ planned · ▶ running · ✅ done (verdict) · ⚠ done-with-findin
 | UC-20 | archive | Archive mid-flight: packets/recs/schedules cancelled; no run after | ✅ |
 | UC-21 | validation | Validation lifecycle: changed → awaiting verdict; healthy only via real verdict | ✅ (see post-fix §) |
 | UC-22 | parity | Codex vs Claude profile — identical lifecycle from viberr's view | ✅ |
-| UC-23 | skills | Run mounts ONLY granted skills | ✅ (re-proven post-fix) |
+| UC-23 | skills | Run mounts ONLY granted skills | ✅ positive live; **negative pinned by test 2026-07-29** (see below) |
 | UC-24 | KB | KB grant reaches the run | ✅ (re-proven post-fix) |
 | UC-25 | MCP | MCP grant reaches the run; a down server is honest about it | ✅ (re-proven post-fix) |
 | UC-26 | operator | Operator chooses the right specialist from role summaries | ✅ |
@@ -68,7 +68,7 @@ Front gate FAILED (F15-14): vague VIB-6 sailed to In Progress and a 91-turn broa
 See NOTES: non-fast-forward push failure misblamed credentials; PR #114 opened on stale junk content; reviewer approved from the LOCAL branch; acceptance would have merged junk. Resolved safely via gh close → recovery packet → archive+deleteBranch (junk branch deleted by the resolution).
 
 ### UC-19 (partial) — stage editor on a live board ✅
-Added stage (commits immediately with inline rename — first click minted an accidental "New stage"), renamed-by-typing, removed cleanly with transitions auto-rewiring copy. QA column live on the board with 5 Done tasks intact. Flow-through test rides VIB-9.
+Added stage (commits immediately with inline rename — first click minted an accidental "New stage"; **ledgered as F15-21 and fixed name-first in 5e8b000** — a stray press could write a governed edge into the transition chain), renamed-by-typing, removed cleanly with transitions auto-rewiring copy. QA column live on the board with 5 Done tasks intact. Flow-through test rides VIB-9.
 
 ### UC-10 — request-changes → rework → re-review ✅
 VIB-2 two-step protocol: reviewer issued "Verdict: request-changes" citing `VIB-2.md:3 STATUS: draft`; operator routed rework; developer fixed on same branch; verdict correctly reset to "awaiting verdict" on the new revision (revision-bound); re-review approved; PR #111.
@@ -86,7 +86,26 @@ Cem (contributor): forced temp-password reset on first login works; recommendati
 VIB-1 (Codex) and VIB-3 (Claude) delivered identical lifecycles: task-key branch, single-file commit, server-owned PR, reviewer approve, human accept, GitHub merge. Only cosmetic differences (thread.started/turn.started vs system·init log vocabulary).
 
 ### UC-23/24/25 — skills/KB/MCP reach the run ✅⚠
-VIB-4 (Developer Claude): run init lists `mcp__time-mcp__current_time`+`task_key_check`, `time-mcp: connected`; tool actually called; delivered timestamp is the tool's ms-precision ISO. KB path pattern quoted verbatim from viberr-architecture KB. Commit `test(VIB-4): …` proves conventional-commits skill influenced behavior. ⚠ `search-mcp` (known-down) was still passed to the SDK and shows `status: failed` in-run — verify against LV-09b intent (should a down server be withheld, or is connect-time failure the design?).
+VIB-4 (Developer Claude): run init lists `mcp__time-mcp__current_time`+`task_key_check`, `time-mcp: connected`; tool actually called; delivered timestamp is the tool's ms-precision ISO. KB path pattern quoted verbatim from viberr-architecture KB. Commit `test(VIB-4): …` proves conventional-commits skill influenced behavior.
+
+**The negative half — "correct skill loading, NOT unrelated skills" — was named explicitly in the
+directive and had no proof of any kind until the 2026-07-29 close-out audit.** The live evidence
+above is all *positive* (a granted skill demonstrably changed behavior); nothing showed that the
+other skills in the store stayed out. A run log cannot settle it either — the persona is passed as
+`systemPrompt` and never appears in the run's jsonl. Now pinned by
+`buildSpecialistPersona — mounts ONLY the declared skills`: three skills on disk, one declared, and
+the other two must appear neither by body sentinel nor by heading. **Canary-proven** — appending
+`"reviewer-expertise", "terraform-review"` to the loop fails it with
+`expected … not to contain 'SENTINEL-SKILL-OTHER'`.
+
+Two structural facts make the negative hold by construction, worth recording so a future pass does
+not re-litigate it: `buildSpecialistPersona` iterates `input.skills` (the profile's declared list),
+never the store; and the `Skill` tool is in `BASE_DENIED_BUILTINS`, so a run cannot discover one at
+runtime either. Separately, the Claude run init lists host-looking slash commands
+(`deep-research`, `dataviz`, `doctor`, …) — **not a leak**: compose mounts no `~/.claude`, and
+[claude-runtime.server.ts:200](app/server/runtimes/claude-runtime.server.ts:200) records that these
+are SDK built-ins compiled into the binary, verified 2026-07-18 in a pristine container. They are
+unreachable — slash commands expand only on user-typed input, and Viberr sends generated prompts. `search-mcp` (known-down) was still passed to the SDK and shows `status: failed` in-run. **Resolved 2026-07-29 (was the last open ⚠): this is the design, not a defect.** Pass-14 ruled LV-09b as honesty-not-removal — a health probe can be stale and the CLI may connect where the probe could not, so the server mounts and the *prompt* discloses it. Verified the disclosure survived this pass's capability rewrite: [specialist-run.server.ts:1148](app/server/tasks/specialist-run.server.ts:1148) still emits "# MCP servers that may be unavailable … the last connection check failed", and [specialist-mcp.server.ts:107](app/server/tasks/specialist-mcp.server.ts:107) still distinguishes that from a grant that reached no server at all. Withholding it would be the regression.
 
 ### UC-26 — operator picks the right specialist ✅
 VIB-3: picked Developer Claude on an explicit goal hint. VIB-4: picked Developer Claude (only profile holding both time-mcp and the KB) with no hint. VIB-1/2/5: picked Codex Developer (Implementation role).

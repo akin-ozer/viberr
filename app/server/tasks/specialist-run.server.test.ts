@@ -1282,4 +1282,40 @@ describe("buildSpecialistPersona — attached resources", () => {
     const none = buildSpecialistPersona({ profileId: "scout", skills: [], dataRoot });
     expect(none).not.toContain("MCP tools are governed too");
   });
+
+  it("mounts ONLY the declared skills — an ungranted skill sitting in the same store never reaches the run", () => {
+    // UC-23's NEGATIVE half. The positive ("a granted skill changed behavior")
+    // was proven live via the conventional-commits commit message; the negative
+    // — that the OTHER skills in the store stay out — had no coverage at all,
+    // which is how a "load every skill on disk" regression would ship silently.
+    // Canary: change the loop in buildSpecialistPersona to iterate the store
+    // instead of `input.skills` and the three `not.toContain`s below fail.
+    const dataRoot = tempRoot();
+    for (const [name, sentinel] of [
+      ["developer-expertise", "SENTINEL-SKILL-GRANTED"],
+      ["reviewer-expertise", "SENTINEL-SKILL-OTHER"],
+      ["terraform-review", "SENTINEL-SKILL-UNRELATED"],
+    ] as const) {
+      mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
+      writeFileSync(
+        path.join(dataRoot, "skills", name, "SKILL.md"),
+        `---\nname: ${name}\n---\n\n# ${name}\n\n${sentinel}`,
+      );
+    }
+
+    const persona = buildSpecialistPersona({
+      profileId: "developer-claude",
+      skills: ["developer-expertise"],
+      dataRoot,
+    });
+
+    expect(persona).toContain("SENTINEL-SKILL-GRANTED");
+    expect(persona).toContain("developer-expertise (skill)");
+    // The store holds two more skills. Neither their bodies nor their headings
+    // may appear — "unrelated skills" is exactly the failure the owner named.
+    expect(persona).not.toContain("SENTINEL-SKILL-OTHER");
+    expect(persona).not.toContain("SENTINEL-SKILL-UNRELATED");
+    expect(persona).not.toContain("reviewer-expertise");
+    expect(persona).not.toContain("terraform-review");
+  });
 });
