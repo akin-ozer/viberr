@@ -263,6 +263,16 @@ it is regenerated from the filesystem rather than restated here.
     titled "Instance settings" (was "Viberr settings", which collided with a project named
     Viberr) and a project's are "<name> · settings" (was bare "Settings"). Every wayfinding
     string that pointed at the old title was updated with it.
+33. **R15-14 (2026-07-29): a resolved agent question goes back to the AGENT THAT ASKED,
+    by resuming its own session.** `ask_human` still ends the run — nothing is held open
+    while a human thinks, so a restart between question and answer costs nothing. What
+    changed is where the answer goes: it used to travel only through the operator, which
+    decides for itself whether to resume the specialist or start it cold, and a cold start
+    discards the reasoning that produced the question. The packet now records `askedBy`
+    (the profile id, not the display label), and resolution routes the decision through the
+    same path an @mention reply takes — resume the session, re-apply confinement,
+    re-anchor on task.md. The operator hand-off remains the fallback for operator packets
+    and for an asker whose session or profile is gone, so no decision is ever swallowed.
 
 ## Route map
 

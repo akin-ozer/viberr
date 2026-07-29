@@ -366,6 +366,12 @@ export function buildAgentQuestionPacket(
     type: "input",
     kind: "Agent question",
     from: encodeActorRef(actorRef),
+    // R15-14: `from` is a DISPLAY string. The answer has to be routed back to a
+    // specific agent, and parsing a rendered label to decide who gets resumed is
+    // the kind of thing that works until someone renames a profile. Stamp the
+    // profile id the router actually needs. Optional by design: packets written
+    // before this exists simply fall back to the operator hand-off.
+    ...(actorRef.kind === "agent" ? { askedBy: actorRef.profileId } : {}),
     title: question.title.trim(),
     body: (question.body ?? "").trim(),
     observations: [],

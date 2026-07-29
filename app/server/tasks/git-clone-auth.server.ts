@@ -159,10 +159,65 @@ export function createGitHubClonePlan(input: {
   };
 }
 
+/**
+ * How long a workspace clone may run.
+ *
+ * Was a hardcoded 60s, which is not a budget — it is a bet that every repo is
+ * small. Viberr's own repo takes ~71s for `--depth 1` (a 55 MB working tree,
+ * most of it screenshots), so the bet lost on the first real project: the clone
+ * was SIGTERM'd at 60s, the run continued against an EMPTY workspace, and the
+ * agent — told by its prompt to clone the repo itself, holding no token because
+ * agents deliberately never receive one — reported "repository requires
+ * credentials". The human then read a credential problem on a project whose
+ * credential was probe-verified minutes earlier. A shallow clone is bounded by
+ * repo size and link speed, neither of which this process knows, so the ceiling
+ * is generous and configurable; it exists to stop a hung clone, not to rule on
+ * how big a repository is allowed to be.
+ */
+export const CLONE_TIMEOUT_MS = (() => {
+  const raw = process.env.VIBERR_GIT_CLONE_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 900_000;
+})();
+
 export interface CloneFailureLogDetails {
   reason: "git_unavailable" | "clone_failed" | "clone_terminated";
   exitCode?: number;
   signal?: string;
+}
+
+/**
+ * One plain sentence naming what actually went wrong, for the agent's prompt and
+ * the task timeline.
+ *
+ * The point is NOT to be descriptive — it is to stop the failure being
+ * re-narrated downstream as something it was not. An agent that finds an empty
+ * workspace has no way to distinguish "the server's clone timed out" from "there
+ * is no credential", and it guessed wrong in exactly the way that wastes a
+ * human's time: by asking for a credential that already exists.
+ */
+export function cloneFailureSentence(
+  details: CloneFailureLogDetails,
+  opts: { hadCredential: boolean; timeoutMs?: number },
+): string {
+  const cred = opts.hadCredential
+    ? "The project's GitHub credential WAS supplied to the clone, so this is not a missing-credential problem."
+    : "No GitHub credential is attached to this project, so the clone ran anonymously.";
+  switch (details.reason) {
+    case "git_unavailable":
+      return `git is not installed on the Viberr server, so the workspace checkout could not be created. ${cred}`;
+    case "clone_terminated":
+      return (
+        `The workspace checkout was cancelled after ${Math.round((opts.timeoutMs ?? CLONE_TIMEOUT_MS) / 1000)}s — ` +
+        `the clone ran past its time limit rather than failing. ${cred}`
+      );
+    default:
+      return (
+        `The workspace checkout failed` +
+        (typeof details.exitCode === "number" ? ` (git exit ${details.exitCode})` : "") +
+        `. ${cred}`
+      );
+  }
 }
 
 /**

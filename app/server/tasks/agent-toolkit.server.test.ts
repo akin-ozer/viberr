@@ -117,6 +117,38 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     const row = listAuditEvents(store.db, { action: "task.agent.packet_opened" })[0];
     expect(row.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
   });
+
+  it("R15-14: stamps WHICH agent asked, so the answer can be routed back to it", async () => {
+    // `from` is a display string. Deciding who to resume by parsing a rendered
+    // label works right up until someone renames a profile — the router needs
+    // the profile id itself.
+    // Canary: drop the `askedBy` spread in buildAgentQuestionPacket.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "impl" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await openAgentQuestionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-9",
+        actorRef: AGENT_REF,
+        title: "Which config should I target?",
+      },
+    );
+
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-9",
+      dataRoot: store.dataRoot,
+    })!;
+    const packet = file.parsed.packet as { askedBy?: string; kind: string } | null;
+    expect(packet?.kind).toBe("Agent question");
+    expect(packet?.askedBy).toBe(AGENT_REF.profileId);
+  });
 });
 
 /**

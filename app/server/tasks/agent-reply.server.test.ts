@@ -971,6 +971,106 @@ describe("commentToAgent", () => {
     expect(posted).toBe(true);
   }, 20_000);
 
+  /**
+   * R15-14. `ask_human` ends the run by contract, and the answer used to travel
+   * only through the operator — which decides for itself whether to resume the
+   * specialist or start it cold. A cold start discards the reasoning that
+   * produced the question, so the run that receives the answer is not the run
+   * that asked it. The owner's call: the answer goes back to the ASKER.
+   */
+  it("R15-14: resolving an agent's question RESUMES that agent's own session with the decision", async () => {
+    // A SETTLED prior session for `dev` — the realistic shape, since the asking
+    // run has already finished by the time a human answers. Inserted directly
+    // rather than by running an agent: a real run's async completion handler
+    // rewrites task.md, and it raced this test's packet away.
+    const priorSessionId = "sess_r1514_dev";
+    upsertRun(store.db, {
+      id: "run_r1514_prior",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t_r1514",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sessionId: priorSessionId,
+      sdk: "test",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    writeTranscript(priorSessionId);
+    const priorCount = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
+
+    // The question `dev` left behind, stamped with WHO asked it.
+    const existing = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    writeTask(store.dataRoot, store.slug, {
+      ...existing.parsed,
+      packet: {
+        id: "pkt_r1514",
+        type: "input",
+        kind: "Agent question",
+        from: "agent:claude/dev (developer)",
+        askedBy: "dev",
+        title: "Which config should I target?",
+        body: "Ambiguous scope.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Target the staging config", d: "", rec: true },
+          { kind: "custom", t: "Target production", d: "", rec: false },
+        ],
+      },
+    } as never);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        note: "staging only, production needs sign-off",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    // The ASKER was resumed — a new run row carrying its prior session id.
+    // Canary: delete the `askedBy` routing in resolvePacket and only the
+    // operator is invoked, so no run ever shares this session.
+    const resumedAsker = await waitFor(() =>
+      listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
+        (r) => r.session_id === priorSessionId && r.id !== "run_r1514_prior",
+      ),
+    );
+    expect(resumedAsker).toBe(true);
+    expect(
+      listRunsForTaskRows(store.db, store.slug, "VIB-1").length,
+    ).toBeGreaterThan(priorCount);
+
+    // …and it was told the decision AND the human's free-text qualifier, which
+    // is the part an operator-mediated cold restart most often loses.
+    const spec = startedRunSpecs().at(-1);
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    const relayed = file.parsed.timeline.find(
+      (e) => e.type === "comment" && e.text.includes("has been answered by a human"),
+    );
+    expect(relayed, "the decision must be visible on the timeline").toBeTruthy();
+    expect(relayed!.text).toContain("Target the staging config");
+    expect(relayed!.text).toContain("staging only, production needs sign-off");
+    expect(relayed!.text).toContain("do not re-open the same question");
+    if (spec) expect(spec.prompt).toContain("Target the staging config");
+  }, 30_000);
+
   // P14-RT-02 / LV-04: the WIRING, not just the prompt builder. `commentToAgent`
   // threaded the human's words into the RESUMED path and the operator-prompt
   // path but neither FRESH branch, so a first-ever @mention started a run that

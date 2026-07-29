@@ -248,7 +248,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     tools.push(
       tool(
         "ask_human",
-        "Ask the humans on this task a question you are blocked on — it opens a decision card they resolve from the task page. Use it ONLY for a genuine decision you cannot make (ambiguous requirement, missing credential, conflicting instructions). Give 2-4 concrete answer options when they exist. You will NOT receive the answer in this run — finish your report noting what is pending.",
+        "Ask the humans on this task a question you are blocked on — it opens a decision card they resolve from the task page. Use it ONLY for a genuine decision you cannot make (ambiguous requirement, conflicting instructions, a choice only a human may make). Give 2-4 concrete answer options when they exist. The answer does not arrive during THIS run: end this run with a report of what you did and what is pending. You WILL be resumed with the decision, in this same session, so you can carry on from where you stopped — do not restart your work or re-ask.",
         {
           title: z.string().describe("The question, one sentence."),
           body: z
@@ -284,7 +284,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             });
             return textResult(
               opened
-                ? "[done] Question raised — a human will decide from the task page. Continue what you can and note the open question in your final report."
+                ? "[done] Question raised — a human will decide from the task page. Continue whatever does NOT depend on the answer, then finish with a report of what is pending. You will be resumed in this same session once the decision is made."
                 : "[refused] A decision is already open on this task — finish your report and mention your question there instead.",
             );
           } catch (error) {

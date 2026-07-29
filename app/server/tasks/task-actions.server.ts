@@ -601,6 +601,84 @@ export async function updateTaskGoal(
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
 
+/**
+ * R15-14 — hand a resolved decision back to the AGENT that asked for it, by
+ * resuming that agent's own provider session.
+ *
+ * The `ask_human` contract has always been "you will not get the answer in this
+ * run": the agent asks, the run ends, and the answer used to travel only through
+ * the operator, which re-engages the specialist however it sees fit. When it
+ * chooses a cold start, the run that receives the answer is not the run that
+ * asked the question — it has none of the reasoning that produced it, and pays
+ * to rediscover the situation it was already standing in.
+ *
+ * This routes the decision through `commentToAgent`, the same path an @mention
+ * reply takes: it resolves the agent, records the answer on the timeline, and
+ * resumes the provider session with the run confinement re-applied. Nothing is
+ * held open while the human thinks — the session is resumed on resolution, so a
+ * restart between question and answer costs nothing.
+ *
+ * Returns false when the answer could not be delivered (profile undeployed, no
+ * resumable session, agent no longer resolvable), so the caller can fall back to
+ * the operator hand-off rather than swallowing the human's decision.
+ */
+async function answerAskingAgent(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    question: string;
+    decision: string;
+    note?: string;
+  },
+  actor: TaskActor,
+): Promise<boolean> {
+  try {
+    const { agentMentionHandle } = await import("./agent-reply.server");
+    const { listDeployedSpecialists } = await import("./specialist-run.server");
+    const deployed = listDeployedSpecialists(input.projectSlug, {
+      ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+    }).find((a: { id: string }) => a.id === input.profileId);
+    if (!deployed) return false;
+
+    // Address the agent by the SAME handle a human would type, so resolution
+    // goes through one code path instead of a private back door that can drift
+    // from what @mentions do.
+    const handle = agentMentionHandle({
+      profileId: deployed.id,
+      name: deployed.name,
+    });
+    const text =
+      `@${handle} Your question — "${input.question}" — has been answered by a human: ` +
+      `**${input.decision}**.` +
+      (input.note ? `\n\n> ${input.note.replace(/\n/g, "\n> ")}` : "") +
+      `\n\nThis is the decision you were blocked on. Continue from where you stopped ` +
+      `and act on it; do not re-open the same question.`;
+
+    const result = await commentToAgent(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, text },
+      // Attributed to the human who resolved it — this IS their decision being
+      // relayed, and the runtime-role check inside commentToAgent must run
+      // against a real person rather than a system actor that bypasses it.
+      actor,
+      ctx,
+    );
+    // `triggered` is the only honest signal that the answer actually reached a
+    // run: a recorded comment whose run never started has not answered anyone.
+    return result.triggered !== null;
+  } catch (error) {
+    logger.warn("could not route a resolved question back to the asking agent", {
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return false;
+  }
+}
+
 /** Best-effort operator handoff; dynamically imported to avoid a module cycle.
  *  Exported for the GitHub reconciler (P14 follow-up): an out-of-band PR state
  *  change (`pr-diverged`) is a coordination event like any other, so the
@@ -4266,7 +4344,36 @@ export async function resolvePacket(
     option.kind === "redirect" ||
     option.kind === "custom";
   if (sentBackToAgent) {
-    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+    // R15-14: when an AGENT raised this question, the answer belongs to that
+    // agent, not to a courier. The old path only re-invoked the operator, which
+    // decides for itself whether to resume the specialist or start it cold — and
+    // a cold restart throws away the exact context that produced the question,
+    // so the agent re-derives its way back to the thing it already knew.
+    //
+    // Route the decision to the asker first, through the same machinery an
+    // @mention reply uses (resume the provider session, re-apply confinement,
+    // re-anchor on task.md). The operator still runs afterwards to coordinate;
+    // it just stops being the only way the answer travels.
+    const askedBy =
+      packet.kind === "Agent question" && typeof packet.askedBy === "string"
+        ? packet.askedBy.trim()
+        : "";
+    let answeredAsker = false;
+    if (askedBy) {
+      answeredAsker = await answerAskingAgent(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: askedBy,
+        question: packet.title,
+        decision: option.t,
+        ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      }, actor);
+    }
+    // No asker (an operator packet), or its session is gone / the profile was
+    // undeployed — fall back to the operator hand-off that has always run here.
+    if (!answeredAsker) {
+      void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+    }
   }
 
   // archive_task: the decision IS the archive — run the real R14-3 contract
