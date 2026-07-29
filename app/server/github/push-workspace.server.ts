@@ -53,15 +53,27 @@ export type PushWorkspaceResult =
       reason: string;
     };
 
+/** Ceiling for the branch push itself (the one network step here). */
+const PUSH_TIMEOUT_MS = 120_000;
+
 interface Exec {
   (
     file: string,
     args: string[],
     opts: { cwd: string; timeoutMs: number; env?: NodeJS.ProcessEnv },
-  ): Promise<{ ok: boolean; stdout: string; stderr: string }>;
+  ): Promise<{
+    ok: boolean;
+    stdout: string;
+    stderr: string;
+    /** The child was KILLED (timeout), not merely unsuccessful. */
+    timedOut?: boolean;
+  }>;
 }
 
-const defaultExec: Exec = async (file, args, opts) => {
+/** Exported ONLY so its timeout detection can be proven against a really-killed
+ *  child. Injecting a fake `exec` in a test proves the classification above but
+ *  says nothing about whether a kill is detected at all. */
+export const defaultExec: Exec = async (file, args, opts) => {
   try {
     const { stdout, stderr } = await execFileAsync(file, args, {
       cwd: opts.cwd,
@@ -71,11 +83,22 @@ const defaultExec: Exec = async (file, args, opts) => {
     });
     return { ok: true, stdout: stdout.toString(), stderr: stderr.toString() };
   } catch (error) {
-    const err = error as { stdout?: unknown; stderr?: unknown };
+    const err = error as {
+      stdout?: unknown;
+      stderr?: unknown;
+      killed?: unknown;
+      signal?: unknown;
+    };
+    // A timeout is a KILL, not a non-zero exit, and saying "returned non-zero"
+    // about a process that never returned sends the reader looking for a git
+    // error that was never printed. Same failure the clone path had, one pipe
+    // over: the true cause was "we did not wait long enough".
+    const timedOut = err.killed === true || typeof err.signal === "string";
     return {
       ok: false,
       stdout: typeof err.stdout === "string" ? err.stdout : "",
       stderr: typeof err.stderr === "string" ? err.stderr : "",
+      ...(timedOut ? { timedOut: true } : {}),
     };
   }
 };
@@ -303,7 +326,7 @@ export async function pushWorkspaceBranch(
       const pushRes = await exec(
         "git",
         ["-C", repoDir, "push", "origin", `HEAD:refs/heads/${branch}`],
-        { cwd: repoDir, timeoutMs: 30_000, env: askpass.env },
+        { cwd: repoDir, timeoutMs: PUSH_TIMEOUT_MS, env: askpass.env },
       );
       if (!pushRes.ok) {
         // B-GH1/F15-15: a NON-FAST-FORWARD rejection is a history divergence
@@ -325,8 +348,17 @@ export async function pushWorkspaceBranch(
           };
         }
         // Redact stderr — a git push failure can echo the remote URL/token.
-        logger.info("workspace branch push failed", { taskKey, branch });
-        return { status: "push_failed", reason: "git push returned non-zero" };
+        logger.info("workspace branch push failed", {
+          taskKey,
+          branch,
+          ...(pushRes.timedOut ? { timedOut: true } : {}),
+        });
+        return {
+          status: "push_failed",
+          reason: pushRes.timedOut
+            ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
+            : "git push returned non-zero",
+        };
       }
     } finally {
       askpass.dispose();

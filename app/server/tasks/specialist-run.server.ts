@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
@@ -72,9 +72,12 @@ import {
 } from "./specialist-tool-policy";
 import { resolveSpecialistMcpServersDetailed } from "./specialist-mcp.server";
 import {
+  CLONE_TIMEOUT_MS,
   cloneFailureLogDetails,
+  cloneFailureSentence,
   createGitHubClonePlan,
   githubRemoteSanitizationArgs,
+  type CloneFailureLogDetails,
 } from "./git-clone-auth.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 
@@ -790,7 +793,8 @@ export async function startAgentRun(
     input.taskKey,
     ctx.dataRoot,
   );
-  const runWorkdir = clone ?? (realBackend ? workspaceRoot : null);
+  const cloneFailure = clone?.failure ?? null;
+  const runWorkdir = clone?.dir ?? (realBackend ? workspaceRoot : null);
   if (runWorkdir && !existsSync(runWorkdir)) {
     mkdirSync(runWorkdir, { recursive: true });
   }
@@ -823,13 +827,50 @@ export async function startAgentRun(
     goal,
     repo,
     branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey),
-    cloned: !!clone,
+    cloned: !!clone?.dir,
+    ...(cloneFailure
+      ? {
+          cloneFailure: {
+            sentence: cloneFailure.sentence,
+            hadCredential: cloneFailure.hadCredential,
+          },
+        }
+      : {}),
     delivery,
     delivers,
     ...(reviewSubject ? { reviewSubject } : {}),
     ...(input.directive ? { directive: input.directive } : {}),
     ...(input.directiveFrom ? { directiveFrom: input.directiveFrom } : {}),
   });
+  // The human needs the real reason too, and needs it BEFORE the agent's own
+  // account of the run. Without this the only trace on the task page is the
+  // agent saying it lacked credentials — which reads as a settings problem on a
+  // project whose credential is probe-verified, and sends someone to re-issue a
+  // PAT that was never at fault. Same rule as F15-15: a mechanical failure must
+  // never reach a human wearing a credential's clothes.
+  if (cloneFailure) {
+    await updateTaskFile(
+      taskRef(ctx, input.projectSlug, input.taskKey),
+      (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text:
+            `**Workspace checkout failed:** ${cloneFailure.sentence} ` +
+            `The agent is running against an EMPTY workspace, so it cannot read or change ${repo}. ` +
+            (cloneFailure.reason === "clone_terminated"
+              ? "Raise `VIBERR_GIT_CLONE_TIMEOUT_MS` if this repository simply needs longer, then re-run."
+              : "Re-run once the cause above is addressed."),
+          toAgent: false,
+          evidence: null,
+        });
+      },
+    );
+    reproject(db, ctx, input.projectSlug, input.taskKey);
+  }
+
   // Collaboration guidance (G3/G4): tell the agent about its channel so the
   // capabilities are actually exercised, per-transport.
   const collabNotes: string[] = [];
@@ -1012,7 +1053,7 @@ export async function startAgentRun(
       profileId: engagement.profileId,
       backend,
       delivers,
-      cloned: !!clone,
+      cloned: !!clone?.dir,
       ...(directiveOverrode ? { directiveRequestedDelivery: true } : {}),
     },
   });
@@ -1184,6 +1225,10 @@ export function buildAnalyzePrompt(input: {
   /** The task-key branch the delivery must land on. */
   branch: string;
   cloned: boolean;
+  /** Why there is no checkout, when `cloned` is false and the server tried.
+   *  Without this the agent can only infer a cause from an empty directory,
+   *  and it inferred the most expensive wrong one: a missing credential. */
+  cloneFailure?: { sentence: string; hadCredential: boolean } | null;
   /** Which delivery steps the profile's capabilities permit (XS-4). */
   delivery: DeliveryPermissions;
   /** Whether this engagement DELIVERS. A supporting (non-delivering) run is
@@ -1221,7 +1266,23 @@ export function buildAnalyzePrompt(input: {
       `repository outside it.\n` +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.\n`
-        : `- Clone \`https://github.com/${input.repo}\` INTO the current directory (\`git clone https://github.com/${input.repo}.git .\`) before making changes.\n`);
+        : input.cloneFailure
+          ? // The server TRIED and failed. Telling the agent to clone here is a
+            // trap: agents are never given the project's token (deliberately),
+            // so on a private repo the attempt can only 404 — and the agent then
+            // reports the one cause it can see, "no credentials", which sends a
+            // human to re-provision a credential that was never the problem.
+            // Name the real reason and forbid the guess.
+            `- **The workspace has NO checkout, and this is a server-side failure, not something you can fix.** ` +
+            `${input.cloneFailure.sentence}\n` +
+            `- Do NOT try to clone, fetch, or authenticate to \`${input.repo}\` yourself, and do NOT ask anyone to ` +
+            `provision credentials or place a checkout` +
+            (input.cloneFailure.hadCredential
+              ? ` — the credential is present and working; repeating that request wastes a human's time on a false lead` :
+                ``) +
+            `. Report that the checkout could not be provisioned, quote the reason above verbatim, and stop. ` +
+            `Do not speculate about the cause beyond what that sentence says.\n`
+          : `- Clone \`https://github.com/${input.repo}\` INTO the current directory (\`git clone https://github.com/${input.repo}.git .\`) before making changes.\n`);
     if (!input.delivers) {
       // F10-12: a SUPPORTING (reviewing) run is physically read-only (Codex
       // read-only sandbox / Claude write+git denylist). The prompt MUST match:
@@ -1536,6 +1597,20 @@ function agentGitIdentityEnv(profileId: string): Record<string, string> {
   };
 }
 
+/** Why a workspace checkout is missing — carried to the prompt and the human. */
+export interface CloneFailure extends CloneFailureLogDetails {
+  /** Whether a real token reached the clone (decides the credential story). */
+  hadCredential: boolean;
+  /** One plain sentence, safe to show a human and to put in a prompt. */
+  sentence: string;
+}
+
+interface CloneOutcome {
+  /** The checkout directory, or null when the run has no working tree. */
+  dir: string | null;
+  failure?: CloneFailure;
+}
+
 async function cloneRepo(
   db: DatabaseSync,
   input: {
@@ -1548,7 +1623,8 @@ async function cloneRepo(
      *  to the same author as the agent's own commits. */
     identity?: { name: string; email: string };
   },
-): Promise<string | null> {
+): Promise<CloneOutcome> {
+  let hadCredential = false;
   const setIdentity = async (dir: string) => {
     if (!input.identity) return;
     try {
@@ -1575,12 +1651,13 @@ async function cloneRepo(
         { timeout: 10_000 },
       );
       await setIdentity(dir);
-      return dir;
+      return { dir };
     }
     mkdirSync(path.dirname(dir), { recursive: true });
 
     const cred = getProjectCredential(db, input.projectSlug);
     const token = cred ? getPatToken(db, cred.id) : null;
+    hadCredential = !!token;
     const clone = createGitHubClonePlan({
       repo: input.repo,
       destination: dir,
@@ -1588,21 +1665,47 @@ async function cloneRepo(
     });
     try {
       await execFileAsync("git", clone.args, {
-        timeout: 60_000,
+        timeout: CLONE_TIMEOUT_MS,
         env: clone.env,
       });
       await setIdentity(dir);
-      return dir;
+      return { dir };
     } finally {
       clone.dispose();
+      // A clone killed mid-transfer can leave a partial tree behind. Left in
+      // place it is worse than nothing: the next run's `.git` check treats it as
+      // "already cloned for this task" and hands the agent a truncated checkout
+      // it has no way to recognise as incomplete.
+      if (!existsSync(path.join(dir, ".git", "HEAD"))) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   } catch (error) {
-    // Repo is private with no cred, network down, git missing — fall back.
-    logger.info("specialist run clone failed — falling back to workspace root", {
+    // Repo private with no cred, network down, git missing, or the clone ran
+    // past its ceiling. WARN, not info: the run continues without the working
+    // tree it was promised, which changes what the agent can do and what its
+    // report means. This used to be an info line nobody read, and the only
+    // downstream signal was an empty directory — from which the agent inferred
+    // a credential problem that did not exist.
+    const details = cloneFailureLogDetails(error);
+    logger.warn("specialist run clone failed — running WITHOUT a checkout", {
       taskKey: input.taskKey,
-      ...cloneFailureLogDetails(error),
+      repo: input.repo,
+      hadCredential,
+      timeoutMs: CLONE_TIMEOUT_MS,
+      ...details,
     });
-    return null;
+    return {
+      dir: null,
+      failure: {
+        ...details,
+        hadCredential,
+        sentence: cloneFailureSentence(details, {
+          hadCredential,
+          timeoutMs: CLONE_TIMEOUT_MS,
+        }),
+      },
+    };
   }
 }
 

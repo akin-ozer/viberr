@@ -995,6 +995,50 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).not.toContain("open a pull request");
   });
 
+  it("a failed checkout names the REAL reason and forbids the credential guess", () => {
+    // Live-caught on a fresh instance. The server's clone hit its 60s ceiling on
+    // a 55 MB repo, the run continued against an empty workspace, and this
+    // prompt told the agent to clone the repo itself. Agents are never given the
+    // project token (deliberately), so on a private repo that can only 404 — and
+    // the agent reported the one cause it could see: "requires credentials".
+    // The human then read a credential problem on a project whose credential had
+    // been probe-verified minutes earlier.
+    // Canary: drop the `input.cloneFailure` branch and the self-clone
+    // instruction comes back.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      cloned: false,
+      cloneFailure: {
+        sentence:
+          "The workspace checkout was cancelled after 900s — the clone ran past its time limit rather than failing. The project's GitHub credential WAS supplied to the clone, so this is not a missing-credential problem.",
+        hadCredential: true,
+      },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+    });
+    // The reason travels verbatim, so the agent's report can quote it.
+    expect(prompt).toContain("not a missing-credential problem");
+    expect(prompt).toContain("cancelled after 900s");
+    // The trap instruction is GONE — it could only ever 404 here.
+    expect(prompt).not.toContain("INTO the current directory");
+    expect(prompt).not.toContain("git clone https://github.com/acme/app.git .");
+    // And the guess that wasted the human's time is explicitly forbidden.
+    expect(prompt).toContain("Do NOT try to clone");
+    expect(prompt).toContain("provision credentials");
+    expect(prompt).toContain("wastes a human's time on a false lead");
+  });
+
+  it("still tells the agent to clone when the server never had a credential to try", () => {
+    // A public repo with no project credential is the one case where a
+    // self-clone genuinely works, so the instruction must survive there.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      cloned: false,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+    });
+    expect(prompt).toContain("INTO the current directory");
+    expect(prompt).not.toContain("Do NOT try to clone");
+  });
+
   it("a human-gated profile is prohibited from committing at all", () => {
     const prompt = buildAnalyzePrompt({
       ...base,

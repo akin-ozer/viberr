@@ -11,7 +11,7 @@ import {
 } from "../../../test-support/test-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { taskDir } from "~/server/files/file-store-root.server";
-import { pushWorkspaceBranch } from "./push-workspace.server";
+import { defaultExec, pushWorkspaceBranch } from "./push-workspace.server";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -50,6 +50,8 @@ function fakeGit(opts: {
   pushOk?: boolean;
   /** stderr the failed push emits (B-GH1 non-fast-forward classification). */
   pushStderr?: string;
+  /** The push child was KILLED by its timeout rather than exiting non-zero. */
+  pushTimedOut?: boolean;
   dirty?: boolean;
   aheadAfterCommit?: number;
 }) {
@@ -76,6 +78,7 @@ function fakeGit(opts: {
     if (args.includes("push")) {
       return {
         ok: opts.pushOk !== false,
+        ...(opts.pushTimedOut ? { timedOut: true } : {}),
         stdout: "",
         stderr: opts.pushOk === false ? (opts.pushStderr ?? "") : "",
       };
@@ -189,6 +192,47 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       dataRoot: store.dataRoot, exec: git.exec,
     });
     expect(res.status).toBe("push_failed");
+  });
+
+  it("a push KILLED by its timeout says so, instead of claiming git returned non-zero", async () => {
+    // Same class as the clone-timeout bug this was found with: a process that
+    // was killed never "returned" anything, and saying it did sends the reader
+    // hunting for a git error that was never printed.
+    // Canary: drop `timedOut` from defaultExec and the reason reverts.
+    bindPat();
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      pushOk: false,
+      pushTimedOut: true,
+    });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("push_failed");
+    const reason = res.status === "push_failed" ? res.reason : "";
+    expect(reason).toContain("ran past its time limit");
+    expect(reason).not.toContain("returned non-zero");
+  });
+
+  it("defaultExec actually DETECTS a killed child (the fake above cannot prove this)", async () => {
+    // The test above injects a fake exec, so it only proves the classification
+    // downstream of `timedOut` — it would keep passing with the detection
+    // deleted, which is exactly what its first canary showed. This one runs a
+    // real process past a real timeout.
+    // Canary: set `const timedOut = false` in defaultExec and this fails.
+    const res = await defaultExec("sleep", ["5"], { cwd: process.cwd(), timeoutMs: 50 });
+    expect(res.ok).toBe(false);
+    expect(res.timedOut).toBe(true);
+
+    // …and a plain non-zero exit is NOT reported as a timeout.
+    const failed = await defaultExec("sh", ["-c", "exit 3"], {
+      cwd: process.cwd(),
+      timeoutMs: 10_000,
+    });
+    expect(failed.ok).toBe(false);
+    expect(failed.timedOut).toBeUndefined();
   });
 
   it("B-GH1/F15-15: a NON-FAST-FORWARD rejection is push_conflict, naming the branch, never a generic failure", async () => {

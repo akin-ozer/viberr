@@ -10,7 +10,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CLONE_TIMEOUT_MS,
   cloneFailureLogDetails,
+  cloneFailureSentence,
   createGitHubClonePlan,
   githubRemoteSanitizationArgs,
 } from "./git-clone-auth.server";
@@ -132,5 +134,56 @@ describe("cloneFailureLogDetails", () => {
     const details = cloneFailureLogDetails(error);
     expect(details).toEqual({ reason: "clone_failed", exitCode: 128 });
     expect(JSON.stringify(details)).not.toContain(token);
+  });
+});
+
+describe("clone timeout + failure sentence", () => {
+  it("gives a clone far more than the old 60s — that ceiling was a bet on repo size", () => {
+    // Viberr's own repo needs ~71s for `--depth 1` (55 MB working tree, most of
+    // it screenshots). At 60s the clone was SIGTERM'd on a healthy project with a
+    // probe-verified credential, and every downstream signal blamed the
+    // credential. A shallow clone is bounded by repo size and link speed; this
+    // ceiling exists to stop a HUNG clone, not to cap how big a repo may be.
+    expect(CLONE_TIMEOUT_MS).toBeGreaterThanOrEqual(600_000);
+  });
+
+  it("a timeout with a working credential says so, in as many words", () => {
+    // The whole point: the sentence has to make the wrong conclusion
+    // unavailable. "Provision credentials" was the guess that cost a human a
+    // debugging session on a credential that was never at fault.
+    // Canary: return a generic "clone failed" string for every reason.
+    const sentence = cloneFailureSentence(
+      { reason: "clone_terminated", signal: "SIGTERM" },
+      { hadCredential: true, timeoutMs: 900_000 },
+    );
+    expect(sentence).toContain("900s");
+    expect(sentence).toContain("ran past its time limit");
+    expect(sentence).toContain("not a missing-credential problem");
+  });
+
+  it("says the opposite when the clone really did run anonymously", () => {
+    const sentence = cloneFailureSentence(
+      { reason: "clone_failed", exitCode: 128 },
+      { hadCredential: false },
+    );
+    expect(sentence).toContain("No GitHub credential is attached");
+    expect(sentence).toContain("git exit 128");
+    expect(sentence).not.toContain("not a missing-credential problem");
+  });
+
+  it("names a missing git binary as the server's problem, not the repo's", () => {
+    expect(
+      cloneFailureSentence({ reason: "git_unavailable" }, { hadCredential: true }),
+    ).toContain("git is not installed on the Viberr server");
+  });
+
+  it("carries no token, whatever the inputs", () => {
+    const token = "github_pat_DO_NOT_LEAK_456";
+    const details = cloneFailureLogDetails(
+      Object.assign(new Error(`fatal: auth failed ${token}`), { code: 128 }),
+    );
+    expect(
+      cloneFailureSentence(details, { hadCredential: true }),
+    ).not.toContain(token);
   });
 });
