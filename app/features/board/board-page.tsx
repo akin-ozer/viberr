@@ -1113,7 +1113,10 @@ export function BoardPage({
       total,
       filterLabel,
       query,
-      boardTotal: allTasks.length,
+      // LIVE, not all: archived tasks render on no column under any normal
+      // filter, so counting them makes an empty board look occupied — which is
+      // exactly what a strict project holding one archived task did.
+      boardTotal: liveTasks.length,
       isEntryColumn,
     });
 

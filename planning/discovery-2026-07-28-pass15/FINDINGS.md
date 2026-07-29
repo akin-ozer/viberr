@@ -204,3 +204,38 @@ store" regression would have shipped silently. Now pinned and canary-proven; see
 **The generalizable lesson**: a ✅ that rests only on positive evidence is half a proof. "X reaches
 the run" and "only X reaches the run" are different claims, and the second is the one a capability
 system actually promises.
+
+## G. Second ruling round — live verification (2026-07-29, rebuilt container)
+
+Image rebuilt and confirmed identical to source (`ls build/server/assets | sort | md5` matches
+inside the container), then every ruling driven through the running app.
+
+| ruling | live evidence |
+|---|---|
+| **R15-9** | DevOps Skills (strict, no stored grant) — the delivery capability now renders under **Recommends**. Viberr (balanced, no stored grant) — still **Acts directly**. Same absent grant, opposite answers, decided by the project's governance rather than its creation date |
+| **R15-10** | DevOps Skills board: entry column reads "No tasks yet — create one to start the flow", the other four bare — one message. Viberr board (9 tasks): every empty column bare, P13-D-34 intact |
+| **R15-11** | Proven in a real browser on the e2e fixture, which has queue rows: `.rq-go` reads "Review", is `aria-hidden`, the row's `aria-label` is `Review VIB-142: …`, and clicking still lands on the task. **Not** proven on the docker instance — its review queues were empty, and the honest reason is worth keeping: Viberr's queue binds to the STRUCTURAL review stage, which on that board is **QA**, not the stage named "Review" (F15-17's resolver doing its job). Walking a task there was blocked by an open scope packet, and bypassing governance to manufacture a row would have proven nothing |
+| **R15-12** | Developer profile: `<details>` reads "Advisory only · 2 lines the runtime does not read", closed by default; expanding shows both lines with their modes intact ("Run unit & integration validation (acts directly)"). Agents surface added to the WCAG sweep and passes in both themes |
+| **R15-13** | `/org/settings` h1 = "Instance settings" (exactly one h1); `/projects/viberr/settings` h1 = "Viberr · settings" |
+
+**And the container caught a defect in my own R15-10 that every unit test had passed.**
+`boardTotal` was `allTasks.length`, which counts ARCHIVED tasks. DevOps Skills holds exactly one
+task, archived, sitting in the entry column — so the board rendered zero cards in five columns while
+the code believed it had a task, and the one board in the instance that most needed the teaching
+line was the only board that could never show it. `matchesBoardFilter` hides archived tasks under
+every filter except "Archived", so they are invisible by design; the count had to be of LIVE tasks,
+matching the R14-3 doctrine the file's own neighbouring comment already states. Fixed, tested
+against exactly that shape (`total: 1, boardTotal: 0` still teaches), canary-proven.
+
+**That is the third time this pass** that a defect survived a green suite and died on the running
+app — after the pid-1 signal bug and F15-20. The pattern in all three: the test asserted the rule I
+had in mind, and the instance held a state I had not imagined (npm as pid 1; a capability with no
+row; a board whose only task is archived). **Tests check the rule; only the instance checks the
+assumption.**
+
+**One more unexplained single-test failure (2026-07-29)**, recorded because guessing would be worse
+than admitting it: one test failed in a combined gate run that immediately followed a docker image
+rebuild. The reporter output captured only the summary, so **the test's name was never captured**
+and I cannot attribute it to the §E EMFILE flake, however well the circumstances match. Four full
+suites since — including a byte-identical re-run of the same combined command — are clean at
+**2434/2434**. Recorded as unexplained rather than filed under a known flake it merely resembles.

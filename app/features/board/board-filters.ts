@@ -151,8 +151,13 @@ export function boardEmptyCopy({
   /** Label of the active filter, or null when it is "all". */
   filterLabel: string | null;
   query: string;
-  /** Tasks on the WHOLE board before filtering — R15-10. Omitted → treated as
-   *  a board that has tasks, i.e. the pre-R15-10 bare behavior. */
+  /** LIVE (non-archived) tasks on the whole board, before filtering — R15-10.
+   *  Live, not total: an archived task is hidden under every filter except
+   *  "Archived" (see matchesBoardFilter), so a board whose only task is
+   *  archived looks — and for this purpose IS — empty. Counting it made the one
+   *  board that most needed the teaching line the one board that never got it.
+   *  Omitted → treated as a board that has tasks, i.e. the pre-R15-10 bare
+   *  behavior. */
   boardTotal?: number;
   /** True for the entry (first) stage column — the only one allowed to teach. */
   isEntryColumn?: boolean;
@@ -163,7 +168,11 @@ export function boardEmptyCopy({
   // times beside real work), so the teaching line is scoped to the case where
   // there is nothing to repeat beside: the whole board is empty, and only the
   // entry column speaks. The moment ANY task exists, every column is bare again.
-  if (total === 0 && boardTotal === 0 && isEntryColumn) {
+  // Keyed on `boardTotal`, NOT on this column's `total`: `total` counts archived
+  // tasks, which are invisible here, so an archived-only entry column reads as
+  // non-empty and would silently skip the teaching line. A filter or search that
+  // is actively hiding something still wins — that message is more informative.
+  if (boardTotal === 0 && isEntryColumn && !filterLabel && !query.trim()) {
     return "No tasks yet — create one to start the flow";
   }
   if (total === 0) return "No tasks";

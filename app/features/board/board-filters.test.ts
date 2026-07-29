@@ -220,9 +220,8 @@ describe("boardEmptyCopy — the first empty board teaches (R15-10)", () => {
   });
 
   it("never teaches when a filter or search is what emptied the column", () => {
-    // boardTotal 0 with an active filter cannot happen, but the ordering must
-    // not let a teaching line pre-empt the "N tasks hidden by …" explanation,
-    // which is strictly more informative.
+    // The ordering must not let a teaching line pre-empt the "N tasks hidden
+    // by …" explanation, which is strictly more informative.
     expect(
       boardEmptyCopy({
         total: 4,
@@ -232,6 +231,45 @@ describe("boardEmptyCopy — the first empty board teaches (R15-10)", () => {
         isEntryColumn: true,
       }),
     ).toBe("All 4 tasks here are hidden by the “Waiting on me” filter.");
+    expect(
+      boardEmptyCopy({
+        total: 4,
+        filterLabel: null,
+        query: "auth",
+        boardTotal: 0,
+        isEntryColumn: true,
+      }),
+    ).toBe("All 4 tasks here are hidden by the search “auth”.");
+  });
+
+  it("still teaches when the board's only tasks are ARCHIVED", () => {
+    // Caught live, not by a test: DevOps Skills held exactly one archived task,
+    // sitting in the entry column. `total` counts archived tasks, but
+    // matchesBoardFilter hides them under every filter except "Archived" — so
+    // the column rendered nothing, read as non-empty, and the board that most
+    // needed the teaching line was the only board that never got it. The
+    // decision is keyed on the board's LIVE count, and this column's own
+    // archived-inclusive `total` must not veto it.
+    // Canary: add `total === 0 &&` back to the condition.
+    expect(
+      boardEmptyCopy({
+        total: 1,
+        filterLabel: null,
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: true,
+      }),
+    ).toBe(teach);
+    // …and a non-entry column with the same shape still stays bare.
+    expect(
+      boardEmptyCopy({
+        total: 1,
+        filterLabel: null,
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: false,
+      }),
+    ).toBe(bare);
   });
 
   it("omitting boardTotal keeps the pre-R15-10 bare behavior", () => {
