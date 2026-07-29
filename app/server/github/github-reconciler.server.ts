@@ -264,16 +264,35 @@ export async function reconcileTask(
     pr?.mergeable !== undefined ? pr.mergeable : (cachedPr?.mergeable ?? null);
   const mergeable =
     prState === "review" || prState === "accepted" ? mergeableLive : null;
-  const newPr: PrRef | null = pr
-    ? {
-        number: pr.number,
-        state: prState ?? pr.state,
-        title: pr.title,
-        ...(checks ? { checks } : {}),
-        ...(review ? { review } : {}),
-        ...(mergeable ? { mergeable } : {}),
-      }
-    : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
+  // R15-15 — OWNERSHIP. `findPrForBranch` matches on branch NAME alone, and a
+  // task-key branch is not a unique identifier: task keys restart at 1 on a new
+  // data root, so a brand-new VIB-1 gets branch `vib-1` — which on GitHub may
+  // still carry the PR of a PREVIOUS VIB-1 that has nothing to do with it.
+  //
+  // Live: a fresh instance's VIB-1 adopted merged PR #109 from a wiped
+  // instance, the divergence rule fired "PR #109 was merged but VIB-1 hasn't
+  // been accepted", and the operator recommended moving a task to Review while
+  // its developer was still writing code. The task's own delivered revision was
+  // not in that PR and never had been.
+  //
+  // A task owns a PR only if THIS task opened it — `openTaskPr` is the one
+  // writer that establishes the link (pr-open.server.ts). The reconciler's job
+  // is to keep an owned link honest, never to mint one. So a discovered PR is
+  // adopted only when the task already references a PR on this branch; with no
+  // reference, the discovery is a name COLLISION and is reported as one.
+  const ownsAPr = fm.pr != null;
+  const unownedPr = pr && !ownsAPr ? pr : null;
+  const newPr: PrRef | null =
+    pr && ownsAPr
+      ? {
+          number: pr.number,
+          state: prState ?? pr.state,
+          title: pr.title,
+          ...(checks ? { checks } : {}),
+          ...(review ? { review } : {}),
+          ...(mergeable ? { mergeable } : {}),
+        }
+      : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
 
   const existingGithub: GithubCache | null = fm.github;
   // Commit association: `[KEY]`-prefixed commits on the branch. Agents don't
@@ -287,12 +306,17 @@ export async function reconcileTask(
       ? existingCommits
       : prefixCommits;
   const newGithub: GithubCache | null =
-    branchCommits !== null || pr?.changed || existingGithub
+    branchCommits !== null || pr?.changed || existingGithub || unownedPr
       ? {
           commits: branchCommits ?? existingCommits,
           changed: pr?.changed ?? existingGithub?.changed ?? null,
+          // Part of the compared snapshot below, so the collision note fires on
+          // the tick it appears and stays quiet on the ~288 that follow.
+          unownedPr: unownedPr?.number ?? null,
         }
       : null;
+  const unownedPrIsNew =
+    !!unownedPr && existingGithub?.unownedPr !== unownedPr.number;
 
   // An accepted (merge-pending) PR closed on GitHub WITHOUT merging drops the
   // Complete-merge affordance with no path back — explain why, typed `policy`.
@@ -370,6 +394,27 @@ export async function reconcileTask(
       );
     }
     await patchTaskFrontmatter(ref, patch);
+    if (unownedPrIsNew) {
+      // The collision is not a divergence and must not read like one: nothing
+      // about THIS task changed on GitHub. Say plainly whose PR it is not, and
+      // point at the same remedy the non-fast-forward push already gives, so the
+      // two symptoms of one cause (a stale branch under a reused task key) read
+      // as the same problem instead of two unrelated GitHub mysteries.
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: POLICY_ENGINE_ACTOR,
+        title: null,
+        text:
+          `**Branch name collision:** GitHub already has PR #${unownedPr!.number} on branch ` +
+          `\`${branch}\`, but ${fm.key} did not open it — it is NOT this task's review PR and ` +
+          `Viberr will not track it as one. This happens when a task key is reused (a new data ` +
+          `root restarts keys at 1) while the old branch still exists on GitHub. Delete or rename ` +
+          `the remote branch \`${branch}\`, or give this task a different branch, before delivering.`,
+        toAgent: false,
+        evidence: null,
+      });
+    }
     if (acceptedClosedText) {
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),

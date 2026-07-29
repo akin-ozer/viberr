@@ -337,6 +337,10 @@ export const githubCacheSchema = z
       .loose()
       .nullable()
       .default(null),
+    /** R15-15: a PR found on this task's branch that this task did NOT open —
+     *  recorded so the collision is reported once instead of on every poll, and
+     *  so the number is visible rather than silently discarded. */
+    unownedPr: z.number().int().nullable().optional(),
   })
   .loose();
 export type GithubCache = z.infer<typeof githubCacheSchema>;
