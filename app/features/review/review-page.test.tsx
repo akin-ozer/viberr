@@ -122,6 +122,29 @@ describe("ReviewQueuePage", () => {
     expect(second.querySelector(".pill.done")!.textContent).toBe("PR #311");
   });
 
+  it("R15-11: every row names its primary action and where it goes", () => {
+    // The queue's job is deciding, but the row was an unlabeled clickable
+    // region — the surface read as having no action at all. It stays a triage
+    // list; the row just says what the click does.
+    // Canary: delete the .rq-go span and both halves fail.
+    const { container } = renderQueue([rowHuman], [rowAgent]);
+    const rows = container.querySelectorAll(".rq-row");
+    for (const row of rows) {
+      const go = row.querySelector(".rq-go");
+      expect(go, "each row needs a named primary action").toBeTruthy();
+      expect(go!.textContent).toContain("Review");
+      // Decorative for AT — the row's own aria-label already names the target,
+      // so the chevron+label must not be read a second time.
+      expect(go!.getAttribute("aria-hidden")).toBe("true");
+    }
+    // It must NOT say "Accept": acceptance is verdict-gated (R15-1) and can
+    // refuse, and this surface cannot promise an outcome it does not evaluate.
+    expect(container.querySelector(".rq-go")!.textContent).not.toContain("Accept");
+    expect(rows[0]!.getAttribute("aria-label")).toBe(
+      "Review VIB-142: Attach execution workspace to task runtime",
+    );
+  });
+
   it("labels a human-waiting row in the working panel 'waiting on a human', never 'agent working'", () => {
     // R8-3: a review task waiting on a human someone ELSE must accept lands in
     // "Still in review" — it must read "waiting on a human", not the false

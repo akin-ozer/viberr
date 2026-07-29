@@ -18,10 +18,12 @@ import {
 } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
+  absentDeliverReviewPrMode,
   applyVerdictOutcomeGate,
   capabilityById,
   coerceSpecialistCapabilityMode,
 } from "~/shared/capabilities";
+import { humanGatesPreWorkAdvance } from "~/shared/workflow/stage-roles";
 import type { AgentProfileView, LibraryProfileView } from "./agent-types";
 
 /**
@@ -225,10 +227,29 @@ export function listLibraryProfiles(
   return out;
 }
 
-/** Effective profile for ONE deployment entry (exported for actions/tests). */
+/**
+ * Pass this as `absentDeliverMode` when the caller reads only kind / backend /
+ * model / resources and never touches `capabilities`. Named rather than a bare
+ * "direct" so the audit is one grep: every use of this constant must be a call
+ * site that provably ignores the returned grants.
+ */
+export const VIEW_WITHOUT_POLICY: CapabilityMode = "direct";
+
+/**
+ * Effective profile for ONE deployment entry (exported for actions/tests).
+ *
+ * `absentDeliverMode` (R15-9) is the mode the RUNTIME applies when the
+ * deployment persisted no `deliver-review-pr` grant — see `deliverGate`. It has
+ * no default on purpose: a silent default here is exactly what made F15-20
+ * possible, where this view asserted a mode the runtime did not use. Surfaces
+ * that RENDER or EDIT policy must derive it from the project
+ * (`humanGatesPreWorkAdvance`); callers that only read `kind`/`backend`/model
+ * pass "direct" and never touch `capabilities`.
+ */
 export function effectiveProfileView(
   deployment: AgentDeployment,
-  dataRoot?: string,
+  dataRoot: string | undefined,
+  absentDeliverMode: CapabilityMode,
 ): AgentProfileView {
   const template = readTemplate(deployment.profileId, dataRoot);
   const def = parseDeploymentDefinition(
@@ -249,13 +270,14 @@ export function effectiveProfileView(
   // panel, however, renders only the grants the deployment PERSISTED — so a
   // capability that genuinely governs behavior was invisible here and could
   // not be edited: an operator was pushing branches and opening PRs with no
-  // row saying so. Materialize it at the mode the runtime actually applies.
+  // row saying so. Materialize it at the mode the runtime actually applies —
+  // which since R15-9 depends on the project's governance, not on a constant.
   const operatorGrants =
     deployment.capabilities.some((c) => c.capabilityId === "deliver-review-pr")
       ? deployment.capabilities
       : [
           ...deployment.capabilities,
-          { capabilityId: "deliver-review-pr", mode: "direct" as CapabilityMode },
+          { capabilityId: "deliver-review-pr", mode: absentDeliverMode },
         ];
   const effectiveGrants = isSpecialist
     ? deployment.capabilities.map((c) => ({
@@ -331,8 +353,13 @@ export function assembleAgentRoster(
 ): AgentProfileView[] {
   const project = getProject(db, projectSlug);
   if (!project) return [];
+  // R15-9: the roster RENDERS policy, so it must materialize an absent
+  // `deliver-review-pr` at the mode this project's runtime actually applies.
+  const deliverDefault = absentDeliverReviewPrMode(
+    humanGatesPreWorkAdvance(project.stages, project.workflow),
+  );
   const views = project.agentPolicy.map((dep) =>
-    effectiveProfileView(dep, ctx.dataRoot),
+    effectiveProfileView(dep, ctx.dataRoot, deliverDefault),
   );
   const operators = views.filter((v) => v.kind === "operator");
   const specialists = views.filter((v) => v.kind !== "operator");

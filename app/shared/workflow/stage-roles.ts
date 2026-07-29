@@ -67,6 +67,30 @@ export function resolveStageRoles(
   return { entryId, terminalId, reviewId, workId };
 }
 
+/**
+ * True when a human gates every advance BEFORE work starts — the `strict`
+ * preset's actual signature in the workflow graph.
+ *
+ * R15-9. The preset a project was created with is not stored anywhere: it is a
+ * creation-time shaping input, and what persists is its EFFECT. `strict` turns
+ * every pre-terminal `auto` boundary into `approval`, so strictness is readable
+ * straight off the graph — and readable for projects that predate any given
+ * capability, which a stored `preset` field could never be (that is the F15-20
+ * shape of bug: a field absent on everything that already exists).
+ *
+ * The terminal edge is excluded because review→done is human-locked in EVERY
+ * preset, so it carries no signal. A workflow with no pre-terminal boundaries
+ * at all is not "strict" — there is nothing being gated — hence the length check.
+ */
+export function humanGatesPreWorkAdvance(
+  stages: readonly Pick<StageDef, "id">[],
+  workflow: readonly Pick<WorkflowBoundary, "to" | "boundary">[],
+): boolean {
+  const terminalId = stages[stages.length - 1]?.id ?? null;
+  const preWork = workflow.filter((b) => b.to !== terminalId);
+  return preWork.length > 0 && preWork.every((b) => b.boundary !== "auto");
+}
+
 /** True when `stageId` is the project's terminal (Done-equivalent) stage. */
 export function isTerminalStage(
   stageId: string | null | undefined,

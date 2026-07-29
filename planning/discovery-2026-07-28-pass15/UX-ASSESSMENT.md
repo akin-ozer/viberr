@@ -51,27 +51,23 @@ build as an end user and harvesting the actual rendered copy rather than reading
 | **375px kept the 232px rail** | content squeezed to ~140px; the "same surface reflowed" promise unmet | fixed (off-canvas rail + toggle, 0 horizontal overflow) |
 | **Silent 403s** on controls the UI offered | the worst failure mode: an offer the server refuses without saying so | fixed (owner authority widened per R15-3; refusals rendered) |
 
-## Open questions for you (design calls, not defects)
+## Owner decisions (asked 2026-07-29, all answered and implemented)
 
-1. **The board's empty column is the one empty state that does not teach** — five columns each
-   saying just "No tasks" to a new user. This is deliberate (ruling P13-D-34 kept "bare copy for a
-   genuinely empty column" and reserved explanatory copy for filter-hidden columns), and a test
-   pins it. On a brand-new project it is the first thing a user sees, five times. Keep as-is, or
-   let the *first* empty board teach ("No tasks yet — create one to start the flow")?
+These were the four design calls this assessment could not make on its own. The owner ruled on
+each; every one is implemented, tested and canary-proven on this branch.
 
-2. **The Review queue has no primary action.** It is the surface whose entire job is deciding, yet
-   accepting happens on the task page. Intended (the queue is a triage list, decisions belong with
-   the evidence), or should the queue accept in place?
+| question | ruling | how it landed |
+|---|---|---|
+| The board's five bare "No tasks" columns — the one empty state that doesn't teach, and the first thing a new user sees. P13-D-34 pinned it deliberately. | **R15-10 — teach only when the whole board is empty, and only once.** | The entry column says "No tasks yet — create one to start the flow" when the project has zero tasks; every other column stays bare, and all of them go bare again the moment one task exists. This *narrows* P13-D-34 instead of reversing it: that ruling guarded against repeating an explanation five times beside real work, which this does not do. |
+| The Review queue has no primary action, though deciding is its whole job. | **R15-11 — keep it a triage list; give the rows a named action.** | Rows now read "Review ›" and carry an `aria-label` naming the task. Acceptance stays on the task page, because a decision belongs with its evidence. Deliberately NOT "Accept": acceptance is verdict-gated (R15-1) and can refuse, and a control must not name an outcome its surface cannot promise — the rule F15-22 was filed under. |
+| "Viberr settings" (instance) collides with a project named Viberr, while the project's own page is titled bare "Settings". | **R15-13 — scope both titles.** | "Instance settings" and "Viberr · settings". The five wayfinding strings that pointed readers at "Viberr settings → GitHub connections" were updated with it, so no copy names a heading that no longer exists. |
+| Advisory capability lines read oddly (a Docs writer listing "Move the task to Review (acts directly)" as advisory). | **R15-12 — collapse them under a labelled group; do not hide them.** | A `<details>` summarised "Advisory only · N lines the runtime does not read", collapsed by default, count always visible. Hiding "unenforced and role-irrelevant" capabilities was the alternative and was rejected: an omission the reader cannot see is worse than an awkward truth — and "role-irrelevant" is a judgment the code should not be making about policy. |
 
-3. **"Viberr settings" vs a project named "Viberr".** Instance settings title collides with a
-   project of the same name; the project's own settings page is titled just "Settings" with the
-   project named only in the subtitle. Worth scoping the titles ("Instance settings" / "Viberr ·
-   settings")?
-
-4. **Advisory capability lines.** A profile's unenforced capabilities now render as "Advisory
-   guidance, not policy: …". Honest, but a Docs writer listing "Move the task to Review (acts
-   directly)" as advisory reads oddly. Should unenforced-and-irrelevant capabilities be hidden
-   rather than disclosed?
+A fifth question lived in `USECASES.md` rather than here — whether a pre-existing project should keep
+running delivery at `direct` by absence while a new strict project gets `recommend`. Ruled **R15-9**:
+derive the absent grant from the project's own governance, so the answer stops depending on when the
+project was created. Both the runtime gate and this panel now read it from one shared function,
+because those two disagreeing is exactly what F15-20 was.
 
 ## Method note
 

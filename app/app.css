@@ -1649,6 +1649,33 @@ dialog[data-closing]::backdrop {
 }
 .def-note .ico { width: 13px; height: 13px; margin-top: .15rem; flex: none; color: var(--placeholder); }
 .def-note code { font-family: var(--font-mono); font-size: .72rem; color: var(--muted); }
+/* R15-12: unenforced capability lines, collapsed. Native <details> so keyboard
+   and screen-reader behavior come for free — the panel already ships in the
+   WCAG sweep and must not regress it. */
+.cap-advisory { margin-top: .55rem; }
+.cap-advisory > summary {
+  display: flex; align-items: center; gap: .45rem;
+  font-size: .76rem; color: var(--muted); cursor: pointer;
+  list-style: none; padding: .25rem 0;
+  border-radius: var(--radius-chip);
+}
+.cap-advisory > summary::-webkit-details-marker { display: none; }
+.cap-advisory > summary::after {
+  content: ""; width: 7px; height: 7px; margin-left: .1rem;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .14s ease;
+}
+.cap-advisory[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
+.cap-advisory > summary:hover { color: var(--fg); }
+.cap-advisory > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.cap-advisory > summary .ico { width: 13px; height: 13px; flex: none; color: var(--placeholder); }
+.cap-advisory-body { font-size: .76rem; line-height: 1.5; color: var(--faint); padding: .1rem 0 .2rem 1.05rem; }
+.cap-advisory-body ul { margin: .35rem 0 0; padding-left: 1rem; list-style: disc; }
+.cap-advisory-body li { margin-top: .12rem; }
+@media (prefers-reduced-motion: reduce) {
+  .cap-advisory > summary::after { transition: none; }
+}
 .tag {
   display: inline-flex; align-items: center; gap: .15rem;
   padding: .22rem .25rem .22rem .5rem; border-radius: 7px;
@@ -2061,6 +2088,21 @@ dialog[data-closing]::backdrop {
 .rq-main .sub { font-size: .78rem; color: var(--faint); margin-top: .18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rq-main .sub .mono { font-size: .72rem; }
 .rq-meta { display: flex; align-items: center; gap: .55rem; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+/* R15-11: the row's named primary action. The row itself is the button, so
+   this is a label inside it, not a nested control — it says where the click
+   goes without promising an outcome the task page may refuse (R15-1). */
+.rq-go {
+  display: inline-flex; align-items: center; gap: .15rem;
+  font-size: .78rem; font-weight: 700; color: var(--muted);
+  flex: none; white-space: nowrap;
+  transition: color .14s ease, transform .14s ease;
+}
+.rq-go svg { width: 14px; height: 14px; }
+.rq-row:hover .rq-go { color: var(--blue); transform: translateX(2px); }
+@media (prefers-reduced-motion: reduce) {
+  .rq-go { transition: color .14s ease; }
+  .rq-row:hover .rq-go { transform: none; }
+}
 @media (max-width: 1100px) {
   .rq-row { flex-wrap: wrap; }
   .rq-main { min-width: 220px; }

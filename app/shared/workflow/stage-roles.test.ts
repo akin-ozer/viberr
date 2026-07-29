@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isTerminalStage, resolveStageRoles } from "./stage-roles";
+import {
+  humanGatesPreWorkAdvance,
+  isTerminalStage,
+  resolveStageRoles,
+} from "./stage-roles";
 import { CUSTOM_3_STAGE_BOARD } from "../../../test-support/custom-board";
 import { GOVERNED_TEMPLATE } from "./templates";
 
@@ -84,5 +88,47 @@ describe("resolveStageRoles", () => {
     const stages = CUSTOM_3_STAGE_BOARD.stages;
     expect(isTerminalStage("done", stages)).toBe(true);
     expect(isTerminalStage("doing", stages)).toBe(false);
+  });
+});
+
+describe("humanGatesPreWorkAdvance (R15-9)", () => {
+  const stages = [
+    { id: "triage" },
+    { id: "ready" },
+    { id: "impl" },
+    { id: "review" },
+    { id: "done" },
+  ];
+  const wf = (
+    ...boundaries: ("auto" | "approval" | "human")[]
+  ) => [
+    { to: "ready", boundary: boundaries[0]! },
+    { to: "impl", boundary: boundaries[1]! },
+    { to: "review", boundary: boundaries[2]! },
+    // review -> done is human-locked in EVERY preset, so it carries no signal.
+    { to: "done", boundary: "human" as const },
+  ];
+
+  it("is true only when NO pre-terminal boundary advances automatically", () => {
+    // The `strict` preset's signature: presetWorkflow rewrites every pre-terminal
+    // `auto` boundary to `approval`. The preset itself is never stored, so this
+    // graph shape is the only durable evidence of it — and unlike a stored field
+    // it is already true of projects that predate the capability (F15-20's shape).
+    expect(humanGatesPreWorkAdvance(stages, wf("approval", "approval", "approval"))).toBe(true);
+    expect(humanGatesPreWorkAdvance(stages, wf("auto", "approval", "approval"))).toBe(false);
+    expect(humanGatesPreWorkAdvance(stages, wf("auto", "auto", "approval"))).toBe(false);
+  });
+
+  it("ignores the terminal edge, which is human-locked under every preset", () => {
+    // A board whose ONLY boundary is review -> done must not read as strict just
+    // because that one edge is human — it is human for everyone.
+    expect(
+      humanGatesPreWorkAdvance(stages, [{ to: "done", boundary: "human" }]),
+    ).toBe(false);
+  });
+
+  it("a workflow with nothing to gate is not strict", () => {
+    expect(humanGatesPreWorkAdvance(stages, [])).toBe(false);
+    expect(humanGatesPreWorkAdvance([], [])).toBe(false);
   });
 });

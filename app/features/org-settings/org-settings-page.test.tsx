@@ -701,3 +701,34 @@ describe("resources tab badge counts resources, not resources+templates", () => 
     expect(badge.getAttribute("title")).toContain("2 agent profiles");
   });
 });
+
+describe("R15-13: instance settings name their scope, not a project's name", () => {
+  it("titles itself 'Instance settings' — never the product name", () => {
+    // "Viberr settings" collided with a PROJECT named Viberr: the surface that
+    // is NOT about that project was the one carrying its name, while the
+    // project's own settings page said only "Settings". Both now answer
+    // "settings for what?" on their own, like every other heading in the app.
+    // Canary: put "Viberr settings" back and both halves fail.
+    const { container } = renderPanel(
+      <OrgSettingsPage
+        view={{
+          connections: CONNECTIONS,
+          users: [ME],
+          domains: DOMAINS,
+          kbs: KBS,
+          mcps: MCPS,
+          skills: SKILLS,
+          gagents: GAGENTS,
+          stages: STAGES,
+        }}
+        meId={ME.id}
+      />,
+    );
+    const h1s = container.querySelectorAll("h1");
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.textContent).toBe("Instance settings");
+    expect(h1s[0]!.textContent).not.toContain("Viberr");
+    // The subtitle already carried the scope; it must keep doing so.
+    expect(container.textContent).toContain("Instance level — shared by every project");
+  });
+});

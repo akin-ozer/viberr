@@ -143,13 +143,29 @@ export function boardEmptyCopy({
   total,
   filterLabel,
   query,
+  boardTotal,
+  isEntryColumn = false,
 }: {
   /** Tasks in this column (or list) BEFORE the filter and search ran. */
   total: number;
   /** Label of the active filter, or null when it is "all". */
   filterLabel: string | null;
   query: string;
+  /** Tasks on the WHOLE board before filtering — R15-10. Omitted → treated as
+   *  a board that has tasks, i.e. the pre-R15-10 bare behavior. */
+  boardTotal?: number;
+  /** True for the entry (first) stage column — the only one allowed to teach. */
+  isEntryColumn?: boolean;
 }): string {
+  // R15-10: a brand-new project showed five columns each saying "No tasks" —
+  // the one empty state in the app that did not teach, and the first thing a
+  // new user sees. P13-D-34's point stands (do not repeat an explanation five
+  // times beside real work), so the teaching line is scoped to the case where
+  // there is nothing to repeat beside: the whole board is empty, and only the
+  // entry column speaks. The moment ANY task exists, every column is bare again.
+  if (total === 0 && boardTotal === 0 && isEntryColumn) {
+    return "No tasks yet — create one to start the flow";
+  }
   if (total === 0) return "No tasks";
   const subject = total === 1 ? "The 1 task here is" : `All ${total} tasks here are`;
   const q = query.trim();

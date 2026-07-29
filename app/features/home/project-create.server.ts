@@ -208,7 +208,7 @@ export async function createProject(
   // therefore gated behind adding a PAT connection.
   if (!owner || !repoName) {
     throw AppError.validation(
-      "A GitHub repository is required — pick a GitHub connection and a repository name. Add a PAT in Viberr settings → GitHub connections first.",
+      "A GitHub repository is required — pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first.",
     );
   }
   const slug = slugifyProjectName(name);
@@ -240,7 +240,7 @@ export async function createProject(
   const connection = getConnection(db, owner);
   if (!connection) {
     throw AppError.validation(
-      `No GitHub connection for "${owner}" — add a PAT for that owner in Viberr settings → GitHub connections first.`,
+      `No GitHub connection for "${owner}" — add a PAT for that owner in Instance settings → GitHub connections first.`,
     );
   }
   let defaultBranch = "main";

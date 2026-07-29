@@ -247,12 +247,20 @@ describe("ProfileDetail", () => {
     expect(
       container.querySelector(".cap-col.direct")!.textContent,
     ).not.toContain("Read the repository & diff");
-    expect(getByText(/Advisory guidance, not policy/)).toBeTruthy();
+    // R15-12: collapsed into its own labelled group rather than disclosed
+    // inline above the binding grants — but still IN the DOM and still counted,
+    // because hiding it was the option that was rejected.
+    const advisory = container.querySelector(".cap-advisory")!;
+    expect(advisory).toBeTruthy();
+    expect(advisory.querySelector("summary")!.textContent).toContain(
+      "Advisory only",
+    );
+    expect(getByText(/Nothing in the runtime enforces them/)).toBeTruthy();
     // …and it keeps each label's MODE. Concatenating the three buckets made an
     // advisory capability an admin set to human-only read exactly like one left
     // at "acts directly" — the same disagreement class F15-05 was filed for,
     // one level quieter (the matrix still tells them apart).
-    const advisoryLine = container.querySelector(".def-note")!.textContent!;
+    const advisoryLine = advisory.textContent!;
     expect(advisoryLine).toContain("Read the repository & diff (acts directly)");
     // The structural human-only locks still render as such.
     expect(
@@ -292,9 +300,22 @@ describe("ProfileDetail", () => {
         onEdit={() => {}}
       />,
     );
-    const advisoryLine = container.querySelector(".def-note")!.textContent!;
-    expect(advisoryLine).toContain("Read the repository & diff (acts directly)");
-    expect(advisoryLine).toContain("Approve the review (reserved for humans)");
+    // R15-12: one <li> per capability now, so the mode travels with its own
+    // label instead of riding a single joined sentence.
+    const items = [
+      ...container.querySelectorAll(".cap-advisory-body li"),
+    ].map((li) => li.textContent!);
+    expect(items).toContain("Read the repository & diff (acts directly)");
+    expect(items).toContain("Approve the review (reserved for humans)");
+    // Collapsed by DEFAULT — the whole point is that it stops competing with
+    // the grants that actually bind. Canary: add `open` to the <details>.
+    expect(
+      container.querySelector(".cap-advisory")!.hasAttribute("open"),
+    ).toBe(false);
+    // The count is visible without expanding, so nothing looks omitted.
+    expect(container.querySelector(".cap-advisory summary")!.textContent).toContain(
+      "Advisory only · 2 lines",
+    );
   });
 
   it("operator: no Delete button, real backend + autonomy cells, lifecycle hint", () => {

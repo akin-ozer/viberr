@@ -599,15 +599,37 @@ export function ProfileDetail({
           <CapColumn group="forbidden" items={governed.forbidden} />
         </div>
         {advisory.length > 0 && (
-          <div className="def-note">
-            <Icon name="shield" />
-            <span>
-              Advisory guidance, not policy:{" "}
-              {advisory.map((x) => `${x.label} (${x.mode.toLowerCase()})`).join(" · ")}.
-              These describe how the profile works; nothing in the runtime reads
-              them.
-            </span>
-          </div>
+          /* R15-12: these were disclosed inline, above the fold, next to the
+             grants that actually bind — so a Docs writer's panel led with
+             "Move the task to Review (acts directly)" as advisory, which reads
+             as a contradiction of the policy right above it. Hiding them was
+             the other option and was rejected: an omission the reader cannot
+             see is worse than an awkward truth. Collapsed, not removed — the
+             count is always visible and one click shows every line. */
+          <details className="cap-advisory">
+            <summary>
+              <Icon name="shield" />
+              <span>
+                Advisory only · {advisory.length}{" "}
+                {advisory.length === 1 ? "line" : "lines"} the runtime does not
+                read
+              </span>
+            </summary>
+            <div className="cap-advisory-body">
+              <p>
+                These describe how the profile is meant to work. Nothing in the
+                runtime enforces them, so they never grant or refuse anything —
+                the binding policy is the three columns above.
+              </p>
+              <ul>
+                {advisory.map((x) => (
+                  <li key={x.label}>
+                    {x.label} <span className="fhint">({x.mode.toLowerCase()})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </details>
         )}
       </div>
 

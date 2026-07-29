@@ -262,7 +262,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
       "~/server/tasks/specialist-run.server"
     );
     const specialists = f.agents
-      .map((a) => effectiveProfileView(a, store.dataRoot))
+      .map((a) => effectiveProfileView(a, store.dataRoot, "direct"))
       .filter((v) => v.kind === "specialist");
     expect(specialists.length).toBeGreaterThan(0);
     for (const spec of specialists) {

@@ -23,7 +23,11 @@ import {
   isMeaninglessComment,
   separateEvidence,
 } from "./comment-guardrails.server";
-import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { absentDeliverReviewPrMode } from "~/shared/capabilities";
+import {
+  humanGatesPreWorkAdvance,
+  resolveStageRoles,
+} from "~/shared/workflow/stage-roles";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -34,7 +38,10 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { effectiveProfileView } from "~/features/agents/agents-query.server";
+import {
+  effectiveProfileView,
+  VIEW_WITHOUT_POLICY,
+} from "~/features/agents/agents-query.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   notifyMentionedUsers,
@@ -102,6 +109,12 @@ export interface OperatorAuthority {
   persona: string | null;
   /** false when no operator profile is deployed in the project. */
   deployed: boolean;
+  /**
+   * R15-9 — true when this project human-gates every pre-work advance (the
+   * `strict` preset's signature in the workflow graph). Used ONLY to resolve a
+   * capability the deployment never persisted; an explicit grant always wins.
+   */
+  humanGatedBeforeWork: boolean;
 }
 
 /** How a gated capability resolves for the current authority. */
@@ -154,10 +167,12 @@ export function operatorBackendFor(
   try {
     const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
     const deployment = file?.parsed.frontmatter.agents.find(
-      (a) => effectiveProfileView(a, ctx.dataRoot).kind === "operator",
+      (a) => effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY).kind === "operator",
     );
     if (!deployment) return "claude";
-    return deploymentBackend(effectiveProfileView(deployment, ctx.dataRoot));
+    return deploymentBackend(
+      effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY),
+    );
   } catch {
     return "claude";
   }
@@ -174,8 +189,14 @@ export function resolveOperatorAuthority(
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
+  // R15-9: read off the graph, not a stored preset — see humanGatesPreWorkAdvance.
+  const humanGatedBeforeWork = humanGatesPreWorkAdvance(
+    file.parsed.frontmatter.stages,
+    file.parsed.frontmatter.workflow,
+  );
+
   const deployment = file.parsed.frontmatter.agents.find((a) => {
-    const view = effectiveProfileView(a, ctx.dataRoot);
+    const view = effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     return view.kind === "operator";
   });
 
@@ -192,10 +213,11 @@ export function resolveOperatorAuthority(
       persona: null,
       mcps: [],
       deployed: false,
+      humanGatedBeforeWork,
     };
   }
 
-  const view = effectiveProfileView(deployment, ctx.dataRoot);
+  const view = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
   const policy = new Map<string, CapabilityMode>(
     deployment.capabilities.map((c) => [c.capabilityId, c.mode]),
   );
@@ -228,6 +250,7 @@ export function resolveOperatorAuthority(
         ? definition.persona.trim() || null
         : null,
     deployed: true,
+    humanGatedBeforeWork,
   };
 }
 
@@ -257,9 +280,18 @@ export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
  * Same deliberate polarity as `use-web-search-fetch` (operatorWebWithheld).
  */
 export function deliverGate(authority: OperatorAuthority): Gate {
-  return authority.policy.has("deliver-review-pr")
-    ? gate(authority, "deliver-review-pr")
-    : "direct";
+  if (authority.policy.has("deliver-review-pr")) {
+    return gate(authority, "deliver-review-pr");
+  }
+  // R15-9 — `deliver-review-pr` postdates every deployment created before
+  // R15-2, so an absent grant is the norm on existing projects, not an edge
+  // case. Resolving it to a flat `direct` meant two projects with identical
+  // governance behaved differently purely by creation date: a strict project
+  // made today asks a human before pushing, while one made last week pushes on
+  // its own. Derive the same answer the preset would have given instead, so the
+  // rule is "what does this project's governance say", not "when was it made".
+  // Shared with the policy surface so the two can never disagree (F15-20).
+  return absentDeliverReviewPrMode(authority.humanGatedBeforeWork);
 }
 
 // ------------------------------------------------------------- helpers

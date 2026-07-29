@@ -1054,8 +1054,11 @@ export function SettingsPage({
     <div className="board-wrap" data-screen-label="Settings">
       <div className="board-head">
         <div>
-          <h1>Settings</h1>
-          <div className="sub">Board configuration for {data.project.name}</div>
+          {/* R15-13: the project's own settings named the project only in the
+              subtitle, while INSTANCE settings put "Viberr" in its heading.
+              Scoped, so each heading answers "settings for what?" on its own. */}
+          <h1>{data.project.name} · settings</h1>
+          <div className="sub">Board configuration for this project</div>
         </div>
       </div>
       <div className="policy-wrap">

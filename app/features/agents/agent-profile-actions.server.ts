@@ -28,6 +28,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import {
   effectiveProfileView,
+  VIEW_WITHOUT_POLICY,
   type AgentDeploymentDefinition,
 } from "./agents-query.server";
 import {
@@ -519,7 +520,7 @@ export async function updateAgentProfile(
     if (!deployment) {
       throw AppError.notFound(`No agent profile ${input.profileId} in this project.`);
     }
-    const current = effectiveProfileView(deployment, ctx.dataRoot);
+    const current = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     const isOperator = current.kind === "operator";
 
     // Grants come from the form for the GOVERNED capability set of this kind
@@ -622,7 +623,7 @@ export async function deleteAgentProfile(
     if (!deployment) {
       throw AppError.notFound(`No agent profile ${input.profileId} in this project.`);
     }
-    const current = effectiveProfileView(deployment, ctx.dataRoot);
+    const current = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     if (current.kind === "operator") {
       // The operator is a system profile — never deletable (agents §4.3),
       // enforced server-side, not just by hiding the button.

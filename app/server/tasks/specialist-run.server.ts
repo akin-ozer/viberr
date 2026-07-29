@@ -45,7 +45,10 @@ import {
   getPatToken,
   getProjectCredential,
 } from "~/server/secrets/pat-store.server";
-import { effectiveProfileView } from "~/features/agents/agents-query.server";
+import {
+  effectiveProfileView,
+  VIEW_WITHOUT_POLICY,
+} from "~/features/agents/agents-query.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
 import {
   isBackendAvailable,
@@ -230,7 +233,7 @@ export function resolveDeployedSpecialist(
       `No agent \`${profileId}\` is deployed in this project.`,
     );
   }
-  const view = effectiveProfileView(deployment, ctx.dataRoot);
+  const view = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
   if (view.kind !== "specialist") {
     throw AppError.validation(
       `Agent \`${profileId}\` is not a specialist and cannot be assigned as one.`,
@@ -1767,7 +1770,7 @@ export function listDeployedSpecialists(
   if (!file) return [];
   const out: DeployedSpecialistView[] = [];
   for (const deployment of file.parsed.frontmatter.agents) {
-    const view = effectiveProfileView(deployment, ctx.dataRoot);
+    const view = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     if (view.kind !== "specialist") continue;
     const resolved = toResolved(view);
     // Same empty-grant resolution the run path uses (AP-06), so what the

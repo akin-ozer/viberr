@@ -234,6 +234,35 @@ it is regenerated from the filesystem rather than restated here.
     ask-human, no evidence.
 27. **R15-8 (2026-07-28): `design/prd.md` is re-synced** with the canon PRD and both are
     maintained; `planning/README.md`'s sync claim must stay true.
+28. **R15-9 (2026-07-29): an absent `deliver-review-pr` grant resolves from the project's
+    own governance, not from a constant.** The capability postdates R15-2, so "absent" is
+    the normal state on every pre-existing project. Resolving it to a flat `direct` meant
+    two projects with identical governance behaved differently by creation date alone.
+    The preset is not stored anywhere — it is a creation-time shaping input — so the rule
+    reads its EFFECT off the workflow graph (`humanGatesPreWorkAdvance`: no pre-terminal
+    boundary advances automatically ⇒ `recommend`). Deriving beats a stored field here
+    precisely because it is already true of projects that predate the capability. The gate
+    and the policy surface share one function (`absentDeliverReviewPrMode`) so they cannot
+    drift — that drift was F15-20. An explicit grant always wins.
+29. **R15-10 (2026-07-29): the first empty board teaches, once.** A project with zero
+    tasks shows one teaching line in the entry column; every other column stays bare, and
+    the moment any task exists every column is bare again. This narrows P13-D-34 rather
+    than reversing it: that ruling protected against repeating an explanation five times
+    beside real work, which this does not do.
+30. **R15-11 (2026-07-29): the Review queue stays a triage list, but its rows name their
+    action.** Decisions belong with their evidence (diff, verdict, packet), so acceptance
+    stays on the task page — the queue was simply an unlabeled clickable region. The row
+    says "Review", deliberately not "Accept": acceptance is verdict-gated (R15-1) and may
+    refuse, and a control must not name an outcome its surface cannot promise.
+31. **R15-12 (2026-07-29): unenforced capability lines are collapsed, never hidden.**
+    They render in a `<details>` labelled with their count. Hiding "unenforced and
+    role-irrelevant" capabilities was the alternative and was rejected: an omission the
+    reader cannot see is worse than an awkward truth, and "role-irrelevant" is a judgment
+    the code should not be making about policy.
+32. **R15-13 (2026-07-29): settings headings name their own scope.** Instance settings are
+    titled "Instance settings" (was "Viberr settings", which collided with a project named
+    Viberr) and a project's are "<name> · settings" (was bare "Settings"). Every wayfinding
+    string that pointed at the old title was updated with it.
 
 ## Route map
 

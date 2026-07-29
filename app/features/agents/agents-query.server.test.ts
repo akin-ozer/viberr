@@ -4,6 +4,7 @@ import {
   effectiveProfileView,
 } from "./agents-query.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
+import { absentDeliverReviewPrMode } from "~/shared/capabilities";
 
 const cap = (capabilityId: string, mode: CapabilityMode) => ({ capabilityId, mode });
 
@@ -99,17 +100,41 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
       definition: { kind: "operator", name: "Operator", role: "Task coordinator" },
     }) as never;
 
+  const noGrant = [
+    { capabilityId: "assign-primary-specialist", mode: "direct" as CapabilityMode },
+    { capabilityId: "stage-transitions", mode: "recommend" as CapabilityMode },
+  ];
+
   it("materializes the grant at the mode the runtime applies when it is absent", () => {
     const view = effectiveProfileView(
-      operatorDeployment([
-        { capabilityId: "assign-primary-specialist", mode: "direct" },
-        { capabilityId: "stage-transitions", mode: "recommend" },
-      ]),
+      operatorDeployment(noGrant),
+      undefined,
+      absentDeliverReviewPrMode(false),
     );
     expect(
       view.actions.direct,
       "the panel must name the delivery grant the operator actually runs under",
     ).toContain("Deliver the branch & open the review PR");
+  });
+
+  it("R15-9: on a human-gated project the SAME absent grant materializes as recommend", () => {
+    // The whole point of R15-9: two projects with no stored grant must not
+    // differ by creation date. A project whose pre-work advances are human-gated
+    // resolves the absent grant to `recommend`, and the panel says so — if this
+    // view kept a hardcoded `direct` it would assert a mode `deliverGate` does
+    // not apply, which is F15-20 all over again.
+    // Canary: return "direct" unconditionally from absentDeliverReviewPrMode.
+    const view = effectiveProfileView(
+      operatorDeployment(noGrant),
+      undefined,
+      absentDeliverReviewPrMode(true),
+    );
+    expect(view.actions.recommend).toContain(
+      "Deliver the branch & open the review PR",
+    );
+    expect(view.actions.direct).not.toContain(
+      "Deliver the branch & open the review PR",
+    );
   });
 
   it("never overrides an EXPLICIT mode — a strict project's recommend stays recommend", () => {
@@ -118,6 +143,9 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
         { capabilityId: "assign-primary-specialist", mode: "direct" },
         { capabilityId: "deliver-review-pr", mode: "recommend" },
       ]),
+      undefined,
+      // Explicit grant must win even when the derived default disagrees.
+      absentDeliverReviewPrMode(false),
     );
     expect(view.actions.recommend).toContain(
       "Deliver the branch & open the review PR",

@@ -439,8 +439,8 @@ function NewProjectConnectionField({
           <Icon name="alert" />
           <span>
             {picked === "failed"
-              ? "This connection's token failed validation. The project will be created, but agents won't be able to push until it's replaced in Viberr settings → GitHub connections."
-              : "This connection hasn't been validated yet — check it in Viberr settings → GitHub connections if delivery fails."}
+              ? "This connection's token failed validation. The project will be created, but agents won't be able to push until it's replaced in Instance settings → GitHub connections."
+              : "This connection hasn't been validated yet — check it in Instance settings → GitHub connections if delivery fails."}
           </span>
         </div>
       )}
@@ -451,7 +451,7 @@ function NewProjectConnectionField({
             No GitHub connections yet — every project needs a repository. Add
             a PAT in{" "}
             <Link to="/org/settings?tab=connections">
-              <b>Viberr settings → GitHub connections</b>
+              <b>Instance settings → GitHub connections</b>
             </Link>
             , then come back.
           </span>

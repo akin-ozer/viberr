@@ -381,3 +381,21 @@ export function capabilityById(id: string): CapabilityDef | null {
 export function capabilityByLabel(label: string): CapabilityDef | null {
   return byLabel.get(label) ?? null;
 }
+
+/**
+ * R15-9 — the mode the runtime applies for `deliver-review-pr` when a
+ * deployment persisted NO grant for it.
+ *
+ * The capability postdates R15-2, so an absent grant is the normal state on
+ * every project that already existed, not an edge case. Resolving it to a flat
+ * `direct` made two projects with identical governance behave differently by
+ * creation date alone. Derived here from the one thing that IS stored — whether
+ * the project human-gates advancement before work starts — so the runtime gate
+ * (`deliverGate`) and the policy surface (`effectiveProfileView`) cannot drift
+ * apart. They drifting apart is precisely what F15-20 was.
+ */
+export function absentDeliverReviewPrMode(
+  humanGatedBeforeWork: boolean,
+): "direct" | "recommend" {
+  return humanGatedBeforeWork ? "recommend" : "direct";
+}

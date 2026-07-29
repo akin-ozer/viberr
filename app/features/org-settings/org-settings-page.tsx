@@ -52,14 +52,18 @@ export function OrgSettingsPage({
   };
 
   return (
-    <main className="home-shell" data-screen-label="Viberr settings">
+    <main className="home-shell" data-screen-label="Instance settings">
       <div className="set-head">
         <button type="button" className="btn ghost sm" onClick={() => navigate("/")}>
           <Icon name="arrow" className="r180" />
           Projects
         </button>
         <div>
-          <h1>Viberr settings</h1>
+          {/* R15-13: was "Viberr settings", which collides with a PROJECT
+              named Viberr — the surface that is not about that project was the
+              one saying its name. Every other surface in the app names its own
+              scope; these two were the exception in both directions. */}
+          <h1>Instance settings</h1>
           <p className="sub">
             Instance level — shared by every project and board. Board-level workflow
             &amp; policy live inside each project.

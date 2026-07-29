@@ -511,6 +511,7 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
       mcps: [],
       persona: null,
       deployed: true,
+      humanGatedBeforeWork: false,
     };
   }
 

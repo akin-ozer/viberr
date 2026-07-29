@@ -33,6 +33,7 @@ function authority(mcps: string[]): OperatorAuthority {
     mcps,
     persona: null,
     deployed: true,
+    humanGatedBeforeWork: false,
   };
 }
 

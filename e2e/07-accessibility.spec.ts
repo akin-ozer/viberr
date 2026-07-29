@@ -31,6 +31,11 @@ const SURFACES: { name: string; path: string; ready: string }[] = [
   { name: "review queue", path: "/projects/viberr-core/review", ready: "main" },
   { name: "policy", path: "/projects/viberr-core/policy", ready: "main" },
   { name: "home", path: "/", ready: ".pj-card, .pj-row" },
+  // R15-12 added a native <details> to the capability panel, and this surface
+  // was outside the sweep — a new interactive control shipped unaudited. It is
+  // also the app's densest policy page, which is where a contrast or
+  // name-role-value slip is most costly.
+  { name: "agents", path: "/projects/viberr-core/agents", ready: "main" },
 ];
 
 async function setTheme(page: Page, theme: "light" | "dark") {

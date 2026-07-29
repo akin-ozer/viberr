@@ -140,6 +140,7 @@ function approval(revisionId = "rev_1", sha = "a".repeat(40)) {
 function authority(
   modes: Record<string, "direct" | "recommend" | "human" | "off"> = {},
   autonomy: "supervised" | "full" = "supervised",
+  humanGatedBeforeWork = false,
 ): OperatorAuthority {
   return {
     policy: new Map(Object.entries(modes)),
@@ -153,6 +154,7 @@ function authority(
     mcps: [],
     persona: null,
     deployed: true,
+    humanGatedBeforeWork,
   };
 }
 
@@ -272,6 +274,25 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
     expect(
       deliverGate(authority({ "deliver-review-pr": "recommend" }, "full")),
     ).toBe("direct");
+  });
+
+  it("R15-9: an ABSENT grant resolves from the project's governance, not a constant", () => {
+    // `deliver-review-pr` postdates every pre-R15-2 deployment, so "absent" is
+    // the normal state on existing projects. Resolving it to a flat `direct`
+    // meant a strict project created before the pass pushed branches on its own
+    // while an identical one created after asked a human first — the same
+    // governance behaving differently by creation date.
+    // Canary: return "direct" unconditionally from absentDeliverReviewPrMode.
+    expect(deliverGate(authority({}, "supervised", false))).toBe("direct");
+    expect(deliverGate(authority({}, "supervised", true))).toBe("recommend");
+
+    // An EXPLICIT grant always wins over the derived default, in both directions.
+    expect(
+      deliverGate(authority({ "deliver-review-pr": "direct" }, "supervised", true)),
+    ).toBe("direct");
+    expect(
+      deliverGate(authority({ "deliver-review-pr": "off" }, "supervised", true)),
+    ).toBe("deny");
   });
 
   it("recommend mode posts a `delivery` recommendation card that round-trips the task file", async () => {

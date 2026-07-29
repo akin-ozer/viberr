@@ -64,7 +64,7 @@ import {
  */
 
 export function meta(_: Route.MetaArgs) {
-  return [{ title: "Viberr settings" }];
+  return [{ title: "Instance settings" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {

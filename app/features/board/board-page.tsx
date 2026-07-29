@@ -855,7 +855,7 @@ function StageBoard({
   columns: BoardColumnData[];
   visible: (tasks: TaskSummary[]) => TaskSummary[];
   /** P13-D-34: per-column empty copy, given that column's UNFILTERED total. */
-  emptyCopyFor: (total: number) => string;
+  emptyCopyFor: (total: number, isEntryColumn?: boolean) => string;
   doneStageId: string | undefined;
   canCreate: boolean;
   canTransition: boolean;
@@ -877,7 +877,7 @@ function StageBoard({
   const allStages = columns.map((c) => c.stage);
   return (
     <div className="board">
-      {columns.map((c) => {
+      {columns.map((c, columnIndex) => {
         const base = visible(c.tasks);
         // The hovered column is the drop target (same OR different stage).
         // Cross-column also shifts the counts: source −1, target +1.
@@ -893,7 +893,7 @@ function StageBoard({
             stage={c.stage}
             tasks={base}
             count={count}
-            emptyCopy={emptyCopyFor(c.tasks.length)}
+            emptyCopy={emptyCopyFor(c.tasks.length, columnIndex === 0)}
             isDone={c.stage.id === doneStageId}
             canCreate={canCreate}
             canTransition={canTransition}
@@ -1106,8 +1106,16 @@ export function BoardPage({
     filter === "all"
       ? null
       : (FILTERS.find((f) => f.id === filter)?.label ?? null);
-  const emptyCopyFor = (total: number) =>
-    boardEmptyCopy({ total, filterLabel, query });
+  // R15-10: `boardTotal` lets the copy tell "this column is empty" apart from
+  // "this project has nothing yet"; only the latter teaches, and only once.
+  const emptyCopyFor = (total: number, isEntryColumn = false) =>
+    boardEmptyCopy({
+      total,
+      filterLabel,
+      query,
+      boardTotal: allTasks.length,
+      isEntryColumn,
+    });
 
   const setParam = (key: string, value: string | null) => {
     setSearchParams(
@@ -1232,7 +1240,7 @@ export function BoardPage({
           stages={stages}
           canTransition={canTransition}
           onMoveTask={onMoveTask}
-          emptyCopy={emptyCopyFor(allTasks.length)}
+          emptyCopy={emptyCopyFor(allTasks.length, true)}
         />
       )}
 

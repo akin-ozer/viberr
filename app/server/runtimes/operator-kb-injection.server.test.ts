@@ -23,6 +23,7 @@ function authorityWith(kb: string[]): OperatorAuthority {
     mcps: [],
     persona: null,
     deployed: true,
+    humanGatedBeforeWork: false,
   };
 }
 

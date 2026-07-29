@@ -173,3 +173,70 @@ describe("boardEmptyCopy (P13-D-34)", () => {
     );
   });
 });
+
+describe("boardEmptyCopy — the first empty board teaches (R15-10)", () => {
+  const bare = "No tasks";
+  const teach = "No tasks yet — create one to start the flow";
+
+  it("teaches ONCE on a project with no tasks: entry column only", () => {
+    // The owner's call: five columns each saying "No tasks" is the one empty
+    // state in the app that does not teach, and it is the first thing a new
+    // user sees. One message, in the column where the first task lands.
+    // Canary: drop `isEntryColumn` from the condition and the second
+    // expectation starts teaching too — five messages again.
+    expect(
+      boardEmptyCopy({
+        total: 0,
+        filterLabel: null,
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: true,
+      }),
+    ).toBe(teach);
+    expect(
+      boardEmptyCopy({
+        total: 0,
+        filterLabel: null,
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: false,
+      }),
+    ).toBe(bare);
+  });
+
+  it("stops teaching the moment ANY task exists — P13-D-34 still holds", () => {
+    // The ruling P13-D-34 protected is "do not repeat an explanation five times
+    // beside real work". That is untouched: with even one task on the board, an
+    // empty entry column is bare again.
+    expect(
+      boardEmptyCopy({
+        total: 0,
+        filterLabel: null,
+        query: "",
+        boardTotal: 1,
+        isEntryColumn: true,
+      }),
+    ).toBe(bare);
+  });
+
+  it("never teaches when a filter or search is what emptied the column", () => {
+    // boardTotal 0 with an active filter cannot happen, but the ordering must
+    // not let a teaching line pre-empt the "N tasks hidden by …" explanation,
+    // which is strictly more informative.
+    expect(
+      boardEmptyCopy({
+        total: 4,
+        filterLabel: "Waiting on me",
+        query: "",
+        boardTotal: 0,
+        isEntryColumn: true,
+      }),
+    ).toBe("All 4 tasks here are hidden by the “Waiting on me” filter.");
+  });
+
+  it("omitting boardTotal keeps the pre-R15-10 bare behavior", () => {
+    expect(
+      boardEmptyCopy({ total: 0, filterLabel: null, query: "", isEntryColumn: true }),
+    ).toBe(bare);
+  });
+});
