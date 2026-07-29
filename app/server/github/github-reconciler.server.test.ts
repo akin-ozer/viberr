@@ -69,6 +69,12 @@ function setup(): { store: TestStore; actor: { userId: string; label: string } }
       stage: "review",
       branch: "vib-301-workspace",
       ownerUserId: store.users.arda.id,
+      // R15-15: the task OWNS PR #318 — the state `openTaskPr` leaves behind, and
+      // the only state in which the reconciler may track a PR at all. The fixture
+      // used to start with no `pr` and let the reconciler adopt whatever sat on
+      // the branch, which is precisely the bug: a task-key branch is not unique,
+      // and on a reused key that adopts a previous task's PR.
+      pr: { number: 318, state: "review", title: "Attach execution workspace" },
     }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -193,6 +199,91 @@ describe("reconcileTask", () => {
       prNumber: 318,
     });
     expect(listAuditEvents(store.db, { action: "github.reconcile.task" })).toHaveLength(1);
+  });
+
+  it("R15-15: a PR this task did NOT open is never adopted — a task-key branch is not unique", async () => {
+    // Reported live. A data root was wiped, so task keys restarted at 1 and a
+    // brand-new VIB-1 got branch `vib-1` — which on GitHub still carried the
+    // MERGED PR of the previous instance's VIB-1. The reconciler matched on
+    // branch name alone, adopted that PR, the divergence rule fired "PR #109 was
+    // merged but VIB-1 hasn't been accepted", and the operator recommended
+    // moving the task to Review while its developer was still writing code.
+    // The task's own delivered revision was not in that PR and never had been.
+    // Canary: drop `&& ownsAPr` from newPr and this adopts #318 again.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        // No `pr`: this task never opened one. The PR on the branch is a
+        // stranger's.
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr, "an unowned PR must never become this task's PR").toBeNull();
+
+    // …and the collision is REPORTED, not silently swallowed — with the same
+    // remedy the non-fast-forward push gives, because it is one cause.
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    const collision = events.find((e) => /Branch name collision/.test(e.text));
+    expect(collision, "the collision must be surfaced").toBeTruthy();
+    expect(collision!.text).toContain("#318");
+    expect(collision!.text).toContain("did not open it");
+    expect(collision!.text).toContain("vib-301-workspace");
+    // Crucially it must NOT read as a divergence — nothing about this task
+    // changed on GitHub, and calling it one is what produced the bad advice.
+    expect(collision!.text).not.toContain("Divergence");
+    expect(events.some((e) => /Divergence/.test(e.text))).toBe(false);
+  });
+
+  it("R15-15: the collision is reported ONCE, not on every 5-minute poll", async () => {
+    // Polling stays — tracking PR updates is the point of it. What must not
+    // repeat is the warning: ~288 identical notes a day would bury the timeline
+    // the note exists to inform.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const run = () =>
+      reconcileTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-301" },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+      );
+    await run();
+    await run();
+    await run();
+
+    const notes = (
+      store.db
+        .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+        .all() as { text: string }[]
+    ).filter((e) => /Branch name collision/.test(e.text));
+    expect(notes).toHaveLength(1);
   });
 
   it("is idempotent: identical GitHub facts → no file write (changed: false)", async () => {
@@ -373,6 +464,10 @@ describe("reconcileTask", () => {
         stage: "review",
         branch: "vib-301-workspace",
         ownerUserId: store.users.arda.id,
+        // R15-15: this rewrite replaces setup()'s task wholesale, so it has to
+        // carry the same PR ownership — a divergence is only reportable about a
+        // PR the task actually owns.
+        pr: { number: 318, state: "review", title: "Attach execution workspace" },
         recommendations: [
           { id: "r-trans", kind: "transition", toStageId: "done", label: "Move VIB-301 to Done", detail: "" },
           { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
@@ -1178,15 +1273,26 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
   });
 
   it("degrades typed: no PR, unknown task, no PAT", async () => {
-    const { store, actor } = setup(); // VIB-301 has no pr in frontmatter
+    // The shared fixture now OWNS a PR (R15-15), so the "no PR on the task"
+    // branch needs a task that genuinely has none — which is the state this
+    // assertion was always about.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-302", {
+        stage: "review",
+        branch: "vib-302-workspace",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(
       await mergeTaskPr(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-301" },
+        { projectSlug: store.slug, taskKey: "VIB-302" },
         actor,
         { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
       ),
-    ).toEqual({ status: "no_pr", taskKey: "VIB-301" });
+    ).toEqual({ status: "no_pr", taskKey: "VIB-302" });
     expect(
       await mergeTaskPr(
         store.db,

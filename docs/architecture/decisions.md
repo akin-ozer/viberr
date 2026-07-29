@@ -273,6 +273,14 @@ it is regenerated from the filesystem rather than restated here.
     same path an @mention reply takes — resume the session, re-apply confinement,
     re-anchor on task.md. The operator hand-off remains the fallback for operator packets
     and for an asker whose session or profile is gone, so no decision is ever swallowed.
+34. **R15-15 (2026-07-29): a task owns a PR only if that task opened it.** `openTaskPr`
+    is the sole writer that establishes the link; the reconciler's job is to keep an owned
+    link honest, never to mint one. A PR discovered on the task's branch that the task does
+    not already reference is a branch-name COLLISION and is reported as one — never adopted.
+    The reason is that a task-key branch is not a unique identifier: a new data root
+    restarts keys at 1, so a brand-new `VIB-1` gets branch `vib-1`, which on GitHub may
+    still carry a previous `VIB-1`'s PR. Five-minute polling is unchanged and still tracks
+    state, checks, review and mergeability — for PRs the task actually owns.
 
 ## Route map
 
