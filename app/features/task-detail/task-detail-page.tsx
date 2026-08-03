@@ -28,7 +28,7 @@ import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
-import { formatDayDotTime, formatRelative } from "~/shared/dates/format";
+import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
@@ -198,8 +198,8 @@ export function GithubTrace({
           <span className="k">Synced</span>
           <span className="v sub" title="Branch, diff, commits and PR state below are served from the cached projection; a background poller refreshes it every 5 minutes.">
             {reconciledAt ? (
-              <time dateTime={reconciledAt} suppressHydrationWarning>
-                {formatRelative(reconciledAt)}
+              <time dateTime={reconciledAt}>
+                <LocalRelative iso={reconciledAt} />
               </time>
             ) : task.pr || task.commits.length > 0 ? (
               // F15-02: PR/commit facts on screen came from delivery-time
@@ -695,7 +695,9 @@ export function ScheduledActions({
             <li key={s.id} className="sched-row">
               <div className="sched-when">
                 <Icon name="clock" />
-                <span>{formatDayDotTime(s.dueAt)}</span>
+                <span>
+                  <LocalDayDotTime iso={s.dueAt} />
+                </span>
               </div>
               <div className="sched-meta">
                 operator · {s.autonomy} · {s.backend === "claude" ? "Claude Code" : "Codex"}

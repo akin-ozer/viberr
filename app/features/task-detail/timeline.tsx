@@ -1,26 +1,21 @@
-import {
-  Fragment,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
-import { formatDayDotTime } from "~/shared/dates/format";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
+import { LocalDayDotTime } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
-import { findMentionSpans } from "~/ui/mention-spans";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
 import { eventMeta, typedKind } from "./event-meta";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
-import { MentionMenu } from "./mention-menu";
-import { useMentionAutocomplete } from "./use-mention-autocomplete";
+import {
+  CommentComposer,
+  mentionNamesFor,
+  type CommentComposerHandle,
+} from "./comment-composer";
 
 /**
  * Unified timeline — 1:1 port of Timeline/TimelineItem (task.jsx §4.6/§4.7):
@@ -42,50 +37,6 @@ const TL_FILTERS = [
   { id: "typed", label: "Important events" },
   { id: "comment", label: "Comments" },
 ] as const;
-
-/**
- * Render the composer draft with `@mention` spans wrapped in `.mention` for the
- * highlight backdrop behind the textarea. Mentions are matched by the shared
- * span-finder against the known mentionable NAMES (so a multi-word "@Arda Kaya"
- * highlights as one chip), falling back to the `@word` token. Text between
- * mentions is plain — the backdrop mirrors the textarea character-for-character
- * (mention spans carry NO layout-affecting padding), so it stays pixel-aligned
- * with the transparent textarea text on top. The trailing "\n" keeps the box
- * height in sync when the draft ends on a newline.
- */
-function highlightDraft(text: string, names: string[]): ReactNode {
-  // Only KNOWN handles light up, so the chip appearing IS the confirmation that
-  // the tag will route (P13-LV-12).
-  const spans = findMentionSpans(text, names).filter((s) => s.known);
-  const parts: ReactNode[] = [];
-  let last = 0;
-  let key = 0;
-  for (const { start, end } of spans) {
-    if (start > last) parts.push(text.slice(last, start));
-    parts.push(
-      <span className="mention" key={key++}>
-        {text.slice(start, end)}
-      </span>,
-    );
-    last = end;
-  }
-  parts.push(text.slice(last) + "\n");
-  return <Fragment>{parts}</Fragment>;
-}
-
-/**
- * Every string that ACTUALLY routes, for whole-name highlight matching: agent
- * display names AND their profile ids/handles, user display names and their
- * email-local handles, and the reserved role handles. The highlight is only
- * honest if this list is exactly what the server resolves (P13-LV-12).
- */
-function mentionNamesOf(m: Mentionables): string[] {
-  return [
-    ...m.agents.flatMap((a) => [a.name, a.handle]),
-    ...m.users.flatMap((u) => [u.name, u.handle]),
-    ...m.reserved.map((r) => r.handle),
-  ];
-}
 
 export type TimelineFilterId = (typeof TL_FILTERS)[number]["id"];
 
@@ -196,7 +147,9 @@ export function TimelineItem({
               app user · not in project
             </Pill>
           )}
-          <span className="tl-time">{formatDayDotTime(ev.occurredAt)}</span>
+          <span className="tl-time">
+            <LocalDayDotTime iso={ev.occurredAt} />
+          </span>
         </div>
 
         {ev.type === "comment" ? (
@@ -266,16 +219,18 @@ export function Timeline({
   taskClosed?: boolean;
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
-  const [draft, setDraft] = useState("");
+  // The raw draft, synced synchronously from the editor. A ref, not state:
+  // nothing renders from it (the editor owns the draft UI), and send() must
+  // read the exact current text — not a value one batch behind the keystroke.
+  const draftRef = useRef("");
   // P13-D-39: the send handler below accepts either modifier, so the hint has to
   // name the one the viewer's keyboard actually has (UI-55's rule).
   const sendHint = useModifierHint("↵");
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  const hlRef = useRef<HTMLDivElement>(null);
-  const mentions = useMentionAutocomplete(mentionables, taRef, draft, setDraft);
+  const composerRef = useRef<CommentComposerHandle>(null);
+  const composerBoxRef = useRef<HTMLDivElement>(null);
   // Known mentionable names — drives whole-name @mention highlighting in the
-  // composer backdrop and in rendered comment bodies.
-  const mentionNames = useMemo(() => mentionNamesOf(mentionables), [mentionables]);
+  // composer and in rendered comment bodies.
+  const mentionNames = useMemo(() => mentionNamesFor(mentionables), [mentionables]);
   const seenAsk = useRef(ask);
   const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<{
@@ -293,11 +248,9 @@ export function Timeline({
   useEffect(() => {
     if (ask && ask !== seenAsk.current) {
       seenAsk.current = ask;
-      setDraft((d) => (d.trim() ? d : "@operator "));
-      if (taRef.current) {
-        taRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-        taRef.current.focus();
-      }
+      composerRef.current?.prefillIfEmpty("@operator ");
+      composerBoxRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      composerRef.current?.focus();
     }
   }, [ask]);
 
@@ -308,7 +261,10 @@ export function Timeline({
     if (handled.current === fetcher.data) return;
     handled.current = fetcher.data;
     if (fetcher.data.ok) {
-      setDraft("");
+      draftRef.current = "";
+      // Clear the editor AND its undo history — ⌘Z must not resurrect a
+      // posted comment. A failure runs neither: the draft stays as typed.
+      composerRef.current?.clearAfterSuccess();
       if (fetcher.data.toast) push(fetcher.data.toast);
       // BUG 3: hand the grouped Agent-logs id up so the page selects + scrolls
       // to the mentioned agent's live output.
@@ -330,7 +286,7 @@ export function Timeline({
   );
 
   const send = () => {
-    const text = draft.trim();
+    const text = draftRef.current.trim();
     if (!text || busy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -379,49 +335,21 @@ export function Timeline({
           </div>
         )}
         <div className="composer-box">
-          <div className="composer-input" style={{ position: "relative" }}>
-            {/* Highlight backdrop: mirrors the draft with @mentions styled,
-                sitting behind the transparent-text textarea so mentions light
-                up live as you type — matching the posted comment. */}
-            <div className="composer-hl" aria-hidden="true" ref={hlRef}>
-              {highlightDraft(draft, mentionNames)}
-            </div>
-            <textarea
-              ref={taRef}
-              placeholder="Add a comment… type @ to tag the operator, an agent, or a teammate"
-              value={draft}
-              role="combobox"
-              aria-expanded={mentions.open}
-              aria-controls={mentions.open ? mentions.listId : undefined}
-              aria-autocomplete="list"
-              aria-activedescendant={mentions.activeId}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                // Recompute after React applies the value (caret is settled).
-                requestAnimationFrame(mentions.refresh);
+          <div
+            className="composer-input"
+            style={{ position: "relative" }}
+            ref={composerBoxRef}
+          >
+            {/* Lexical plain-text editor: known @mentions highlight live as
+                character-editable text (no backdrop mirroring); the posted
+                value stays exactly the trimmed plain draft. */}
+            <CommentComposer
+              ref={composerRef}
+              mentionables={mentionables}
+              onChange={(raw) => {
+                draftRef.current = raw;
               }}
-              onKeyUp={mentions.refresh}
-              onClick={mentions.refresh}
-              onSelect={mentions.refresh}
-              onScroll={(e) => {
-                // Keep the highlight backdrop scroll-locked to the textarea.
-                if (hlRef.current) hlRef.current.scrollTop = e.currentTarget.scrollTop;
-              }}
-              onBlur={mentions.close}
-              onKeyDown={(e) => {
-                // The autocomplete claims navigation/selection keys while open;
-                // ⌘/Ctrl+Enter always falls through to send.
-                if (mentions.onKeyDown(e)) return;
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
-              }}
-            />
-            <MentionMenu
-              id={mentions.listId}
-              items={mentions.open ? mentions.items : []}
-              active={mentions.active}
-              query={mentions.query}
-              onPick={mentions.pick}
-              onHover={mentions.setActive}
+              onSubmit={send}
             />
           </div>
           <div className="composer-foot">

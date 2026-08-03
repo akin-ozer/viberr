@@ -1096,36 +1096,27 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 .composer-box:focus-within { border-color: var(--blue); box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue), transparent 86%); }
-/* The textarea + its highlight backdrop MUST share identical box metrics
-   (font, size, line-height, padding, border, min-height, wrapping) so the
-   backdrop stays character-aligned with the transparent textarea text. */
-.composer-box textarea,
-.composer-box .composer-hl {
+/* The Lexical plain-text editor renders styled @mentions inline — no
+   transparent-textarea/backdrop mirroring, so no glyph-alignment constraints
+   to defend. Metrics match the old textarea exactly. */
+.composer-box .composer-ce {
   width: 100%; border: 0; margin: 0; padding: 0;
   font-family: var(--font-body); font-size: .9rem; line-height: 1.5;
   min-height: 44px;
   letter-spacing: normal; tab-size: 4;
-}
-.composer-box textarea {
-  outline: 0; resize: none; background: transparent;
-  position: relative; z-index: 1;
-  /* text is transparent — the backdrop shows the styled text; caret stays visible */
-  color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--fg);
-}
-.composer-box textarea::placeholder { color: var(--placeholder); -webkit-text-fill-color: var(--placeholder); }
-.composer-box .composer-hl {
-  position: absolute; inset: 0; z-index: 0;
-  pointer-events: none; overflow: hidden;
+  outline: 0; background: transparent; color: var(--fg);
   white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;
-  color: var(--fg);
 }
-/* The backdrop must line up glyph-for-glyph with the (transparent) textarea, so
-   the mention highlight may only use NON-width-affecting styles — background +
-   color. No padding, and crucially NO bold: the base `.mention` is font-weight
-   700, which is wider than the textarea's 400 and drifts the caret right (worse
-   the longer the name, e.g. "@codex-reviewer"), so the caret can't reach the end.
-   Reset weight + letter-spacing to the composer's. */
-.composer-box .composer-hl .mention {
+.composer-box .composer-ce p { margin: 0; }
+.composer-box .composer-placeholder {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none; user-select: none;
+  color: var(--placeholder);
+  font-size: .9rem; line-height: 1.5;
+}
+/* Keep the mention chip's weight/spacing at the composer's own so the draft
+   reads like the posted comment without shifting line metrics while typing. */
+.composer-box .composer-ce .mention {
   padding: 0;
   border-radius: 3px;
   font-weight: inherit;
