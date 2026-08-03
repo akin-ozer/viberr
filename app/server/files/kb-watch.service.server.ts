@@ -1,6 +1,7 @@
 import path from "node:path";
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
+import { watch, type FSWatcher } from "chokidar";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { reindexKnowledgeBaseByDir } from "~/server/org/resources.server";
@@ -14,8 +15,15 @@ import { getDataRoot, kbRootDir } from "./file-store-root.server";
  * moment a doc under it is added, edited, or removed. A KB pinned to "manual"
  * is skipped (handled inside `reindexKnowledgeBaseByDir`).
  *
+ * The event source is chokidar (typed events, atomic-write coalescing,
+ * portable recursion); debounce and re-index dispatch stay Viberr code.
+ *
  * - 250 ms trailing debounce per KB dir (editors fire event bursts);
  * - the changed path's FIRST segment under kb/ names the KB dir to re-index;
+ * - `ignoreInitial: true`: existing docs are already indexed (indexing happens
+ *   at KB save/refresh), so the initial scan must not bump `last_indexed_at`
+ *   on every boot. An external edit landing inside the sub-second scan window
+ *   is picked up on that KB's next touch or a manual refresh.
  * - HMR-safe: the handle lives behind a global symbol, so a reload reuses the
  *   running watcher instead of stacking duplicates.
  */
@@ -51,7 +59,7 @@ export function startKbWatcher(
   if (existing && existing.root === root) return existing.watcher;
   if (existing) {
     for (const t of existing.timers.values()) clearTimeout(t);
-    existing.watcher.close();
+    void existing.watcher.close();
     cache[KB_WATCHER_KEY] = undefined;
   }
   if (!existsSync(kbRoot)) return null;
@@ -77,22 +85,33 @@ export function startKbWatcher(
     }
   };
 
+  const onEvent = (eventPath: string) => {
+    const dir = kbDirOfChange(kbRoot, path.relative(kbRoot, path.resolve(kbRoot, eventPath)));
+    if (!dir) return;
+    const pending = timers.get(dir);
+    if (pending) clearTimeout(pending);
+    timers.set(
+      dir,
+      setTimeout(() => {
+        timers.delete(dir);
+        reindex(dir);
+      }, KB_WATCH_DEBOUNCE_MS),
+    );
+  };
+
   let watcher: FSWatcher;
   try {
-    watcher = watch(kbRoot, { recursive: true }, (_event, filename) => {
-      if (!filename) return;
-      const dir = kbDirOfChange(kbRoot, filename.toString());
-      if (!dir) return;
-      const pending = timers.get(dir);
-      if (pending) clearTimeout(pending);
-      timers.set(
-        dir,
-        setTimeout(() => {
-          timers.delete(dir);
-          reindex(dir);
-        }, KB_WATCH_DEBOUNCE_MS),
-      );
+    watcher = watch(kbRoot, {
+      ignoreInitial: true,
+      followSymlinks: false,
+      atomic: true,
     });
+    watcher
+      .on("add", onEvent)
+      .on("change", onEvent)
+      .on("unlink", onEvent)
+      .on("addDir", onEvent)
+      .on("unlinkDir", onEvent);
   } catch (error) {
     logger.error("kb watcher failed to start", {
       kbRoot,
@@ -101,13 +120,20 @@ export function startKbWatcher(
     return null;
   }
 
-  watcher.on("error", (err: NodeJS.ErrnoException) => {
+  watcher.on("error", (err: unknown) => {
+    const code = (err as { code?: string } | null)?.code;
+    // A vanished path is NOT a broken watcher (mirrors the store watcher):
+    // deleting a watched KB subtree can race into a spurious ENOENT while its
+    // debounced re-index is still queued. Keep watching.
+    if (code === "ENOENT") {
+      logger.debug("kb watcher ignored ENOENT for a removed path", { code });
+      return;
+    }
     // DM-2: a zombie watcher stops delivering events but stayed cached forever —
     // isKbWatcherAlive() (and /resources/health) then lied. Clear the handle so
     // health reports the truth, then re-arm on transient FS-pressure errors
     // (mirrors the store file watcher) so a blip doesn't permanently stop KB
     // re-indexing until a restart.
-    const code = (err as { code?: string } | null)?.code;
     logger.error("kb watcher error — clearing watcher handle", {
       err: err instanceof Error ? err : new Error(String(err)),
       code,
@@ -117,7 +143,7 @@ export function startKbWatcher(
       for (const t of current.timers.values()) clearTimeout(t);
       cache[KB_WATCHER_KEY] = undefined;
     }
-    watcher.close();
+    void watcher.close();
     const TRANSIENT = new Set(["EMFILE", "ENFILE", "ENOSPC", "EPERM", "EACCES"]);
     if (code && TRANSIENT.has(code)) {
       setTimeout(() => {
@@ -147,12 +173,13 @@ export function isKbWatcherAlive(): boolean {
   return cache[KB_WATCHER_KEY] !== undefined;
 }
 
-/** Stops the kb watcher (tests + teardown). */
+/** Stops the kb watcher (process shutdown + test teardown). The native close
+ *  is fire-and-forget: clearing timers/handle is what stops domain work. */
 export function stopKbWatcher(): void {
   const cache = globalThis as unknown as Record<symbol, KbWatcherHandle | undefined>;
   const existing = cache[KB_WATCHER_KEY];
   if (!existing) return;
   for (const t of existing.timers.values()) clearTimeout(t);
-  existing.watcher.close();
+  void existing.watcher.close();
   cache[KB_WATCHER_KEY] = undefined;
 }

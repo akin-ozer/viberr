@@ -1,6 +1,8 @@
 import type { SseEvent } from "~/schemas/sse-event.schema";
 import { releaseDataRootLock } from "~/server/db/data-root-lock.server";
 import { shutdownDatabase } from "~/server/db/sqlite.server";
+import { stopFileWatcher } from "~/server/files/file-watch.service.server";
+import { stopKbWatcher } from "~/server/files/kb-watch.service.server";
 import { logger } from "~/server/logging/logger.server";
 
 /**
@@ -355,6 +357,10 @@ export function armProcessShutdown(): void {
 
 export function runProcessShutdown(): void {
   closeAllSseConnections();
+  // Detach both watchers (timers + handlers cleared synchronously) BEFORE the
+  // database closes, so no debounced rebuild can fire into a shut-down DB.
+  stopFileWatcher();
+  stopKbWatcher();
   shutdownDatabase();
   releaseDataRootLock();
 }

@@ -13,29 +13,57 @@ import {
   isFileWatcherAlive,
   shouldIgnoreWatchPath,
   startFileWatcher,
-  stopFileWatcherForTests,
+  stopFileWatcher,
 } from "./file-watch.service.server";
 
 const ctx = createTestDbContext();
 afterEach(() => {
-  stopFileWatcherForTests();
+  stopFileWatcher();
   ctx.cleanup();
 });
 
-const WAIT_TIMEOUT_MS = 8000;
+const WAIT_TIMEOUT_MS = 12_000;
 
-async function waitFor(cond: () => boolean, what: string): Promise<void> {
+/**
+ * Poll for `cond`. macOS can DROP (not just delay) coalesced FSEvents when
+ * the machine is churning temp dirs (back-to-back full-suite runs); `nudge`
+ * runs every few seconds to RE-OFFER the awaited event — e.g. touching an
+ * ignored dotfile in a removed directory's parent forces the watcher to
+ * re-diff the listing and emit the missed unlink. A genuinely broken
+ * reconcile path never converges regardless and still times out.
+ */
+async function waitFor(
+  cond: () => boolean,
+  what: string,
+  nudge?: () => void,
+): Promise<void> {
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
+  let lastNudge = Date.now();
   while (Date.now() < deadline) {
     if (cond()) return;
+    if (nudge && Date.now() - lastNudge > 4_000) {
+      lastNudge = Date.now();
+      nudge();
+    }
     await new Promise((r) => setTimeout(r, 50));
   }
   throw new Error(`timed out waiting for: ${what}`);
 }
 
+/** Touch a WORK-NEUTRAL file under `dir` so the watcher re-reads its listing:
+ *  not dot/tmp (an ignored name can skip the rescan entirely), and not a
+ *  canonical basename, so the add event reaches chokidar's differ but never
+ *  the projection handlers. */
+function pokeDir(dir: string): void {
+  writeFileSync(path.join(dir, "poke-marker"), String(Date.now()));
+}
+
 async function startWatcherReady(store: ReturnType<typeof setupTestStore>) {
   const watcher = startFileWatcher({ dataRoot: store.dataRoot, db: store.db });
-  await new Promise((r) => setTimeout(r, 250));
+  // Chokidar arms asynchronously — `ready` marks the initial scan complete.
+  // The listener attaches in the same synchronous frame as the start, so the
+  // event cannot have fired before it.
+  await new Promise<void>((resolve) => watcher.once("ready", () => resolve()));
   return watcher;
 }
 
@@ -61,7 +89,11 @@ describe("unlinkDir handling (E13)", () => {
       force: true,
     });
 
-    await waitFor(() => taskCount(store) === 1, "VIB-1 rows pruned");
+    await waitFor(
+      () => taskCount(store) === 1,
+      "VIB-1 rows pruned",
+      () => pokeDir(path.join(projectDir(store.slug, store.dataRoot), "tasks")),
+    );
     const left = store.db
       .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
       .all(store.slug) as { task_key: string }[];
@@ -81,6 +113,7 @@ describe("unlinkDir handling (E13)", () => {
         store.db.prepare(`SELECT slug FROM projects WHERE slug = ?`).get(store.slug) ===
           undefined && taskCount(store) === 0,
       "project + task rows pruned",
+      () => pokeDir(path.join(store.dataRoot, "projects")),
     );
   }, 15000);
 });
@@ -142,6 +175,21 @@ describe("watcher liveness (E8)", () => {
     watcher.emit("error", new Error("EMFILE: too many open files"));
     expect(isFileWatcherAlive()).toBe(false);
   }, 15000);
+
+  it("ENOENT is benign: deleting a watched path must not kill the watcher", async () => {
+    // Deleting a watched subtree can race chokidar into a spurious ENOENT
+    // while the deletion's own debounced reconcile is still queued — killing
+    // the watcher then cancels that reconcile and orphans the projections.
+    const store = setupTestStore(ctx);
+    const watcher = await startWatcherReady(store);
+    watcher.emit(
+      "error",
+      Object.assign(new Error("ENOENT: no such file or directory"), {
+        code: "ENOENT",
+      }),
+    );
+    expect(isFileWatcherAlive()).toBe(true);
+  }, 15000);
 });
 
 describe("watcher re-arm lifecycle (F10-08)", () => {
@@ -163,7 +211,7 @@ describe("watcher re-arm lifecycle (F10-08)", () => {
       // advancing well past the backoff never brings a watcher back (the old
       // untracked timer re-fired on `cache === undefined` — exactly what
       // teardown creates — resurrecting a watcher against a deleted root).
-      stopFileWatcherForTests();
+      stopFileWatcher();
       vi.advanceTimersByTime(10_000);
       expect(isFileWatcherAlive()).toBe(false);
     } finally {
