@@ -1,0 +1,67 @@
+# Isolated production-image stack for the e2e suite. Driven by scripts/e2e.ts
+# (`npm run e2e`); not meant for `docker compose up` by hand.
+#
+# Owner policy (2026-08-02): anything that serves the app for a test runs the
+# PRODUCTION image — never a dev server. This stack never touches the main
+# compose.yml project, .env, ./docker-data, or any host credential: synthetic
+# secrets only, and a project-scoped named volume that the orchestrator
+# removes after every run.
+
+# Deterministic test-only secrets (same values the dev-server harness used);
+# seed and app must share them so the app can read what the seed wrote.
+x-e2e-env: &e2e-env
+  VIBERR_DATA_ROOT: /data
+  VIBERR_SESSION_SECRET: e2e-session-secret-0123456789abcdefghijklmnop
+  # base64 of 32 zero bytes — fine for an ephemeral test store.
+  VIBERR_SECRET_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+services:
+  seed:
+    build:
+      context: .
+      target: build
+    # The demo fixture (test-support/) deliberately never ships in the final
+    # image, but the BUILD stage still has the full source tree, so the
+    # one-shot seeds the volume there — as root — and then hands ownership to
+    # the final stage's UID-1000 `node` user before the app boots.
+    command: sh -c "npm run seed:demo && chown -R 1000:1000 /data"
+    environment: *e2e-env
+    volumes:
+      - e2e-data:/data
+    restart: "no"
+
+  app:
+    build:
+      context: .
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    # Stable identity so an app-only restart can reclaim its own writer lock
+    # (same B-FD1 rationale as compose.yml's pinned hostname). Restart tests
+    # must use `--no-deps` so the seed one-shot cannot re-run and reset the
+    # volume mid-check.
+    hostname: viberr-e2e
+    environment:
+      <<: *e2e-env
+      NODE_ENV: production
+    ports:
+      # Random loopback host port; scripts/e2e.ts derives it via
+      # `docker compose port app 3000`.
+      - "127.0.0.1::3000"
+    volumes:
+      - e2e-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/resources/health').then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+volumes:
+  e2e-data:
