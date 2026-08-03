@@ -22,3 +22,8 @@ Implementation behavior is verified by the source and test suite; completed disc
 passes and generated handoff ledgers are not retained here. Binding conventions and the
 numbered orchestrator rulings that code comments cite live in
 [`docs/architecture/decisions.md`](../docs/architecture/decisions.md).
+
+The 2026-08-03 dependency/subsystem modernization (chokidar, dnd-kit, Lexical, full
+dependency currency, production-image e2e) is recorded in
+[`modernization-2026-08-03/PLAN.md`](modernization-2026-08-03/PLAN.md) and
+[`modernization-2026-08-03/IMPLEMENTATION.md`](modernization-2026-08-03/IMPLEMENTATION.md).
