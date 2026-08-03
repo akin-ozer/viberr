@@ -181,29 +181,28 @@ export function HumanAccess({
             </tr>
           </thead>
           <tbody>
+            {/* E1: the first two rows (view / comment) used to render one merged
+                cell reading "Any signed-in user · membership not required".
+                Enforcement has answered a signed-in NON-member with the
+                unknown-slug 404 on every page of this project since R15-4 —
+                board, task, policy AND a comment POST — so the one place in the
+                app where display contradicted enforcement was this table. They
+                are ordinary rows: every ROLE holds them, and the note below says
+                what holding them is worth to someone who is not a member. */}
             {RBAC_ROWS.map((row) => (
-              <tr key={row.action} className={row.appWide ? "rbac-appwide" : undefined}>
+              <tr key={row.action}>
                 <td className="act">{row.action}</td>
-                {row.appWide ? (
-                  <td className="rbac-appwide-cell" colSpan={ROLE_IDS.length}>
-                    <span className="rbac-yes">
-                      <Icon name="check" />
-                    </span>{" "}
-                    Any signed-in user · membership not required
+                {ROLE_IDS.map((r) => (
+                  <td key={r}>
+                    {row.grant[r] ? (
+                      <span className="rbac-yes">
+                        <Icon name="check" />
+                      </span>
+                    ) : (
+                      <span className="rbac-no">—</span>
+                    )}
                   </td>
-                ) : (
-                  ROLE_IDS.map((r) => (
-                    <td key={r}>
-                      {row.grant[r] ? (
-                        <span className="rbac-yes">
-                          <Icon name="check" />
-                        </span>
-                      ) : (
-                        <span className="rbac-no">—</span>
-                      )}
-                    </td>
-                  ))
-                )}
+                ))}
               </tr>
             ))}
           </tbody>
@@ -213,9 +212,10 @@ export function HumanAccess({
         <Icon name="message" />
         <span>
           Rules that reach beyond project roles:{" "}
-          <strong>viewing and commenting are app-wide</strong> — every
-          registered user may read boards, tasks &amp; timelines and comment on
-          any task, member or not (the View/Comment rows above say so directly);{" "}
+          <strong>this project is members-only</strong> — the table above says
+          what a member may do, and someone who is not a member is not merely
+          refused: every page and every action, comments included, answers as if
+          the project did not exist, so even its existence stays private;{" "}
           <strong>contributors and above</strong> may{" "}
           <strong>take or release their own task ownership</strong> (viewers are
           read + comment only; the owner is the task's human reviewer and

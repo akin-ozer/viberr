@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ClaudeQuery, ClaudeQueryFn } from "./claude-runtime.server";
+import type {
+  ClaudeQuery,
+  ClaudeQueryFn,
+  ClaudeQueryOptions,
+} from "./claude-runtime.server";
 import {
+  claudeProbeOptions,
   curatedCatalog,
   defaultEffortFor,
   defaultModelFor,
@@ -226,6 +231,63 @@ describe("getModelCatalog", () => {
       isAvailable: () => true,
     });
     expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
+  });
+});
+
+describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", () => {
+  /**
+   * `query()` spawns the `claude` binary as soon as it is constructed, and the
+   * SDK REPLACES the child env with `options.env` — falling back to the FULL
+   * `process.env` only when the field is absent. The probe used to pass
+   * `options: {}`, so every catalog miss from the agent create/edit UI handed a
+   * spawned process the GitHub PAT, the session secret, the secret-box
+   * encryption key and every provider key, and pointed it at the operator's
+   * personal `~/.claude`.
+   */
+  it("passes an explicit, credential-filtered env (never process.env)", async () => {
+    process.env.VIBERR_CATALOG_PROBE_MARKER = "ordinary";
+    process.env.MY_DEPLOY_SECRET = "server-deploy-secret";
+    process.env.GITHUB_TOKEN = "ghp_should_not_leak";
+    process.env.DATABASE_URL = "postgres://secret";
+    let seen: ClaudeQueryOptions | undefined;
+    const queryFn = ((params: {
+      prompt: unknown;
+      options?: ClaudeQueryOptions;
+    }) => {
+      seen = params.options;
+      return fakeQueryObject([
+        { value: "sonnet", displayName: "S", description: "", supportsEffort: true },
+      ]);
+    }) as unknown as ClaudeQueryFn;
+    try {
+      await getModelCatalog("claude", {
+        claudeQueryFn: queryFn,
+        isAvailable: () => true,
+      });
+      // The field must EXIST — an absent `env` is the leak, not a neutral default.
+      expect(seen?.env).toBeDefined();
+      const env = seen!.env!;
+      expect(env.VIBERR_CATALOG_PROBE_MARKER).toBe("ordinary"); // PATH-like vars survive
+      expect(env.MY_DEPLOY_SECRET).toBeUndefined();
+      expect(env.GITHUB_TOKEN).toBeUndefined();
+      expect(env.DATABASE_URL).toBeUndefined();
+      expect(env.VIBERR_SESSION_SECRET).toBeUndefined();
+      expect(env.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
+      // …and it never reads/writes the host ~/.claude.
+      expect(env.CLAUDE_CONFIG_DIR).toBeTruthy();
+    } finally {
+      delete process.env.VIBERR_CATALOG_PROBE_MARKER;
+      delete process.env.MY_DEPLOY_SECRET;
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.DATABASE_URL;
+    }
+  });
+
+  it("carries the same host-isolation options a run gets", () => {
+    const options = claudeProbeOptions();
+    expect(options.settingSources).toEqual([]);
+    expect(options.skills).toEqual([]);
+    expect(options.plugins).toEqual([]);
   });
 });
 

@@ -19,6 +19,7 @@ import {
   getProjectGithubContext,
   type GithubContextFailure,
 } from "./github-context.server";
+import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 import { mapPrToCacheState } from "./pr-linker.server";
 import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
 
@@ -107,6 +108,15 @@ export type OpenTaskPrResult =
   | GithubContextFailure
   | { status: "task_not_found" }
   | { status: "no_branch" }
+  /** R16-1: an OPEN pull request already occupies this head branch and it is not
+   *  this task's (see `decidePrAdoption`). GitHub cannot hold two PRs for one
+   *  head, so no PR was opened — the remote branch has to be resolved first. */
+  | {
+      status: "branch_collision";
+      prNumber: number;
+      branch: string;
+      message: string;
+    }
   | { status: "scope_violation"; scope: string; violationId: string }
   | { status: "auth_failed"; message: string }
   /** GitHub 422 on POST /pulls — the branch has no commits ahead of base, so
@@ -123,6 +133,8 @@ interface GhPull {
   /** Merge facts from GET /pulls/{n} (absent on list items). */
   merged?: boolean;
   merged_at?: string | null;
+  /** Present on both the list item and the detail — the adoption rule's subject. */
+  head?: { sha?: string };
 }
 
 /**
@@ -207,7 +219,12 @@ export async function openTaskPr(
 
   const owner = gh.repo.split("/")[0] ?? "";
 
-  // 1. Idempotency: reuse an existing open PR for this head branch.
+  // 1. Idempotency: reuse an existing open PR for this head branch — but only
+  //    when it is genuinely THIS task's (R16-1). The branch name alone proved it
+  //    can bind a foreign PR to a task that delivered nothing (H8), so the head
+  //    sha must be the delivered revision. A name-matched PR that fails the rule
+  //    is a branch COLLISION: creating a second PR for the same head is
+  //    impossible on GitHub anyway (422), so delivery stops here and says why.
   const existing = await gh.client.request<GhPull[]>(
     "GET",
     `/repos/${gh.repo}/pulls`,
@@ -215,6 +232,28 @@ export async function openTaskPr(
   );
   if (existing.ok && existing.data.length > 0) {
     const pr = existing.data[0]!;
+    const adoption =
+      fm.pr?.number === pr.number
+        ? { adopt: true as const }
+        : decidePrAdoption({
+            state: mapPrToCacheState(pr),
+            prHeadSha: pr.head?.sha ?? null,
+            revisionHeadSha: fm.workRevision?.headSha ?? null,
+          });
+    if (!adoption.adopt) {
+      return {
+        status: "branch_collision",
+        prNumber: pr.number,
+        branch,
+        message: prAdoptionRefusalNote({
+          refusal: adoption.refusal,
+          taskKey: input.taskKey,
+          branch,
+          prNumber: pr.number,
+          revisionHeadSha: fm.workRevision?.headSha ?? null,
+        }),
+      };
+    }
     await writePrToTask(db, ref, input, gh, pr, actor, false, ctx, fm.pr);
     return { status: "ok", prNumber: pr.number, created: false, url: pr.html_url };
   }

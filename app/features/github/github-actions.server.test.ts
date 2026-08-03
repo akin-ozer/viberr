@@ -54,7 +54,13 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
     const attachTime = fakeGithubFetch({
       "GET /user": { body: { login: "akin-ozer" } },
       "GET /user/orgs": { body: [] },
-      [`GET /repos/${REPO}`]: { body: { full_name: REPO } },
+      [`GET /repos/${REPO}`]: {
+        // A8 (pass 16): repository write is proven from the `permissions`
+        // block GitHub returns for the authenticated token, replacing the
+        // probe that PUT a file into the user's repo. Real GitHub always
+        // sends it, so the fixture has to as well.
+        body: { full_name: REPO, permissions: { push: true } },
+      },
       [`GET /repos/${REPO}/pulls`]: { body: [] },
     });
     const outcome = await runSetCredential(store.db, store.slug, actor, {
@@ -126,7 +132,13 @@ describe("runReconcile on a project with no branched tasks", () => {
     const attachTime = fakeGithubFetch({
       "GET /user": { body: { login: "akin-ozer" } },
       "GET /user/orgs": { body: [] },
-      [`GET /repos/${REPO}`]: { body: { full_name: REPO } },
+      [`GET /repos/${REPO}`]: {
+        // A8 (pass 16): repository write is proven from the `permissions`
+        // block GitHub returns for the authenticated token, replacing the
+        // probe that PUT a file into the user's repo. Real GitHub always
+        // sends it, so the fixture has to as well.
+        body: { full_name: REPO, permissions: { push: true } },
+      },
       [`GET /repos/${REPO}/pulls`]: { body: [] },
     });
     await runSetCredential(store.db, store.slug, actor, {
@@ -192,7 +204,13 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
 
     const attach = fakeGithubFetch({
       "GET /user": { body: { login: "akin-ozer" }, headers: { "x-oauth-scopes": "repo" } },
-      [`GET /repos/${REPO}`]: { body: { full_name: REPO } },
+      [`GET /repos/${REPO}`]: {
+        // A8 (pass 16): repository write is proven from the `permissions`
+        // block GitHub returns for the authenticated token, replacing the
+        // probe that PUT a file into the user's repo. Real GitHub always
+        // sends it, so the fixture has to as well.
+        body: { full_name: REPO, permissions: { push: true } },
+      },
     });
     const outcome = await runSetCredential(store.db, store.slug, actor, {
       dataRoot: store.dataRoot,
@@ -221,7 +239,13 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
 
     const attach = fakeGithubFetch({
       "GET /user": { body: { login: "hepapi" }, headers: { "x-oauth-scopes": "repo" } },
-      [`GET /repos/${REPO}`]: { body: { full_name: REPO } },
+      [`GET /repos/${REPO}`]: {
+        // A8 (pass 16): repository write is proven from the `permissions`
+        // block GitHub returns for the authenticated token, replacing the
+        // probe that PUT a file into the user's repo. Real GitHub always
+        // sends it, so the fixture has to as well.
+        body: { full_name: REPO, permissions: { push: true } },
+      },
       [`GET /repos/${REPO}/pulls`]: { body: [] },
     });
     const outcome = await runSetCredential(store.db, store.slug, actor, {

@@ -156,7 +156,7 @@ describe("P13-D-6: the card and the list row draw validation status (FR24)", () 
     // Before the fix `grep -c validation board-page.tsx` was 0: a reviewer's
     // request_changes set validation:"failing" and touched nothing the card
     // drew, so a rejected revision looked identical to a healthy one — while
-    // the "Needs attention" filter matched on exactly that field.
+    // the "Blocked or waiting" filter matched on exactly that field.
     const { container } = renderBoard([
       task({ key: "VIB-1", validation: "failing" }),
     ]);
@@ -244,7 +244,7 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
       c.querySelector(".col-head .nm")!.textContent!.includes("In Progress"),
     )!;
     expect(implBoth.querySelector(".empty")!.textContent).toBe(
-      "The 1 task here is hidden by the “Needs attention” filter and the search “zzz”.",
+      "The 1 task here is hidden by the “Blocked or waiting” filter and the search “zzz”.",
     );
   });
 
@@ -397,5 +397,42 @@ describe("R15-5: the board owns its own filter box", () => {
     fireEvent.change(input, { target: { value: "rotate" } });
     await waitFor(() => expect(queryByText("Attach a project credential")).toBeNull());
     expect(queryByText("Rotate the PAT")).toBeTruthy();
+  });
+});
+
+/**
+ * R16-2 (owner ruling). Live in pass 16, the board drew an amber "input
+ * required" chip on a card and its own attention filter matched 0 of 4 tasks —
+ * the state the card flagged was the one state the predicate omitted. The chip
+ * is renamed to what it selects, and this binds the two: the label on the chip
+ * and the tasks that survive the click are asserted in the same test, so a
+ * future edit cannot rename one without the other.
+ */
+describe("R16-2: the attention chip says what it selects", () => {
+  const chip = (container: HTMLElement) =>
+    [...container.querySelectorAll(".fchip, .chip, button")].find(
+      (el) => el.textContent!.trim() === "Blocked or waiting",
+    );
+
+  it('is labelled "Blocked or waiting", not "Needs attention"', () => {
+    const { container } = renderBoard([task()]);
+    expect(chip(container)).toBeTruthy();
+    expect(container.textContent).not.toContain("Needs attention");
+  });
+
+  it("keeps an input_required card visible under that filter", async () => {
+    const { container, queryByText } = renderBoard([
+      task({
+        key: "VIB-1",
+        title: "Waiting on an answer",
+        readiness: "input_required",
+        displayReadiness: "input_required",
+        waiting: "human",
+      }),
+      task({ key: "VIB-2", title: "Perfectly fine", readiness: "ready" }),
+    ]);
+    fireEvent.click(chip(container)!);
+    await waitFor(() => expect(queryByText("Perfectly fine")).toBeNull());
+    expect(queryByText("Waiting on an answer")).toBeTruthy();
   });
 });

@@ -85,12 +85,15 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
     // comment; the contributor tier adds "Create tasks" AND task ownership.
     // R8-4: reconcile-github is now maintainer+ (was contributor+).
     expect(RBAC_ROWS.every((r) => r.grant.admin === 1)).toBe(true);
-    // view/comment are app-wide (informational role columns); the table row
-    // renders them as "any signed-in user".
-    expect(RBAC_ROWS.filter((r) => r.appWide).map((r) => r.action)).toEqual([
-      "View board, tasks & timelines",
-      "Comment on tasks",
-    ]);
+    // E1: view/comment are held by every ROLE and by no non-member — there is no
+    // "app-wide" row shape any more, so every row carries four role grants and
+    // nothing in this table can render as membership-free.
+    expect(RBAC_ROWS.every((r) => Object.keys(r.grant).length === 4)).toBe(true);
+    expect(
+      RBAC_ROWS.filter((r) => ROLE_IDS.every((role) => r.grant[role] === 1)).map(
+        (r) => r.action,
+      ),
+    ).toEqual(["View board, tasks & timelines", "Comment on tasks"]);
     expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([
       1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ]);

@@ -3,6 +3,7 @@ import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   deliveringEngagement,
   supportingEngagements,
+  type Engagement,
   type PacketOption,
   type PrState,
   type PacketOptionKind,
@@ -121,7 +122,19 @@ export interface OperatorAuthority {
 type Gate = "direct" | "recommend" | "deny";
 
 export interface OperatorActionResult {
-  /** done = performed · recommended = posted for a human · denied = refused. */
+  /**
+   * done = performed · recommended = posted for a human ·
+   * **denied = refused by AUTHORITY** (the capability policy withheld it, or
+   * the action belongs to someone else — e.g. an agent's own packet) ·
+   * **noop = nothing to do / the task's state ruled it out** (already Done, no
+   * open packet, a target that is not engaged, a malformed step).
+   *
+   * That split is load-bearing, not cosmetic: `narrateRefusedActions` files a
+   * refused plan step under "refused by its capability policy" or "did not
+   * apply to the task's current state" purely on this field. A state conflict
+   * returned as `denied` therefore tells the human the project's policy blocked
+   * work it never blocked — the misblame class LV-03 exists to prevent.
+   */
   outcome: "done" | "recommended" | "denied" | "noop";
   message: string;
 }
@@ -256,6 +269,12 @@ export function resolveOperatorAuthority(
 
 /** Resolve one capability to direct / recommend / deny for this authority. */
 export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
+  // A4: no operator deployed ⇒ no operator authority, full stop. The
+  // no-deployment branch above already returns an EMPTY policy (so every
+  // lookup falls to `off`), but stating the rule here makes it the ONE place
+  // both gates answer from — a future default in that branch cannot quietly
+  // hand a project that deployed no operator a working capability.
+  if (!authority.deployed) return "deny";
   const mode = authority.policy.get(capabilityId) ?? "off";
   if (mode === "direct") return "direct";
   if (mode === "recommend") {
@@ -280,6 +299,19 @@ export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
  * Same deliberate polarity as `use-web-search-fetch` (operatorWebWithheld).
  */
 export function deliverGate(authority: OperatorAuthority): Gate {
+  // A4: absent-means-granted is about DEPLOYMENTS that predate the capability
+  // — never about a project with no operator deployed at all. `deliverGate`
+  // could not return `deny` for such a project: the no-deployment authority
+  // carries an empty policy, so `policy.has` was false and the fallback below
+  // resolved to `direct` on any non-strict board. An undeployed operator
+  // therefore built a toolkit of exactly `get_task` + `deliver_for_review` —
+  // it could push a branch and open a PR with no operator configured anywhere.
+  // Denied HERE rather than at the call sites, because four of the five
+  // `runOperator` entry points (the Run-operator button, a schedule, boot
+  // recovery, an `@operator` comment) never check `authority.deployed`; the
+  // Claude toolkit, the Codex plan schema and `operatorDeliverForReview` all
+  // resolve delivery through this one function.
+  if (!authority.deployed) return "deny";
   if (authority.policy.has("deliver-review-pr")) {
     return gate(authority, "deliver-review-pr");
   }
@@ -561,6 +593,51 @@ export interface OperatorOpenPacketInput {
 
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
 
+/**
+ * B1 — what a `retry_other_backend` option retries ON, when the operator did
+ * not say.
+ *
+ * `resolvePacket` starts the retry with `option.backend ?? "claude"`, so an
+ * option written without one ALWAYS re-ran on Claude — including when Claude
+ * is exactly what just failed, which makes the recommended recovery path from
+ * a Claude quota/auth failure a re-run of the same dead backend. Only the
+ * completion pipeline stamped the field; the operator's own authoring
+ * surfaces now expose it too, and an option that still arrives without one is
+ * stamped here with the SAME rule the completion pipeline uses: the other
+ * backend than the one that failed.
+ *
+ * "The one that failed" is the task's most recent AGENT run (the run a retry
+ * re-runs), then the delivering engagement's backend, then the operator's own
+ * — a packet authored before any agent ran still names a real target.
+ */
+function retryOtherBackendDefaults(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+  frontmatter: { engagements: Engagement[] },
+  authority: OperatorAuthority,
+): { backend: RealBackend; profileId?: string } {
+  const lastAgentRun = db
+    .prepare(
+      `SELECT backend, agent_profile_id FROM agent_runs
+       WHERE project_slug = ? AND task_key = ? AND kind IN ('primary', 'reviewer')
+       ORDER BY rowid DESC LIMIT 1`,
+    )
+    .get(projectSlug, taskKey) as
+    | { backend: string; agent_profile_id: string | null }
+    | undefined;
+  const delivering = deliveringEngagement(frontmatter);
+  const failed = lastAgentRun?.backend ?? delivering?.backend ?? authority.backend;
+  const profileId = lastAgentRun?.agent_profile_id ?? delivering?.profileId;
+  return {
+    backend: failed === "codex" ? "claude" : "codex",
+    // Stamped so the retry re-runs the agent that failed rather than falling
+    // back to the delivering one, and so `withdrawSupersededStuckPacket` joins
+    // the packet to the right agent's success.
+    ...(profileId ? { profileId } : {}),
+  };
+}
+
 /** Open a typed human-decision packet and notify the task's supervisors. */
 export async function operatorOpenPacket(
   db: DatabaseSync,
@@ -585,26 +662,65 @@ export async function operatorOpenPacket(
   for (const o of rawOptions) {
     if (!PACKET_KIND_SET.has(o.kind)) {
       return {
-        outcome: "denied",
+        // `noop`, not `denied`: nothing about the operator's POLICY refused
+        // this — the option was malformed. `denied` is reserved for authority
+        // refusals so the plan narration can name the real reason.
+        outcome: "noop",
         message: `Unknown packet option kind "${o.kind}". Valid kinds: ${PACKET_OPTION_KINDS.join(", ")}.`,
       };
     }
   }
 
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) {
+    return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
+  }
+  // B3: one open decision at a time, the same refusal every sibling packet
+  // writer makes (`openStuckLoopPacket`, `openAgentQuestionPacket`). This
+  // writer alone assigned `parsed.packet` unconditionally, so a second packet
+  // REPLACED the open one: a human mid-answer got "this decision was replaced
+  // by a newer one" and the question they were answering vanished — and an
+  // agent's own `ask_human` packet could be overwritten by an operator turn
+  // that never read it. Prompt text asked the model not to; nothing enforced
+  // it. Withdraw the open packet first (`resolve_decision_packet`) when it is
+  // genuinely moot.
+  if (existing.parsed.packet) {
+    return {
+      outcome: "noop",
+      message:
+        `A decision packet is already open on ${input.taskKey} ("${existing.parsed.packet.title}") — ` +
+        "answer from it, or withdraw it with resolve_decision_packet if it is moot, before opening another.",
+    };
+  }
+
   // Exactly one recommended option (the parser expects this): honour the first
   // one the operator marked, else default to the first option.
   let recSeen = false;
+  const retryDefaults = rawOptions.some((o) => o.kind === "retry_other_backend")
+    ? retryOtherBackendDefaults(
+        db,
+        input.projectSlug,
+        input.taskKey,
+        existing.parsed.frontmatter,
+        authority,
+      )
+    : null;
   const options: PacketOption[] = rawOptions.map((o) => {
     const rec = !recSeen && o.recommended === true;
     if (rec) recSeen = true;
+    // B1: a retry option ALWAYS names the backend it retries on — an unnamed
+    // one silently resolved to Claude, i.e. a re-run of whatever just failed.
+    const retry = o.kind === "retry_other_backend" ? retryDefaults : null;
+    const backend = o.backend ?? retry?.backend;
+    const profileId = o.profileId ?? retry?.profileId;
     return {
       kind: o.kind,
       t: o.title.trim() || o.kind,
       d: (o.detail ?? "").trim(),
       rec,
       ...(o.ev ? { ev: o.ev } : {}),
-      ...(o.backend ? { backend: o.backend } : {}),
-      ...(o.profileId ? { profileId: o.profileId } : {}),
+      ...(backend ? { backend } : {}),
+      ...(profileId ? { profileId } : {}),
       ...(o.deleteBranch ? { deleteBranch: true } : {}),
     };
   });
@@ -625,8 +741,13 @@ export async function operatorOpenPacket(
     options,
   };
 
+  let opened = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    // Re-check inside the locked write — the read above raced other writers
+    // (the same guard `openAgentQuestionPacket` makes).
+    if (parsed.packet) return;
     parsed.packet = packet;
+    opened = true;
     parsed.frontmatter.waiting = "human";
     if (input.packetType === "blocked") {
       // Blocked-ness lives on `readiness` alone (F7-VAL1). It used to ALSO set
@@ -651,6 +772,12 @@ export async function operatorOpenPacket(
       evidence: null,
     });
   });
+  if (!opened) {
+    return {
+      outcome: "noop",
+      message: `Another decision packet was opened on ${input.taskKey} first — this one was not written.`,
+    };
+  }
   reproject(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.operator.packet_opened",
@@ -710,11 +837,34 @@ export async function operatorResolvePacket(
   if (!packet) {
     return { outcome: "noop", message: "No open decision packet to resolve." };
   }
+  // B2: withdraw only what the OPERATOR raised. `generate-packets` + "a packet
+  // exists" was the whole check, so the operator could silently withdraw an
+  // agent's `ask_human` question — the agent stays blocked on an answer that
+  // now has no surface, and the R15-14 `askedBy` resume (which fires from the
+  // human's resolution) never runs. `from` is stamped by the writer:
+  // "operator" here, the agent's actor ref in `buildAgentQuestionPacket`.
+  if (packet.from !== "operator" || packet.askedBy) {
+    return {
+      outcome: "denied",
+      message:
+        `The open packet "${packet.title}" was raised by ${packet.from}, not by you — ` +
+        "only a human can resolve an agent's question. Answer it in a comment or leave it standing.",
+    };
+  }
   const reason =
     (input.reason ?? "").trim() ||
     "The input it asked for has since been provided.";
+  let withdrawn = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    // Re-check inside the locked write — the read above raced other writers.
+    // Both halves matter: the packet standing NOW must still be the operator's
+    // (never an agent question that landed in the window), and it must be the
+    // same packet this decision was made about (F10-09 ids).
+    const current = parsed.packet;
+    if (!current || current.from !== "operator" || current.askedBy) return;
+    if (packet.id && current.id !== packet.id) return;
     parsed.packet = null;
+    withdrawn = true;
     // A blocked packet set readiness=blocked when it opened — withdrawing the
     // packet lifts that (a genuine standing block would re-assert itself).
     if (packet.type === "blocked" && parsed.frontmatter.readiness === "blocked") {
@@ -730,6 +880,12 @@ export async function operatorResolvePacket(
       evidence: null,
     });
   });
+  if (!withdrawn) {
+    return {
+      outcome: "noop",
+      message: `The open packet on ${input.taskKey} changed before it could be withdrawn — nothing was removed.`,
+    };
+  }
   reproject(db, ctx, input.projectSlug, input.taskKey);
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
   recordAudit(db, {
@@ -988,12 +1144,12 @@ export async function operatorSetGoal(
   }
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) {
-    return { outcome: "denied", message: `Task ${input.taskKey} not found.` };
+    return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
   const current = existing.parsed.goal.trim();
   if (current !== "" && current !== DEFAULT_GOAL) {
     return {
-      outcome: "denied",
+      outcome: "noop",
       message:
         "The goal is already specified — open an edit_goal packet to propose a change instead of overwriting it.",
     };
@@ -1259,7 +1415,7 @@ export async function operatorPromptSpecialist(
   }
   const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
   if (!agent) {
-    return { outcome: "denied", message: `No deployed specialist "${input.profileId}" to prompt.` };
+    return { outcome: "noop", message: `No deployed specialist "${input.profileId}" to prompt.` };
   }
 
   if (g === "recommend") {
@@ -1345,7 +1501,7 @@ export async function operatorPromptReviewer(
   }
   const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
   if (!agent) {
-    return { outcome: "denied", message: `No deployed specialist "${input.profileId}" to engage as a reviewer.` };
+    return { outcome: "noop", message: `No deployed specialist "${input.profileId}" to engage as a reviewer.` };
   }
 
   if (g === "recommend") {
@@ -1531,7 +1687,7 @@ export async function operatorRunAgent(
         : null;
       if (current && current !== input.profileId) {
         return {
-          outcome: "denied",
+          outcome: "noop",
           message:
             `"${input.profileId}" is not the delivering agent ("${current}" is). ` +
             "Engage it as the deliverer first if you want it to deliver — a delivering run always runs the current deliverer.",
@@ -1542,7 +1698,7 @@ export async function operatorRunAgent(
   }
   if (!input.profileId) {
     return {
-      outcome: "denied",
+      outcome: "noop",
       message: "A profileId is required to run a supporting agent.",
     };
   }

@@ -10,7 +10,10 @@ import {
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
+  appendComment,
+  completeTaskMerge,
   createTask,
+  releaseOwner,
   setOwner,
   transitionStage,
   updateTaskGoal,
@@ -23,7 +26,9 @@ import {
   assignSpecialist,
 } from "~/server/tasks/specialist-run.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { updateProjectIdentity, inviteMember } from "~/features/project-settings/settings-actions.server";
+import { createAgentProfile } from "~/features/agents/agent-profile-actions.server";
 import { setMemberRole } from "~/features/policy/policy-actions.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { isAppError } from "~/server/errors/app-error.server";
@@ -165,6 +170,19 @@ function resetTaskStage(stage: string) {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
+/** Rewrite VIB-1 with an owner + rebuild (for the ownership guards). */
+function resetTaskOwner(ownerUserId: string) {
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter("VIB-1", {
+      stage: "impl",
+      title: "RBAC binding probe",
+      ownerUserId,
+    }),
+    goal: "Exercise the canonical guards per role.",
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
 describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", () => {
   it("ROLE_RANK is a strict monotonic tier viewer<contributor<maintainer<admin", () => {
     expect(ROLE_RANK.viewer).toBeLessThan(ROLE_RANK.contributor);
@@ -273,6 +291,124 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
   it("reconcile-github → maintainer+ (R8-4: aligned with rescan-project, was contributor+)", async () => {
     await assertMatchesMatrix("reconcile-github", async (actor) =>
       assertProjectAction(store.db, "reconcile-github", store.slug, actor, "reconcile with GitHub", { dataRoot: store.dataRoot }),
+    );
+  });
+
+  // ---------------------------------------------------------------------
+  // E7: the six ROLE-GATED actions the matrix declared but no driver drove.
+  // Every one of them was reachable only through the org-admin override test
+  // (four of them) or not at all, so `ACTION_ROLES` could have named any tier
+  // for them and nothing would have failed.
+  // ---------------------------------------------------------------------
+
+  it("accept-completion → maintainer+ (completeTaskMerge shares the acceptance gate)", async () => {
+    // VIB-1 has no owner, so the R6-2 owner exception cannot mask the tier, and
+    // no PR, so maintainer+ pass the guard and fail downstream (non-403).
+    await assertMatchesMatrix("accept-completion", (actor) =>
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor,
+        { dataRoot: store.dataRoot },
+      ),
+    );
+  });
+
+  it("accept-completion: the task's CONTRIBUTOR owner passes the same gate (R6-2)", async () => {
+    // The exception the review queue promises when it puts a contributor-owned
+    // task under "Waiting on your acceptance" — asserted against the guard, not
+    // just against the queue's own predicate.
+    resetTaskOwner(store.users.selin.id);
+    const owner = await guardAllowed(() =>
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actorOf(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    );
+    expect(owner, "a contributor OWNER may accept their own task").toBe(true);
+    // …and a contributor who does NOT own it is still denied.
+    const other = await guardAllowed(() =>
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actorOf(store.users.deniz),
+        { dataRoot: store.dataRoot },
+      ),
+    );
+    expect(other).toBe(false);
+  });
+
+  it("grant-github-scope → maintainer+", async () => {
+    await assertMatchesMatrix("grant-github-scope", async (actor) =>
+      assertProjectAction(
+        store.db,
+        "grant-github-scope",
+        store.slug,
+        actor,
+        "change the credential",
+        { dataRoot: store.dataRoot },
+      ),
+    );
+  });
+
+  it("release-any-ownership → admin ONLY (releasing SOMEONE ELSE's seat)", async () => {
+    // The owner is deniz — a former member who kept the seat. That makes the
+    // release FOREIGN for all four roles (so the own-task path can't stand in),
+    // while deniz's own attempt is a self-release that still needs `own-task`,
+    // which a non-member does not hold. Re-seated before each actor because a
+    // successful release clears the seat and the next attempt would take the
+    // idempotent "nothing to release" branch, which only needs membership.
+    await assertMatchesMatrix(
+      "release-any-ownership",
+      (actor) =>
+        releaseOwner(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actor, {
+          dataRoot: store.dataRoot,
+        }),
+      () => resetTaskOwner(store.users.deniz.id),
+    );
+  });
+
+  it("manage-members → admin ONLY", async () => {
+    let n = 0;
+    await assertMatchesMatrix("manage-members", (actor) =>
+      inviteMember(
+        store.db,
+        {
+          projectSlug: store.slug,
+          name: `Invitee ${n}`,
+          email: `invitee-${n++}@viberr.test`,
+        },
+        actor,
+        { dataRoot: store.dataRoot },
+      ),
+    );
+  });
+
+  it("manage-agents → admin ONLY", async () => {
+    // An empty form only reaches its validation error AFTER the guard, so the
+    // matrix reads the guard cleanly (403 = denied, validation = allowed).
+    await assertMatchesMatrix("manage-agents", (actor) =>
+      createAgentProfile(store.db, { projectSlug: store.slug, form: {} }, actor, {
+        dataRoot: store.dataRoot,
+      }),
+    );
+  });
+
+  it("edit-policy → admin ONLY", async () => {
+    await assertMatchesMatrix("edit-policy", (actor) =>
+      updateProjectIdentity(
+        store.db,
+        {
+          projectSlug: store.slug,
+          name: "Viberr Core",
+          prefix: "VIB",
+          description: "Edited by the matrix driver.",
+        },
+        actor,
+        { dataRoot: store.dataRoot },
+      ),
     );
   });
 
@@ -449,5 +585,158 @@ describe("B-WF7: reorder-board and approve-transition stay one tier", () => {
           `visible gate passed`,
       ).toContain(role);
     }
+  });
+});
+
+/**
+ * E7 + E1: `view` and `comment` are the two rows in the matrix that NO role
+ * tier narrows, and they had no per-role driver at all. That is exactly why the
+ * Policy page could go on rendering them as "any signed-in user · membership not
+ * required" long after R15-4 made projects members-only: nothing drove the
+ * question. These cases pin what the live HTTP probe found — a viewer reads and
+ * comments (200/200), a non-member gets 404 on both, and the comment a
+ * non-member tried to write is never in the file.
+ */
+describe("view + comment are enforced as MEMBERSHIP, not as a role tier", () => {
+  /** Run and return what was thrown (or undefined). */
+  async function caught(fn: () => unknown): Promise<unknown> {
+    try {
+      await fn();
+      return undefined;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  /**
+   * The membership gate itself. `requireVisibleProject` (the route wrapper)
+   * calls exactly this and re-clothes its refusal as the unknown-slug 404; that
+   * conversion is asserted at the route level in
+   * app/routes/project-visibility.server.test.ts and
+   * app/routes/project.board.server.test.ts. Here we drive the gate, which is
+   * where the per-role answer is actually decided — and which needs the test
+   * store's dataRoot, so the route wrapper cannot be called from this suite.
+   */
+  function visibilityGate(user: { id: string; email: string }) {
+    return assertProjectAction(
+      store.db,
+      "any-member",
+      store.slug,
+      actorOf(user),
+      "act on this project",
+      { dataRoot: store.dataRoot, allowArchived: true },
+    );
+  }
+
+  /** The composition every project-scoped action uses: visibility, then work. */
+  async function commentAs(
+    user: { id: string; email: string },
+    text: string,
+  ): Promise<unknown> {
+    visibilityGate(user);
+    return appendComment(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text },
+      actorOf(user),
+      { dataRoot: store.dataRoot },
+    );
+  }
+
+  function commentTexts(): string[] {
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    return file.parsed.timeline
+      .filter((e) => e.type === "comment")
+      .map((e) => e.text);
+  }
+
+  it("both rows are held by EVERY role — the matrix says so and no guard narrows it", () => {
+    for (const action of ["view", "comment"] as const) {
+      expect(new Set(rolesForAction(action))).toEqual(
+        new Set(["admin", "maintainer", "contributor", "viewer"]),
+      );
+    }
+  });
+
+  it("every role reaches the project; a non-member is refused by the same gate", async () => {
+    const byRole = usersByRole();
+    for (const role of Object.keys(byRole) as ProjectRole[]) {
+      const grant = visibilityGate(byRole[role]);
+      expect(grant.role, `role "${role}" must be able to open the project`).toBe(role);
+      expect(grant.isOrgAdminOverride).toBe(false);
+    }
+    const refusal = (await caught(() => visibilityGate(store.users.deniz))) as {
+      status?: number;
+    };
+    expect(isAppError(refusal)).toBe(true);
+    expect(refusal.status).toBe(403); // the ROUTE turns this into the 404
+    // The D2 override reaches reads too (no audit row — it is a read gate).
+    const override = visibilityGate(orgAdmin);
+    expect(override.role).toBe("admin");
+    expect(override.isOrgAdminOverride).toBe(true);
+  });
+
+  it("a VIEWER may comment; a non-member's comment is refused before a byte is written", async () => {
+    expect(await caught(() => commentAs(store.users.elif, "Viewer says hello"))).toBeUndefined();
+    expect(commentTexts()).toContain("Viewer says hello");
+
+    const refusal = (await caught(() =>
+      commentAs(store.users.deniz, "Non-member says hello"),
+    )) as { status?: number };
+    expect(isAppError(refusal)).toBe(true);
+    expect(refusal.status).toBe(403); // → the route's unknown-slug 404
+    // The comment path itself carries no authorization (task-actions §7.7) —
+    // `requireVisibleProject` IS its access control, so "refused" has to mean
+    // the timeline never took the write.
+    expect(commentTexts()).not.toContain("Non-member says hello");
+  });
+});
+
+describe("the matrix itself is pinned, not just the call sites", () => {
+  /**
+   * Everything above derives its expectation from `rolesForAction` — the same
+   * map the guards read — so it binds CALL SITES to the matrix but cannot see a
+   * change to the matrix. Widening a tier (e.g. `manage-agents` to maintainer)
+   * keeps every one of those tests green while silently handing out authority.
+   *
+   * This is the other half: the tiers written out by hand. Editing ACTION_ROLES
+   * now requires editing this table too, which is the point — a role tier is a
+   * governance decision, so it should never move as a side effect of a refactor.
+   */
+  const EXPECTED_TIERS: Record<RbacAction, ProjectRole[]> = {
+    view: ["admin", "maintainer", "contributor", "viewer"],
+    comment: ["admin", "maintainer", "contributor", "viewer"],
+    "create-task": ["admin", "maintainer", "contributor"],
+    "own-task": ["admin", "maintainer", "contributor"],
+    "approve-transition": ["admin", "maintainer"],
+    "resolve-packet": ["admin", "maintainer"],
+    "accept-completion": ["admin", "maintainer"],
+    "update-goal": ["admin", "maintainer"],
+    "run-agents": ["admin", "maintainer"],
+    "reorder-board": ["admin", "maintainer"],
+    "reconcile-github": ["admin", "maintainer"],
+    "grant-github-scope": ["admin", "maintainer"],
+    "rescan-project": ["admin", "maintainer"],
+    "release-any-ownership": ["admin"],
+    "manage-members": ["admin"],
+    "manage-agents": ["admin"],
+    "edit-policy": ["admin"],
+    "force-accept-completion": ["admin"],
+  };
+
+  it("every action holds exactly the roles governance assigned it", () => {
+    const actual = Object.fromEntries(
+      RBAC_DEFINITIONS.map((d) => [d.id, [...d.roles]]),
+    );
+    expect(actual).toEqual(EXPECTED_TIERS);
+  });
+
+  it("covers every action in the matrix — a new action cannot slip in untiered", () => {
+    expect(RBAC_DEFINITIONS.map((d) => d.id).sort()).toEqual(
+      Object.keys(EXPECTED_TIERS).sort(),
+    );
   });
 });

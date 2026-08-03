@@ -54,12 +54,26 @@ function fakeGit(opts: {
   pushTimedOut?: boolean;
   dirty?: boolean;
   aheadAfterCommit?: number;
+  /** `git rev-list --count` fails outright (A3: UNKNOWN, not "no commits"). */
+  countFails?: boolean;
+  /** `rev-parse --is-shallow-repository` answer (default: not shallow). */
+  shallow?: boolean;
+  /** Whether the deepen fetch succeeds (default: true). */
+  deepenOk?: boolean;
 }) {
   const calls: string[][] = [];
   let committed = false;
   const exec = vi.fn(async (_file: string, args: string[]) => {
     calls.push(args);
     if (args.includes("--abbrev-ref")) return { ok: true, stdout: opts.branch, stderr: "" };
+    if (args.includes("--is-shallow-repository")) {
+      return { ok: true, stdout: opts.shallow ? "true" : "false", stderr: "" };
+    }
+    if (args.includes("fetch")) {
+      return opts.deepenOk === false
+        ? { ok: false, stdout: "", stderr: "could not resolve host" }
+        : { ok: true, stdout: "", stderr: "" };
+    }
     if (args.includes("status") && args.includes("--porcelain")) {
       return {
         ok: true,
@@ -72,6 +86,9 @@ function fakeGit(opts: {
       return { ok: true, stdout: "", stderr: "" };
     }
     if (args.includes("--count")) {
+      if (opts.countFails) {
+        return { ok: false, stdout: "", stderr: "fatal: bad revision" };
+      }
       const ahead = committed ? (opts.aheadAfterCommit ?? opts.ahead + 1) : opts.ahead;
       return { ok: true, stdout: String(ahead), stderr: "" };
     }
@@ -112,6 +129,54 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
     // A clean tree → no auto-commit.
     expect(git.calls.some((c) => c.includes("commit"))).toBe(false);
+  });
+
+  it("A3: a FAILED rev-list is UNKNOWN, not `no_commits` — it still pushes", async () => {
+    // `countRes.ok ? parseInt(…) || 0 : 0` made an unreadable history
+    // indistinguishable from an empty branch, and `no_commits` used to fall
+    // through to openTaskPr — a review PR over a remote the delivery never
+    // reached. Canary: restore the `: 0` fallback and this returns no_commits.
+    bindPat();
+    const git = fakeGit({ branch: "vib-1-work", ahead: 4, countFails: true });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("pushed");
+    expect(git.calls.some((c) => c.includes("push"))).toBe(true);
+  });
+
+  it("A3: counts against origin/<default> and deepens a shallow clone first", async () => {
+    // Clones are `--depth 1`, so `<default>..HEAD` runs over truncated history.
+    // The reconcile path has deepened since P11-72; this one compared against
+    // the LOCAL default branch with no guard at all.
+    bindPat();
+    const git = fakeGit({ branch: "vib-1-work", ahead: 2, shallow: true });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("pushed");
+    const deepen = git.calls.find((c) => c.includes("fetch"));
+    expect(deepen).toEqual([
+      "-C", expect.any(String), "fetch", "--deepen", "50", "origin", "main",
+    ]);
+    const count = git.calls.find((c) => c.includes("--count"));
+    expect(count).toContain("origin/main..HEAD");
+  });
+
+  it("A3: a shallow clone whose deepen FAILS is unknown — it pushes rather than claiming no_commits", async () => {
+    bindPat();
+    const git = fakeGit({
+      branch: "vib-1-work", ahead: 0, shallow: true, deepenOk: false,
+    });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("pushed");
+    // Never even asked for a count it could not trust.
+    expect(git.calls.some((c) => c.includes("--count"))).toBe(false);
   });
 
   it("COMMITS the agent's uncommitted changes, then pushes (delivery finalization)", async () => {

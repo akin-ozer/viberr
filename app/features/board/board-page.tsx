@@ -291,7 +291,7 @@ function TaskCard({
             </Pill>
           )}
           {/* P13-D-6 (FR24): the card drew stage, agent and waiting state but
-              NOT validation — while the "Needs attention" filter matched on it.
+              NOT validation — while the "Blocked or waiting" filter matched on it.
               A reviewer's request_changes sets validation:"failing" and the card
               was pixel-identical to a healthy one. Deliberate departure from the
               HTML mock (design/html-app/app/board.jsx), which omits it too.
@@ -689,7 +689,11 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "all", label: "All tasks", icon: "board" },
   { id: "human", label: "Waiting on me", icon: "hand" },
   { id: "agent", label: "Agent working", icon: "cpu" },
-  { id: "risk", label: "Needs attention", icon: "alert" },
+  // R16-2: "Needs attention" read as a danger filter and matched only alarming
+  // states; the owner ruling renames it to what it selects — work that cannot
+  // proceed (blocked, waiting on an answer, failing validation, urgent, or a
+  // rejected PR). See matchesBoardFilter.
+  { id: "risk", label: "Blocked or waiting", icon: "alert" },
   // R14-3: archived tasks are out of every other view; this is the way back to
   // them. The chip only renders when the project has any (see FilterBar).
   { id: "archived", label: "Archived", icon: "lock" },

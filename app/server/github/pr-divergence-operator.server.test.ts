@@ -197,8 +197,19 @@ describe("the healing transition — a closed PR goes live again", () => {
   });
 
   it("a FRESH PR replacing the closed one is announced as a replacement", async () => {
+    // R16-1: healing means a human closed OUR PR and opened another over the
+    // SAME delivered revision — so the replacement is adopted only because its
+    // head IS `workRevision.headSha`. Drop the revision and #999 is a stranger.
     const { store, actor } = setup({
       pr: { number: 318, state: "closed", title: "Attach execution workspace" },
+      workRevision: {
+        id: "rev_1",
+        headSha: "headsha",
+        treeSha: null,
+        branch: BRANCH,
+        createdAt: "2026-07-25T08:00:00.000Z",
+        sourceProfileId: "developer",
+      },
     });
     await reconcile(store, actor, routesWithPr({ number: 999, state: "open", merged: false }));
     const events = store.db
@@ -210,6 +221,42 @@ describe("the healing transition — a closed PR goes live again", () => {
       ),
     ).toBe(true);
     expect(invoked).toHaveBeenCalledTimes(1);
+  });
+
+  it("R16-1: a DIFFERENT open PR whose head is not the delivered revision does not heal anything", async () => {
+    // The healing branch is the one door through which a task adopts a PR it
+    // did not open. Before R16-1 it opened on the branch NAME, so any stranger
+    // that appeared on `vib-301-workspace` after our PR closed replaced it —
+    // and the closed-PR block lifted on somebody else's work.
+    const { store, actor } = setup({
+      pr: { number: 318, state: "closed", title: "Attach execution workspace" },
+      workRevision: {
+        id: "rev_1",
+        headSha: "the-delivered-sha",
+        treeSha: null,
+        branch: BRANCH,
+        createdAt: "2026-07-25T08:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+    });
+    await reconcile(store, actor, routesWithPr({ number: 999, state: "open", merged: false }));
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 318, state: "closed" });
+
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    expect(events.some((e) => /replacing closed PR #318/.test(e.text))).toBe(false);
+    const collision = events.find((e) => /Branch name collision/.test(e.text));
+    expect(collision, "the stranger is reported as a collision").toBeTruthy();
+    expect(collision!.text).toContain("#999");
+    expect(collision!.text).toContain("the-del"); // the delivered sha, abbreviated
+    expect(invoked).not.toHaveBeenCalled();
   });
 });
 
@@ -300,5 +347,28 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
     );
     expect(result).toMatchObject({ status: "refused" });
     expect((result as { message: string }).message).toMatch(/unreachable/);
+  });
+
+  it("B11: URL-encodes the branch — an exotic name addresses its OWN ref, not a different one", async () => {
+    // The branch was interpolated raw, so anything outside the `vib-142` shape
+    // built a different URL than the ref it meant. `/` stays a separator
+    // (`feature/x` is a legal branch and `refs/heads/feature/x` is its path);
+    // every other unsafe character is encoded.
+    // Canary: drop the encoding and the DELETE lands on an unencoded path.
+    const branch = "feature/fix #42 (draft)";
+    const { store, actor } = setup({
+      branch,
+      pr: { number: 318, state: "closed", title: "Attach execution workspace" },
+    });
+    const encodedPath = `${REPO_PATH}/git/refs/heads/feature/fix%20%2342%20(draft)`;
+    const fake = fakeGithubFetch({ [`DELETE ${encodedPath}`]: { status: 204 } });
+    const result = await deleteTaskRemoteBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
+    );
+    expect(result).toEqual({ status: "deleted", branch });
+    expect(fake.callsTo(`DELETE ${encodedPath}`)).toHaveLength(1);
   });
 });

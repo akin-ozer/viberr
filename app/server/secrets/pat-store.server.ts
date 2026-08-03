@@ -8,8 +8,9 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { openSecret, sealSecret } from "./secret-box.server";
+import { openSecretRotating, sealSecret } from "./secret-box.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 
 /**
@@ -200,7 +201,28 @@ export function getPatToken(
     .prepare(`SELECT encrypted_token FROM github_pats WHERE id = ?`)
     .get(patId) as { encrypted_token: string } | undefined;
   if (!row) return null;
-  return openSecret(row.encrypted_token);
+  // A9: accept a box sealed under a RETIRED key during a rotation window, then
+  // re-seal it in place under the current key. Without this, rotating
+  // VIBERR_SECRET_ENCRYPTION_KEY bricked every stored PAT — the only signal
+  // being a 500 at the next GitHub call.
+  const opened = openSecretRotating(row.encrypted_token);
+  if (opened.staleKey) {
+    try {
+      db.prepare(`UPDATE github_pats SET encrypted_token = ? WHERE id = ?`).run(
+        sealSecret(opened.plaintext),
+        patId,
+      );
+      logger.info("re-sealed a PAT under the current encryption key", { patId });
+    } catch (error) {
+      // The read still succeeded — a failed re-seal only costs the next read
+      // another fallback, so never fail the caller over it.
+      logger.warn("could not re-seal a PAT under the current encryption key", {
+        patId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  return opened.plaintext;
 }
 
 /** Caches a validator run on the PAT row (validation_json + timestamp). */

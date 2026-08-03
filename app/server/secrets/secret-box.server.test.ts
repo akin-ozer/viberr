@@ -1,7 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { isAppError } from "~/server/errors/app-error.server";
-import { isSecretBox, openSecret, sealSecret } from "./secret-box.server";
+import {
+  isSecretBox,
+  openSecret,
+  openSecretRotating,
+  previousSecretKeys,
+  sealSecret,
+} from "./secret-box.server";
 
 const key = randomBytes(32);
 
@@ -75,5 +81,64 @@ describe("secret-box", () => {
     expect(isSecretBox(sealSecret("x", key))).toBe(true);
     expect(isSecretBox("github_pat_plaintext")).toBe(false);
     expect(isSecretBox("v2$a$b$c")).toBe(false);
+  });
+});
+
+/**
+ * A9/pass-16 — key rotation was UNIMPLEMENTED. Changing
+ * `VIBERR_SECRET_ENCRYPTION_KEY` bricked every stored PAT (a 500 at the next
+ * GitHub call) and silently downgraded every authenticated MCP server to
+ * anonymous. Rotation is now a real, lazy, no-migration operation.
+ */
+describe("secret-box key rotation (A9)", () => {
+  it("opens a box sealed under a RETIRED key and flags it for re-sealing", () => {
+    const oldKey = randomBytes(32);
+    const newKey = randomBytes(32);
+    const box = sealSecret("tok_live_123", oldKey);
+
+    // The current key alone cannot read it — that was the whole failure.
+    expectSecretBoxError(() => openSecret(box, newKey));
+
+    const opened = openSecretRotating(box, newKey, [oldKey]);
+    expect(opened.plaintext).toBe("tok_live_123");
+    expect(opened.staleKey).toBe(true);
+  });
+
+  it("a box under the CURRENT key never reports a stale key (no needless rewrite)", () => {
+    const newKey = randomBytes(32);
+    const opened = openSecretRotating(sealSecret("x", newKey), newKey, [
+      randomBytes(32),
+    ]);
+    expect(opened).toEqual({ plaintext: "x", staleKey: false });
+  });
+
+  it("tries EVERY retired key, and still throws when none of them opens it", () => {
+    const wanted = randomBytes(32);
+    const box = sealSecret("x", wanted);
+    expect(
+      openSecretRotating(box, randomBytes(32), [randomBytes(32), wanted])
+        .plaintext,
+    ).toBe("x");
+    expectSecretBoxError(() =>
+      openSecretRotating(box, randomBytes(32), [randomBytes(32)]),
+    );
+  });
+
+  it("parses the retired-key env list and drops unusable entries in silence", () => {
+    const a = randomBytes(32);
+    const b = randomBytes(32);
+    expect(
+      previousSecretKeys({
+        VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS: `${a.toString("base64")}, ${b.toString("base64")}`,
+      } as NodeJS.ProcessEnv).map((k) => k.toString("base64")),
+    ).toEqual([a.toString("base64"), b.toString("base64")]);
+    // Wrong-length / empty entries are skipped rather than thrown about — an
+    // error message must never hint at key material.
+    expect(
+      previousSecretKeys({
+        VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS: `,${Buffer.alloc(8).toString("base64")},`,
+      } as NodeJS.ProcessEnv),
+    ).toEqual([]);
+    expect(previousSecretKeys({} as NodeJS.ProcessEnv)).toEqual([]);
   });
 });

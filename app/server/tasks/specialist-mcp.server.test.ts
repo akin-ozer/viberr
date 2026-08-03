@@ -138,12 +138,79 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     });
   });
 
-  it("F7-MCP1: a legacy plaintext cred_ref is ignored, never leaked as auth", () => {
+  /**
+   * A9/pass-16 — this test used to assert the SILENT DOWNGRADE: a legacy
+   * plaintext `cred_ref` yielded no token and the server was mounted anyway, so
+   * a run connected ANONYMOUSLY to a server the operator had configured with
+   * auth, the persona still advertised its tools, and the only trace was a log
+   * warn. The credential is still never leaked as auth — but the server is no
+   * longer mounted, and the run is told why.
+   */
+  it("F7-MCP1 + A9: a legacy plaintext cred_ref is never leaked AND never silently anonymous", () => {
     const store = setupTestStore(ctx);
-    // A pre-F7-MCP1 row stored a `secret://…` reference in cleartext — it is not
-    // a sealed box, so getMcpCredential returns null and no header is injected.
     addMcp(store.db, "legacy", "HTTP", "https://mcp.example/sse", "secret://mcp/legacy");
-    const servers = resolveSpecialistMcpServers(store.db, ["legacy"]);
-    expect(servers["legacy"]).toEqual({ type: "http", url: "https://mcp.example/sse" });
+    const { servers, unresolved } = resolveSpecialistMcpServersDetailed(store.db, [
+      "legacy",
+    ]);
+    expect(servers["legacy"]).toBeUndefined();
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0]!.name).toBe("legacy");
+    expect(unresolved[0]!.reason).toContain("not in the current sealed format");
+    // …and it is NOT flagged as merely unhealthy — it never mounted.
+    expect(unresolved[0]!.mounted).toBeUndefined();
+  });
+
+  it("A9: a credential sealed under a RETIRED key is refused, not downgraded to anonymous", async () => {
+    const { sealSecret } = await import("~/server/secrets/secret-box.server");
+    const otherKey = randomBytes(32);
+    const store = setupTestStore(ctx);
+    addMcp(
+      store.db,
+      "billing-api",
+      "HTTP",
+      "https://mcp.example/sse",
+      sealSecret("tok_live_123", otherKey), // sealed under a key nothing knows
+    );
+    const { servers, unresolved } = resolveSpecialistMcpServersDetailed(store.db, [
+      "billing-api",
+    ]);
+    expect(servers["billing-api"]).toBeUndefined();
+    expect(unresolved[0]!.reason).toContain("cannot be decrypted");
+    expect(unresolved[0]!.reason).toContain(
+      "VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS",
+    );
+  });
+
+  it("A9: rotation WORKS — a retired key in the env opens the box and re-seals it", async () => {
+    const { sealSecret } = await import("~/server/secrets/secret-box.server");
+    const oldKey = randomBytes(32);
+    const store = setupTestStore(ctx);
+    addMcp(
+      store.db,
+      "billing-api",
+      "HTTP",
+      "https://mcp.example/sse",
+      sealSecret("tok_live_123", oldKey),
+    );
+    const saved = process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS;
+    process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS = oldKey.toString("base64");
+    try {
+      const servers = resolveSpecialistMcpServers(store.db, ["billing-api"]);
+      expect(servers["billing-api"]).toEqual({
+        type: "http",
+        url: "https://mcp.example/sse",
+        headers: { Authorization: "Bearer tok_live_123" },
+      });
+      // Lazy rotation: the row was re-sealed under the CURRENT key, so it keeps
+      // working after the retired key is removed from the env.
+      process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS = "";
+      const after = resolveSpecialistMcpServers(store.db, ["billing-api"]);
+      expect(after["billing-api"]).toMatchObject({
+        headers: { Authorization: "Bearer tok_live_123" },
+      });
+    } finally {
+      if (saved === undefined) delete process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS;
+      else process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS = saved;
+    }
   });
 });

@@ -117,6 +117,47 @@ export function isNonFastForwardStderr(stderr: string): boolean {
   );
 }
 
+/**
+ * Commits on HEAD that the default branch does not carry — `null` when history
+ * cannot answer honestly (A3).
+ *
+ * Two rules, both matching `reconcileWorkspaceDelivery`'s commit count, which
+ * this path had drifted from:
+ *  - compare against `origin/<default>`, the remote-tracking ref, not the LOCAL
+ *    default branch: the agent owns the local one and a workspace is reused
+ *    across runs;
+ *  - specialist clones are `--depth 1`, so the range runs over truncated history
+ *    and every reachable commit looks "ahead". Deepen first; a deepen that fails
+ *    (offline, no remote) leaves the answer unknown rather than wrong.
+ */
+async function countCommitsAhead(
+  exec: Exec,
+  repoDir: string,
+  defaultBranch: string,
+): Promise<number | null> {
+  const shallowRes = await exec(
+    "git",
+    ["-C", repoDir, "rev-parse", "--is-shallow-repository"],
+    { cwd: repoDir, timeoutMs: 5_000 },
+  );
+  if (shallowRes.ok && shallowRes.stdout.trim() === "true") {
+    const deepen = await exec(
+      "git",
+      ["-C", repoDir, "fetch", "--deepen", "50", "origin", defaultBranch],
+      { cwd: repoDir, timeoutMs: 30_000 },
+    );
+    if (!deepen.ok) return null;
+  }
+  const countRes = await exec(
+    "git",
+    ["-C", repoDir, "rev-list", "--count", `origin/${defaultBranch}..HEAD`],
+    { cwd: repoDir, timeoutMs: 5_000 },
+  );
+  if (!countRes.ok) return null;
+  const parsed = Number.parseInt(countRes.stdout.trim(), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 /** Locate the workspace git repo for a task (same conventions as the reconciler). */
 function findRepoDir(
   projectSlug: string,
@@ -307,12 +348,12 @@ export async function pushWorkspaceBranch(
     }
 
     // Count local commits not on the default branch — nothing to push otherwise.
-    const countRes = await exec(
-      "git",
-      ["-C", repoDir, "rev-list", "--count", `${defaultBranch}..HEAD`],
-      { cwd: repoDir, timeoutMs: 5_000 },
-    );
-    const localAhead = countRes.ok ? Number.parseInt(countRes.stdout.trim(), 10) || 0 : 0;
+    // `null` is UNKNOWN and is NOT "no commits": a failed rev-list used to read
+    // as 0, so a real delivery reported `no_commits` and the caller opened a PR
+    // over a remote nobody had pushed to (A3, the F15-15 hazard class through a
+    // different door). Unknown pushes: a push with nothing new is a no-op, while
+    // skipping one that had commits is the failure that matters.
+    const localAhead = await countCommitsAhead(exec, repoDir, defaultBranch);
     if (localAhead === 0) {
       return { status: "no_commits", reason: "no local commits ahead of the default branch" };
     }
@@ -369,7 +410,9 @@ export async function pushWorkspaceBranch(
       branch,
       commits: localAhead,
     });
-    return { status: "pushed", branch, commits: localAhead };
+    // `commits: null` (history unreadable) reports 0 — the push happened, the
+    // count is the only thing we don't know.
+    return { status: "pushed", branch, commits: localAhead ?? 0 };
   } catch (error) {
     logger.info("workspace branch push errored — skipping", {
       taskKey,

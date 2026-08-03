@@ -204,12 +204,16 @@ describe("loader", () => {
 });
 
 describe("action RBAC + degraded no-PAT results", () => {
-  it("rejects non-members and viewers from reconcile", async () => {
-    const result = (await postAction(ids.deniz, "reconcile")) as {
-      init?: { status?: number };
-      data?: { ok: boolean };
-    };
-    expect(result.init?.status).toBe(403);
+  it("answers a NON-MEMBER as an unknown slug, never 403 (E2)", async () => {
+    // This asserted 403 — the leak. A 403 here says "the project exists and you
+    // may not"; R15-4 makes a project invisible to non-members, and every other
+    // surface answers 404, so this one reply confirmed its existence. The role
+    // tiers are still exercised honestly by the member cases below.
+    const thrown = (await postAction(ids.deniz, "reconcile").catch(
+      (e) => e,
+    )) as { init?: { status?: number }; data?: unknown };
+    expect(thrown?.init?.status).toBe(404);
+    expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
   });
 
   it("rejects a reviewer from grant-scope (admin|maintainer only)", async () => {

@@ -30,3 +30,24 @@ export function resolveClaudeConfigDir(): string {
   }
   return path.resolve(env.VIBERR_DATA_ROOT, "runtimes", "claude-home");
 }
+
+/**
+ * The SAME rule, applied to a raw env snapshot (D2).
+ *
+ * The credential PROBE has to be live: `isBackendAvailable` re-probes on every
+ * call so a credential fixed at runtime heals without a restart (the property
+ * that makes the docker codex trap self-healing), while `getEnv()` is a
+ * validated, process-lifetime cache. `resolveCodexAuthSource` reads the raw env
+ * for exactly this reason. This is deliberately the same branch order as above,
+ * not a second rule — the two must never disagree, or the dir the adapter
+ * writes transcripts to stops being the dir the probe inspects.
+ */
+export function resolveClaudeConfigDirFrom(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (env.CLAUDE_CONFIG_DIR) return env.CLAUDE_CONFIG_DIR;
+  if (isTruthy(env.VIBERR_CLAUDE_USE_CLI_AUTH)) {
+    return path.join(os.homedir(), ".claude");
+  }
+  return path.resolve(env.VIBERR_DATA_ROOT || "./data", "runtimes", "claude-home");
+}

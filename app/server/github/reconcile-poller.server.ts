@@ -40,12 +40,19 @@ async function nudgeMergePendingTasks(
   db: DatabaseSync,
   ctx: GithubActionContext,
 ): Promise<number> {
+  // B9: this matched `pr_json LIKE '%"state":"accepted"%'` — a substring scan of
+  // a JSON blob, which a PR TITLE containing that text satisfies just as well.
+  // `json_extract` asks the question the code actually means; the re-parse below
+  // stays because the projection column is still a blob and the number matters.
   const rows = db
     .prepare(
       `SELECT t.project_slug AS slug, t.task_key AS key, t.pr_json AS pr
          FROM task_projections t
          JOIN projects p ON p.slug = t.project_slug
-        WHERE p.archived = 0 AND t.pr_json LIKE '%"state":"accepted"%'`,
+        WHERE p.archived = 0
+          AND t.pr_json IS NOT NULL
+          AND json_valid(t.pr_json)
+          AND json_extract(t.pr_json, '$.state') = 'accepted'`,
     )
     .all() as { slug: string; key: string; pr: string }[];
   let nudged = 0;

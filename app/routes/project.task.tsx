@@ -723,10 +723,18 @@ export async function action({ request, params }: Route.ActionArgs) {
           // "started a run" audit row names the maintainer who launched it.
           actor: { userId: actor.userId, label: actor.label },
         });
+        const backendLabel =
+          started.backend === "claude" ? "Claude Code" : "Codex";
         return {
           ok: true as const,
           intent,
-          toast: `Operator running · ${started.backend === "claude" ? "Claude Code" : "Codex"} · ${started.autonomy} autonomy`,
+          // B10 (pass 16): a trigger that lands while a run already holds the
+          // lease is QUEUED, not started — it drains when the current run ends.
+          // "Operator running" for both left the human watching for a run that
+          // had not begun; `queued` now distinguishes them.
+          toast: started.queued
+            ? `Operator queued · runs when the current run finishes · ${backendLabel} · ${started.autonomy} autonomy`
+            : `Operator running · ${backendLabel} · ${started.autonomy} autonomy`,
         };
       }
       case "schedule-action": {

@@ -92,11 +92,11 @@ describe("ensureTaskBranch", () => {
     const store = setupWithCredential();
     const branch = "vib-201";
     const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/git/ref/heads%2F${branch}`]: {
+      [`GET ${REPO_PATH}/git/ref/heads/${branch}`]: {
         status: 404,
         body: { message: "Not Found" },
       },
-      [`GET ${REPO_PATH}/git/ref/heads%2Fmain`]: {
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: {
         body: { object: { sha: "basesha00" } },
       },
       [`POST ${REPO_PATH}/git/refs`]: {
@@ -135,7 +135,7 @@ describe("ensureTaskBranch", () => {
   it("is idempotent: an existing branch is success without a create call", async () => {
     const store = setupWithCredential("VIB-202", "vib-202-existing");
     const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/git/ref/heads%2Fvib-202-existing`]: {
+      [`GET ${REPO_PATH}/git/ref/heads/vib-202-existing`]: {
         body: { object: { sha: "headsha" } },
       },
       [`GET ${REPO_PATH}/compare/main...vib-202-existing`]: compareRoute(
@@ -164,11 +164,11 @@ describe("ensureTaskBranch", () => {
   it("treats a 422 'Reference already exists' race as success", async () => {
     const store = setupWithCredential("VIB-203", "vib-203-race");
     const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/git/ref/heads%2Fvib-203-race`]: {
+      [`GET ${REPO_PATH}/git/ref/heads/vib-203-race`]: {
         status: 404,
         body: { message: "Not Found" },
       },
-      [`GET ${REPO_PATH}/git/ref/heads%2Fmain`]: {
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: {
         body: { object: { sha: "basesha00" } },
       },
       [`POST ${REPO_PATH}/git/refs`]: {
@@ -189,11 +189,11 @@ describe("ensureTaskBranch", () => {
   it("403 creating the ref opens a `repo` scope violation carried by the task", async () => {
     const store = setupWithCredential("VIB-204", "vib-204-forbidden");
     const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/git/ref/heads%2Fvib-204-forbidden`]: {
+      [`GET ${REPO_PATH}/git/ref/heads/vib-204-forbidden`]: {
         status: 404,
         body: { message: "Not Found" },
       },
-      [`GET ${REPO_PATH}/git/ref/heads%2Fmain`]: {
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: {
         body: { object: { sha: "basesha00" } },
       },
       [`POST ${REPO_PATH}/git/refs`]: {
@@ -241,11 +241,11 @@ describe("ensureTaskBranch", () => {
     // Default branch missing on the remote.
     const store = setupWithCredential("VIB-206", "vib-206-x");
     const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/git/ref/heads%2Fvib-206-x`]: {
+      [`GET ${REPO_PATH}/git/ref/heads/vib-206-x`]: {
         status: 404,
         body: { message: "Not Found" },
       },
-      [`GET ${REPO_PATH}/git/ref/heads%2Fmain`]: {
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: {
         status: 404,
         body: { message: "Not Found" },
       },
@@ -268,5 +268,33 @@ describe("ensureTaskBranch", () => {
         { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
       ),
     ).toEqual({ status: "task_not_found" });
+  });
+});
+
+describe("ref paths (B11)", () => {
+  it("addresses `heads/<branch>` with the separator intact", async () => {
+    // The fixtures above used to register `git/ref/heads%2F<branch>`, because
+    // the code sent `encodeURIComponent("heads/" + branch)`. GitHub does not
+    // resolve that ref, so the existence probe could never succeed and every
+    // call fell through to the create path — where a 422 reads as idempotent
+    // success, which is why nothing ever looked broken. The separator has to
+    // stay literal; only the segments are escaped.
+    const store = setupWithCredential("VIB-900", "vib-900");
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/vib-900`]: {
+        body: { ref: "refs/heads/vib-900", object: { sha: "a".repeat(40) } },
+      },
+    });
+    const result = await ensureTaskBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-900" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result.status).toBe("synced"); // the ref already existed
+    // The probe HIT, so no create was attempted — the observable proof that the
+    // ref resolved rather than 404ing into the idempotent create path.
+    expect(gh.callsTo(`GET ${REPO_PATH}/git/ref/heads/vib-900`)).toHaveLength(1);
+    expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
   });
 });

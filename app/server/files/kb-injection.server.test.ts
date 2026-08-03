@@ -1,11 +1,13 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   KB_INJECTION_BUDGET,
   isInjectableKbDoc,
+  readKbBodies,
   readKbBody,
+  readKbBodyDetailed,
 } from "./kb-injection.server";
 
 function freshKb(dir = "notes"): { dataRoot: string; kbDir: string } {
@@ -52,11 +54,31 @@ describe("readKbBody — recursive, multi-format KB injection", () => {
     const { dataRoot, kbDir } = freshKb();
     writeFileSync(path.join(kbDir, "keep.md"), "MARKER-KEEP", "utf8");
     writeFileSync(path.join(kbDir, "skip.png"), "not-text", "utf8");
-    writeFileSync(path.join(kbDir, "skip.json"), '{"x":1}', "utf8");
+    writeFileSync(path.join(kbDir, "skip.pdf"), "%PDF", "utf8");
     const body = readKbBody("notes", dataRoot);
     expect(body).toContain("MARKER-KEEP");
     expect(body).not.toContain("skip.png");
-    expect(body).not.toContain("skip.json");
+    expect(body).not.toContain("skip.pdf");
+  });
+
+  /**
+   * C5/pass-16 — this test previously asserted the OPPOSITE (`skip.json` must
+   * not inject). The in-app "New document" editor has always been able to
+   * author `.json`/`.yaml`/`.yml` into a KB (`EDITABLE_EXTENSIONS`), and the
+   * store browser listed the result — while the injector's extension set
+   * excluded them, so the doc a human wrote in the product was invisible to
+   * every run and nothing said so. The authoring surface must not offer a
+   * dead-end format; structured docs inject.
+   */
+  it("injects the structured formats the in-app editor can author (.json/.yaml/.yml)", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "contract.json"), '{"MARKER":"JSON"}', "utf8");
+    writeFileSync(path.join(kbDir, "config.yaml"), "marker: YAML", "utf8");
+    writeFileSync(path.join(kbDir, "other.yml"), "marker: YML", "utf8");
+    const body = readKbBody("notes", dataRoot);
+    expect(body).toContain('{"MARKER":"JSON"}');
+    expect(body).toContain("marker: YAML");
+    expect(body).toContain("marker: YML");
   });
 
   it("skips dotfiles and dot-directories", () => {
@@ -118,11 +140,71 @@ describe("readKbBody — recursive, multi-format KB injection", () => {
   });
 
   it("isInjectableKbDoc is the predicate the org doc count shares", () => {
-    for (const name of ["a.md", "b.MDX", "c.txt", "d.rst"]) {
+    for (const name of ["a.md", "b.MDX", "c.txt", "d.rst", "e.json", "f.yaml", "g.yml"]) {
       expect(isInjectableKbDoc(name)).toBe(true);
     }
-    for (const name of ["contract.pdf", "diagram.png", "data.json", ".hidden.md"]) {
+    for (const name of ["contract.pdf", "diagram.png", ".hidden.md"]) {
       expect(isInjectableKbDoc(name)).toBe(false);
     }
+  });
+
+  /**
+   * C5/pass-16 containment. `collectKbDocs` realpath's the ROOT and then checks
+   * every visited dir against it — so when the KB folder is ITSELF a symlink,
+   * containment was measured against the link's TARGET and the whole target
+   * tree was injected as trusted agent context. Every other store path refuses
+   * to follow a link out of the store (P14-RV-02, assertInsideRoot).
+   */
+  it("refuses a KB folder that is a symlink out of the store", () => {
+    const { dataRoot } = freshKb();
+    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    writeFileSync(path.join(outside, "secret.md"), "MARKER-OUTSIDE", "utf8");
+    symlinkSync(outside, path.join(dataRoot, "kb", "linked"));
+    const detailed = readKbBodyDetailed("linked", dataRoot);
+    expect(detailed.body).toBe("");
+    expect(detailed.unresolved?.reason).toContain("symlink");
+    expect(readKbBody("linked", dataRoot)).not.toContain("MARKER-OUTSIDE");
+  });
+});
+
+/**
+ * C1/pass-16 — a KB grant that resolves to nothing must reach the RUN, not only
+ * a server log. The MCP leg has reported structured misses since P14-LV-09;
+ * this is the KB half of the same honesty rule.
+ */
+describe("readKbBodyDetailed / readKbBodies — structured misses (C1)", () => {
+  it("reports a missing KB folder as a structured unresolved grant", () => {
+    const { dataRoot } = freshKb();
+    const detailed = readKbBodyDetailed("renamed-away", dataRoot);
+    expect(detailed.body).toBe("");
+    expect(detailed.unresolved).toEqual({
+      name: "renamed-away",
+      reason: "no knowledge-base folder by that name in the store",
+    });
+  });
+
+  it("reports an EMPTY KB folder (the grant is attached, the content is not)", () => {
+    const { dataRoot } = freshKb("hollow");
+    expect(readKbBodyDetailed("hollow", dataRoot).unresolved?.name).toBe("hollow");
+  });
+
+  it("a resolvable KB carries NO unresolved row", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "a.md"), "MARKER", "utf8");
+    expect(readKbBodyDetailed("notes", dataRoot).unresolved).toBeUndefined();
+  });
+
+  it("readKbBodies spends ONE shared budget and collects every miss", () => {
+    const { dataRoot, kbDir } = freshKb("first");
+    writeFileSync(path.join(kbDir, "a.md"), "A".repeat(300), "utf8");
+    const second = path.join(dataRoot, "kb", "second");
+    mkdirSync(second, { recursive: true });
+    writeFileSync(path.join(second, "b.md"), "B".repeat(300), "utf8");
+
+    const set = readKbBodies(["first", "second", "ghost"], dataRoot, 320);
+    // The first KB spends the shared budget; the second announces itself.
+    expect(set.parts[0]!.name).toBe("first");
+    expect(set.parts[1]!.body).toContain("omitted entirely");
+    expect(set.unresolved.map((u) => u.name)).toEqual(["second", "ghost"]);
   });
 });

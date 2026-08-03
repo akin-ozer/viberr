@@ -31,7 +31,7 @@ describe("matchesBoardFilter", () => {
     expect(matchesBoardFilter({ ...base, waiting: "agent" }, "human")).toBe(false);
     expect(matchesBoardFilter({ ...base, waiting: "agent" }, "agent")).toBe(true);
   });
-  it('"risk" = canonical risk/blocked readiness OR failing validation OR urgent (contracts §2.3)', () => {
+  it('"risk" ("Blocked or waiting") = work that cannot proceed (contracts §2.3)', () => {
     expect(
       matchesBoardFilter(
         { ...base, readiness: "inconsistency_risk_detected" },
@@ -42,14 +42,34 @@ describe("matchesBoardFilter", () => {
     expect(matchesBoardFilter({ ...base, validation: "failing" }, "risk")).toBe(true);
     expect(matchesBoardFilter({ ...base, urgent: true }, "risk")).toBe(true);
     expect(matchesBoardFilter(base, "risk")).toBe(false);
-    // input_required is NOT "needs attention"
+  });
+
+  // R16-2 (owner ruling, live in pass 16): this filter matched 0 of 4 tasks on a
+  // board that was drawing an amber "input required" chip on one of the cards.
+  // This case asserted the OPPOSITE — that input_required is not attention-worthy
+  // — which is what let the incoherence ship: the board flagged a state and then
+  // hid it from its own filter. A task holding for a human answer cannot proceed,
+  // which is exactly what the renamed chip promises.
+  it('"risk" counts input_required — the state the board chips amber (R16-2)', () => {
     expect(
       matchesBoardFilter({ ...base, readiness: "input_required" }, "risk"),
+    ).toBe(true);
+    // …and it is not a blanket match: an ordinary in-flight task stays out.
+    expect(
+      matchesBoardFilter({ ...base, readiness: "in_review" }, "risk"),
+    ).toBe(false);
+    expect(matchesBoardFilter({ ...base, readiness: "ready" }, "risk")).toBe(false);
+    // Archived still wins over every signal (R14-3).
+    expect(
+      matchesBoardFilter(
+        { ...base, readiness: "input_required", archived: true },
+        "risk",
+      ),
     ).toBe(false);
   });
 
   // P14-WL-03: live, PST-5's PR was closed without merging — the review queue
-  // filed it under "Decision required" and the board's own "Needs attention"
+  // filed it under "Decision required" and the board's own "Blocked or waiting"
   // filter hid it, because a rejected PR leaves readiness `in_review`,
   // validation healthy and urgent off. None of the four old signals fire.
   it('"risk" counts a PR closed without merging — the review queue calls it a decision', () => {
@@ -149,7 +169,7 @@ describe("shortBranch", () => {
 describe("boardEmptyCopy (P13-D-34)", () => {
   it("keeps the bare copy when the column really is empty", () => {
     expect(
-      boardEmptyCopy({ total: 0, filterLabel: "Needs attention", query: "x" }),
+      boardEmptyCopy({ total: 0, filterLabel: "Blocked or waiting", query: "x" }),
     ).toBe("No tasks");
   });
 

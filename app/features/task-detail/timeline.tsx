@@ -142,9 +142,15 @@ export function TimelineItem({
               agent
             </Pill>
           )}
+          {/* E1: this pill dates from app-wide commenting, and read "app user ·
+              not in project" as if outsiders could post here. They cannot — a
+              signed-in non-member 404s on the task and on the comment POST. The
+              flag survives because membership is read at PROJECTION time, so it
+              now marks exactly one thing: the author has since left the project.
+              (`actor.server.ts` derives it; the wording is this surface's.) */}
           {guest && (
             <Pill kind="neutral" sm>
-              app user · not in project
+              no longer a member
             </Pill>
           )}
           <span className="tl-time">

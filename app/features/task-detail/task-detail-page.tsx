@@ -324,19 +324,29 @@ function PolicyPanel({
     stages.length >= 2 ? stages[stages.length - 2]!.name : "the review stage";
   const terminalName =
     stages.length >= 1 ? stages[stages.length - 1]!.name : "the final stage";
-  const admin = myRole === "admin";
   const r = (myRole as ProjectRole | null) ?? null;
   const role = myRole || "viewer";
   // Render exactly what the canonical matrix (app/shared/rbac.ts) enforces for
   // THIS viewer's role — no aspirational copy that the server would 403.
   const rows: { k: string; v: string; icon: "user" | "flag" | "plus" | "message" | "cpu" | "lock" }[] = [
     { k: "Your role", v: role.charAt(0).toUpperCase() + role.slice(1), icon: "user" },
-    { k: "Comments", v: "Every registered user", icon: "message" },
+    {
+      // E1: this was hardcoded "Every registered user" — false, and false on a
+      // surface whose whole job is stating what the server enforces. A
+      // signed-in non-member 404s on this page and on the comment POST;
+      // membership is the gate, and every project role holds `comment` inside
+      // it. Read from the matrix like every other row so it cannot drift again.
+      k: "Comments",
+      v: roleCan(r, "comment")
+        ? "You can comment — every project member can"
+        : "Project members only",
+      icon: "message",
+    },
     {
       k: "Task ownership",
       v: roleCan(r, "own-task")
-        ? admin
-          ? "Take / release · admin releases anyone"
+        ? roleCan(r, "release-any-ownership")
+          ? "Take / release · you can release anyone"
           : "Take / release your own seat"
         : "View only — contributor+ to own",
       icon: "plus",
@@ -964,6 +974,13 @@ function CurrentStatePanel({
   // comment and hands the task to the operator at its new stage.
   const canTransition = roleCan(myRole as ProjectRole | null, "approve-transition");
   const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  // E3: releasing SOMEONE ELSE's seat is `release-any-ownership`, which is what
+  // `releaseOwner` enforces — this asked `myRole === "admin"`, a hardcoded copy
+  // of one row of the matrix.
+  const canReleaseAnyOwner = roleCan(
+    myRole as ProjectRole | null,
+    "release-any-ownership",
+  );
   const transitionBusy = transitionFetcher.state !== "idle";
   const onTransition = (toStageId: string) => {
     if (transitionBusy) return;
@@ -1044,7 +1061,7 @@ function CurrentStatePanel({
                   {owner.name.split(" ")[0]}
                   {ownerMine ? " (you)" : ""}
                 </span>
-                {((ownerMine && canOwn) || myRole === "admin") && (
+                {((ownerMine && canOwn) || canReleaseAnyOwner) && (
                   <button
                     type="button"
                     className="own-x"
@@ -1114,7 +1131,20 @@ function CurrentStatePanel({
               <p className="deny-note">
                 <Icon name="alert" />
                 <span>
-                  <strong>Not acceptable yet.</strong> {acceptance.blockedReason}
+                  {/* R16-3: "Not acceptable yet" is the right frame for a
+                      process gate and the wrong one for a closed PR — nothing
+                      about waiting makes that acceptable. The reason itself is
+                      the server's (one source); only the framing and the
+                      pointer at the recovery decision are this surface's. */}
+                  <strong>
+                    {acceptance.terminallyBlocked
+                      ? "Acceptance is closed."
+                      : "Not acceptable yet."}
+                  </strong>{" "}
+                  {acceptance.blockedReason}
+                  {acceptance.terminallyBlocked && task.packet && (
+                    <> The decision on this task carries the recovery paths.</>
+                  )}
                 </span>
               </p>
             )}
@@ -1157,11 +1187,14 @@ function useRunControls({
   runtime,
   myRole,
   canRunAgents,
+  acceptanceTerminallyBlocked,
 }: {
   csrf: string;
   runtime: RunView[];
   myRole: string | null;
   canRunAgents: boolean;
+  /** R16-3: a closed, unmerged PR blocks acceptance terminally — no override. */
+  acceptanceTerminallyBlocked: boolean;
 }) {
   const runFetcher = useFetcher<ActionResult>();
   useActionFeedback(runFetcher);
@@ -1222,10 +1255,16 @@ function useRunControls({
     : undefined;
   // Admin-only override of a stuck acceptance gate (DG-2). Server re-checks the
   // admin role AND re-derives the block; this only wires the affordance.
-  const canForceAccept = roleCan(
-    myRole as ProjectRole | null,
-    "force-accept-completion",
-  );
+  //
+  // R16-3: force-accept exists for a WEDGED gate — a verdict that can no longer
+  // be recorded, a stale packet. A PR closed unmerged is not wedged, it is
+  // decided: forcing past it moves the task to Done over a rejection and stamps
+  // `pr.state: accepted` on a PR GitHub has already closed. Live (H10) the rail
+  // offered exactly that while the recovery packet beside it said otherwise, so
+  // the affordance is withheld entirely and the packet is the path.
+  const canForceAccept =
+    roleCan(myRole as ProjectRole | null, "force-accept-completion") &&
+    !acceptanceTerminallyBlocked;
   const onForceAccept = canForceAccept
     ? () => {
         if (runBusy) return;
@@ -1408,6 +1447,11 @@ export function TaskDetailPage({
   // RecommendationsSection below.
   const canRunAgents = roleCan(myRole as ProjectRole | null, "run-agents");
   const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  // E3: ask for the action the SERVER enforces, not a neighbouring one.
+  // `updateTaskGoal` requires `update-goal`; this read `run-agents`, which
+  // agrees today only because the matrix happens to line up — a role change to
+  // either row silently desyncs the button from the endpoint behind it.
+  const canEditGoal = roleCan(myRole as ProjectRole | null, "update-goal");
   // The viewer may resolve THIS packet when they're admin|maintainer OR the
   // task owner (M2 / owner ruling Q2, WIDENED by R14-2). The owner bypass
   // requires `own-task` (contributor+): the server's owner check does too, so a
@@ -1511,7 +1555,13 @@ export function TaskDetailPage({
     onRetryBackend,
     onCompleteMerge,
     onForceAccept,
-  } = useRunControls({ csrf, runtime, myRole, canRunAgents });
+  } = useRunControls({
+    csrf,
+    runtime,
+    myRole,
+    canRunAgents,
+    acceptanceTerminallyBlocked: acceptance.terminallyBlocked,
+  });
   const { shownLogSel, selectLog, onViewLogs, onAgentLog } =
     useLogSelection(runtime);
 
@@ -1561,7 +1611,7 @@ export function TaskDetailPage({
         <TaskHero
           task={task}
           stage={stage}
-          canEditGoal={canRunAgents}
+          canEditGoal={canEditGoal}
           archived={archived}
           agentWorking={anyRunLive}
           editGoalSignal={editGoalSignal}
@@ -1585,10 +1635,10 @@ export function TaskDetailPage({
             busy={resolveBusy}
             canResolve={canResolvePacket}
             canResolveCompletion={canDecideOwned}
-            // UI-42: `update-goal` is admin|maintainer — the same grant the
-            // hero's Edit button uses. An owner-only resolver must not be
-            // offered a decision they cannot then carry out.
-            canEditGoal={canRunAgents}
+            // UI-42: an owner-only resolver must not be offered a decision they
+            // cannot then carry out — so this asks for `update-goal`, the grant
+            // `updateTaskGoal` itself enforces (E3).
+            canEditGoal={canEditGoal}
             canArchive={canArchiveViaPacket}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}

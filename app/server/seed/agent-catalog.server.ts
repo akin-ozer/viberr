@@ -84,10 +84,14 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       scope: "System role · one per active task",
       stages: ["triage", "ready", "impl", "review", "done"], spanAll: true,
       resources: {
-        // Real, non-placeholder resources: the shipped skill, the actual
-        // in-process governance MCP server ("viberr"), and a real KB on disk.
+        // B7 (pass 16): NO `viberr` grant — this writer was the last one that
+        // still had it, disagreeing with `assets/operator.profile.md` (P14-KM-14).
+        // `buildOperatorToolkit` mounts the in-process governance server
+        // unconditionally and `buildResourceCatalog` filters the reserved name
+        // out, so the grant resolved to nothing and painted the operator's own
+        // toolkit as a red "no longer in the store" chip.
         skills: ["viberr-app-expertise"],
-        mcps: ["viberr"],
+        mcps: [],
         kb: ["architecture-notes"],
       },
     },
@@ -104,7 +108,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
     {
       id: "developer", kind: "specialist", name: "Developer", role: "Implementation",
       icon: "branch", backends: ["codex", "claude"], model: "gpt-5.6-sol",
-      scope: "Global base · customized for Viberr Core",
+      scope: "Global base",
       stages: ["ready", "impl"],
       resources: {
         skills: ["developer-expertise"],
@@ -131,7 +135,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
     {
       id: "reviewer", kind: "specialist", name: "Reviewer", role: "Review & validation",
       icon: "check", backends: ["claude"], model: "sonnet",
-      scope: "Global base · customized for Viberr Core",
+      scope: "Global base",
       stages: ["impl", "review"],
       resources: {
         skills: ["reviewer-expertise"],

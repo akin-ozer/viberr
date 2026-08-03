@@ -1786,16 +1786,6 @@ dialog[data-closing]::backdrop {
 }
 .rbac-yes .ico { width: 12px; height: 12px; }
 .rbac-no { color: var(--ring); }
-/* App-wide rows (view/comment): any signed-in user, not role-gated — spans the
-   role columns with an honest label instead of implying membership matters. */
-.rbac-table td.rbac-appwide-cell {
-  text-align: left; color: var(--faint);
-  font-size: .78rem; letter-spacing: .01em;
-}
-.rbac-table td.rbac-appwide-cell .rbac-yes {
-  width: 18px; height: 18px; vertical-align: middle; margin-right: .12rem;
-}
-.rbac-table tr.rbac-appwide td.act { color: var(--fg); }
 /* Read-only profile (no gated capabilities) — honest label vs "0/0/0". */
 .pcap-counts .pcap-readonly {
   font-style: italic; color: var(--faint);

@@ -19,9 +19,15 @@ import { getProject, listProjectTasks } from "./board-query.server";
  * the task owner (owner exception, R6-2). Everything else — waiting on an agent,
  * the legal `review + none` combination, OR a human-waiting task another human
  * must accept — lands in "Still in review", where the page labels a human-
- * waiting row "waiting on a human" (never the false "agent working"). Passing no
- * viewer keeps the split state-based (any human-waiting task → ready), which the
- * tests and non-scoped callers rely on.
+ * waiting row "waiting on a human" (never the false "agent working").
+ *
+ * E5: `viewerUserId` is REQUIRED. It used to be optional, and the acceptance
+ * predicate opened with `if (viewerUserId === undefined) return true` — an
+ * authorization question whose default answer was "yes, anyone". Nothing in the
+ * app omitted it, so the permissive branch existed purely for test convenience
+ * while standing ready to hand the next caller an unfiltered "ready for
+ * acceptance" list. Naming a viewer is now the type-level cost of asking the
+ * question, and an unknown/non-member id resolves to no acceptance authority.
  *
  * Ordering (spec §8.2 decision): deterministic task-key number ASC — the
  * order `listProjectTasks` already guarantees, which reproduces the mock's
@@ -61,7 +67,7 @@ export interface ReviewQueueData {
 export function getReviewQueue(
   db: DatabaseSync,
   slug: string,
-  opts: { viewerUserId?: string; dataRoot?: string } = {},
+  opts: { viewerUserId: string; dataRoot?: string },
 ): ReviewQueueData {
   const project = getProject(db, slug);
   const reviewId = project
@@ -116,18 +122,18 @@ export function getReviewQueue(
   // have no packet/recommendation (the operator couldn't open a completion
   // packet) yet still need a human to accept it. A viewer can accept iff they are
   // maintainer+ (resolve-packet tier) OR the task's owner (owner exception, R6-2,
-  // which requires the own-task role). No viewer → state-based (any human-waiting
-  // task), preserving the unscoped/test behavior.
-  const viewerRole: ProjectRole | null =
-    opts.viewerUserId === undefined
-      ? null
-      : ((
-          db
-            .prepare(
-              `SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`,
-            )
-            .get(slug, opts.viewerUserId) as { role: ProjectRole } | undefined
-        )?.role ?? null);
+  // which requires the own-task role). Fail closed: an id with no membership row
+  // — a non-member, a deleted account, or (a JS caller) no id at all — holds
+  // neither role, so nothing is acceptance-ready for them.
+  const viewerRole: ProjectRole | null = opts.viewerUserId
+    ? ((
+        db
+          .prepare(
+            `SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`,
+          )
+          .get(slug, opts.viewerUserId) as { role: ProjectRole } | undefined
+      )?.role ?? null)
+    : null;
   const viewerCanGovern = roleCan(viewerRole, "resolve-packet");
   const viewerCanOwn = roleCan(viewerRole, "own-task");
   const ownerByKey = new Map(
@@ -137,10 +143,10 @@ export function getReviewQueue(
     ]),
   );
   const canAccept = (key: string): boolean => {
-    if (opts.viewerUserId === undefined) return true; // unscoped
     if (viewerCanGovern) return true;
+    if (!viewerCanOwn) return false;
     const owner = ownerByKey.get(key) ?? null;
-    return owner !== null && owner === opts.viewerUserId && viewerCanOwn;
+    return owner !== null && owner === opts.viewerUserId;
   };
   // Ready-for-acceptance requires acceptance authority, an acceptable current
   // revision (F10-11: no failing/awaiting/no-revision block), AND that the review

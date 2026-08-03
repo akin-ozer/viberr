@@ -21,6 +21,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   forceAcceptCompletion,
+  resolveAcceptanceAffordance,
   resolvePacket,
   transitionStage,
 } from "./task-actions.server";
@@ -289,6 +290,60 @@ describe("path 3 — operatorAcceptCompletion", () => {
       resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {}),
     );
     expect(snapshot.pr).toBeNull();
+  });
+});
+
+describe("R16-3: a terminal GitHub fact outranks the process gates in the refusal", () => {
+  const REVISION = {
+    id: "rev_1",
+    headSha: "a".repeat(40),
+    treeSha: "t".repeat(40),
+    branch: "vib-1-attach-execution-workspace",
+    createdAt: "2026-08-01T09:00:00.000Z",
+    sourceProfileId: "developer",
+  };
+
+  it("names the closed PR, not the missing verdict — and withholds the override", () => {
+    // Live (H10): the task page showed a correct "PR #124 closed without
+    // merging — choose recovery path" packet while the acceptance box beside it
+    // read "no approving verdict yet — run a review for a verdict, or an admin
+    // can force-accept". Both sentences come from acceptanceRefusalReason; the
+    // verdict gate simply sat higher in the chain. Running a review is not the
+    // path when the PR is gone.
+    // Canary: move closedPrBlockedReason back below verdictGateReason and this
+    // reads "no approving verdict yet" again.
+    seedClosedPrTask({ workRevision: REVISION, validation: "changed" });
+    const affordance = resolveAcceptanceAffordance(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        viewerUserId: store.users.arda.id,
+      },
+      { dataRoot: store.dataRoot },
+    );
+    expect(affordance.blockedReason).toMatch(/closed on GitHub without merging/i);
+    expect(affordance.blockedReason).not.toMatch(/approving verdict/i);
+    // The machine-readable half the rail uses to withhold force-accept.
+    expect(affordance.terminallyBlocked).toBe(true);
+    expect(affordance.canAccept).toBe(false);
+  });
+
+  it("with the PR still open, the process gates speak exactly as before", () => {
+    seedClosedPrTask({
+      pr: { number: 318, state: "review", title: "[VIB-1] Attach execution workspace" },
+      workRevision: REVISION,
+      validation: "changed",
+    });
+    const affordance = resolveAcceptanceAffordance(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        viewerUserId: store.users.arda.id,
+      },
+      { dataRoot: store.dataRoot },
+    );
+    expect(affordance.blockedReason).toMatch(/approving verdict/i);
+    expect(affordance.terminallyBlocked).toBe(false);
   });
 });
 

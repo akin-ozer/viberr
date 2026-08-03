@@ -37,6 +37,8 @@ import {
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
+  claudeCliAuthDiagnostics,
+  codexAuthMisconfiguration,
   codexCliAuthDiagnostics,
   createAdapters,
   resetRegistryForTests,
@@ -459,9 +461,22 @@ function failRunUnavailable(db: DatabaseSync, spec: RunSpec): void {
  */
 export function backendUnavailableMessage(backend: RealBackend): string {
   if (backend === "claude") {
+    // D2: the CLI-auth opt-in is now validated, so the refusal can name the
+    // dir it checked instead of re-suggesting the flag that is already set.
+    const claude = claudeCliAuthDiagnostics();
+    if (claude.optIn && claude.verified === "refuted") {
+      return `Claude Code is unavailable — VIBERR_CLAUDE_USE_CLI_AUTH=1 is set, but \`${claude.configDir}\` holds no \`claude\` login (no ${claude.credentialsPath}, and the CLI has never run against that config dir). Point CLAUDE_CONFIG_DIR at the logged-in dir, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN, or run this agent on another backend. No agent process was started.`;
+    }
     return "Claude Code is unavailable — no usable credential is configured. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (or opt in with VIBERR_CLAUDE_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
   }
   const diag = codexCliAuthDiagnostics();
+  // D1: the source==run-home misconfiguration must be named FIRST. The generic
+  // copy below tells the operator to copy their login INTO Viberr's own run
+  // home, which in this state cements the misconfiguration instead of fixing it.
+  const misconfigured = codexAuthMisconfiguration(diag);
+  if (misconfigured) {
+    return `Codex is unavailable — ${misconfigured} No agent process was started.`;
+  }
   if (diag.optIn && !diag.authJsonExists) {
     return `Codex is unavailable — VIBERR_CODEX_USE_CLI_AUTH=1 is set, but the Codex CLI login file is missing at ${diag.authJsonPath}. Copy it from a logged-in machine (docker: \`docker compose cp ~/.codex/auth.json app:${diag.authJsonPath}\`) — the next run picks it up without a restart. Or set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY, or run this agent on another backend. No agent process was started.`;
   }

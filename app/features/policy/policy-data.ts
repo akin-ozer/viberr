@@ -12,6 +12,11 @@ export { ROLE_LABEL } from "~/shared/rbac";
  * (app/shared/rbac.ts) that the server guards also consult — display can't drift
  * from enforcement. `policy-rbac.server.test.ts` drives each guard per role to
  * keep them bound.
+ *
+ * Every row is a grant WITHIN a project the reader is a member of — the two
+ * surfaces state that in their own copy (E1). A row is never a claim about who
+ * can reach the project: that is membership, and a non-member never gets far
+ * enough to be refused by role.
  */
 
 export const ROLE_IDS = PROJECT_ROLES;
@@ -19,9 +24,6 @@ export const ROLE_IDS = PROJECT_ROLES;
 export interface RbacRow {
   action: string;
   grant: Record<ProjectRole, 0 | 1>;
-  /** App-wide (any signed-in user, member or not) — the role columns are
-   * informational; the UI renders these as app-wide, not role-gated. */
-  appWide?: boolean;
 }
 
 export const RBAC_ROWS: readonly RbacRow[] = RBAC_DEFINITIONS.map((cap) => ({
@@ -32,7 +34,6 @@ export const RBAC_ROWS: readonly RbacRow[] = RBAC_DEFINITIONS.map((cap) => ({
       (cap.roles as readonly ProjectRole[]).includes(r) ? 1 : 0,
     ]),
   ) as Record<ProjectRole, 0 | 1>,
-  ...("appWide" in cap ? { appWide: cap.appWide } : {}),
 }));
 
 export type BoundaryId = "auto" | "approval" | "human";

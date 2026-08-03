@@ -212,12 +212,17 @@ describe("action RBAC (profile CRUD is admin-only)", () => {
     expect(result.init?.status).toBe(403);
   });
 
-  it("rejects a non-member from deleting a profile", async () => {
-    const result = (await postAction(ids.deniz, {
+  it("answers a non-member as an unknown slug, never 403 (E2)", async () => {
+    // Was 403 — a reply that confirms the project exists. The project is
+    // invisible to a non-member (R15-4), so the action refuses before it ever
+    // reaches the `manage-agents` tier check. The member-below-tier case above
+    // still gets the honest 403.
+    const thrown = (await postAction(ids.deniz, {
       intent: "delete-profile",
       profileId: "reviewer",
-    })) as { init?: { status?: number } };
-    expect(result.init?.status).toBe(403);
+    }).catch((e) => e)) as { init?: { status?: number }; data?: unknown };
+    expect(thrown?.init?.status).toBe(404);
+    expect(String(thrown?.data)).toMatch(/^No project at projects\//);
   });
 
   it("rejects deleting the operator even for an admin (server invariant)", async () => {

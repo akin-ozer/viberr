@@ -234,6 +234,23 @@ export function githubWebHost(apiBaseUrl?: string | null): string {
   }
 }
 
+/**
+ * Encode a git ref (`heads/<branch>`) for a REST path.
+ *
+ * B11: encoded PER SEGMENT. `encodeURIComponent("heads/" + branch)` percent-
+ * encodes the separator too, so the ref addressed `heads%2F<branch>` — which
+ * GitHub does not resolve, and the caller could not tell a missing ref from a
+ * malformed one. A branch may legitimately contain `/` (`feature/x`), so the
+ * separators stay literal while every segment is escaped. For today's
+ * `vib-142`-shaped names the output is byte-identical to a raw interpolation.
+ */
+export function encodeRefPath(ref: string): string {
+  return ref
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 /** Convenience header read used by the PAT validator. */
 export function tokenExpirationFrom(headers: Headers): string | null {
   const raw = headers.get("github-authentication-token-expiration");

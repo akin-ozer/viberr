@@ -9,15 +9,27 @@ import {
 const SECRET = "csrf-secret-csrf-secret-csrf-secret-1234";
 const SESSION_ID = "abc123sessionhash";
 
+const SAME_ORIGIN = "http://localhost:5173";
+
 function postRequest(options: {
   origin?: string;
   secFetchSite?: string;
+  referer?: string;
   token?: string | null;
   headerToken?: string;
+  /** Send no origin signal at all — the shape a non-browser caller produces. */
+  bare?: boolean;
 } = {}): { request: Request; formData: FormData } {
   const headers = new Headers();
+  // Every app form post is a same-origin browser POST, which always carries at
+  // least Origin — so that is the default here, and a case that wants the
+  // header-less shape asks for it with `bare`.
   if (options.origin) headers.set("Origin", options.origin);
+  else if (!options.bare && !options.secFetchSite && !options.referer) {
+    headers.set("Origin", SAME_ORIGIN);
+  }
   if (options.secFetchSite) headers.set("Sec-Fetch-Site", options.secFetchSite);
+  if (options.referer) headers.set("Referer", options.referer);
   if (options.headerToken) headers.set("X-Csrf-Token", options.headerToken);
   const formData = new FormData();
   if (options.token !== null && options.token !== undefined) {
@@ -43,16 +55,32 @@ describe("csrfTokenForSession", () => {
 });
 
 describe("assertTrustedOrigin", () => {
-  it("accepts same-origin and header-less (curl) requests", () => {
+  it("accepts the shapes a same-origin browser form post actually sends", () => {
+    // Origin alone (every cross-origin-capable POST carries it), Sec-Fetch-Site
+    // alone, a same-origin Referer alone, and all of them together.
     expect(() =>
-      assertTrustedOrigin(postRequest({ origin: "http://localhost:5173" }).request),
+      assertTrustedOrigin(postRequest({ origin: SAME_ORIGIN }).request),
     ).not.toThrow();
-    expect(() => assertTrustedOrigin(postRequest({}).request)).not.toThrow();
     expect(() =>
       assertTrustedOrigin(postRequest({ secFetchSite: "same-origin" }).request),
     ).not.toThrow();
     expect(() =>
       assertTrustedOrigin(postRequest({ secFetchSite: "none" }).request),
+    ).not.toThrow();
+    expect(() =>
+      assertTrustedOrigin(
+        postRequest({ referer: `${SAME_ORIGIN}/projects/viberr-core/board` })
+          .request,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertTrustedOrigin(
+        postRequest({
+          origin: SAME_ORIGIN,
+          secFetchSite: "same-origin",
+          referer: `${SAME_ORIGIN}/logout`,
+        }).request,
+      ),
     ).not.toThrow();
   });
 
@@ -62,6 +90,10 @@ describe("assertTrustedOrigin", () => {
       postRequest({ origin: "null" }),
       postRequest({ secFetchSite: "cross-site" }),
       postRequest({ secFetchSite: "same-site" }),
+      // A same-origin Origin cannot launder a foreign Referer, and vice versa:
+      // every signal the request DOES carry has to agree.
+      postRequest({ origin: SAME_ORIGIN, referer: "https://evil.example/x" }),
+      postRequest({ secFetchSite: "same-origin", referer: "https://evil.example/x" }),
     ]) {
       let thrown: unknown;
       try {
@@ -72,6 +104,21 @@ describe("assertTrustedOrigin", () => {
       expect(thrown).toBeInstanceOf(Response);
       expect((thrown as Response).status).toBe(403);
     }
+  });
+
+  // §7.10 / A7: this used to PASS. A request carrying no Origin, no
+  // Sec-Fetch-Site and no Referer proves nothing about where it came from, and
+  // the layer whose entire job is that proof was letting it through on the
+  // strength of a curl/server-to-server concession the app never uses.
+  it("rejects a request that carries NO origin signal at all (fails closed)", () => {
+    let thrown: unknown;
+    try {
+      assertTrustedOrigin(postRequest({ bare: true }).request);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(403);
   });
 });
 
@@ -116,6 +163,13 @@ describe("assertCsrfWithSecret", () => {
         SECRET,
         otherSession.formData,
       ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("rejects a valid token on a request with no origin signal (the two layers are AND)", async () => {
+    const { request, formData } = postRequest({ bare: true, token: validToken() });
+    await expect(
+      assertCsrfWithSecret(request, SESSION_ID, SECRET, formData),
     ).rejects.toMatchObject({ status: 403 });
   });
 

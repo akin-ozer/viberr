@@ -6,6 +6,7 @@ import {
   requireFormAction,
 } from "~/server/auth/form-action.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
+import { requireVisibleProject } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { listAgentDeployments } from "~/server/projections/agent-deployments.server";
@@ -65,13 +66,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // KB created in org settings is grantable to an agent, replacing the
     // hardcoded mock catalog whose items resolved to nothing.
     //
-    // P13-KM-09/UI-28: this was ALWAYS built as `specialist`, which excludes the
-    // reserved in-process `viberr` toolkit — so opening Edit Operator rendered
-    // the operator's REAL governance-server grant as a red "no longer in the
-    // store — click to remove this grant" chip, i.e. the UI instructed an admin
-    // to break the operator. The editor is one modal for both kinds, so the
-    // catalog now carries the operator set (which is a superset: it merely adds
-    // the reserved name) and the specialist picker filters it out per profile.
+    // The catalog is the registry only: `buildResourceCatalog` skips the
+    // reserved `viberr` name for BOTH profile kinds (P14-KM-14), because the
+    // in-process governance server is mounted by `buildOperatorToolkit`
+    // unconditionally — a toggle for it would be one an admin could flip with no
+    // effect. No profile grants it either, as of B7 (pass 16).
     resourceCatalog: buildResourceCatalog(db),
     // Per-backend credential availability (same cheap SDK-auth check the run
     // service uses). The create/edit modal disables a backend that isn't
@@ -86,6 +85,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
 export async function action({ request, params }: Route.ActionArgs) {
   const { db, formData, actor, intent } = await requireFormAction(request);
+
+  // E2 (pass 16): the layout loader does not run for an action, so the
+  // members-only gate is repeated here. Without it a signed-in non-member got
+  // the inner guard's 403 — a reply that confirms the project exists — while
+  // every other surface answered 404. Same placement as project.board.tsx.
+  requireVisibleProject(db, params.slug, actor, "act on this project");
 
   const parsePayload = (): unknown => {
     try {

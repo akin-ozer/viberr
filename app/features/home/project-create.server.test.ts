@@ -96,12 +96,17 @@ describe("createProject — GitHub connection wiring", () => {
     const gh = fakeGithubFetch({
       "GET /user": { body: { login: "akin-ozer" } },
       "GET /user/orgs": { body: [] },
-      "GET /repos/akin-ozer/viberr": { body: { full_name: "akin-ozer/viberr", default_branch: "main" } },
-      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
-      "PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe": {
-        status: 422,
-        body: { message: "Validation Failed" },
+      "GET /repos/akin-ozer/viberr": {
+        // A8 (pass 16): repo write is read from the `permissions` block the
+        // authenticated token gets back, not from a probe that wrote a file
+        // into the real repository. Real GitHub always sends it.
+        body: {
+          full_name: "akin-ozer/viberr",
+          default_branch: "main",
+          permissions: { push: true },
+        },
       },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
       "POST /repos/akin-ozer/viberr/pulls": {
         status: 422,
         body: { message: "Validation Failed" },

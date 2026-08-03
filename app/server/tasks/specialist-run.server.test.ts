@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -15,6 +15,7 @@ import {
   deliveringEngagement,
   supportingEngagements,
 } from "~/schemas/task-file.schema";
+import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -1297,7 +1298,15 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).toContain("Attached resources (trusted");
   });
 
-  it("a KB that resolves to nothing injects nothing (and no empty section)", () => {
+  /**
+   * C1/pass-16 — this test used to end at "injects nothing", which was exactly
+   * the bug: a KB grant that resolved to nothing produced a `logger.warn` and
+   * NOTHING else, so the renamed folder was invisible to the run while the
+   * agents page, the profile modal and the task rail all still showed it
+   * attached. MCP misses have reached the prompt as structured `unresolved`
+   * since P14-LV-09; KB and skill misses now do too.
+   */
+  it("a KB that resolves to nothing is NAMED in the prompt, not silently dropped", () => {
     const dataRoot = tempRoot();
     const persona = buildSpecialistPersona({
       profileId: "docs-writer",
@@ -1305,8 +1314,94 @@ describe("buildSpecialistPersona — attached resources", () => {
       kb: ["was-renamed-away"],
       dataRoot,
     });
+    // No trusted-content section — there is no content.
     expect(persona).not.toContain("was-renamed-away (knowledge base)");
     expect(persona).not.toContain("Attached resources (trusted");
+    // …but the run is told what it did NOT get, and why.
+    expect(persona).toContain("Attached resources that did NOT reach this run");
+    expect(persona).toContain("was-renamed-away");
+    expect(persona).toContain("no knowledge-base folder by that name in the store");
+    expect(persona).toContain("do not treat their absence as your own failure");
+  });
+
+  it("a skill that resolves to nothing is NAMED in the prompt too (C1)", () => {
+    const dataRoot = tempRoot();
+    const persona = buildSpecialistPersona({
+      profileId: "developer-claude",
+      skills: ["typo-expertise"],
+      dataRoot,
+    });
+    expect(persona).toContain("Attached resources that did NOT reach this run");
+    expect(persona).toContain("typo-expertise");
+    expect(persona).toContain("no skill folder by that name in the store");
+  });
+
+  it("resolvable resources produce NO 'did not reach' section", () => {
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "release-facts"), { recursive: true });
+    writeFileSync(path.join(dataRoot, "kb", "release-facts", "f.md"), "FACT");
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["release-facts"],
+      dataRoot,
+    });
+    expect(persona).not.toContain("Attached resources that did NOT reach this run");
+  });
+
+  /**
+   * A5/pass-16 — the skill body sits under the "trusted — configured for you"
+   * banner, so a symlinked SKILL.md was a way to put arbitrary host content into
+   * the model's context AS TRUSTED PERSONA. `readKbBody` has refused links since
+   * F9; the skill reader now agrees, and the refusal is visible in the prompt.
+   */
+  it("a symlinked SKILL.md never becomes trusted persona material", () => {
+    const dataRoot = tempRoot();
+    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    writeFileSync(
+      path.join(outside, "SKILL.md"),
+      "# Evil\n\nSENTINEL-LINKED-SKILL",
+    );
+    mkdirSync(path.join(dataRoot, "skills", "craft"), { recursive: true });
+    symlinkSync(
+      path.join(outside, "SKILL.md"),
+      path.join(dataRoot, "skills", "craft", "SKILL.md"),
+    );
+    const persona = buildSpecialistPersona({
+      profileId: "developer-claude",
+      skills: ["craft"],
+      dataRoot,
+    });
+    expect(persona).not.toContain("SENTINEL-LINKED-SKILL");
+    expect(persona).not.toContain("Attached resources (trusted");
+    expect(persona).toContain("Viberr does not follow links out of the store");
+  });
+
+  /**
+   * C2/pass-16 — the skill budget was per-skill, so N granted skills could put
+   * N × SKILL_INJECTION_BUDGET characters into one prompt. That is the exact
+   * failure mode the shared KB budget exists to prevent.
+   */
+  it("many granted skills share ONE budget instead of N × the cap", () => {
+    const dataRoot = tempRoot();
+    const names = ["s1", "s2", "s3", "s4"];
+    for (const name of names) {
+      mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
+      writeFileSync(
+        path.join(dataRoot, "skills", name, "SKILL.md"),
+        "Z".repeat(SKILL_INJECTION_BUDGET),
+      );
+    }
+    const persona = buildSpecialistPersona({
+      profileId: "developer-claude",
+      skills: names,
+      dataRoot,
+    });
+    const zChars = (persona.match(/Z/g) ?? []).length;
+    // Per-skill budgeting produced 4 × 24k = 96k characters of skill text.
+    expect(zChars).toBeLessThanOrEqual(SKILL_INJECTION_BUDGET);
+    // …and the squeezed-out skills say so rather than vanishing.
+    expect(persona).toContain("omitted entirely");
   });
 
   it("states that MCP tools cannot widen authority when servers are mounted", () => {

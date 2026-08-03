@@ -27,12 +27,13 @@ import {
   type BranchCompare,
   type BranchSyncState,
 } from "./branch-sync.server";
-import { GITHUB_API_BASE } from "./github-client.server";
+import { encodeRefPath, GITHUB_API_BASE } from "./github-client.server";
 import {
   getProjectGithubContext,
   type GithubContextFailure,
 } from "./github-context.server";
 import { branchCleanupOnMerge } from "./branch-cleanup.server";
+import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 import { deriveMergeable, findPrForBranch, type PrFacts } from "./pr-linker.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
@@ -264,10 +265,10 @@ export async function reconcileTask(
     pr?.mergeable !== undefined ? pr.mergeable : (cachedPr?.mergeable ?? null);
   const mergeable =
     prState === "review" || prState === "accepted" ? mergeableLive : null;
-  // R15-15 — OWNERSHIP. `findPrForBranch` matches on branch NAME alone, and a
-  // task-key branch is not a unique identifier: task keys restart at 1 on a new
-  // data root, so a brand-new VIB-1 gets branch `vib-1` — which on GitHub may
-  // still carry the PR of a PREVIOUS VIB-1 that has nothing to do with it.
+  // R15-15 / R16-1 — OWNERSHIP. `findPrForBranch` matches on branch NAME alone,
+  // and a task-key branch is not a unique identifier: task keys restart at 1 on
+  // a new data root, so a brand-new VIB-1 gets branch `vib-1` — which on GitHub
+  // may still carry the PR of a PREVIOUS VIB-1 that has nothing to do with it.
   //
   // Live: a fresh instance's VIB-1 adopted merged PR #109 from a wiped
   // instance, the divergence rule fired "PR #109 was merged but VIB-1 hasn't
@@ -275,12 +276,25 @@ export async function reconcileTask(
   // its developer was still writing code. The task's own delivered revision was
   // not in that PR and never had been.
   //
-  // A task owns a PR only if THIS task opened it — `openTaskPr` is the one
-  // writer that establishes the link (pr-open.server.ts). The reconciler's job
-  // is to keep an owned link honest, never to mint one. So a discovered PR is
-  // adopted only when the task already references a PR on this branch; with no
-  // reference, the discovery is a name COLLISION and is reported as one.
-  const ownsAPr = fm.pr != null;
+  // Two distinct jobs, so two rules:
+  //  · KEEPING AN OWNED LINK HONEST — the discovery is the SAME number the task
+  //    already references, so its live facts (state, checks, review) are this
+  //    task's news whatever they say. R15-15 stopped at `fm.pr != null`, which
+  //    let a name-matched STRANGER overwrite the owned link with its own number;
+  //  · ADOPTING — a different (or first) PR may become this task's only under
+  //    R16-1: open, and its head IS the delivered revision. That still covers the
+  //    healing case below (a human closed our PR and opened a fresh one on the
+  //    same branch) without letting a foreign merged PR in.
+  const sameAsCached = pr != null && fm.pr?.number === pr.number;
+  const adoption =
+    pr != null && !sameAsCached
+      ? decidePrAdoption({
+          state: pr.state,
+          prHeadSha: pr.headSha,
+          revisionHeadSha: fm.workRevision?.headSha ?? null,
+        })
+      : null;
+  const ownsAPr = sameAsCached || adoption?.adopt === true;
   const unownedPr = pr && !ownsAPr ? pr : null;
   const newPr: PrRef | null =
     pr && ownsAPr
@@ -317,6 +331,20 @@ export async function reconcileTask(
       : null;
   const unownedPrIsNew =
     !!unownedPr && existingGithub?.unownedPr !== unownedPr.number;
+  // The collision is not a divergence and must not read like one: nothing about
+  // THIS task changed on GitHub. Say plainly whose PR it is not, WHY the
+  // adoption rule refused it, and point at the same remedy the non-fast-forward
+  // push already gives.
+  const collisionNote =
+    unownedPr && adoption && !adoption.adopt
+      ? prAdoptionRefusalNote({
+          refusal: adoption.refusal,
+          taskKey: fm.key,
+          branch,
+          prNumber: unownedPr.number,
+          revisionHeadSha: fm.workRevision?.headSha ?? null,
+        })
+      : null;
 
   // An accepted (merge-pending) PR closed on GitHub WITHOUT merging drops the
   // Complete-merge affordance with no path back — explain why, typed `policy`.
@@ -394,23 +422,13 @@ export async function reconcileTask(
       );
     }
     await patchTaskFrontmatter(ref, patch);
-    if (unownedPrIsNew) {
-      // The collision is not a divergence and must not read like one: nothing
-      // about THIS task changed on GitHub. Say plainly whose PR it is not, and
-      // point at the same remedy the non-fast-forward push already gives, so the
-      // two symptoms of one cause (a stale branch under a reused task key) read
-      // as the same problem instead of two unrelated GitHub mysteries.
+    if (unownedPrIsNew && collisionNote) {
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
         type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
-        text:
-          `**Branch name collision:** GitHub already has PR #${unownedPr!.number} on branch ` +
-          `\`${branch}\`, but ${fm.key} did not open it — it is NOT this task's review PR and ` +
-          `Viberr will not track it as one. This happens when a task key is reused (a new data ` +
-          `root restarts keys at 1) while the old branch still exists on GitHub. Delete or rename ` +
-          `the remote branch \`${branch}\`, or give this task a different branch, before delivering.`,
+        text: collisionNote,
         toAgent: false,
         evidence: null,
       });
@@ -1104,9 +1122,16 @@ export async function deleteTaskRemoteBranch(
     };
   }
 
+  // B11: this interpolated the branch raw, so it was correct only for
+  // `vib-142`-shaped names — a `#`, `?` or space addressed a different ref, or
+  // none at all. Encoded PER SEGMENT because `heads/<branch>` is a path and a
+  // branch may legitimately contain `/` (`feature/x`), which has to stay a
+  // separator. For today's task-key branches this is byte-identical to what it
+  // already sent, so the working path cannot regress.
+  const refPath = encodeRefPath(`heads/${branch}`);
   const del = await gh.client.request<unknown>(
     "DELETE",
-    `/repos/${gh.repo}/git/refs/heads/${branch}`,
+    `/repos/${gh.repo}/git/refs/${refPath}`,
   );
 
   if (del.ok) {

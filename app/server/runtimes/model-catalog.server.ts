@@ -1,6 +1,15 @@
+import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
-import { isBackendAvailable, type RealBackend } from "./runtime-registry.server";
-import type { ClaudeQueryFn } from "./claude-runtime.server";
+import { resolveClaudeConfigDir } from "./claude-config.server";
+import {
+  claudeSpawnEnv,
+  isBackendAvailable,
+  type RealBackend,
+} from "./runtime-registry.server";
+import type {
+  ClaudeQueryFn,
+  ClaudeQueryOptions,
+} from "./claude-runtime.server";
 
 /**
  * Model + effort (reasoning) CATALOG for the agent create/edit UI.
@@ -347,13 +356,47 @@ async function realQueryFn(): Promise<ClaudeQueryFn> {
   return cachedQueryFn;
 }
 
+/**
+ * The SDK options for the `supportedModels()` probe — the SAME confinement a
+ * real run gets (F10-02, re-broken here and re-fixed).
+ *
+ * `query()` spawns the `claude` binary even when the stream is never iterated,
+ * and the SDK **REPLACES** the child env with `options.env` (only defaulting to
+ * `{...process.env}` when the field is ABSENT). Passing `options: {}` therefore
+ * handed the probe the FULL server environment — the GitHub PAT, the session
+ * signing secret, `VIBERR_SECRET_ENCRYPTION_KEY`, every provider key — and let
+ * it read/write the operator's personal `~/.claude`. This probe is reachable
+ * from the agent create/edit UI on every catalog miss, so it must be confined
+ * exactly like a run: the filtered spawn env from `claudeSpawnEnv` plus a
+ * deterministic `CLAUDE_CONFIG_DIR`, and the host-isolation trio the adapter
+ * sets (`settingSources`/`skills`/`plugins`).
+ *
+ * Exported so the confinement is assertable — see the model-catalog tests.
+ */
+export function claudeProbeOptions(): ClaudeQueryOptions {
+  const env = getEnv();
+  return {
+    env: claudeSpawnEnv(
+      resolveClaudeConfigDir(),
+      env.ANTHROPIC_API_KEY,
+      env.CLAUDE_CODE_OAUTH_TOKEN,
+    ),
+    settingSources: [],
+    skills: [],
+    plugins: [],
+    maxTurns: 1,
+  };
+}
+
 /** A lightweight query whose ONLY purpose is calling `.supportedModels()`.
- *  We never iterate the stream — the query object exposes the method directly. */
+ *  We never iterate the stream — the query object exposes the method directly.
+ *  The options are still the confined ones: constructing the query is what
+ *  spawns the binary, so "we never iterate" is not isolation. */
 async function fetchLiveClaudeModels(
   queryFn: ClaudeQueryFn,
   timeoutMs: number,
 ): Promise<SdkModelInfo[]> {
-  const q = queryFn({ prompt: "", options: {} }) as unknown as {
+  const q = queryFn({ prompt: "", options: claudeProbeOptions() }) as unknown as {
     supportedModels?: () => Promise<SdkModelInfo[]>;
     interrupt?: () => Promise<void>;
   };

@@ -212,7 +212,12 @@ describe("TimelineItem", () => {
     );
   });
 
-  it("guest commenter renders the app-user pill (Deniz on VIB-153)", () => {
+  it("E1: a comment from someone no longer in the project says exactly that", () => {
+    // The pill read "app user · not in project", from the era when any
+    // registered user could comment on any task. Members-only enforcement
+    // (R15) killed that path — a non-member 404s on the page and on the POST —
+    // so the only way to see this flag now is an author who has LEFT, and the
+    // old wording described a route into the product that no longer exists.
     const { container } = render(
       <TimelineItem
         ev={ev({
@@ -230,7 +235,8 @@ describe("TimelineItem", () => {
     const pills = [...container.querySelectorAll(".tl-meta .pill")].map(
       (p) => p.textContent,
     );
-    expect(pills).toContain("app user · not in project");
+    expect(pills).toContain("no longer a member");
+    expect(pills).not.toContain("app user · not in project");
   });
 
   it("completion: title, done pill, evidence rows with add/del", () => {

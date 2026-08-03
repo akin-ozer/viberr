@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -261,6 +262,141 @@ describe("Codex structured operator completion", () => {
     // Nothing was actually performed.
     expect(task().packet).toBeNull();
     expect(task().frontmatter.stage).toBe("impl");
+  });
+
+  /**
+   * The refusal banner must name the REAL reason. With B3's already-open guard
+   * landed, an operator that holds `generate-packets` and simply must not open
+   * a second packet was reported as "refused by its capability policy" — an
+   * accusation against a policy that blocked nothing, on a `policy` timeline
+   * event (the type LV-03 reserves for governance signals).
+   */
+  it("files a STATE refusal as a note that does not blame the capability policy", async () => {
+    await start();
+    // Turn 1 opens the packet.
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Which endpoint should this target?",
+            reason: "The task names no endpoint.",
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      expect(task().packet).not.toBeNull();
+    });
+
+    // Turn 2 tries to open a SECOND one — refused by state, not by policy.
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Ask about the migration too.",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Ship without the migration?",
+            reason: "A second question.",
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      const narration = task().timeline.find((e) =>
+        e.text.includes("not carried out in full"),
+      );
+      expect(narration).toBeDefined();
+      expect(narration!.text).toContain("did not apply to the task's current state");
+      expect(narration!.text).toContain("already open");
+      expect(narration!.text).not.toContain("refused by its capability policy");
+      // LV-03: a state conflict is not a governance refusal.
+      expect(narration!.type).toBe("note");
+    });
+    // The human's packet still stands.
+    expect(task().packet!.title).toBe("Which endpoint should this target?");
+  });
+
+  it("names BOTH reasons separately when a plan hits policy and state in one turn", async () => {
+    // `stage-transitions: off` (authority) + an already-Done-style state
+    // refusal from resolve_packet with no packet open.
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "append-typed-events", mode: "direct" },
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "stage-transitions", mode: "off" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Tidy up and advance.",
+        actions: [
+          {
+            tool: "resolve_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: null,
+            reason: "nothing to withdraw",
+            packetOptions: null,
+          },
+          transitionAction(),
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      const narration = task().timeline.find((e) =>
+        e.text.includes("not carried out in full"),
+      );
+      expect(narration).toBeDefined();
+      expect(narration!.text).toContain("Refused by its capability policy:");
+      expect(narration!.text).toContain("`transition_stage`");
+      expect(narration!.text).toContain("Did not apply to the task's current state:");
+      expect(narration!.text).toContain("`resolve_packet`");
+      // A real governance refusal IS present, so the event stays `policy`.
+      expect(narration!.type).toBe("policy");
+    });
   });
 
   it("does not narrate anything when every action succeeded", async () => {
@@ -547,14 +683,26 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     );
   });
 
-  it("an all-denied operator falls back to the full list (an enum may not be empty)", () => {
+  it("an all-denied operator falls back to the full list MINUS delivery (an enum may not be empty)", () => {
     // A misconfiguration rather than an expressible run shape — every action it
     // then proposes is refused VISIBLY by the executor rather than silently.
     // R15-2: `deliver-review-pr` must be EXPLICITLY off here — an absent grant
     // means granted (the capability postdates live deployments).
-    expect(
-      operatorPlanToolsFor(authority({ "deliver-review-pr": "off" })),
-    ).toHaveLength(10);
+    // A4: the fallback must not re-advertise the one action with effects
+    // outside Viberr (push a branch, open a PR) that this policy just withheld.
+    const tools = operatorPlanToolsFor(authority({ "deliver-review-pr": "off" }));
+    expect(tools).toHaveLength(9);
+    expect(tools).not.toContain("deliver_for_review");
+  });
+
+  it("A4: an UNDEPLOYED operator is never offered delivery, whatever the board's preset", () => {
+    // The no-deployment authority carries an EMPTY policy, so every gate denies
+    // and the fallback fires — which used to re-offer `deliver_for_review`
+    // because `deliverGate`'s absent-means-granted polarity had no
+    // deployed-check. `humanGatedBeforeWork: false` is the non-strict board
+    // that resolved the absent grant to `direct`.
+    const undeployed = { ...authority({}), deployed: false };
+    expect(operatorPlanToolsFor(undeployed)).not.toContain("deliver_for_review");
   });
 
   it("R15-2: deliver_for_review is offered when the grant is absent (absent = granted), withheld only when explicitly off", () => {
@@ -1029,9 +1177,10 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
   });
 
   it("S3-1: a question answered while a packet is open must not open a SECOND one", () => {
-    // Each queued question drains as its own governed turn and
-    // `open_decision_packet` REPLACES the open packet — the human answering the
-    // first is then told their decision "was replaced by a newer one".
+    // Each queued question drains as its own governed turn. B3 made a second
+    // packet a REFUSAL rather than a silent replacement, so the turn says what
+    // the tool now does: answer from the open packet, withdraw it first if it
+    // is genuinely moot.
     const withPacket = operatorPrompts.buildOperatorTurnPrompt(
       snap({ stage: "impl", stageName: "In Progress", openPacket: true }),
       "manual",
@@ -1040,7 +1189,8 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
       "Arda",
     );
     expect(withPacket).toContain("A decision packet is ALREADY OPEN");
-    expect(withPacket).toContain("REPLACES the open one");
+    expect(withPacket).toContain("`open_decision_packet` is REFUSED while it stands");
+    expect(withPacket).not.toContain("REPLACES the open one");
     expect(withPacket).toContain("ONE reply that answers everything quoted");
     // No open packet → no clause, so the turn never invents a packet to defer to.
     expect(
@@ -1351,6 +1501,384 @@ describe("stranded codex plan recovery", () => {
         .all() as { id: string }[];
       expect(runs).toHaveLength(2);
       expect(adapter4.pending).not.toBeNull();
+    });
+  });
+});
+
+/* ---- runOperator entry-point behaviour: A4 / B4 / B5 / B6 / B8 / B10 ---- */
+
+/** A ControlledAdapter that records, at each run START, whether the task
+ *  already carries a decision packet — the ordering probe for B5. */
+class ProbeAdapter extends ControlledAdapter {
+  packetAtStart: boolean[] = [];
+  probe: (() => boolean) | null = null;
+
+  override start(spec: RunSpec, callbacks: RunCallbacks): RunHandle {
+    this.packetAtStart.push(this.probe ? this.probe() : false);
+    return super.start(spec, callbacks);
+  }
+}
+
+describe("runOperator — authority, ordering, orphans", () => {
+  let ctx5: TestDbContext;
+  let store5: TestStore;
+  let adapter5: ProbeAdapter;
+
+  const deployAgents = (agents: unknown[]): void => {
+    const project = readProjectFile({
+      projectSlug: store5.slug,
+      dataRoot: store5.dataRoot,
+    })!;
+    writeProject(store5.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: agents as never,
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+  };
+
+  const operatorAgent = (over: Record<string, unknown> = {}) => ({
+    profileId: "operator",
+    capabilities: OPERATOR_POLICY,
+    extras: [],
+    definition: {
+      kind: "operator",
+      name: "Operator",
+      backends: ["claude"],
+      model: "sonnet",
+      ...over,
+    },
+  });
+
+  const seed = (stage: string): void => {
+    writeTask(store5.dataRoot, store5.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage,
+        readiness: "ready",
+        waiting: "agent",
+        ownerUserId: store5.users.arda.id,
+      }),
+      goal: "Ship the parser.",
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+  };
+
+  const task = () =>
+    readTaskFile({
+      projectSlug: store5.slug,
+      taskKey: "VIB-1",
+      dataRoot: store5.dataRoot,
+    })!.parsed;
+
+  const operatorRuns = () =>
+    store5.db
+      .prepare(`SELECT id, state FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
+      .all() as { id: string; state: string }[];
+
+  const drive = (over: Partial<Parameters<typeof runOperator>[1]> = {}) =>
+    runOperator(store5.db, {
+      projectSlug: store5.slug,
+      taskKey: "VIB-1",
+      autonomy: "supervised",
+      dataRoot: store5.dataRoot,
+      ...over,
+    });
+
+  beforeEach(() => {
+    ctx5 = createTestDbContext();
+    store5 = setupTestStore(ctx5);
+    resetSseBrokerForTests();
+    resetOperatorLeasesForTests();
+    adapter5 = new ProbeAdapter();
+    configureRunServiceForTests({ claude: adapter5, codex: adapter5 });
+    setBackendAvailability("claude", true);
+    setBackendAvailability("codex", true);
+  });
+
+  afterEach(() => {
+    resetOperatorLeasesForTests();
+    resetSseBrokerForTests();
+    ctx5.cleanup();
+  });
+
+  /**
+   * A4 — every entry point (the Run-operator button, a schedule, boot
+   * recovery, an `@operator` comment) funnels through runOperator without
+   * checking `authority.deployed`, so the toolkit is where "no deployment"
+   * has to mean "no delivery". A project with no operator agent used to hand
+   * the run `get_task` + `deliver_for_review` on a non-strict board.
+   */
+  it("A4: a project with NO operator deployed gets a read-only toolkit on a real run", async () => {
+    deployAgents([
+      {
+        profileId: "developer",
+        capabilities: [],
+        extras: [],
+        definition: {
+          kind: "specialist",
+          name: "Dev",
+          role: "Implementation",
+          backends: ["claude"],
+          model: "sonnet",
+        },
+      },
+    ]);
+    seed("impl");
+
+    const started = await drive({ trigger: "manual" });
+    expect(started.queued).toBe(false);
+    const spec = adapter5.pending!.spec;
+    expect(spec.allowedTools).toEqual(["mcp__viberr__get_task"]);
+    expect(spec.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
+  });
+
+  /**
+   * B8 — the prompt used to print the GRANT list. An operator granted a server
+   * the registry does not have was told "Attached MCP servers: ghost-mcp" and
+   * then reported it as available; zero servers mounted.
+   */
+  it("B8: a granted-but-unregistered MCP is reported as UNAVAILABLE, never as attached", async () => {
+    deployAgents([
+      operatorAgent({ resources: { skills: [], kb: [], mcps: ["ghost-mcp"] } }),
+    ]);
+    seed("impl");
+
+    await drive({ trigger: "manual" });
+    const systemPrompt = adapter5.pending!.spec.systemPrompt ?? "";
+    expect(systemPrompt).not.toContain("Attached MCP servers: ghost-mcp");
+    expect(systemPrompt).toContain("No MCP servers are attached to you.");
+    expect(systemPrompt).toContain("Unavailable MCP servers");
+    expect(systemPrompt).toContain("ghost-mcp");
+    // Nothing mounted → no governance paragraph claiming tools it lacks.
+    expect(systemPrompt).not.toContain("MCP tools are governed too");
+  });
+
+  /**
+   * B5 — the Claude completion hook released the lease FIRST, which
+   * synchronously fires the queued trigger, and only then wrote the blocked
+   * recovery packet. The successor drive therefore read the task while the
+   * packet that explains the failure was still being written.
+   */
+  it("B5: the blocked packet is written BEFORE the queued successor drive starts", async () => {
+    deployAgents([operatorAgent()]);
+    seed("impl");
+    adapter5.probe = () => task().packet !== null;
+
+    await drive({ trigger: "manual" });
+    expect(adapter5.pending).not.toBeNull();
+    // A second trigger lands mid-drive and is queued behind the lease.
+    const queued = await drive({ trigger: "transition" });
+    expect(queued.queued).toBe(true);
+
+    // The drive fails: the escalation writes a blocked recovery packet.
+    adapter5.finish(store5, "provider exploded", "error");
+
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(2); // the queued trigger drove
+    });
+    expect(task().packet?.type).toBe("blocked");
+    // Run 1 started with no packet; run 2 — the successor — started with the
+    // escalation ALREADY on the task.
+    expect(adapter5.packetAtStart).toEqual([false, true]);
+  });
+
+  /**
+   * B10 — a queued/running row left behind by a previous process has no
+   * completion callback in this one, so chaining the drain onto it stranded
+   * the trigger until some unrelated drive released the lease.
+   */
+  it("B10: a restart-orphaned run row is finalized and the trigger drives now", async () => {
+    deployAgents([operatorAgent()]);
+    seed("impl");
+    upsertRun(store5.db, {
+      id: "run_prev_boot",
+      taskKey: "VIB-1",
+      projectSlug: store5.slug,
+      threadId: "op-prevboot",
+      role: "Operator",
+      kind: "operator",
+      backend: "claude",
+      agentProfileId: "operator",
+      model: "sonnet",
+      sdk: "Claude Agent SDK",
+      state: "running",
+    } as Parameters<typeof upsertRun>[1]);
+    // The row predates this process — the fact that makes it an orphan.
+    store5.db
+      .prepare(`UPDATE agent_runs SET created_at = ? WHERE id = ?`)
+      .run(new Date(Date.now() - 60 * 60 * 1000).toISOString(), "run_prev_boot");
+
+    const started = await drive({ trigger: "manual" });
+    expect(started.queued).toBe(false);
+    expect(started.runId).not.toBe("run_prev_boot");
+    // A real run started instead of the trigger sitting in `pending` forever…
+    expect(adapter5.pending).not.toBeNull();
+    // …and the orphan row no longer reads as live work on the board.
+    const orphan = operatorRuns().find((r) => r.id === "run_prev_boot")!;
+    expect(orphan.state).toBe("error");
+  });
+
+  it("B10: a run row from THIS process still coalesces (the backstop is not a free-for-all)", async () => {
+    deployAgents([operatorAgent()]);
+    seed("impl");
+    await drive({ trigger: "manual" });
+    const first = operatorRuns();
+    expect(first).toHaveLength(1);
+    // Drop the process lease but leave the run row live: the DB-row backstop.
+    resetOperatorLeasesForTests();
+
+    const second = await drive({ trigger: "transition" });
+    expect(second.queued).toBe(true);
+    expect(second.runId).toBe(first[0]!.id);
+    expect(operatorRuns()).toHaveLength(1); // no second overlapping drive
+  });
+
+  /**
+   * B6 — a task file that cannot be read leaves `stageAtStart: null`, which
+   * switches the stranded-resume backstop off for the whole drive. It used to
+   * do that in silence.
+   */
+  it("B6: a failed task-file read says so, twice — at the read and at the backstop", async () => {
+    deployAgents([operatorAgent({ backends: ["codex"], model: defaultModelFor("codex") })]);
+    // No task file at all: the read failure this drive cannot recover from.
+    upsertRun(store5.db, {
+      id: "run_ghost",
+      taskKey: "GHOST-1",
+      projectSlug: store5.slug,
+      threadId: "op-ghost",
+      role: "Operator",
+      kind: "operator",
+      backend: "codex",
+      agentProfileId: "operator",
+      model: defaultModelFor("codex"),
+      sdk: "Codex SDK",
+      state: "finished",
+      finishedAt: new Date().toISOString(),
+    } as Parameters<typeof upsertRun>[1]);
+    const warn = vi.spyOn(logger, "warn");
+
+    await executeStrandedCodexPlan(
+      store5.db,
+      { dataRoot: store5.dataRoot },
+      { projectSlug: store5.slug, taskKey: "GHOST-1", runId: "run_ghost" },
+    );
+
+    const warned = () => warn.mock.calls.map(([msg]) => String(msg));
+    expect(
+      warned().some((m) => m.includes("could not read the task's starting stage")),
+    ).toBe(true);
+    await eventually(() => {
+      expect(
+        warned().some((m) => m.includes("stranded-operator backstop DISABLED")),
+      ).toBe(true);
+    });
+    warn.mockRestore();
+  });
+});
+
+/* ------------- B4: one cap, one comparison, one meaning ------------- */
+
+describe("stranded-resume shares the transition chain cap (B4)", () => {
+  let ctx6: TestDbContext;
+  let store6: TestStore;
+  let adapter6: ControlledAdapter;
+
+  beforeEach(() => {
+    ctx6 = createTestDbContext();
+    store6 = setupTestStore(ctx6);
+    const project = readProjectFile({
+      projectSlug: store6.slug,
+      dataRoot: store6.dataRoot,
+    })!;
+    writeProject(store6.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: OPERATOR_POLICY,
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ] as never,
+    });
+    // An AUTO stage with nothing pending — the stranded shape the backstop
+    // resumes, so the ONLY thing bounding the chain is the cap.
+    writeTask(store6.dataRoot, store6.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "triage",
+        readiness: "ready",
+        waiting: "agent",
+        ownerUserId: store6.users.arda.id,
+      }),
+      goal: "Add the changelog entry.",
+    });
+    rebuildAll(store6.db, { dataRoot: store6.dataRoot, force: true });
+    resetSseBrokerForTests();
+    resetOperatorLeasesForTests();
+    adapter6 = new ControlledAdapter();
+    configureRunServiceForTests({ claude: adapter6, codex: adapter6 });
+    setBackendAvailability("codex", true);
+  });
+
+  afterEach(() => {
+    resetOperatorLeasesForTests();
+    resetSseBrokerForTests();
+    ctx6.cleanup();
+  });
+
+  const runs = () =>
+    store6.db
+      .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
+      .all() as { id: string }[];
+
+  const driveAtDepth = async (transitionDepth: number): Promise<void> => {
+    await runOperator(store6.db, {
+      projectSlug: store6.slug,
+      taskKey: "VIB-1",
+      backend: "codex",
+      autonomy: "supervised",
+      trigger: "transition",
+      transitionDepth,
+      dataRoot: store6.dataRoot,
+    });
+    adapter6.finish(store6, JSON.stringify({ reasoning: "", actions: [] }), "finished");
+  };
+
+  it("refuses the link that would REACH the cap — the same comparison the transition side makes", async () => {
+    const { OPERATOR_TRANSITION_CHAIN_CAP } = await import(
+      "~/server/tasks/task-actions.server"
+    );
+    // depth + 1 === CAP. `transitionStage` stops here (`chainDepth >= CAP`);
+    // this side used `>`, so it granted a 9th consecutive link.
+    await driveAtDepth(OPERATOR_TRANSITION_CHAIN_CAP - 1);
+
+    await eventually(() => {
+      const note = readTaskFile({
+        projectSlug: store6.slug,
+        taskKey: "VIB-1",
+        dataRoot: store6.dataRoot,
+      })!.parsed.timeline.find((e) => e.text.includes("consecutive runs without advancing"));
+      expect(note).toBeDefined();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(runs()).toHaveLength(1); // no extra link
+    expect(adapter6.pending).toBeNull();
+  });
+
+  it("still resumes one link below the cap", async () => {
+    const { OPERATOR_TRANSITION_CHAIN_CAP } = await import(
+      "~/server/tasks/task-actions.server"
+    );
+    await driveAtDepth(OPERATOR_TRANSITION_CHAIN_CAP - 2);
+    await eventually(() => {
+      expect(runs()).toHaveLength(2);
+      expect(adapter6.pending).not.toBeNull();
     });
   });
 });

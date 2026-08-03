@@ -1,6 +1,7 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.board";
 import type { loader as projectLoader } from "./project";
+import { requireVisibleProject } from "./project-visibility.server";
 import {
   appErrorResponse,
   requireFormAction,
@@ -21,6 +22,13 @@ import { BoardPage } from "~/features/board/board-page";
 
 export async function action({ request, params }: Route.ActionArgs) {
   const { db, formData, actor, intent } = await requireFormAction(request);
+  // R15-4 / E2: React Router runs this action WITHOUT the layout loader, so the
+  // membership gate has to be repeated here. Without it `create-task` answered a
+  // signed-in non-member with the inner guard's 403 ("Only project members can
+  // create tasks") while every other route and intent in the app answered 404 —
+  // one reply that confirmed the project exists (WI-13). Outside the try so the
+  // refusal stays a thrown 404 Response, byte-identical to the unknown-slug one.
+  requireVisibleProject(db, params.slug, actor, "act on this project");
 
   try {
     if (intent === "create-task") {
@@ -91,7 +99,10 @@ export async function action({ request, params }: Route.ActionArgs) {
 export default function Board() {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   if (!layout) return null;
-  const canCreate = layout.myRole !== null && layout.myRole !== "viewer";
+  // UI-58 again (E3): this was the one control left gated on a role LITERAL
+  // (`!== "viewer"`) rather than the action id the server enforces — the exact
+  // drift hazard the comment below names, three lines from the comment.
+  const canCreate = roleCan(layout.myRole as ProjectRole | null, "create-task");
   // UI-58: drag/move visibility must consult the SAME action id the server
   // enforces (`reorder-board`), not the `admin|maintainer` literal it happened
   // to equal — this file already uses `roleCan` for `rescan-project` for exactly

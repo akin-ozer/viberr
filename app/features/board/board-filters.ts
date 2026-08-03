@@ -21,9 +21,9 @@ export interface FilterableTask {
   archived?: boolean;
 }
 
-/** Verbatim mock semantics with canonical enum values ("Needs attention" =
- * readiness risk/blocked || validation failing || urgent || a rejected PR). The
- * "Waiting on me" filter is member-scoped (R8-3): a decision the viewer can
+/** "Blocked or waiting" = work that CANNOT PROCEED: readiness blocked /
+ * input_required / risk-detected, failing validation, urgent, or a rejected PR.
+ * The "Waiting on me" filter is member-scoped (R8-3): a decision the viewer can
  * actually act on, not the project-wide `waiting === "human"` enum.
  *
  * P14-R14-3: archived tasks are excluded from EVERY filter but `archived`, so
@@ -41,14 +41,21 @@ export function matchesBoardFilter(
     return (
       task.readiness === "inconsistency_risk_detected" ||
       task.readiness === "blocked" ||
+      // R16-2 (live, pass 16): the board rendered an amber "input required" chip
+      // on a card and then matched 0 of 4 tasks under its own attention filter —
+      // a task holding for a human answer is the plainest case of work that
+      // cannot proceed, and it was the one state the predicate omitted. The chip
+      // is named "Blocked or waiting" for the same reason: the filter is about
+      // work that is STUCK, not about danger.
+      task.readiness === "input_required" ||
       task.validation === "failing" ||
       task.urgent ||
       // P14-WL-03: a PR closed without merging is a DIVERGENCE the review queue
       // files under "Decision required" — the work was declined and the task
       // needs a rework/reopen/archive call from a human. It carries none of the
-      // four signals above (readiness stays `in_review`, validation stays
-      // healthy, urgent is off), so the board's own "Needs attention" filter
-      // hid the single class of task that most needs a person.
+      // signals above (readiness stays `in_review`, validation stays healthy,
+      // urgent is off), so the board's own attention filter hid the single class
+      // of task that most needs a person.
       task.pr?.state === "closed"
     );
   }
@@ -132,7 +139,7 @@ export function shortBranch(branch: string): string {
 
 /**
  * P13-D-34 (UX-4): every column printed the bare string "No tasks" for a
- * filter+search result, so a board hiding 12 tasks behind "Needs attention"
+ * filter+search result, so a board hiding 12 tasks behind an active filter
  * read as an empty project. The UX spec asks an empty state to say what is
  * absent, why, and what to do next (ux-design-specification.md:846-847) — the
  * same three-way shape pass 13 shipped on the home grid (UI-21) and the task

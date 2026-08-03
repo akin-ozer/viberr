@@ -53,12 +53,31 @@ export interface StoreTarget {
 
 // ------------------------------------------------------------------ scan
 
-/** Scans a store folder → StoreNode[] (dirs first, alphabetical, dotfiles
- * skipped). Missing folder → empty tree. */
-export function scanStoreTree(absDir: string): StoreNode[] {
+/**
+ * Scans a store folder → StoreNode[] (dirs first, alphabetical, dotfiles
+ * skipped). Missing folder → empty tree.
+ *
+ * CONTAINMENT (C5/pass-16). `readdirSync(…, { withFileTypes: true })` reports
+ * the directory ENTRY type — it does not dereference — so a symlink is neither
+ * `isDirectory()` nor `isFile()` and drops out of both lists. That already
+ * matched `collectKbDocs`, but only by accident of the Dirent API: the
+ * `isSymbolicLink()` filter below states the rule so a future refactor to
+ * `readdirSync(dir)` + `statSync` (which DOES dereference, and which
+ * `subDirNames` was doing until this pass) cannot quietly reintroduce a browser
+ * that promises content no run receives — or, worse, serves a host file through
+ * the in-app reader. `statSync` further down is reached only for entries the
+ * Dirent already proved are real files.
+ *
+ * The depth cap mirrors `collectKbDocs`: symlinks cannot make a cycle here, but
+ * a pathological upload should not be able to blow the stack either.
+ */
+const MAX_STORE_SCAN_DEPTH = 32;
+
+export function scanStoreTree(absDir: string, depth = 0): StoreNode[] {
+  if (depth > MAX_STORE_SCAN_DEPTH) return [];
   if (!existsSync(absDir)) return [];
   const entries = readdirSync(absDir, { withFileTypes: true }).filter(
-    (e) => !e.name.startsWith("."),
+    (e) => !e.name.startsWith(".") && !e.isSymbolicLink(),
   );
   const dirs = entries
     .filter((e) => e.isDirectory())
@@ -71,7 +90,7 @@ export function scanStoreTree(absDir: string): StoreNode[] {
     nodes.push({
       type: "dir",
       name: d.name,
-      children: scanStoreTree(path.join(absDir, d.name)),
+      children: scanStoreTree(path.join(absDir, d.name), depth + 1),
     });
   }
   for (const f of files) {
@@ -164,21 +183,36 @@ function touchResource(db: DatabaseSync, target: StoreTarget): void {
   const now = new Date().toISOString();
   if (target.kind === "kb") {
     const dir = path.basename(target.rootAbs);
+    // C5/pass-16: honour the `manual` refresh pin.
+    //
+    // `last_indexed_at` is the "re-scanned <when>" stamp, and a KB pinned to
+    // `manual` means "advance it only on an explicit re-scan". The watcher path
+    // (`reindexKnowledgeBaseByDir`) has always respected that; this one bumped
+    // it unconditionally, so any in-app upload / doc write / delete made a
+    // manual-pinned KB claim it had just been re-scanned when nobody had asked
+    // for one. `updated_at` still moves — the row DID change — but only the
+    // re-scan button (or watcher-driven mode) may move the index stamp.
+    const pinned =
+      (
+        db
+          .prepare(
+            `SELECT refresh FROM org_knowledge_bases WHERE id = ? OR dir = ?`,
+          )
+          .get(target.id, dir) as { refresh?: string } | undefined
+      )?.refresh === "manual";
+    const indexClause = pinned
+      ? `SET updated_at = ?`
+      : `SET last_indexed_at = ?, updated_at = ?`;
+    const indexArgs = pinned ? [now] : [now, now];
     const updated = db
-      .prepare(
-        `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(now, now, target.id);
+      .prepare(`UPDATE org_knowledge_bases ${indexClause} WHERE id = ?`)
+      .run(...indexArgs, target.id);
     if (updated.changes === 0) {
       // Adopt-on-touch. Key on dir (UNIQUE): a row may already exist under a
       // different id than the synthetic one the target carries.
       const adopted = db
-        .prepare(
-          `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ?
-           WHERE dir = ?`,
-        )
-        .run(now, now, dir);
+        .prepare(`UPDATE org_knowledge_bases ${indexClause} WHERE dir = ?`)
+        .run(...indexArgs, dir);
       if (adopted.changes === 0) {
         db.prepare(
           `INSERT INTO org_knowledge_bases

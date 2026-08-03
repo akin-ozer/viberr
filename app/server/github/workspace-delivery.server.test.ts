@@ -29,10 +29,19 @@ const BRANCH = "atl-3-add-workspace-feature";
 const COMMITS = "abc1234 [ATL-3] Add feature\ndef5678 [ATL-3] Wire tests";
 
 /** A canned git/gh runner keyed by the command shape. */
+/** What `git rev-parse HEAD` answers — the sha an adoptable PR's head must be. */
+const HEAD_SHA = "1a2b3c4d5e6f70819a2b3c4d5e6f70819a2b3c4d";
+
 function fakeExec(config: {
   branch?: string;
   commits?: string;
-  pr?: { number: number; state: string; title: string };
+  pr?: {
+    number: number;
+    state: string;
+    title: string;
+    /** R16-1: the PR's head sha. Defaults to the workspace HEAD (ours). */
+    headRefOid?: string;
+  };
   ghMissing?: boolean;
   /** `rev-parse --is-shallow-repository` answer (default: not shallow). */
   shallow?: boolean;
@@ -42,6 +51,12 @@ function fakeExec(config: {
   return async (file, args) => {
     if (file === "git" && args.includes("--is-shallow-repository")) {
       return { ok: true, stdout: config.shallow ? "true\n" : "false\n" };
+    }
+    if (file === "git" && args.includes("HEAD^{tree}")) {
+      return { ok: true, stdout: "7ee0000000000000000000000000000000000000\n" };
+    }
+    if (file === "git" && args.includes("rev-parse") && args.includes("HEAD") && !args.includes("--abbrev-ref")) {
+      return { ok: true, stdout: `${HEAD_SHA}\n` };
     }
     if (file === "git" && args.includes("rev-parse")) {
       return config.branch !== undefined
@@ -61,7 +76,13 @@ function fakeExec(config: {
         return { ok: false, stdout: "", stderr: "gh: not found", code: 127 };
       }
       return config.pr
-        ? { ok: true, stdout: JSON.stringify(config.pr) }
+        ? {
+            ok: true,
+            stdout: JSON.stringify({
+              headRefOid: HEAD_SHA,
+              ...config.pr,
+            }),
+          }
         : { ok: false, stdout: "", stderr: "no pull requests found", code: 1 };
     }
     return { ok: false, stdout: "", stderr: "unexpected", code: 1 };
@@ -380,6 +401,86 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
       "github.workspace.pr_linked",
     );
+  });
+
+  it("R16-1/H8: a MERGED PR found on the branch is never adopted — it is reported as a collision", async () => {
+    // The exact live failure (H8, 2026-08-04). `gh pr view <branch>` answers
+    // with the branch's newest PR whatever its state, and this path wrote it
+    // into `pr:` unconditionally: brand-new VIB-4 came out carrying
+    // `{number: 113, state: merged, title: "[VIB-4] Verify MCP tool…"}` — a PR
+    // merged a week earlier by an unrelated task that happened to use the same
+    // branch name. The reconciler then filled in checks 2/2 against it, because
+    // its own ownership test was satisfied by `fm.pr != null`.
+    // Canary: delete the `decidePrAdoption` branch and #113 lands in `pr:`.
+    const store = setupTask("ATL-3", { branch: BRANCH });
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      profileId: "developer",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: COMMITS,
+        pr: {
+          number: 113,
+          state: "MERGED",
+          title: "[VIB-4] Verify MCP tool and knowledge-base wiring",
+          headRefOid: "93435df0000000000000000000000000000000ff",
+        },
+      }),
+    });
+
+    expect(res.prLinked).toBe(false);
+    const parsed = readFm(store);
+    expect(parsed.frontmatter.pr, "a stranger's PR never becomes ours").toBeNull();
+    const note = parsed.timeline.find((e) => /Branch name collision/.test(e.text));
+    expect(note, "the collision is reported once").toBeTruthy();
+    expect(note!.text).toContain("#113");
+    expect(note!.text).toContain("already merged or closed");
+    // Deduped through the same marker the server reconciler uses, so the note
+    // does not repeat on the next run or poll tick.
+    expect(parsed.frontmatter.github?.unownedPr).toBe(113);
+    expect(listAuditEvents(store.db, {}).map((a) => a.action)).not.toContain(
+      "github.workspace.pr_linked",
+    );
+  });
+
+  it("R16-1: an OPEN PR on the branch whose head is not the delivered revision is not adopted either", async () => {
+    const store = setupTask("ATL-3", { branch: BRANCH });
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      profileId: "developer",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: COMMITS,
+        pr: {
+          number: 77,
+          state: "OPEN",
+          title: "someone else's work on the same branch name",
+          headRefOid: "ffffffffffffffffffffffffffffffffffffffff",
+        },
+      }),
+    });
+
+    expect(res.prLinked).toBe(false);
+    const parsed = readFm(store);
+    expect(parsed.frontmatter.pr).toBeNull();
+    // The branch and the delivered revision are still reconciled — refusing the
+    // PR must not cost the task its own delivery facts.
+    expect(parsed.frontmatter.branch).toBe(BRANCH);
+    expect(parsed.frontmatter.workRevision?.headSha).toBe(HEAD_SHA);
+    const note = parsed.timeline.find((e) => /Branch name collision/.test(e.text));
+    expect(note!.text).toContain("is not ATL-3's delivered revision");
   });
 
   it("does NOT re-link or ping-pong a PR the server already cached as \"review\"", async () => {

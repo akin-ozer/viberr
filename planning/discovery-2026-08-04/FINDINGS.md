@@ -174,6 +174,17 @@ Top queue (ask owner in batches during phase 2):
 - H14 `live` [NOT A BUG — recorded so a later pass doesn't re-file it] The active filter chip appears blank in CDP
   screenshots and `getComputedStyle` can report color == background. Both are harness artifacts (transition snap +
   the stale-computed-style trap). A fresh read gives `rgb(27,29,37)` on `rgb(236,238,244)`. Verify CSS conclusions twice.
+- H15 `fixed-in-pass` [F17 resolved] Seeded Developer/Reviewer profiles rendered
+  `Global base · customized for Viberr Core` — a workspace name that exists nowhere in the product (it is a
+  literal from the design mock; `notifications-page.tsx:23` documents the same mock literal as one that must be
+  replaced). Meanwhile the app's own profile writer (`gagents.server.ts:282`) uses the honest `Global base`.
+  Fixed: seeded profiles now use `Global base`, matching what the app writes for every profile a user creates.
+- H16 `live` [NOT A BUG — recorded so it is not "fixed" later] The seeded catalog grants KB dirs
+  `architecture-notes` / `api-contracts`, which do NOT exist in a boot-backfilled store — but this is already
+  handled: `default-assets.server.ts:238-253` strips KB grants on the backfill path (`kbGrants: false`) precisely
+  so they cannot dangle as an "N of 0" ghost, and `npm run seed` creates the backing dirs via `seedOrgResources`
+  (`org-seed.server.ts:63,108`). Verified live: the clean-sheet instance shows Knowledge bases 0 and profiles
+  with only their skill attached. I started "fixing" this and reverted — the mechanism is correct.
 - H7 `live` Invited local users are gated by pwreset (`readiness` of accounts): sign-in succeeds but every page 302s
   to /login until intent=set-password completes. Correct behavior, but the "setup pending" pill is the only UI hint;
   admin-facing copy could say the user must set a password at first sign-in before they can be assigned work.

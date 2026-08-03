@@ -89,11 +89,17 @@ function OwnerControl({
 }) {
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
-  const admin = myRole === "admin";
   // Q5 tiering (XS-12): only contributor+ may take/hold ownership — a viewer is
   // read + comment only, so its take/hand-off buttons would just 403. Gate the
   // controls the same way the server does rather than render a button that fails.
   const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  // E3: managing SOMEONE ELSE's owner seat is `release-any-ownership` — what
+  // `setOwner`/`releaseOwner` actually check. `myRole === "admin"` was a copy of
+  // one row of the matrix that would drift the moment the row moved.
+  const canManageOthersOwnership = roleCan(
+    myRole as ProjectRole | null,
+    "release-any-ownership",
+  );
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -133,9 +139,9 @@ function OwnerControl({
     );
   }
 
-  // Hand-off requires owner-or-admin (owner-assign); only the owner or an admin
-  // sees the candidate list.
-  const canHandOff = mine || admin;
+  // Hand-off requires being the current owner or holding the manage-others tier
+  // (setOwner's own test); only those two see the candidate list.
+  const canHandOff = mine || canManageOthersOwnership;
   // Hand-off candidates: active members minus the current owner and me, and —
   // F10-13 — only members who can actually OWN a task (contributor or above).
   // The server rejects a hand-off to a viewer ("own-task"), so the picker must
@@ -151,7 +157,7 @@ function OwnerControl({
 
   // Nothing this user can do to ownership → no Manage control (Q5, XS-12): a
   // viewer can't take over, hand off, or release.
-  if (!canOwn && !admin) {
+  if (!canOwn && !canManageOthersOwnership) {
     return null;
   }
 
@@ -217,7 +223,7 @@ function OwnerControl({
               </button>
             </>
           )}
-          {!mine && admin && (
+          {!mine && canManageOthersOwnership && (
             <>
               <div className="menu-sep" />
               <button

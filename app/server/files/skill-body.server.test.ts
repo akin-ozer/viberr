@@ -1,8 +1,13 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { SKILL_INJECTION_BUDGET, readSkillBody } from "./skill-body.server";
+import {
+  SKILL_INJECTION_BUDGET,
+  readSkillBodies,
+  readSkillBody,
+  readSkillBodyDetailed,
+} from "./skill-body.server";
 
 /**
  * P14-KM-03: skill injection was the one unbounded prompt input. KBs have been
@@ -61,5 +66,135 @@ describe("readSkillBody", () => {
     const body = readSkillBody("craft", dataRoot);
     expect(body.length).toBeLessThan(SKILL_INJECTION_BUDGET + 300);
     expect(body).toContain("skill truncated");
+  });
+});
+
+/**
+ * A5/pass-16 — a skill body is injected under the "Attached resources (trusted
+ * — configured for you)" banner, i.e. the run is explicitly told to follow its
+ * instructions. `readKbBody` has refused to follow symlinks out of the store
+ * since F9 and every other store path agreed after P14-RV-02; this reader
+ * dereferenced them, so a symlinked SKILL.md (or skill folder) put arbitrary
+ * host content into the model's context AS TRUSTED PERSONA.
+ */
+describe("readSkillBody — store containment (A5)", () => {
+  function outsideFile(body: string): string {
+    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    writeFileSync(path.join(outside, "SKILL.md"), body, "utf8");
+    return outside;
+  }
+
+  it("refuses a symlinked SKILL.md instead of injecting the link target", () => {
+    const { dataRoot, skillDir } = freshSkill();
+    const outside = outsideFile("MARKER-EVIL-INSTRUCTIONS");
+    symlinkSync(path.join(outside, "SKILL.md"), path.join(skillDir, "SKILL.md"));
+    const detailed = readSkillBodyDetailed("craft", dataRoot);
+    expect(detailed.body).toBe("");
+    expect(detailed.body).not.toContain("MARKER-EVIL-INSTRUCTIONS");
+    expect(detailed.unresolved?.reason).toContain("symlink");
+  });
+
+  it("refuses a skill FOLDER that is a symlink out of the store", () => {
+    const { dataRoot } = freshSkill();
+    const outside = outsideFile("MARKER-EVIL-FOLDER");
+    symlinkSync(outside, path.join(dataRoot, "skills", "linked"));
+    const detailed = readSkillBodyDetailed("linked", dataRoot);
+    expect(detailed.body).toBe("");
+    expect(readSkillBody("linked", dataRoot)).not.toContain("MARKER-EVIL-FOLDER");
+    expect(detailed.unresolved?.reason).toContain("symlink");
+  });
+
+  it("a real SKILL.md in a real folder still reads (containment is not a ban)", () => {
+    const { dataRoot, skillDir } = freshSkill();
+    writeFileSync(path.join(skillDir, "SKILL.md"), "MARKER-REAL", "utf8");
+    expect(readSkillBody("craft", dataRoot)).toContain("MARKER-REAL");
+  });
+});
+
+/**
+ * C1/pass-16 — a skill grant that resolves to nothing used to be a
+ * `logger.warn` and nothing else, so a typo'd or renamed skill folder was
+ * invisible to the run while every UI still showed it attached.
+ */
+describe("readSkillBodyDetailed — structured misses (C1)", () => {
+  it("names a missing skill folder as an unresolved grant", () => {
+    const { dataRoot } = freshSkill();
+    const detailed = readSkillBodyDetailed("typo-expertise", dataRoot);
+    expect(detailed.body).toBe("");
+    expect(detailed.unresolved).toEqual({
+      name: "typo-expertise",
+      reason: "no skill folder by that name in the store",
+    });
+  });
+
+  it("names a folder that exists but ships no SKILL.md", () => {
+    const { dataRoot } = freshSkill();
+    expect(readSkillBodyDetailed("craft", dataRoot).unresolved?.reason).toBe(
+      "its folder holds no SKILL.md",
+    );
+  });
+
+  it("a traversal-shaped grant is DENIED, never escaped", () => {
+    const { dataRoot } = freshSkill();
+    const detailed = readSkillBodyDetailed("../../projects", dataRoot);
+    expect(detailed.body).toBe("");
+    expect(detailed.unresolved?.name).toBe("../../projects");
+  });
+
+  it("a resolvable skill carries NO unresolved row", () => {
+    const { dataRoot, skillDir } = freshSkill();
+    writeFileSync(path.join(skillDir, "SKILL.md"), "MARKER", "utf8");
+    expect(readSkillBodyDetailed("craft", dataRoot).unresolved).toBeUndefined();
+  });
+});
+
+/**
+ * C2/pass-16 — the skill budget was PER SKILL: it re-armed on every call inside
+ * the caller's loop, so N skills contributed N × 24k. The KB leg has spent one
+ * shared budget since F9 precisely to prevent that.
+ */
+describe("readSkillBodies — ONE shared budget (C2)", () => {
+  function skillWith(dataRoot: string, name: string, body: string): void {
+    const dir = path.join(dataRoot, "skills", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "SKILL.md"), body, "utf8");
+  }
+
+  it("later skills draw from what earlier ones left — total is bounded", () => {
+    const { dataRoot } = freshSkill();
+    skillWith(dataRoot, "one", "A".repeat(400));
+    skillWith(dataRoot, "two", "B".repeat(400));
+    skillWith(dataRoot, "three", "C".repeat(400));
+
+    const set = readSkillBodies(["one", "two", "three"], dataRoot, 500);
+    const total = set.parts.reduce((n, p) => n + p.body.length, 0);
+    // Per-skill budgeting would have produced ~1200 chars of content; the shared
+    // budget keeps the injected content at/below the cap (plus honest markers).
+    expect(
+      set.parts.reduce(
+        (n, p) => n + (p.body.includes("omitted entirely") ? 0 : p.body.length),
+        0,
+      ),
+    ).toBeLessThanOrEqual(500 + 200);
+    expect(total).toBeLessThan(1200);
+  });
+
+  it("a skill squeezed out entirely announces itself and is reported unresolved", () => {
+    const { dataRoot } = freshSkill();
+    skillWith(dataRoot, "one", "A".repeat(400));
+    skillWith(dataRoot, "two", "B".repeat(400));
+
+    const set = readSkillBodies(["one", "two"], dataRoot, 400);
+    expect(set.parts[0]!.body).toBe("A".repeat(400));
+    expect(set.parts[1]!.body).toContain("omitted entirely");
+    expect(set.unresolved.map((u) => u.name)).toEqual(["two"]);
+  });
+
+  it("collects misses across the whole declared list", () => {
+    const { dataRoot } = freshSkill();
+    skillWith(dataRoot, "one", "real");
+    const set = readSkillBodies(["one", "ghost"], dataRoot);
+    expect(set.parts.map((p) => p.name)).toEqual(["one"]);
+    expect(set.unresolved.map((u) => u.name)).toEqual(["ghost"]);
   });
 });

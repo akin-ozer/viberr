@@ -7,6 +7,7 @@ import {
 } from "~/server/auth/form-action.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
+import { requireVisibleProject } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
 import {
   runClearCredential,
@@ -40,6 +41,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
 export async function action({ request, params }: Route.ActionArgs) {
   const { db, actor, intent } = await requireFormAction(request);
+
+  // E2 (pass 16): the layout loader does not run for an action, so the
+  // members-only gate is repeated here — otherwise a signed-in non-member got a
+  // 403 that confirms the project exists while every other surface answered 404.
+  requireVisibleProject(db, params.slug, actor, "act on this project");
 
   // RBAC — the single guard path (project-authority.server) consulting the
   // ACTION_ROLES source (rbac.ts), never a hardcoded role string, so the

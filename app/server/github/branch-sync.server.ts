@@ -7,7 +7,7 @@ import {
   resolveTaskFilePath,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import type { GithubClient } from "./github-client.server";
+import { encodeRefPath, type GithubClient } from "./github-client.server";
 import {
   getProjectGithubContext,
   type GithubContextFailure,
@@ -204,7 +204,7 @@ export async function ensureTaskBranch(
   // 1. Does the ref already exist? (idempotency first)
   const existing = await gh.client.request<GhRef>(
     "GET",
-    `/repos/${gh.repo}/git/ref/${encodeURIComponent(`heads/${branch}`)}`,
+    `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${branch}`)}`,
   );
   let created = false;
   if (!existing.ok) {
@@ -218,7 +218,7 @@ export async function ensureTaskBranch(
       // 2. Resolve the default branch head…
       const baseRef = await gh.client.request<GhRef>(
         "GET",
-        `/repos/${gh.repo}/git/ref/${encodeURIComponent(`heads/${gh.defaultBranch}`)}`,
+        `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${gh.defaultBranch}`)}`,
       );
       if (!baseRef.ok) {
         if (baseRef.kind === "http" && baseRef.status === 404) {
