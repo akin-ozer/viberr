@@ -1658,11 +1658,18 @@ Things an implementer will trip over, and things that look wrong. Each is code-v
     `.json .yaml .yml`; `KB_TEXT_EXTENSIONS` (`kb-injection.server.ts:37`) does not. You can
     author a `.json` KB doc in-app; it lands on disk and is invisible to every run. The
     `injectableCount` is honest, but the authoring surface offers a dead-end format.
-26. **`scanStoreTree` follows symlinks; `readKbBody` refuses to.**
-    `store-files.server.ts:58-87` uses `statSync` (dereferences), so a symlinked file/dir
-    inside a KB is displayed and counted in `fileCount`/`injectableCount`
-    (`countInjectableDocs:205` has no link check) while `collectKbDocs:110` skips it. The
-    browser can promise content no run receives.
+26. ~~**`scanStoreTree` follows symlinks; `readKbBody` refuses to.**~~
+    **CORRECTED 2026-08-04 (pass 16, verified empirically) — this claim was wrong, and the
+    real hole ran the other way.** `scanStoreTree` does NOT dereference: it reads with
+    `readdirSync(…, {withFileTypes:true})`, which is lstat-based, so a symlinked entry is
+    neither `isDirectory()` nor `isFile()` and is skipped. The actual dereferencing path was
+    `subDirNames` (`resources.server.ts:98`), which used `statSync` — so a symlinked
+    `kb/<dir>` was listed as a first-class knowledge base, and `readKbBody` followed it too,
+    because `collectKbDocs` realpaths the *root* and therefore measured containment against
+    the link target. Fixed in pass 16: `subDirNames` uses Dirent, `readKbBodyDetailed`
+    refuses a symlinked KB folder, and `scanStoreTree` gained an explicit
+    `isSymbolicLink()` filter plus a depth cap as a regression guard. Left here rather than
+    deleted so a later pass does not re-derive the original, incorrect reading.
 27. **MCP tools are ungoverned by the capability system.** No `mcp__*` deny rule exists in
     `specialist-tool-policy.ts`; the only control is prompt text
     (`specialist-run.server.ts:1162-1179`). An org MCP with write powers is reachable by any

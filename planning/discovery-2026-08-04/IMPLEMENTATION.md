@@ -13,6 +13,42 @@ Four workstreams, disjoint file ownership so they can run concurrently.
 | WS3 runtime/resources | `app/server/runtimes/**` (minus operator-run, run-recovery), `org/**`, `secrets/**`, `files/**`, `tasks/specialist-*`, `tasks/agent-toolkit`, `package.json` | A1 (env leak in model probe), A5 (skill symlink containment), A8 (destructive scope probe), A9 (silent MCP cred downgrade), C1 (silent KB/skill grant misses), C2 (skill budget), C4 (rename/watcher race), C5, C6 (phantom dep), D1 (Codex home misconfig diagnostic), D2 |
 | WS4 RBAC/board | `app/shared/rbac.ts`, `features/policy/**`, `features/board/**`, `routes/project.board.tsx`, `auth/project-authority`, `auth/csrf`, review-queue projection | E1 (display contradicts enforcement), E2 (403 leak), E5 (fail-open predicate), R16-2 (attention filter + rename), CSRF origin fail-closed, RBAC test matrix for 8 undriven actions |
 
+### Wave 1 outcome — LANDED (commit `5e03c6e`, 89 files, +6331/−661)
+
+Gates at commit: **2609 unit tests / 209 files green, `npm run typecheck` clean.**
+
+Highlights beyond the literal backlog items:
+
+- **R16-1 was traced to its real source.** The reconciler was only one of three adoption
+  sites; `workspace-delivery.server.ts` was what actually bound PR #113 to VIB-4 (it asked
+  `gh pr view <branch>` and took whatever came back, any state). One rule now governs all
+  three: `app/server/github/pr-adoption.server.ts`, adopting only an OPEN PR whose head sha
+  IS the delivered revision — identity, not containment, deliberately stricter than the
+  acceptance gate (which tolerates a commit on top of the delivery).
+- **A2 was fixed structurally**, not per-caller: the head gate moved inside
+  `applyAcceptanceWrite`, the shared Done write, so `operatorAcceptCompletion` is covered
+  without editing the operator, and force cannot relax it. Because a network read cannot
+  run under the file lock, the verified (PR, revision) pair is re-asserted inside the lock.
+- **E1 was fixed by deleting the concept**, not editing the sentence: `appWide` is gone from
+  `rbac.ts`, so the Policy table, the Profile page and the task Permissions panel now all
+  read the one matrix and cannot drift apart again.
+- **The action matrix itself is now pinned** (`policy-rbac.server.test.ts`). The existing
+  matrix test derived its expectation from the same map it guarded, so widening a tier
+  passed silently — proven by canary, then closed.
+- **A1 was a live credential leak**, not a theoretical one: the Claude model probe spawned
+  with the full server environment (GitHub PAT, session secret, encryption key, every
+  provider key) and the operator's own `~/.claude`, reachable from the agent-edit UI.
+
+Corrections made to this pass's own documents (recorded so they are not re-derived):
+
+- `DOMAIN-MODEL.md` §12 item 26 was wrong about `scanStoreTree`; the real symlink hole was
+  `subDirNames`, in the opposite direction. Corrected in place.
+- A "phantom KB grant" I started fixing in the seed catalog is already handled by
+  `default-assets.server.ts` (`kbGrants: false` on the backfill path). Reverted; recorded as
+  FINDINGS H16 so it is not "fixed" again.
+- An apparent contrast bug and an apparent mention-menu bug were both harness artifacts
+  (stale `getComputedStyle`; the menu deliberately requires one character after `@`).
+
 ## Wave 2 — UI/UX (R16-4: then the full UI list)
 
 Source: UI-INVENTORY.md §8 (27 rough edges) + live walkthrough items F1–F20 in FINDINGS.md.
