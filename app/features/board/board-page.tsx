@@ -1,5 +1,4 @@
 import {
-  type DragEvent,
   Fragment,
   useEffect,
   useMemo,
@@ -11,6 +10,25 @@ import {
   useFetcher,
   useSearchParams,
 } from "react-router";
+import {
+  DragDropProvider,
+  KeyboardSensor,
+  PointerSensor,
+  useDroppable,
+  type DragEndEvent,
+  type DragMoveEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/react";
+import { useSortable } from "@dnd-kit/react/sortable";
+import { OptimisticSortingPlugin } from "@dnd-kit/dom/sortable";
+import {
+  Accessibility,
+  defaultPreset,
+  Feedback,
+  PointerActivationConstraints,
+} from "@dnd-kit/dom";
+import { resolveBoardDrop } from "./board-dnd";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -58,6 +76,50 @@ export interface BoardColumnData {
   stage: BoardStage;
   tasks: TaskSummary[];
 }
+
+/** Data carried by every card sortable so the drag handlers can refine the
+ *  insertion slot without global lookups. */
+interface CardDragData {
+  nextKey: string | null;
+  [key: string]: unknown;
+}
+
+/* Drag-and-drop configuration (dnd-kit).
+ *
+ * The whole card stays the drag surface — no grip handle. A small pointer
+ * distance keeps plain clicks navigating to the task; touch requires a short
+ * press so column scrolling is not hijacked. Escape cancels a lifted drag. */
+const BOARD_SENSORS = [
+  PointerSensor.configure({
+    // The card face is a Link, and the sensor's default refuses to lift from
+    // inside interactive elements — which would demand a grip handle. Only
+    // real controls (the StageMenu button) opt out of dragging.
+    preventActivation: (event: PointerEvent) => {
+      const target = event.target;
+      return (
+        target instanceof Element &&
+        Boolean(target.closest("button, input, select, textarea"))
+      );
+    },
+    // Mouse is distance-only (the default's hold-to-lift delay would swallow
+    // a slow press-and-release on the link, which must stay a navigation);
+    // touch keeps the long-press so column scrolling is never hijacked.
+    activationConstraints: (event: PointerEvent) =>
+      event.pointerType === "touch"
+        ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
+        : [new PointerActivationConstraints.Distance({ value: 5 })],
+  }),
+  KeyboardSensor,
+];
+
+/* No ARIA decoration on the cards: the plugin's role="button" on the card
+ * wrapper nests the task link and StageMenu inside an interactive control
+ * (axe: nested-interactive, serious). The board's accessible move path is,
+ * and stays, the StageMenu (F10-25 — drag is pointer-only); dragging is a
+ * pointer/touch enhancement on top of it. */
+const BOARD_PLUGINS = defaultPreset.plugins.filter(
+  (plugin) => plugin !== Accessibility,
+);
 
 function WaitTag({ task }: { task: TaskSummary }) {
   if (task.waiting === "agent") {
@@ -129,12 +191,9 @@ function ReviewerStack({ task, label }: { task: TaskSummary; label?: boolean }) 
 function TaskCard({
   task,
   nextKey,
+  index,
   canTransition,
-  dragging,
   arrived,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
   allStages,
   onMoveTask,
 }: {
@@ -142,36 +201,41 @@ function TaskCard({
   /** The key of the card immediately below this one (null when last) — used to
    *  resolve "drop below this card" into an insertion slot. */
   nextKey: string | null;
+  /** Visible position within the column (sortable registration). */
+  index: number;
   /** admin|maintainer — makes the card draggable between stage columns. */
   canTransition: boolean;
-  /** This card is the one being dragged (rendered as a faded ghost in place). */
-  dragging: boolean;
   /** This card just landed here from a drop (plays the arrival pulse). */
   arrived: boolean;
-  onDragStart: (task: TaskSummary, e: DragEvent) => void;
-  onDragEnd: () => void;
-  onDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
   /** F10-25: all stages, for the keyboard-accessible "Move to stage" menu. */
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
+  // The card is both drag source and drop target (insert-before-this-card).
+  // Clone feedback keeps today's model: the original stays as a faded ghost
+  // (`.dragging`) while a visual clone follows the pointer. Optimistic
+  // sorting is OFF — the board never reorders client-side; the DropPreview
+  // shows the requested slot and the server's answer is the only commit.
+  const { ref, isDragSource } = useSortable<CardDragData>({
+    id: task.key,
+    group: task.stage,
+    index,
+    data: { nextKey },
+    disabled: !canTransition,
+    plugins: (defaults) => [
+      ...defaults.filter((plugin) => plugin !== OptimisticSortingPlugin),
+      Feedback.configure({ feedback: "clone" }),
+    ],
+  });
   const cls = ["card"];
   if (task.waiting === "human") cls.push("wait-human");
   if (task.urgent) cls.push("urgent");
   const wrapCls = ["card-wrap"];
   if (canTransition) wrapCls.push("draggable");
-  if (dragging) wrapCls.push("dragging");
+  if (isDragSource) wrapCls.push("dragging");
   if (arrived) wrapCls.push("just-arrived");
   return (
-    <div
-      className={wrapCls.join(" ")}
-      draggable={canTransition}
-      onDragStart={canTransition ? (e) => onDragStart(task, e) : undefined}
-      onDragEnd={canTransition ? onDragEnd : undefined}
-      onDragOver={
-        canTransition ? (e) => onDragOver(task, nextKey, e) : undefined
-      }
-    >
+    <div className={wrapCls.join(" ")} ref={ref}>
       <Link
         className={cls.join(" ")}
         to={`/projects/${task.projectSlug}/tasks/${task.key}`}
@@ -277,16 +341,10 @@ function Column({
   canCreate,
   canTransition,
   onNew,
-  draggingKey,
   arrivedKey,
   dropTarget,
   previewTask,
   beforeKey,
-  onCardDragStart,
-  onCardDragEnd,
-  onCardDragOver,
-  onColumnDragOver,
-  onColumnDrop,
   allStages,
   onMoveTask,
   emptyCopy,
@@ -301,28 +359,28 @@ function Column({
   canCreate: boolean;
   canTransition: boolean;
   onNew: () => void;
-  draggingKey: string | null;
   arrivedKey: string | null;
   /** This column is the current drop target (highlight + show the preview). */
   dropTarget: boolean;
   previewTask: TaskSummary | null;
   /** Insertion slot: render the preview before this card (null = column end). */
   beforeKey: string | null;
-  onCardDragStart: (task: TaskSummary, e: DragEvent) => void;
-  onCardDragEnd: () => void;
-  onCardDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
-  onColumnDragOver: (stageId: string, e: DragEvent) => void;
-  onColumnDrop: (stageId: string, e: DragEvent) => void;
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
+  // Explicit column target so empty stages (and the blank space under the
+  // cards) accept drops. Priority 1 (Low) — an over-card collision (Normal, 2)
+  // always wins over the containing column.
+  const { ref } = useDroppable({
+    id: `stage:${stage.id}`,
+    collisionPriority: 1,
+  });
   const showPreview = dropTarget && previewTask !== null;
   const preview = showPreview ? <DropPreview task={previewTask!} /> : null;
   return (
     <section
       className={"column" + (dropTarget ? " drop-over" : "")}
-      onDragOver={(e) => onColumnDragOver(stage.id, e)}
-      onDrop={(e) => onColumnDrop(stage.id, e)}
+      ref={ref}
     >
       <header className="col-head">
         <span className="col-stage-dot" style={{ background: stage.color }} />
@@ -351,12 +409,9 @@ function Column({
                 <TaskCard
                   task={t}
                   nextKey={tasks[i + 1]?.key ?? null}
+                  index={i}
                   canTransition={canTransition}
-                  dragging={draggingKey === t.key}
                   arrived={arrivedKey === t.key}
-                  onDragStart={onCardDragStart}
-                  onDragEnd={onCardDragEnd}
-                  onDragOver={onCardDragOver}
                   allStages={allStages}
                   onMoveTask={onMoveTask}
                 />
@@ -844,11 +899,6 @@ function StageBoard({
   beforeKey,
   arrivedKey,
   draggedTask,
-  onCardDragStart,
-  onCardDragEnd,
-  onCardDragOver,
-  onColumnDragOver,
-  onColumnDrop,
   onMoveTask,
   emptyCopyFor,
 }: {
@@ -865,12 +915,7 @@ function StageBoard({
   beforeKey: string | null;
   arrivedKey: string | null;
   draggedTask: TaskSummary | null;
-  onCardDragStart: (task: TaskSummary, e: DragEvent) => void;
-  onCardDragEnd: () => void;
-  onCardDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
-  onColumnDragOver: (stageId: string, e: DragEvent) => void;
-  onColumnDrop: (stageId: string, e: DragEvent) => void;
-  /** F10-25: keyboard-accessible stage move (drag is pointer-only). */
+  /** F10-25: the StageMenu move — the always-available non-drag path. */
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
   // All stages, for the per-card keyboard "Move to stage" menu (F10-25).
@@ -898,16 +943,10 @@ function StageBoard({
             canCreate={canCreate}
             canTransition={canTransition}
             onNew={() => onNew(c.stage.id)}
-            draggingKey={drag?.key ?? null}
             arrivedKey={arrivedKey}
             dropTarget={hovered}
             previewTask={hovered ? draggedTask : null}
             beforeKey={beforeKey}
-            onCardDragStart={onCardDragStart}
-            onCardDragEnd={onCardDragEnd}
-            onCardDragOver={onCardDragOver}
-            onColumnDragOver={onColumnDragOver}
-            onColumnDrop={onColumnDrop}
             allStages={allStages}
             onMoveTask={onMoveTask}
           />
@@ -962,78 +1001,78 @@ export function BoardPage({
   const [arrivedKey, setArrivedKey] = useState<string | null>(null);
   const moveDone = useRef<unknown>(null);
 
-  const onCardDragStart = (task: TaskSummary, e: DragEvent) => {
-    setDrag({ key: task.key, fromStage: task.stage });
-    setOverStage(task.stage);
-    setBeforeKey(null);
-    try {
-      e.dataTransfer.effectAllowed = "move";
-      // Some browsers require data to be set for a drag to begin (Firefox).
-      e.dataTransfer.setData("text/plain", task.key);
-    } catch {
-      // dataTransfer unavailable — the drag still works via component state.
-    }
-  };
-  // Fires on both a successful drop and a cancel (drop outside any column) —
-  // clears the drag visuals, reverting the optimistic move on cancel.
-  const onCardDragEnd = () => {
-    setDrag(null);
-    setOverStage(null);
+  // dnd-kit event flow → the same drag state machine the visuals always used.
+  // A card target proposes "insert before that card"; onDragMove refines it
+  // against the pointer's vertical midpoint (top half → before it, bottom
+  // half → before the next one). Keyboard drags get no move events, so the
+  // card-target proposal stands as-is — deterministic and announced.
+  const onDragStart = (event: DragStartEvent) => {
+    const key = String(event.operation.source?.id ?? "");
+    const t = allTasks.find((x) => x.key === key);
+    if (!t) return;
+    setDrag({ key, fromStage: t.stage });
+    setOverStage(t.stage);
     setBeforeKey(null);
   };
-  // Per-card: the precise insertion slot from the pointer vs the card's vertical
-  // midpoint (top half → before this card; bottom half → before the next one).
-  const onCardDragOver = (
-    task: TaskSummary,
-    nextKey: string | null,
-    e: DragEvent,
-  ) => {
-    if (!drag) return;
-    e.preventDefault();
-    e.stopPropagation(); // keep the column handler from coarsening the slot
-    e.dataTransfer.dropEffect = "move";
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const before =
-      e.clientY < rect.top + rect.height / 2 ? task.key : nextKey;
-    if (overStage !== task.stage) setOverStage(task.stage);
-    if (beforeKey !== before) setBeforeKey(before);
-  };
-  // Column body / empty space: allow the drop; entering a NEW column defaults to
-  // the end until a card refines the slot.
-  const onColumnDragOver = (stageId: string, e: DragEvent) => {
-    if (!drag) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (overStage !== stageId) {
-      setOverStage(stageId);
+  const onDragOver = (event: DragOverEvent) => {
+    const target = event.operation.target;
+    if (!target) {
+      setOverStage(null);
       setBeforeKey(null);
+      return;
     }
+    const id = String(target.id);
+    if (id.startsWith("stage:")) {
+      // Column body / empty space: default to the end until a card refines it.
+      setOverStage(id.slice("stage:".length));
+      setBeforeKey(null);
+      return;
+    }
+    const t = allTasks.find((x) => x.key === id);
+    if (!t) return;
+    setOverStage(t.stage);
+    setBeforeKey(id);
   };
-  const onColumnDrop = (stageId: string, e: DragEvent) => {
-    if (!drag) return;
-    e.preventDefault();
-    const { key, fromStage } = drag;
-    const target = beforeKey;
+  const onDragMove = (event: DragMoveEvent) => {
+    const target = event.operation.target;
+    if (!target || String(target.id).startsWith("stage:")) return;
+    const element = target.element;
+    const y = event.operation.position.current.y;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
+    const key = String(target.id);
+    const nextKey =
+      (target.data as Partial<CardDragData> | undefined)?.nextKey ?? null;
+    const before = y < rect.top + rect.height / 2 ? key : nextKey;
+    setBeforeKey((prev) => (prev === before ? prev : before));
+  };
+  // Fires on drop AND cancel (Escape, released outside a column). The server
+  // stays authoritative: nothing commits client-side; a resolved drop submits
+  // the governed reorder and revalidation applies the server's order.
+  const onDragEnd = (event: DragEndEvent) => {
+    const active = drag;
     setDrag(null);
     setOverStage(null);
     setBeforeKey(null);
-    // Same-stage no-op: dropped exactly where it already sits (before itself, or
-    // before the card that already follows it).
-    if (stageId === fromStage) {
-      const orderedKeys = visible(
-        columns.find((c) => c.stage.id === fromStage)?.tasks ?? [],
-      ).map((t) => t.key);
-      const di = orderedKeys.indexOf(key);
-      const afterDragged = di >= 0 ? (orderedKeys[di + 1] ?? null) : null;
-      if (target === key || target === afterDragged) return;
-    }
-    setArrivedKey(key);
+    if (!active || event.canceled) return;
+    const resolution = resolveBoardDrop({
+      dragKey: active.key,
+      fromStage: active.fromStage,
+      overStage,
+      beforeKey,
+      columns: columns.map((c) => ({
+        stageId: c.stage.id,
+        keys: visible(c.tasks).map((t) => t.key),
+      })),
+    });
+    if (!resolution) return;
+    setArrivedKey(active.key);
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "reorder");
-    fd.set("taskKey", key);
-    fd.set("to", stageId);
-    fd.set("beforeKey", target ?? "");
+    fd.set("taskKey", active.key);
+    fd.set("to", resolution.to);
+    fd.set("beforeKey", resolution.beforeKey ?? "");
     transitionFetcher.submit(fd, { method: "post" });
   };
 
@@ -1217,26 +1256,30 @@ export function BoardPage({
       {orphanTasks.length > 0 && <OrphanBanner orphanTasks={orphanTasks} />}
 
       {group === "stage" ? (
-        <StageBoard
-          columns={columns}
-          visible={visible}
-          emptyCopyFor={emptyCopyFor}
-          doneStageId={doneStageId}
-          canCreate={canCreate}
-          canTransition={canTransition}
-          onNew={(stageId) => setCreating(stageId)}
-          drag={drag}
-          overStage={overStage}
-          beforeKey={beforeKey}
-          arrivedKey={arrivedKey}
-          draggedTask={draggedTask}
-          onCardDragStart={onCardDragStart}
-          onCardDragEnd={onCardDragEnd}
-          onCardDragOver={onCardDragOver}
-          onColumnDragOver={onColumnDragOver}
-          onColumnDrop={onColumnDrop}
-          onMoveTask={onMoveTask}
-        />
+        <DragDropProvider
+          sensors={BOARD_SENSORS}
+          plugins={BOARD_PLUGINS}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+        >
+          <StageBoard
+            columns={columns}
+            visible={visible}
+            emptyCopyFor={emptyCopyFor}
+            doneStageId={doneStageId}
+            canCreate={canCreate}
+            canTransition={canTransition}
+            onNew={(stageId) => setCreating(stageId)}
+            drag={drag}
+            overStage={overStage}
+            beforeKey={beforeKey}
+            arrivedKey={arrivedKey}
+            draggedTask={draggedTask}
+            onMoveTask={onMoveTask}
+          />
+        </DragDropProvider>
       ) : (
         <ListView
           tasks={visible(allTasks)}

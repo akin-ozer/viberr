@@ -1,5 +1,5 @@
 /**
- * Vitest setup: jsdom (29.x) still ships HTMLDialogElement without the
+ * Vitest setup: jsdom still ships HTMLDialogElement without the
  * showModal()/show()/close() methods the app's native <dialog> modals use.
  * Polyfill just enough for component tests: toggle the `open` attribute and
  * fire the `close` event. No-op under the node environment.
@@ -19,4 +19,18 @@ if (typeof window !== "undefined" && typeof window.HTMLDialogElement !== "undefi
       this.dispatchEvent(new window.Event("close"));
     };
   }
+}
+
+/**
+ * jsdom has no ResizeObserver; dnd-kit (board drag-and-drop) references it on
+ * import. Component tests never exercise real geometry, so an inert stub is
+ * the honest shape.
+ */
+if (typeof window !== "undefined" && typeof window.ResizeObserver === "undefined") {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 }
