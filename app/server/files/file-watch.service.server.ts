@@ -1,6 +1,7 @@
 import path from "node:path";
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
+import { watch, type FSWatcher } from "chokidar";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
@@ -9,11 +10,21 @@ import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-
 /**
  * Watches ${dataRoot}/projects and incrementally rebuilds projections.
  *
+ * The event source is chokidar (typed add/change/unlink/unlinkDir events,
+ * atomic-write coalescing, portable recursive watching); everything domain —
+ * debounce, ignore rules, projection rebuilds, removal reconciliation,
+ * lifecycle — stays Viberr code.
+ *
  * - 250 ms trailing debounce per path (editors fire bursts of events);
  * - ignores dotfiles and `*.tmp` (our atomic-write staging files);
  * - reconciles task/project rows after directory removals;
  * - clears a failed watcher so the health route reports it accurately;
  * - started from server boot in dev AND prod;
+ * - `ignoreInitial: true` pairs with the boot rescan: offline drift is
+ *   reconciled before the watcher starts, so the initial scan emits nothing.
+ *   (An external edit landing inside the sub-second initial scan window is
+ *   picked up on its next touch or a manual rescan — route actions project
+ *   synchronously and never depend on the watcher.)
  * - HMR-safe: the watcher handle lives behind a global symbol — a module
  *   reload reuses the running watcher instead of stacking a duplicate.
  */
@@ -107,7 +118,7 @@ export function startFileWatcher(
     lc.generation += 1;
     cancelAll(existing.fileTimers);
     cancelAll(existing.dirTimers);
-    existing.watcher.close();
+    void existing.watcher.close();
   }
 
   const resolveDb = () => options.db ?? getDb();
@@ -147,11 +158,8 @@ export function startFileWatcher(
       const db = resolveDb();
       const rel = path.relative(watchedDir, absDir);
       if (rel.startsWith("..")) return;
-      // F15-03: `rename` fires for directory CREATION too, so creating a
-      // project logged "watcher reconciled removed directory" for the directory
-      // that had just appeared and re-read every task of that project. A
-      // directory that is still there was not removed — the file-level handlers
-      // already project its contents.
+      // A directory that is back on disk was not removed (or was already
+      // recreated) — the file-level handlers project its contents.
       if (existsSync(absDir)) return;
       const segments = rel === "" ? [] : rel.split(path.sep);
 
@@ -201,30 +209,45 @@ export function startFileWatcher(
     }
   };
 
-  const onChange = (event: "rename" | "change", filename: string | null) => {
-    if (!filename) {
-      schedule(dirTimers, watchedDir, rebuildDir);
-      return;
-    }
-    const absPath = path.resolve(watchedDir, filename);
-    if (shouldIgnoreWatchPath(watchedDir, absPath)) return;
+  // Chokidar delivers typed events with real paths — no rename inference.
+  // The ignore matcher prunes traversal too, keeping the watcher out of
+  // workspace clones entirely (F-SPAWN1).
+  const onFile = (eventPath: string) => {
+    const absPath = path.resolve(watchedDir, eventPath);
     const base = path.basename(absPath);
     if (base === "project.md" || base === "task.md") {
       schedule(fileTimers, absPath, rebuildFile);
     }
-    if (event === "rename") schedule(dirTimers, absPath, rebuildDir);
   };
 
   const watcher = watch(watchedDir, {
-    recursive: true,
-    ignore: (candidate) => shouldIgnoreWatchPath(watchedDir, candidate),
-  }, onChange);
+    ignoreInitial: true,
+    ignored: (candidate: string) => shouldIgnoreWatchPath(watchedDir, candidate),
+    followSymlinks: false,
+    atomic: true,
+  });
+  watcher
+    .on("add", onFile)
+    .on("change", onFile)
+    .on("unlink", onFile)
+    .on("unlinkDir", (dir: string) =>
+      schedule(dirTimers, path.resolve(watchedDir, dir), rebuildDir),
+    );
 
-  watcher.on("error", (error: NodeJS.ErrnoException) => {
+  watcher.on("error", (error: unknown) => {
+    const code = (error as { code?: string } | null)?.code;
+    // A vanished path is NOT a broken watcher: deleting a watched subtree can
+    // race chokidar's own bookkeeping into a spurious ENOENT while the
+    // deletion's unlinkDir reconcile is still queued in the debounce. Killing
+    // the watcher here cancelled that queued reconcile and orphaned the
+    // projections. Log and keep watching.
+    if (code === "ENOENT") {
+      logger.debug("file watcher ignored ENOENT for a removed path", { code });
+      return;
+    }
     // E8: the handle can no longer be trusted to deliver events — clear it so
     // isFileWatcherAlive() (and /resources/health) reports the truth instead
     // of a zombie watcher.
-    const code = (error as { code?: string } | null)?.code;
     logger.error("file watcher error — clearing watcher handle", {
       err: error instanceof Error ? error : new Error(String(error)),
       code,
@@ -235,7 +258,7 @@ export function startFileWatcher(
       cancelAll(current.dirTimers);
       cache[WATCHER_KEY] = undefined;
     }
-    watcher.close();
+    void watcher.close();
     // Self-heal (adversarial-review #16): transient FS-pressure errors
     // (EMFILE / ENFILE / ENOSPC / EPERM / EACCES) should not permanently kill
     // watching — re-arm after a short backoff instead of requiring a full
@@ -280,10 +303,14 @@ export function isFileWatcherAlive(): boolean {
   return cache[WATCHER_KEY] !== undefined;
 }
 
-/** Test-only: stop and forget the running watcher. Also cancels any pending
- *  re-arm timer and bumps the generation so a scheduled re-arm cannot resurrect
- *  the watcher after teardown (F10-08). */
-export function stopFileWatcherForTests(): void {
+/**
+ * Stop and forget the running watcher (process shutdown + test teardown).
+ * Cancels every debounce timer and any pending re-arm, and bumps the
+ * generation so a scheduled re-arm cannot resurrect the watcher (F10-08).
+ * The native close is fire-and-forget: detaching timers/handlers is what
+ * guarantees no rebuild callback runs after this returns.
+ */
+export function stopFileWatcher(): void {
   const cache = globalThis as unknown as Record<symbol, unknown>;
   const lc = watcherLifecycle(cache);
   cancelPendingReArm(lc);
@@ -292,6 +319,6 @@ export function stopFileWatcherForTests(): void {
   if (!existing) return;
   cancelAll(existing.fileTimers);
   cancelAll(existing.dirTimers);
-  existing.watcher.close();
+  void existing.watcher.close();
   cache[WATCHER_KEY] = undefined;
 }

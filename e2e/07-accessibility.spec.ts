@@ -39,12 +39,11 @@ const SURFACES: { name: string; path: string; ready: string }[] = [
 ];
 
 async function setTheme(page: Page, theme: "light" | "dark") {
+  // Scope the cookie to wherever the page actually is — cookies are
+  // host-scoped, and the production compose stack serves on 127.0.0.1 with a
+  // derived port, so a hard-coded host would silently never apply.
   await page.context().addCookies([
-    {
-      name: THEME_COOKIE,
-      value: theme,
-      url: `http://localhost:${new URL(page.url() || "http://localhost:5177").port || 5177}`,
-    },
+    { name: THEME_COOKIE, value: theme, url: new URL(page.url()).origin },
   ]);
 }
 
@@ -97,6 +96,13 @@ test.describe("signed out", () => {
       await setTheme(page, theme);
       await page.reload();
       await expect(page.locator('input[name="email"]')).toBeVisible();
+      // The login card plays an entry animation; axe samples computed colors,
+      // so let every animation settle instead of auditing a mid-fade frame.
+      await page
+        .locator(".login-card")
+        .evaluate((el) =>
+          Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+        );
 
       const results = await audit(page).analyze();
       const detail = results.violations

@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
 import { ActivityPage, actIcon } from "./activity-page";
 import {
   auditTimeLabel,
+  auditTimeLabelUTC,
   groupStreamByDay,
+  groupStreamByDayUTC,
   matchesActorFilter,
   type ActivityStreamRowView,
   type AuditLogEntryView,
@@ -113,6 +116,24 @@ describe("helpers", () => {
     expect(auditTimeLabel(iso(0, 9, 38))).toBe("today 9:38");
     expect(auditTimeLabel(iso(1, 16, 4))).toBe("yesterday 16:04");
     expect(auditTimeLabel("2026-03-30T14:00:00.000Z")).toMatch(/^Mar \d+$/);
+  });
+
+  it("UTC variants bucket by absolute UTC day — the hydration first pass", () => {
+    // 23:50Z / 00:10Z straddle a UTC midnight: two groups with absolute
+    // labels, whatever the host timezone (a UTC+3 host merges them locally).
+    const rows = [
+      { ...STREAM[0]!, id: 21, occurredAt: "2026-07-04T00:10:00.000Z" },
+      { ...STREAM[1]!, id: 20, occurredAt: "2026-07-03T23:50:00.000Z" },
+    ];
+    expect(groupStreamByDayUTC(rows).map((g) => g.day)).toEqual([
+      "Jul 4",
+      "Jul 3",
+    ]);
+    // Never now-relative — that is exactly what a UTC server and a non-UTC
+    // viewer disagree on.
+    const fresh = { ...STREAM[0]!, occurredAt: new Date().toISOString() };
+    expect(groupStreamByDayUTC([fresh])[0]!.day).not.toBe("Today");
+    expect(auditTimeLabelUTC("2026-07-03T23:50:00.000Z")).toBe("Jul 3");
   });
 });
 
@@ -291,5 +312,48 @@ describe("stream vocabulary (P14-UI-62)", () => {
     expect(
       container.querySelector(".pev-ico svg")!.innerHTML,
     ).toContain("circle");
+  });
+});
+
+/**
+ * The hydration contract (modernization follow-up): the pre-hydration render
+ * must be byte-identical on server and client, so it uses timezone-AGNOSTIC
+ * forms — absolute UTC day groups, UTC clocks, absolute audit days; the local
+ * forms only swap in after hydration (useHydrated flips inside an effect, so
+ * the testing-library renders above assert the LOCAL forms). On a UTC host
+ * the local and UTC clock forms coincide and this test loses its edge — the
+ * e2e spec (e2e/10-activity-hydration.spec.ts) forces a 13-hour split against
+ * the production image regardless of the host.
+ */
+describe("hydration first pass (SSR)", () => {
+  it("renderToString emits absolute UTC days and UTC clocks, never Today/Yesterday", () => {
+    const stream = [
+      { ...STREAM[0]!, occurredAt: "2026-07-04T09:41:00.000Z" },
+      { ...STREAM[2]!, occurredAt: "2026-07-03T16:04:00.000Z" },
+    ];
+    const audit = [{ ...AUDIT[0]!, occurredAt: "2026-07-03T22:15:00.000Z" }];
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/activity",
+        Component: () => (
+          <ActivityPage
+            projectSlug="viberr-core"
+            projectName="Viberr Core"
+            stream={stream}
+            streamTotal={stream.length}
+            audit={audit}
+            auditTotal={audit.length}
+          />
+        ),
+      },
+    ]);
+    const html = renderToString(
+      <Stub initialEntries={["/projects/viberr-core/activity"]} />,
+    );
+    expect(html).toContain(">Jul 4<");
+    expect(html).toContain(">Jul 3<");
+    expect(html).toContain(">9:41<");
+    expect(html).toContain(">16:04<");
+    expect(html).not.toMatch(/Today|Yesterday|today |yesterday /);
   });
 });

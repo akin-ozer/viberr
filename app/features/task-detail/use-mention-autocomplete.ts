@@ -1,32 +1,25 @@
-import {
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type RefObject,
-} from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import {
   detectMentionToken,
   filterMentions,
   flattenMentionables,
   insertMention,
+  type InsertResult,
   type MentionSuggestion,
   type MentionToken,
 } from "./mention-autocomplete";
 
 /**
  * Composer @-mention autocomplete controller. Owns the active-token state,
- * the filtered suggestion list, the active-row index, and the keyboard model;
- * the composer stays the single source of truth for the draft text via
- * `value` / `setValue`.
+ * the filtered suggestion list, and the active-row index. The editing surface
+ * feeds it snapshots (`refreshFrom(text, caret)`) and receives insertions
+ * through `applyInsert` — the controller never touches the DOM, so the same
+ * model drives any editor (it grew up on a textarea, it now drives Lexical).
  *
- * Keyboard (only while the menu is open):
- *   ArrowDown/ArrowUp move the active row (wrapping), Enter or Tab insert the
- *   active suggestion, Escape closes without inserting. ⌘/Ctrl+Enter is left
- *   for the composer (send) even while open. When the menu is closed the
- *   handler is a no-op so plain Enter/⌘↵ behave exactly as before.
+ * Keyboard is owned by the composer (Lexical key commands): ArrowUp/Down →
+ * `moveActive`, Enter/Tab → `pickActive`, Escape → `close`. ⌘/Ctrl+Enter is
+ * always the composer's send, never the menu's.
  */
 
 const MAX_SUGGESTIONS = 8;
@@ -42,33 +35,35 @@ export interface MentionAutocomplete {
   query: string;
   /** Stable listbox id (aria-controls). */
   listId: string;
-  /** aria-activedescendant for the textarea, or undefined when closed. */
+  /** aria-activedescendant for the input, or undefined when closed. */
   activeId: string | undefined;
-  /** Recompute the token from the textarea's current value + caret. */
-  refresh: () => void;
+  /** Recompute the token from the surface's current text + caret
+   *  (`caret: null` = no collapsed caret → close). */
+  refreshFrom: (text: string, caret: number | null) => void;
   /** Point the active row at `index` (hover). */
   setActive: (index: number) => void;
+  /** Move the active row by `delta`, wrapping. */
+  moveActive: (delta: number) => void;
   /** Insert a specific suggestion (click / programmatic). */
   pick: (s: MentionSuggestion) => void;
-  /** Keydown handler for the textarea; returns true when it consumed the key. */
-  onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
-  /** Close without inserting (blur / outside). */
+  /** Insert the active suggestion; false when there is none. */
+  pickActive: () => boolean;
+  /** Close without inserting (blur / Escape / outside). */
   close: () => void;
 }
 
 export function useMentionAutocomplete(
   mentionables: Mentionables,
-  taRef: RefObject<HTMLTextAreaElement | null>,
-  value: string,
-  setValue: (next: string) => void,
+  applyInsert: (result: InsertResult) => void,
 ): MentionAutocomplete {
   const all = useMemo(() => flattenMentionables(mentionables), [mentionables]);
   const [token, setToken] = useState<MentionToken | null>(null);
   const [active, setActiveIndex] = useState(0);
-  // Identity of the token the active row currently points into. refresh()
-  // fires on every keyup/select/click, so it must NOT reset the highlight
-  // while the token is unchanged — otherwise Arrow keys (whose keyup also
-  // fires refresh) get their selection snapped back to 0 mid-navigation.
+  /** The surface text the current token was detected in — what `pick` edits. */
+  const lastText = useRef("");
+  // Identity of the token the active row currently points into: the highlight
+  // must NOT reset while the token is unchanged (caret-only refreshes), only
+  // when a new @-token appears or its query changes.
   const tokenKeyRef = useRef<string | null>(null);
   const listId = useRef(
     "mention-list-" + Math.random().toString(36).slice(2, 8),
@@ -80,20 +75,16 @@ export function useMentionAutocomplete(
   );
   const open = token !== null && items.length > 0;
 
-  const refresh = useCallback(() => {
-    const ta = taRef.current;
-    if (!ta) return;
-    const next = detectMentionToken(ta.value, ta.selectionStart ?? 0);
-    // Reset the highlight to the top ONLY when the token identity changes
-    // (a new @-token, or the query was edited) — never on plain caret moves
-    // like Arrow-key navigation, which also emit keyup → refresh.
+  const refreshFrom = useCallback((text: string, caret: number | null) => {
+    lastText.current = text;
+    const next = caret === null ? null : detectMentionToken(text, caret);
     const key = next ? `${next.start}:${next.query}` : null;
     if (key !== tokenKeyRef.current) {
       tokenKeyRef.current = key;
       setActiveIndex(0);
     }
     setToken(next);
-  }, [taRef]);
+  }, []);
 
   const close = useCallback(() => {
     tokenKeyRef.current = null;
@@ -106,51 +97,27 @@ export function useMentionAutocomplete(
       if (!token) return;
       // Insert the display NAME (not the lowercased handle) so the mention
       // reads with the real name and highlights as one chip.
-      const { text, caret } = insertMention(value, token, s.name);
-      setValue(text);
+      applyInsert(insertMention(lastText.current, token, s.name));
       close();
-      // Restore focus + caret after the controlled re-render.
-      requestAnimationFrame(() => {
-        const ta = taRef.current;
-        if (!ta) return;
-        ta.focus();
-        ta.setSelectionRange(caret, caret);
-      });
     },
-    [token, value, setValue, close, taRef],
+    [token, applyInsert, close],
   );
 
-  const onKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
-      // ⌘/Ctrl+Enter always belongs to the composer (send) — never intercept.
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) return false;
-      if (!open) return false;
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          setActiveIndex((i) => (i + 1) % items.length);
-          return true;
-        case "ArrowUp":
-          e.preventDefault();
-          setActiveIndex((i) => (i - 1 + items.length) % items.length);
-          return true;
-        case "Enter":
-        case "Tab": {
-          e.preventDefault();
-          const s = items[active];
-          if (s) pick(s);
-          return true;
-        }
-        case "Escape":
-          e.preventDefault();
-          close();
-          return true;
-        default:
-          return false;
-      }
+  const moveActive = useCallback(
+    (delta: number) => {
+      setActiveIndex((i) =>
+        items.length === 0 ? 0 : (i + delta + items.length) % items.length,
+      );
     },
-    [open, items, active, pick, close],
+    [items.length],
   );
+
+  const pickActive = useCallback((): boolean => {
+    const s = items[active];
+    if (!s) return false;
+    pick(s);
+    return true;
+  }, [items, active, pick]);
 
   return {
     open,
@@ -159,10 +126,11 @@ export function useMentionAutocomplete(
     query: token?.query ?? "",
     listId,
     activeId: open ? `${listId}-opt-${active}` : undefined,
-    refresh,
+    refreshFrom,
     setActive: setActiveIndex,
+    moveActive,
     pick,
-    onKeyDown,
+    pickActive,
     close,
   };
 }

@@ -1,13 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AgentGlyph } from "~/ui/identity";
 import { Icon } from "~/ui/icon";
-import { formatClock } from "~/shared/dates/format";
+import { formatClock, formatClockUTC } from "~/shared/dates/format";
+import { useHydrated } from "~/ui/local-time";
 
-/** P13-UI-57: the projection now ships the ISO so the CLIENT renders the clock
- *  (it used to be formatted with the SERVER's timezone). A seeded/mock label
- *  that isn't an ISO is shown verbatim. */
-function finishedClock(value: string): string {
-  return /^\d{4}-\d{2}-\d{2}T/.test(value) ? formatClock(value) : value;
+/** P13-UI-57: the projection ships the ISO so the CLIENT renders the clock in
+ *  the viewer's zone. During SSR + hydration the UTC form is rendered instead
+ *  (`hydrated: false`) — the server's zone and the viewer's differ, and a
+ *  zone-dependent first paint is a hydration text mismatch (React #418). A
+ *  seeded/mock label that isn't an ISO is shown verbatim. */
+function finishedClock(value: string, hydrated: boolean): string {
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
+  return hydrated ? formatClock(value) : formatClockUTC(value);
 }
 import { Pill } from "~/ui/pill";
 import {
@@ -357,6 +361,7 @@ export function AgentLogsPanel({
 }) {
   const [follow, setFollow] = useState(true);
   const [raw, setRaw] = useState(false);
+  const hydrated = useHydrated();
   const boxRef = useRef<HTMLDivElement>(null);
   /**
    * P13-D-11: the console's scroll geometry captured at the moment "load older"
@@ -450,7 +455,7 @@ export function AgentLogsPanel({
           ? `interrupted${cur!.interruptedBy ? " by " + cur!.interruptedBy.label.split(" ")[0] : ""} — the thread stays resumable`
           : cur!.state === "done"
             ? "run finished at " +
-              (cur!.finished ? finishedClock(cur!.finished) : "—") +
+              (cur!.finished ? finishedClock(cur!.finished, hydrated) : "—") +
               " — thread can be re-engaged"
             : cur!.state === "error"
               ? backendUnavailable
@@ -581,9 +586,13 @@ export function AgentLogsPanel({
           ) : (
             <div className={"log-line " + entry.line.display.ev} key={i}>
               {/* F15-08: the stored `t` is a UTC wall clock; the timeline on
-                  the same page is local. One story per page. */}
+                  the same page is local. One story per page. Until hydration
+                  the raw UTC clock renders — reprojecting into the viewer's
+                  zone during SSR is a hydration text mismatch (React #418). */}
               <span className="lt">
-                {localLogClock(entry.line.display.t, cur!.startedAt)}
+                {hydrated
+                  ? localLogClock(entry.line.display.t, cur!.startedAt)
+                  : entry.line.display.t}
               </span>
               <span className="ltag">{entry.line.display.tag}</span>
               <span className="lx">

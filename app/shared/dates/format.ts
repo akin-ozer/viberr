@@ -79,6 +79,55 @@ export function formatDayDotTime(iso: string, now: Date = new Date()): string {
   return `${bucket} · ${clock}`;
 }
 
+const shortDayUtc = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+function sameUtcDay(a: Date, b: Date): boolean {
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  );
+}
+
+/**
+ * `formatDayBucket`'s hydration first pass: the absolute UTC calendar day
+ * ("Mar 30") for EVERY row — deliberately never Today/Yesterday. Those depend
+ * on when "now" is sampled, and the activity page uses this value as its
+ * GROUPING key, where an SSR/hydration render straddling UTC midnight would
+ * mismatch every header at once. Absolute days depend only on the timestamp.
+ */
+export function formatDayBucketUTC(iso: string): string {
+  const d = toDate(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return shortDayUtc.format(d);
+}
+
+/**
+ * `formatDayDotTime` rendered in UTC regardless of the host timezone — the
+ * deterministic first pass that SSR and hydration agree on byte-for-byte;
+ * an effect then swaps in the viewer-local form (app/ui/local-time.tsx).
+ */
+export function formatDayDotTimeUTC(iso: string, now: Date = new Date()): string {
+  const d = toDate(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const clock = `${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  if (sameUtcDay(d, now)) return clock;
+  const yesterday = new Date(now.getTime() - 86_400_000);
+  if (sameUtcDay(d, yesterday)) return `Yesterday · ${clock}`;
+  return `${shortDayUtc.format(d)} · ${clock}`;
+}
+
+/** `formatClock` in UTC — the timezone-deterministic hydration first pass. */
+export function formatClockUTC(iso: string): string {
+  const d = toDate(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+
 /** Relative form for home cards / store strip ("updated 2m ago"). */
 export function formatRelative(iso: string, now: Date = new Date()): string {
   const d = toDate(iso);

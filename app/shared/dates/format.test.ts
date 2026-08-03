@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   formatClock,
+  formatClockUTC,
   formatDayBucket,
+  formatDayBucketUTC,
   formatDayDotTime,
+  formatDayDotTimeUTC,
   formatDayTime,
   formatRelative,
 } from "./format";
@@ -52,6 +55,33 @@ describe("formatDayDotTime (timeline form)", () => {
     expect(formatDayDotTime(at(2026, 6, 4, 9, 41), NOW)).toBe("9:41");
     expect(formatDayDotTime(at(2026, 6, 3, 16, 4), NOW)).toBe(
       "Yesterday · 16:04",
+    );
+  });
+});
+
+describe("UTC variants (hydration-deterministic first pass)", () => {
+  // Fixed UTC instants — output must not depend on the host timezone.
+  const NOW_UTC = new Date("2026-07-04T10:45:00.000Z");
+  it("formatClockUTC renders the UTC wall clock", () => {
+    expect(formatClockUTC("2026-07-04T09:41:00.000Z")).toBe("9:41");
+    expect(formatClockUTC("2026-07-04T16:04:00.000Z")).toBe("16:04");
+    expect(formatClockUTC("not-a-date")).toBe("");
+  });
+  it("formatDayBucketUTC is the absolute UTC day — never Today/Yesterday", () => {
+    // 2026-07-04 IS NOW_UTC's own day, and still renders absolute: the
+    // activity page groups by this value, where a now-relative bucket would
+    // mismatch between the server render and hydration.
+    expect(formatDayBucketUTC("2026-07-04T09:41:00.000Z")).toBe("Jul 4");
+    expect(formatDayBucketUTC("2026-07-03T23:59:00.000Z")).toBe("Jul 3");
+    expect(formatDayBucketUTC("not-a-date")).toBe("");
+  });
+  it("formatDayDotTimeUTC buckets by UTC day", () => {
+    expect(formatDayDotTimeUTC("2026-07-04T09:41:00.000Z", NOW_UTC)).toBe("9:41");
+    expect(formatDayDotTimeUTC("2026-07-03T16:04:00.000Z", NOW_UTC)).toBe(
+      "Yesterday · 16:04",
+    );
+    expect(formatDayDotTimeUTC("2026-03-30T17:26:00.000Z", NOW_UTC)).toBe(
+      "Mar 30 · 17:26",
     );
   });
 });

@@ -41,7 +41,9 @@ Docker setup, and the architecture overview.
 - Keep commits focused and use clear, descriptive commit messages.
 - Open a pull request against `main`. CI (`.github/workflows/ci.yml`) must pass before
   merge. It runs two jobs: `verify` (typecheck → unit/integration tests → build) and
-  `e2e` (Playwright against a real dev server).
+  `e2e` (Playwright against the production Docker image in an isolated Compose stack —
+  `scripts/e2e.ts` builds it, seeds the demo fixture, and tears it down; never a dev
+  server).
 - Merge via GitHub once CI is green and the PR has been reviewed and accepted (see
   below).
 
@@ -53,12 +55,12 @@ Run these from the repository root after `npm ci`:
 npm run typecheck   # route typegen + tsc
 npm test            # vitest unit + integration suite
 npm run build       # production build, the `verify` job's final gate
-npm run e2e         # Playwright — CI's second job
+npm run e2e         # Playwright vs the production Docker image — CI's second job
 ```
 
 Don't skip `npm run e2e` because the other three are green. It is the only gate that
-boots a real CLI entrypoint end to end: the pass-13 install regression passed typecheck,
-1663 unit tests and the build, and was caught here.
+boots the shipped production image end to end (Docker required): the pass-13 install
+regression passed typecheck, 1663 unit tests and the build, and was caught here.
 
 See [docs/testing-quickstart.md](docs/testing-quickstart.md) for the short test guide.
 

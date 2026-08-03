@@ -1,18 +1,32 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
+import { useState } from "react";
+import {
+  $createParagraphNode,
+  $getRoot,
+  $isParagraphNode,
+  UNDO_COMMAND,
+  type LexicalEditor,
+} from "lexical";
 import { ToastProvider } from "~/ui/toast";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import { Timeline } from "./timeline";
+import { $setParagraphPlainText } from "./lexical-mention-plugin";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 
 /**
- * jsdom behavior test for the comment composer's @-mention autocomplete:
- * typing "@de" opens a dropdown listing "dev" with "de" highlighted;
- * ArrowDown+Enter inserts "@dev "; Escape closes; a bare "@" does not open.
- * The composer renders inside a route stub so its useFetcher/useSearchParams
- * hooks have a data router.
+ * jsdom behavior tests for the Lexical comment composer: the @-mention
+ * autocomplete (open/filter/keyboard/click/Escape), live mention
+ * wrapping/unwrapping, the plain-text submission contract (exact posted
+ * bytes), failure draft retention, the success reset (including undo
+ * history), and the Ask-operator prefill.
+ *
+ * The tests drive the REAL editor: text is set through editor updates (jsdom
+ * cannot synthesize typing into contenteditable), keys fire as DOM keydown
+ * events on the contenteditable (Lexical's own listeners dispatch the
+ * commands), and every assertion reads the editor or the submitted form.
  */
 
 afterEach(() => {
@@ -31,49 +45,89 @@ const MENTIONABLES: Mentionables = {
   ],
 };
 
-function renderComposer() {
+function renderComposer(
+  opts: {
+    action?: () => unknown | Promise<unknown>;
+    onPosted?: (text: string) => void;
+  } = {},
+) {
+  const Host = () => {
+    const [ask, setAsk] = useState(0);
+    return (
+      <ToastProvider>
+        <button data-testid="bump-ask" onClick={() => setAsk((a) => a + 1)}>
+          bump ask
+        </button>
+        <Timeline
+          events={[]}
+          hasMore={false}
+          remaining={0}
+          nextLimit={40}
+          tlDefault="all"
+          ask={ask}
+          mentionables={MENTIONABLES}
+        />
+      </ToastProvider>
+    );
+  };
   const Stub = createRoutesStub([
     {
       path: "/t",
-      Component: () => (
-        <ToastProvider>
-          <Timeline
-            events={[]}
-            hasMore={false}
-            remaining={0}
-            nextLimit={40}
-            tlDefault="all"
-            ask={0}
-            mentionables={MENTIONABLES}
-          />
-        </ToastProvider>
-      ),
-      action: async () => ({ ok: true }),
+      Component: Host,
+      action: async ({ request }) => {
+        const text = String((await request.formData()).get("text"));
+        opts.onPosted?.(text);
+        return opts.action ? await opts.action() : { ok: true };
+      },
     },
   ]);
   const utils = render(<Stub initialEntries={["/t"]} />);
-  const ta = utils.container.querySelector("textarea") as HTMLTextAreaElement;
-  return { ...utils, ta };
+  const ce = utils.container.querySelector(
+    '[contenteditable="true"]',
+  ) as HTMLElement;
+  const editor = (ce as unknown as { __lexicalEditor: LexicalEditor })
+    .__lexicalEditor;
+  expect(editor).toBeTruthy();
+  return { ...utils, ce, editor };
 }
 
-/** Type `value` into the textarea and place the caret at its end. */
-function type(ta: HTMLTextAreaElement, value: string) {
-  fireEvent.change(ta, { target: { value } });
-  ta.setSelectionRange(value.length, value.length);
-  // The composer recomputes on keyUp (rAF from onChange is flaky in jsdom).
-  fireEvent.keyUp(ta);
+/** Set the whole draft (caret at end) through a real editor update. Async:
+ *  Lexical commits in a microtask, so the act must flush it before the test
+ *  fires keys at the (otherwise still-empty) editor. */
+async function setText(editor: LexicalEditor, text: string) {
+  await act(async () => {
+    editor.update(() => {
+      const root = $getRoot();
+      const first = root.getFirstChild();
+      if ($isParagraphNode(first)) {
+        $setParagraphPlainText(first, text);
+        return;
+      }
+      root.clear();
+      const paragraph = $createParagraphNode();
+      root.append(paragraph);
+      $setParagraphPlainText(paragraph, text);
+    });
+  });
+}
+
+function readText(editor: LexicalEditor): string {
+  let out = "";
+  editor.getEditorState().read(() => {
+    out = $getRoot().getTextContent();
+  });
+  return out;
 }
 
 const listbox = () => document.querySelector('[role="listbox"]');
 
 describe("comment composer @-mention autocomplete", () => {
   it("opens a dropdown listing matching agents when typing @de", async () => {
-    const { ta } = renderComposer();
-    type(ta, "@de");
+    const { editor } = renderComposer();
+    await setText(editor, "@de");
     await waitFor(() => expect(listbox()).toBeTruthy());
     const options = document.querySelectorAll('[role="option"]');
     expect(options.length).toBeGreaterThan(0);
-    // "dev" is listed…
     const devRow = Array.from(options).find((o) =>
       o.textContent?.includes("dev"),
     )!;
@@ -84,86 +138,192 @@ describe("comment composer @-mention autocomplete", () => {
     expect(hl!.textContent!.toLowerCase()).toBe("de");
   });
 
-  it("does not open on a bare @ (needs ≥1 char)", () => {
-    const { ta } = renderComposer();
-    type(ta, "@");
+  it("does not open on a bare @ (needs ≥1 char)", async () => {
+    const { editor } = renderComposer();
+    await setText(editor, "@");
+    await new Promise((r) => setTimeout(r, 50));
     expect(listbox()).toBeFalsy();
   });
 
-  it("ArrowDown + Enter inserts the highlighted handle as @dev ", async () => {
-    const { ta } = renderComposer();
-    type(ta, "@de");
+  it("Enter inserts the highlighted handle as @dev and closes the menu", async () => {
+    const { ce, editor } = renderComposer();
+    await setText(editor, "@de");
     await waitFor(() => expect(listbox()).toBeTruthy());
-    // First row is active by default; select it with Enter.
-    fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(ta.value).toBe("@dev "));
-    // The menu closes after insertion.
+    fireEvent.keyDown(ce, { key: "Enter" });
+    await waitFor(() => expect(readText(editor)).toBe("@dev "));
     expect(listbox()).toBeFalsy();
   });
 
   it("ArrowDown moves the active row before selecting", async () => {
-    const { ta } = renderComposer();
-    // "@a" matches "arda" (user) and "agent"/"claude"(reserved substr) — a list.
-    type(ta, "@a");
+    const { ce, editor } = renderComposer();
+    // "@a" matches several rows (arda, agent, claude…) — a list.
+    await setText(editor, "@a");
     await waitFor(() => expect(listbox()).toBeTruthy());
     const before = document.querySelectorAll('[role="option"][aria-selected="true"]');
     expect(before).toHaveLength(1);
-    fireEvent.keyDown(ta, { key: "ArrowDown" });
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fireEvent.keyDown(ce, { key: "ArrowDown" });
+    fireEvent.keyDown(ce, { key: "Enter" });
     // Something was inserted: an @mention (a display name, which may contain
     // spaces like "@Arda Kaya") followed by a trailing space.
-    await waitFor(() => expect(/^@.+ $/.test(ta.value)).toBe(true));
+    await waitFor(() => expect(/^@.+ $/.test(readText(editor))).toBe(true));
   });
 
-  it("Arrow navigation survives the caret keyUp refresh (no snap back to top)", async () => {
-    const { ta } = renderComposer();
-    type(ta, "@a"); // multi-item list (arda, agent, claude, …)
+  it("Arrow navigation survives caret-only refreshes (no snap back to top)", async () => {
+    const { ce, editor } = renderComposer();
+    await setText(editor, "@a");
     await waitFor(() => expect(listbox()).toBeTruthy());
     const selectedIndex = () =>
       Array.from(document.querySelectorAll('[role="option"]')).findIndex(
         (o) => o.getAttribute("aria-selected") === "true",
       );
     expect(selectedIndex()).toBe(0);
-    fireEvent.keyDown(ta, { key: "ArrowDown" });
-    // The bug: every keyUp fires refresh(), which used to reset the highlight
-    // to 0 even when the token is unchanged — snapping Arrow-nav back to top.
-    fireEvent.keyUp(ta);
-    expect(selectedIndex()).toBe(1);
-    fireEvent.keyDown(ta, { key: "ArrowDown" });
-    fireEvent.keyUp(ta);
-    expect(selectedIndex()).toBe(2);
+    fireEvent.keyDown(ce, { key: "ArrowDown" });
+    // The regression this pins: every editor update re-runs refreshFrom; while
+    // the token is unchanged the highlight must NOT reset to the top.
+    act(() => editor.update(() => {}));
+    await waitFor(() => expect(selectedIndex()).toBe(1));
+    fireEvent.keyDown(ce, { key: "ArrowDown" });
+    act(() => editor.update(() => {}));
+    await waitFor(() => expect(selectedIndex()).toBe(2));
   });
 
   it("Escape closes the dropdown without inserting", async () => {
-    const { ta } = renderComposer();
-    type(ta, "@de");
+    const { ce, editor } = renderComposer();
+    await setText(editor, "@de");
     await waitFor(() => expect(listbox()).toBeTruthy());
-    fireEvent.keyDown(ta, { key: "Escape" });
+    fireEvent.keyDown(ce, { key: "Escape" });
     await waitFor(() => expect(listbox()).toBeFalsy());
-    expect(ta.value).toBe("@de"); // unchanged
+    expect(readText(editor)).toBe("@de"); // unchanged
   });
 
   it("clicking a row inserts its handle", async () => {
-    const { ta } = renderComposer();
-    type(ta, "@de");
+    const { editor } = renderComposer();
+    await setText(editor, "@de");
     await waitFor(() => expect(listbox()).toBeTruthy());
     const devRow = Array.from(document.querySelectorAll('[role="option"]')).find(
       (o) => o.textContent?.includes("dev"),
     ) as HTMLElement;
     fireEvent.click(devRow);
-    await waitFor(() => expect(ta.value).toBe("@dev "));
+    await waitFor(() => expect(readText(editor)).toBe("@dev "));
   });
 
-  it("marks the textarea as a combobox controlling the listbox", async () => {
-    const { ta } = renderComposer();
-    expect(ta.getAttribute("role")).toBe("combobox");
-    type(ta, "@de");
-    await waitFor(() => expect(ta.getAttribute("aria-expanded")).toBe("true"));
-    const controls = ta.getAttribute("aria-controls")!;
+  it("marks the input as a combobox controlling the listbox", async () => {
+    const { ce, editor } = renderComposer();
+    expect(ce.getAttribute("role")).toBe("combobox");
+    await setText(editor, "@de");
+    await waitFor(() => expect(ce.getAttribute("aria-expanded")).toBe("true"));
+    const controls = ce.getAttribute("aria-controls")!;
     expect(document.getElementById(controls)).toBeTruthy();
     // aria-activedescendant points at an existing option.
-    const activeId = ta.getAttribute("aria-activedescendant")!;
+    const activeId = ce.getAttribute("aria-activedescendant")!;
     expect(document.getElementById(activeId)).toBeTruthy();
+  });
+});
+
+describe("live mention highlighting (character-editable, exact matcher)", () => {
+  it("wraps a known mention in a .mention span and unwraps it when edited away", async () => {
+    const { container, editor } = renderComposer();
+    await setText(editor, "ping @dev now");
+    await waitFor(() => {
+      const chip = container.querySelector(".composer-ce .mention");
+      expect(chip).toBeTruthy();
+      expect(chip!.textContent).toBe("@dev");
+    });
+    // Editing the mention's characters away unwraps it — no atomic entity.
+    await setText(editor, "ping @dv now");
+    await waitFor(() =>
+      expect(container.querySelector(".composer-ce .mention")).toBeFalsy(),
+    );
+  });
+
+  it("leaves unknown mentions as plain text", async () => {
+    const { container, editor } = renderComposer();
+    await setText(editor, "@nobody-known hello");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(container.querySelector(".composer-ce .mention")).toBeFalsy();
+    expect(readText(editor)).toBe("@nobody-known hello");
+  });
+});
+
+describe("plain-text submission contract (exact posted bytes)", () => {
+  const CASES: { raw: string; posted: string }[] = [
+    { raw: "  hello \n", posted: "hello" },
+    { raw: "hello\nworld", posted: "hello\nworld" },
+    { raw: " @Arda Kaya, please check. ", posted: "@Arda Kaya, please check." },
+    { raw: "@unknown\n@operator ", posted: "@unknown\n@operator" },
+  ];
+
+  for (const { raw, posted } of CASES) {
+    it(`posts ${JSON.stringify(raw)} as ${JSON.stringify(posted)}`, async () => {
+      const texts: string[] = [];
+      const { ce, editor } = renderComposer({ onPosted: (t) => texts.push(t) });
+      await setText(editor, raw);
+      await waitFor(() => expect(readText(editor)).toBe(raw));
+      fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
+      await waitFor(() => expect(texts).toHaveLength(1));
+      expect(texts[0]).toBe(posted);
+    });
+  }
+
+  it("whitespace-only drafts do not submit", async () => {
+    const texts: string[] = [];
+    const { ce, editor } = renderComposer({ onPosted: (t) => texts.push(t) });
+    await setText(editor, "   \n  ");
+    fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(texts).toHaveLength(0);
+  });
+
+  it("Ctrl+Enter submits like ⌘+Enter", async () => {
+    const texts: string[] = [];
+    const { ce, editor } = renderComposer({ onPosted: (t) => texts.push(t) });
+    await setText(editor, "ctrl works");
+    fireEvent.keyDown(ce, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(texts).toEqual(["ctrl works"]));
+  });
+});
+
+describe("submit outcomes", () => {
+  it("success clears the draft AND the undo history (⌘Z cannot resurrect it)", async () => {
+    const { ce, editor } = renderComposer();
+    await setText(editor, "posted away");
+    fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(readText(editor)).toBe(""));
+    act(() => {
+      editor.dispatchCommand(UNDO_COMMAND, undefined);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(readText(editor)).toBe("");
+  });
+
+  it("failure keeps the draft as typed and shows the inline error", async () => {
+    const { ce, editor, container } = renderComposer({
+      action: () => ({ ok: false, error: "Comment rejected by policy." }),
+    });
+    await setText(editor, "keep me safe");
+    fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
+    await waitFor(() =>
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+        "Comment rejected by policy.",
+      ),
+    );
+    expect(readText(editor)).toBe("keep me safe");
+  });
+});
+
+describe("Ask operator prefill", () => {
+  it("prefills only a blank draft with @operator and focuses the composer", async () => {
+    const { editor, getByTestId } = renderComposer();
+    fireEvent.click(getByTestId("bump-ask"));
+    await waitFor(() => expect(readText(editor)).toBe("@operator "));
+  });
+
+  it("never overwrites a non-empty draft", async () => {
+    const { editor, getByTestId } = renderComposer();
+    await setText(editor, "half-written thought");
+    fireEvent.click(getByTestId("bump-ask"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(readText(editor)).toBe("half-written thought");
   });
 });
 

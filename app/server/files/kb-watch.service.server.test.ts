@@ -111,6 +111,11 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
 
     const watcher = startKbWatcher({ dataRoot, db });
     expect(watcher).not.toBeNull();
+    // Chokidar arms asynchronously: a write landing inside the initial scan
+    // is treated as pre-existing (ignoreInitial) and never emits. Wait for
+    // `ready` — attached in the same synchronous frame as the start, so the
+    // event cannot have fired yet — before mutating the store.
+    await new Promise<void>((resolve) => watcher!.once("ready", () => resolve()));
 
     // Add a doc; the watcher debounces (250ms) then re-indexes. Poll until the
     // sentinel is overwritten (or time out) so the assertion never races.
@@ -131,8 +136,20 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
     kbFile(dataRoot, "notes", "b.md", "more");
     const deadline = Date.now() + 30_000;
     let after = { last_indexed_at: OLD as string | null };
+    let lastTouch = Date.now();
+    let touches = 0;
     while (after.last_indexed_at === OLD && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 50));
+      // macOS can DROP (not just delay) a coalesced FSEvent outright when the
+      // whole machine is churning temp dirs — observed under back-to-back full
+      // suite runs. Re-offer the event every few seconds: a swallowed delivery
+      // gets another chance, while a broken debounce/re-index path still never
+      // converges and times out.
+      if (Date.now() - lastTouch > 5_000) {
+        lastTouch = Date.now();
+        touches += 1;
+        kbFile(dataRoot, "notes", "b.md", `more v${touches}`);
+      }
       after = db
         .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
         .get() as { last_indexed_at: string | null };
