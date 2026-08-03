@@ -1,14 +1,17 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Icon, type IconName } from "~/ui/icon";
+import { useHydrated } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
-import { formatClock } from "~/shared/dates/format";
+import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { TIMELINE_EVENT_TYPES } from "~/schemas/task-file.schema";
 import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
 import {
   auditTimeLabel,
+  auditTimeLabelUTC,
   groupStreamByDay,
+  groupStreamByDayUTC,
   matchesActorFilter,
   type ActivityStreamRowView,
   type ActorFilter,
@@ -118,14 +121,18 @@ const PEV_META: Record<string, { icon: IconName; cls: string }> = {
 function AuditLogs({
   entries,
   total,
+  utc,
   onOpen,
   onShowOlder,
 }: {
   entries: AuditLogEntryView[];
   total: number;
+  /** Timezone-agnostic first-pass rendering until hydration (see ActivityPage). */
+  utc: boolean;
   onOpen: (key: string) => void;
   onShowOlder: () => void;
 }) {
+  const timeLabel = utc ? auditTimeLabelUTC : auditTimeLabel;
   // UI-47: bound "remaining" by the ceiling `onShowOlder` can actually reach —
   // at AUDIT_MAX the button was a no-op that still promised N more.
   const remaining = Math.max(
@@ -180,7 +187,7 @@ function AuditLogs({
                           ? "Resolved" +
                             (e.resolvedBy ? ` by ${e.resolvedBy}` : "") +
                             (e.resolvedAt
-                              ? ` · ${auditTimeLabel(e.resolvedAt)}`
+                              ? ` · ${timeLabel(e.resolvedAt)}`
                               : "")
                           : "Open — grant the missing scope to resolve"
                       }
@@ -192,7 +199,7 @@ function AuditLogs({
                   </>
                 )}
               </span>
-              <span className="pev-t">{auditTimeLabel(e.occurredAt)}</span>
+              <span className="pev-t">{timeLabel(e.occurredAt)}</span>
             </div>
           );
         })}
@@ -260,6 +267,13 @@ export function ActivityPage({
   const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
   const [f, setF] = useState<ActorFilter>("all");
+  // Every timestamp on this page is viewer-local, but the server renders in
+  // ITS zone (a UTC container in production), so the local forms hydrate to
+  // different text — a recoverable React #418 that regenerates the whole page
+  // client-side. Until hydration flips this flag, day groups and clocks render
+  // timezone-AGNOSTIC UTC forms (absolute days, UTC clocks); an effect then
+  // swaps in the viewer-local forms (the app/ui/local-time.tsx pattern).
+  const local = useHydrated();
   const onOpen = (key: string) =>
     navigate(`/projects/${projectSlug}/tasks/${key}`);
 
@@ -275,9 +289,10 @@ export function ActivityPage({
       { replace: true, preventScrollReset: true },
     );
 
-  const shown = groupStreamByDay(
-    stream.filter((r) => matchesActorFilter(r, f)),
-  );
+  const filtered = stream.filter((r) => matchesActorFilter(r, f));
+  const shown = local
+    ? groupStreamByDay(filtered)
+    : groupStreamByDayUTC(filtered);
   const total = shown.reduce((n, g) => n + g.rows.length, 0);
   // UI-47: "Show older" submits `min(loaded + STEP, STREAM_MAX)`, so once the
   // loaded slice hits the ceiling the click is a NO-OP — while the button still
@@ -362,7 +377,9 @@ export function ActivityPage({
                         {r.taskKey}
                       </button>
                     </span>
-                    <span className="pev-t">{formatClock(r.occurredAt)}</span>
+                    <span className="pev-t">
+                      {(local ? formatClock : formatClockUTC)(r.occurredAt)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -414,6 +431,7 @@ export function ActivityPage({
           <AuditLogs
             entries={audit}
             total={auditTotal}
+            utc={!local}
             onOpen={onOpen}
             onShowOlder={() =>
               showOlder("audit", Math.min(audit.length + AUDIT_STEP, AUDIT_MAX))
