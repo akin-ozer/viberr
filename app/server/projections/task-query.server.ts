@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { DiagnosticSeverity } from "~/schemas/file-diagnostics";
+import type { Readiness } from "~/schemas/task-file.schema";
+import { readinessEffectOf } from "~/server/interpretation/diagnostics-policy.server";
 import { isAcceptedDisplayState } from "~/server/interpretation/readiness-policy.server";
 import { createActorRenderOverlay } from "~/shared/mapping/actor.server";
 import {
@@ -29,6 +31,15 @@ export interface DiagnosticRecord {
   path: string | null;
   message: string;
   hardStop: boolean;
+  /**
+   * The readiness floor THIS finding imposes, from the canonical
+   * {@link readinessEffectOf} policy (hardStop→blocked, error→inconsistency
+   * risk, warning→input required, info→none). G2: the Diagnostics panel colors
+   * and labels each finding from this — so it speaks the SAME state language as
+   * the hero's ReadinessPill instead of painting a soft `error` crimson and a
+   * hardStop-`warning` amber. `null` = a heads-up with no readiness effect.
+   */
+  readinessEffect: Readiness | null;
   observedAt: string;
 }
 
@@ -115,6 +126,12 @@ export function listTaskDiagnostics(
     path: row.path,
     message: row.message,
     hardStop: row.hard_stop === 1,
+    readinessEffect: readinessEffectOf({
+      severity: row.severity,
+      code: row.code,
+      message: row.message,
+      hardStop: row.hard_stop === 1,
+    }),
     observedAt: row.observed_at,
   }));
 }

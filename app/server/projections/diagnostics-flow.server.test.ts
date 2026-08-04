@@ -117,9 +117,12 @@ describe("malformed frontmatter → readiness floor + readable diagnostic → cl
     expect(detail.readiness).toBe("input_required"); // warning floor
     const diags = listTaskDiagnostics(store.db, store.slug, "VIB-9");
     expect(diags.some((d) => d.code === "reference.unknown_stage")).toBe(true);
-    expect(
-      diags.find((d) => d.code === "reference.unknown_stage")!.message,
-    ).toContain("qa");
+    const unknownStage = diags.find((d) => d.code === "reference.unknown_stage")!;
+    expect(unknownStage.message).toContain("qa");
+    // G2: the DiagnosticsPanel colors/labels each finding from its readiness
+    // EFFECT, not the raw severity word — so this warning renders the SAME
+    // "input required" pill the hero shows, never a crimson "blocked".
+    expect(unknownStage.readinessEffect).toBe("input_required");
 
     writeFileSync(filePath(), pristine, "utf8");
     reproject();

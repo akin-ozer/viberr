@@ -29,13 +29,16 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
  * pure structural refactor — no behaviour or copy change).
  */
 
-/** Diagnostic severity → pill kind (pure; module scope so it isn't rebuilt per render). */
-const kind = (severity: string) =>
-  severity === "error" ? "blocked" : severity === "warning" ? "input" : "neutral";
-
 /** Parse/inconsistency findings from the projection (tolerant-parsing
  * contract) — compact list, only when the projection carries any. The full
- * diagnostics console arrives in Phase 10. */
+ * diagnostics console arrives in Phase 10.
+ *
+ * G2: each finding's pill is its READINESS EFFECT (the same `ReadinessPill`
+ * the hero shows), computed server-side from the canonical policy — NOT the
+ * raw `severity` word painted with an ad-hoc color. That kept a soft `error`
+ * crimson ("blocked") while the hero showed amber "inconsistency risk" for the
+ * same finding, and ignored `hardStop` entirely. A finding with no readiness
+ * effect (info) is a neutral "heads-up". */
 export function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) {
   if (diagnostics.length === 0) return null;
   return (
@@ -53,9 +56,13 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecor
         {diagnostics.map((d) => (
           <div className="obs" key={d.id}>
             <span className="k">
-              <Pill kind={kind(d.severity)} sm>
-                {d.severity}
-              </Pill>
+              {d.readinessEffect ? (
+                <ReadinessPill value={d.readinessEffect} sm />
+              ) : (
+                <Pill kind="neutral" sm>
+                  heads-up
+                </Pill>
+              )}
             </span>
             <span>
               <code className="mono">{d.code}</code> — {d.message}
