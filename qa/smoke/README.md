@@ -31,3 +31,5 @@ Purpose: <what this smoke run records or confirms>.
 ```
 
 Remove optional metadata lines that do not apply.
+
+<!-- pass-18 drift probe: added after review -->
