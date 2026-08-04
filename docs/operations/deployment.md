@@ -214,3 +214,25 @@ backup before a major upgrade).
 Single-node by design (SQLite + local file authority + in-process SSE bus). There is no
 horizontal-scale story in V1; run one instance per data root. Vertical sizing is governed
 by projection query volume and concurrent agent runs, both modest for small teams.
+
+## Single-writer safety (B-FD1 / F18-5)
+
+**One app process per data root, EVER.** Two processes pointed at one root corrupts the
+SQLite WAL and silently loses transactions — `PRAGMA integrity_check` does NOT detect the
+loss. Boot takes an exclusive `state/writer.lock`; a second process refuses to boot naming
+the holder. As of F18-5 the holder also re-verifies ownership on a 20 s timer and **fails
+closed** (loud `logger.error` + `process.exit(1)`) the moment its lock file is deleted or
+replaced out from under it — because the fd stays valid on the now-unlinked inode while a
+second boot can acquire the freed path. `/resources/health` reports the current holder
+(`lock: { pid, hostname, startedAt }`) so you can confirm exactly one writer.
+
+Two ways this bites in practice, both to avoid:
+
+- **Do NOT wipe `<dataRoot>/state` while a Viberr process is running.** Deleting the lock
+  file lets a second process acquire the root; the first now writes lock-less until the
+  guard notices and exits. Stop the app first, then reset the store.
+- **Beware the same-port `::1` vs IPv4 split.** A host dev server on `[::1]:5173` and a
+  compose container's docker-proxy on `*:5173` both answer `localhost:5173` (macOS resolves
+  `localhost` → `::1` first). Two live servers can look like one app while writing the same
+  bind-mounted `docker-data`. Run exactly one; the writer lock + health holder make it
+  visible which.

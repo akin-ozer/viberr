@@ -388,6 +388,47 @@ it is regenerated from the filesystem rather than restated here.
     the MCP-health precedent, where "never checked" was already "unknown", not "stale"
     (`isMcpHealthStale`). (`app/features/github/github-view.tsx`)
 
+47. **R18-1 (2026-08-05): a reviewer inherits the delivering engagement's KBs.** When a
+    specialist is engaged as a REVIEWER on a task, its knowledge-base context is the UNION of
+    its own profile grants and the KB grants the DELIVERING engagement used for that task —
+    so the deliverer and the reviewer judge against the same conventions. Grants are otherwise
+    strictly per-profile, and that produced a false `request_changes` live: a Developer with a
+    "conventions" KB wrote the required footer, and a Reviewer with `kb: []` flagged that footer
+    as unsubstantiated because it never saw the KB. The union is deduped (a KB both grant never
+    double-charges the shared injection budget), applies only to non-delivering runs, and is
+    tolerant of an undeployed deliverer. Same on the resumed/@mention review path.
+    (`app/server/tasks/specialist-run.server.ts` — `deliveringKbGrants`/`withDeliveringKb`)
+
+48. **R18-2 (2026-08-05): a full-autonomy delivery re-queues the operator.** Opening the review
+    PR is delivery, NOT a stage transition, so the P11-70 every-transition re-trigger (and the
+    auto-boundary stranded backstop) never fired after it — an AUTONOMOUS task sat `waiting:human`
+    with no packet, recommendation, or card (an invisible dead-end). Under FULL autonomy the
+    server now re-queues the operator with a `delivered` trigger so it proceeds on its own (engage
+    the reviewer / recommend the next step). SUPERVISED deliberately does NOT re-trigger — the
+    human is the driver and the "Opened PR" event on the timeline is the cue. Only a NEWLY opened
+    PR fires it; the re-triggered run can never re-deliver (the deliver tool no-ops on a live PR),
+    and the chain shares `OPERATOR_TRANSITION_CHAIN_CAP`. (`performDelivery` in
+    `app/server/tasks/task-actions.server.ts`; the `delivered` trigger in `operator-run.server.ts`)
+
+49. **R18-3 (2026-08-05): the SDK-native skill/command catalog is governed OUT of runs.** A
+    spawned agent run loads ONLY Viberr's granted skills. The per-task workspace clone's own
+    `.claude` catalog is stripped before the run (git-invisibly, via `--skip-worktree` so the
+    delivery's `git add -A` never ships a `.claude` deletion into the review PR), and the Claude
+    launch carries `strictMcpConfig: true` so only Viberr-passed MCP servers reach the run. The
+    user-level catalog is already isolated in production by the app-owned `CLAUDE_CONFIG_DIR`;
+    Codex was already governed by `CODEX_HOME` + its skills/plugins/AGENTS.md flags. Known,
+    accepted limitation: a run whose task is to edit the repo's OWN `.claude` cannot deliver those
+    edits — that is the governance posture, not a bug.
+    (`stripUngovernedRepoCatalog` in `app/server/tasks/specialist-run.server.ts`;
+    `app/server/runtimes/claude-runtime.server.ts`)
+
+50. **R18-4 (2026-08-05): branch-collision stays a human-gated packet — do NOT auto-reset.** A
+    stale remote task branch (a reused task key whose old branch still exists on GitHub) forces
+    a collision packet before delivery. The rejected fix was "always force-reset the remote task
+    branch to base at execution start"; the ruling KEEPS the collision packet + human resolve as
+    an intentional safety checkpoint against clobbering unrelated remote history. (Resolves the
+    carried F17-L4 behavior question; the pass-17 merged-vs-closed copy split stands.)
+
 ## Route map
 
 ```
