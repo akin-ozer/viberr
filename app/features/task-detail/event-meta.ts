@@ -27,6 +27,10 @@ export const EVENT_META: Record<string, EventMeta> = {
   // scheduled re-run. Same "note" node styling as a comment row, no shield.
   note: { node: "note", icon: "message", label: "Note" },
   quality: { node: "quality", icon: "flag", label: "Quality flag" },
+  // G8: runtime-continuity reset — warning-toned (amber), refresh icon (the
+  // agent re-anchored on a fresh session). Distinct from a neutral `note` so a
+  // scanning supervisor sees that context was lost and recovered.
+  continuity: { node: "quality", icon: "refresh", label: "Continuity reset" },
   transition: { node: "transition", icon: "arrow", label: "Transition request" },
   blocked: { node: "blocked", icon: "alert", label: "Blocked decision" },
   // The operator's coordination actions (deploy/engage/run/release a specialist).
@@ -55,6 +59,7 @@ const TYPED_KIND: Record<string, PillKind> = {
   policy: "input",
   note: "neutral",
   quality: "risk",
+  continuity: "risk", // G8: amber warning tone
   transition: "info",
   blocked: "blocked",
   agent: "agent",

@@ -303,7 +303,7 @@ describe("TimelineItem", () => {
     );
   });
 
-  it("all 10 types map to their node class + pill label (contracts §1.3)", () => {
+  it("all 11 types map to their node class + pill label (contracts §1.3)", () => {
     const table: [string, string, string | null][] = [
       ["comment", "", null],
       ["completion", "completion", "Completion report"],
@@ -313,6 +313,9 @@ describe("TimelineItem", () => {
       // no longer borrow the coral "Policy violation" shield.
       ["note", "note", "Note"],
       ["quality", "quality", "Quality flag"],
+      // G8: continuity reset — amber warning tone, its own label; borrows the
+      // quality node styling (both are the amber/attention family).
+      ["continuity", "quality", "Continuity reset"],
       ["transition", "transition", "Transition request"],
       ["blocked", "blocked", "Blocked decision"],
       ["agent", "agent", "Operator"],

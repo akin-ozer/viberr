@@ -743,7 +743,10 @@ describe("resumeRun — continuity recovery", () => {
     })!.parsed.timeline;
     const note = timeline.find((e) => e.text.includes("continuity was lost"));
     expect(note).toBeDefined();
-    expect(note!.type).toBe("note");
+    // G8: a WARNING-toned typed `continuity` event (amber), NOT a neutral
+    // `note` that a scanning supervisor never sees. It is a typed event, so it
+    // survives the "Important events" filter and is never folded by compaction.
+    expect(note!.type).toBe("continuity");
     expect(note!.text).toContain("task.md");
   });
 

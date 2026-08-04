@@ -97,6 +97,7 @@ const ACT_ICON: Record<(typeof TIMELINE_EVENT_TYPES)[number], IconName> = {
   policy: "shield",
   note: "message",
   quality: "flag",
+  continuity: "refresh",
   transition: "arrow",
   blocked: "alert",
   agent: "agents",

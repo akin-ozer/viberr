@@ -55,6 +55,12 @@ export const TIMELINE_EVENT_TYPES = [
   "blocked",
   "agent",
   "assign",
+  // G8: a runtime-continuity reset (a resumed session's provider transcript was
+  // gone, so the agent re-anchored on task.md in a fresh session). A WARNING-
+  // toned typed event, not a neutral `note` — nothing was violated (not
+  // `policy`) and nothing is stuck (not `blocked`), but a supervisor scanning
+  // the board/stream must get a cue that context was lost and recovered.
+  "continuity",
 ] as const;
 
 /** Stable packet-option kinds (orchestrator ruling 7). Dispatch on these,

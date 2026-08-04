@@ -590,9 +590,12 @@ function continuityResetPreamble(backend: RealBackend): string {
 }
 
 /**
- * Note the continuity break on the task timeline. `note` (not `policy` or
- * `blocked`): nothing was violated and nothing is stuck — the turn ran, on a
- * fresh session. Best-effort: a task file we cannot write must never block the
+ * Note the continuity break on the task timeline. G8: a `continuity` typed
+ * event (amber warning tone), NOT a neutral `note` — nothing was violated (not
+ * `policy`) and nothing is stuck (not `blocked`), but context WAS lost and a
+ * supervisor scanning the timeline/stream must get a cue, which a neutral note
+ * buried mid-timeline never gave (PRD Journey 4: "a continuity warning appears
+ * on the task"). Best-effort: a task file we cannot write must never block the
  * run that is the actual recovery.
  */
 async function noteContinuityReset(
@@ -610,7 +613,7 @@ async function noteContinuityReset(
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
-        type: "note",
+        type: "continuity",
         actor: { kind: "system", systemId: "runtime-continuity" },
         title: null,
         text: `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
