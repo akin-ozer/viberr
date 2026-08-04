@@ -5411,7 +5411,13 @@ export async function applyRecommendation(
   const rec = existing.parsed.frontmatter.recommendations.find(
     (r) => r.id === input.recId,
   );
-  if (!rec) throw AppError.conflict("That recommendation was already resolved.");
+  // F18-7: a missing id means the card is GONE — resolved, dismissed, or
+  // superseded by a newer operator run — not specifically "already resolved"
+  // (which mis-describes an unknown/stale id). Hedge to what is actually known.
+  if (!rec)
+    throw AppError.conflict(
+      "That recommendation is no longer available — it may have been resolved, dismissed, or replaced by a newer one. Refresh to see the current recommendations.",
+    );
 
   // R15-3 (owner ruling 2026-07-28): the task OWNER may apply ANY operator
   // recommendation on their own task — the Apply click IS the authorization

@@ -155,6 +155,35 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     ).rejects.toMatchObject({ message: expect.stringContaining("Review") });
   });
 
+  it("F18-7: an UNKNOWN recommendation id 409s with copy that does not mis-claim 'already resolved'", async () => {
+    const store = prepared();
+    seed(store, {
+      stage: "impl",
+      waiting: "human",
+      recommendations: [
+        {
+          id: "r-real",
+          kind: "transition",
+          toStageId: "review",
+          label: "Move the task to Review",
+          detail: "",
+        },
+      ],
+    });
+    const rejection = applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-does-not-exist" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await expect(rejection).rejects.toMatchObject({ status: 409 });
+    // The copy hedges (resolved / dismissed / replaced), never a bare
+    // "already resolved" that mis-describes a stale or unknown id.
+    await expect(rejection).rejects.toMatchObject({
+      message: expect.stringContaining("no longer available"),
+    });
+  });
+
   it("R15-3: the task OWNER applies an operator TRANSITION rec on their own task — the Apply click IS the authorization", async () => {
     // F15-12 live defect: a contributor-OWNER was shown Apply on a stage rec
     // and then 403'd by the inner approve-transition tier, silently. Owner

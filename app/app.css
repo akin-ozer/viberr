@@ -1118,7 +1118,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .packet-actions .btn { flex: 1; min-width: 130px; }
 
 /* execution profile */
-.profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+/* F18-12: `1fr 1fr` tracks can't shrink below their content's min-content, so on
+   a narrow viewport the DELIVERING/HUMAN-OWNER column (with its Run / Manage /
+   Assign controls) rendered off the right edge with no scroll — a governance
+   action unreachable at that width (violates the responsive ruling). `minmax(0,
+   1fr)` lets the tracks shrink; the mobile block below drops it to one column. */
+.profile-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .7rem; }
 .profile-cell {
   border: 1px solid var(--hairline);
   border-radius: 14px;
@@ -2895,6 +2900,10 @@ dialog[data-closing]::backdrop {
   .top-search-label { display: none; }
   .filter-bar, .board { padding-left: .8rem; padding-right: .8rem; }
   .board-filter-input { flex-basis: 100%; }
+  /* F18-12: the execution-profile 2-up cells (operator/delivering/reviewing/owner)
+     hold real controls — stack them one-per-row on a phone so every action stays
+     in the viewport instead of being clipped off the right edge. */
+  .profile-grid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   .rail { transition: none; }
