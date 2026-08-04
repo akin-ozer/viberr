@@ -1,4 +1,13 @@
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from "node:fs";
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import path from "node:path";
@@ -65,12 +74,40 @@ export interface LockHolder {
 /** Why an existing lock could not simply be taken. */
 export type LockVerdict = "stale" | "held" | "unknown-holder";
 
+/**
+ * Result of re-verifying that THIS process still owns the file at the lock path
+ * (F18-5). `stolen` = the file was deleted or replaced while we held it (a second
+ * writer is now possible → fail closed). `unverifiable` = a transient/torn read
+ * this tick, not proof of a steal (the guard retries).
+ */
+export type LockOwnership = "held" | "stolen" | "unverifiable";
+
+/** Injected fs probes for {@link verifyLockOwnership}; tests substitute these to
+ *  simulate a steal without touching a real descriptor (mirrors the `isAlive`
+ *  injection used by `acquireDataRootLock`). */
+export interface LockOwnershipProbes {
+  fstat: (fd: number) => { ino: bigint; dev: bigint };
+  stat: (path: string) => { ino: bigint; dev: bigint };
+  readHolder: (path: string) => LockHolder | null;
+}
+
 export interface DataRootLock {
   /** Absolute path of the lock file. */
   path: string;
   holder: LockHolder;
+  /** The OS descriptor of the open lock file. The ownership re-check fstats THIS
+   *  to compare against the inode currently living at `path`. */
+  fd: number;
   /** Idempotent: closes the descriptor and removes the file. */
   release(): void;
+  /**
+   * Fail-closed teardown for a STOLEN lock (F18-5): drop tracking + close our
+   * (stale) descriptor, but DO NOT unlink `path` — the file there now belongs to
+   * whatever replaced it, and removing it would re-open the two-writer window.
+   */
+  abandon(): void;
+  /** Re-verify this process still owns the file at `path`. See {@link verifyLockOwnership}. */
+  verifyOwnership(probes?: LockOwnershipProbes): LockOwnership;
 }
 
 export interface AcquireDataRootLockOptions {
@@ -205,6 +242,62 @@ export function classifyLock(
   return isAlive(holder.pid) ? "held" : "stale";
 }
 
+const DEFAULT_OWNERSHIP_PROBES: LockOwnershipProbes = {
+  fstat: (fd) => {
+    const s = fstatSync(fd, { bigint: true });
+    return { ino: s.ino, dev: s.dev };
+  },
+  stat: (p) => {
+    const s = statSync(p, { bigint: true });
+    return { ino: s.ino, dev: s.dev };
+  },
+  readHolder,
+};
+
+/**
+ * Re-verify that the file at `lock.path` is STILL the one this process opened
+ * (F18-5). The B-FD1 lock keeps an fd open for the process lifetime; if a store
+ * reset deletes `state/` (or a second boot replaces the file), that fd becomes an
+ * unlinked ghost while a NEW inode sits at the path — two live writers, silent
+ * SQLite loss. This is how the holder catches it.
+ *
+ *  1. `fstat` our held fd — if the descriptor itself is unusable, we cannot prove
+ *     we own anything → `stolen`.
+ *  2. `stat` the path — ENOENT (deleted out from under us) → `stolen`.
+ *  3. inode/device differ → the path was deleted+recreated → `stolen`.
+ *  4. inode matches: corroborate identity for filesystems with synthesized inode
+ *     numbers (VirtioFS bind mounts) — the file must still NAME our `bootId`.
+ *     Only enforced when our own identity carries a bootId (production always
+ *     does; a bootId-less injected/legacy self trusts the inode match). A null
+ *     read is a torn/racing read, not proof → `unverifiable`.
+ *
+ * Pure + injectable so a test can simulate every branch (mirrors `classifyLock`).
+ */
+export function verifyLockOwnership(
+  lock: Pick<DataRootLock, "fd" | "path" | "holder">,
+  probes: LockOwnershipProbes = DEFAULT_OWNERSHIP_PROBES,
+): LockOwnership {
+  let held: { ino: bigint; dev: bigint };
+  try {
+    held = probes.fstat(lock.fd);
+  } catch {
+    return "stolen";
+  }
+  let onDisk: { ino: bigint; dev: bigint };
+  try {
+    onDisk = probes.stat(lock.path);
+  } catch {
+    return "stolen"; // ENOENT — the lock file was deleted while we held it.
+  }
+  if (held.ino !== onDisk.ino || held.dev !== onDisk.dev) return "stolen";
+  if (lock.holder.bootId) {
+    const onDiskHolder = probes.readHolder(lock.path);
+    if (!onDiskHolder) return "unverifiable";
+    if (onDiskHolder.bootId !== lock.holder.bootId) return "stolen";
+  }
+  return "held";
+}
+
 function refusalMessage(
   holder: LockHolder | null,
   self: LockHolder,
@@ -291,6 +384,10 @@ export function acquireDataRootLock(
 
     const tracked = options.releaseOnExit !== false;
     let released = false;
+    // Normal release unlinks; the fail-closed `abandon()` (F18-5) sets this false
+    // so a STOLEN lock's teardown closes our stale fd WITHOUT deleting the file
+    // that now belongs to the process which replaced us.
+    let unlinkOnRelease = true;
     const release = () => {
       if (released) return;
       released = true;
@@ -303,9 +400,22 @@ export function acquireDataRootLock(
       } catch {
         // A descriptor already closed by shutdown is not a failure.
       }
-      rmSync(lockPath, { force: true });
+      if (unlinkOnRelease) rmSync(lockPath, { force: true });
     };
-    const lock: DataRootLock = { path: lockPath, holder: self, release };
+    const abandon = () => {
+      unlinkOnRelease = false;
+      release();
+    };
+    const verifyOwnership = (probes?: LockOwnershipProbes): LockOwnership =>
+      verifyLockOwnership({ fd, path: lockPath, holder: self }, probes);
+    const lock: DataRootLock = {
+      path: lockPath,
+      holder: self,
+      fd,
+      release,
+      abandon,
+      verifyOwnership,
+    };
     if (tracked) {
       // Both ends of the process's life: `exit` covers a normal return, and the
       // signal handler calls releaseDataRootLock() before it re-raises.
@@ -322,4 +432,96 @@ export function acquireDataRootLock(
     holder: readHolder(lockPath),
     lockPath,
   });
+}
+
+/** Ownership re-check cadence. Cheap (one fstat + one stat + one small read),
+ *  unref'd, so 20 s is comfortable while still catching a steal within a tick. */
+export const DATA_ROOT_LOCK_GUARD_INTERVAL_MS = 20_000;
+
+/** HMR-safe singleton handle — same global-symbol pattern as the reconcile
+ *  poller / file watcher, so a dev reload never stacks a second interval. */
+const GUARD_KEY = Symbol.for("viberr.dataRootLockGuard");
+
+function guardSlot(): Record<symbol, ReturnType<typeof setInterval> | undefined> {
+  return globalThis as unknown as Record<
+    symbol,
+    ReturnType<typeof setInterval> | undefined
+  >;
+}
+
+export interface DataRootLockGuardOptions {
+  intervalMs?: number;
+  /** Lock to watch. Defaults to the process-held lock (read every tick, so an
+   *  HMR re-acquire is picked up). Injected by tests. */
+  lock?: DataRootLock;
+  /** Ownership probe. Defaults to `lock.verifyOwnership()`. Injected by tests. */
+  verify?: (lock: DataRootLock) => LockOwnership;
+  /** Reaction to a lost lock. Default: loud log + `process.exit(1)`. Injected by
+   *  tests so the worker is not taken down. */
+  onStolen?: (lock: DataRootLock, verdict: LockOwnership) => void;
+}
+
+function loudlyShutDownOnStolenLock(
+  lock: DataRootLock,
+  verdict: LockOwnership,
+): void {
+  // No `logger.fatal` exists (levels: debug/info/warn/error); this is the app's
+  // fatal channel — a loud `error` line + a non-zero exit, mirroring the boot
+  // refusal's who/what/why so an operator reading stdout has the whole diagnosis.
+  logger.error(
+    `FATAL: this Viberr process no longer owns the data-root writer lock at ${lock.path} (${verdict}). ` +
+      `The lock file was deleted or replaced while this process held it — another process may now be ` +
+      `writing the same data root concurrently, which clobbers the SQLite WAL and silently loses ` +
+      `transactions (B-FD1/F18-5). Shutting down NOW rather than continuing to write lock-less. ` +
+      `Do not wipe <dataRoot>/state while a Viberr process is running.`,
+    { lockPath: lock.path, holder: lock.holder, verdict },
+  );
+  // Detach WITHOUT unlinking: the file at lock.path is no longer ours to remove.
+  lock.abandon();
+  process.exit(1);
+}
+
+/**
+ * Start the fail-closed ownership guard (F18-5): every {@link DATA_ROOT_LOCK_GUARD_INTERVAL_MS}
+ * re-verify the process still owns its writer-lock file; on a `stolen` verdict,
+ * loudly shut the process down instead of writing lock-less. Idempotent + HMR-safe
+ * + unref'd (never blocks exit). No-op when nothing is held.
+ */
+export function startDataRootLockGuard(options: DataRootLockGuardOptions = {}): void {
+  const slot = guardSlot();
+  if (slot[GUARD_KEY]) return;
+  const intervalMs = options.intervalMs ?? DATA_ROOT_LOCK_GUARD_INTERVAL_MS;
+  const verify = options.verify ?? ((l: DataRootLock) => l.verifyOwnership());
+  const onStolen = options.onStolen ?? loudlyShutDownOnStolenLock;
+  const handle = setInterval(() => {
+    const lock = options.lock ?? heldDataRootLock();
+    if (!lock) return; // released (or never taken) — nothing to guard this tick.
+    let verdict: LockOwnership;
+    try {
+      verdict = verify(lock);
+    } catch (error) {
+      // A single probe hiccup is not proof of a steal — log and retry next tick.
+      logger.warn("data-root lock guard check failed (transient)", {
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      return;
+    }
+    if (verdict === "stolen") {
+      stopDataRootLockGuard();
+      onStolen(lock, verdict);
+    }
+    // "held" → fine; "unverifiable" → torn read, retry next tick.
+  }, intervalMs);
+  if (typeof handle.unref === "function") handle.unref();
+  slot[GUARD_KEY] = handle;
+}
+
+/** Stop the guard (graceful shutdown + tests). */
+export function stopDataRootLockGuard(): void {
+  const slot = guardSlot();
+  const handle = slot[GUARD_KEY];
+  if (handle) {
+    clearInterval(handle);
+    slot[GUARD_KEY] = undefined;
+  }
 }
