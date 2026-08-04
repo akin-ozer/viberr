@@ -399,6 +399,17 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           kind: option.kind,
           toast,
+          // F17-L3: a scoping (edit_goal) decision drops the human into the goal
+          // editor — prefill it with the CHOSEN option's deliverable so they
+          // don't have to retype the scope they just picked. The option title is
+          // the headline; its description carries the deliverable + acceptance.
+          ...(option.kind === "edit_goal"
+            ? {
+                goalDraft: option.d?.trim()
+                  ? `${option.t}\n\n${option.d.trim()}`
+                  : option.t,
+              }
+            : {}),
           // Mock flow: blocking on policy opens the repository settings.
           ...(option.kind === "block_on_policy"
             ? { navigateTo: `/projects/${projectSlug}/settings` }

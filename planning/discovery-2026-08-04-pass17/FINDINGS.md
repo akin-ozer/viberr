@@ -64,11 +64,15 @@ Prior rulings still in force: R16-1..R16-7 (see pass-16 memory), R15-x, R6-2
   empty (or no branch at all), reviewer verdict optional. Tests for the new
   path + that it does NOT merge anything.
 
-- **F17-L5 (bug) silent failure on "Complete merge".** When the merge-pending
-  "Complete merge" action fails server-side (e.g. PR head no longer contains the
-  delivered revision → 409 with a precise message), the UI renders nothing — no
-  toast, no inline error. Surface the fetcher error on the GitHub card.
-  Files: task-detail GitHub panel + the complete-merge fetcher.
+- **F17-L5 — DISPROVEN (harness artifact, NOT a bug).** The "Complete merge"
+  failure DOES surface: `completeTaskMerge` throws `AppError.conflict`, the route's
+  top-level catch returns `appErrorResponse` → `{ok:false, error: userMessage}`,
+  and `useActionFeedback(runFetcher)` pushes it as an error toast (kind "error").
+  Verified in code ([task-detail-hooks.ts:32-38](app/features/task-detail/task-detail-hooks.ts),
+  [form-action.server.ts:21](app/server/auth/form-action.server.ts)) and covered by
+  the P13-D-10 error-toast test. My live "nothing appeared" was the backgrounded
+  Browser-pane toast throttling documented in [[viberr-motion-and-preview-quirks]].
+  No code change.
 
 - **F17-L4 / F17-L6 (consistency) branch-collision + conflict surfacing.**
   (a) Branch-collision policy fires only after a GitHub sync has happened, so the

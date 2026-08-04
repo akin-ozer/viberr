@@ -161,12 +161,16 @@ export function TaskDetailPage({
   // A confirmed edit_goal packet decision drops the human straight into the
   // goal editor (TaskHero opens + focuses it on this signal).
   const [editGoalSignal, setEditGoalSignal] = useState(0);
+  // F17-L3: the deliverable of the chosen scoping option, so the editor opens
+  // prefilled with the scope the human just picked (not the old vague goal).
+  const [editGoalDraft, setEditGoalDraft] = useState<string | null>(null);
   useEffect(() => {
     if (
       resolveFetcher.state === "idle" &&
       resolveFetcher.data?.ok &&
       resolveFetcher.data.kind === "edit_goal"
     ) {
+      setEditGoalDraft(resolveFetcher.data.goalDraft ?? null);
       setEditGoalSignal((n) => n + 1);
     }
   }, [resolveFetcher.state, resolveFetcher.data]);
@@ -345,6 +349,7 @@ export function TaskDetailPage({
           archived={archived}
           agentWorking={anyRunLive}
           editGoalSignal={editGoalSignal}
+          editGoalDraft={editGoalDraft}
         />
 
         {runtime.length > 0 ? (

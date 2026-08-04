@@ -75,6 +75,7 @@ export function TaskHero({
   archived = false,
   agentWorking = false,
   editGoalSignal = 0,
+  editGoalDraft = null,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
@@ -89,6 +90,10 @@ export function TaskHero({
   /** Increments when a packet's `edit_goal` decision is confirmed — opens the
    *  goal editor so the human can start typing immediately. */
   editGoalSignal?: number;
+  /** F17-L3: the chosen scoping option's deliverable — the editor prefills with
+   *  THIS (not the old vague goal) so the human doesn't retype what they picked.
+   *  Null when the decision carried no draft (falls back to the current goal). */
+  editGoalDraft?: string | null;
 }) {
   const goalFetcher = useFetcher<ActionResult>();
   const csrf = useCsrfToken();
@@ -119,11 +124,13 @@ export function TaskHero({
         // UI-57: re-seed from the CURRENT goal. `draft` is seeded once at mount
         // and only the Edit button refreshed it, so a packet-opened editor could
         // save stale text over another user's edit.
-        setDraft(task.goal);
+        // F17-L3: a scoping decision prefills with the chosen option's
+        // deliverable so the human edits from what they picked, not the old goal.
+        setDraft(editGoalDraft ?? task.goal);
         setEditing(true);
       }
     }
-  }, [editGoalSignal, canEditGoal, task.goal]);
+  }, [editGoalSignal, canEditGoal, task.goal, editGoalDraft]);
 
   return (
     <div className="task-hero">
