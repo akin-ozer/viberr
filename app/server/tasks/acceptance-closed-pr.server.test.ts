@@ -212,6 +212,44 @@ describe("path 3 — operatorAcceptCompletion", () => {
     expect(task().frontmatter.pr?.state).toBe("closed");
   });
 
+  it("R17-1: a full-autonomy accept of a drifted-head PR names the divergence in the completion event", async () => {
+    deployOperator();
+    // An OPEN review PR whose head drifted ahead of the reviewed revision by 2.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        validation: "healthy",
+        ownerUserId: store.users.arda.id,
+        title: "Attach execution workspace",
+        branch: "vib-1-attach-execution-workspace",
+        pr: {
+          number: 318,
+          state: "review",
+          title: "[VIB-1] Attach execution workspace",
+          revisionDrift: { aheadBy: 2, headSha: "aheadhead0000" },
+        },
+      }),
+      goal: "Prove the divergence note lands on the completion record.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const result = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+        autonomy: "full",
+      }),
+    );
+    expect(result.message).toMatch(/accepted|Done/i);
+    expect(task().frontmatter.stage).toBe("done");
+    const completion = task().timeline.find((e) => e.type === "completion");
+    expect(completion?.text).toContain("2 commits were added to the PR head");
+    // The note shows the first 12 chars of the drifted head sha.
+    expect(completion?.text).toContain("aheadhead000");
+  });
+
   it("supervised does not even RECOMMEND acceptance on a closed-PR task", async () => {
     deployOperator();
     seedClosedPrTask();

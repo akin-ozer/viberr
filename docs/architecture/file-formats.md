@@ -76,7 +76,9 @@ workflow:                         # governed boundaries: auto|approval|human
     locked: true
 members:                          # project roles (4-role system, contracts §3.2)
   - userId: u_abc123
-    role: admin                   # admin | maintainer | reviewer | viewer
+    role: admin                   # admin | maintainer | contributor | viewer
+                                  # (strict tier; `reviewer` was renamed `contributor` —
+                                  # ruling 2 amendment. Source of truth: app/shared/rbac.ts)
 agents:                           # per-project DEPLOYMENT of profile templates
   - profileId: developer
     capabilities:                 # id-based against CAP_CATALOG (ruling 2)
@@ -88,7 +90,8 @@ agents:                           # per-project DEPLOYMENT of profile templates
 credentialPolicy:                 # NON-secret policy; the PAT itself lives
   credentialLabel: viberr-bot · fine-grained PAT     # AES-encrypted in SQLite (Phase 7)
   masked: github_pat_••••42af
-  requiredScopes: [repo, workflow, read:org, pull_request:write]
+  requiredScopes: [repo, pull_request:write]   # the exact minimum (ruling 18);
+                                  # `workflow` and `read:org` were dropped 2026-07-25
 guardrails:
   - id: compression-threshold
     desc: Long timelines compress once routine events pass the threshold; typed events are always kept.

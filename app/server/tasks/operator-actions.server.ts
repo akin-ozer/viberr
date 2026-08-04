@@ -62,6 +62,7 @@ import {
   notifyTaskWatchers,
   operatorPromptAgent,
   performDelivery,
+  revisionDriftNote,
   transitionStage,
   type TaskMutationContext,
 } from "./task-actions.server";
@@ -2040,6 +2041,8 @@ export async function operatorAcceptCompletion(
   // human path gate by gate and shipped with a subset more than once. The core
   // also re-checks the refusal gates inside the write lock (B-WF1).
   const hasPr = !!file.parsed.frontmatter.pr;
+  // R17-1 (F17-L12): name any reviewed-revision drift on the completion record.
+  const driftNote = revisionDriftNote(file.parsed.frontmatter);
   await applyAcceptanceWrite(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -2050,9 +2053,11 @@ export async function operatorAcceptCompletion(
       type: "completion",
       actor: { kind: "operator" },
       title: "Completion accepted",
-      text: hasPr
-        ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
-        : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`,
+      text:
+        (hasPr
+          ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
+          : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`) +
+        driftNote,
       toAgent: false,
       evidence: null,
     },

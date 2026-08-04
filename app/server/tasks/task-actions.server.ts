@@ -4177,18 +4177,22 @@ export async function resolvePacket(
       if (merge.kind === "unmergeable") throw AppError.conflict(merge.reason);
       const reallyMerged = merge.kind === "merged";
       const hasPr = !!existing.parsed.frontmatter.pr;
+      // R17-1: name any reviewed-revision drift on the completion record.
+      const driftNote = revisionDriftNote(existing.parsed.frontmatter);
       event = {
         occurredAt: now,
         type: "completion",
         actor: human,
         title: "Completion accepted",
-        text: !hasPr
-          ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
-          : alreadyMerged
-            ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
-            : reallyMerged
-              ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
-              : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`,
+        text:
+          (!hasPr
+            ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
+            : alreadyMerged
+              ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
+              : reallyMerged
+                ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
+                : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+          driftNote,
         toAgent: false,
         evidence: null,
       };
@@ -4927,6 +4931,22 @@ function mergePendingCause(merge: AcceptanceMergeOutcome): string {
 }
 
 /**
+ * R17-1 (F17-L12): a completion-event suffix naming the reviewed-revision drift,
+ * or "" when the PR head equals the reviewed revision. The reconciler records
+ * `pr.revisionDrift` when the head moved AHEAD of the reviewed revision (commits
+ * pushed after the review). Acceptance still merges an ahead head — the owner
+ * ruling keeps "ahead" — but the completion record must name the commits that
+ * ship (or shipped) outside the reviewed revision, so a Done task's own timeline
+ * is honest about what merged. Every acceptance path appends this.
+ */
+export function revisionDriftNote(fm: TaskFrontmatter): string {
+  const drift = fm.pr?.revisionDrift;
+  if (!drift || drift.aheadBy <= 0) return "";
+  const n = drift.aheadBy;
+  return ` ${n} commit${n === 1 ? "" : "s"} were added to the PR head (\`${drift.headSha.slice(0, 12)}\`) after the review — outside the reviewed revision.`;
+}
+
+/**
  * The ONE Done write every acceptance path shares (B-WF6). Exported for
  * `operatorAcceptCompletion`, whose full-autonomy branch historically
  * re-implemented this block inline and drifted gate by gate.
@@ -5115,18 +5135,22 @@ async function acceptCompletion(
   const reallyMerged = merge.kind === "merged";
   const hasPr = !!existing.parsed.frontmatter.pr;
 
+  // R17-1: name any reviewed-revision drift on the completion record.
+  const driftNote = revisionDriftNote(existing.parsed.frontmatter);
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "completion",
     actor: humanActorRef(db, actor),
     title: "Completion accepted",
-    text: !hasPr
-      ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
-      : alreadyMerged
-        ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
-        : reallyMerged
-          ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
-          : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`,
+    text:
+      (!hasPr
+        ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
+        : alreadyMerged
+          ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
+          : reallyMerged
+            ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
+            : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+      driftNote,
     toAgent: false,
     evidence: null,
   };

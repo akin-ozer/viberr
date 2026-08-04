@@ -147,7 +147,10 @@ it is regenerated from the filesystem rather than restated here.
 6. **Identity.** Compare by user id everywhere; display names are render-only. The session
    user id is authoritative.
 7. **Packet options carry a stable `kind`** — never dispatch on English titles.
-   Accept-completion triggers a real async PR merge with an explicit failure state.
+   Accept-completion on the HUMAN path triggers a real async PR merge with an explicit
+   failure state. **Amended 2026-08-04 (ruling 40 / R16-6)** — that is true only of a human
+   acceptance; a full-autonomy operator acceptance records the PR `accepted` (merge pending)
+   and a human completes the merge later, because `merge-pull-request` is `ALWAYS_HUMAN`.
    **Extended** — the kind set is now eight: `accept_completion`, `request_edit`,
    `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`,
    `custom`. The same ruling governs the capability catalog: agent policy is id-based
@@ -281,6 +284,91 @@ it is regenerated from the filesystem rather than restated here.
     restarts keys at 1, so a brand-new `VIB-1` gets branch `vib-1`, which on GitHub may
     still carry a previous `VIB-1`'s PR. Five-minute polling is unchanged and still tracks
     state, checks, review and mergeability — for PRs the task actually owns.
+35. **R16-1 (2026-08-04): a pre-existing PR is adopted ONLY IF it is open AND its head sha
+    is the task's delivered revision.** Adoption exists for one case — Viberr lost track of a
+    PR it had opened (a crashed delivery, a hand-wiped `pr:` field). Every earlier
+    implementation matched on the head BRANCH NAME, and a task-key branch is not an
+    identifier: keys restart at 1 on a new data root, so `vib-4` on GitHub may still carry a
+    wiped instance's VIB-4 work. (Live H8: a brand-new VIB-4 adopted a week-old merged PR and
+    wore a green "merged" badge and "checks 2/2" for work that was never pushed.) The rule:
+    adopt ONLY a PR that is OPEN **and** whose head sha IS the delivered revision — identity,
+    not containment (the acceptance gate accepts a head that merely *contains* the delivered
+    commit; adoption is the stronger claim), and a task that has delivered nothing adopts
+    nothing. A name-matched PR that fails the rule is a branch COLLISION, reported as one
+    (`prAdoptionRefusalNote`; refusals `not_open | no_revision | head_unknown | head_mismatch`)
+    and blocking delivery — never silently bound, never silently dropped. Extends ruling 34
+    (R15-15). `app/server/github/pr-adoption.server.ts`.
+36. **R16-2 (2026-08-04): `input_required` joins the board's attention predicate.** The
+    board's "risk"/attention filter selected only `blocked` and
+    `inconsistency_risk_detected`, so it matched 0 of 4 tasks on a board full of
+    input-required work — the exact state a human most needs to see. `input_required` now
+    joins the predicate, and the chip is renamed from "Needs attention" to **"Blocked or
+    waiting"** so its label names what it selects. `app/features/board/board-filters.ts`,
+    `board-page.tsx`.
+37. **R16-3 (2026-08-04): terminal GitHub facts outrank process gates in refusal copy.**
+    When acceptance is blocked, a TERMINAL GitHub fact — a closed, unmerged PR — is named
+    FIRST, ahead of any process gate (missing verdict, head mismatch), because it is the fact
+    the human must act on and the recovery packet is the only way forward. While the PR is
+    closed, admin **Force-accept is WITHDRAWN** (hidden), not merely disabled: force-accept
+    exists to bypass a wedged *process* gate, not a settled GitHub state it cannot change.
+    Extends ruling 20 (R15-1). `task-actions.server.ts`, `app/features/review/review-helpers.ts`,
+    `rebuilder.server.ts`.
+38. **R16-4 (2026-08-04): correctness first with tests, then the full UI/a11y list — nothing
+    deferred out of the pass.** A pass fixes governance/correctness defects first, each with a
+    test, then completes the UI and accessibility list in the same pass rather than punting
+    items to a later one. The disposition audit — every backlog item's state re-derived from
+    the tree after the fix waves — is what proves "done" is not "partial".
+39. **R16-5 (2026-08-04): MCP grants stay OUTSIDE the capability matrix — granting a server
+    IS the grant.** An MCP server's tools are not enumerated as capabilities and are not gated
+    by the `direct | recommend | human | off` matrix. Granting a profile a server is itself the
+    authorization to use that server's tools, whatever they do; Viberr will not pretend to
+    bound a third-party tool it does not define. Consequence, stated plainly: a withheld
+    `execute-code-or-write-repo` does NOT bound a granted server's tools — an org MCP server
+    with write powers is reachable by an agent whose code-write capability is `off`. This is a
+    deliberate honesty boundary, not a gap. Pinned by the ABSENCE of any `mcp__*` deny rule
+    (`app/server/tasks/specialist-tool-policy.test.ts`) and disclosed in the capability-matrix
+    UI (`capability-matrix-modal.tsx`). See the PRD/NFR8 amendment note.
+40. **R16-6 (2026-08-04): merge stays human-only — "Done" has two meanings.**
+    `merge-pull-request` is and stays `ALWAYS_HUMAN`. So a full-autonomy operator that accepts
+    completion CANNOT merge: it records the PR `pr.state: "accepted"` — **merge pending** —
+    moves the task to Done, and a human completes the actual merge later. A *human* acceptance
+    triggers a real async merge. Both paths reach Done; they mean different things, and the
+    difference must be visible where the task lives (board card **and** review queue), not only
+    on the detail page. This is the correction to ruling 7's flat "accept-completion triggers a
+    real async PR merge", which holds only on the human path.
+    `app/server/tasks/operator-actions.server.ts`, `app/shared/capabilities.ts`.
+41. **R16-7 (2026-08-04): the stale `codex/gpt-5-6-sol-agents` branch was deleted.** An
+    abandoned harness branch was removed from local and `origin` (tip `461d34ab` if ever
+    wanted). **Premise correction:** the deletion stands, but the pass-16 rationale that
+    certain contributor/testing docs "no longer exist" was wrong — `docs/contributing-quickstart.md`
+    and `docs/testing-quickstart.md` both exist in the tree today. Record the branch deletion
+    as done; discard the missing-docs premise.
+42. **R17-1 (2026-08-04): acceptance may accept a head AHEAD of the reviewed revision, but
+    MUST surface the divergence.** The accept gate stays containment-based — it accepts a PR
+    head that CONTAINS (is ahead of) the delivered/reviewed revision, because a legitimate
+    auto-commit on top of the delivery is fine there. Honesty over blocking: the accept dialog
+    AND the admin force-accept dialog must show the ACTUAL merge head and a divergence warning
+    ("N commits added since review"), and the refusal/subline chain must name the divergence;
+    the audit log names the real merge head, not the reviewed SHA. A head that has DIVERGED
+    (no longer contains the delivered commit) still refuses, unchanged. (Owner ruling gathered
+    pass 17; the surfacing is on this pass's implementation backlog — the gate today pins only
+    the delivered SHA.)
+43. **R17-2 (2026-08-04): a verified no-diff task is a first-class "Completed — no changes"
+    outcome.** A task whose branch carries no diff against the base (or has no branch at all)
+    may close to Done WITHOUT a PR or merge, through a distinct "Completed — no changes
+    required" acceptance path recorded as its own timeline event and operator-recommendable.
+    Force-accept and Archive are no longer the only exits for a zero-diff task, and refusal
+    copy stops claiming "delivered work" for a 0-diff. Gated on: task at the review boundary,
+    verified empty diff, reviewer verdict optional; it merges nothing. (Owner ruling gathered
+    pass 17; on this pass's implementation backlog.)
+44. **R17-3 (2026-08-04): rulings live in `decisions.md`; a docs-canon re-read is a required
+    closing step of every pass.** A ruling a code comment cites but no canon file records is a
+    ruling that gets reversed — D-17's failure mode, and pass-15's unanswered Q9. Every owner
+    ruling a pass produces is promoted into this file, in this numbering, before the pass
+    closes; rulings 35–43 above are pass 16's and pass 17's, promoted here under this ruling.
+    And re-reading the operational docs against the tree (`file-formats.md`, `deployment.md`,
+    `runbook.md`, `testing.md`) to catch statements that a correct change elsewhere left stale
+    is itself a required closing phase, alongside the disposition audit.
 
 ## Route map
 

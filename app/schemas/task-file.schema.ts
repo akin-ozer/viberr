@@ -317,6 +317,20 @@ export const prRefSchema = z
     // P14-LV-07: same optional-key convention as `checks`/`review` — an absent
     // key is "never read", which is NOT the same as "merges cleanly".
     mergeable: z.enum(PR_MERGEABLE_VALUES).nullish().catch(null),
+    // R17-1 (F17-L12): the PR head is STRICTLY AHEAD of the reviewed/delivered
+    // revision — it contains it plus `aheadBy` extra commits pushed after the
+    // review. Acceptance still merges an ahead head (owner ruling: keep "ahead"),
+    // but the accept/force dialogs, the review-queue subline and the completion
+    // record must SURFACE that those extra commits ship unreviewed. Absent when
+    // the head equals the reviewed revision (or the drift is unknown). Same
+    // optional-key + `.catch(null)` convention as the facts above.
+    revisionDrift: z
+      .object({
+        aheadBy: z.number().int().positive(),
+        headSha: z.string().min(1),
+      })
+      .nullish()
+      .catch(null),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;

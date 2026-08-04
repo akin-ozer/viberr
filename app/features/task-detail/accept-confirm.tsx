@@ -94,6 +94,23 @@ export function AcceptConfirm({
               )}
             </span>
           </div>
+          {/* R17-1 (F17-L12): the PR head moved AHEAD of the reviewed revision
+              since the review — accepting still merges an ahead head, but the
+              human must see that those extra commits ship unreviewed and that
+              the merge head is NOT the revision pinned above. */}
+          {task.pr?.revisionDrift && (
+            <div className="obs warn">
+              <span className="k">Merge head</span>
+              <span>
+                <span className="mono">
+                  {task.pr.revisionDrift.headSha.slice(0, 12)}
+                </span>{" "}
+                — {task.pr.revisionDrift.aheadBy} commit
+                {task.pr.revisionDrift.aheadBy === 1 ? "" : "s"} added since
+                review; they merge unreviewed.
+              </span>
+            </div>
+          )}
           <div className="obs">
             <span className="k">Verdict</span>
             <span>

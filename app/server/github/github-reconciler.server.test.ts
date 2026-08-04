@@ -201,6 +201,98 @@ describe("reconcileTask", () => {
     expect(listAuditEvents(store.db, { action: "github.reconcile.task" })).toHaveLength(1);
   });
 
+  it("R17-1: an owned PR head AHEAD of the reviewed revision records revisionDrift", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "review", title: "Attach execution workspace" },
+        // The delivered/reviewed revision is NOT the current PR head.
+        workRevision: {
+          id: "rev_1",
+          headSha: "rev0delivered",
+          treeSha: null,
+          branch: "vib-301-workspace",
+          createdAt: "2026-08-04T08:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler02" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+
+    const routes = happyRoutes();
+    // The reviewed revision is an ancestor of the head, plus 2 extra commits.
+    routes[`GET ${REPO_PATH}/compare/rev0delivered...headsha318`] = {
+      body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [] },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+  });
+
+  it("R17-1: a head IDENTICAL to the reviewed revision records no drift (no extra compare)", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "review", title: "Attach execution workspace" },
+        // Reviewed revision == the live PR head — no drift, no compare call.
+        workRevision: {
+          id: "rev_1",
+          headSha: "headsha318",
+          treeSha: null,
+          branch: "vib-301-workspace",
+          createdAt: "2026-08-04T08:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler03" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    // No `rev...head` compare route registered — if the reconciler asked for one
+    // (it must not, the shas are equal) the fake would throw an unknown route.
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.revisionDrift).toBeUndefined();
+  });
+
   it("R15-15: a PR this task did NOT open is never adopted — a task-key branch is not unique", async () => {
     // Reported live. A data root was wiped, so task keys restarted at 1 and a
     // brand-new VIB-1 got branch `vib-1` — which on GitHub still carried the

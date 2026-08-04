@@ -28,9 +28,11 @@ audit, notifications). Anything projection-shaped can be rebuilt from files.
   a schema migration that changes projection shape. Users/sessions/PATs/audit are **not**
   touched.
 
-The native recursive file watcher (250 ms debounce) drives incremental rebuilds automatically in
+The file watcher (chokidar, 250 ms trailing debounce) drives incremental rebuilds automatically in
 both dev and prod; boot also runs a reconciling rescan so out-of-band edits made while the
-app was down converge before the first request.
+app was down converge before the first request. (Chokidar replaced the native `fs.watch`
+recursion in the 2026-08-03 modernization; the domain layer — debounce, ignore rules,
+projection rebuilds — is unchanged.)
 
 ## Diagnostics (a task looks wrong / stuck)
 
@@ -101,8 +103,25 @@ request. It is not optional and none of its windows is env-configurable:
 | table | policy |
 |---|---|
 | `run_log_lines` | deleted after **30 days** |
-| `audit_events` | deleted after **90 days** |
+| `audit_events` | deleted after **90 days** — **except two recovery-marker actions (below)** |
 | `notifications` | trimmed to the **newest 500 per user** |
+
+**Two audit actions are exempt from the 90-day delete**, because boot recovery uses them as
+IDEMPOTENCY KEYS rather than as history:
+
+| exempt action | boot-recovery reader |
+|---|---|
+| `task.agent.replied` | `recoverUnreactedAgentRuns` |
+| `runtime.operator.plan_executed` | `recoverStrandedOperatorPlans` |
+
+Recovery decides whether an effect already happened by asking whether its audit row exists
+(`NOT EXISTS (SELECT 1 FROM audit_events …)`), so pruning one of these does not merely lose
+history — it makes the **next boot redo the work**. A >90-day-old task still sitting at
+`waiting=agent` would have its finished run's reply posted a second time. They are listed
+explicitly in `IDEMPOTENCY_AUDIT_ACTIONS` (`app/server/db/retention.server.ts`), never
+pattern-matched, so adding a recovery marker is a deliberate act. The lesson generalises:
+a row with **no display reader is not a dead row** — these are load-bearing precisely
+because a background reader depends on them.
 
 Two consequences worth internalising:
 

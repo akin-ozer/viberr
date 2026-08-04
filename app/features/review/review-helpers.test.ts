@@ -66,6 +66,30 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     ).toContain("conflicts with the base branch");
   });
 
+  it("R17-1: an open PR whose head drifted ahead of the review warns it merges unreviewed", () => {
+    const sub = reviewRowSub({
+      ...base,
+      pr: { number: 130, state: "review", revisionDrift: { aheadBy: 2 } },
+    });
+    expect(sub).toContain("2 commits added since review");
+    expect(sub).toContain("unreviewed");
+  });
+
+  it("R17-1: a conflicting PR still takes precedence over the drift note", () => {
+    // conflicting is a harder blocker; it is named first.
+    expect(
+      reviewRowSub({
+        ...base,
+        pr: {
+          number: 130,
+          state: "review",
+          mergeable: "conflicting",
+          revisionDrift: { aheadBy: 1 },
+        },
+      }),
+    ).toContain("conflicts with the base branch");
+  });
+
   it("a merged PR reads as merged, whatever the newest event says", () => {
     expect(
       reviewRowSub({

@@ -296,6 +296,38 @@ export async function reconcileTask(
       : null;
   const ownsAPr = sameAsCached || adoption?.adopt === true;
   const unownedPr = pr && !ownsAPr ? pr : null;
+  // R17-1 (F17-L12): when this task's OWNED, live PR head is STRICTLY AHEAD of
+  // the delivered/reviewed revision, record the drift so the accept/force
+  // dialogs, the review-queue subline and the completion record can SURFACE the
+  // commits that would ship unreviewed. Acceptance still merges an ahead head
+  // (owner ruling R17-1 — keep "ahead"), but honestly. Only a PR whose head
+  // actually differs from the reviewed revision needs the extra compare call; a
+  // "diverged" head (delivered revision NOT an ancestor) is a REFUSAL handled by
+  // `acceptancePrHeadMismatch`, so we record drift only for a clean "ahead".
+  const reviewedSha = fm.workRevision?.headSha ?? null;
+  let revisionDrift: PrRef["revisionDrift"] = null;
+  if (
+    pr &&
+    ownsAPr &&
+    reviewedSha &&
+    pr.headSha &&
+    pr.headSha !== reviewedSha &&
+    (prState === "review" || prState === "accepted")
+  ) {
+    const driftCompare = await getBranchCompare(
+      gh.client,
+      gh.repo,
+      reviewedSha,
+      pr.headSha,
+    );
+    if (
+      driftCompare.status === "ok" &&
+      driftCompare.compare.status === "ahead" &&
+      driftCompare.compare.aheadBy > 0
+    ) {
+      revisionDrift = { aheadBy: driftCompare.compare.aheadBy, headSha: pr.headSha };
+    }
+  }
   const newPr: PrRef | null =
     pr && ownsAPr
       ? {
@@ -305,6 +337,7 @@ export async function reconcileTask(
           ...(checks ? { checks } : {}),
           ...(review ? { review } : {}),
           ...(mergeable ? { mergeable } : {}),
+          ...(revisionDrift ? { revisionDrift } : {}),
         }
       : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
 

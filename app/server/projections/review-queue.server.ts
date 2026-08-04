@@ -58,6 +58,10 @@ export interface ReviewQueueRow {
      *  cannot be merged at all. Same convention as `prRefSchema`: an ABSENT key
      *  means never read, which is NOT "merges cleanly". */
     mergeable?: PrMergeable;
+    /** R17-1 (F17-L12): the PR head is ahead of the reviewed revision by
+     *  `aheadBy` commits — the queue subline warns that accepting merges them
+     *  unreviewed. Absent when the head equals the reviewed revision. */
+    revisionDrift?: { aheadBy: number };
   } | null;
   validation: Validation;
   /** F10-11/F10-15: null = the current revision is acceptance-ready (all
@@ -129,6 +133,9 @@ export function getReviewQueue(
           // Omitted rather than nulled when GitHub was never asked — the key's
           // absence is the "never read" signal the file format itself uses.
           ...(t.pr.mergeable ? { mergeable: t.pr.mergeable } : {}),
+          ...(t.pr.revisionDrift
+            ? { revisionDrift: { aheadBy: t.pr.revisionDrift.aheadBy } }
+            : {}),
         }
       : null,
     validation: t.validation,

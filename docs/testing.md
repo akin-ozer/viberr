@@ -24,11 +24,18 @@ pass-13 `npm run seed` regression through.
 npm run e2e
 ```
 
-Runs Playwright against a real dev server. The config wipes and reseeds an
-isolated data root (`e2e/.tmp-data`) before each run, so it never touches a
-developer's local `./data` store. It seeds the **demo fixture**
-(`npm run seed:demo`), not the product seed — the specs are written against
-the mock dataset, which the product seed no longer ships.
+Runs the whole Playwright suite against the **production Docker image** in an
+isolated Compose stack — **never a dev server** for any app-serving test (owner
+policy, 2026-08-02). `npm run e2e` runs `scripts/e2e.ts`, which drives
+`compose.e2e.yml` (project `viberr-e2e`): it tears down any leftover stack,
+brings a fresh one up on a project-scoped **named Docker volume** (a seed
+one-shot writes the store, then the production app boots against it), waits for
+`/resources/health`, runs `playwright test` against the derived base URL, and
+tears the stack down with its volume afterwards. It never touches a developer's
+local `./data` store. `VIBERR_E2E_KEEP=1` keeps the stack up for debugging.
+The seed is the **demo fixture** (`npm run seed:demo`), not the product seed —
+the specs are written against the mock dataset, which the product seed no longer
+ships.
 
 ## Test data: two sanctioned ways to build state
 

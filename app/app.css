@@ -1085,6 +1085,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .obs .k { font-size: .7rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); padding-top: .12rem; }
 .obs code { font-family: var(--font-mono); font-size: .78rem; }
+/* R17-1: a divergence warning row inside an acceptance dialog — the reviewed
+   revision moved on, so the value reads in the warning tone. */
+.obs.warn { border-color: color-mix(in srgb, var(--coral-dark), transparent 55%); background: var(--rose-light); }
+.obs.warn > span:last-child { color: var(--coral-dark); }
 
 .options { display: grid; gap: .5rem; margin-top: .9rem; }
 .opt {
