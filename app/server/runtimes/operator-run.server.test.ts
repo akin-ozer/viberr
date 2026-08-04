@@ -264,6 +264,53 @@ describe("Codex structured operator completion", () => {
     expect(task().frontmatter.stage).toBe("impl");
   });
 
+  it("no usable plan + generate-packets WITHHELD writes a note instead of stranding (G6)", async () => {
+    // The operator can post events but CANNOT open packets. Its turn is
+    // unparseable, so the escalation path tries to open a blocked recovery
+    // packet — which the gate DENIES (returns `denied` without throwing). The
+    // old `.catch`-only code discarded that and the task strated silently.
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "append-typed-events", mode: "direct" },
+            { capabilityId: "generate-packets", mode: "off" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await start();
+    // Non-JSON output → parseOperatorPlan returns null (the no-plan branch).
+    adapter.finish(store, "I was unable to decide on a next step.", "finished");
+
+    await eventually(() => {
+      const note = task().timeline.find(
+        (e) =>
+          e.type === "note" &&
+          e.text.includes("could not open a recovery packet"),
+      );
+      expect(note).toBeDefined();
+      expect(note!.text).toContain("re-engage the operator");
+    });
+    // The gate denied the packet — but the human is NOT stranded with silence.
+    expect(task().packet).toBeNull();
+  });
+
   /**
    * The refusal banner must name the REAL reason. With B3's already-open guard
    * landed, an operator that holds `generate-packets` and simply must not open
