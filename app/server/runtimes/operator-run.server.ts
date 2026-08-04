@@ -89,6 +89,10 @@ export interface RunOperatorInput {
    *     (closed without merge / merged uncelebrated / reopened) — assess it and
    *     open the recovery decision, withdraw a moot packet, or recommend
    *     acceptance, per the turn instruction.
+   *   delivered → PROCEED: the server just opened the review PR (a full-autonomy
+   *     delivery). Not a transition, so this is the seam that keeps an autonomous
+   *     task moving — engage the reviewer / recommend the next step from the live
+   *     snapshot (R18-2).
    */
   trigger?:
     | "create"
@@ -96,6 +100,7 @@ export interface RunOperatorInput {
     | "agent-reply"
     | "goal-updated"
     | "pr-diverged"
+    | "delivered"
     | "scheduled"
     | "manual";
   /** `scheduled` trigger: the note the human wrote when they set the re-run
@@ -2168,6 +2173,21 @@ function operatorTurnInstruction(
     return (
       `GitHub reports PR ${prNo} is live again — a closed PR was reopened or replaced (see the newest policy-engine note). ` +
       "If your open decision packet was about the closed PR, withdraw it with `resolve_decision_packet` — it is moot now. Then continue the current stage from the live snapshot (an already-approved review can move to `accept_completion` per policy). Do not duplicate work that is already in flight."
+    );
+  }
+
+  if (trigger === "delivered") {
+    // R18-2: the server just opened the review PR for a full-autonomy delivery.
+    // Delivery is done — proceed ONE coordination step, never re-deliver.
+    const prNo = snapshot.pr ? `#${snapshot.pr.number}` : "the review PR";
+    return (
+      `The review pull request ${prNo} was just opened for this task's delivered work — ` +
+      "delivery is DONE, do not deliver again. Take the ONE next coordination step from the " +
+      "live snapshot: if no reviewer is engaged and the stage calls for review, engage a " +
+      "verdict-capable profile with `prompt_agent` (`delivers: false`); if a review has " +
+      "already passed, `accept_completion` per policy; if a stage move is needed to reach " +
+      "review, `transition_stage`. If the reviewer's run is already IN FLIGHT (`liveRuns`), " +
+      "do nothing and stop — you are re-invoked when it reports."
     );
   }
 

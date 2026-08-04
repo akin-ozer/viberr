@@ -689,8 +689,8 @@ export async function autoInvokeOperator(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  trigger: "create" | "transition" | "goal-updated" | "pr-diverged",
-  /** Transition-chain depth to thread into the run (transition trigger only —
+  trigger: "create" | "transition" | "goal-updated" | "pr-diverged" | "delivered",
+  /** Transition-chain depth to thread into the run (transition + delivered triggers —
    *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
   transitionDepth?: number,
   /** Owner ruling 2026-07-26 — the transition trigger carries WHAT moved and
@@ -3518,6 +3518,33 @@ export async function performDelivery(
           delete parsed.frontmatter.noChanges;
         });
         reprojectTask(db, ctx, projectSlug, taskKey);
+      }
+      // R18-2 (F18-10): opening the review PR is delivery, NOT a stage transition, so
+      // the P11-70 every-transition re-trigger (and the auto-boundary stranded backstop)
+      // never fires here — an autonomous task would sit `waiting:human` with no packet,
+      // recommendation, or card. Under FULL autonomy the operator must proceed on its own
+      // (engage the reviewer / recommend the next step): re-queue it with a `delivered`
+      // trigger. SUPERVISED keeps the human in the loop — the "Opened PR" event is on the
+      // timeline (writePrToTask) and the human drives the next move, so we do NOT
+      // re-trigger. Only a NEWLY opened PR counts (`result.created`); a reuse changed
+      // nothing, and the operator's own deliver tool already no-ops on a live PR, so this
+      // never loops. Fire-and-forget and depth-capped, exactly like the transition
+      // re-trigger; `autoInvokeOperator` is itself a no-op when no operator is deployed.
+      if (result.created) {
+        const { resolveOperatorAuthority } = await import("./operator-actions.server");
+        const autonomy =
+          ctx.operatorRun?.autonomy ??
+          resolveOperatorAuthority(ctx, projectSlug).autonomy;
+        if (autonomy === "full") {
+          void autoInvokeOperator(
+            db,
+            ctx,
+            projectSlug,
+            taskKey,
+            "delivered",
+            nextTransitionChainDepth(ctx),
+          );
+        }
       }
       return {
         status: "delivered",
