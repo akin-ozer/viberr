@@ -104,19 +104,19 @@ export function CapabilityMatrixModal({
       </div>
       <div className="mx-legend">
         <span className="lg">
-          <span className="d" style={{ background: "var(--teal-dark)" }} />
+          <span className="d direct" />
           Acts directly
         </span>
         <span className="lg">
-          <span className="d" style={{ background: "var(--blue)" }} />
+          <span className="d recommend" />
           Recommends
         </span>
         <span className="lg">
-          <span className="d" style={{ background: "var(--coral-dark)" }} />
+          <span className="d human" />
           Reserved for humans
         </span>
         <span className="lg">
-          <span className="d" style={{ background: "var(--ring)" }} />
+          <span className="d off" />
           Not granted
         </span>
         <span className="lg mx-scope-legend">
@@ -227,10 +227,20 @@ export function CapabilityMatrixModal({
                 not as what a given run will get.
               </li>
               <li>
+                {/* R16-5 (owner ruling, 2026-08-04): MCP stays outside the matrix
+                    BY DESIGN — the owner's call, not an oversight. The old copy
+                    named only the actions an MCP tool must not take, which read
+                    as if the matrix still bounded its powers. It does not, and
+                    the consequence belongs in the disclosure: a granted server
+                    is its own grant. Pinned by specialist-tool-policy.test.ts. */}
                 <b>MCP tools are not gated by this matrix.</b> Viberr can't know what a
-                third-party tool does, so the rule is stated in every run's system
-                prompt instead: an MCP tool may never merge, close a task, or change
-                policy. Grant MCP servers deliberately.
+                third-party tool does, so nothing here restricts one. A server whose
+                tools write files or run commands gives an agent those powers even
+                when <b>Execute code / write to the repo</b> is withheld — granting a
+                server IS the grant. The only rule Viberr can enforce is stated in
+                every run's system prompt: an MCP tool may never merge, close a task,
+                or change policy. Grant MCP servers as deliberately as you grant a
+                capability.
               </li>
               <li>
                 The Claude operator can reach the web (WebFetch/WebSearch) when

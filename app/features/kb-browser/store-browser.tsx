@@ -7,6 +7,7 @@ import {
   type DragEvent as ReactDragEvent,
 } from "react";
 import { useFetcher } from "react-router";
+import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
@@ -79,25 +80,19 @@ function ghImportReducer(
 }
 
 /**
- * Extensions the in-app editor offers to open. The SERVER is the authority —
- * `readStoreDoc`/`writeStoreDoc` refuse anything else — this list only decides
- * which rows are clickable, so a PDF doesn't look editable (P14-KM-08).
+ * Which rows are clickable, so a PDF doesn't look editable (P14-KM-08). The
+ * SERVER is still the authority — `readStoreDoc`/`writeStoreDoc` refuse
+ * anything else — but this list no longer restates it from memory (C5-followup):
+ * it reads the same set, from `~/shared/text/store-extensions` rather than the
+ * injector, because this component runs in the browser and cannot import a
+ * `.server` module.
  */
-const EDITABLE_EXTENSIONS = [
-  ".md",
-  ".markdown",
-  ".mdx",
-  ".txt",
-  ".rst",
-  ".text",
-  ".json",
-  ".yaml",
-  ".yml",
-];
-
 function isEditableDoc(name: string): boolean {
+  // extname-equivalent without node:path: last dot in the last segment.
   const lower = name.toLowerCase();
-  return EDITABLE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  const dot = lower.lastIndexOf(".");
+  if (dot <= 0) return false;
+  return STORE_TEXT_EXTENSIONS.has(lower.slice(dot));
 }
 
 /** Toolbar row + the collapsible GitHub import bar and its error line. */
@@ -425,7 +420,16 @@ function StoreTree({
                   <FileMtime iso={r.node.mtime} />
                 </span>
               )}
-              <span className="fm-acts" onClick={(e) => e.stopPropagation()}>
+              {/* Row actions are ALWAYS drawn (pass 16). `.fm-acts` faded them
+                  in on `:hover`/`:focus-within`, which is a mouse-only reveal —
+                  and `opacity: 0` does not remove hit-testing, so on a touch
+                  device these buttons were invisible but still tappable: a tap
+                  near the right edge of a row could hit Delete with nothing on
+                  screen to explain it. `.rsrc-acts` is the always-visible row-
+                  action wrapper the org-settings resource rows already use, so
+                  this is also the app's one row-action shape rather than a
+                  third. (For UI-A: `.fm-acts` at app.css:3242-3243 is now dead.) */}
+              <span className="rsrc-acts" onClick={(e) => e.stopPropagation()}>
                 {r.node.type === "dir" && (
                   <>
                     <button
@@ -491,8 +495,7 @@ function DeleteConfirm({
   return (
     <dialog
       ref={ref}
-      className="confirm-card"
-      style={{ zIndex: 71 }}
+      className="confirm-card over-modal"
       role="alertdialog"
       aria-labelledby="store-confirm-title"
       aria-describedby="store-confirm-desc"
@@ -845,8 +848,7 @@ function ReplaceConfirm({
   return (
     <dialog
       ref={ref}
-      className="confirm-card"
-      style={{ zIndex: 71 }}
+      className="confirm-card over-modal"
       role="alertdialog"
       aria-labelledby="store-replace-title"
       aria-describedby="store-replace-desc"
@@ -1028,7 +1030,7 @@ export function StoreBrowser({
         inert={confirm !== null || editor.confirmReplace}
       >
         <div className="modal-head">
-          <span className="conn-ico" style={{ width: 34, height: 34, borderRadius: 10 }}>
+          <span className="conn-ico">
             <Icon name="memory" />
           </span>
           <span className="mh-main">
@@ -1185,7 +1187,7 @@ export function StoreBrowser({
           ref={ops.fileRef}
           type="file"
           multiple
-          style={{ display: "none" }}
+          className="file-input"
           onChange={ops.onFiles}
           aria-hidden="true"
           tabIndex={-1}
@@ -1197,7 +1199,7 @@ export function StoreBrowser({
           webkitdirectory=""
           directory=""
           multiple
-          style={{ display: "none" }}
+          className="file-input"
           onChange={ops.onDirFiles}
           aria-hidden="true"
           tabIndex={-1}

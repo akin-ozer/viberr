@@ -1,12 +1,17 @@
 import { existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type { RuntimeAdapter } from "./adapter.server";
-import { resolveClaudeConfigDir } from "./claude-config.server";
+import {
+  resolveClaudeConfigDir,
+  resolveClaudeConfigDirFrom,
+} from "./claude-config.server";
 import {
   prepareCodexHome,
   resolveCodexAuthSource,
+  resolveCodexHome,
 } from "./codex-config.server";
 import {
   createClaudeAdapter,
@@ -96,32 +101,176 @@ function codexCliAuthUsable(env: NodeJS.ProcessEnv): boolean {
  * removed) and lose the self-healing property below. In the container the two
  * paths are the same dir, so the documented docker recipe is unchanged.
  */
-export function codexCliAuthDiagnostics(env: NodeJS.ProcessEnv = process.env): {
+export interface CodexCliAuthDiagnostics {
   optIn: boolean;
   authJsonPath: string;
   authJsonExists: boolean;
-} {
-  const authJsonPath = path.join(resolveCodexAuthSource(env), "auth.json");
-  let authJsonExists = false;
-  try {
-    authJsonExists = existsSync(authJsonPath);
-  } catch {
-    authJsonExists = false;
-  }
+  /** The app-owned home every codex RUN executes in (`prepareCodexHome`). */
+  runHome: string;
+  /**
+   * D1: `CODEX_HOME` resolves to the app-owned RUN home, so the auth SOURCE and
+   * the run home are the same directory — `prepareCodexHome` returns early
+   * ("nothing to mirror") and no `codex login` anywhere on the machine can ever
+   * reach a run. Every run is then refused with a bare "no usable credential
+   * configured" that points at a Viberr-internal path the operator never chose.
+   */
+  sourceIsRunHome: boolean;
+  /** Where `codex login` writes by default (`~/.codex/auth.json`). */
+  defaultLoginPath: string;
+  /** Whether that default login actually exists — what makes D1 actionable. */
+  defaultLoginExists: boolean;
+}
+
+export function codexCliAuthDiagnostics(
+  env: NodeJS.ProcessEnv = process.env,
+): CodexCliAuthDiagnostics {
+  const source = path.resolve(resolveCodexAuthSource(env));
+  const authJsonPath = path.join(source, "auth.json");
+  const runHome = resolveCodexHome(env);
+  // Derived from the env this function was HANDED, not from the process's.
+  // `os.homedir()` reads `process.env.HOME` directly, so the one field that
+  // reached around the `env` parameter was also the one that made the D1 copy
+  // branch on whether the machine running the code happens to hold a real
+  // `~/.codex` login — which is how the D1 test passed on a developer box with
+  // a Codex login and failed on CI without one. `os.homedir()` stays the
+  // fallback for the (Windows / no-$HOME) case where the env carries nothing.
+  const home = env.HOME ?? env.USERPROFILE ?? os.homedir();
+  const defaultLoginPath = path.join(home, ".codex", "auth.json");
+  const exists = (file: string): boolean => {
+    try {
+      return existsSync(file);
+    } catch {
+      return false;
+    }
+  };
   return {
     optIn: isTruthy(env.VIBERR_CODEX_USE_CLI_AUTH),
     authJsonPath,
-    authJsonExists,
+    authJsonExists: exists(authJsonPath),
+    runHome,
+    sourceIsRunHome: source === path.resolve(runHome),
+    defaultLoginPath,
+    defaultLoginExists: exists(defaultLoginPath),
   };
+}
+
+/**
+ * D1 — the ONE Codex misconfiguration that produces a refusal nothing explains.
+ *
+ * Live incident (2026-08-03, this repo): a dev launcher exported
+ * `CODEX_HOME=<dataRoot>/runtimes/codex-home`. That is exactly the path
+ * `resolveCodexHome` returns, so the auth source EQUALS the run home, the
+ * mirror in `prepareCodexHome` short-circuits, the probe looks for `auth.json`
+ * inside Viberr's own empty run home, and every Codex run is refused — while a
+ * perfectly good `~/.codex/auth.json` sits one directory away. The generic
+ * F-DOCKER1 copy makes it worse: it tells the operator to copy their login INTO
+ * the app-owned directory, cementing the misconfiguration instead of naming it.
+ *
+ * Returns an actionable sentence, or null when this is not the problem.
+ */
+export function codexAuthMisconfiguration(
+  diag: CodexCliAuthDiagnostics = codexCliAuthDiagnostics(),
+): string | null {
+  if (!diag.optIn || diag.authJsonExists || !diag.sourceIsRunHome) return null;
+  return (
+    `CODEX_HOME is set to \`${diag.runHome}\`, which is Viberr's OWN per-run home — ` +
+    `so the login Viberr mirrors FROM and the home it runs IN are the same empty directory, ` +
+    `and no \`codex login\` can ever reach a run. ` +
+    (diag.defaultLoginExists
+      ? `Your actual login is already at \`${diag.defaultLoginPath}\`: UNSET CODEX_HOME (or point it at \`${path.dirname(diag.defaultLoginPath)}\`) and the next run picks it up without a restart.`
+      : `Unset CODEX_HOME so it resolves to \`${path.dirname(diag.defaultLoginPath)}\`, then run \`codex login\` — Viberr mirrors that login into its run home per run.`)
+  );
+}
+
+export interface ClaudeCliAuthDiagnostics {
+  optIn: boolean;
+  /** The config/HOME dir the spawned runtime reads (`resolveClaudeConfigDir`). */
+  configDir: string;
+  configDirExists: boolean;
+  /** Where Claude Code writes a FILE-based login. */
+  credentialsPath: string;
+  credentialsExist: boolean;
+  /** How strongly the opt-in was verified — see {@link claudeCliAuthUsable}. */
+  verified: "file" | "presence" | "refuted";
+}
+
+/**
+ * D2 — make the Claude CLI-auth opt-in at least as honest as the Codex one.
+ *
+ * `VIBERR_CLAUDE_USE_CLI_AUTH=1` used to be pure presence: the flag alone made
+ * the registry pick the REAL adapter, so the F-DOCKER1 shape was fully
+ * reachable on this side too (flag set from `.env`, `CLAUDE_CONFIG_DIR` pointed
+ * at an app-owned directory the logged-in CLI never wrote to → every run dies on
+ * auth instead of degrading honestly).
+ *
+ * What CAN be verified, precisely:
+ *  - `refuted` — the config dir does not exist at all. The CLI materializes its
+ *    config dir on first use, so "logged in, but the directory it would have
+ *    created is absent" is provably false. Reported UNAVAILABLE, matching
+ *    `codexCliAuthUsable`.
+ *  - `file` — `<configDir>/.credentials.json` exists: a real, file-backed login.
+ *  - `presence` — the dir exists but holds no credentials file. On **darwin**
+ *    this is the NORMAL logged-in state: Claude Code stores its OAuth
+ *    credential in the login Keychain, and reading it from the server would
+ *    require an interactive keychain-unlock prompt (and would be an
+ *    availability probe that pops a system dialog). There is no file to check,
+ *    so the flag is honoured and the weaker verification is REPORTED rather than
+ *    hidden. On every other platform the CLI writes the credentials file, so a
+ *    missing one means "not logged in" → `refuted`.
+ */
+export function claudeCliAuthDiagnostics(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): ClaudeCliAuthDiagnostics {
+  const optIn = isTruthy(env.VIBERR_CLAUDE_USE_CLI_AUTH);
+  let configDir: string;
+  try {
+    // Live env, not `getEnv()` — the probe re-runs on every call so a fixed
+    // credential heals without a restart (same reason as the codex side).
+    configDir = resolveClaudeConfigDirFrom(env);
+  } catch {
+    configDir = "";
+  }
+  const credentialsPath = configDir
+    ? path.join(configDir, ".credentials.json")
+    : "";
+  const exists = (file: string): boolean => {
+    if (!file) return false;
+    try {
+      return existsSync(file);
+    } catch {
+      return false;
+    }
+  };
+  const configDirExists = exists(configDir);
+  const credentialsExist = exists(credentialsPath);
+  const verified: ClaudeCliAuthDiagnostics["verified"] = credentialsExist
+    ? "file"
+    : configDirExists && platform === "darwin"
+      ? "presence"
+      : "refuted";
+  return {
+    optIn,
+    configDir,
+    configDirExists,
+    credentialsPath,
+    credentialsExist,
+    verified,
+  };
+}
+
+/** The Claude counterpart of `codexCliAuthUsable` (D2). */
+function claudeCliAuthUsable(env: NodeJS.ProcessEnv): boolean {
+  return claudeCliAuthDiagnostics(env).verified !== "refuted";
 }
 
 function hasCredential(backend: RealBackend, env: NodeJS.ProcessEnv = process.env): boolean {
   if (backend === "claude") {
-    return !!(
-      env.ANTHROPIC_API_KEY ||
-      env.CLAUDE_CODE_OAUTH_TOKEN ||
-      isTruthy(env.VIBERR_CLAUDE_USE_CLI_AUTH)
-    );
+    // A real key/token is authoritative on its own; CLI-auth mode additionally
+    // requires a config dir the logged-in CLI could plausibly have written
+    // (D2 — previously the flag alone was enough).
+    if (env.ANTHROPIC_API_KEY || env.CLAUDE_CODE_OAUTH_TOKEN) return true;
+    return isTruthy(env.VIBERR_CLAUDE_USE_CLI_AUTH) && claudeCliAuthUsable(env);
   }
   // A real token/key is authoritative on its own; CLI-auth mode additionally
   // requires a usable auth.json (see codexCliAuthUsable / F-DOCKER1).
@@ -152,8 +301,101 @@ export function isBackendAvailable(backend: RealBackend): boolean {
   if (state.detected[backend] !== ok) {
     state.detected[backend] = ok;
     logger.info("runtime backend detection", { backend, available: ok });
+    // D1: a backend flipping to unavailable because of a KNOWN misconfiguration
+    // must not be logged as a bare boolean — that is exactly the silence the
+    // live incident produced. Say what is wrong the moment we notice.
+    if (!ok && backend === "codex") {
+      const misconfigured = codexAuthMisconfiguration();
+      if (misconfigured) {
+        logger.error("codex is unavailable because CODEX_HOME is misconfigured", {
+          detail: misconfigured,
+        });
+      }
+    }
   }
   return ok;
+}
+
+/**
+ * Why a backend is (un)available, in words — the ONE place the UI, the run
+ * service and the logs get their answer from, so "Codex — not configured" can
+ * stop being the whole story (D1/D2, and the F16 gap on the Agents page).
+ *
+ * `detail` is null when the backend is available and fully verified; otherwise
+ * it is an actionable sentence naming the specific misconfiguration.
+ */
+export interface BackendCredentialHealth {
+  backend: RealBackend;
+  available: boolean;
+  /** How strongly availability was proven: a real credential, a validated
+   *  cached login, or a presence-only signal we could not verify further. */
+  verification: "credential" | "file" | "presence" | "none";
+  detail: string | null;
+}
+
+export function backendCredentialHealth(
+  backend: RealBackend,
+  env: NodeJS.ProcessEnv = process.env,
+): BackendCredentialHealth {
+  const available = isBackendAvailable(backend);
+  if (backend === "claude") {
+    if (env.ANTHROPIC_API_KEY || env.CLAUDE_CODE_OAUTH_TOKEN) {
+      return { backend, available, verification: "credential", detail: null };
+    }
+    const diag = claudeCliAuthDiagnostics(env);
+    if (!diag.optIn) {
+      return {
+        backend,
+        available,
+        verification: "none",
+        detail: available
+          ? null
+          : "No Claude credential is configured. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, or opt in to a logged-in `claude` CLI with VIBERR_CLAUDE_USE_CLI_AUTH=1.",
+      };
+    }
+    if (diag.verified === "file") {
+      return { backend, available, verification: "file", detail: null };
+    }
+    if (diag.verified === "presence") {
+      return {
+        backend,
+        available,
+        verification: "presence",
+        detail: `Using the logged-in \`claude\` CLI at \`${diag.configDir}\`. Viberr cannot fully verify this: on macOS the CLI keeps its credential in the login Keychain, which the server would have to prompt for. If runs fail on auth, re-run \`claude setup-token\` and set CLAUDE_CODE_OAUTH_TOKEN.`,
+      };
+    }
+    return {
+      backend,
+      available,
+      verification: "none",
+      detail: `VIBERR_CLAUDE_USE_CLI_AUTH=1 is set, but \`${diag.configDir}\` does not exist — the \`claude\` CLI has never run against that config dir, so it holds no login. Point CLAUDE_CONFIG_DIR at the logged-in dir, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN.`,
+    };
+  }
+  if (env.CODEX_ACCESS_TOKEN || env.CODEX_API_KEY || env.OPENAI_API_KEY) {
+    return { backend, available, verification: "credential", detail: null };
+  }
+  const diag = codexCliAuthDiagnostics(env);
+  if (!diag.optIn) {
+    return {
+      backend,
+      available,
+      verification: "none",
+      detail: available
+        ? null
+        : "No Codex credential is configured. Set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY, or opt in to a cached `codex login` with VIBERR_CODEX_USE_CLI_AUTH=1.",
+    };
+  }
+  if (diag.authJsonExists) {
+    return { backend, available, verification: "file", detail: null };
+  }
+  return {
+    backend,
+    available,
+    verification: "none",
+    detail:
+      codexAuthMisconfiguration(diag) ??
+      `VIBERR_CODEX_USE_CLI_AUTH=1 is set, but the Codex CLI login file is missing at \`${diag.authJsonPath}\`. Run \`codex login\`, or copy it from a logged-in machine — the next run picks it up without a restart.`,
+  };
 }
 
 /** Test-only: clear detection state and overrides. */

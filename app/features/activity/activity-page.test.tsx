@@ -113,7 +113,7 @@ describe("helpers", () => {
   });
 
   it("auditTimeLabel reproduces the mock's freeform audit times", () => {
-    expect(auditTimeLabel(iso(0, 9, 38))).toBe("today 9:38");
+    expect(auditTimeLabel(iso(0, 9, 38))).toBe("today 09:38");
     expect(auditTimeLabel(iso(1, 16, 4))).toBe("yesterday 16:04");
     expect(auditTimeLabel("2026-03-30T14:00:00.000Z")).toMatch(/^Mar \d+$/);
   });
@@ -197,7 +197,7 @@ describe("ActivityPage", () => {
     expect(audit[0]!.querySelector(".pev-ico.violation")).toBeTruthy();
     expect(audit[0]!.querySelector(".pill.input")!.textContent).toBe("open");
     expect(audit[0]!.querySelector(".keybtn")!.textContent).toBe("VIB-142");
-    expect(audit[0]!.querySelector(".pev-t")!.textContent).toBe("today 9:38");
+    expect(audit[0]!.querySelector(".pev-t")!.textContent).toBe("today 09:38");
     expect(audit[1]!.querySelector(".pev-ico.change")).toBeTruthy();
     expect(audit[1]!.querySelector(".pill")).toBeNull();
 
@@ -322,7 +322,7 @@ describe("stream vocabulary (P14-UI-62)", () => {
  * forms only swap in after hydration (useHydrated flips inside an effect, so
  * the testing-library renders above assert the LOCAL forms). On a UTC host
  * the local and UTC clock forms coincide and this test loses its edge — the
- * e2e spec (e2e/10-activity-hydration.spec.ts) forces a 13-hour split against
+ * e2e spec (e2e/06-activity-hydration.spec.ts) forces a 13-hour split against
  * the production image regardless of the host.
  */
 describe("hydration first pass (SSR)", () => {
@@ -352,7 +352,7 @@ describe("hydration first pass (SSR)", () => {
     );
     expect(html).toContain(">Jul 4<");
     expect(html).toContain(">Jul 3<");
-    expect(html).toContain(">9:41<");
+    expect(html).toContain(">09:41<");
     expect(html).toContain(">16:04<");
     expect(html).not.toMatch(/Today|Yesterday|today |yesterday /);
   });

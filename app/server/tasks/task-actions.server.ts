@@ -740,10 +740,21 @@ export interface AppendCommentResult {
 }
 
 /**
- * App-wide commenting: EVERY registered user may comment, including
- * non-members (they render with the guest pill). @mentions fan out
- * `mention` notifications to resolved users (by email local-part or first
- * name, case-insensitive); agent handles route the comment to the operator.
+ * Append a human comment to the task timeline.
+ *
+ * E1: this said "App-wide commenting: EVERY registered user may comment,
+ * including non-members". That has not been true since the members-only ruling
+ * (R15): a signed-in non-member gets a 404 from the task route and from this
+ * POST, because the route resolves the project through membership before it
+ * reaches here. Commenting is a MEMBER action — `comment`, held by all four
+ * project roles including viewer, which is what "app-wide" had degraded into
+ * meaning. The reason there is no `requireAction` call in this function is that
+ * every one of its callers has already resolved membership; what it does guard
+ * explicitly is the archived-project freeze below (R6-3).
+ *
+ * @mentions fan out `mention` notifications to resolved users (by email
+ * local-part or first name, case-insensitive); agent handles route the comment
+ * to the operator.
  */
 export async function appendComment(
   db: DatabaseSync,
@@ -1356,13 +1367,19 @@ export async function commentToAgent(
  * The grouped RunView.id (Agent-logs selection key) that the just-started reply
  * `runId` will appear under. Finds the grouped run whose representative is this
  * run's DB id; falls back to the run's own thread id, then null.
+ *
+ * B10: `runId` is nullable because `runOperator` can honestly report that a
+ * trigger reached NO run — it was queued behind a drive that has not written
+ * its row yet. There is no thread to select in that window; it used to arrive
+ * here as the literal string "queued" and be looked up as if it were an id.
  */
 function resolveReplyLogThread(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-  runId: string,
+  runId: string | null,
 ): string | null {
+  if (!runId) return null;
   try {
     const runViews = projectRunsForTask(db, projectSlug, taskKey);
     const byRepresentative = runViews.find((r) => r.serverRunId === runId);
@@ -2780,10 +2797,15 @@ function withMention(handle: string, directive: string): string {
 
 /**
  * Take or hand off ownership. Exact typed `assign` event copy from
- * task-detail spec §5.2. RBAC: any project member may take (all four
- * roles hold the "Take / release task ownership" grant); handing off
- * requires being the current owner or a project admin, and the target
- * must be a member.
+ * task-detail spec §5.2.
+ *
+ * RBAC, as enforced below: taking requires `own-task` — admin, maintainer and
+ * contributor, NOT all four roles; a viewer is read+comment only and cannot
+ * hold the owner seat. (The docblock claimed "any project member may take (all
+ * four roles hold …)" since before the Q5 tiering removed viewers from that
+ * grant; the code has been refusing them the whole time.) Handing off requires
+ * being the current owner or holding `release-any-ownership`, and the target
+ * must be a member who can own.
  */
 export async function setOwner(
   db: DatabaseSync,
@@ -3393,40 +3415,78 @@ export async function performDelivery(
       return { status: "push_failed", message };
     }
 
+    // A3: every REMAINING non-`pushed` outcome is a state no PR may be opened
+    // over, and each one has its own cause. They used to fall straight through
+    // to `openTaskPr` — the same hazard the three refusals above exist to stop
+    // (a review PR whose head is not the delivery), reached through four
+    // quieter doors. `no_commits` in particular was also what a FAILED
+    // `git rev-list` looked like before push-workspace learned to say "unknown".
+    if (push.status !== "pushed") {
+      const message =
+        push.status === "no_commits"
+          ? `${taskKey}'s workspace carries no commits ahead of the default branch, so there is ` +
+            `nothing to review and no PR was opened. If the agent produced work, it never reached ` +
+            `the task branch — re-run the delivering agent, then deliver again.`
+          : push.status === "no_workspace"
+            ? `${taskKey} has no workspace clone to deliver from, so its branch was not pushed and ` +
+              `no review PR was opened — one opened now would review whatever the remote branch ` +
+              `already holds, not this task's work. Run the delivering agent, then deliver again.`
+            : push.status === "no_repo"
+              ? `${taskKey}'s project has no GitHub repository configured, so nothing could be ` +
+                `pushed and no review PR was opened. Set the repository in project settings, then ` +
+                `deliver again.`
+              : push.status === "no_branch"
+                ? `${taskKey}'s workspace is not on a task branch (${push.reason}), so nothing was ` +
+                  `pushed and no review PR was opened. The delivering run must commit on the task ` +
+                  `branch — re-run it, then deliver again.`
+                : `${taskKey} has no canonical task file, so nothing could be delivered.`;
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        push.status === "no_commits" ? "Nothing to deliver" : "Delivery could not run",
+        message,
+      );
+      // "Nothing to review" is the honest bucket for an empty branch; the rest
+      // are failures to deliver at all.
+      return push.status === "no_commits"
+        ? { status: "nothing_to_review", message }
+        : { status: "failed", message };
+    }
+
     // P11-10: `pushed` means the push may have AUTO-COMMITTED an uncommitted
     // working tree just now (push-workspace.server), so the remote head can
     // postdate the workRevision minted at run completion — reviewer verdicts
     // would bind to a stale sha. Re-reconcile the workspace so the revision
     // reflects exactly what the PR delivers. Best-effort; never blocks the PR.
-    if (push.status === "pushed") {
-      try {
-        const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
-        const deliverer = file
-          ? deliveringEngagement(file.parsed.frontmatter)
-          : null;
-        if (deliverer) {
-          const { reconcileWorkspaceDelivery } = await import(
-            "~/server/github/workspace-delivery.server"
-          );
-          await reconcileWorkspaceDelivery({
-            db,
-            projectSlug,
-            taskKey,
-            profileId: deliverer.profileId,
-            ...(deliverer.backend ? { backend: deliverer.backend } : {}),
-            ...(deliverer.role ? { role: deliverer.role } : {}),
-            ...dataCtx,
-          });
-        }
-      } catch (reconcileErr) {
-        logger.warn("post-push delivery reconcile failed (best-effort)", {
+    try {
+      const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+      const deliverer = file
+        ? deliveringEngagement(file.parsed.frontmatter)
+        : null;
+      if (deliverer) {
+        const { reconcileWorkspaceDelivery } = await import(
+          "~/server/github/workspace-delivery.server"
+        );
+        await reconcileWorkspaceDelivery({
+          db,
+          projectSlug,
           taskKey,
-          err:
-            reconcileErr instanceof Error
-              ? reconcileErr
-              : new Error(String(reconcileErr)),
+          profileId: deliverer.profileId,
+          ...(deliverer.backend ? { backend: deliverer.backend } : {}),
+          ...(deliverer.role ? { role: deliverer.role } : {}),
+          ...dataCtx,
         });
       }
+    } catch (reconcileErr) {
+      logger.warn("post-push delivery reconcile failed (best-effort)", {
+        taskKey,
+        err:
+          reconcileErr instanceof Error
+            ? reconcileErr
+            : new Error(String(reconcileErr)),
+      });
     }
 
     // 2. Open (or reuse) the review PR now that the remote carries the diff.
@@ -3447,6 +3507,22 @@ export async function performDelivery(
       };
     }
     logger.info("review PR not opened", { taskKey, reason: result.status });
+
+    // R16-1: an OPEN pull request that is not this task's already occupies the
+    // head branch. Delivery stops on the same fact the reconciler reports as a
+    // branch collision, and points at the same remedy the non-fast-forward push
+    // does — never at the foreign PR as if it were ours.
+    if (result.status === "branch_collision") {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery blocked by a branch collision",
+        result.message,
+      );
+      return { status: "failed", message: result.message };
+    }
 
     // 3. An empty-diff branch means the delivery produced no change (the failed-
     //    push cases returned above with their own precise reason, P11-12/P11-11).
@@ -4039,13 +4115,13 @@ export async function resolvePacket(
       // two, so the PR head must contain the delivered revision HERE as well —
       // otherwise the operator's own acceptance packet becomes the one door
       // through which a stale-head PR merges with a green review attached.
-      const headMismatch = await acceptancePrHeadMismatch(
+      const headCheck = await acceptancePrHeadCheck(
         db,
         ctx,
         input.projectSlug,
         input.taskKey,
       );
-      if (headMismatch) throw AppError.conflict(headMismatch);
+      if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
       // F15-13: a PR already merged out of band needs no merge attempt, and the
       // completion event must not claim the merge as this human's act.
       const alreadyMerged = existing.parsed.frontmatter.pr?.state === "merged";
@@ -4114,7 +4190,10 @@ export async function resolvePacket(
       };
       mutate = (fm) => {
         // In-lock re-check (B-WF1): the generic resolution write below holds the
-        // file lock — this is the last word before Done is recorded.
+        // file lock — this is the last word before Done is recorded. A2: the
+        // head verification above is bound to one (PR, revision) pair, so the
+        // pair itself is re-asserted here too.
+        assertVerifiedHeadStillApplies(fm, headCheck, input.taskKey);
         const refusal = acceptanceRefusalReason(project, fm, input.taskKey, {
           blockedPacket: false,
         });
@@ -4565,6 +4644,15 @@ function acceptanceRefusalReason(
   return (
     // R14-3: an archived task is out of the flow entirely.
     archivedTaskBlockedReason(fm, taskKey) ??
+    // R16-3 (owner ruling 2026-08-04): a TERMINAL GitHub fact outranks every
+    // process gate below it. Live (H10): a task whose PR had been closed
+    // unmerged carried a correct "PR #124 closed — choose a recovery path"
+    // packet, and the acceptance box beside it read "no approving verdict yet —
+    // run a review for a verdict, or an admin can force-accept". Both sentences
+    // came from this function; the verdict gate simply matched first. Running a
+    // review is not the path when the PR is gone, and neither is force-accept —
+    // so the closed PR is named first and nothing below it can speak over it.
+    closedPrBlockedReason(fm, taskKey) ??
     acceptanceStageBlockedReason(project, fm.stage, taskKey) ??
     // F10-15: every required reviewer must have approved the CURRENT revision.
     acceptanceBlockedReason(fm) ??
@@ -4575,21 +4663,95 @@ function acceptanceRefusalReason(
     (opts.blockedPacket
       ? "This task has an open blocked decision — resolve the operator's packet before accepting it."
       : null) ??
-    // P13-D-4: a PR closed on GitHub without merging is a rejection.
-    closedPrBlockedReason(fm, taskKey) ??
     // P14-LV-07: a conflicting PR cannot be merged, so it cannot be accepted.
     conflictingPrBlockedReason(fm, taskKey)
   );
 }
 
 /**
+ * R16-3 — is acceptance blocked by a TERMINAL GitHub fact rather than a process
+ * gate? A closed, unmerged PR is not something a verdict, a stage move or an
+ * admin override can fix: the work has no pull request to merge. Force-accept
+ * exists for a WEDGED gate (a verdict that can no longer be recorded, a stale
+ * packet) — offering it here would move the task to Done over a rejection and
+ * stamp `pr.state: accepted` on a PR GitHub has already closed.
+ *
+ * The predicate is server-side so the rail cannot re-derive it differently, and
+ * separate from the refusal SENTENCE so the two can never disagree.
+ */
+export function acceptanceTerminallyBlocked(fm: TaskFrontmatter): boolean {
+  return fm.pr?.state === "closed";
+}
+
+/**
+ * One head verification, and the exact (PR, revision) pair it was performed
+ * against (A2).
+ *
+ * The check is a live network read, so it cannot run inside the write lock. The
+ * pair is what makes it safe anyway: every Done writer re-asserts, under the
+ * lock, that the state it is about to close is still the state that was
+ * verified (`assertVerifiedHeadStillApplies`). A PR or revision that changed
+ * during the await refuses instead of riding a stale verification through.
+ */
+export interface AcceptancePrHeadCheck {
+  /** The refusal sentence, or null when the head is verified or unverifiable. */
+  refusal: string | null;
+  prNumber: number | null;
+  revisionHeadSha: string | null;
+}
+
+/**
  * R15-1 gate 2 (F15-15): the PR head must CONTAIN the delivered revision, or
  * the acceptance would merge content the delivery never produced (the live
  * failure: a PR opened over stale remote junk, approved from the local tree).
- * A live GitHub read; `null` when it cannot be verified (offline / no PR / no
- * revision / PR already merged) — the merge attempt's own honesty covers those.
- * This is the ONE acceptance gate force-accept can NEVER bypass.
+ * A live GitHub read; `refusal: null` when it cannot be verified (offline / no
+ * PR / no revision / PR already merged) — the merge attempt's own honesty
+ * covers those.
+ *
+ * This is the ONE acceptance gate force-accept can never bypass — and, since
+ * A2, the one every Done writer runs: it used to be called by two of the four,
+ * so a full-autonomy operator accept followed by a human "Complete merge"
+ * merged a stale-head PR through the two doors that skipped it.
  */
+export async function acceptancePrHeadCheck(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<AcceptancePrHeadCheck> {
+  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  const fm = file?.parsed.frontmatter;
+  return {
+    refusal: await acceptancePrHeadMismatch(db, ctx, projectSlug, taskKey),
+    prNumber: fm?.pr?.number ?? null,
+    revisionHeadSha: fm?.workRevision?.headSha ?? null,
+  };
+}
+
+/**
+ * The in-lock half of the head gate (A2). The verification above is bound to
+ * one (PR, revision) pair; if the task no longer carries that pair, the write
+ * is closing over something nobody verified — refuse rather than proceed.
+ * `force` does not relax this: it is the head gate, not a process gate.
+ */
+function assertVerifiedHeadStillApplies(
+  fm: TaskFrontmatter,
+  check: AcceptancePrHeadCheck,
+  taskKey: string,
+): void {
+  const prNumber = fm.pr?.number ?? null;
+  const revisionHeadSha = fm.workRevision?.headSha ?? null;
+  if (prNumber === check.prNumber && revisionHeadSha === check.revisionHeadSha) {
+    return;
+  }
+  throw AppError.conflict(
+    `${taskKey}'s pull request or delivered revision changed while the acceptance was being ` +
+      `verified — the PR head was never checked against what would be closed now. Refresh the ` +
+      `task and accept again.`,
+  );
+}
+
+/** @see acceptancePrHeadCheck — the refusal alone, for callers that need no pin. */
 export async function acceptancePrHeadMismatch(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -4681,6 +4843,9 @@ export interface AcceptanceAffordance {
   blockedReason: string | null;
   /** Render an acceptance control iff true. */
   canAccept: boolean;
+  /** R16-3: the blocker is a terminal GitHub fact (a closed, unmerged PR), not a
+   *  process gate — so no override may be offered against it. */
+  terminallyBlocked: boolean;
 }
 
 /**
@@ -4708,6 +4873,7 @@ export function resolveAcceptanceAffordance(
     atBoundary: false,
     blockedReason: null,
     canAccept: false,
+    terminallyBlocked: false,
   };
   let project: ProjectContext;
   try {
@@ -4744,6 +4910,7 @@ export function resolveAcceptanceAffordance(
     atBoundary,
     blockedReason,
     canAccept: hasAuthority && atBoundary && blockedReason === null,
+    terminallyBlocked: acceptanceTerminallyBlocked(fm),
   };
 }
 
@@ -4765,6 +4932,12 @@ function mergePendingCause(merge: AcceptanceMergeOutcome): string {
  * parsed state (B-WF1): the direct human path awaits a real GitHub merge
  * between its gate check and this write, and a verdict/revision/packet change
  * in that window used to be accepted anyway.
+ *
+ * A2: the PR-head gate runs HERE, for every caller, and `skipInLockRecheck`
+ * does not relax it. `operatorAcceptCompletion` reached this write without ever
+ * checking the head — so a full-autonomy operator could stamp "merge pending"
+ * on a PR carrying content its task never delivered. Callers that already
+ * verified pass their `headCheck` through rather than paying a second read.
  */
 export async function applyAcceptanceWrite(
   db: DatabaseSync,
@@ -4777,10 +4950,17 @@ export async function applyAcceptanceWrite(
     prState: "merged" | "accepted";
     event: TaskFileEvent;
     skipInLockRecheck?: boolean;
+    /** A verification already performed by the caller; re-read when absent. */
+    headCheck?: AcceptancePrHeadCheck;
   },
 ): Promise<void> {
   const project = loadProjectContext(ctx, input.projectSlug);
+  const headCheck =
+    input.headCheck ??
+    (await acceptancePrHeadCheck(db, ctx, input.projectSlug, input.taskKey));
+  if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    assertVerifiedHeadStillApplies(parsed.frontmatter, headCheck, input.taskKey);
     if (!input.skipInLockRecheck) {
       const refusal = acceptanceRefusalReason(
         project,
@@ -4867,14 +5047,16 @@ async function acceptCompletion(
   // R15-1 gate 2: the PR head must contain the delivered revision. Checked for
   // FORCED acceptance too — force bypasses missing/failed verdicts and stale
   // packets, never a PR that carries different content than was delivered
-  // (F15-15: that is how junk would merge with a green review attached).
-  const headMismatch = await acceptancePrHeadMismatch(
+  // (F15-15: that is how junk would merge with a green review attached). The
+  // verification is threaded into the write below so the shared Done write does
+  // not pay for a second read (A2).
+  const headCheck = await acceptancePrHeadCheck(
     db,
     ctx,
     input.projectSlug,
     input.taskKey,
   );
-  if (headMismatch) throw AppError.conflict(headMismatch);
+  if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
 
   // F15-13: a PR already merged on GitHub (out of band, reconciled into the
   // cache) needs no merge attempt — and the completion event must not claim the
@@ -4950,6 +5132,7 @@ async function acceptCompletion(
     doneStageId,
     prState: reallyMerged ? "merged" : "accepted",
     event,
+    headCheck,
     ...(input.force ? { skipInLockRecheck: true } : {}),
   });
 
@@ -5060,6 +5243,19 @@ export async function completeTaskMerge(
         : `This PR is "${pr.state}", not an accepted merge-pending PR.`,
     );
   }
+
+  // A2: this is a Done writer too — it finishes the acceptance by performing
+  // the irreversible merge — and it ran the head gate on neither side. The
+  // merge-pending nudge sends a human straight at this button, so an acceptance
+  // that stamped "merge pending" before the PR head moved (or an operator
+  // acceptance that never checked it at all) merged whatever the PR carries.
+  const headCheck = await acceptancePrHeadCheck(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+  );
+  if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
 
   const { mergeTaskPr } = await import("~/server/github/github-reconciler.server");
   const result = await mergeTaskPr(

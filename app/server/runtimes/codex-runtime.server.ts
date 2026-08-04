@@ -20,7 +20,12 @@ import { projectEnvelope } from "./wire-format.server";
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
- * v0.144.1). `new Codex()`, `codex.startThread({ workingDirectory,
+ * v0.146.0 — {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the
+ * DECLARED dependency so this line cannot go stale again; 0.144.1 → 0.146.0 moved
+ * exactly one documented thing, an additive `usage.cache_write_input_tokens` on
+ * `turn.completed` that the SDK back-fills with 0 and Viberr does not project —
+ * the wire normalizer reads `cached_input_tokens`, which is unchanged).
+ * `new Codex()`, `codex.startThread({ workingDirectory,
  * skipGitRepoCheck, sandboxMode, model })` (or `resumeThread(threadId, …)`),
  * then `thread.runStreamed(prompt, { signal })` → `{ events }`, an async
  * generator of the ThreadEvents documented in runtime-adapters.md §2.3
@@ -40,6 +45,18 @@ import { projectEnvelope } from "./wire-format.server";
  * or API-key auth. The SDK factory is injectable so tests drive fakes — real
  * Codex is NEVER invoked.
  */
+
+/**
+ * The `@openai/codex-sdk` release this adapter (and the effort catalog) was
+ * verified against.
+ *
+ * D5/pass-16: the header claimed v0.144.1 while the dependency had moved to
+ * 0.146.0, and nothing could tell — a version claim in prose is unfalsifiable.
+ * It lives here as a constant so `codex-runtime.server.test.ts` can assert it
+ * against package.json: bumping the dependency without re-reading this adapter
+ * now fails a test instead of quietly rotting a docstring.
+ */
+export const CODEX_SDK_VERIFIED_VERSION = "0.146.0";
 
 /** Narrow injectable seam, derived from the installed SDK's public types. */
 export type CodexThread = Pick<Thread, "id" | "runStreamed">;

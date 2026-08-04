@@ -546,6 +546,93 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
   });
 });
 
+/* ------------------------- D4: the tool APPROVAL list --------------------- */
+
+describe("D4 — allowedTools reaches the run and survives a resume", () => {
+  function captureAdapter(specs: RunSpec[]): RuntimeAdapter {
+    return {
+      backend: "claude",
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: "sess-a" });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+  }
+
+  // The specialist path passed NO allowedTools at all, so a granted org MCP and
+  // the in-process collaboration toolkit (post_comment / ask_human /
+  // report_outcome) were usable only because every run happens to be autonomous
+  // ⇒ bypassPermissions. That made a permission MODE load-bearing for a
+  // capability GRANT.
+  it("auto-approves every mounted MCP server without the caller asking", async () => {
+    const specs: RunSpec[] = [];
+    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
+      kind: "primary", backend: "claude", model: "m", prompt: "go",
+      mcpServers: { viberr_agent: { type: "sdk" }, everything: { type: "stdio" } },
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    expect(specs[0]?.allowedTools).toEqual(["mcp__viberr_agent", "mcp__everything"]);
+  });
+
+  // The operator lists its governance tools ONE BY ONE so the approval list
+  // mirrors its capability policy — a blanket `mcp__viberr` would paper over it.
+  it("leaves a server the caller curated per-tool alone", async () => {
+    const specs: RunSpec[] = [];
+    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Operator", kind: "operator",
+      backend: "claude", model: "m", prompt: "go",
+      mcpServers: { viberr: { type: "sdk" }, everything: { type: "stdio" } },
+      allowedTools: ["mcp__viberr__post_comment", "mcp__viberr__open_packet"],
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    expect(specs[0]?.allowedTools).toEqual([
+      "mcp__viberr__post_comment",
+      "mcp__viberr__open_packet",
+      "mcp__everything",
+    ]);
+  });
+
+  it("carries the approval list — curated and derived — onto a resumed run", async () => {
+    const specs: RunSpec[] = [];
+    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
+      kind: "primary", backend: "claude", model: "m", prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    const resumed = await resumeRun(store.db, {
+      runId,
+      prompt: "follow up",
+      allowedTools: ["mcp__viberr__report_outcome"],
+      mcpServers: { viberr_agent: { type: "sdk" }, everything: { type: "stdio" } },
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    // BEFORE: `resumeRun`'s input type had no `allowedTools` at all, so the
+    // curated entry could not even be expressed, and nothing derived the
+    // mounted servers' entries either.
+    expect(specs.find((s) => s.runId === resumed.runId)!.allowedTools).toEqual([
+      "mcp__viberr__report_outcome",
+      "mcp__viberr_agent",
+      "mcp__everything",
+    ]);
+  });
+});
+
 /* ---------------- runtime continuity recovery (P13-D-2 / FR22) ------------- */
 
 describe("resumeRun — continuity recovery", () => {
@@ -584,7 +671,9 @@ describe("resumeRun — continuity recovery", () => {
   async function startThenResume(): Promise<{
     specs: RunSpec[];
     firstRunId: string;
-    resume: () => Promise<{ runId: string; continuityReset?: true }>;
+    resume: (
+      extra?: Partial<Parameters<typeof resumeRun>[1]>,
+    ) => Promise<{ runId: string; continuityReset?: true }>;
   }> {
     const specs: RunSpec[] = [];
     const capture: RuntimeAdapter = {
@@ -609,11 +698,12 @@ describe("resumeRun — continuity recovery", () => {
     return {
       specs,
       firstRunId: runId,
-      resume: () =>
+      resume: (extra) =>
         resumeRun(store.db, {
           runId,
           prompt: "follow up",
           dataRoot: store.dataRoot,
+          ...extra,
         }),
     };
   }
@@ -655,6 +745,50 @@ describe("resumeRun — continuity recovery", () => {
     expect(note).toBeDefined();
     expect(note!.type).toBe("note");
     expect(note!.text).toContain("task.md");
+  });
+
+  // D5: `rawLogPath` documented a `<sessionOrRunId>` key — "the provider session
+  // id when known, else the run id" — that no caller has ever produced. The CODE
+  // is the honest half and this pins it: a resume SHARES the provider session id
+  // with its parent, so keying the raw .jsonl by session would interleave two
+  // runs' envelopes into one file. The session-missing marker is written by the
+  // one caller the docstring most implicated (run-service, not the sink).
+  it("keys the raw transcript by RUN id — never by the shared session id", async () => {
+    const { existsSync, readFileSync, rmSync } = await import("node:fs");
+    const { rawLogPath } = await import("./run-store.server");
+    const { firstRunId, resume } = await startThenResume();
+    // Raw transcripts live under the AMBIENT data root, which outlives the test
+    // db — clear the session-keyed name so a stale file can't fake the verdict.
+    rmSync(rawLogPath("claude", "sess-gone"), { force: true });
+    await withTranscriptStore(); // the session is gone
+
+    await resume();
+    await settle();
+
+    const perRun = rawLogPath("claude", firstRunId);
+    expect(readFileSync(perRun, "utf8")).toContain("session_missing");
+    expect(existsSync(rawLogPath("claude", "sess-gone"))).toBe(false);
+  });
+
+  // D4: the continuity reset re-enters `startRun` by hand, so every field the
+  // resume carries has to be listed there a SECOND time — the approval list was
+  // the one that wasn't, which would have stripped the toolkit from exactly the
+  // run that just lost its session and needs to report what happened.
+  it("keeps the tool approval list across a continuity reset", async () => {
+    const { specs, resume } = await startThenResume();
+    await withTranscriptStore(); // the session is gone
+
+    const resumed = await resume({
+      allowedTools: ["mcp__viberr__report_outcome"],
+      mcpServers: { viberr_agent: { type: "sdk" } },
+    });
+    await settle();
+
+    expect(resumed.continuityReset).toBe(true);
+    expect(specs.find((s) => s.runId === resumed.runId)!.allowedTools).toEqual([
+      "mcp__viberr__report_outcome",
+      "mcp__viberr_agent",
+    ]);
   });
 
   it("resumes normally when the transcript is still there", async () => {

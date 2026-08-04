@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
@@ -86,5 +93,77 @@ describe("test-harness hermeticity", () => {
       for (const key of CREDENTIAL_KEYS) process.env[key] = "";
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * C6/pass-16 — PHANTOM DEPENDENCIES.
+ *
+ * `@lexical/utils` was imported by the comment composer and absent from
+ * package.json: it resolved only because npm hoisted it as a transitive
+ * dependency of `@lexical/react`. That works until the transitive graph
+ * changes, and then the build breaks with an error that points at a file
+ * nobody edited. This guard lives beside the harness-hermeticity checks because
+ * it is the same category — an invariant about the REPOSITORY, not a feature.
+ */
+describe("dependency hygiene: every imported package is declared (C6)", () => {
+  /** Statement-position module specifiers only — never a quoted string that
+   *  happens to sit in prose or a comment. */
+  const IMPORT_RE =
+    /^\s*(?:import\b[^\n]*?\bfrom|}\s*from|export\b[^\n]*?\bfrom|import)\s+["']([^"']+)["']\s*;?\s*$|\bimport\(\s*["']([^"']+)["']\s*\)/;
+
+  /** The package name a specifier resolves to ("@scope/pkg" or "pkg"), or null
+   *  for anything relative / aliased / a node builtin. */
+  function packageOf(specifier: string): string | null {
+    if (
+      specifier.startsWith(".") ||
+      specifier.startsWith("~") ||
+      specifier.startsWith("/") ||
+      specifier.startsWith("node:")
+    ) {
+      return null;
+    }
+    const parts = specifier.split("/");
+    return specifier.startsWith("@")
+      ? parts.slice(0, 2).join("/")
+      : (parts[0] ?? null);
+  }
+
+  function collectImports(dir: string, out: Map<string, string>): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        collectImports(full, out);
+        continue;
+      }
+      if (!/\.tsx?$/.test(entry.name)) continue;
+      for (const line of readFileSync(full, "utf8").split("\n")) {
+        const match = line.match(IMPORT_RE);
+        const specifier = match?.[1] ?? match?.[2];
+        if (!specifier) continue;
+        const pkg = packageOf(specifier);
+        if (pkg && !out.has(pkg)) out.set(pkg, full);
+      }
+    }
+  }
+
+  it("no app import resolves only through npm hoisting", () => {
+    const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const declared = new Set([
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.devDependencies ?? {}),
+    ]);
+    const imported = new Map<string, string>();
+    collectImports("app", imported);
+    // Sanity: the scan actually found imports (a broken regex must not pass).
+    expect(imported.size).toBeGreaterThan(10);
+
+    const phantom = [...imported]
+      .filter(([pkg]) => !declared.has(pkg))
+      .map(([pkg, file]) => `${pkg} (first seen in ${file})`);
+    expect(phantom).toEqual([]);
   });
 });

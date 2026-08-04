@@ -13,9 +13,11 @@ export default defineConfig({
     // .env needed — CI has none); jsdom lacks <dialog> methods; the shim
     // no-ops under node.
     setupFiles: ["./test-support/setup-env.ts", "./test-support/setup-dom.ts"],
-    include: [
-      "app/**/*.test.{ts,tsx}",
-      "db/**/*.test.ts",
-    ],
+    // `db/**/*.test.ts` was here and had matched ZERO files since the
+    // migrations were squashed — `db/` holds only 0001_baseline.sql. Dropped
+    // (G10) because a glob matching nothing still advertises a convention: the
+    // runner's own test lives at app/server/db/migration-runner.server.test.ts,
+    // and schema behaviour belongs to the projection suites that own the tables.
+    include: ["app/**/*.test.{ts,tsx}"],
   },
 });

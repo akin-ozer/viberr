@@ -3,7 +3,11 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { ResCatalogGroup } from "~/features/agents/capability-catalog";
 import { kbRootDir, skillsRootDir } from "~/server/files/file-store-root.server";
-import { listMcpServers, listSkills } from "./resources.server";
+import {
+  isReservedMcpName,
+  listMcpServers,
+  listSkills,
+} from "./resources.server";
 
 /**
  * Build the LIVE agent resource catalog (F6 / item-2): the real skills, MCP
@@ -32,6 +36,7 @@ import { listMcpServers, listSkills } from "./resources.server";
  */
 export const RESERVED_OPERATOR_MCP = "viberr";
 
+
 export function buildResourceCatalog(
   db: DatabaseSync,
   dataRoot?: string,
@@ -53,8 +58,8 @@ export function buildResourceCatalog(
   // so granting or revoking it changed nothing in either direction.
   const mcpIds = new Set<string>();
   for (const m of safe(() => listMcpServers(db))) {
-    if (m.name === RESERVED_OPERATOR_MCP) {
-      continue; // never let a real org row shadow the reserved operator toolkit
+    if (isReservedMcpName(m.name)) {
+      continue; // never let a real org row shadow Viberr's own in-process tools
     }
     mcpIds.add(m.name);
   }

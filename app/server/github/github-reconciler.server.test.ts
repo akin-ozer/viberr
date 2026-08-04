@@ -245,12 +245,85 @@ describe("reconcileTask", () => {
     const collision = events.find((e) => /Branch name collision/.test(e.text));
     expect(collision, "the collision must be surfaced").toBeTruthy();
     expect(collision!.text).toContain("#318");
-    expect(collision!.text).toContain("did not open it");
+    expect(collision!.text).toContain("is NOT VIB-301's review PR");
     expect(collision!.text).toContain("vib-301-workspace");
     // Crucially it must NOT read as a divergence — nothing about this task
     // changed on GitHub, and calling it one is what produced the bad advice.
     expect(collision!.text).not.toContain("Divergence");
     expect(events.some((e) => /Divergence/.test(e.text))).toBe(false);
+  });
+
+  it("R16-1/H8: a name-matched MERGED stranger never replaces the PR the task owns", async () => {
+    // Live H8, 2026-08-04: a brand-new VIB-4 ended up with
+    // `pr: {number: 113, state: merged, title: "[VIB-4] Verify MCP tool…",
+    // checks 2/2}` — PR #113 was merged a week earlier by an unrelated task
+    // whose head branch happened to be `vib-4`. R15-15's ownership test was
+    // `fm.pr != null`, so ANY discovery on the branch was written into the
+    // owned slot, number and all: the rail wore a green "merged" badge and a
+    // green checks pill for work that was never delivered.
+    // Canary: relax `ownsAPr` back to `fm.pr != null` and #113 lands again.
+    const { store, actor } = setup();
+    const gh = fakeGithubFetch({
+      ...happyRoutes(),
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [
+          {
+            number: 113,
+            title: "[VIB-4] Verify MCP tool and knowledge-base wiring",
+            state: "closed",
+            draft: false,
+            merged_at: "2026-07-28T10:00:00Z",
+            head: { sha: "93435df" },
+          },
+        ],
+      },
+      [`GET ${REPO_PATH}/pulls/113`]: {
+        body: {
+          number: 113,
+          title: "[VIB-4] Verify MCP tool and knowledge-base wiring",
+          state: "closed",
+          merged: true,
+          merged_at: "2026-07-28T10:00:00Z",
+          head: { sha: "93435df" },
+          additions: 5,
+          deletions: 0,
+          changed_files: 1,
+        },
+      },
+      [`GET ${REPO_PATH}/commits/93435df/check-runs`]: {
+        body: {
+          total_count: 2,
+          check_runs: [
+            { status: "completed", conclusion: "success" },
+            { status: "completed", conclusion: "success" },
+          ],
+        },
+      },
+    });
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr, "the owned link stands").toMatchObject({
+      number: 318,
+      state: "review",
+    });
+    // …and nothing about a merge is announced, because nothing of THIS task's
+    // merged — the false "merged out of band" divergence is what then told the
+    // operator to accept a completion that never happened.
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    expect(events.some((e) => /Divergence/.test(e.text))).toBe(false);
+    expect(events.some((e) => /Branch name collision/.test(e.text))).toBe(true);
   });
 
   it("R15-15: the collision is reported ONCE, not on every 5-minute poll", async () => {

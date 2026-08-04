@@ -29,11 +29,15 @@ export interface IdentityInput {
   id: string;
   email: string;
   name: string;
-  /** scrypt hash for a credential account, or null for OAuth-only users. */
+  /** better-auth credential hash (`<saltHex>:<keyHex>`, see
+   *  `isBetterAuthPasswordHash`), or null for OAuth-only users. Naming the
+   *  format matters: the retired hand-rolled auth ALSO used scrypt, in a
+   *  different `scrypt$N$r$p$salt$key` encoding better-auth's verifier throws
+   *  on, so "scrypt hash" alone does not say which of the two this is. */
   passwordHash: string | null;
 }
 
-/** Upserts the credential account carrying a user's scrypt hash. */
+/** Upserts the credential account carrying a user's better-auth password hash. */
 function upsertCredential(
   db: DatabaseSync,
   userId: string,

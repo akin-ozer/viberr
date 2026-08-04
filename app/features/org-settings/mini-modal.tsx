@@ -42,7 +42,7 @@ export function MiniModal({
       data-screen-label={screen || title}
     >
       <div className="modal-head">
-        <span className="conn-ico" style={{ width: 34, height: 34, borderRadius: 10 }}>
+        <span className="conn-ico">
           {icon}
         </span>
         <span className="mh-main">

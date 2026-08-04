@@ -8,6 +8,7 @@ import {
 } from "../../../test-support/test-store";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -24,13 +25,31 @@ const REPO_PATH = "/repos/akin-ozer/viberr";
 const ACTOR = { userId: "u_test", label: "arda@viberr.test" };
 const BRANCH = "vib-201-attach-execution-workspace-to";
 
-function setupWithBranch(taskKey = "VIB-201") {
+/** The delivered revision an adoptable PR's head has to be (R16-1). */
+const DELIVERED_SHA = "d3l1ver3dsha0000000000000000000000000000";
+
+function deliveredRevision(): TaskFrontmatter["workRevision"] {
+  return {
+    id: "rev_1",
+    headSha: DELIVERED_SHA,
+    treeSha: null,
+    branch: BRANCH,
+    createdAt: "2026-07-25T08:00:00.000Z",
+    sourceProfileId: "developer",
+  };
+}
+
+function setupWithBranch(
+  taskKey = "VIB-201",
+  fmPatch: Partial<TaskFrontmatter> = {},
+) {
   const store = setupTestStore(ctx);
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter(taskKey, {
       title: "Attach execution workspace to task runtime",
       stage: "review",
       branch: BRANCH,
+      ...fmPatch,
     }),
     goal: "Wire the runtime workspace to the canonical task so runs anchor on it.",
   });
@@ -190,10 +209,12 @@ describe("openTaskPr", () => {
   });
 
   it("is idempotent — reuses an existing open PR instead of creating a duplicate", async () => {
-    const store = setupWithBranch();
+    // R16-1: reuse is ADOPTION, so the open PR on the branch is only ours
+    // because its head IS the delivered revision.
+    const store = setupWithBranch("VIB-201", { workRevision: deliveredRevision() });
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls`]: {
-        body: [{ number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] x", state: "open" }],
+        body: [{ number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] x", state: "open", head: { sha: DELIVERED_SHA } }],
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
@@ -214,6 +235,85 @@ describe("openTaskPr", () => {
     expect(
       listAuditEvents(store.db, {}).filter((a) => a.action === "github.pr.opened"),
     ).toHaveLength(0);
+  });
+
+  it("R16-1: an open PR on the branch whose head is NOT the delivered revision is a collision, not this task's PR", async () => {
+    // The adoption door H8 walked through. `head=owner:branch` finds whatever
+    // sits on `vib-201-…`; before R16-1 that PR was written into `pr:` and the
+    // task claimed a review it had nothing to do with. GitHub cannot hold two
+    // PRs for one head, so the honest answer is to stop and name the collision.
+    // Canary: drop the decidePrAdoption branch and this reuses PR #7.
+    const store = setupWithBranch("VIB-201", { workRevision: deliveredRevision() });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [{ number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "someone else's work", state: "open", head: { sha: "a-stranger-sha" } }],
+      },
+      [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("branch_collision");
+    if (res.status !== "branch_collision") throw new Error("expected branch_collision");
+    expect(res.prNumber).toBe(7);
+    expect(res.message).toContain("Branch name collision");
+    expect(res.message).toContain(BRANCH);
+    // No PR was created, and the task's `pr` was never fabricated.
+    expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toBeNull();
+  });
+
+  it("R16-1: a task that has delivered NO revision adopts nothing", async () => {
+    // The H8 shape exactly: a brand-new task, nothing pushed, and an open PR
+    // already on the branch from a previous instance of the same key.
+    const store = setupWithBranch("VIB-201");
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [{ number: 113, html_url: "https://github.com/akin-ozer/viberr/pull/113", title: "[VIB-4] Verify MCP tool wiring", state: "open", head: { sha: "93435df" } }],
+      },
+      [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("branch_collision");
+    if (res.status !== "branch_collision") throw new Error("expected branch_collision");
+    expect(res.message).toContain("delivered no revision");
+  });
+
+  it("R16-1: the PR the task already OWNS is still reused, revision or not", async () => {
+    // Adoption is about PRs the task does not own. A cached number that matches
+    // the discovery is the link `openTaskPr` itself minted — refreshing it is
+    // not adoption and must not need a head match (a re-delivery can advance
+    // the revision between the push and this read).
+    const store = setupWithBranch("VIB-201", {
+      pr: { number: 7, state: "review", title: "[VIB-201] x" },
+      workRevision: deliveredRevision(),
+    });
+    const gh = fakeGithubFetch({
+      // Step 0 confirms the cached PR is still open on GitHub and reuses it.
+      [`GET ${REPO_PATH}/pulls/7`]: {
+        body: { number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] x", state: "open", head: { sha: "moved-on-since" } },
+      },
+      [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("ok");
+    if (res.status !== "ok") throw new Error("expected ok");
+    expect(res.prNumber).toBe(7);
+    expect(res.created).toBe(false);
   });
 
   it("a 403 opens a pull_request:write scope violation, does not fabricate a PR", async () => {

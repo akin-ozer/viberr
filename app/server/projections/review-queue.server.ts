@@ -1,5 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { Validation, Waiting } from "~/schemas/task-file.schema";
+import type {
+  PrMergeable,
+  Validation,
+  Waiting,
+} from "~/schemas/task-file.schema";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { getProject, listProjectTasks } from "./board-query.server";
@@ -19,9 +23,15 @@ import { getProject, listProjectTasks } from "./board-query.server";
  * the task owner (owner exception, R6-2). Everything else — waiting on an agent,
  * the legal `review + none` combination, OR a human-waiting task another human
  * must accept — lands in "Still in review", where the page labels a human-
- * waiting row "waiting on a human" (never the false "agent working"). Passing no
- * viewer keeps the split state-based (any human-waiting task → ready), which the
- * tests and non-scoped callers rely on.
+ * waiting row "waiting on a human" (never the false "agent working").
+ *
+ * E5: `viewerUserId` is REQUIRED. It used to be optional, and the acceptance
+ * predicate opened with `if (viewerUserId === undefined) return true` — an
+ * authorization question whose default answer was "yes, anyone". Nothing in the
+ * app omitted it, so the permissive branch existed purely for test convenience
+ * while standing ready to hand the next caller an unfiltered "ready for
+ * acceptance" list. Naming a viewer is now the type-level cost of asking the
+ * question, and an unknown/non-member id resolves to no acceptance authority.
  *
  * Ordering (spec §8.2 decision): deterministic task-key number ASC — the
  * order `listProjectTasks` already guarantees, which reproduces the mock's
@@ -38,14 +48,25 @@ export interface ReviewQueueRow {
   packet: { kind: string; title: string } | null;
   /** Newest timeline event's text (position 0) — the subline fallback. */
   latestEventText: string | null;
-  pr: { number: number; state: "review" | "merged" | "closed" } | null;
+  pr: {
+    number: number;
+    state: "review" | "merged" | "closed";
+    /** P14-LV-07: GitHub's last-read mergeability. The subline builder has
+     *  named a conflicting PR since LV-07 (review-helpers.ts `prStateSub`) and
+     *  this row never carried the field, so that branch could not fire on any
+     *  real queue — the one state the row could not describe was the one that
+     *  cannot be merged at all. Same convention as `prRefSchema`: an ABSENT key
+     *  means never read, which is NOT "merges cleanly". */
+    mergeable?: PrMergeable;
+  } | null;
   validation: Validation;
   /** F10-11/F10-15: null = the current revision is acceptance-ready (all
    *  required reviewers approved it, none requesting changes). A non-null reason
    *  means the task is NOT ready for acceptance (failing / awaiting a reviewer /
    *  no delivered revision, or R15-1's verdict gate: delivered work with no PR
    *  or no approving verdict) — it must NOT sit under "Waiting on your
-   *  acceptance". */
+   *  acceptance". R16-3: a PR closed unmerged is named here FIRST, ahead of any
+   *  process gate, because no verdict and no force-accept can undo it. */
   blockReason: string | null;
 }
 
@@ -61,7 +82,7 @@ export interface ReviewQueueData {
 export function getReviewQueue(
   db: DatabaseSync,
   slug: string,
-  opts: { viewerUserId?: string; dataRoot?: string } = {},
+  opts: { viewerUserId: string; dataRoot?: string },
 ): ReviewQueueData {
   const project = getProject(db, slug);
   const reviewId = project
@@ -105,6 +126,9 @@ export function getReviewQueue(
               : t.pr.state === "closed"
                 ? ("closed" as const)
                 : ("review" as const),
+          // Omitted rather than nulled when GitHub was never asked — the key's
+          // absence is the "never read" signal the file format itself uses.
+          ...(t.pr.mergeable ? { mergeable: t.pr.mergeable } : {}),
         }
       : null,
     validation: t.validation,
@@ -116,18 +140,18 @@ export function getReviewQueue(
   // have no packet/recommendation (the operator couldn't open a completion
   // packet) yet still need a human to accept it. A viewer can accept iff they are
   // maintainer+ (resolve-packet tier) OR the task's owner (owner exception, R6-2,
-  // which requires the own-task role). No viewer → state-based (any human-waiting
-  // task), preserving the unscoped/test behavior.
-  const viewerRole: ProjectRole | null =
-    opts.viewerUserId === undefined
-      ? null
-      : ((
-          db
-            .prepare(
-              `SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`,
-            )
-            .get(slug, opts.viewerUserId) as { role: ProjectRole } | undefined
-        )?.role ?? null);
+  // which requires the own-task role). Fail closed: an id with no membership row
+  // — a non-member, a deleted account, or (a JS caller) no id at all — holds
+  // neither role, so nothing is acceptance-ready for them.
+  const viewerRole: ProjectRole | null = opts.viewerUserId
+    ? ((
+        db
+          .prepare(
+            `SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`,
+          )
+          .get(slug, opts.viewerUserId) as { role: ProjectRole } | undefined
+      )?.role ?? null)
+    : null;
   const viewerCanGovern = roleCan(viewerRole, "resolve-packet");
   const viewerCanOwn = roleCan(viewerRole, "own-task");
   const ownerByKey = new Map(
@@ -137,10 +161,10 @@ export function getReviewQueue(
     ]),
   );
   const canAccept = (key: string): boolean => {
-    if (opts.viewerUserId === undefined) return true; // unscoped
     if (viewerCanGovern) return true;
+    if (!viewerCanOwn) return false;
     const owner = ownerByKey.get(key) ?? null;
-    return owner !== null && owner === opts.viewerUserId && viewerCanOwn;
+    return owner !== null && owner === opts.viewerUserId;
   };
   // Ready-for-acceptance requires acceptance authority, an acceptable current
   // revision (F10-11: no failing/awaiting/no-revision block), AND that the review

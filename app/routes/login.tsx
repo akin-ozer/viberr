@@ -421,8 +421,7 @@ export default function Login({
         </div>
         {(!providers.github || !providers.google) && (
           <div
-            className="login-tag"
-            style={{ marginTop: ".2rem", textAlign: "center" }}
+            className="login-tag providers"
           >
             {!providers.github && !providers.google
               ? "GitHub and Google sign-in aren't configured on this deployment — use a local account below."
@@ -517,8 +516,7 @@ export default function Login({
           <div className="login-foot">
             <button
               type="button"
-              className="linkish"
-              style={{ fontSize: ".78rem", color: "var(--faint)" }}
+              className="linkish fine sm"
               onClick={() => {
                 setClientErr(null);
                 setDismissedServerErr(actionError);

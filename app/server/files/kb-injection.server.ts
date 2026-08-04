@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { logger } from "~/server/logging/logger.server";
+import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
 import { kbDirPath } from "./file-store-root.server";
 
 /**
@@ -33,15 +34,20 @@ import { kbDirPath } from "./file-store-root.server";
  * neither the agent nor the reader silently believes it saw the whole KB.
  */
 
-/** Extensions we treat as injectable text docs (lower-cased, with dot). */
-const KB_TEXT_EXTENSIONS = new Set([
-  ".md",
-  ".markdown",
-  ".mdx",
-  ".txt",
-  ".rst",
-  ".text",
-]);
+/**
+ * THE list of store text-doc extensions now lives in an isomorphic module: the
+ * store browser needs it too and runs in the browser, so it cannot import this
+ * `.server` file. Re-exported here because this injector is the reason the list
+ * exists — `isInjectableKbDoc` below is its primary consumer, and callers that
+ * already import the injector should not have to learn a second module.
+ *
+ * C5/pass-16: the set MUST cover everything the in-app editor can author. It
+ * didn't — `.json`/`.yaml`/`.yml` were offered by the "New document" flow,
+ * written to disk, counted in the browser, and then invisible to every run.
+ * C5-followup: the first fix left three hand-maintained copies "separate but
+ * equal", which is how the divergence happened in the first place. One set now.
+ */
+export { STORE_TEXT_EXTENSIONS };
 
 /**
  * Would this file name reach a run? P14-KM-13: the org-settings row counted
@@ -51,7 +57,7 @@ const KB_TEXT_EXTENSIONS = new Set([
  */
 export function isInjectableKbDoc(fileName: string): boolean {
   if (fileName.startsWith(".")) return false; // dotfiles are not content
-  return KB_TEXT_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+  return STORE_TEXT_EXTENSIONS.has(path.extname(fileName).toLowerCase());
 }
 
 /** Default per-run character budget across ALL of a KB's docs. */
@@ -123,6 +129,21 @@ function collectKbDocs(dir: string): KbDoc[] {
   return out.sort((a, b) => a.rel.localeCompare(b.rel));
 }
 
+/** A declared knowledge base that reached the run with less (or none) of its
+ *  content — the KB twin of `UnresolvedSkillGrant` / `UnresolvedMcpGrant`. */
+export interface UnresolvedKbGrant {
+  name: string;
+  /** Why it produced nothing usable, in words a human can act on. */
+  reason: string;
+}
+
+export interface KbInjection {
+  /** The text to inject ("" when nothing of this KB reached the run). */
+  body: string;
+  /** Present when the grant did not deliver what every UI says it delivers. */
+  unresolved?: UnresolvedKbGrant;
+}
+
 /**
  * Read a knowledge base's documents from the store, concatenated with per-doc
  * headings and bounded by {@link KB_INJECTION_BUDGET}. Returns "" when the KB
@@ -131,12 +152,21 @@ function collectKbDocs(dir: string): KbDoc[] {
  * and when the remaining budget fits NOTHING the marker is returned on its own
  * (P14-KM-05) — a KB is never dropped silently, whether it was partly or wholly
  * squeezed out by the KBs ahead of it.
+ *
+ * C1/pass-16: the "not silently" part was true of the LOG only. `unresolved` now
+ * carries the same structured miss the MCP leg has reported since P14-LV-09, so
+ * a renamed/typo'd KB folder reaches the run's own prompt instead of living in
+ * a server log nobody reads while every UI still shows the grant attached.
  */
-export function readKbBody(
+export function readKbBodyDetailed(
   name: string,
   dataRoot?: string,
   budgetChars: number = KB_INJECTION_BUDGET,
-): string {
+): KbInjection {
+  const miss = (reason: string): KbInjection => ({
+    body: "",
+    unresolved: { name, reason },
+  });
   try {
     const dir = kbDirPath(name, dataRoot);
     if (!existsSync(dir)) {
@@ -150,14 +180,28 @@ export function readKbBody(
         "declared knowledge base not found in the store — run proceeds WITHOUT it",
         { kb: name },
       );
-      return "";
+      return miss("no knowledge-base folder by that name in the store");
+    }
+    // C5/pass-16: the walk below realpath's the ROOT before enforcing
+    // containment, so a KB folder that is ITSELF a symlink made every
+    // containment check relative to the link's target — `data/kb/notes -> /etc`
+    // injected the target's files as trusted agent context. Every other store
+    // path refuses to follow a link out of the store (P14-RV-02); so does this.
+    if (lstatSync(dir).isSymbolicLink()) {
+      logger.warn(
+        "declared knowledge base folder is a symlink — run proceeds WITHOUT it",
+        { kb: name },
+      );
+      return miss(
+        "its store folder is a symlink — Viberr does not follow links out of the store",
+      );
     }
     const docs = collectKbDocs(dir);
     if (docs.length === 0) {
       logger.warn("declared knowledge base is empty — run proceeds WITHOUT it", {
         kb: name,
       });
-      return "";
+      return miss("its store folder holds no documents a run can read");
     }
     const parts: string[] = [];
     let budget = budgetChars;
@@ -201,13 +245,19 @@ export function readKbBody(
           "declared knowledge base did not fit the run's injection budget — NOTHING of it reached the run",
           { kb: name, docs: omitted, budgetChars },
         );
-        return `_(knowledge base omitted entirely — ${omitted} doc${omitted === 1 ? "" : "s"} dropped; only ${budgetChars} chars of the shared knowledge-base budget were left)_`;
+        return {
+          body: `_(knowledge base omitted entirely — ${omitted} doc${omitted === 1 ? "" : "s"} dropped; only ${budgetChars} chars of the shared knowledge-base budget were left)_`,
+          unresolved: {
+            name,
+            reason: `it did not fit the shared ${KB_INJECTION_BUDGET}-char knowledge-base budget — none of its ${omitted} doc${omitted === 1 ? "" : "s"} reached this run`,
+          },
+        };
       }
       logger.warn(
         "declared knowledge base holds no readable text — run proceeds WITHOUT it",
         { kb: name, docs: docs.length },
       );
-      return "";
+      return miss("its documents hold no readable text");
     }
     if (omitted > 0 || truncatedADoc) {
       const tail =
@@ -218,12 +268,54 @@ export function readKbBody(
         `_(knowledge base truncated — ${tail}; it exceeded the ${budgetChars}-char budget left for knowledge bases)_`,
       );
     }
-    return parts.join("\n\n");
+    return { body: parts.join("\n\n") };
   } catch (error) {
     logger.warn("knowledge base unreadable — run proceeds WITHOUT it", {
       kb: name,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    return "";
+    return miss("its store folder could not be read");
   }
+}
+
+/** Read one KB's docs, or "" when it resolves to nothing. Thin wrapper over
+ *  {@link readKbBodyDetailed} for callers that only inject. */
+export function readKbBody(
+  name: string,
+  dataRoot?: string,
+  budgetChars: number = KB_INJECTION_BUDGET,
+): string {
+  return readKbBodyDetailed(name, dataRoot, budgetChars).body;
+}
+
+export interface KbInjectionSet {
+  /** The KBs that contributed text, in declaration order. */
+  parts: { name: string; body: string }[];
+  /** Grants that delivered nothing (C1) — the caller owes the run these. */
+  unresolved: UnresolvedKbGrant[];
+}
+
+/**
+ * Read EVERY declared knowledge base under ONE shared budget (F9). Each KB draws
+ * from what the ones before it left; a KB that no longer fits still emits its
+ * "omitted entirely" marker (P14-KM-05) AND a structured `unresolved` row (C1),
+ * so the run's prompt names what it did not get.
+ */
+export function readKbBodies(
+  names: readonly string[],
+  dataRoot?: string,
+  budgetChars: number = KB_INJECTION_BUDGET,
+): KbInjectionSet {
+  const parts: { name: string; body: string }[] = [];
+  const unresolved: UnresolvedKbGrant[] = [];
+  let budget = budgetChars;
+  for (const name of names) {
+    const injection = readKbBodyDetailed(name, dataRoot, Math.max(0, budget));
+    if (injection.unresolved) unresolved.push(injection.unresolved);
+    if (injection.body) {
+      parts.push({ name, body: injection.body });
+      budget -= injection.body.length;
+    }
+  }
+  return { parts, unresolved };
 }

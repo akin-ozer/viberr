@@ -92,6 +92,23 @@ describe("Markdown", () => {
     expect(container.querySelector("b")).toBeNull();
   });
 
+  it("labels every chip for screen readers without changing what is on screen (P16-UI-20)", () => {
+    // Colour + background was the chip's ONLY distinction from the prose around
+    // it, so "@Selin" read exactly like the word "Selin". The label is a
+    // SIBLING of the chip, so `.mention`'s own text stays the literal mention.
+    const { container } = render(
+      <Markdown text={"thanks @dev and @operator"} mentionNames={["dev"]} />,
+    );
+    const labels = [...container.querySelectorAll(".mention-vh")];
+    expect(labels.map((n) => n.textContent)).toEqual(["mention ", "mention "]);
+    for (const label of labels) {
+      expect(label.nextElementSibling!.className).toBe("mention");
+    }
+    const clone = container.cloneNode(true) as HTMLElement;
+    for (const vh of clone.querySelectorAll(".mention-vh")) vh.remove();
+    expect(clone.textContent).toBe("thanks @dev and @operator");
+  });
+
   it("chips a KNOWN multi-word name as one .mention span", () => {
     const { container } = render(
       <Markdown text={"thanks @Arda Kaya for the review"} mentionNames={["Arda Kaya"]} />,

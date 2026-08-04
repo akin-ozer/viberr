@@ -22,6 +22,17 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
  * - Error messages never include plaintext or key material.
  *
  * Pass an explicit `key` only in tests; production callers use the env key.
+ *
+ * KEY ROTATION (A9). Rotating `VIBERR_SECRET_ENCRYPTION_KEY` used to be
+ * unimplemented, and the consequences were silent: every stored PAT became
+ * unreadable and every authenticated MCP server quietly downgraded to
+ * unauthenticated on the next run. Rotation is now real and lazy — set
+ * `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` to the old key (or a comma-separated
+ * list of old keys) alongside the new one and every read tries the current key
+ * first, then each retired key; a box that opened under a retired key is
+ * RE-SEALED in place by its caller, so the store converges on the new key with
+ * no migration and no downtime. Once nothing opens under a retired key any
+ * more, drop it from the env.
  */
 
 const VERSION = "v1";
@@ -31,6 +42,66 @@ const TAG_BYTES = 16;
 
 function envKey(): Buffer {
   return getEnv().VIBERR_SECRET_ENCRYPTION_KEY;
+}
+
+/**
+ * Retired keys still accepted for READS, newest first.
+ *
+ * Read from the raw env rather than `getEnv()`: `getEnv()` is a validated,
+ * process-lifetime cache and this is an operational, rotation-window-only
+ * value. A malformed entry is skipped with no detail — a key list must never
+ * produce an error message that hints at key material.
+ */
+export function previousSecretKeys(
+  env: NodeJS.ProcessEnv = process.env,
+): Buffer[] {
+  const raw = env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS;
+  if (!raw) return [];
+  const keys: Buffer[] = [];
+  for (const part of raw.split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    try {
+      const key = Buffer.from(trimmed, "base64");
+      if (key.byteLength === 32) keys.push(key);
+    } catch {
+      // unusable entry — skipped in silence (never echo key material)
+    }
+  }
+  return keys;
+}
+
+export interface OpenedSecret {
+  plaintext: string;
+  /**
+   * True when the box opened under a RETIRED key. The caller owes the store a
+   * re-seal under the current key — that lazy rewrite is what makes rotation
+   * converge without a migration.
+   */
+  staleKey: boolean;
+}
+
+/**
+ * Open a box under the current key, falling back to each retired key (A9).
+ * Throws the same typed AppError as {@link openSecret} when no key opens it.
+ */
+export function openSecretRotating(
+  box: string,
+  key: Buffer = envKey(),
+  previous: Buffer[] = previousSecretKeys(),
+): OpenedSecret {
+  try {
+    return { plaintext: openSecret(box, key), staleKey: false };
+  } catch (error) {
+    for (const old of previous) {
+      try {
+        return { plaintext: openSecret(box, old), staleKey: true };
+      } catch {
+        // try the next retired key
+      }
+    }
+    throw error;
+  }
 }
 
 function invalidBox(message: string, cause?: unknown): AppError {

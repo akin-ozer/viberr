@@ -487,6 +487,103 @@ describe("disk-only resource freshness (E6)", () => {
   });
 });
 
+/**
+ * C5/pass-16 — the `manual` refresh pin means "advance the re-scan stamp only
+ * on an explicit re-scan". The watcher path honoured it; `touchResource` did
+ * not, so any in-app upload / doc write / delete made a manual-pinned KB report
+ * "re-scanned just now" when nobody had re-scanned it.
+ */
+describe("the `manual` refresh pin (C5)", () => {
+  it("an in-app mutation does NOT advance last_indexed_at on a manual KB", async () => {
+    const db = dbCtx.makeDb();
+    const ctx = { dataRoot: dbCtx.makeTempDir() };
+    const { kb } = await saveKnowledgeBase(
+      db,
+      { name: "Pinned", refresh: "manual" },
+      ACTOR,
+      ctx,
+    );
+    const before = db
+      .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
+      .get(kb.id) as { last_indexed_at: string; updated_at: string };
+
+    const target = resolveStoreTarget(db, "kb", kb.id, ctx)!;
+    writeStoreDoc(db, target, [], "note.md", "hello", ACTOR);
+
+    const after = db
+      .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
+      .get(kb.id) as { last_indexed_at: string; updated_at: string };
+    // The re-scan stamp is pinned…
+    expect(after.last_indexed_at).toBe(before.last_indexed_at);
+    // …but the row genuinely changed, so `updated_at` still moves.
+    expect(after.updated_at >= before.updated_at).toBe(true);
+  });
+
+  it("an 'on change' KB still advances last_indexed_at (the pin is not a freeze)", async () => {
+    const db = dbCtx.makeDb();
+    const ctx = { dataRoot: dbCtx.makeTempDir() };
+    const { kb } = await saveKnowledgeBase(
+      db,
+      { name: "Watched", refresh: "on change" },
+      ACTOR,
+      ctx,
+    );
+    db.prepare(
+      `UPDATE org_knowledge_bases SET last_indexed_at = '2020-01-01T00:00:00.000Z' WHERE id = ?`,
+    ).run(kb.id);
+
+    const target = resolveStoreTarget(db, "kb", kb.id, ctx)!;
+    writeStoreDoc(db, target, [], "note.md", "hello", ACTOR);
+
+    const after = db
+      .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE id = ?`)
+      .get(kb.id) as { last_indexed_at: string };
+    expect(after.last_indexed_at).not.toBe("2020-01-01T00:00:00.000Z");
+  });
+});
+
+/**
+ * C5/pass-16 — containment consistency. `readKbBody` has refused to follow
+ * links out of the store since F9 and every write path since P14-RV-02; the
+ * LISTINGS were the odd one out (`subDirNames` used dereferencing `statSync`),
+ * so a symlinked folder was a first-class, browsable, injectable resource.
+ */
+describe("store listings never follow links out of the store (C5)", () => {
+  it("a symlinked KB folder is not a knowledge base", () => {
+    const db = dbCtx.makeDb();
+    const ctx = { dataRoot: dbCtx.makeTempDir() };
+    const outside = dbCtx.makeTempDir();
+    writeFileSync(path.join(outside, "secret.md"), "MARKER-OUTSIDE");
+    mkdirSync(path.join(ctx.dataRoot, "kb"), { recursive: true });
+    symlinkSync(outside, path.join(ctx.dataRoot, "kb", "linked"));
+
+    expect(listKnowledgeBases(db, ctx).map((kb) => kb.dir)).not.toContain("linked");
+  });
+
+  it("a symlinked SKILL folder is not a skill", () => {
+    const db = dbCtx.makeDb();
+    const ctx = { dataRoot: dbCtx.makeTempDir() };
+    const outside = dbCtx.makeTempDir();
+    writeFileSync(path.join(outside, "SKILL.md"), "MARKER-OUTSIDE");
+    mkdirSync(path.join(ctx.dataRoot, "skills"), { recursive: true });
+    symlinkSync(outside, path.join(ctx.dataRoot, "skills", "linked"));
+
+    expect(listSkills(db, ctx).map((s) => s.name)).not.toContain("linked");
+  });
+
+  it("scanStoreTree lists neither symlinked files nor symlinked directories", () => {
+    const root = dbCtx.makeTempDir();
+    const outside = dbCtx.makeTempDir();
+    writeFileSync(path.join(outside, "secret.md"), "MARKER-OUTSIDE");
+    writeFileSync(path.join(root, "real.md"), "real");
+    symlinkSync(path.join(outside, "secret.md"), path.join(root, "linked.md"));
+    symlinkSync(outside, path.join(root, "linkeddir"));
+
+    const names = scanStoreTree(root).map((n) => n.name);
+    expect(names).toEqual(["real.md"]);
+  });
+});
+
 /* ------------------------------- in-app document authoring (P13-LV-06) */
 
 describe("writeStoreDoc", () => {

@@ -15,11 +15,15 @@ import { PROJECT_ROLES, type ProjectRole } from "~/schemas/project-file.schema";
  * `ROLE_RANK` + a floor would suffice — but the explicit role list keeps the map
  * readable and lets the display table render role columns directly.
  *
- * Two actions (`view`, `comment`) are app-wide by FR4: any *authenticated* user,
- * member or not, may read boards/tasks and comment. They appear here (granted to
- * all four roles) so the Policy table can show them, but their server enforcement
- * is "authenticated", not "member of this project" — the guards for those do NOT
- * call requireAction.
+ * MEMBERSHIP is the outer gate on every action here (R15-4): a project is
+ * visible only to its members (plus org admins, as the audited D2 override), and
+ * a non-member is refused with the unknown-slug 404 — by the layout loader
+ * (routes/project.tsx) on reads and by `requireVisibleProject` on every
+ * project-scoped action. `view` and `comment` are the two actions no role tier
+ * narrows: every role holds them, so their entire enforcement IS that membership
+ * gate (they never call `requireAction`). That is NOT the pre-R15-4 "any
+ * authenticated user, member or not" — the claim this file and the Policy page
+ * both carried until E1, while enforcement had already been 404ing non-members.
  */
 
 export { PROJECT_ROLES, type ProjectRole };
@@ -46,15 +50,17 @@ const V = "viewer" as const;
 /**
  * One source for enforcement and the Policy/Profile permission tables.
  *
- * `appWide` means NOT ROLE-GATED — every project role holds it, including
- * viewer. Since R15-4 it does NOT mean "membership not required": projects are
- * members-only, so view/comment reach exactly as far as the project does
- * (routes/project's loader and `requireVisibleProject` on the action side both
- * refuse a non-member with the unknown-slug 404).
+ * The first two rows are held by all four roles — nothing about them is
+ * role-gated — so they render as ordinary four-check rows. They used to carry an
+ * `appWide` flag that made the Policy page draw one merged "Any signed-in user ·
+ * membership not required" cell; post-R15-4 that sentence was simply false (a
+ * signed-in non-member gets a 404 on every page of this project, comments
+ * included), and the flag existed only to render it. Membership scope is stated
+ * once, under the table, where it applies to every row.
  */
 export const RBAC_DEFINITIONS = [
-  { id: "view", label: "View board, tasks & timelines", roles: [A, M, C, V], appWide: true },
-  { id: "comment", label: "Comment on tasks", roles: [A, M, C, V], appWide: true },
+  { id: "view", label: "View board, tasks & timelines", roles: [A, M, C, V] },
+  { id: "comment", label: "Comment on tasks", roles: [A, M, C, V] },
   { id: "create-task", label: "Create tasks", roles: [A, M, C] },
   { id: "own-task", label: "Take / release own task ownership", roles: [A, M, C] },
   { id: "approve-transition", label: "Approve stage transitions", roles: [A, M] },
@@ -79,7 +85,6 @@ export const RBAC_DEFINITIONS = [
   id: string;
   label: string;
   roles: readonly ProjectRole[];
-  appWide?: boolean;
 }[];
 
 export type RbacAction = (typeof RBAC_DEFINITIONS)[number]["id"];

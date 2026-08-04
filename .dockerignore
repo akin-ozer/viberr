@@ -17,6 +17,16 @@ e2e
 design
 planning
 docs
+
+# NOT excluded, on purpose: test-support/.
+#
+# `test-support/demo-seed` is the e2e dataset, and compose.e2e.yml:22-26 seeds
+# the e2e volume from the BUILD stage (`npm run seed:demo`) precisely because
+# the build stage still has the full source tree — the final image deliberately
+# does not. Adding `test-support` here would leave the image smaller and `npm
+# run e2e` dead, with the failure surfacing as an empty board rather than a
+# missing file. The demo data never reaches the shipped image regardless: the
+# Dockerfile's final stage copies only what it names.
 Dockerfile
 compose.yml
 README.md

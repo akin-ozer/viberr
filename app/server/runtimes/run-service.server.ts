@@ -37,6 +37,8 @@ import {
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
+  claudeCliAuthDiagnostics,
+  codexAuthMisconfiguration,
   codexCliAuthDiagnostics,
   createAdapters,
   resetRegistryForTests,
@@ -295,6 +297,41 @@ export function webSearchWithheldFromDenylist(
 }
 
 /**
+ * Auto-approve every MOUNTED MCP server that the caller did not already name.
+ *
+ * D4: `allowedTools` is the APPROVAL list (P14-KM-12) — an `mcp__*` tool with
+ * no entry stalls on a permission prompt no human is there to answer. The
+ * operator toolkit built its own list; the specialist path passed NONE, so a
+ * profile's granted org MCPs (and the in-process `viberr_agent` toolkit —
+ * post_comment / ask_human / report_outcome) were only ever usable because
+ * every run happens to be autonomous and therefore `bypassPermissions`. That
+ * made a permission MODE load-bearing for a capability GRANT: the first
+ * non-autonomous or non-bypass run would silently lose the whole toolkit.
+ * Deriving the entries here — the one funnel every path goes through (fresh,
+ * operator, resume), the same place the effort tier is normalized — means no
+ * caller can forget them, and a resume cannot drop them.
+ *
+ * A server the caller already named (`mcp__x`, or per-tool `mcp__x__y`) is left
+ * alone: the operator deliberately lists its governance tools ONE BY ONE so the
+ * approval list mirrors its capability policy, and a blanket `mcp__viberr`
+ * would paper over that curation.
+ */
+export function withMcpAutoApproval(
+  allowedTools: readonly string[] | undefined,
+  mcpServers: Record<string, unknown> | undefined,
+): string[] | undefined {
+  const named = allowedTools ?? [];
+  const servers = Object.keys(mcpServers ?? {});
+  const additions = servers.flatMap((name) =>
+    named.some((t) => t === `mcp__${name}` || t.startsWith(`mcp__${name}__`))
+      ? []
+      : [`mcp__${name}`],
+  );
+  const merged = [...named, ...additions];
+  return merged.length ? merged : undefined;
+}
+
+/**
  * Starts a run: selects the requested provider adapter, inserts the queued
  * row, wires the sink and adapter callbacks, and kicks the adapter.
  *
@@ -369,6 +406,9 @@ export async function startRun(
     },
   });
 
+  // D4: every mounted MCP server is auto-approved here, not per caller.
+  const allowedTools = withMcpAutoApproval(input.allowedTools, input.mcpServers);
+
   const spec: RunSpec = {
     runId,
     projectSlug: input.projectSlug,
@@ -393,7 +433,7 @@ export async function startRun(
     autonomous: input.autonomous ?? true,
     ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
-    ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
+    ...(allowedTools ? { allowedTools } : {}),
     ...(input.disallowedTools && input.disallowedTools.length
       ? { disallowedTools: input.disallowedTools }
       : {}),
@@ -459,9 +499,22 @@ function failRunUnavailable(db: DatabaseSync, spec: RunSpec): void {
  */
 export function backendUnavailableMessage(backend: RealBackend): string {
   if (backend === "claude") {
+    // D2: the CLI-auth opt-in is now validated, so the refusal can name the
+    // dir it checked instead of re-suggesting the flag that is already set.
+    const claude = claudeCliAuthDiagnostics();
+    if (claude.optIn && claude.verified === "refuted") {
+      return `Claude Code is unavailable — VIBERR_CLAUDE_USE_CLI_AUTH=1 is set, but \`${claude.configDir}\` holds no \`claude\` login (no ${claude.credentialsPath}, and the CLI has never run against that config dir). Point CLAUDE_CONFIG_DIR at the logged-in dir, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN, or run this agent on another backend. No agent process was started.`;
+    }
     return "Claude Code is unavailable — no usable credential is configured. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (or opt in with VIBERR_CLAUDE_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
   }
   const diag = codexCliAuthDiagnostics();
+  // D1: the source==run-home misconfiguration must be named FIRST. The generic
+  // copy below tells the operator to copy their login INTO Viberr's own run
+  // home, which in this state cements the misconfiguration instead of fixing it.
+  const misconfigured = codexAuthMisconfiguration(diag);
+  if (misconfigured) {
+    return `Codex is unavailable — ${misconfigured} No agent process was started.`;
+  }
   if (diag.optIn && !diag.authJsonExists) {
     return `Codex is unavailable — VIBERR_CODEX_USE_CLI_AUTH=1 is set, but the Codex CLI login file is missing at ${diag.authJsonPath}. Copy it from a logged-in machine (docker: \`docker compose cp ~/.codex/auth.json app:${diag.authJsonPath}\`) — the next run picks it up without a restart. Or set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY, or run this agent on another backend. No agent process was started.`;
   }
@@ -620,6 +673,12 @@ export async function resumeRun(
      *  this a resumed (e.g. @mention) specialist runs UNCONFINED — the exact
      *  confinement the fresh-run path establishes is silently dropped (XS-1). */
     disallowedTools?: string[];
+    /** Re-apply the run's tool APPROVAL list on resume. D4: the type used to
+     *  omit this while accepting every other half of the run's tool policy, so
+     *  a caller that curated an allowlist (the operator does) silently lost it
+     *  the moment its session was resumed. Mounted MCP servers are still
+     *  auto-approved by `startRun` either way. */
+    allowedTools?: string[];
     /** Re-apply the per-run env overlay (GIT_CEILING_DIRECTORIES workspace
      *  confinement) on resume. */
     env?: Record<string, string>;
@@ -676,6 +735,7 @@ export async function resumeRun(
       ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
       ...(input.actor ? { actor: input.actor } : {}),
       ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+      ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
       ...(input.env ? { env: input.env } : {}),
       ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
       ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
@@ -709,6 +769,7 @@ export async function resumeRun(
     ...(input.actor ? { actor: input.actor } : {}),
     // Re-establish the run confinement the fresh-run path applies (XS-1).
     ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+    ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
     ...(input.env ? { env: input.env } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
     ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),

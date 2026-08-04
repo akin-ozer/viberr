@@ -427,14 +427,18 @@ describe("danger zone", () => {
     );
   });
 
-  it("delete is admin-only (per-project membership)", async () => {
-    // Murat is not a member of deploy-pipeline at all.
-    const result = (await postAction(
+  it("a NON-MEMBER gets the unknown-slug 404, not a 403 (E2)", async () => {
+    // Murat is not a member of deploy-pipeline at all, so the project is
+    // invisible to him (R15-4) — this used to answer 403, which confirmed the
+    // project exists. Admin-only-ness for actual members is covered by the
+    // archive-project case below, where Murat IS a member and is told plainly.
+    const thrown = (await postAction(
       ids.murat,
       { intent: "delete-project", confirmName: "Deploy Pipeline" },
       "deploy-pipeline",
-    )) as { init?: { status?: number } };
-    expect(result.init?.status).toBe(403);
+    ).catch((e) => e)) as { init?: { status?: number }; data?: unknown };
+    expect(thrown?.init?.status).toBe(404);
+    expect(String(thrown?.data)).toBe("No project at projects/deploy-pipeline.");
   });
 });
 

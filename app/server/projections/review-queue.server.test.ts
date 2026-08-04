@@ -112,7 +112,10 @@ function setup() {
 describe("getReviewQueue", () => {
   it("splits review-stage tasks on waiting — review+none lands with agents", () => {
     const store = setup();
-    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const queue = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
 
     expect(queue.total).toBe(3);
     expect(queue.ready.map((t) => t.key)).toEqual(["VIB-101"]);
@@ -125,7 +128,10 @@ describe("getReviewQueue", () => {
 
   it("carries the subline sources: packet header, newest event text, or nothing", () => {
     const store = setup();
-    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const queue = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
 
     const withPacket = queue.ready[0]!;
     expect(withPacket.packet).toEqual({
@@ -145,7 +151,10 @@ describe("getReviewQueue", () => {
 
   it("keeps pr + validation for the meta cluster", () => {
     const store = setup();
-    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const queue = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
     expect(queue.ready[0]!.pr).toEqual({ number: 318, state: "review" });
     expect(queue.ready[0]!.validation).toBe("changed");
     expect(queue.working[0]!.validation).toBe("healthy");
@@ -154,7 +163,10 @@ describe("getReviewQueue", () => {
   it("returns empty panels for a project with no review-stage tasks", () => {
     const store = setupTestStore(ctx);
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const queue = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
     expect(queue).toEqual({ ready: [], working: [], total: 0 });
   });
 
@@ -188,7 +200,10 @@ describe("getReviewQueue", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    const queue = getReviewQueue(store.db, "lite", { dataRoot: store.dataRoot });
+    const queue = getReviewQueue(store.db, "lite", {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
     expect(queue.total).toBe(1);
     expect(queue.ready.map((t) => t.key)).toEqual(["LP-1"]);
   });
@@ -259,11 +274,32 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
     expect(q.working.map((t) => t.key)).toEqual(["VIB-201"]);
   });
 
-  it("unscoped (no viewer) keeps the state-based split — any human-waiting task is ready", () => {
+  it("a NON-MEMBER viewer id gets nothing in `ready` — the task is still listed as in review", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, null);
-    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
-    expect(q.ready.map((t) => t.key)).toEqual(["VIB-201"]);
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.deniz.id, // no membership row at all
+    });
+    expect(q.ready).toHaveLength(0);
+    expect(q.working.map((t) => t.key)).toEqual(["VIB-201"]);
+    expect(q.total).toBe(1);
+  });
+
+  // E5: the predicate used to open with `if (viewerUserId === undefined) return
+  // true` — "may this person accept?" answered yes for everyone. `viewerUserId`
+  // is a required parameter now, so no caller can reach that branch by omission;
+  // this drives the shape a JS caller (or a future refactor that drops the
+  // argument) would still produce, and asserts it fails CLOSED rather than
+  // handing back an unfiltered acceptance list.
+  it("an absent viewer is fail-closed: nothing is acceptance-ready", () => {
+    const store = setupTestStore(ctx);
+    seedBareHumanReview(store, null);
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+    } as unknown as { viewerUserId: string; dataRoot: string });
+    expect(q.ready).toHaveLength(0);
+    expect(q.working.map((t) => t.key)).toEqual(["VIB-201"]);
   });
 });
 
@@ -303,7 +339,10 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
     // Human-waiting, but a required reviewer requested changes → NOT acceptable.
     expect(q.ready.map((t) => t.key)).not.toContain("VIB-9");
     const row = q.working.find((t) => t.key === "VIB-9")!;
@@ -345,7 +384,10 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
     expect(q.ready.map((t) => t.key)).toContain("VIB-8");
     expect(q.ready.find((t) => t.key === "VIB-8")!.blockReason).toBeNull();
   });
@@ -364,7 +406,10 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
     // Human-waiting + no blockReason, but the PR was rejected → NOT acceptance-ready.
     expect(q.ready.map((t) => t.key)).not.toContain("VIB-7");
     const row = q.working.find((t) => t.key === "VIB-7")!;
@@ -421,7 +466,10 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
   it("a delivered revision with ZERO verdict-capable engagements is not `ready`", () => {
     const store = setupTestStore(ctx);
     seedDelivered(store, "VIB-6");
-    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
     expect(q.ready.map((t) => t.key)).not.toContain("VIB-6");
     const row = q.working.find((t) => t.key === "VIB-6")!;
     expect(row.blockReason).toMatch(/no approving verdict yet/i);
@@ -430,7 +478,10 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
   it("delivered work with NO review PR is not `ready` either", () => {
     const store = setupTestStore(ctx);
     seedDelivered(store, "VIB-5", { pr: null });
-    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
     expect(q.ready.map((t) => t.key)).not.toContain("VIB-5");
     expect(
       q.working.find((t) => t.key === "VIB-5")!.blockReason,
@@ -440,8 +491,113 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
   it("an UNDELIVERED task (no revision) stays acceptable — planning work is not gated", () => {
     const store = setupTestStore(ctx);
     seedDelivered(store, "VIB-4", { workRevision: null, pr: null, branch: null });
-    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
     expect(q.ready.map((t) => t.key)).toContain("VIB-4");
     expect(q.ready.find((t) => t.key === "VIB-4")!.blockReason).toBeNull();
+  });
+
+  /**
+   * R16-3 (owner ruling 2026-08-04): a terminal GitHub fact outranks the
+   * process gates, and force-accept is withheld while the PR is closed. The row
+   * used to carry the verdict gate's "…or an admin can force-accept" beside a
+   * PR GitHub had already closed — the exact override the task page refuses.
+   */
+  it("a CLOSED PR on the same delivered task replaces the verdict gate, force-accept and all", () => {
+    const store = setupTestStore(ctx);
+    seedDelivered(store, "VIB-6", {
+      pr: { number: 66, state: "closed", title: "Delivered, unreviewed" },
+    });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = q.working.find((t) => t.key === "VIB-6")!;
+    expect(row.blockReason).toContain("closed on GitHub without merging");
+    expect(row.blockReason).not.toContain("force-accept");
+    expect(row.blockReason).not.toContain("approving verdict");
+    // Unchanged: it was never acceptance-ready (NEW-1 filters closed PRs out).
+    expect(q.ready.map((t) => t.key)).not.toContain("VIB-6");
+  });
+
+  it("the same task with its PR still OPEN keeps the process-gate sentence", () => {
+    const store = setupTestStore(ctx);
+    seedDelivered(store, "VIB-6");
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(q.working.find((t) => t.key === "VIB-6")!.blockReason).toMatch(
+      /no approving verdict yet — run a review for a verdict, or an admin can force-accept/,
+    );
+  });
+
+  it("a MERGED PR is not terminal — the verdict gate still names the real blocker", () => {
+    const store = setupTestStore(ctx);
+    seedDelivered(store, "VIB-6", {
+      pr: { number: 66, state: "merged", title: "Delivered, unreviewed" },
+    });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = q.working.find((t) => t.key === "VIB-6")!;
+    expect(row.pr).toMatchObject({ number: 66, state: "merged" });
+    expect(row.blockReason).toMatch(/no approving verdict yet/);
+  });
+});
+
+/**
+ * P14-LV-07 residual: `prStateSub` has described a conflicting PR since LV-07,
+ * but the row it reads never carried `mergeable` — so on every real queue that
+ * branch was unreachable and the one PR state that CANNOT be merged looked
+ * exactly like a healthy open one.
+ */
+describe("the row carries GitHub's mergeability", () => {
+  it("forwards `mergeable` from the projection", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-11", {
+        title: "Conflicting",
+        stage: "review",
+        waiting: "human",
+        pr: {
+          number: 55,
+          state: "review",
+          title: "Conflicting",
+          mergeable: "conflicting",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = [...q.ready, ...q.working].find((t) => t.key === "VIB-11")!;
+    expect(row.pr!.mergeable).toBe("conflicting");
+  });
+
+  it("an unread mergeability is ABSENT, never coerced to a value", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-12", {
+        title: "Never reconciled",
+        stage: "review",
+        waiting: "human",
+        pr: { number: 56, state: "review", title: "Never reconciled" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = [...q.ready, ...q.working].find((t) => t.key === "VIB-12")!;
+    // Not "clean": nobody asked GitHub. The subline must not claim mergeability
+    // it never read (prStateSub only speaks on an explicit "conflicting").
+    expect("mergeable" in row.pr!).toBe(false);
   });
 });

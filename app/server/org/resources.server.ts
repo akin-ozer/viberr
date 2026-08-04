@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -21,7 +22,7 @@ import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   isSecretBox,
-  openSecret,
+  openSecretRotating,
   sealSecret,
 } from "~/server/secrets/secret-box.server";
 import {
@@ -31,6 +32,7 @@ import {
   skillsRootDir,
 } from "~/server/files/file-store-root.server";
 import { isInjectableKbDoc } from "~/server/files/kb-injection.server";
+import { resolveContainedSkillFile } from "~/server/files/skill-body.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
@@ -94,17 +96,22 @@ function diskNameFromId(id: string): string | null {
   return name;
 }
 
-/** Immediate sub-directory names of a store root ([] when absent). */
+/**
+ * Immediate sub-directory names of a store root ([] when absent).
+ *
+ * C5/pass-16: this used `statSync`, which DEREFERENCES — so `kb/notes` pointing
+ * at `/etc` was listed as a first-class knowledge base, browsable in the store
+ * browser, counted in its doc count, and (before the matching guard in
+ * `readKbBodyDetailed`) injected into runs as trusted agent context. Every
+ * other store path refuses to follow a link out of the store (P14-RV-02);
+ * `lstatSync` does not dereference, so a linked entry is simply not a resource.
+ */
 function subDirNames(root: string): string[] {
   try {
     if (!existsSync(root)) return [];
-    return readdirSync(root).filter((entry) => {
-      try {
-        return statSync(path.join(root, entry)).isDirectory();
-      } catch {
-        return false;
-      }
-    });
+    return readdirSync(root, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? [entry.name] : [],
+    );
   } catch {
     return [];
   }
@@ -279,25 +286,48 @@ export async function saveKnowledgeBase(
     throw AppError.notFound("No such knowledge base.");
   }
 
-  if (oldDir && dir !== oldDir) {
+  // C4 — the folder move and the row write are ONE synchronous block, and the
+  // reference rewrite comes AFTER.
+  //
+  // The old order was `renameSync` → `await updateResourceReferences(…)` →
+  // `UPDATE … SET dir`. That await walks EVERY agent template and EVERY
+  // project.md, so its duration scales with the installation; the KB watcher
+  // debounces for only KB_WATCH_DEBOUNCE_MS (250 ms). Whenever the walk ran
+  // long, the watcher saw `addDir` on the NEW folder while the row still said
+  // the OLD dir, found no row, and adopted the folder as a brand-new KB
+  // (`reindexKnowledgeBaseByDir`) — after which this function's pending write
+  // collided with the `dir` UNIQUE constraint and the rename failed with a
+  // constraint error on a folder that had already moved.
+  //
+  // node:sqlite is synchronous and there is no `await` between the rename and
+  // the row write below, so the event loop cannot run the watcher's debounce
+  // timer in that window at all: the watcher can only ever observe a state
+  // where disk and row already agree.
+  const renamedFrom = oldDir && dir !== oldDir ? oldDir : null;
+  if (renamedFrom) {
     // Rename ⇒ real folder move (spec §7.3); collision refused.
     const clash = db
       .prepare(`SELECT id FROM org_knowledge_bases WHERE dir = ? AND id != ?`)
       .get(dir, existing?.id ?? "");
-    const oldAbs = kbDirPath(oldDir, ctx.dataRoot);
+    const oldAbs = kbDirPath(renamedFrom, ctx.dataRoot);
     const newAbs = kbDirPath(dir, ctx.dataRoot);
     if (clash || existsSync(newAbs)) {
       throw AppError.conflict(`A knowledge-base folder ${dir}/ already exists.`);
     }
     if (existsSync(oldAbs)) renameSync(oldAbs, newAbs);
     else mkdirSync(newAbs, { recursive: true });
-    // P13-KM-07: a rename used to move the folder and leave every agent grant
-    // pointing at the old dir — silently, on both the template and deployment
-    // side. Rewrite the references with the move.
-    await updateResourceReferences("kb", oldDir, dir, ctx.dataRoot);
   } else {
     mkdirSync(kbDirPath(dir, ctx.dataRoot), { recursive: true });
   }
+
+  // P13-KM-07: a rename used to move the folder and leave every agent grant
+  // pointing at the old dir — silently, on both the template and deployment
+  // side. Rewrite the references with the move (after the row write, see C4).
+  const rewriteReferences = async () => {
+    if (renamedFrom) {
+      await updateResourceReferences("kb", renamedFrom, dir, ctx.dataRoot);
+    }
+  };
 
   if (existing) {
     db.prepare(
@@ -311,6 +341,7 @@ export async function saveKnowledgeBase(
       subjectId: existing.id,
       details: { name, dir, refresh, renamed: dir !== oldDir },
     });
+    await rewriteReferences();
     return {
       kb: getKnowledgeBase(db, existing.id, ctx)!,
       toast: `${name} updated`,
@@ -335,6 +366,7 @@ export async function saveKnowledgeBase(
     subjectId: id,
     details: { name, dir, refresh, ...(oldDir ? { adopted: true } : {}) },
   });
+  await rewriteReferences();
   return {
     kb: getKnowledgeBase(db, id, ctx)!,
     toast: oldDir
@@ -470,8 +502,19 @@ export interface McpView {
   /** Whether an encrypted credential is configured for this server. The sealed
    *  secret NEVER leaves the server (F7-MCP1) — only this boolean is exposed so
    *  the UI can show "auth configured" without the value; injection reads the
-   *  sealed value via `getMcpCredential`. */
+   *  sealed value via `getMcpCredentialState`. */
   hasCred: boolean;
+  /**
+   * A9: `hasCred` alone could not tell "authenticated" from "configured but
+   * BROKEN". A credential that no longer decrypts used to make every run
+   * connect anonymously with nothing but a log line to show for it, while this
+   * row still read "auth configured". `true` here means the stored credential
+   * cannot be opened and the server will NOT be mounted on a run.
+   *
+   * Optional so hand-built fixtures elsewhere stay valid; every real row from
+   * `mapMcp` sets it explicitly.
+   */
+  credUnreadable?: boolean;
   tools: number | null;
   /** true up · false down · null never probed / not probeable (stdio). */
   up: boolean | null;
@@ -496,6 +539,11 @@ function mapMcp(row: McpRow): McpView {
     transport: row.transport === "stdio" ? "stdio" : "HTTP",
     target: row.target,
     hasCred: !!row.cred_ref,
+    // A cheap format check only — a full decrypt attempt per listed row would
+    // put key work on every settings render. A legacy plaintext ref is caught
+    // here; a wrong-key box is caught by the resolver/probe, which report it
+    // through the same `credUnreadable` vocabulary.
+    credUnreadable: !!row.cred_ref && !isSecretBox(row.cred_ref),
     tools: row.tools_count,
     up: row.up === null ? null : row.up === 1,
     lastCheckedAt: row.last_checked_at,
@@ -503,50 +551,129 @@ function mapMcp(row: McpRow): McpView {
 }
 
 /**
- * Server-only accessor for an MCP server's DECRYPTED credential (F7-MCP1). Used
- * exclusively by the run-spawn injection path (specialist-mcp) — never a loader
- * or a client-facing surface. Returns null when no credential is configured or
- * the stored value isn't a sealed box (legacy plaintext refs are ignored, not
- * leaked). Failures to open (e.g. a rotated key) return null rather than throw,
- * so a run degrades to no-auth instead of crashing.
+ * What a row's `cred_ref` column actually yields (A9).
+ *
+ * `none`       — no credential configured; connecting unauthenticated is correct.
+ * `ok`         — decrypted; use `token`.
+ * `unreadable` — a credential IS configured and cannot be opened: a legacy
+ *                plaintext ref, or a box no current/retired key opens.
  */
-export function getMcpCredential(
+export type McpCredentialState =
+  | { state: "none" }
+  | { state: "ok"; token: string }
+  | { state: "unreadable"; reason: string };
+
+/**
+ * Server-only accessor for an MCP server's DECRYPTED credential (F7-MCP1). Used
+ * by the run-spawn injection path (specialist-mcp) and the health probes —
+ * never a loader or a client-facing surface.
+ *
+ * A9: the failure mode used to be a `logger.warn` and `null`, i.e. **silently
+ * unauthenticated**. Every authenticated server downgraded to anonymous on a
+ * key mismatch, the run's prompt still advertised its tools, and the only trace
+ * was a server log line. A configured-but-unopenable credential is now a typed
+ * state the callers must handle: the resolver refuses to mount the server and
+ * tells the RUN why, and the settings row says so too. Rotation itself is now
+ * implemented (`openSecretRotating` + lazy re-seal), so the common cause of
+ * this state — an operator changing VIBERR_SECRET_ENCRYPTION_KEY — is handled
+ * rather than merely reported.
+ */
+export function getMcpCredentialState(
   db: DatabaseSync,
   name: string,
-): string | null {
+): McpCredentialState {
   const row = db
-    .prepare(`SELECT cred_ref FROM org_mcp_servers WHERE name = ?`)
-    .get(name) as { cred_ref: string | null } | undefined;
-  if (!row?.cred_ref) return null;
-  // P11-61: a cred_ref is PRESENT but unusable — a legacy/non-secret-box value,
-  // or a sealed secret that no longer opens (the encryption key was rotated).
-  // The run degrades to no-auth, which is safe, but doing so SILENTLY hid a
-  // misconfigured integration. Warn so an operator can diagnose why an MCP that
-  // "has a credential" is being called unauthenticated.
-  if (!isSecretBox(row.cred_ref)) {
-    logger.warn("mcp credential is in a legacy/unreadable format — running no-auth", {
-      mcp: name,
-    });
-    return null;
+    .prepare(`SELECT id, cred_ref FROM org_mcp_servers WHERE name = ?`)
+    .get(name) as { id: string; cred_ref: string | null } | undefined;
+  if (!row?.cred_ref) return { state: "none" };
+  return openMcpCredential(db, row.id, name, row.cred_ref);
+}
+
+/** Shared open + lazy re-seal for one row's sealed credential. */
+function openMcpCredential(
+  db: DatabaseSync,
+  id: string,
+  name: string,
+  credRef: string,
+): McpCredentialState {
+  if (!isSecretBox(credRef)) {
+    logger.error(
+      "mcp credential is in a legacy/unreadable format — the server will NOT be mounted",
+      { mcp: name },
+    );
+    return {
+      state: "unreadable",
+      reason:
+        "its stored credential is not in the current sealed format — re-enter it in Settings → MCP servers",
+    };
   }
   try {
-    return openSecret(row.cred_ref);
+    const opened = openSecretRotating(credRef);
+    if (opened.staleKey) {
+      // Lazy rotation: the box opened under a RETIRED key, so rewrite it under
+      // the current one. This is what makes a key rotation converge with no
+      // migration — and what stops the next read from degrading to no-auth.
+      try {
+        db.prepare(`UPDATE org_mcp_servers SET cred_ref = ? WHERE id = ?`).run(
+          sealSecret(opened.plaintext),
+          id,
+        );
+        logger.info("re-sealed an MCP credential under the current encryption key", {
+          mcp: name,
+        });
+      } catch (error) {
+        logger.warn("could not re-seal an MCP credential — read still succeeded", {
+          mcp: name,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
+    return { state: "ok", token: opened.plaintext };
   } catch (error) {
-    logger.warn("mcp credential failed to decrypt (rotated key?) — running no-auth", {
-      mcp: name,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-    return null;
+    logger.error(
+      "mcp credential failed to decrypt under every configured key — the server will NOT be mounted",
+      {
+        mcp: name,
+        err: error instanceof Error ? error : new Error(String(error)),
+      },
+    );
+    return {
+      state: "unreadable",
+      reason:
+        "its stored credential cannot be decrypted — the secret-encryption key changed. Set VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS to the old key, or re-enter the credential in Settings → MCP servers",
+    };
   }
 }
 
-/** Open a sealed credential for a PROBE, never throwing (a rotated key just
- *  means the probe runs unauthenticated, exactly like a run would). */
-function safeOpenSecret(sealed: string): string | null {
+/** Open a sealed credential for a PROBE. Unlike a run, a probe MAY continue
+ *  unauthenticated — but it reports which it did, so a green/red dot is never
+ *  measured against a different credential than the run would use. */
+function safeOpenSecret(
+  db: DatabaseSync,
+  id: string,
+  name: string,
+  sealed: string,
+): { token: string | null; unreadable: boolean } {
+  const state = openMcpCredential(db, id, name, sealed);
+  if (state.state === "ok") return { token: state.token, unreadable: false };
+  return { token: null, unreadable: state.state === "unreadable" };
+}
+
+/** The same open for a row that does not exist yet (a CREATE): there is nothing
+ *  to lazily re-seal into, so this is a plain read with the same reporting. */
+function openedForNewRow(
+  sealed: string,
+  name: string,
+): { token: string | null; unreadable: boolean } {
+  if (!isSecretBox(sealed)) return { token: null, unreadable: true };
   try {
-    return openSecret(sealed);
-  } catch {
-    return null;
+    return { token: openSecretRotating(sealed).plaintext, unreadable: false };
+  } catch (error) {
+    logger.error("mcp credential failed to decrypt on save — probing no-auth", {
+      mcp: name,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return { token: null, unreadable: true };
   }
 }
 
@@ -801,6 +928,23 @@ export async function probeMcpTarget(
   }
 }
 
+
+/**
+ * Every name Viberr's own in-process tooling owns: `viberr` is the operator's
+ * governance server, `viberr_agent` the specialist toolkit (and `viberr-agent`
+ * the hyphen spelling a Codex run would see). `saveMcpServer` refuses all three,
+ * but a row created before that guard — or written straight into the DB — is
+ * still on disk, and the catalog only skipped the first. It would then be
+ * offered in the picker while every resolver skipped it: a grant that resolves
+ * to nothing, which is the silent-resource class this pass exists to close.
+ * One predicate so the writer and the picker can never disagree again.
+ */
+export function isReservedMcpName(name: string): boolean {
+  return (
+    name === "viberr" || name === "viberr_agent" || name === "viberr-agent"
+  );
+}
+
 /**
  * Real tool discovery over Streamable HTTP (P13-LV-10).
  *
@@ -972,7 +1116,7 @@ export async function saveMcpServer(
   // `viberr_agent` is the specialist toolkit. A row under either name is
   // unusable — the resolvers skip the reserved name — and shadows differently
   // per backend, so refuse it at save instead of accepting a dead server.
-  if (name === "viberr" || name === "viberr_agent" || name === "viberr-agent") {
+  if (isReservedMcpName(name)) {
     throw AppError.validation(
       `"${name}" is reserved for Viberr's built-in agent tools — pick another name.`,
     );
@@ -994,7 +1138,17 @@ export async function saveMcpServer(
   // (P13-LV-10): an HTTP endpoint used to be "reachable" on any HTTP response —
   // including a 400 — and never reported tools at all. The probe carries the
   // server's credential so a credentialed server isn't reported down (P13-KM-05).
-  const plainCred = cred && isSecretBox(cred) ? safeOpenSecret(cred) : null;
+  //
+  // A9: a credential that cannot be OPENED is named in the toast. It used to
+  // probe anonymously and blame the endpoint ("didn't answer as an MCP
+  // server"), sending the operator to debug a server that was fine.
+  const credOpened =
+    cred && input.id
+      ? safeOpenSecret(db, input.id, name, cred)
+      : cred
+        ? openedForNewRow(cred, name)
+        : { token: null, unreadable: false };
+  const plainCred = credOpened.token;
   const disc =
     transport === "stdio"
       ? await discoverStdioMcpTools(target, { ...options, token: plainCred })
@@ -1003,12 +1157,16 @@ export async function saveMcpServer(
   const up = disc.kind === "up" ? 1 : 0;
   const tools = disc.kind === "up" ? disc.tools : null;
   const spawnNote = transport === "stdio" ? " · spawned per run" : "";
+  const credNote = credOpened.unreadable
+    ? " · its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
+    : "";
   const toast =
-    disc.kind === "up"
+    (disc.kind === "up"
       ? `${name} saved — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} discovered${spawnNote}`
       : transport === "stdio"
         ? `${name} saved — command didn't respond (${disc.reason}); check it`
-        : `${name} saved — endpoint didn't answer as an MCP server (${disc.reason})`;
+        : `${name} saved — endpoint didn't answer as an MCP server (${disc.reason})`) +
+    credNote;
 
   let id = input.id ?? null;
   if (id) {
@@ -1073,10 +1231,16 @@ export async function testMcpServer(
   const sealed = db
     .prepare(`SELECT cred_ref FROM org_mcp_servers WHERE id = ?`)
     .get(id) as { cred_ref: string | null } | undefined;
-  const token =
-    sealed?.cred_ref && isSecretBox(sealed.cred_ref)
-      ? safeOpenSecret(sealed.cred_ref)
-      : null;
+  // A9: an unopenable credential is REPORTED, not silently dropped — this probe
+  // must never render a green dot earned without the auth a run would use, nor
+  // a red one blamed on the endpoint.
+  const opened = sealed?.cred_ref
+    ? safeOpenSecret(db, id, existing.name, sealed.cred_ref)
+    : { token: null, unreadable: false };
+  const token = opened.token;
+  const credNote = opened.unreadable
+    ? " · WARNING: its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
+    : "";
   const disc =
     existing.transport === "stdio"
       ? await discoverStdioMcpTools(existing.target, { ...options, token })
@@ -1091,7 +1255,7 @@ export async function testMcpServer(
     const fresh = getMcpServer(db, id)!;
     return {
       mcp: fresh,
-      toast: `${fresh.name} healthy — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} · ${disc.latencyMs}ms`,
+      toast: `${fresh.name} healthy — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} · ${disc.latencyMs}ms${credNote}`,
     };
   }
   db.prepare(
@@ -1100,7 +1264,10 @@ export async function testMcpServer(
      WHERE id = ?`,
   ).run(now, now, id);
   const fresh = getMcpServer(db, id)!;
-  return { mcp: fresh, toast: `${fresh.name} unreachable — ${disc.reason}` };
+  return {
+    mcp: fresh,
+    toast: `${fresh.name} unreachable — ${disc.reason}${credNote}`,
+  };
 }
 
 export async function deleteMcpServer(
@@ -1147,14 +1314,62 @@ interface SkillRow {
   updated_at: string;
 }
 
+/**
+ * The editor reads the SAME contained path the injector does.
+ *
+ * A5-followup/pass-16: this reader used to build the path itself and
+ * `readFileSync` it, which dereferences. So a symlinked `SKILL.md` (or skill
+ * FOLDER) rendered the link TARGET's content in the org-settings editor as if it
+ * were the skill — text no run would ever see, because `readSkillBodyDetailed`
+ * refuses links. Two answers to "what is this skill?" is the silent-resource
+ * failure this pass exists to close, and here it also pointed the editor's own
+ * `writeFileSync` at a file outside the store (see `assertSkillBodyWritable`).
+ */
 function readSkillBody(name: string, ctx: OrgSeedContext): string {
-  const abs = path.join(skillDirPath(name, ctx.dataRoot), "SKILL.md");
-  if (!existsSync(abs)) return "";
+  let resolved: ReturnType<typeof resolveContainedSkillFile>;
   try {
-    const raw = readFileSync(abs);
+    resolved = resolveContainedSkillFile(name, ctx.dataRoot);
+  } catch {
+    return ""; // traversal-shaped name — `skillDirPath` refused it
+  }
+  if ("reason" in resolved) return "";
+  try {
+    const raw = readFileSync(resolved.file);
     return raw.subarray(0, SKILL_BODY_MAX_BYTES).toString("utf8");
   } catch {
     return "";
+  }
+}
+
+/**
+ * Refuse to SAVE over a `SKILL.md` that leaves the store.
+ *
+ * `writeFileSync` follows a symlink, so an uncontained SKILL.md turned the
+ * skill editor into a write-anywhere primitive: save once and the link's target
+ * — any file the server process can write — is replaced with the editor's
+ * textarea. The read half above already blanks the body for these skills, which
+ * would make an unguarded save even worse: it would blank the target. Same rule
+ * as the injector, stated to the human instead of logged.
+ */
+function assertSkillBodyWritable(name: string, ctx: OrgSeedContext): void {
+  const dir = skillDirPath(name, ctx.dataRoot);
+  const uncontained = () =>
+    AppError.validation(
+      `SKILL.md for ${name} is a symlink (or sits under one), so it points outside the skills store. Viberr never reads or writes through a link out of the store — replace it with a real file to edit it here.`,
+    );
+  const dirStat = lstatOr(dir);
+  if (dirStat?.isSymbolicLink()) throw uncontained();
+  // `lstat`, not `existsSync`: a link to a target that does not exist yet is
+  // still a link, and the write would CREATE the target outside the store.
+  if (!lstatOr(path.join(dir, "SKILL.md"))) return;
+  if ("reason" in resolveContainedSkillFile(name, ctx.dataRoot)) throw uncontained();
+}
+
+function lstatOr(target: string): ReturnType<typeof lstatSync> | null {
+  try {
+    return lstatSync(target);
+  } catch {
+    return null;
   }
 }
 
@@ -1315,6 +1530,13 @@ export async function saveSkill(
     throw AppError.validation(
       `SKILL.md for ${oldName} is larger than the 256 KB editor limit, so the editor only loaded a truncated copy. Saving would overwrite the full file with that truncated text — edit SKILL.md on disk (or re-upload it) instead.`,
     );
+  }
+
+  // A5-followup: a save must never write THROUGH a link out of the store. This
+  // runs BEFORE the rename below, which would otherwise move the linked folder
+  // first and report the refusal against a path that no longer exists.
+  if (oldName && !keepExistingBody && !filesMode) {
+    assertSkillBodyWritable(oldName, ctx);
   }
 
   if (oldName && name !== oldName) {

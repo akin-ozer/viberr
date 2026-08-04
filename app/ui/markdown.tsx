@@ -61,6 +61,18 @@ function chipMentions(value: string, names: string[]): HastNode[] | null {
   let last = 0;
   for (const { start, end } of spans) {
     if (start > last) out.push({ type: "text", value: value.slice(last, start) });
+    // P16-UI-20: colour + background is the chip's ONLY distinction from the
+    // prose around it, so "@Selin" read identically to the word "Selin". A
+    // visually-hidden word in front carries it to AT. It is a SIBLING of the
+    // chip, not a child: `.mention`'s text content stays exactly the span the
+    // shared matcher produced. `.mention-vh` is `user-select: none`, so copying
+    // a comment still yields the author's text.
+    out.push({
+      type: "element",
+      tagName: "span",
+      properties: { className: ["mention-vh"] },
+      children: [{ type: "text", value: "mention " }],
+    });
     out.push({
       type: "element",
       tagName: "span",

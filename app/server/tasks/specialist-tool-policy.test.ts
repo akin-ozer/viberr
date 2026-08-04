@@ -286,3 +286,59 @@ describe("web egress capability", () => {
     ).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
   });
 });
+
+/* --------------------------------- MCP is outside the matrix (R16-5) */
+
+describe("MCP tools are deliberately NOT capability-gated (R16-5)", () => {
+  // Owner ruling, 2026-08-04: MCP grants stay outside the capability matrix.
+  // Viberr cannot know what a third-party tool does, so it does not pretend to
+  // bound one — granting a server IS the grant, and the only rule it can
+  // enforce is the prompt-level one (an MCP tool may never merge, close a task
+  // or change policy).
+  //
+  // Without this test the decision is invisible: the absence of an `mcp__*`
+  // deny rule reads exactly like an oversight, and the obvious "fix" — denying
+  // `mcp__*` alongside Edit/Write when execute-code-or-write-repo is withheld —
+  // would silently revoke every read-only MCP server an operator granted on
+  // purpose. This is the record that says the gap is a decision.
+
+  it("withholding execute-code-or-write-repo does NOT deny the mcp__* channel", () => {
+    const denied = resolveSpecialistDisallowedTools([
+      grant("execute-code-or-write-repo", "off"),
+    ]);
+    // The file-write tools ARE removed — the capability has teeth where Viberr
+    // can see the tool.
+    expect(denied).toContain("Edit");
+    expect(denied).toContain("Write");
+    // …and stops exactly at the boundary of what it can see.
+    expect(denied.some((tool) => tool.startsWith("mcp__"))).toBe(false);
+  });
+
+  it("no capability, at any mode, denies an mcp__* tool", () => {
+    const modes: CapabilityGrant["mode"][] = ["off", "human", "direct"];
+    for (const mode of modes) {
+      for (const capabilityId of [
+        "execute-code-or-write-repo",
+        "use-web-search-fetch",
+        "create-task-branch",
+        "commit-push-branch",
+        "open-review-pr",
+        "merge-pull-request",
+      ]) {
+        const denied = resolveSpecialistDisallowedTools([grant(capabilityId, mode)]);
+        expect(
+          denied.filter((tool) => tool.startsWith("mcp__")),
+          `${capabilityId} @ ${mode} must not touch the mcp__* channel`,
+        ).toEqual([]);
+      }
+    }
+  });
+
+  it("an undeployed agent is confined by DEPLOYMENT, not by the matrix", () => {
+    // The one place mcp__* could legitimately be cut is "this agent is not
+    // deployed here at all" — a different question from "which capabilities did
+    // you grant it". Pinned so the two stay distinguishable.
+    const denied = resolveUndeployedDisallowedTools();
+    expect(denied.length).toBeGreaterThan(0);
+  });
+});

@@ -9,7 +9,8 @@ import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter, createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { DecisionPacket, observationLabel } from "./decision-packet";
-import { GithubTrace, ScheduledActions, TaskHero } from "./task-detail-page";
+import { GithubTrace } from "./task-side-panels";
+import { ScheduledActions, TaskHero } from "./task-main-sections";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
 import {
@@ -167,7 +168,7 @@ describe("TimelineItem", () => {
     expect(container.querySelector(".comment-card")).not.toBeNull();
     expect(container.querySelector(".comment-card.toagent")).toBeNull();
     expect(container.querySelector(".tl-meta .pill")).toBeNull();
-    expect(container.querySelector(".tl-time")!.textContent).toBe("9:41");
+    expect(container.querySelector(".tl-time")!.textContent).toBe("09:41");
     // Comments render as GFM markdown (multi-line agent replies + user
     // comments), and @mentions inside a comment are re-chipped by the
     // rehypeMentions pass so they get the shared `.mention` highlight back.
@@ -176,6 +177,26 @@ describe("TimelineItem", () => {
     const chip = container.querySelector(".comment-card .mention")!;
     expect(chip).not.toBeNull();
     expect(chip.textContent).toBe("@operator");
+  });
+
+  it("F20: typed-event text chips known names whole and leaves unknown @words prose", () => {
+    // The typed-event branch used to render through RichText's own `@word`
+    // regex, so it chipped `@nobody` (routes nowhere) and chipped only "@Arda"
+    // out of the known name "@Arda Kaya". It now shares the comment renderer's
+    // known-name list, so the two branches cannot disagree.
+    const { container } = render(
+      <TimelineItem
+        ev={ev({
+          type: "handoff",
+          text: "Assigned to @Arda Kaya — @nobody was asked",
+        })}
+        mentionNames={["Arda Kaya"]}
+      />,
+    );
+    const mentions = [...container.querySelectorAll(".tl-text .mention")].map(
+      (m) => m.textContent,
+    );
+    expect(mentions).toEqual(["@Arda Kaya"]);
   });
 
   it("agent-routed comment gets the toagent tint", () => {
@@ -212,7 +233,12 @@ describe("TimelineItem", () => {
     );
   });
 
-  it("guest commenter renders the app-user pill (Deniz on VIB-153)", () => {
+  it("E1: a comment from someone no longer in the project says exactly that", () => {
+    // The pill read "app user · not in project", from the era when any
+    // registered user could comment on any task. Members-only enforcement
+    // (R15) killed that path — a non-member 404s on the page and on the POST —
+    // so the only way to see this flag now is an author who has LEFT, and the
+    // old wording described a route into the product that no longer exists.
     const { container } = render(
       <TimelineItem
         ev={ev({
@@ -230,7 +256,8 @@ describe("TimelineItem", () => {
     const pills = [...container.querySelectorAll(".tl-meta .pill")].map(
       (p) => p.textContent,
     );
-    expect(pills).toContain("app user · not in project");
+    expect(pills).toContain("no longer a member");
+    expect(pills).not.toContain("app user · not in project");
   });
 
   it("completion: title, done pill, evidence rows with add/del", () => {
@@ -801,6 +828,51 @@ describe("ExecutionProfile — owner hand-off candidates", () => {
   });
 });
 
+/* ------------------------------------------- popover dismissal (shared hook) */
+
+/**
+ * Pass 16: the three menus on this panel each carried their own copy of the
+ * "Escape + outside mousedown closes me" effect, and none of them was covered —
+ * so the behaviour could quietly diverge between them (it already had, app-wide:
+ * `window` vs `document`, some popovers with no outside-close at all). They now
+ * share `use-dismiss.ts`, and this asserts the shared contract on all three at
+ * once so a future divergence is a test failure.
+ */
+describe("ExecutionProfile — every menu dismisses the same way", () => {
+  const menus: [label: string, trigger: string, panel: string][] = [
+    ["owner", "Manage", "Manage task ownership"],
+    ["delivering agent", "Assign delivering agent", "Assign a delivering agent"],
+    ["reviewer", "Engage reviewer", "Engage a reviewer"],
+  ];
+
+  for (const [name, trigger, panel] of menus) {
+    it(`${name} menu: Escape closes it`, () => {
+      const { container } = renderExec(execTask());
+      const btn = Array.from(container.querySelectorAll(".own-btn, .rev-add")).find(
+        (b) => b.textContent?.includes(trigger),
+      ) as HTMLButtonElement;
+      expect(btn).toBeDefined();
+      fireEvent.click(btn);
+      expect(container.querySelector(`[aria-label="${panel}"]`)).not.toBeNull();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(container.querySelector(`[aria-label="${panel}"]`)).toBeNull();
+    });
+
+    it(`${name} menu: a press outside closes it, a press inside does not`, () => {
+      const { container } = renderExec(execTask());
+      const btn = Array.from(container.querySelectorAll(".own-btn, .rev-add")).find(
+        (b) => b.textContent?.includes(trigger),
+      ) as HTMLButtonElement;
+      fireEvent.click(btn);
+      const open = () => container.querySelector(`[aria-label="${panel}"]`);
+      fireEvent.mouseDown(open()!);
+      expect(open()).not.toBeNull();
+      fireEvent.mouseDown(document.body);
+      expect(open()).toBeNull();
+    });
+  }
+});
+
 /* -------------------------------------------------- GithubTrace force-accept */
 
 /** P14-UI-11: the browse host is the loader's, always — the component no longer
@@ -1002,10 +1074,14 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(first.textContent).toContain("your role can't edit the goal");
     // The Confirm button refuses too — before the fix an owner-contributor
     // recorded the decision, got "type the new goal", and found no editor.
+    // E4: the refusal is `aria-disabled`, not `disabled`, so the reason it
+    // points at is reachable; the click handler is what actually refuses.
     const confirm = container.querySelector<HTMLButtonElement>(
       ".packet-actions .btn.primary",
     )!;
-    expect(confirm.disabled).toBe(true);
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(confirm);
+    expect(onResolve).not.toHaveBeenCalled();
   });
 
   it("offers edit_goal normally to a maintainer", () => {
@@ -1100,6 +1176,81 @@ describe("UI-42/UI-44: the decision packet", () => {
     const tabbable = opts.filter((o) => o.tabIndex === 0);
     expect(tabbable).toHaveLength(1);
     expect(tabbable[0]!.getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+// E4: the Confirm button used to park its refusal reason in `title` on a
+// `disabled` element — the one attribute+state combination that guarantees
+// nobody reads it: no hover, no focus, absent from the a11y tree. The reason
+// has to be on screen AND announced.
+describe("E4: the blocked Confirm button gives its reason to everybody", () => {
+  const completionPacket: PacketRender = {
+    ...packet142,
+    options: [
+      { kind: "accept_completion", t: "Accept the completion", d: "Move to Done.", rec: true },
+      { kind: "request_edit", t: "Request one edit", d: "Ask the developer.", rec: false },
+    ],
+  };
+
+  const renderBlocked = (onResolve = vi.fn()) =>
+    render(
+      <DecisionPacket
+        packet={completionPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion={false}
+        canEditGoal
+        canArchive
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+
+  it("renders the reason as visible text wired to the button by aria-describedby", () => {
+    const { container } = renderBlocked();
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    const described = confirm.getAttribute("aria-describedby");
+    expect(described).toBeTruthy();
+    const reason = container.querySelector(`#${described}`)!;
+    // In the document, not in a tooltip — this is the whole finding.
+    expect(reason).not.toBeNull();
+    expect(reason.textContent).toContain("Accepting completion is reserved");
+    // And no `title`, which is where it used to hide.
+    expect(confirm.getAttribute("title")).toBeNull();
+  });
+
+  it("stays focusable (aria-disabled, not disabled) yet still refuses the click", () => {
+    const onResolve = vi.fn();
+    const { container } = renderBlocked(onResolve);
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    // `disabled` would drop it out of the tab order and out of the a11y tree,
+    // taking the description with it.
+    expect(confirm.disabled).toBe(false);
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    confirm.focus();
+    expect(document.activeElement).toBe(confirm);
+    fireEvent.click(confirm);
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it("drops the reason — and resolves — the moment an allowed option is selected", () => {
+    const onResolve = vi.fn();
+    const { container } = renderBlocked(onResolve);
+    expect(container.querySelector(".deny-note")).not.toBeNull();
+    // Arrow to `request_edit`, which needs no extra grant.
+    fireEvent.keyDown(container.querySelector(".options")!, { key: "ArrowDown" });
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    expect(confirm.getAttribute("aria-disabled")).toBeNull();
+    expect(confirm.getAttribute("aria-describedby")).toBeNull();
+    expect(container.querySelector(".deny-note")).toBeNull();
+    fireEvent.click(confirm);
+    expect(onResolve).toHaveBeenCalledWith(1, "");
   });
 });
 

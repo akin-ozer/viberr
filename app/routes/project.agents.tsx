@@ -6,11 +6,12 @@ import {
   requireFormAction,
 } from "~/server/auth/form-action.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
+import { requireVisibleProject } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { listAgentDeployments } from "~/server/projections/agent-deployments.server";
 import { buildResourceCatalog } from "~/server/org/resource-catalog.server";
-import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
+import { backendCredentialHealth } from "~/server/runtimes/runtime-registry.server";
 import {
   createAgentProfile,
   deleteAgentProfile,
@@ -42,6 +43,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!project) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
+  // F16: ONE credential probe per backend, feeding both the boolean the modals
+  // already consumed and the roster's new health line. `backendCredentialHealth`
+  // is the single source the run service and the logs read (D1/D2) — deriving
+  // `available` from it here is what keeps the page from growing a second,
+  // quietly divergent answer to "can this profile actually run?".
+  const backendHealth = {
+    claude: backendCredentialHealth("claude"),
+    codex: backendCredentialHealth("codex"),
+  };
   return {
     profiles: assembleAgentRoster(db, params.slug),
     // The org-level template LIBRARY, minus what this project already runs
@@ -65,27 +75,35 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // KB created in org settings is grantable to an agent, replacing the
     // hardcoded mock catalog whose items resolved to nothing.
     //
-    // P13-KM-09/UI-28: this was ALWAYS built as `specialist`, which excludes the
-    // reserved in-process `viberr` toolkit — so opening Edit Operator rendered
-    // the operator's REAL governance-server grant as a red "no longer in the
-    // store — click to remove this grant" chip, i.e. the UI instructed an admin
-    // to break the operator. The editor is one modal for both kinds, so the
-    // catalog now carries the operator set (which is a superset: it merely adds
-    // the reserved name) and the specialist picker filters it out per profile.
+    // The catalog is the registry only: `buildResourceCatalog` skips the
+    // reserved `viberr` name for BOTH profile kinds (P14-KM-14), because the
+    // in-process governance server is mounted by `buildOperatorToolkit`
+    // unconditionally — a toggle for it would be one an admin could flip with no
+    // effect. No profile grants it either, as of B7 (pass 16).
     resourceCatalog: buildResourceCatalog(db),
     // Per-backend credential availability (same cheap SDK-auth check the run
     // service uses). The create/edit modal disables a backend that isn't
     // configured so a new profile can't be pinned to a runtime whose every run
     // would fail (RU-2).
     backendAvailable: {
-      claude: isBackendAvailable("claude"),
-      codex: isBackendAvailable("codex"),
+      claude: backendHealth.claude.available,
+      codex: backendHealth.codex.available,
     },
+    // …and WHY, in words, for the roster (F16): the task-level Execution
+    // profile panel already said "Codex — not configured" while this page
+    // called the same profile "idle · available".
+    backendHealth,
   };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
   const { db, formData, actor, intent } = await requireFormAction(request);
+
+  // E2 (pass 16): the layout loader does not run for an action, so the
+  // members-only gate is repeated here. Without it a signed-in non-member got
+  // the inner guard's 403 — a reply that confirms the project exists — while
+  // every other surface answered 404. Same placement as project.board.tsx.
+  requireVisibleProject(db, params.slug, actor, "act on this project");
 
   const parsePayload = (): unknown => {
     try {
@@ -185,6 +203,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       myRole={layout?.myRole ?? null}
       resourceCatalog={loaderData.resourceCatalog}
       backendAvailable={loaderData.backendAvailable}
+      backendHealth={loaderData.backendHealth}
     />
   );
 }

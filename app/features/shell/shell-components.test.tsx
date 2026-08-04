@@ -95,6 +95,57 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
   });
 });
 
+/**
+ * P16-UI-12 — both shell popovers moved from a hand-rolled `window` keydown
+ * listener to the shared `useDismiss` hook. They pass `{ outside: false }`,
+ * which is not an oversight: the account menu is meant to be cycled in place
+ * (the Theme item deliberately does not close it) and the bell closes on an
+ * explicit action. Converting them to the hook's DEFAULT would silently take
+ * that away, and nothing would have noticed — so it is asserted here.
+ */
+describe("P16-UI-12: the shell popovers dismiss on Escape, not on any press", () => {
+  function openMenu() {
+    const view = renderIn(
+      <UserMenu
+        user={{
+          id: "u",
+          name: "Arda Kaya",
+          email: "arda@viberr.dev",
+          role: "admin",
+          avatarTone: "",
+        }}
+        theme="system"
+      />,
+    );
+    fireEvent.click(view.getByLabelText("Account menu"));
+    expect(view.container.querySelector(".user-menu")).not.toBeNull();
+    return view;
+  }
+
+  it("the account menu survives an outside press (theme cycling in place)", () => {
+    const { container } = openMenu();
+    fireEvent.mouseDown(document.body);
+    expect(container.querySelector(".user-menu")).not.toBeNull();
+  });
+
+  it("the account menu closes on Escape from anywhere", () => {
+    const { container } = openMenu();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(container.querySelector(".user-menu")).toBeNull();
+  });
+
+  it("the bell popover survives an outside press and closes on Escape", () => {
+    const { getByLabelText, container } = renderIn(
+      <TopBell notifications={[notification(1)]} unread={1} />,
+    );
+    fireEvent.click(getByLabelText(/Notifications/));
+    fireEvent.mouseDown(document.body);
+    expect(container.querySelector("dialog.ntf-pop")).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(container.querySelector("dialog.ntf-pop")).toBeNull();
+  });
+});
+
 describe("Topbar: UI-03 paused chip + UI-55 shortcut hint", () => {
   const topbar = (props: Record<string, unknown> = {}) => (
     <Topbar
@@ -320,5 +371,53 @@ describe("Topbar: palette trigger + rail toggle", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(toggle);
     expect(toggled).toBe(1);
+  });
+});
+
+/**
+ * UI-C (inventory rough edge #15) — the mobile rail overlay's dismiss layer was
+ * a `<button aria-hidden="true" tabIndex={-1}>`: an interactive element hidden
+ * from assistive tech, and the ONLY dismissal besides re-pressing the toggle.
+ * The scrim is now a decorative div (`routes/project.tsx`) and this is the
+ * keyboard half — Escape closes the overlay and puts focus back where it came
+ * from, which is what a scrim could never do.
+ */
+describe("F15-18/UI-C: the mobile rail overlay has a keyboard way out", () => {
+  function railOverlayAt(railOpen: boolean) {
+    let toggled = 0;
+    const utils = renderAt(
+      <Topbar
+        projectSlug="viberr-core"
+        projectName="Viberr Core"
+        openTask={null}
+        user={USER}
+        theme="system"
+        notifications={[]}
+        unread={0}
+        railOpen={railOpen}
+        onToggleRail={() => (toggled += 1)}
+      />,
+      "/projects/viberr-core/board",
+    );
+    return { ...utils, toggles: () => toggled };
+  }
+
+  it("closes the open rail on Escape and returns focus to the toggle", () => {
+    const { getByLabelText, toggles } = railOverlayAt(true);
+    const toggle = getByLabelText("Project navigation");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(toggles()).toBe(1);
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("leaves Escape alone while the rail is closed", () => {
+    const { toggles } = railOverlayAt(false);
+    fireEvent.keyDown(window, { key: "Escape" });
+    // Escape belongs to whatever dialog or popover is open; the rail must not
+    // consume it just because the shell is on screen.
+    expect(toggles()).toBe(0);
   });
 });

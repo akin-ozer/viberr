@@ -23,7 +23,12 @@ test("⌘K opens the palette and Enter jumps to the task", async ({ page }) => {
     await expect(palette).toBeVisible({ timeout: 1000 });
   }).toPass({ timeout: 15_000 });
 
-  await palette.getByRole("textbox").fill("VIB-142");
+  // The field is a combobox, not a plain textbox: pass 16 gave the palette the
+  // APG contract (`role=combobox` + `aria-activedescendant` into the results
+  // listbox) that its `data-active` highlight never announced. `role=combobox`
+  // REPLACES the input's implicit `textbox`, so asking for a textbox here finds
+  // nothing — that is the shape the assertion should hold the palette to.
+  await palette.getByRole("combobox").fill("VIB-142");
   const firstRow = palette.locator(".cmdk-row").first();
   await expect(firstRow).toContainText("VIB-142");
   await page.keyboard.press("Enter");
@@ -88,4 +93,51 @@ test("a non-member gets the unknown-slug 404 on a project board (R15-4)", async 
   await expect(
     page.getByText("No project at projects/not-a-real-project."),
   ).toBeVisible();
+});
+
+test("at 375px Home keeps a way into the palette (G3)", async ({ page }) => {
+  // The finding this pins: below 900px Home used to hide `.top-search`
+  // outright, and below 1080px a global rule hid the `.kbd` chip — so a phone
+  // lost BOTH the project finder and the only trigger for the palette, while
+  // the ⌘K shortcut it replaced them with is not an affordance on a phone.
+  // The box now collapses to a magnifier button rather than vanishing.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.waitForURL("/");
+
+  const box = page.locator(".home-top .top-search");
+  await expect(box).toBeVisible();
+
+  // Collapsed: the text field is gone (there is no room for it), the trigger
+  // is not. Losing the field is fine — the palette searches projects too.
+  await expect(box.locator("input")).toBeHidden();
+
+  const trigger = box.getByRole("button", { name: "Search everything" });
+  await expect(trigger).toBeVisible();
+  // A finger target, not a 12px chip.
+  const triggerBox = await trigger.boundingBox();
+  expect(triggerBox!.height).toBeGreaterThanOrEqual(30);
+  expect(triggerBox!.width).toBeGreaterThanOrEqual(30);
+
+  // Same hydration caveat as ⌘K above: the handler is React's, so retry the
+  // click until the dialog proves it took.
+  const palette = page.locator("dialog.cmdk-card");
+  await expect(async () => {
+    await trigger.click();
+    await expect(palette).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
+
+  await palette.getByRole("combobox").fill("viberr");
+  await expect(palette.locator(".cmdk-row").first()).toBeVisible();
+});
+
+test("at 375px the workspace palette trigger is a real touch target (G3)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/projects/viberr-core/board");
+  const trigger = page.locator(".topbar > .top-search");
+  await expect(trigger).toBeVisible();
+  const triggerBox = await trigger.boundingBox();
+  expect(triggerBox!.height).toBeGreaterThanOrEqual(34);
 });

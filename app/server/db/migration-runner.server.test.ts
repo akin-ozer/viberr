@@ -68,6 +68,12 @@ describe("runMigrations", () => {
     expect(tables).not.toContain("sessions");
     expect(tables).toContain("session");
     expect(tables).toContain("account");
+    // E8(a): `verification` reads as dead — no app query names it — and pass 16
+    // came within one edit of dropping it. better-auth writes it on every social
+    // sign-in (`storeStateStrategy` resolves to "database" because we hand it a
+    // `database`), so dropping it kills GitHub login and nothing in the suite
+    // would have said so. Canary: delete the CREATE TABLE from the baseline.
+    expect(tables).toContain("verification");
 
     const indexes = (
       db

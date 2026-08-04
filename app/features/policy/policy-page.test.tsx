@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { MembershipView } from "~/features/project-settings/membership.server";
 import type { TransitionView } from "./policy-query.server";
 import { AgentCapability, HumanAccess, WorkflowRules, type PcapProfile } from "./policy-page";
+import { ROLE_IDS } from "./policy-data";
 
 afterEach(cleanup);
 
@@ -66,11 +67,23 @@ describe("HumanAccess", () => {
     // Newly-surfaced enforced actions (were hidden before the total-table fix).
     expect(getByText("Reconcile GitHub state")).toBeTruthy();
     expect(getByText("Manage agent profiles")).toBeTruthy();
-    // App-wide rows (view/comment) render as "any signed-in user", not role cells.
-    expect(container.querySelectorAll(".rbac-table tr.rbac-appwide")).toHaveLength(2);
-    expect(
-      container.querySelectorAll(".rbac-table td.rbac-appwide-cell"),
-    ).toHaveLength(2);
+    // E1: EVERY row is a per-role row — the merged "Any signed-in user ·
+    // membership not required" cell is gone, because enforcement 404s a
+    // signed-in non-member on every page of the project (board, task, policy)
+    // and on a comment POST. The View row now reads as four role grants.
+    for (const row of container.querySelectorAll(".rbac-table tbody tr")) {
+      expect(row.querySelectorAll("td")).toHaveLength(1 + ROLE_IDS.length);
+      expect(row.querySelector("[colspan]")).toBeNull();
+    }
+    const viewRow = [...container.querySelectorAll(".rbac-table tbody tr")].find(
+      (r) => r.querySelector(".act")!.textContent === "View board, tasks & timelines",
+    )!;
+    expect(viewRow.querySelectorAll(".rbac-yes")).toHaveLength(4);
+    // The claim that made display contradict enforcement must not survive
+    // anywhere on the surface — cell copy or footnote.
+    expect(container.textContent).not.toContain("membership not required");
+    expect(container.textContent).not.toContain("member or not");
+    expect(container.textContent).toContain("this project is members-only");
 
     // Selecting a new role dispatches; re-selecting the current one no-ops.
     const selinSeg = container.querySelectorAll(".mini-seg")[3]!;
@@ -285,5 +298,44 @@ describe("WorkflowRules", () => {
     );
     // Falls back to rendering the raw id instead of crashing.
     expect(getByText("Human acceptance of the completion report")).toBeTruthy();
+  });
+});
+
+// E4: a disabled boundary radio used to be the whole message — dimmed, inert,
+// and silent. `locked` had a chip on its row; "your role may not change this"
+// had nothing anywhere, and a `title` would never have opened on a disabled
+// button. These pin the visible reason and the two cases staying distinct.
+describe("WorkflowRules — the not-permitted case says why", () => {
+  const render1 = (canManage: boolean) =>
+    render(
+      <WorkflowRules
+        stages={STAGES}
+        transitions={TRANSITIONS}
+        canManage={canManage}
+        busy={false}
+        onSetBoundary={() => {}}
+      />,
+    );
+
+  it("a non-manager gets every radio disabled AND a visible reason", () => {
+    const { container } = render1(false);
+    expect(
+      Array.from(container.querySelectorAll(".cap-seg button")).every(
+        (b) => (b as HTMLButtonElement).disabled,
+      ),
+    ).toBe(true);
+    const note = container.querySelector(".deny-note");
+    expect(note).not.toBeNull();
+    // Names the grant, not just "no permission" — the reader has to know what
+    // to ask for.
+    expect(note!.textContent).toContain("Edit workflow & policy");
+  });
+
+  it("a manager gets no denial note, and `locked` keeps its own separate chip", () => {
+    const { container, getByText } = render1(true);
+    expect(container.querySelector(".deny-note")).toBeNull();
+    // The V1 lock is a different reason and must survive independently: it
+    // still applies to a manager.
+    expect(getByText("locked · V1")).toBeTruthy();
   });
 });

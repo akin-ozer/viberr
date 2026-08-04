@@ -72,6 +72,7 @@ const ACCEPTANCE: AcceptanceAffordance = {
   atBoundary: true,
   blockedReason: null,
   canAccept: true,
+  terminallyBlocked: false,
 };
 
 function renderPage(props: {
@@ -227,6 +228,62 @@ describe("P14-LV-06: the acceptance affordance", () => {
     expect(getByText(/no approving verdict yet/)).toBeTruthy();
   });
 
+  it("R16-3: a closed PR frames the refusal as CLOSED and withdraws force-accept", () => {
+    // Live (H10): the task carried a correct "PR #124 closed without merging —
+    // choose recovery path" packet, while this box read "no approving verdict
+    // yet — run a review for a verdict, or an admin can force-accept" AND an
+    // admin's force button sat right under it. Running a review is not the path
+    // when the PR is gone, and forcing past it would move the task to Done over
+    // a rejection and stamp `accepted` on a PR GitHub has closed.
+    // Canary: drop `!acceptanceTerminallyBlocked` from canForceAccept and the
+    // Force accept button comes back.
+    const { container, getByText } = renderPage({
+      myRole: "admin",
+      task: {
+        blockReason: "PR #124 closed without merging",
+        pr: { number: 124, state: "closed", title: "[VIB-151] x" } as TaskDetail["pr"],
+        packet: {
+          type: "input",
+          kind: "Decision required",
+          from: "Operator",
+          title: "PR #124 closed without merging — choose recovery path",
+          body: "Rework and reopen, or archive the task.",
+          observations: [],
+          options: [
+            { kind: "custom", title: "Rework and reopen the PR", detail: "", rec: true },
+            { kind: "archive_task", title: "Archive the task", detail: "" },
+          ],
+        } as unknown as TaskDetail["packet"],
+      },
+      acceptance: {
+        canAccept: false,
+        terminallyBlocked: true,
+        blockedReason:
+          "VIB-151's review PR was closed on GitHub without merging — it can't be accepted. Rework and reopen the PR, or archive the task.",
+      },
+    });
+    expect(getByText(/closed on GitHub without merging/)).toBeTruthy();
+    // The frame says decided, not "not yet".
+    expect(getByText("Acceptance is closed.")).toBeTruthy();
+    // …and points at the recovery decision rendered on the same screen.
+    expect(getByText(/carries the recovery paths/)).toBeTruthy();
+    // No override against a terminal GitHub fact, admin or not.
+    expect(findButton(container, "Force accept")).toBeUndefined();
+  });
+
+  it("R16-3: force-accept still stands for a WEDGED process gate (the DG-2 case it exists for)", () => {
+    const { container } = renderPage({
+      myRole: "admin",
+      task: { blockReason: "A required reviewer can no longer record a verdict" },
+      acceptance: {
+        canAccept: false,
+        terminallyBlocked: false,
+        blockedReason: "VIB-151's delivered revision has no approving verdict yet",
+      },
+    });
+    expect(findButton(container, "Force accept")).toBeDefined();
+  });
+
   it("F15-11: an ARCHIVED task renders no Accept control, no schedule form, and disabled run controls", () => {
     const { container, queryByText } = renderPage({
       archived: true,
@@ -324,5 +381,33 @@ describe("P14-GV-04: the Permissions panel tells the owner the truth", () => {
       meId: "u-baris",
     });
     expect(getByText("Maintainer, admin, or the task's own owner")).toBeTruthy();
+  });
+
+  it("E1: the Comments row states membership, not 'Every registered user'", () => {
+    // Verified live this pass: a signed-in NON-member gets 404 on this page and
+    // on the comment POST. The row was a hardcoded string promising the
+    // opposite, on the one panel whose entire job is stating what the server
+    // enforces. Canary: restore the literal and this fails on both assertions.
+    const { container } = renderPage({ myRole: "viewer", meId: "u-elif" });
+    const commentRow = [...container.querySelectorAll(".policy-line")].find((r) =>
+      r.textContent?.startsWith("Comments"),
+    )!;
+    expect(commentRow.textContent).not.toContain("Every registered user");
+    // A viewer IS a member and holds `comment`, so it reads as permitted…
+    expect(commentRow.textContent).toContain("every project member");
+  });
+
+  it("E3: the ownership row reads the release-any grant, not a hardcoded admin literal", () => {
+    const asAdmin = renderPage({ myRole: "admin", meId: "u-arda" });
+    const adminRow = [...asAdmin.container.querySelectorAll(".policy-line")].find(
+      (r) => r.textContent?.startsWith("Task ownership"),
+    )!;
+    expect(adminRow.textContent).toContain("you can release anyone");
+    cleanup();
+    const asMaintainer = renderPage({ myRole: "maintainer", meId: "u-murat" });
+    const maintRow = [
+      ...asMaintainer.container.querySelectorAll(".policy-line"),
+    ].find((r) => r.textContent?.startsWith("Task ownership"))!;
+    expect(maintRow.textContent).toContain("your own seat");
   });
 });

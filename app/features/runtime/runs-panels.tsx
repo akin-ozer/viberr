@@ -3,6 +3,7 @@ import { AgentGlyph } from "~/ui/identity";
 import { Icon } from "~/ui/icon";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { useHydrated } from "~/ui/local-time";
+import { useDismiss } from "~/ui/use-dismiss";
 
 /** P13-UI-57: the projection ships the ISO so the CLIENT renders the clock in
  *  the viewer's zone. During SSR + hydration the UTC form is rendered instead
@@ -61,17 +62,14 @@ function AgentPicker({
   label: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
   const cur = items.find((r) => r.id === value) || items[0]!;
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  // P16-UI-12: one shared dismiss hook (`app/ui/use-dismiss.ts`). This picker
+  // had outside-press close but NOT document-level Escape — Escape only worked
+  // while focus was still on the trigger, so an Escape from inside the open
+  // listbox did nothing. It gains that here; the defaults are exactly what it
+  // wants (the trigger is inside the returned ref, so no `also`).
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   const move = (dir: 1 | -1) => {
     const idx = items.findIndex((r) => r.id === cur.id);

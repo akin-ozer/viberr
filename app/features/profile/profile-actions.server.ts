@@ -114,9 +114,10 @@ export function setTimelineDefaultPref(
 }
 
 /**
- * Self-serve password change (phase-2 machinery: scrypt hash/verify,
- * shared MIN_PASSWORD_LENGTH, login-flow validation copy). Keeps the
- * current session, signs out every other one.
+ * Self-serve password change. Hash/verify go through the app's
+ * `password.server` wrappers — i.e. better-auth's own crypto, the sole auth
+ * system — plus the shared MIN_PASSWORD_LENGTH and the login flow's validation
+ * copy. Keeps the current session, signs out every other one.
  */
 export async function changeOwnPassword(
   db: DatabaseSync,

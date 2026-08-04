@@ -351,6 +351,103 @@ describe("rebuilder", () => {
   });
 });
 
+/**
+ * R16-3 (owner ruling 2026-08-04) — `validation_block_reason` is the sentence
+ * every acceptance-readiness surface repeats (review queue, decisions inbox,
+ * Home counts). It deliberately excluded PR state, so a task whose PR GitHub
+ * had CLOSED still projected the verdict gate — "run a review for a verdict, or
+ * an admin can force-accept" — naming a process gate over the terminal fact and
+ * advertising the override the task page withholds. The PR's last-reconciled
+ * state is in the same frontmatter this projection reads, so ranking it first
+ * (as `acceptanceRefusalReason` does) invents nothing.
+ */
+describe("R16-3: the projected acceptance block names the terminal GitHub fact first", () => {
+  const REV = {
+    id: "rev_1",
+    headSha: "d".repeat(40),
+    treeSha: "w".repeat(40),
+    branch: "vib-3-work",
+    createdAt: "2026-07-04T00:00:00.000Z",
+    sourceProfileId: "developer",
+  };
+
+  /** Delivered, nobody engaged to give a verdict → the verdict gate binds. */
+  function seedDelivered(
+    store: ReturnType<typeof setupTestStore>,
+    prState: "review" | "merged" | "closed",
+  ) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", {
+        title: "Delivered, unreviewed",
+        stage: "review",
+        waiting: "human",
+        branch: REV.branch,
+        pr: { number: 124, state: prState, title: "Delivered, unreviewed" },
+        workRevision: REV,
+        engagements: [
+          {
+            profileId: "developer",
+            backend: "claude",
+            role: "developer",
+            delivers: true,
+            verdictCapable: false,
+          },
+        ],
+        verdicts: [],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    return listProjectTasks(store.db, store.slug).find((t) => t.key === "VIB-3")!;
+  }
+
+  it("a CLOSED PR replaces the verdict-gate sentence — no force-accept is advertised", () => {
+    const store = setupTestStore(ctx);
+    const task = seedDelivered(store, "closed");
+    expect(task.blockReason).toBe(
+      "VIB-3's review PR was closed on GitHub without merging — it can't be accepted. Rework and reopen the PR, or archive the task.",
+    );
+    expect(task.blockReason).not.toContain("force-accept");
+    expect(task.blockReason).not.toContain("approving verdict");
+  });
+
+  it("an OPEN PR still projects the verdict gate verbatim (R15-1 unchanged)", () => {
+    const store = setupTestStore(ctx);
+    expect(seedDelivered(store, "review").blockReason).toBe(
+      "VIB-3's delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.",
+    );
+  });
+
+  it("a MERGED PR is not terminal for acceptance — the verdict gate keeps speaking", () => {
+    // Merged-on-GitHub is reachable (someone merged the PR by hand and the
+    // poller recorded it) but it is not a refusal: the task page still refuses
+    // under the verdict gate and still offers force-accept there, so this
+    // column must not start describing the PR instead.
+    const store = setupTestStore(ctx);
+    expect(seedDelivered(store, "merged").blockReason).toMatch(
+      /no approving verdict yet/,
+    );
+  });
+
+  it("a closed PR blocks even a task the reviewer gate would have cleared", () => {
+    // No delivered revision at all — planning work, which R15-1 leaves
+    // acceptable. The closed PR is still the fact that decides it.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "review",
+        waiting: "human",
+        validation: "healthy",
+        pr: { number: 77, state: "closed", title: "Rejected on GitHub" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const task = listProjectTasks(store.db, store.slug).find(
+      (t) => t.key === "VIB-2",
+    )!;
+    expect(task.blockReason).toContain("closed on GitHub without merging");
+  });
+});
+
 describe("scoped project rescan (F20)", () => {
   it("reprojects ONLY the target project, leaving other projects' rows untouched", () => {
     const store = setupTestStore(ctx);

@@ -16,6 +16,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   applyRecommendation,
+  completeTaskMerge,
   forceAcceptCompletion,
   manualDeliverForReview,
   performDelivery,
@@ -25,6 +26,7 @@ import {
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import {
   deliverGate,
+  operatorAcceptCompletion,
   operatorDeliverForReview,
   type OperatorAuthority,
 } from "./operator-actions.server";
@@ -248,6 +250,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
 
   it("a delivered push opens (or reuses) the PR and reports it", async () => {
     seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 9,
@@ -263,6 +266,52 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     );
     expect(outcome).toMatchObject({ status: "delivered", prNumber: 9, created: true });
   });
+
+  // A3: `grant_withheld` / `push_conflict` / `push_failed` refused; the other
+  // four push outcomes fell straight through to `openTaskPr` and opened a
+  // review PR over a remote nobody had just written to. Each has to name its
+  // own cause — "no PR was opened" is only useful if it says why.
+  const NOT_DELIVERABLE = [
+    {
+      push: { status: "no_commits" as const, reason: "no local commits ahead of the default branch" },
+      outcome: "nothing_to_review",
+      says: "no commits ahead",
+    },
+    {
+      push: { status: "no_workspace" as const, reason: "no workspace git repo" },
+      outcome: "failed",
+      says: "no workspace clone",
+    },
+    {
+      push: { status: "no_repo" as const, reason: "project has no repo" },
+      outcome: "failed",
+      says: "no GitHub repository configured",
+    },
+    {
+      push: { status: "no_branch" as const, reason: "HEAD not on a task branch (main)" },
+      outcome: "failed",
+      says: "not on a task branch",
+    },
+  ];
+  for (const c of NOT_DELIVERABLE) {
+    it(`A3: a ${c.push.status} push opens NO PR and says so`, async () => {
+      seed({ stage: "review", branch: "vib-1" });
+      pushMock.mockResolvedValue(c.push);
+      const outcome = await performDelivery(
+        store.db,
+        dataCtx(),
+        store.slug,
+        "VIB-1",
+        actor(store.users.arda),
+      );
+      expect(openPrMock, "no PR over an unknown remote state").not.toHaveBeenCalled();
+      expect(outcome.status).toBe(c.outcome);
+      expect(outcome.status === "delivered" ? "" : outcome.message).toContain(c.says);
+      // …and the refusal reaches the timeline, like every other delivery failure.
+      const event = fm().timeline.find((e) => e.type === "github");
+      expect(event?.text).toContain(c.says);
+    });
+  }
 });
 
 describe("R15-2: the operator's deliver_for_review decision", () => {
@@ -365,6 +414,7 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
 describe("R15-2 safety net (b): manual delivery from the task page", () => {
   it("maintainer delivers; the act is audited github.delivery.manual", async () => {
     seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 12,
@@ -425,6 +475,7 @@ describe("R15-2: an applied `delivery` recommendation performs the delivery", ()
 
   it("apply → performDelivery; a delivered outcome consumes the card", async () => {
     seed({ stage: "review", branch: "vib-1", recommendations: [REC] });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 21,
@@ -640,6 +691,96 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       dataCtx(),
     );
     expect(fm().frontmatter.stage).toBe("done");
+  });
+
+  it("A2: the full-autonomy OPERATOR acceptance is refused by the head gate too", async () => {
+    // The docstring called this "the ONE gate force can NEVER bypass" while two
+    // of the four Done writers never called it. `operatorAcceptCompletion`
+    // checked `acceptanceRefusalFor` only, so a full-autonomy operator stamped
+    // `pr.state: accepted` (merge pending) on a PR carrying content its task
+    // never delivered — and the poller then nudged a human to merge it.
+    // Canary: drop the headCheck from applyAcceptanceWrite and this accepts.
+    healthySeed();
+    githubReportsHead("f".repeat(40), "diverged");
+    // Fails CLOSED: the shared Done write throws, which aborts the operator's
+    // action (and, on the Codex path, the rest of its plan) rather than
+    // recording a Done nobody verified.
+    await expect(
+      operatorAcceptCompletion(
+        store.db,
+        dataCtx(),
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        authority({ "completion-for-acceptance": "direct" }, "full"),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("does not contain the delivered"),
+    });
+    expect(fm().frontmatter.stage).toBe("review");
+    expect(fm().frontmatter.pr?.state).toBe("review");
+  });
+
+  it("A2: completeTaskMerge refuses a stale-head merge instead of performing it", async () => {
+    // The other bypassed writer, and the dangerous one: it calls mergeTaskPr,
+    // which is irreversible. The merge-pending nudge points a human straight at
+    // this button. Canary: drop the headCheck and mergeTaskPr is called.
+    seed({
+      stage: "done",
+      branch: "vib-1",
+      engagements: [REVIEWER],
+      workRevision: revision(),
+      verdicts: [approval()],
+      pr: { number: 114, state: "accepted", title: "[VIB-1] t" },
+      validation: "healthy",
+    });
+    githubReportsHead("f".repeat(40), "diverged");
+    await expect(
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        dataCtx(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("does not contain the delivered"),
+    });
+    expect(mergeMock).not.toHaveBeenCalled();
+    expect(fm().frontmatter.pr?.state).toBe("accepted");
+  });
+
+  it("A2: a PR swapped under the acceptance during the verification refuses (the head was checked against the old one)", async () => {
+    // The head gate is a live network read, so it cannot run inside the write
+    // lock. The pair it verified is re-asserted there instead — otherwise the
+    // window between "verified #114" and the Done write is a hole exactly as
+    // wide as a GitHub round-trip.
+    healthySeed();
+    githubReportsHead("a".repeat(40), "identical"); // #114 verifies clean
+    mergeMock.mockImplementation(async () => {
+      const current = fm();
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: {
+          ...current.frontmatter,
+          // A different PR now stands for this task — nobody verified ITS head.
+          pr: { number: 999, state: "review", title: "[VIB-1] t" },
+        },
+        goal: current.goal,
+        timeline: current.timeline,
+      });
+      return { status: "merged", prNumber: 114 } as never;
+    });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("changed while the acceptance was being verified"),
+    });
+    expect(fm().frontmatter.stage).toBe("review");
   });
 });
 

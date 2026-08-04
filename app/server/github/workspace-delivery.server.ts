@@ -26,6 +26,7 @@ import {
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 import type { PrCacheState } from "./pr-linker.server";
 import { POLICY_ENGINE_ACTOR } from "./scope-flag.server";
 
@@ -390,6 +391,9 @@ export async function reconcileWorkspaceDelivery(
       branchPatch.github = {
         commits,
         changed: fm.github?.changed ?? null,
+        // Carry the reconciler's collision marker (R15-15/R16-1) — dropping it
+        // here re-armed the "branch name collision" note on the next poll tick.
+        unownedPr: fm.github?.unownedPr ?? null,
       };
       commitsChanged = true;
     }
@@ -444,7 +448,9 @@ export async function reconcileWorkspaceDelivery(
           "--repo",
           repo,
           "--json",
-          "number,state,title",
+          // `headRefOid` is the adoption rule's subject (R16-1) — without it
+          // this path bound a PR to a task on the branch NAME alone.
+          "number,state,title,headRefOid",
         ],
         { cwd: repoDir, timeoutMs: 8_000 },
       );
@@ -460,6 +466,63 @@ export async function reconcileWorkspaceDelivery(
           const liveState = mapGhStateToCache(obj?.state);
           const cur = fm.pr;
           const samePr = !!cur && cur.number === number;
+          // R16-1 — this is the path that bound merged PR #113 to a brand-new
+          // VIB-4 (H8): `gh pr view <branch>` answers with the branch's newest
+          // PR whatever its state, and the result was written into `pr:`
+          // unconditionally. A PR the task does not already own may be adopted
+          // only when it is OPEN and its head IS the delivered revision.
+          const adoption = samePr
+            ? { adopt: true as const }
+            : decidePrAdoption({
+                state: liveState,
+                prHeadSha:
+                  typeof obj?.headRefOid === "string" ? obj.headRefOid : null,
+                revisionHeadSha:
+                  workRevisionPatch?.headSha ?? fm.workRevision?.headSha ?? null,
+              });
+          if (!adoption.adopt) {
+            // Not this task's PR — say so once (the marker in the github cache
+            // is the same one the server reconciler dedupes on) and leave `pr:`
+            // alone. Delivery is blocked by the same collision and reports it.
+            const baseCache = branchPatch.github ?? fm.github ?? null;
+            if (baseCache?.unownedPr !== number) {
+              await appendTimelineEvent(
+                ref,
+                {
+                  occurredAt: new Date().toISOString(),
+                  type: "note",
+                  actor: POLICY_ENGINE_ACTOR,
+                  title: null,
+                  text: prAdoptionRefusalNote({
+                    refusal: adoption.refusal,
+                    taskKey,
+                    branch: effectiveBranch,
+                    prNumber: number,
+                    revisionHeadSha:
+                      workRevisionPatch?.headSha ?? fm.workRevision?.headSha ?? null,
+                  }),
+                  toAgent: false,
+                  evidence: null,
+                },
+                {
+                  github: {
+                    commits: baseCache?.commits ?? [],
+                    changed: baseCache?.changed ?? null,
+                    unownedPr: number,
+                  },
+                },
+              );
+              rebuildPath(db, resolveTaskFilePath(ref), { dataRoot });
+            }
+            return {
+              status: "reconciled",
+              branchLinked,
+              prLinked: false,
+              branch: validBranch ?? fm.branch,
+              pr: fm.pr,
+              commits: commits?.length ?? 0,
+            };
+          }
           // H1 guard (same as the server reconciler): a human-set "accepted"
           // (merge pending, D3/S2) must NOT be downgraded to "review" while
           // the PR is still open on GitHub — that would silently hide the

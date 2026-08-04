@@ -3,7 +3,9 @@ import { getEnv } from "../config/env.server";
 
 /**
  * CSRF protection for mutating actions:
- * 1. Origin / Sec-Fetch-Site checking (browser-enforced request metadata).
+ * 1. Origin / Sec-Fetch-Site / Referer checking (browser-enforced request
+ *    metadata) — a request that proves nothing about where it came from is
+ *    refused, see assertTrustedOrigin.
  * 2. A double-submit token tied to the session: HMAC(secret, session id),
  *    injected into forms via <CsrfInput /> (app/ui/csrf-input.tsx, fed by
  *    the root loader) as hidden field "_csrf".
@@ -38,10 +40,19 @@ function forbidden(reason: string): Response {
 }
 
 /**
- * Origin / Sec-Fetch-Site check for mutating requests. Same-origin form
- * posts pass; cross-site browser requests fail. Requests without either
- * header (curl, server-to-server) pass — the token check is the backstop
- * for cookie-bearing browser requests.
+ * Origin check for mutating requests: the request must PROVE it came from this
+ * origin. Every signal it carries (`Sec-Fetch-Site`, `Origin`, `Referer`) has to
+ * say same-origin, and it has to carry at least one of them.
+ *
+ * §7.10 / A7: the last clause is the fix. A request with none of the three used
+ * to PASS — documented as a concession to curl and server-to-server callers,
+ * with the double-submit token as the sole backstop. Nothing in the app is such
+ * a caller (every `assertTrustedOrigin` site is a browser form surface: the
+ * login action and, via `assertCsrf`, `requireFormAction`), so the concession
+ * bought nothing and turned a defense-in-depth layer into a header any attacker
+ * can simply omit. Browsers send `Origin` on every cross-origin POST and
+ * `Sec-Fetch-Site` on every fetch — a genuine same-origin form post always
+ * carries at least one, so failing closed costs the app nothing.
  */
 export function assertTrustedOrigin(request: Request): void {
   const secFetchSite = request.headers.get("Sec-Fetch-Site");
@@ -52,19 +63,33 @@ export function assertTrustedOrigin(request: Request): void {
   ) {
     throw forbidden("Cross-site request rejected.");
   }
+  let requestOrigin: string;
+  try {
+    requestOrigin = new URL(request.url).origin;
+  } catch {
+    throw forbidden("Request origin could not be determined.");
+  }
   const origin = request.headers.get("Origin");
-  if (origin && origin !== "null") {
-    let requestOrigin: string;
+  if (origin === "null") throw forbidden("Opaque-origin request rejected.");
+  if (origin && origin !== requestOrigin) {
+    throw forbidden("Cross-origin request rejected.");
+  }
+  // `Referer` is the fallback signal, not a substitute: a referrer policy can
+  // strip it, so it is only ever read when it is actually present.
+  const referer = request.headers.get("Referer");
+  if (referer) {
+    let refererOrigin: string | null = null;
     try {
-      requestOrigin = new URL(request.url).origin;
+      refererOrigin = new URL(referer).origin;
     } catch {
-      throw forbidden("Request origin could not be determined.");
+      refererOrigin = null;
     }
-    if (origin !== requestOrigin) {
+    if (refererOrigin !== requestOrigin) {
       throw forbidden("Cross-origin request rejected.");
     }
-  } else if (origin === "null") {
-    throw forbidden("Opaque-origin request rejected.");
+  }
+  if (!secFetchSite && !origin && !referer) {
+    throw forbidden("Request origin could not be verified.");
   }
 }
 

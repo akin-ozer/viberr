@@ -119,3 +119,34 @@ describe("buildOperatorToolkit — deliver_for_review (R15-2)", () => {
     expect(toolkit.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
   });
 });
+
+/**
+ * A4 — with NO operator deployed, `resolveOperatorAuthority` returns an empty
+ * policy and `deployed: false`. Every gate then denies, so the toolkit is
+ * read-only. The bug: `deliverGate`'s absent-means-granted polarity fired for
+ * the empty policy too, so this authority built `get_task` +
+ * `deliver_for_review` — a run that could push a branch and open a PR with no
+ * operator configured anywhere in the project.
+ */
+describe("buildOperatorToolkit — no operator deployed (A4)", () => {
+  const undeployed = (): OperatorAuthority => ({
+    ...authority([]),
+    policy: new Map(),
+    deployed: false,
+    // A non-strict board: the shape whose absent grant resolved to `direct`.
+    humanGatedBeforeWork: false,
+  });
+
+  it("builds a READ-ONLY toolkit — no delivery, no packets, no transitions", () => {
+    const db = ctxDb.makeDb();
+    const toolkit = buildOperatorToolkit({
+      db,
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: undeployed(),
+    });
+    expect(toolkit.allowedTools).toEqual(["mcp__viberr__get_task"]);
+    expect(toolkit.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
+  });
+});

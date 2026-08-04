@@ -36,10 +36,26 @@ import {
  *   `write:org` imply `read:org`.
  * - FINE-GRAINED tokens (`github_pat_…`) return NO scope header and GitHub
  *   offers no introspection endpoint. We probe read-only endpoints where
- *   one exists (`/repos/{r}` for repo access, `/user/orgs` for org read,
- *   `/repos/{r}/pulls` for pull-request READ) and mark write permissions
- *   `source: "assumed"` — treated as granted until a real 403 opens a
- *   scope violation (ruling 5). A safe write-probe does not exist.
+ *   one exists (`/repos/{r}` for repo access + its `permissions` block,
+ *   `/user/orgs` for org read, `/repos/{r}/pulls` for pull-request READ) and
+ *   mark anything still unprovable `source: "assumed"` — treated as granted
+ *   until a real 403 opens a scope violation (ruling 5).
+ * - REPOSITORY WRITE is proven READ-ONLY (A8/pass-16): `GET /repos/{r}`
+ *   returns a `permissions` object computed for the AUTHENTICATED token, so
+ *   `permissions.push` answers "can this credential write to this repo?"
+ *   without touching the repository. The previous prover was an empty-payload
+ *   dry-run `PUT /repos/{r}/contents/viberr-scope-probe` — non-destructive by
+ *   construction (GitHub authorizes before validating the body, so `{}` can
+ *   only 422) but still a WRITE request issued against a real user repository
+ *   on every revalidation: it lands in the org audit log, it can trip rulesets
+ *   and branch-protection tooling, and it is one GitHub validation-ordering
+ *   change away from actually creating a file. Health checks do not write.
+ *   The dry-run survives only as an explicit, disclosed opt-in
+ *   (`VIBERR_GITHUB_WRITE_PROBE=1` / `writeProbe: true`) for operators who
+ *   want `pull_request:write` proven rather than assumed — that one has no
+ *   read-only signal (a fine-grained token can hold Contents:write while
+ *   Pull requests is read-only, so `permissions.push` must NOT be read as
+ *   proof of it).
  * - Expired vs revoked on a 401 is a heuristic: GitHub says "…token
  *   expired…" for expired fine-grained tokens and "Bad credentials" for
  *   revoked/unknown ones. Tokens WITH an expiration also advertise it via
@@ -61,6 +77,42 @@ export interface ValidatePatTokenOptions {
   knownExpiresAt?: string | null;
   /** Mock-transport hook for tests. */
   fetchImpl?: typeof fetch;
+  /**
+   * Opt in to the authorization-only WRITE dry-run for scopes with no
+   * read-only signal (A8). Default OFF — validation never writes to a user's
+   * repository unless someone asked for it. Falls back to the
+   * `VIBERR_GITHUB_WRITE_PROBE` env opt-in when omitted.
+   */
+  writeProbe?: boolean;
+}
+
+/** Env opt-in for the write dry-run (see {@link ValidatePatTokenOptions}).
+ *  Read from the raw env rather than `getEnv()` so an operator can flip it
+ *  without the process-lifetime env cache pinning the old answer. */
+function writeProbeEnabled(explicit?: boolean): boolean {
+  if (explicit !== undefined) return explicit;
+  const v = process.env.VIBERR_GITHUB_WRITE_PROBE;
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/** The legacy permission block GitHub computes for the AUTHENTICATED token on
+ *  `GET /repos/{owner}/{repo}` — the read-only proof of repository write. */
+interface RepoPermissions {
+  admin?: boolean;
+  maintain?: boolean;
+  push?: boolean;
+  triage?: boolean;
+  pull?: boolean;
+}
+
+/** True/false when GitHub answered, null when it sent no `permissions` block
+ *  (an older GHES, or a response shape we should not guess about). */
+function repoWritable(permissions: RepoPermissions | undefined): boolean | null {
+  if (!permissions || typeof permissions !== "object") return null;
+  const { admin, maintain, push } = permissions;
+  if (admin === true || maintain === true || push === true) return true;
+  if (push === false) return false;
+  return null;
 }
 
 function tokenKindOf(token: string, scopesHeader: string | null): PatTokenKind {
@@ -169,15 +221,19 @@ export async function validatePatToken(
   const expiresAt = user.tokenExpiration ?? options.knownExpiresAt ?? null;
   const withIdentity = { ...base, login, tokenKind, expiresAt };
 
-  // 2. Repo access — /repos/{owner}/{repo}.
+  // 2. Repo access — /repos/{owner}/{repo}. The response also carries the
+  //    `permissions` block GitHub computes for THIS token, which is the
+  //    read-only proof of repository write (A8).
   let repoAccessible: boolean | null = null;
+  let repoWriteOk: boolean | null = null;
   if (repo) {
-    const repoResult = await client.request<{ full_name: string }>(
-      "GET",
-      `/repos/${repo}`,
-    );
+    const repoResult = await client.request<{
+      full_name: string;
+      permissions?: RepoPermissions;
+    }>("GET", `/repos/${repo}`);
     if (repoResult.ok) {
       repoAccessible = true;
+      repoWriteOk = repoWritable(repoResult.data.permissions);
     } else if (repoResult.kind === "network") {
       return {
         ...withIdentity,
@@ -220,8 +276,18 @@ export async function validatePatToken(
 
   // 3. Scope introspection.
   const scopes: ScopeCheck[] = [];
-  if (scopesHeader !== null && scopesHeader !== "") {
+  if (scopesHeader !== null && (scopesHeader !== "" || tokenKind === "classic")) {
     // Classic token: the header is authoritative.
+    //
+    // B11/pass-16: an EMPTY header on a classic token is a positive fact — "this
+    // token holds no scopes" — not missing information. The condition used to
+    // require a non-empty header, so a scopeless `ghp_…` fell through to the
+    // fine-grained probe branch and came back `pull_request:write: assumed`
+    // ("fine-grained tokens expose no scope introspection") while `tokenKind`
+    // right above it still said `classic`: an assumed-granted chip for a token
+    // GitHub had just told us can do nothing. An empty header on an unknown-
+    // prefix token stays in the probe branch — there, absence really does prove
+    // nothing (GitHub omits the header entirely for fine-grained tokens).
     const granted = new Set(
       scopesHeader.split(",").flatMap((s) => {
         const scope = s.trim();
@@ -229,7 +295,17 @@ export async function validatePatToken(
       }),
     );
     for (const id of requiredScopes) {
-      scopes.push(classicScopeCheck(id, granted));
+      const check = classicScopeCheck(id, granted);
+      scopes.push(
+        granted.size === 0
+          ? {
+              ...check,
+              // Say WHICH nothing this is: "missing scope" reads like a partial
+              // grant, and the operator would go looking for one checkbox.
+              note: "this classic token was created with no scopes at all — regenerate it with `repo`",
+            }
+          : check,
+      );
     }
   } else {
     // Fine-grained (or headerless) token: probe what can be probed.
@@ -262,13 +338,22 @@ export async function validatePatToken(
     // request BEFORE validating its body, so a write endpoint hit with `{}`
     // answers 422 (Validation Failed) when the permission is HELD — nothing
     // can be created from an empty payload — and 403 when it is refused.
-    // That turns the two delivery-critical writes from eternal "assumed"
-    // chips into probe verdicts. Any other answer (404 resource-hiding, 5xx,
-    // network) stays UNKNOWN → the honest "assumed" fallback below.
+    //
+    // A8/pass-16: this is now OPT-IN and never runs by default. It is still a
+    // write REQUEST against someone's real repository, issued on every
+    // revalidation of a credential — audit-log noise at best, ruleset/branch
+    // -protection noise in the middle, and destructive if GitHub ever
+    // validated the body before authorizing it. Repository write is proven
+    // read-only from the `permissions` block instead; `pull_request:write` has
+    // no read-only signal, so it stays honestly "assumed" unless an operator
+    // turns this on. Any other answer (404 resource-hiding, 5xx, network)
+    // stays UNKNOWN → the same "assumed" fallback.
+    const writeProbe = writeProbeEnabled(options.writeProbe);
     const dryRunWrite = async (
       method: "POST" | "PUT",
       path: string,
     ): Promise<boolean | null> => {
+      if (!writeProbe) return null;
       const dry = await client.request<unknown>(method, path, { body: {} });
       if (dry.ok) return true; // cannot really happen for an empty payload
       if (dry.kind !== "http") return null;
@@ -276,10 +361,6 @@ export async function validatePatToken(
       if (dry.status === 403) return false;
       return null;
     };
-    const contentsWriteOk =
-      repo && repoAccessible === true && requiredScopes.includes("repo")
-        ? await dryRunWrite("PUT", `/repos/${repo}/contents/viberr-scope-probe`)
-        : null;
     const pullsWriteOk =
       repo && pullsReadOk === true
         ? await dryRunWrite("POST", `/repos/${repo}/pulls`)
@@ -287,15 +368,27 @@ export async function validatePatToken(
     for (const id of requiredScopes) {
       if (id === "repo" && repoAccessible !== null) {
         scopes.push(
-          repoAccessible && contentsWriteOk === true
-            ? { id, ok: true, source: "probe", note: "read + write proven by dry-run" }
-            : repoAccessible && contentsWriteOk === false
-              ? { id, ok: false, source: "probe", note: "repository readable but not writable" }
+          repoAccessible && repoWriteOk === true
+            ? {
+                id,
+                ok: true,
+                source: "probe",
+                note: "read + write reported by GitHub for this token",
+              }
+            : repoAccessible && repoWriteOk === false
+              ? {
+                  id,
+                  ok: false,
+                  source: "probe",
+                  note: "repository readable but not writable",
+                }
               : {
                   id,
                   ok: repoAccessible,
-                  source: "probe",
-                  note: `repository ${repoAccessible ? "readable; write unverified" : "not readable"}`,
+                  source: repoAccessible ? "assumed" : "probe",
+                  note: repoAccessible
+                    ? "repository readable; GitHub reported no permission block, so write is unverified"
+                    : "repository not readable",
                 },
         );
       } else if (id === "read:org" && orgReadOk !== null) {
@@ -318,7 +411,11 @@ export async function validatePatToken(
           id,
           ok: true,
           source: "assumed",
-          note: "read proven; write is unverifiable until used",
+          // A8: name the opt-in so the chip discloses WHY it is only assumed
+          // and what the operator can turn on to prove it. `permissions.push`
+          // is deliberately not read as proof here — a fine-grained token can
+          // hold Contents:write while Pull requests stays read-only.
+          note: "read proven; write needs a write request to prove — set VIBERR_GITHUB_WRITE_PROBE=1 to allow an authorization-only dry-run",
         });
       } else {
         scopes.push({
@@ -385,6 +482,16 @@ export interface RevalidateContext {
   repo?: string | null;
   /** Injectable clock for the revalidation cooldown (tests). */
   now?: () => number;
+  /**
+   * Allow the authorization-only WRITE dry-run for scopes with no read-only
+   * signal (A8). Default OFF — a "Re-check scopes" press must not write to the
+   * user's repository. Consequence, deliberately: `pull_request:write` stays
+   * `assumed`, and B-GH8 (write scopes need PROVEN evidence) therefore keeps
+   * its violation open until either a real delivery succeeds or an operator
+   * opts in. Turning "we don't know" into "granted" is the failure B-GH8 exists
+   * to prevent, so the honest degraded state wins over a convenient clear.
+   */
+  writeProbe?: boolean;
 }
 
 /**
@@ -498,6 +605,7 @@ export async function revalidateProjectCredential(
       ...(requiredScopes ? { requiredScopes } : {}),
       knownExpiresAt: credential.validation?.expiresAt ?? null,
       ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+      ...(ctx.writeProbe !== undefined ? { writeProbe: ctx.writeProbe } : {}),
     }));
   if (!validation) {
     auditAttempt("no_pat_configured");

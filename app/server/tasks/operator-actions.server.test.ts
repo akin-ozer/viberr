@@ -20,6 +20,7 @@ import {
   interruptRun,
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { listNotifications } from "~/server/projections/notifications.server";
@@ -32,10 +33,12 @@ import {
 } from "./task-actions.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
+  deliverGate,
   gate,
   operatorAcceptCompletion,
   operatorAssignReviewer,
   operatorAssignSpecialist,
+  operatorDeliverForReview,
   operatorEngageAgent,
   operatorOpenPacket,
   operatorPostComment,
@@ -242,7 +245,12 @@ describe("operatorSetGoal — draft the goal at the triage gate", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", goal: "something totally different" },
       authority("full"),
     );
-    expect(r.outcome).toBe("denied");
+    // `noop`, not `denied`: the operator HELD `append-typed-events` — the
+    // task's state (a goal that is already specified) is what ruled it out.
+    // The plan narration files the two apart, so a state conflict returned as
+    // `denied` accuses the project's policy of a block it never made.
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("already specified");
     expect(task().goal).toBe("Prove the operator drives the task."); // unchanged
   });
 
@@ -367,7 +375,8 @@ describe("operatorRunAgent — delivering profileId guard (P11-22)", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
       authority("full"),
     );
-    expect(r.outcome).toBe("denied");
+    // A STATE refusal (who currently delivers), not a withheld capability.
+    expect(r.outcome).toBe("noop");
     expect(r.message).toContain("not the delivering agent");
   });
 
@@ -713,8 +722,13 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
       autonomy: "supervised",
       dataRoot: store.dataRoot,
     });
-    // The second call coalesced — it returned the queued sentinel, not a new run.
-    expect(r2.runId).toBe("queued");
+    // The second call coalesced — it says so with `queued`, not a new run.
+    expect(r2.queued).toBe(true);
+    // B10: it must NEVER invent a run id. The first drive has not written its
+    // run row yet in this window, so there is nothing to name — this used to
+    // return the literal string "queued", which `appendComment`'s @operator
+    // path passed straight into `resolveReplyLogThread` as if it were an id.
+    expect(r2.runId).toBeNull();
     await p1;
     // Give the queued trigger time to drain, then interrupt anything running.
     await new Promise((r) => setTimeout(r, 50));
@@ -725,6 +739,54 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
       (r) => r.kind === "transition",
     );
     expect(recs.length).toBeLessThanOrEqual(1);
+  });
+
+  /**
+   * B10, consumer side. The nullable `runId` is a TYPE contract — the compiler
+   * is its canary (`resolveReplyLogThread` declared `runId: string` and was
+   * handed the literal "queued"). What is observable is the other half of the
+   * same rule: a queued trigger reports the run it is queued BEHIND, and every
+   * id that leaves `runOperator` resolves to a real row.
+   */
+  it("an @operator comment queued behind a live drive names that live run, never a synthetic id", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const { resetOperatorLeasesForTests, runOperator } = await import(
+      "~/server/runtimes/operator-run.server"
+    );
+    resetOperatorLeasesForTests();
+    const inFlight = runOperator(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      trigger: "transition",
+      autonomy: "supervised",
+      dataRoot: store.dataRoot,
+    });
+
+    const { commentToAgent } = await import("./task-actions.server");
+    const res = await commentToAgent(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: "@operator what is holding this up?",
+      },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.triggered).toBe("started");
+    // The comment was answered by queueing behind the live drive, and the log
+    // thread it reports is that drive's REAL thread — the literal "queued"
+    // resolved to nothing and silently produced a null here instead.
+    const live = listRunsForTask(store.db, store.slug, "VIB-1").find(
+      (r) => r.kind === "operator",
+    )!;
+    expect(live).toBeDefined();
+    expect(res.logThreadId).toBe(live.id);
+
+    await inFlight;
+    await new Promise((r) => setTimeout(r, 50));
+    interruptRunningRuns("VIB-1");
   });
 });
 
@@ -1203,7 +1265,10 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
       },
       authority("supervised"),
     );
-    expect(res.outcome).toBe("denied");
+    // A malformed step, not a policy refusal — `denied` is reserved for
+    // authority so the plan narration can name the real reason.
+    expect(res.outcome).toBe("noop");
+    expect(res.message).toContain("Unknown packet option kind");
     expect(task().packet).toBeNull();
   });
 });
@@ -1439,5 +1504,308 @@ describe("operatorPostComment", () => {
         (n) => n.kind === "mention",
       ),
     ).toHaveLength(0);
+  });
+});
+
+/* --------------------------------------------------------------- A4 / B1-B3 */
+
+/** Deploy a roster with NO operator profile — the A4 shape. */
+function deployWithoutOperator(): void {
+  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  writeProject(store.dataRoot, {
+    ...file.parsed.frontmatter,
+    repo: null,
+    agents: [
+      {
+        profileId: "developer",
+        capabilities: [],
+        extras: [],
+        definition: {
+          kind: "specialist",
+          name: "Dev",
+          role: "Implementation",
+          backends: ["claude"],
+          model: "sonnet",
+        },
+      },
+    ] as never,
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
+describe("A4 — an UNDEPLOYED operator has no authority at all", () => {
+  it("deliverGate DENIES with no operator deployed (absent-means-granted is about old deployments, not no deployment)", () => {
+    deployWithoutOperator();
+    const a = authority("supervised");
+    expect(a.deployed).toBe(false);
+    // The board is non-strict (triage → ready is `auto`), which is exactly the
+    // shape that used to resolve the ABSENT grant to `direct`.
+    expect(a.humanGatedBeforeWork).toBe(false);
+    expect(deliverGate(a)).toBe("deny");
+    // …and every other capability with it — one rule, one answer.
+    expect(gate(a, "generate-packets")).toBe("deny");
+    expect(gate(a, "stage-transitions")).toBe("deny");
+  });
+
+  it("operatorDeliverForReview refuses to push a branch / open a PR for an undeployed operator", async () => {
+    deployWithoutOperator();
+    seedTask("impl");
+    const res = await operatorDeliverForReview(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(res.outcome).toBe("denied");
+    expect(res.message).toContain("not permitted");
+  });
+
+  it("a DEPLOYED operator still delivers with the grant absent (the R15-2 polarity is intact)", async () => {
+    deployRoster(DEFAULT_POLICY); // no deliver-review-pr entry
+    expect(deliverGate(authority("supervised"))).toBe("direct");
+  });
+});
+
+describe("B1 — an operator-authored retry_other_backend names the OTHER backend", () => {
+  const RETRY = [
+    { kind: "retry_other_backend" as const, title: "Retry on the other backend", recommended: true },
+    { kind: "redirect" as const, title: "Redirect the work" },
+  ];
+
+  async function openRetryPacket() {
+    return operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "The delivering run failed — pick a recovery path",
+        options: RETRY,
+      },
+      authority("supervised"),
+    );
+  }
+
+  it("stamps the opposite of the backend the failed AGENT run used (it used to always mean Claude)", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    // The run that just failed ran on Claude — retrying on Claude is retrying
+    // the dead backend, which is what `option.backend ?? "claude"` did.
+    upsertRun(store.db, {
+      id: "run_failed_claude",
+      taskKey: "VIB-1",
+      projectSlug: store.slug,
+      threadId: "t-dev",
+      role: "Implementation",
+      kind: "primary",
+      backend: "claude",
+      agentProfileId: "developer",
+      model: "sonnet",
+      sdk: "Claude Agent SDK",
+      state: "error",
+    } as Parameters<typeof upsertRun>[1]);
+
+    expect((await openRetryPacket()).outcome).toBe("done");
+    const retry = task().packet!.options.find((o) => o.kind === "retry_other_backend")!;
+    expect(retry.backend).toBe("codex");
+    // …and it names the agent whose run failed, so the retry re-runs THAT one.
+    expect(retry.profileId).toBe("developer");
+  });
+
+  it("falls back to the delivering engagement's backend when no agent run exists yet", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          {
+            profileId: "developer",
+            backend: "codex",
+            role: "Implementation",
+            delivers: true,
+            verdictCapable: false,
+          },
+        ],
+      }),
+      goal: "Ship the parser.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    expect((await openRetryPacket()).outcome).toBe("done");
+    const retry = task().packet!.options.find((o) => o.kind === "retry_other_backend")!;
+    expect(retry.backend).toBe("claude");
+    expect(retry.profileId).toBe("developer");
+  });
+
+  it("an EXPLICIT backend from the operator always wins", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Retry deliberately on Claude",
+        options: [
+          {
+            kind: "retry_other_backend",
+            title: "Retry on Claude Code",
+            backend: "claude",
+            profileId: "reviewer",
+            recommended: true,
+          },
+        ],
+      },
+      authority("supervised"),
+    );
+    const retry = task().packet!.options[0]!;
+    expect(retry.backend).toBe("claude");
+    expect(retry.profileId).toBe("reviewer");
+  });
+});
+
+describe("B3 — one open decision at a time", () => {
+  const OPTION = [{ kind: "request_edit" as const, title: "Send it back" }];
+
+  async function open(title: string) {
+    return operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title,
+        options: OPTION,
+      },
+      authority("supervised"),
+    );
+  }
+
+  it("refuses a SECOND packet instead of replacing the one a human is answering", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    expect((await open("Which endpoint should this target?")).outcome).toBe("done");
+
+    const second = await open("Something else entirely");
+    expect(second.outcome).toBe("noop");
+    expect(second.message).toContain("already open");
+    // The human's packet is untouched — this used to be silently overwritten.
+    expect(task().packet!.title).toBe("Which endpoint should this target?");
+    // …and no second "Decision packet:" event was written either.
+    expect(
+      task().timeline.filter((e) => e.text.includes("Something else entirely")),
+    ).toHaveLength(0);
+  });
+
+  // The pre-read guard alone only orders SEQUENTIAL opens. Two turns that both
+  // read the task before either writes (the operator's own coalesce-queue makes
+  // this reachable: a queued trigger fires the moment the in-flight run's
+  // completion work lands) both saw "no packet" and both wrote — the second
+  // silently replacing a question a human might already be answering. The
+  // authoritative check has to be INSIDE the locked write, the way the
+  // acceptance head gate does it (`assertVerifiedHeadStillApplies`).
+  it("refuses the loser of a CONCURRENT open — both passed the pre-read", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+
+    // Do NOT await the first: it suspends inside `updateTaskFile` (the file
+    // mutex) with nothing written yet, so the second call's pre-read sees a
+    // packet-free task and gets past the guard the sequential test covers.
+    const first = open("Which endpoint should this target?");
+    const second = await open("Something else entirely");
+    const firstResult = await first;
+
+    expect(firstResult.outcome).toBe("done");
+    expect(second.outcome).toBe("noop");
+    expect(second.message).toContain("was opened on VIB-1 first");
+    expect(task().packet!.title).toBe("Which endpoint should this target?");
+    // …and the loser wrote no timeline event either — a noop is a NON-write.
+    expect(
+      task().timeline.filter((e) => e.text.includes("Something else entirely")),
+    ).toHaveLength(0);
+  });
+
+  it("withdrawing the open packet first makes room for the next one", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    await open("First decision");
+    await operatorResolvePacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", reason: "answered out of band" },
+      authority("supervised"),
+    );
+    expect((await open("Second decision")).outcome).toBe("done");
+    expect(task().packet!.title).toBe("Second decision");
+  });
+
+  it("an agent's ask_human packet is never clobbered by an operator packet", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    const { openAgentQuestionPacket } = await import("./agent-toolkit.server");
+    expect(
+      await openAgentQuestionPacket(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          actorRef: {
+            kind: "agent",
+            backend: "claude",
+            profileId: "developer",
+            roleHint: "Implementation",
+          },
+          title: "Which database should I migrate?",
+        },
+      ),
+    ).toBe(true);
+
+    expect((await open("Operator decides instead")).outcome).toBe("noop");
+    expect(task().packet!.title).toBe("Which database should I migrate?");
+    expect(task().packet!.askedBy).toBe("developer");
+  });
+});
+
+describe("B2 — the operator may only withdraw ITS OWN packet", () => {
+  it("refuses to withdraw an agent's ask_human question (the askedBy resume must stay reachable)", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    const { openAgentQuestionPacket } = await import("./agent-toolkit.server");
+    await openAgentQuestionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        actorRef: {
+          kind: "agent",
+          backend: "claude",
+          profileId: "developer",
+          roleHint: "Implementation",
+        },
+        title: "Which database should I migrate?",
+      },
+    );
+
+    const res = await operatorResolvePacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", reason: "I have decided already" },
+      authority("full"),
+    );
+    expect(res.outcome).toBe("denied");
+    expect(res.message).toContain("not by you");
+    // The question — and the profile the answer resumes — survives.
+    expect(task().packet!.title).toBe("Which database should I migrate?");
+    expect(task().packet!.askedBy).toBe("developer");
+    expect(listAuditEvents(store.db, {}).map((a) => a.action)).not.toContain(
+      "task.operator.packet_withdrawn",
+    );
   });
 });

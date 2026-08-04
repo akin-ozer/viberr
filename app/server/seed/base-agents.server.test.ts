@@ -152,7 +152,13 @@ describe("buildSpecialistPersona", () => {
       skills: ["also-nonexistent"],
       dataRoot,
     });
-    expect(persona).toBe("");
+    // C1 (pass 16): a grant that resolves to nothing is no longer silent. There
+    // is still no trusted content — what the run now gets is the disclosure that
+    // a declared resource did not arrive, so the agent reports the gap instead
+    // of treating the missing context as its own failure.
+    expect(persona).not.toContain("Attached resources (trusted");
+    expect(persona).toContain("Attached resources that did NOT reach this run");
+    expect(persona).toContain("also-nonexistent");
   });
 });
 

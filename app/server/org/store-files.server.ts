@@ -18,6 +18,13 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { createGithubClient } from "~/server/github/github-client.server";
+// C5-followup: the editor's own copy of this list is gone. What Viberr will
+// author, list as editable and inject is now ONE set — three hand-maintained
+// copies is how `.json`/`.yaml` came to be authorable but never injectable.
+import {
+  STORE_TEXT_EXTENSIONS,
+  STORE_TEXT_EXTENSION_LIST,
+} from "~/shared/text/store-extensions";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { getDefaultConnectionTokenFresh } from "./connections.server";
@@ -53,12 +60,31 @@ export interface StoreTarget {
 
 // ------------------------------------------------------------------ scan
 
-/** Scans a store folder → StoreNode[] (dirs first, alphabetical, dotfiles
- * skipped). Missing folder → empty tree. */
-export function scanStoreTree(absDir: string): StoreNode[] {
+/**
+ * Scans a store folder → StoreNode[] (dirs first, alphabetical, dotfiles
+ * skipped). Missing folder → empty tree.
+ *
+ * CONTAINMENT (C5/pass-16). `readdirSync(…, { withFileTypes: true })` reports
+ * the directory ENTRY type — it does not dereference — so a symlink is neither
+ * `isDirectory()` nor `isFile()` and drops out of both lists. That already
+ * matched `collectKbDocs`, but only by accident of the Dirent API: the
+ * `isSymbolicLink()` filter below states the rule so a future refactor to
+ * `readdirSync(dir)` + `statSync` (which DOES dereference, and which
+ * `subDirNames` was doing until this pass) cannot quietly reintroduce a browser
+ * that promises content no run receives — or, worse, serves a host file through
+ * the in-app reader. `statSync` further down is reached only for entries the
+ * Dirent already proved are real files.
+ *
+ * The depth cap mirrors `collectKbDocs`: symlinks cannot make a cycle here, but
+ * a pathological upload should not be able to blow the stack either.
+ */
+const MAX_STORE_SCAN_DEPTH = 32;
+
+export function scanStoreTree(absDir: string, depth = 0): StoreNode[] {
+  if (depth > MAX_STORE_SCAN_DEPTH) return [];
   if (!existsSync(absDir)) return [];
   const entries = readdirSync(absDir, { withFileTypes: true }).filter(
-    (e) => !e.name.startsWith("."),
+    (e) => !e.name.startsWith(".") && !e.isSymbolicLink(),
   );
   const dirs = entries
     .filter((e) => e.isDirectory())
@@ -71,7 +97,7 @@ export function scanStoreTree(absDir: string): StoreNode[] {
     nodes.push({
       type: "dir",
       name: d.name,
-      children: scanStoreTree(path.join(absDir, d.name)),
+      children: scanStoreTree(path.join(absDir, d.name), depth + 1),
     });
   }
   for (const f of files) {
@@ -164,21 +190,36 @@ function touchResource(db: DatabaseSync, target: StoreTarget): void {
   const now = new Date().toISOString();
   if (target.kind === "kb") {
     const dir = path.basename(target.rootAbs);
+    // C5/pass-16: honour the `manual` refresh pin.
+    //
+    // `last_indexed_at` is the "re-scanned <when>" stamp, and a KB pinned to
+    // `manual` means "advance it only on an explicit re-scan". The watcher path
+    // (`reindexKnowledgeBaseByDir`) has always respected that; this one bumped
+    // it unconditionally, so any in-app upload / doc write / delete made a
+    // manual-pinned KB claim it had just been re-scanned when nobody had asked
+    // for one. `updated_at` still moves — the row DID change — but only the
+    // re-scan button (or watcher-driven mode) may move the index stamp.
+    const pinned =
+      (
+        db
+          .prepare(
+            `SELECT refresh FROM org_knowledge_bases WHERE id = ? OR dir = ?`,
+          )
+          .get(target.id, dir) as { refresh?: string } | undefined
+      )?.refresh === "manual";
+    const indexClause = pinned
+      ? `SET updated_at = ?`
+      : `SET last_indexed_at = ?, updated_at = ?`;
+    const indexArgs = pinned ? [now] : [now, now];
     const updated = db
-      .prepare(
-        `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(now, now, target.id);
+      .prepare(`UPDATE org_knowledge_bases ${indexClause} WHERE id = ?`)
+      .run(...indexArgs, target.id);
     if (updated.changes === 0) {
       // Adopt-on-touch. Key on dir (UNIQUE): a row may already exist under a
       // different id than the synthetic one the target carries.
       const adopted = db
-        .prepare(
-          `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ?
-           WHERE dir = ?`,
-        )
-        .run(now, now, dir);
+        .prepare(`UPDATE org_knowledge_bases ${indexClause} WHERE dir = ?`)
+        .run(...indexArgs, dir);
       if (adopted.changes === 0) {
         db.prepare(
           `INSERT INTO org_knowledge_bases
@@ -350,18 +391,6 @@ export function createStoreFolder(
 
 // ------------------------------------------------------------ author a doc
 
-/** Extensions the in-app editor will create/read (text docs only). */
-const EDITABLE_EXTENSIONS = new Set([
-  ".md",
-  ".markdown",
-  ".mdx",
-  ".txt",
-  ".rst",
-  ".text",
-  ".json",
-  ".yaml",
-  ".yml",
-]);
 
 export interface StoreDocResult {
   path: string[];
@@ -383,9 +412,9 @@ export function readStoreDoc(
   if (parts.length === 0) return null;
   const abs = path.join(target.rootAbs, ...parts);
   assertInsideRoot(target.rootAbs, abs);
-  if (!EDITABLE_EXTENSIONS.has(path.extname(abs).toLowerCase())) {
+  if (!STORE_TEXT_EXTENSIONS.has(path.extname(abs).toLowerCase())) {
     throw AppError.validation(
-      `Viberr only opens text documents (${[...EDITABLE_EXTENSIONS].join(", ")}).`,
+      `Viberr only opens text documents (${STORE_TEXT_EXTENSION_LIST.join(", ")}).`,
     );
   }
   if (!existsSync(abs) || !statSync(abs).isFile()) return null;
@@ -425,9 +454,9 @@ export function writeStoreDoc(
     throw AppError.validation("Give the document a file name.");
   }
   const withExt = path.extname(cleaned) ? cleaned : `${cleaned}.md`;
-  if (!EDITABLE_EXTENSIONS.has(path.extname(withExt).toLowerCase())) {
+  if (!STORE_TEXT_EXTENSIONS.has(path.extname(withExt).toLowerCase())) {
     throw AppError.validation(
-      `Viberr only edits text documents (${[...EDITABLE_EXTENSIONS].join(", ")}).`,
+      `Viberr only edits text documents (${STORE_TEXT_EXTENSION_LIST.join(", ")}).`,
     );
   }
   const dirAbs = path.join(target.rootAbs, ...base);

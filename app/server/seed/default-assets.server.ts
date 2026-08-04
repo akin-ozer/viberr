@@ -283,7 +283,9 @@ function specialistProfileAssets(): { rel: string; content: string }[] {
  * `prompt_specialist`) no longer exist, because `readOperatorDefinition` prefers
  * the store copy over the shipped asset. A store copy is refreshed only when its
  * hash still matches something this app shipped (the manifest it wrote, or a
- * historical version); anything a human edited is left exactly as it is.
+ * historical version); anything a human edited is left exactly as it is — and
+ * WARNED about (B7), so a store pinned to old doctrine is visible at boot
+ * instead of being an invisible behaviour difference between two installs.
  */
 export function seedDefaultAgentAssets(dataRoot?: string): void {
   const store = getDataRoot(dataRoot);
@@ -307,8 +309,29 @@ export function seedDefaultAgentAssets(dataRoot?: string): void {
           record(asset.rel, shippedHash);
           continue;
         }
-        // A human owns an edited file — never clobber it.
-        if (!shippedCopyIsUnedited(asset.rel, onDiskHash, manifest)) continue;
+        // A human owns an edited file — never clobber it. But say so: B7 found
+        // the live `./data` store pinned to an operator.md that hashes to no
+        // version this app ever shipped (hand-edited, or from an unmerged
+        // branch) and still names the deleted `prompt_specialist` /
+        // `assign_specialist` tools. The fail-safe was working exactly as
+        // designed; what was missing is that NOTHING told anyone their operator
+        // was running doctrine 15 releases old. The refresh path already logs,
+        // so the divergent path staying silent read as "nothing to do here".
+        if (!shippedCopyIsUnedited(asset.rel, onDiskHash, manifest)) {
+          logger.warn(
+            "shipped agent asset diverged — keeping the store's copy, which may be stale",
+            {
+              asset: asset.rel,
+              onDisk: onDiskHash.slice(0, 12),
+              shipped: shippedHash.slice(0, 12),
+              path: dest,
+              hint:
+                "This copy matches no version Viberr shipped, so it is treated as " +
+                "yours and never overwritten. Delete it to adopt the shipped one.",
+            },
+          );
+          continue;
+        }
         writeFileSync(dest, asset.content, "utf8");
         record(asset.rel, shippedHash);
         logger.info("refreshed an unedited shipped agent asset", {

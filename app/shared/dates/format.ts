@@ -5,11 +5,11 @@
  * forms in the viewer's local timezone (the seed back-dates events to local
  * wall-clock times so rendering matches the mock):
  *
- *   - clock:     "9:41", "16:04"            (24h, no leading zero on hours)
+ *   - clock:     "09:41", "16:04"           (24h, both fields zero-padded)
  *   - dayBucket: "Today" | "Yesterday" | "Mar 30"
- *   - dayTime:   today → "9:41", else "Yesterday 16:04" / "Mar 30 14:00"
+ *   - dayTime:   today → "09:41", else "Yesterday 16:04" / "Mar 30 14:00"
  *                (the bell-popover / notification meta form)
- *   - dayDotTime:today → "9:41", else "{day} · {t}" (timeline/run form)
+ *   - dayDotTime:today → "09:41", else "{day} · {t}" (timeline/run form)
  *   - relative:  "just now" | "2m ago" | "3h ago" | "yesterday" | "3d ago"
  *                | "Mar 30" (home cards / store strip)
  *
@@ -38,11 +38,26 @@ function sameLocalDay(a: Date, b: Date): boolean {
   );
 }
 
-/** "9:41" / "16:04" — 24h clock, minutes zero-padded, hours as-is. */
+/**
+ * "09:41" / "16:04" — a 24h clock, both fields zero-padded.
+ *
+ * F19: the hour used to be printed as-is because the design mock's sample
+ * times were all mid-morning, so the 0 hour never appeared in it. In the
+ * running app it does, and an audit row stamped `today 0:18` reads as a
+ * fragment, not a time — a 24h clock is padded in every convention that has
+ * one. The mock's own "9:41" becomes "09:41"; nothing else about the forms
+ * built on top of this changes.
+ */
 export function formatClock(iso: string): string {
   const d = toDate(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return clock(d.getHours(), d.getMinutes());
+}
+
+/** The one place hour:minute is assembled — local and UTC share it so the two
+ *  passes of a hydration swap can never drift apart on padding. */
+function clock(hours: number, minutes: number): string {
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 /** "Today" | "Yesterday" | "Mar 30" (local days). */
@@ -63,7 +78,7 @@ export function formatCalendarDate(iso: string | null): string | null {
   return Number.isNaN(d.getTime()) ? null : calendarDate.format(d);
 }
 
-/** Notification meta form: today → "9:41", else "{day} {t}" (trimmed). */
+/** Notification meta form: today → "09:41", else "{day} {t}" (trimmed). */
 export function formatDayTime(iso: string, now: Date = new Date()): string {
   const bucket = formatDayBucket(iso, now);
   const clock = formatClock(iso);
@@ -71,7 +86,7 @@ export function formatDayTime(iso: string, now: Date = new Date()): string {
   return `${bucket} ${clock}`.trim();
 }
 
-/** Timeline form: today → "9:41", else "{day} · {t}". */
+/** Timeline form: today → "09:41", else "{day} · {t}". */
 export function formatDayDotTime(iso: string, now: Date = new Date()): string {
   const bucket = formatDayBucket(iso, now);
   const clock = formatClock(iso);
@@ -114,18 +129,18 @@ export function formatDayBucketUTC(iso: string): string {
 export function formatDayDotTimeUTC(iso: string, now: Date = new Date()): string {
   const d = toDate(iso);
   if (Number.isNaN(d.getTime())) return "";
-  const clock = `${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
-  if (sameUtcDay(d, now)) return clock;
+  const t = clock(d.getUTCHours(), d.getUTCMinutes());
+  if (sameUtcDay(d, now)) return t;
   const yesterday = new Date(now.getTime() - 86_400_000);
-  if (sameUtcDay(d, yesterday)) return `Yesterday · ${clock}`;
-  return `${shortDayUtc.format(d)} · ${clock}`;
+  if (sameUtcDay(d, yesterday)) return `Yesterday · ${t}`;
+  return `${shortDayUtc.format(d)} · ${t}`;
 }
 
 /** `formatClock` in UTC — the timezone-deterministic hydration first pass. */
 export function formatClockUTC(iso: string): string {
   const d = toDate(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return `${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  return clock(d.getUTCHours(), d.getUTCMinutes());
 }
 
 /** Relative form for home cards / store strip ("updated 2m ago"). */

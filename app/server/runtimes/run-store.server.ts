@@ -353,26 +353,32 @@ export function runIdsWithMissingSession(
 // -------------------------------------------------- raw .jsonl truth
 
 /**
- * The canonical raw log path: runtimes/<backend>/<sessionOrRunId>.jsonl.
- * Uses the requested backend directory and the
- * provider session id when known, else the run id.
+ * The canonical raw log path: `runtimes/<backend>/<runId>.jsonl`.
+ *
+ * D5/pass-16: this used to document a `<sessionOrRunId>` key — "the provider
+ * session id when known, else the run id" — which NO caller has ever produced
+ * (run-sink and the session-missing marker both pass the run id
+ * unconditionally). The CODE is the honest half: a resume creates a new run row
+ * that SHARES the provider session id, so a session-keyed file would interleave
+ * two runs' envelopes into one .jsonl and make each run's raw truth
+ * unrecoverable. One file per run, always.
  */
 export function rawLogPath(
   backend: RunBackend,
-  sessionOrRunId: string,
+  runId: string,
   dataRoot?: string,
 ): string {
-  return path.join(getDataRoot(dataRoot), "runtimes", backend, `${sessionOrRunId}.jsonl`);
+  return path.join(getDataRoot(dataRoot), "runtimes", backend, `${runId}.jsonl`);
 }
 
-/** Append one raw envelope line to the canonical .jsonl (creates dirs). */
+/** Append one raw envelope line to the run's canonical .jsonl (creates dirs). */
 export function appendRawLine(
   backend: RunBackend,
-  sessionOrRunId: string,
+  runId: string,
   raw: string,
   dataRoot?: string,
 ): void {
-  const file = rawLogPath(backend, sessionOrRunId, dataRoot);
+  const file = rawLogPath(backend, runId, dataRoot);
   mkdirSync(path.dirname(file), { recursive: true });
   appendFileSync(file, raw.replace(/\n+$/, "") + "\n", "utf8");
 }

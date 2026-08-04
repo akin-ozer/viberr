@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
 import {
-  getMcpCredential,
+  getMcpCredentialState,
   listMcpServers,
   splitMcpCommand,
 } from "~/server/org/resources.server";
@@ -28,6 +28,13 @@ import {
  * for HTTP, or the `MCP_CREDENTIAL` env var for stdio. The plaintext never
  * touches task files, timelines, logs, or any client surface. Servers with no
  * credential connect unauthenticated (e.g. a local stdio tool).
+ *
+ * A9: a server whose credential is CONFIGURED but unopenable (a retired
+ * encryption key, a legacy plaintext ref) is NOT mounted. It used to fall
+ * through to an anonymous connection — every authenticated server silently
+ * downgrading on a key mismatch — while the persona still announced its tools.
+ * It now joins the structured `unresolved` list with the reason, so the run
+ * reads it in its own prompt instead of discovering it as a wall of 401s.
  *
  * BACKEND SCOPE: the credential is honored on CLAUDE runs (the Agent SDK accepts
  * `headers`/`env` on an mcpServer directly). On CODEX it is intentionally
@@ -128,7 +135,18 @@ export function resolveSpecialistMcpServersDetailed(
       drop(name, "no MCP server by that name in the org registry");
       continue;
     }
-    const token = getMcpCredential(db, name);
+    // A9: a configured credential that cannot be OPENED must never become a
+    // silent anonymous connection. The server used to be mounted no-auth, the
+    // persona still advertised its tools, and the only trace was a log warn —
+    // so an agent hit 401s on every call and reported them as its own failure.
+    // Refuse the mount and tell the RUN why, in the same structured shape a
+    // missing server uses.
+    const credential = getMcpCredentialState(db, name);
+    if (credential.state === "unreadable") {
+      drop(name, credential.reason);
+      continue;
+    }
+    const token = credential.state === "ok" ? credential.token : null;
     if (row.transport === "stdio") {
       const parts = splitMcpCommand(row.target);
       const command = parts[0];

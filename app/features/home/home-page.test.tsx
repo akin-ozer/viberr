@@ -319,11 +319,144 @@ describe("R15-5: ⌘K is one shortcut app-wide", () => {
     ).toBe("Find a project…");
   });
 
+  it("leaves ⌥⌘K to the OS — Home used the shared hook's binding, not its own", () => {
+    // Home carried a second copy of the topbar's keydown effect, matching on
+    // metaKey||ctrlKey alone and so swallowing ⌥⌘K / Ctrl-Alt-K.
+    const { container } = renderHome(baseData([card()]));
+    fireEvent.keyDown(window, { key: "k", metaKey: true, altKey: true });
+    expect(container.querySelector("dialog.cmdk-card")).toBeNull();
+  });
+
   it("makes the shortcut chip the palette's affordance, not a label", () => {
     const { getByLabelText, container } = renderHome(baseData([card()]));
     const chip = getByLabelText("Search everything");
     expect(chip.tagName).toBe("BUTTON");
     fireEvent.click(chip);
     expect(container.querySelector("dialog.cmdk-card")).toBeTruthy();
+  });
+});
+
+describe("F14: derived name-fields must not be typed INTO", () => {
+  /* Typing a project name auto-fills the repo and the task key. Both are real
+     input values, so clicking in put the caret after them and the next
+     keystroke APPENDED — live this produced the repo name `viberrviberr`. */
+  it("selects the derived repo value on focus so the first keystroke replaces it", () => {
+    const { getAllByText, getByLabelText, getByPlaceholderText } = renderHome(
+      baseData([card()]),
+    );
+    fireEvent.click(getAllByText("New project")[0]!.closest("button")!);
+    fireEvent.change(getByPlaceholderText("e.g. Payments Gateway"), {
+      target: { value: "Viberr" },
+    });
+    const repo = getByLabelText(/GitHub repository/) as HTMLInputElement;
+    expect(repo.value).toBe("viberr");
+
+    repo.setSelectionRange(6, 6);
+    fireEvent.focus(repo);
+    expect(repo.selectionStart).toBe(0);
+    expect(repo.selectionEnd).toBe("viberr".length);
+    // …and the field says where the value came from, so the selection is not a
+    // surprise.
+    expect(fieldContains(repo, "from the project name — type to replace")).toBe(
+      true,
+    );
+  });
+
+  it("stops selecting once the field holds the user's own value", () => {
+    const { getAllByText, getByLabelText, getByPlaceholderText } = renderHome(
+      baseData([card()]),
+    );
+    fireEvent.click(getAllByText("New project")[0]!.closest("button")!);
+    fireEvent.change(getByPlaceholderText("e.g. Payments Gateway"), {
+      target: { value: "Viberr" },
+    });
+    const repo = getByLabelText(/GitHub repository/) as HTMLInputElement;
+    fireEvent.change(repo, { target: { value: "viberr-app" } });
+    repo.setSelectionRange(10, 10);
+    fireEvent.focus(repo);
+    expect(repo.selectionStart).toBe(10);
+    expect(repo.selectionEnd).toBe(10);
+  });
+
+  it("applies the same rule to the derived task key", () => {
+    const { getAllByText, getByLabelText, getByPlaceholderText } = renderHome(
+      baseData([card()]),
+    );
+    fireEvent.click(getAllByText("New project")[0]!.closest("button")!);
+    fireEvent.change(getByPlaceholderText("e.g. Payments Gateway"), {
+      target: { value: "Viberr" },
+    });
+    const key = getByLabelText(/Task key/) as HTMLInputElement;
+    expect(key.value).toBe("VIB");
+    // Put the caret where a click would leave it — after the derived text.
+    key.setSelectionRange(3, 3);
+    fireEvent.focus(key);
+    expect(key.selectionStart).toBe(0);
+    expect(key.selectionEnd).toBe(3);
+  });
+});
+
+/** True when `text` appears anywhere in the input's own `.field` block. */
+function fieldContains(input: HTMLInputElement, text: string): boolean {
+  return Boolean(input.closest(".field")?.textContent?.includes(text));
+}
+
+describe("F13: the home footer says what it is", () => {
+  it("frames the two store actions as admin-only maintenance", () => {
+    const { container } = renderHome(baseData([card()]));
+    const strip = container.querySelector(".store-strip")!;
+    expect(strip.textContent).toContain("Store maintenance");
+    expect(strip.textContent).toContain("admins only");
+    // The reassurance an admin needs BEFORE clicking, not in a tooltip.
+    expect(strip.textContent).toContain("Neither action edits a task file");
+  });
+
+  it("routes the projection rebuild through a confirmation", () => {
+    const { container, getByText } = renderHome(baseData([card()]));
+    expect(container.querySelector("dialog.confirm-card")).toBeNull();
+    fireEvent.click(getByText("Rebuild projections…").closest("button")!);
+    const dialog = container.querySelector("dialog.confirm-card")!;
+    expect(dialog.textContent).toContain("Rebuild all projections?");
+    // Honest about the blast radius in both directions.
+    expect(dialog.textContent).toContain("Drops every derived board/task row");
+    expect(dialog.textContent).toContain("never touched");
+  });
+
+  it("hides both actions from a non-admin (they are 403 server-side)", () => {
+    const data = baseData([card()]);
+    const { container } = renderHome({
+      ...data,
+      user: { ...data.user, role: "member" },
+    });
+    expect(container.querySelector(".store-strip")).toBeNull();
+  });
+});
+
+describe("F12: counts and their nouns agree", () => {
+  it("says '1 user' / '1 connection' / '1 knowledge base' at one", () => {
+    const data = baseData([card()]);
+    const { container } = renderHome({
+      ...data,
+      org: {
+        ...data.org,
+        connectionOwners: ["akin-ozer"],
+        users: { total: 1, admins: 1, members: 0, disabled: 0, first: [] },
+        globalAgents: 1,
+        knowledgeBases: 1,
+        mcpServers: 1,
+        skills: 1,
+      },
+    });
+    const tiles = container.querySelector(".org-tiles")!.textContent!;
+    expect(tiles).toContain("1 connection");
+    expect(tiles).not.toContain("1 connections");
+    expect(tiles).toContain("1 user");
+    expect(tiles).not.toContain("1 users");
+    expect(tiles).toContain("1 agent profile");
+    expect(tiles).toContain("1 knowledge base ·");
+    expect(tiles).toContain("1 MCP server ·");
+    expect(tiles).toContain("1 skill");
+    expect(tiles).not.toContain("knowledge bases");
+    expect(tiles).not.toContain("1 skills");
   });
 });

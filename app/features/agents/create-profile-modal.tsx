@@ -1,4 +1,4 @@
-import type { CSSProperties, Dispatch, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
 import { Icon } from "~/ui/icon";
@@ -79,21 +79,6 @@ const EFFORT_LABEL: Record<string, string> = {
 function effortLabel(id: string): string {
   return EFFORT_LABEL[id] ?? id;
 }
-
-/** Inline styling mirroring `.field input` (app.css) — the design system has
- * no `<select>` rule and this feature may not edit app.css, so the dropdowns
- * match the modal's other fields via matching tokens here. */
-const selectStyle: CSSProperties = {
-  width: "100%",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-button)",
-  padding: ".55rem .7rem",
-  background: "var(--surface)",
-  color: "var(--fg)",
-  fontFamily: "var(--font-body)",
-  fontSize: ".9rem",
-  outline: 0,
-};
 
 // Repo-write grants that mark a profile as a DELIVERING builder (mirrors
 // listDeployedSpecialists' delivery heuristic) — used to seed the verdict
@@ -368,7 +353,6 @@ function ModelEffortFields({
           value={model}
           onChange={(e) => setModel(e.target.value)}
           disabled={!backend || catalogLoading}
-          style={selectStyle}
         >
           {!backend && <option value="">Pick a backend first</option>}
           {/* Preserve a seeded value that is not in the catalog. */}
@@ -385,7 +369,7 @@ function ModelEffortFields({
           ))}
         </select>
         {selectedModel?.description && (
-          <span className="fhint" style={{ marginLeft: 0 }}>
+          <span className="fhint flush">
             {selectedModel.description}
           </span>
         )}
@@ -402,8 +386,7 @@ function ModelEffortFields({
             value={effort}
             onChange={(e) => setEffort(e.target.value)}
             disabled={!backend || catalogLoading}
-            style={selectStyle}
-          >
+            >
             {!backend && <option value="">—</option>}
             {effort && !effortOptions.includes(effort) && (
               <option value={effort}>{effortLabel(effort)}</option>
@@ -486,7 +469,7 @@ function DefinitionField({
           id={`${uid}-definition`}
           value={definition}
           onChange={(e) => setDefinition(e.target.value)}
-          style={{ minHeight: "72px" }}
+          className="ta-brief"
           placeholder="e.g. Owns database schema changes. Writes and verifies migrations against a shadow DB, and never touches application code without operator sign-off."
         />
       </div>
@@ -503,7 +486,7 @@ function DefinitionField({
           id={`${uid}-persona`}
           value={persona}
           onChange={(e) => setPersona(e.target.value)}
-          style={{ minHeight: "120px" }}
+          className="ta-long"
           placeholder="How this agent works: its responsibilities, standards, review checklist, reporting format…"
         />
       </div>
@@ -558,25 +541,25 @@ function CapabilityGrants({
                 <span className="cap-msum">
                   {c.direct > 0 && (
                     <span className="cs">
-                      <span className="d" style={{ background: "var(--teal-dark)" }} />
+                      <span className="d direct" />
                       {c.direct}
                     </span>
                   )}
                   {c.recommend > 0 && (
                     <span className="cs">
-                      <span className="d" style={{ background: "var(--blue)" }} />
+                      <span className="d recommend" />
                       {c.recommend}
                     </span>
                   )}
                   {c.human > 0 && (
                     <span className="cs">
-                      <span className="d" style={{ background: "var(--coral-dark)" }} />
+                      <span className="d human" />
                       {c.human}
                     </span>
                   )}
                   {c.off > 0 && (
                     <span className="cs">
-                      <span className="d" style={{ background: "var(--placeholder)" }} />
+                      <span className="d none" />
                       {c.off}
                     </span>
                   )}
@@ -667,7 +650,7 @@ function ResourcePicker({
                 <span className="cap-mglabel">{g.group}</span>
                 <span className="cap-msum">
                   <span className="cs">
-                    <span className="d" style={{ background: "var(--blue)" }} />
+                    <span className="d recommend" />
                     {sel.length} of {displayItems.length}
                   </span>
                 </span>

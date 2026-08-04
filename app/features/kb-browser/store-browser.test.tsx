@@ -114,6 +114,31 @@ describe("StoreBrowser", () => {
     await waitFor(() => expect(getByText("stub done")).toBeTruthy());
   });
 
+  /**
+   * Pass 16. Row actions used to live in `.fm-acts`, which is `opacity: 0`
+   * until the row is hovered or something inside it is focused. `opacity: 0`
+   * does NOT stop hit-testing, so on a touch device the Delete button was
+   * invisible and still tappable — a tap near the right edge of a row could
+   * destroy a file with nothing on screen to explain it. The reveal is gone:
+   * the actions use the app's always-visible row-action wrapper.
+   */
+  it("row actions are always rendered, never hover-revealed", () => {
+    const { container, getByLabelText } = renderBrowser();
+    // The mouse-only reveal wrapper is gone everywhere in the tree…
+    expect(container.querySelectorAll(".fm-acts")).toHaveLength(0);
+    // …replaced by the shared always-visible one, on every row that has actions.
+    expect(container.querySelectorAll(".rsrc-acts").length).toBeGreaterThan(0);
+    // Every action is a real, labelled button — reachable by keyboard and touch
+    // without a pointer ever hovering the row.
+    for (const row of container.querySelectorAll(".fm-row")) {
+      for (const act of row.querySelectorAll(".rsrc-acts button")) {
+        expect(act.getAttribute("type")).toBe("button");
+        expect(act.getAttribute("aria-label")).toBeTruthy();
+      }
+    }
+    expect(getByLabelText("Delete overview.md")).toBeTruthy();
+  });
+
   it("delete goes through the nested confirm; Escape closes only the top layer", async () => {
     let closed = 0;
     const { getByText, getByLabelText, queryByRole } = renderBrowser({

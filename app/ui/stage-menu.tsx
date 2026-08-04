@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./icon";
+import { useDismiss } from "./use-dismiss";
 
 /**
  * StageMenu — a stage-change dropdown shared by the board card and the
@@ -36,8 +37,20 @@ export function StageMenu({
     null,
   );
   const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const current = stages.find((s) => s.id === currentStageId);
+
+  // P16-UI-12: outside-press / Escape / reflow close, from the one shared hook
+  // (`app/ui/use-dismiss.ts`) instead of a sixth hand-rolled copy of it.
+  // `onReflow` because this popover is fixed-positioned from the trigger's rect
+  // and a scroll inside the board column makes that rect a lie; `also: [btnRef]`
+  // because the popover is portaled to <body>, so the trigger is NOT inside the
+  // returned ref and a press on it would otherwise dismiss-then-reopen.
+  // Escape-with-focus-return stays the caller's job — `onMenuKeyDown` below
+  // owns it, because only the caller knows where focus should land.
+  const menuRef = useDismiss<HTMLDivElement>(open, () => setOpen(false), {
+    onReflow: true,
+    also: [btnRef],
+  });
 
   // Pop the trigger when the stage actually CHANGES (not on first mount), so a
   // move made from this menu animates in place. Board cards remount into the new
@@ -80,33 +93,6 @@ export function StageMenu({
     setOpen(false);
     btnRef.current?.focus();
   };
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (
-        !menuRef.current?.contains(e.target as Node) &&
-        !btnRef.current?.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeAndReturnFocus();
-    };
-    const onReflow = () => setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    // capture:true so a scroll inside the column (not just window) closes it.
-    window.addEventListener("scroll", onReflow, true);
-    window.addEventListener("resize", onReflow);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onReflow, true);
-      window.removeEventListener("resize", onReflow);
-    };
-  }, [open]);
 
   // F10-25: move keyboard focus into the menu when it opens (the first
   // selectable stage), so Arrow/Home/End navigation has an anchor.

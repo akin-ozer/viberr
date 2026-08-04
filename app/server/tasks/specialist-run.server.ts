@@ -37,8 +37,11 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { taskDir } from "~/server/files/file-store-root.server";
-import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
-import { readSkillBody } from "~/server/files/skill-body.server";
+import {
+  KB_INJECTION_BUDGET,
+  readKbBodies,
+} from "~/server/files/kb-injection.server";
+import { readSkillBodies } from "~/server/files/skill-body.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
@@ -1120,26 +1123,26 @@ export function buildSpecialistPersona(input: {
   // content — a profile that declares resources the store doesn't ship still
   // produces an empty persona.
   const resourceParts: string[] = [];
-  for (const name of input.skills) {
-    const body = readSkillBody(name, input.dataRoot);
-    if (body) resourceParts.push(`\n\n---\n# ${name} (skill)\n\n${body}`);
+  // C2: ONE shared budget across every declared skill, exactly like the KB leg.
+  // The old per-skill cap re-armed on each call inside this loop, so N skills
+  // could contribute N × 24k — the unbounded prompt input the KB budget exists
+  // to prevent.
+  const skillSet = readSkillBodies(input.skills, input.dataRoot);
+  for (const part of skillSet.parts) {
+    resourceParts.push(`\n\n---\n# ${part.name} (skill)\n\n${part.body}`);
   }
   // Inject declared knowledge-base docs (F6, FR9): the KB leg was decorative for
   // specialists — no run received KB content. Load each declared KB folder that
   // exists in the store. KB_INJECTION_BUDGET is a GLOBAL cap across all declared
   // KBs (F9) — a specialist with many KBs can't blow the prompt with N × 24k.
-  let kbBudget = KB_INJECTION_BUDGET;
-  for (const name of input.kb ?? []) {
-    // P14-KM-05: do NOT skip once the budget is spent. `readKbBody` returns an
-    // explicit "omitted entirely" marker for a KB that no longer fits, so the
-    // prompt names what was dropped instead of quietly shrinking — an agent that
-    // is silently missing a granted KB reports on the ones it got and nobody
-    // learns the difference.
-    const body = readKbBody(name, input.dataRoot, Math.max(0, kbBudget));
-    if (body) {
-      resourceParts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
-      kbBudget -= body.length;
-    }
+  //
+  // P14-KM-05: nothing is skipped once the budget is spent — a KB that no longer
+  // fits emits an explicit "omitted entirely" marker, so the prompt names what
+  // was dropped instead of quietly shrinking. (An agent silently missing a
+  // granted KB reports on the ones it got and nobody learns the difference.)
+  const kbSet = readKbBodies(input.kb ?? [], input.dataRoot, KB_INJECTION_BUDGET);
+  for (const part of kbSet.parts) {
+    resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);
   }
   if (resourceParts.length > 0) {
     // Provenance banner: the skills/KBs below are TRUSTED operating context an
@@ -1204,6 +1207,23 @@ export function buildSpecialistPersona(input: {
         `Your profile grants ${unresolved.join(", ")}, but ${it} NOT mounted on ` +
         `this run — no such server is in the org registry. Do not claim or ` +
         `attempt tools from ${they}; report the gap in your findings instead.`,
+    );
+  }
+  // C1: the surviving half of the silent-resource class. An MCP grant that
+  // resolved to nothing has reached the run's prompt as a structured miss since
+  // P14-LV-09, but a KB or skill grant that resolved to nothing produced only a
+  // `logger.warn` — so a renamed KB folder or a typo'd skill was invisible
+  // everywhere while every UI still showed it attached, and the agent had no way
+  // to know its granted craft/facts never arrived. Same honesty rule, same shape.
+  const missing = [...skillSet.unresolved, ...kbSet.unresolved];
+  if (missing.length > 0) {
+    parts.push(
+      "\n\n---\n# Attached resources that did NOT reach this run\n\n" +
+        "Your profile grants these, but their content is not in your context:\n" +
+        missing.map((m) => `- **${m.name}** — ${m.reason}`).join("\n") +
+        "\n\nDo not claim knowledge or craft from them, and do not treat their " +
+        "absence as your own failure — say plainly in your reply that the grant " +
+        "reached this run empty so a human can fix the configuration.",
     );
   }
   return parts.join("");

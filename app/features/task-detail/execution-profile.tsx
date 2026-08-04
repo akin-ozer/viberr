@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router";
+import { useDismiss } from "~/ui/use-dismiss";
 import { type ProjectRole, roleCan } from "~/shared/rbac";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import { Avatar } from "~/ui/avatar";
@@ -89,31 +90,19 @@ function OwnerControl({
 }) {
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
-  const admin = myRole === "admin";
   // Q5 tiering (XS-12): only contributor+ may take/hold ownership — a viewer is
   // read + comment only, so its take/hand-off buttons would just 403. Gate the
   // controls the same way the server does rather than render a button that fails.
   const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  // E3: managing SOMEONE ELSE's owner seat is `release-any-ownership` — what
+  // `setOwner`/`releaseOwner` actually check. `myRole === "admin"` was a copy of
+  // one row of the matrix that would drift the moment the row moved.
+  const canManageOthersOwnership = roleCan(
+    myRole as ProjectRole | null,
+    "release-any-ownership",
+  );
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   if (!o) {
     // Only contributor+ may take ownership (Q5) — hide from viewers/non-members.
@@ -133,9 +122,9 @@ function OwnerControl({
     );
   }
 
-  // Hand-off requires owner-or-admin (owner-assign); only the owner or an admin
-  // sees the candidate list.
-  const canHandOff = mine || admin;
+  // Hand-off requires being the current owner or holding the manage-others tier
+  // (setOwner's own test); only those two see the candidate list.
+  const canHandOff = mine || canManageOthersOwnership;
   // Hand-off candidates: active members minus the current owner and me, and —
   // F10-13 — only members who can actually OWN a task (contributor or above).
   // The server rejects a hand-off to a viewer ("own-task"), so the picker must
@@ -151,7 +140,7 @@ function OwnerControl({
 
   // Nothing this user can do to ownership → no Manage control (Q5, XS-12): a
   // viewer can't take over, hand off, or release.
-  if (!canOwn && !admin) {
+  if (!canOwn && !canManageOthersOwnership) {
     return null;
   }
 
@@ -217,7 +206,7 @@ function OwnerControl({
               </button>
             </>
           )}
-          {!mine && admin && (
+          {!mine && canManageOthersOwnership && (
             <>
               <div className="menu-sep" />
               <button
@@ -262,23 +251,7 @@ function SpecialistControl({
   onAssign: (profileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   // P14-WL-07: G9 disabled the RUN buttons on a closed task but left the two
   // engage menus fully live, so a Done+merged task still offered to assign a
@@ -379,23 +352,7 @@ function ReviewerControl({
   onAssign: (profileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   // P14-WL-07: same reason as SpecialistControl — a closed task must not offer
   // to engage a reviewer whose Run button would then render disabled.

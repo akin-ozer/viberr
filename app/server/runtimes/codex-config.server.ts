@@ -50,7 +50,12 @@ const DEFAULT_DATA_ROOT = "./data";
 export function resolveCodexAuthSource(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  // Home comes from the env this was HANDED, so a caller passing an explicit
+  // env gets an answer derived only from it. Identical in production (where
+  // `env` IS `process.env`, which is what `os.homedir()` reads on POSIX) — the
+  // difference is that nothing here silently depends on the machine. Same
+  // idiom as `codexCliAuthDiagnostics`, which learned it the hard way.
+  return env.CODEX_HOME || path.join(env.HOME ?? env.USERPROFILE ?? os.homedir(), ".codex");
 }
 
 /**

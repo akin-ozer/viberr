@@ -79,6 +79,57 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
     expect(result.detail).toContain("workflow");
   });
 
+  // B11: an EMPTY `x-oauth-scopes` on a classic token is a positive fact — the
+  // token holds no scopes. The header branch used to require a NON-empty header,
+  // so this token fell into the fine-grained probe and came back
+  // `pull_request:write: assumed` ("fine-grained tokens expose no scope
+  // introspection") — an assumed-granted chip for a token GitHub had just told
+  // us can do nothing — while `tokenKind` on the same result said `classic`.
+  it("classic token with an EMPTY scopes header → insufficient_scope, not assumed", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "viberr-bot" },
+        headers: { "x-oauth-scopes": "" },
+      },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+    });
+    const result = await validatePatToken(CLASSIC, {
+      repo: REPO,
+      requiredScopes: SCOPES,
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.tokenKind).toBe("classic");
+    expect(result.status).toBe("insufficient_scope");
+    expect(result.missingScopes.sort()).toEqual(SCOPES.slice().sort());
+    for (const scope of result.scopes) {
+      expect(scope).toMatchObject({ ok: false, source: "header" });
+      expect(scope.note).toContain("no scopes at all");
+    }
+  });
+
+  // …but an empty header on a token whose PREFIX proves nothing stays unknown:
+  // GitHub omits the header entirely for fine-grained tokens, so absence there
+  // really is missing information and the probe branch is the honest one.
+  it("empty scopes header on an unknown-prefix token still probes", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "viberr-bot" },
+        headers: { "x-oauth-scopes": "" },
+      },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true } },
+      },
+      "GET /user/orgs": { body: [] },
+    });
+    const result = await validatePatToken("some_opaque_token_0123456789", {
+      repo: REPO,
+      requiredScopes: ["read:org"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.tokenKind).toBe("unknown");
+    expect(result.scopes[0]).toMatchObject({ id: "read:org", source: "probe" });
+  });
+
   it("401 with an 'expired' message → expired", async () => {
     const gh = fakeGithubFetch({
       "GET /user": {
@@ -178,7 +229,9 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
   it("fine-grained token: probes what it can, assumes the rest (honestly labeled)", async () => {
     const gh = fakeGithubFetch({
       "GET /user": { body: { login: "viberr-bot" } }, // no scopes header
-      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true } },
+      },
       "GET /user/orgs": { body: [] },
       "GET /repos/akin-ozer/viberr/pulls": { body: [] },
     });
@@ -218,20 +271,103 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
     expect(result.missingScopes).toEqual(["pull_request:write"]);
   });
 
-  // The empty-payload dry-run: GitHub authorizes BEFORE validating the body,
-  // so `{}` against a write endpoint answers 422 when the permission is held
-  // (nothing can be created from an empty payload) and 403 when it is refused.
-  // This is what turns the write scopes from eternal "assumed" chips into
-  // probe verdicts for fine-grained tokens.
-  it("write dry-runs: 422 on contents + pulls proves both write scopes", async () => {
+  /**
+   * A8/pass-16 — validation must not WRITE to a user's repository.
+   *
+   * These tests previously asserted the opposite: that every revalidation
+   * issued `PUT /repos/{repo}/contents/viberr-scope-probe`. That call is
+   * non-destructive by construction (GitHub authorizes before validating the
+   * body, so `{}` can only 422) but it is still a write REQUEST against a real
+   * repository as a side effect of a health check — audit-log noise, ruleset
+   * and branch-protection noise, and destructive the day GitHub reorders
+   * validation. Repository write is now proven READ-ONLY from the `permissions`
+   * block GitHub computes for the authenticated token.
+   */
+  it("proves repository write READ-ONLY from the repo permissions block — no write request", async () => {
     const gh = fakeGithubFetch({
       "GET /user": { body: { login: "viberr-bot" } },
-      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
-      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
-      "PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe": {
-        status: 422,
-        body: { message: "Invalid request.\n\n\"message\", \"content\" weren't supplied." },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { admin: false, push: true, pull: true } },
       },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+    });
+    const result = await validatePatToken(FINE, {
+      repo: REPO,
+      requiredScopes: ["repo", "pull_request:write"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("valid");
+    const byId = new Map(result.scopes.map((s) => [s.id, s]));
+    expect(byId.get("repo")).toMatchObject({
+      ok: true,
+      source: "probe",
+      note: "read + write reported by GitHub for this token",
+    });
+    // THE point of the fix: nothing was written to the repository.
+    expect(
+      gh.callsTo("PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe"),
+    ).toHaveLength(0);
+    expect(gh.callsTo("POST /repos/akin-ozer/viberr/pulls")).toHaveLength(0);
+  });
+
+  it("a read-only permissions block is a REFUSED write — insufficient_scope, still no write request", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: false, pull: true } },
+      },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+    });
+    const result = await validatePatToken(FINE, {
+      repo: REPO,
+      requiredScopes: ["repo"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("insufficient_scope");
+    expect(result.missingScopes).toEqual(["repo"]);
+    expect(result.scopes[0]).toMatchObject({
+      ok: false,
+      source: "probe",
+      note: "repository readable but not writable",
+    });
+    expect(
+      gh.callsTo("PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe"),
+    ).toHaveLength(0);
+  });
+
+  it("no permissions block → readable-but-unverified, reported as ASSUMED (never a false 'proven')", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } }, // no permissions
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+    });
+    const result = await validatePatToken(FINE, {
+      repo: REPO,
+      requiredScopes: ["repo", "pull_request:write"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("valid");
+    const byId = new Map(result.scopes.map((s) => [s.id, s]));
+    // `assumed`, so B-GH8 will NOT clear a write violation off it.
+    expect(byId.get("repo")).toMatchObject({ ok: true, source: "assumed" });
+    expect(byId.get("repo")!.note).toContain("write is unverified");
+    expect(byId.get("pull_request:write")).toMatchObject({
+      ok: true,
+      source: "assumed",
+    });
+    // The chip discloses the opt-in that WOULD prove it.
+    expect(byId.get("pull_request:write")!.note).toContain(
+      "VIBERR_GITHUB_WRITE_PROBE=1",
+    );
+  });
+
+  it("the write dry-run runs ONLY when explicitly opted in (and then proves pull_request:write)", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true } },
+      },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
       "POST /repos/akin-ozer/viberr/pulls": {
         status: 422,
         body: { message: "Validation Failed" },
@@ -241,33 +377,30 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
       repo: REPO,
       requiredScopes: ["repo", "pull_request:write"],
       fetchImpl: gh.fetchImpl,
+      writeProbe: true,
     });
     expect(result.status).toBe("valid");
     const byId = new Map(result.scopes.map((s) => [s.id, s]));
-    expect(byId.get("repo")).toMatchObject({
-      ok: true,
-      source: "probe",
-      note: "read + write proven by dry-run",
-    });
     expect(byId.get("pull_request:write")).toMatchObject({
       ok: true,
       source: "probe",
       note: "write proven by dry-run",
     });
-    // The dry-runs never mutate: both write calls carried an empty body.
-    expect(gh.callsTo("PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe")[0]!.body).toEqual({});
+    // Even opted in, the dry-run carries an empty body and never touches
+    // repository CONTENTS — the contents PUT is gone for good.
     expect(gh.callsTo("POST /repos/akin-ozer/viberr/pulls")[0]!.body).toEqual({});
+    expect(
+      gh.callsTo("PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe"),
+    ).toHaveLength(0);
   });
 
-  it("write dry-runs: a 403 is a REFUSED write — readable repo goes insufficient_scope", async () => {
+  it("an opted-in dry-run 403 is a REFUSED write", async () => {
     const gh = fakeGithubFetch({
       "GET /user": { body: { login: "viberr-bot" } },
-      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
-      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
-      "PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe": {
-        status: 403,
-        body: { message: "Resource not accessible by personal access token" },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true } },
       },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
       "POST /repos/akin-ozer/viberr/pulls": {
         status: 403,
         body: { message: "Resource not accessible by personal access token" },
@@ -275,47 +408,15 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
     });
     const result = await validatePatToken(FINE, {
       repo: REPO,
-      requiredScopes: ["repo", "pull_request:write"],
+      requiredScopes: ["pull_request:write"],
       fetchImpl: gh.fetchImpl,
+      writeProbe: true,
     });
     expect(result.status).toBe("insufficient_scope");
-    expect(result.missingScopes.sort()).toEqual(["pull_request:write", "repo"]);
-    const byId = new Map(result.scopes.map((s) => [s.id, s]));
-    expect(byId.get("repo")).toMatchObject({
-      ok: false,
-      source: "probe",
-      note: "repository readable but not writable",
-    });
-    expect(byId.get("pull_request:write")).toMatchObject({
+    expect(result.scopes[0]).toMatchObject({
       ok: false,
       source: "probe",
       note: "pull-request write refused",
-    });
-  });
-
-  it("write dry-runs: an INCONCLUSIVE answer (404/5xx) degrades to the honest fallback, never a false verdict", async () => {
-    const gh = fakeGithubFetch({
-      "GET /user": { body: { login: "viberr-bot" } },
-      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
-      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
-      // No PUT/POST routes → the fake answers 404 (resource-hiding ambiguity).
-    });
-    const result = await validatePatToken(FINE, {
-      repo: REPO,
-      requiredScopes: ["repo", "pull_request:write"],
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result.status).toBe("valid");
-    const byId = new Map(result.scopes.map((s) => [s.id, s]));
-    expect(byId.get("repo")).toMatchObject({
-      ok: true,
-      source: "probe",
-      note: "repository readable; write unverified",
-    });
-    expect(byId.get("pull_request:write")).toMatchObject({
-      ok: true,
-      source: "assumed",
-      note: "read proven; write is unverifiable until used",
     });
   });
 });
@@ -443,20 +544,18 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
     // Healthy validation → violation resolves, typed policy event lands on
     // VIB-142, projections update.
     //
-    // B-GH8: a WRITE scope now needs WRITE evidence. The dry-run probes are
-    // what supply it — an empty payload GitHub authorizes before validating,
-    // so 422 means "the permission is held". Without them this token proves
-    // only READ and the `pull_request:write` violation correctly stays open
-    // (asserted in its own test below).
+    // B-GH8: a WRITE scope needs WRITE evidence. `pull_request:write` is the one
+    // scope with no read-only signal (A8: `permissions.push` proves Contents
+    // write, NOT pull-request write), so proving it still needs the
+    // authorization-only dry-run — which is now OPT-IN. Default-off means a
+    // revalidation writes nothing; this flow asks for it explicitly.
     const gh = fakeGithubFetch({
       "GET /user": { body: { login: "viberr-bot" } },
-      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true } },
+      },
       "GET /user/orgs": { body: [] },
       "GET /repos/akin-ozer/viberr/pulls": { body: [] },
-      "PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe": {
-        status: 422,
-        body: { message: "Validation Failed" },
-      },
       "POST /repos/akin-ozer/viberr/pulls": {
         status: 422,
         body: { message: "Validation Failed" },
@@ -465,6 +564,7 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
     const result = await revalidateProjectCredential(store.db, store.slug, actor, {
       dataRoot: store.dataRoot,
       fetchImpl: gh.fetchImpl,
+      writeProbe: true,
     });
     expect(result.status).toBe("revalidated");
     if (result.status === "revalidated") {
@@ -528,10 +628,15 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
  * something on GitHub's side.
  */
 describe("PAT revalidation cooldown (P13-D-33)", () => {
+  // A8: a healthy repo response carries the `permissions` block GitHub computes
+  // for the authenticated token — the READ-ONLY proof of repository write that
+  // replaced the contents write dry-run.
   const healthyGithub = () =>
     fakeGithubFetch({
       "GET /user": { body: { login: "viberr-bot" } },
-      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true, pull: true } },
+      },
       "GET /user/orgs": { body: [] },
       "GET /repos/akin-ozer/viberr/pulls": { body: [] },
     });

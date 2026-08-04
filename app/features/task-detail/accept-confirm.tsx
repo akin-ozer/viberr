@@ -67,8 +67,8 @@ export function AcceptConfirm({
           <Icon name="x" />
         </button>
       </div>
-      <div className="modal-body" style={{ gap: "1.05rem" }}>
-        <div className="packet-obs" style={{ margin: 0 }}>
+      <div className="modal-body tight">
+        <div className="packet-obs flush">
           <div className="obs">
             <span className="k">Merges</span>
             <span>

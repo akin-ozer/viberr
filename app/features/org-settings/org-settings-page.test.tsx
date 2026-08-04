@@ -118,6 +118,29 @@ describe("ConnectionsPanel", () => {
     expect(lastForm).toBeNull(); // no server round-trip
     expect(getByLabelText("Close")).toBeTruthy();
   });
+
+  it("F11: the PAT field is a secret field, matching its own promise", () => {
+    // The label says "stored encrypted · never displayed" while the input was
+    // type="text" — the one moment the token IS on screen is the moment the
+    // copy denies. Also kept out of autofill stores and spell-checkers.
+    const { getByText, getByPlaceholderText } = renderPanel(
+      <ConnectionsPanel connections={CONNECTIONS} />,
+    );
+    fireEvent.click(getByText("Add connection"));
+    const token = getByPlaceholderText("ghp_…") as HTMLInputElement;
+    expect(token.type).toBe("password");
+    expect(token.getAttribute("autocomplete")).toBe("off");
+    expect(token.getAttribute("spellcheck")).toBe("false");
+    // The owner field beside it is NOT a secret and stays readable.
+    expect((getByPlaceholderText("owner") as HTMLInputElement).type).toBe("text");
+  });
+
+  it("F12: the connection count agrees with its noun", () => {
+    const { getByText } = renderPanel(
+      <ConnectionsPanel connections={[CONNECTIONS[0]!]} />,
+    );
+    expect(getByText("1 connection.")).toBeTruthy();
+  });
 });
 
 const ME: OrgUserView = {
@@ -153,11 +176,20 @@ describe("UsersPanel", () => {
       <UsersPanel users={USERS} domains={DOMAINS} meId="u_arda" />,
     );
     expect(getByText("3 instance accounts")).toBeTruthy();
+    // F12: …and the noun follows the count. "1 instance accounts" was live.
     expect(getByText("you")).toBeTruthy();
     expect(getByText("whitelisted")).toBeTruthy();
     expect(getByText("password reset pending")).toBeTruthy();
     expect(getByText("domain allowlist")).toBeTruthy();
     expect(getByText("any Google account with this domain · joins as member")).toBeTruthy();
+  });
+
+  it("F12: one account is '1 instance account', not '1 instance accounts'", () => {
+    const { getByText, queryByText } = renderPanel(
+      <UsersPanel users={[ME]} domains={[]} meId="u_arda" />,
+    );
+    expect(getByText("1 instance account")).toBeTruthy();
+    expect(queryByText("1 instance accounts")).toBeNull();
   });
 
   it("self guards: demote + remove are client-toasted, never posted", async () => {

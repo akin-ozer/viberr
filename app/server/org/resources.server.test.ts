@@ -1,5 +1,12 @@
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { unreachableFetch } from "../../../test-support/fake-github";
@@ -18,6 +25,7 @@ import {
   type McpSpawn,
   probeMcpTarget,
   reindexKnowledgeBase,
+  reindexKnowledgeBaseByDir,
   saveKnowledgeBase,
   saveMcpServer,
   saveSkill,
@@ -344,6 +352,51 @@ describe("skills", () => {
     );
     expect(kept.toast).toContain("existing SKILL.md kept");
     expect(readFileSync(onDisk, "utf8")).toHaveLength(256 * 1024 + 10);
+  });
+
+  // A5-followup: the editor's reader dereferenced links while the INJECTION
+  // reader refuses them, so a symlinked SKILL.md showed the link target's
+  // content as if it were the skill — text no run would ever see — and the
+  // editor's `writeFileSync` would then have replaced that target's content
+  // with whatever was in the textarea. Deliberate answer: the editor obeys the
+  // same containment rule as the injector, and says so instead of logging it.
+  it("refuses to read or write a SKILL.md that links out of the store", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { skill } = await saveSkill(
+      db,
+      { name: "linked-skill", summary: "Linked.", body: "# in the store" },
+      ACTOR,
+      ctx,
+    );
+    const dir = skillDirPath("linked-skill", dataRoot);
+    const outside = path.join(dataRoot, "outside-the-store.md");
+    writeFileSync(outside, "# secrets from outside the store");
+    rmSync(path.join(dir, "SKILL.md"));
+    symlinkSync(outside, path.join(dir, "SKILL.md"));
+
+    // READ: the editor shows nothing rather than the target's content.
+    expect(getSkill(db, skill.id, ctx)!.body).toBe("");
+
+    // WRITE: refused, and the link target is untouched.
+    await expect(
+      saveSkill(
+        db,
+        { id: skill.id, name: "linked-skill", summary: "Linked.", body: "clobbered" },
+        ACTOR,
+        ctx,
+      ),
+    ).rejects.toThrowError(/symlink/);
+    expect(readFileSync(outside, "utf8")).toBe("# secrets from outside the store");
+
+    // A summary-only save (empty body → keep on disk) still works: it writes
+    // no SKILL.md at all, so there is nothing to refuse.
+    const kept = await saveSkill(
+      db,
+      { id: skill.id, name: "linked-skill", summary: "New summary here.", body: "" },
+      ACTOR,
+      ctx,
+    );
+    expect(kept.toast).toContain("existing SKILL.md kept");
   });
 
   it("rename moves the skill folder; delete removes it", async () => {
@@ -712,6 +765,57 @@ describe("resource reference integrity", () => {
     expect(existsSync(kbDirPath("p13-facts-v2", dataRoot))).toBe(true);
     expect(grantsOf(dataRoot, "scout")).toContain("p13-facts-v2");
     expect(grantsOf(dataRoot, "scout")).not.toMatch(/- p13-facts$/m);
+  });
+
+  /**
+   * C4/pass-16 — rename ↔ KB-watcher race.
+   *
+   * The old order was `renameSync` → `await updateResourceReferences(…)` →
+   * `UPDATE … SET dir`. The await walks every agent template AND every
+   * project.md, so it scales with the installation, while the KB watcher
+   * debounces for only 250 ms. When the walk ran long the watcher saw the new
+   * folder, found no row for it, and ADOPTED it as a brand-new KB — after which
+   * the pending UPDATE hit the `dir` UNIQUE constraint and the rename blew up
+   * on a folder that had already moved.
+   *
+   * This drives the race deterministically instead of racing a real timer:
+   * `saveKnowledgeBase` runs synchronously up to its FIRST await, so firing the
+   * watcher's re-index right there reproduces the exact interleaving. With the
+   * row write moved ahead of the await, the watcher can only ever observe a
+   * state where disk and row already agree.
+   */
+  it("a watcher re-index landing mid-rename cannot fork a duplicate row (C4)", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(
+      db,
+      { name: "Race facts", refresh: "on change" },
+      ACTOR,
+      ctx,
+    );
+    expect(kb.dir).toBe("race-facts");
+    // A profile grant + a real project.md give `updateResourceReferences`
+    // something to walk, so it genuinely suspends.
+    writeProfileTemplate(dataRoot, "scout", { kb: ["race-facts"] });
+
+    const pending = saveKnowledgeBase(
+      db,
+      { id: kb.id, name: "Race facts v2", refresh: "on change" },
+      ACTOR,
+      ctx,
+    );
+    // …the watcher's debounce fires HERE, at the first suspension point.
+    reindexKnowledgeBaseByDir(db, "race-facts-v2", ctx);
+    await expect(pending).resolves.toMatchObject({
+      kb: { id: kb.id, dir: "race-facts-v2" },
+    });
+
+    const rows = db
+      .prepare(`SELECT id, dir FROM org_knowledge_bases ORDER BY dir`)
+      .all() as unknown as { id: string; dir: string }[];
+    expect(rows).toEqual([{ id: kb.id, dir: "race-facts-v2" }]);
+    // The rename still completed on both legs.
+    expect(existsSync(kbDirPath("race-facts-v2", dataRoot))).toBe(true);
+    expect(grantsOf(dataRoot, "scout")).toContain("race-facts-v2");
   });
 
   it("deleting a KB drops the grant rather than leaving it dangling", async () => {

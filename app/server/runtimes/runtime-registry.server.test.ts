@@ -1,9 +1,19 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  backendCredentialHealth,
+  claudeCliAuthDiagnostics,
   claudeSpawnEnv,
+  codexAuthMisconfiguration,
+  codexCliAuthDiagnostics,
   codexSpawnEnv,
   createAdapters,
   isBackendAvailable,
@@ -11,10 +21,17 @@ import {
   selectAdapter,
   setBackendAvailability,
 } from "./runtime-registry.server";
+import { backendUnavailableMessage } from "./run-service.server";
 
 describe("runtime-registry", () => {
   const tmpDirs: string[] = [];
   const savedDataRoot = process.env.VIBERR_DATA_ROOT;
+  const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  // The D1 tests repoint $HOME so `~/.codex/auth.json` is a fact they control
+  // rather than one the machine supplies. It MUST go back: the temp dir is
+  // removed below, and a stale $HOME pointing at a deleted directory would
+  // leak into every later test in this worker.
+  const savedHome = process.env.HOME;
   afterEach(() => {
     resetRegistryForTests();
     delete process.env.ANTHROPIC_API_KEY;
@@ -25,12 +42,26 @@ describe("runtime-registry", () => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.VIBERR_CODEX_USE_CLI_AUTH;
     delete process.env.CODEX_HOME;
+    if (savedClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir;
     // The mirror resolves the run home under the data root, so these tests
     // repoint it; put the ambient value back rather than dropping it.
     if (savedDataRoot === undefined) delete process.env.VIBERR_DATA_ROOT;
     else process.env.VIBERR_DATA_ROOT = savedDataRoot;
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
     for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
+
+  /** A CLAUDE_CONFIG_DIR that exists, optionally holding a file-based login. */
+  function claudeConfigDir(opts: { credentials: boolean }): string {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-claude-home-"));
+    tmpDirs.push(dir);
+    if (opts.credentials) {
+      writeFileSync(path.join(dir, ".credentials.json"), "{}");
+    }
+    return dir;
+  }
 
   function codexHome(withAuth: boolean): string {
     const dir = mkdtempSync(path.join(tmpdir(), "viberr-codex-home-"));
@@ -49,9 +80,59 @@ describe("runtime-registry", () => {
     expect(isBackendAvailable("claude")).toBe(true);
   });
 
-  it("detects claude available via the CLI-auth opt-in flag", () => {
+  /**
+   * D2/pass-16 — this test used to assert PRESENCE ONLY: the flag alone made the
+   * registry pick the REAL adapter, so the F-DOCKER1 shape (flag set from
+   * `.env`, config dir pointed somewhere the logged-in CLI never wrote) was
+   * fully reachable on the Claude side too — every run then died on auth
+   * instead of degrading honestly. The flag is now validated as far as the
+   * platform allows; see `claudeCliAuthDiagnostics`.
+   */
+  it("detects claude available via CLI-auth when the config dir holds a login", () => {
     process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
+    process.env.CLAUDE_CONFIG_DIR = claudeConfigDir({ credentials: true });
     expect(isBackendAvailable("claude")).toBe(true);
+    expect(claudeCliAuthDiagnostics().verified).toBe("file");
+  });
+
+  it("reports claude UNAVAILABLE under CLI-auth when the config dir does not exist (D2)", () => {
+    // The CLI materializes its config dir on first use, so "logged in, but the
+    // directory it would have created is absent" is provably false — on every
+    // platform. This is the Claude half of the F-DOCKER1 guard.
+    process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
+    process.env.CLAUDE_CONFIG_DIR = path.join(
+      tmpdir(),
+      `viberr-claude-missing-${Date.now()}`,
+    );
+    expect(isBackendAvailable("claude")).toBe(false);
+    expect(claudeCliAuthDiagnostics().verified).toBe("refuted");
+    expect(backendUnavailableMessage("claude")).toContain("holds no `claude` login");
+  });
+
+  it("a real ANTHROPIC_API_KEY is authoritative even with no config dir", () => {
+    process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
+    process.env.CLAUDE_CONFIG_DIR = path.join(tmpdir(), "viberr-claude-nope");
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    expect(isBackendAvailable("claude")).toBe(true);
+  });
+
+  it("an existing config dir with no credentials FILE is honest about how it verified", () => {
+    // macOS keeps the CLI credential in the login Keychain, so there is no file
+    // to check and the server must not pop a keychain prompt to probe. The
+    // weaker verification is REPORTED rather than hidden; every other platform
+    // expects the credentials file and refutes the flag without it.
+    process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
+    process.env.CLAUDE_CONFIG_DIR = claudeConfigDir({ credentials: false });
+    const onMac = claudeCliAuthDiagnostics(process.env, "darwin");
+    expect(onMac.verified).toBe("presence");
+    const onLinux = claudeCliAuthDiagnostics(process.env, "linux");
+    expect(onLinux.verified).toBe("refuted");
+    // The honesty surface says which, instead of a bare "configured".
+    if (process.platform === "darwin") {
+      const health = backendCredentialHealth("claude");
+      expect(health.verification).toBe("presence");
+      expect(health.detail).toContain("cannot fully verify");
+    }
   });
 
   it("detects codex available via CODEX_API_KEY or OPENAI_API_KEY", () => {
@@ -77,6 +158,97 @@ describe("runtime-registry", () => {
     process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
     process.env.CODEX_HOME = codexHome(false);
     expect(isBackendAvailable("codex")).toBe(false);
+  });
+
+  /**
+   * D1/pass-16 — the live incident (2026-08-03).
+   *
+   * A dev launcher exported `CODEX_HOME=<dataRoot>/runtimes/codex-home`, which
+   * is EXACTLY the path `resolveCodexHome` returns. Auth source == run home, so
+   * `prepareCodexHome`'s mirror short-circuits, the probe looks for auth.json
+   * inside Viberr's own empty run home, and every Codex run was refused with a
+   * bare "no usable credential configured" — while a working `~/.codex` login
+   * sat one directory away and the generic copy told the operator to copy their
+   * login INTO the app-owned dir, cementing the misconfiguration.
+   */
+  it("names the CODEX_HOME==run-home misconfiguration instead of a bare refusal (D1)", () => {
+    // HERMETIC: $HOME is a temp dir with NO `.codex/auth.json`, so this drives
+    // the "you have no login anywhere" half of the copy. The test used to read
+    // the real machine's home, so which half it exercised depended on whether
+    // the developer happened to be logged into Codex — it passed locally and
+    // failed on CI, and the branch CI hit was never asserted at all.
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
+    tmpDirs.push(dataRoot);
+    const fakeHome = mkdtempSync(path.join(tmpdir(), "viberr-home-"));
+    tmpDirs.push(fakeHome);
+    process.env.HOME = fakeHome;
+    process.env.VIBERR_DATA_ROOT = dataRoot;
+    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
+    // The exact misconfiguration: CODEX_HOME pointed at Viberr's own run home.
+    process.env.CODEX_HOME = path.join(dataRoot, "runtimes", "codex-home");
+
+    const diag = codexCliAuthDiagnostics();
+    expect(diag.sourceIsRunHome).toBe(true);
+    expect(diag.authJsonExists).toBe(false);
+    expect(diag.defaultLoginExists).toBe(false);
+    expect(isBackendAvailable("codex")).toBe(false);
+
+    const detail = codexAuthMisconfiguration(diag);
+    expect(detail).toContain("Viberr's OWN per-run home");
+    // No login to point at, so the copy must say how to CREATE one.
+    expect(detail).toContain("Unset CODEX_HOME");
+    expect(detail).toContain("codex login");
+
+    // It reaches the two surfaces an operator actually reads: the run refusal…
+    const message = backendUnavailableMessage("codex");
+    expect(message).toContain("Viberr's OWN per-run home");
+    // …and it must NOT re-suggest copying the login into that same dead dir.
+    expect(message).not.toContain("docker compose cp");
+
+    // …and the credential-health surface the backend pickers render.
+    const health = backendCredentialHealth("codex");
+    expect(health.available).toBe(false);
+    expect(health.detail).toContain("Viberr's OWN per-run home");
+  });
+
+  it("points at the login the operator ALREADY has, when there is one (D1)", () => {
+    // The other half, and the one the live incident actually was: a working
+    // `~/.codex` login sat one directory away while every run was refused. The
+    // copy has to name it and say UNSET, not "run codex login" — the operator
+    // has already done that.
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
+    tmpDirs.push(dataRoot);
+    const fakeHome = mkdtempSync(path.join(tmpdir(), "viberr-home-"));
+    tmpDirs.push(fakeHome);
+    mkdirSync(path.join(fakeHome, ".codex"), { recursive: true });
+    writeFileSync(path.join(fakeHome, ".codex", "auth.json"), "{}");
+    process.env.HOME = fakeHome;
+    process.env.VIBERR_DATA_ROOT = dataRoot;
+    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
+    process.env.CODEX_HOME = path.join(dataRoot, "runtimes", "codex-home");
+
+    const diag = codexCliAuthDiagnostics();
+    expect(diag.sourceIsRunHome).toBe(true);
+    expect(diag.defaultLoginExists).toBe(true);
+
+    const detail = codexAuthMisconfiguration(diag);
+    expect(detail).toContain("Viberr's OWN per-run home");
+    expect(detail).toContain(path.join(fakeHome, ".codex", "auth.json"));
+    expect(detail).toContain("UNSET CODEX_HOME");
+    // Nothing to log in to — telling them to would be the wrong instruction.
+    expect(detail).not.toContain("then run `codex login`");
+  });
+
+  it("the ordinary missing-auth.json case still gets the docker recipe (not the D1 copy)", () => {
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
+    tmpDirs.push(dataRoot);
+    process.env.VIBERR_DATA_ROOT = dataRoot;
+    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
+    process.env.CODEX_HOME = codexHome(false); // a real login dir, just empty
+    expect(codexCliAuthDiagnostics().sourceIsRunHome).toBe(false);
+    const message = backendUnavailableMessage("codex");
+    expect(message).toContain("docker compose cp");
+    expect(message).not.toContain("Viberr's OWN per-run home");
   });
 
   it("a real CODEX_ACCESS_TOKEN is authoritative even with no auth.json", () => {

@@ -179,11 +179,19 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
       />
       {/* F15-18: dismiss layer for the mobile rail overlay. CSS keeps it out of
           the layout above the breakpoint AND while the rail is closed, so it can
-          never swallow a click on the desktop shell. */}
-      <button
-        type="button"
+          never swallow a click on the desktop shell.
+
+          UI-C (inventory rough edge #15): this was a `<button aria-hidden="true"
+          tabIndex={-1}>` — an interactive element hidden from assistive tech,
+          which passes axe today only because the two attributes agree, and turns
+          into an `aria-hidden-focus` violation the moment someone touches the
+          tabIndex. A scrim is a POINTER affordance and nothing else, so it is a
+          decorative div now: no role, no name, nothing to focus. The keyboard
+          path is the one that was always the real one — the topbar toggle
+          (`aria-expanded`) plus Escape, which `topbar.tsx` handles by closing
+          the rail and returning focus to that toggle. */}
+      <div
         className="rail-scrim"
-        tabIndex={-1}
         aria-hidden="true"
         onClick={() => setRailOpen(false)}
       />

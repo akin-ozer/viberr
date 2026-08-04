@@ -171,7 +171,7 @@ function ProfileIdentity({
           )}
         </div>
       </div>
-      <div className="kv" style={{ marginTop: ".9rem" }}>
+      <div className="kv spaced">
         {memberships.length ? (
           memberships.map((m, i) => (
             <div className="kv-row" key={m.slug}>
@@ -461,7 +461,7 @@ function ProfileAccess({
         <div className="kv">
           {RBAC_ROWS.map((r) => (
             <div className="kv-row" key={r.action}>
-              <span className="k" style={{ color: "var(--fg)" }}>
+              <span className="k strong">
                 {r.action}
               </span>
               {r.grant[role] ? (
@@ -477,7 +477,7 @@ function ProfileAccess({
       ) : (
         <div className="empty">No project membership yet.</div>
       )}
-      <div className="pol-note" style={{ margin: ".9rem 0 0" }}>
+      <div className="pol-note after last">
         <Icon name="lock" />
         <span>
           Your role is assigned by an admin and enforced on every action.
@@ -583,10 +583,7 @@ function ProfileGithub({
         <div className="cred-top">
           <Icon name="github" />
           <span className="cred-name">Personal OAuth identity</span>
-          <span
-            className="mono"
-            style={{ marginLeft: "auto", color: "var(--faint)" }}
-          >
+          <span className="mono push faint">
             {gh ? "oauth" : "—"}
           </span>
         </div>
@@ -613,8 +610,7 @@ function ProfileGithub({
             </span>
             <button
               type="button"
-              className="btn ghost sm"
-              style={{ marginLeft: "auto" }}
+              className="btn ghost sm push"
               onClick={() => submit({ intent: "github-disconnect" })}
             >
               Disconnect
@@ -630,8 +626,7 @@ function ProfileGithub({
             </span>
             <button
               type="button"
-              className="btn sm"
-              style={{ marginLeft: "auto" }}
+              className="btn sm push"
               disabled={connectBusy}
               onClick={startConnect}
             >
@@ -642,12 +637,12 @@ function ProfileGithub({
         )}
       </div>
       {(error || connectErr) && (
-        <div className="login-err" role="alert" style={{ marginTop: ".7rem" }}>
+        <div className="login-err spaced" role="alert">
           <Icon name="alert" />
           {error ?? connectErr}
         </div>
       )}
-      <div className="pol-note" style={{ margin: ".9rem 0 0" }}>
+      <div className="pol-note after last">
         <Icon name="lock" />
         <span>
           This identity only attributes <strong>your</strong> actions. Agents

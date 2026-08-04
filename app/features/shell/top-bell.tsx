@@ -3,6 +3,7 @@ import { useFetcher, useLocation, useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { useDismiss } from "~/ui/use-dismiss";
 import { useToast } from "~/ui/toast";
 import {
   NotificationItem,
@@ -42,14 +43,10 @@ export function TopBell({
   const popRef = useRef<HTMLDialogElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  // P16-UI-12: one shared dismiss hook (`app/ui/use-dismiss.ts`) instead of a
+  // hand-rolled listener. `outside: false` preserves today's behaviour — the
+  // popover closes on Escape or an explicit action, not on any stray press.
+  useDismiss(open, () => setOpen(false), { outside: false });
 
   // UI-45: the popover is rendered BEFORE its trigger in the DOM and nothing
   // moved focus into it, so a keyboard user who activated the bell then pressed
@@ -150,7 +147,7 @@ export function TopBell({
                   cap instead of letting the count silently disagree with the
                   rows — the same truncation notice /notifications already got. */}
               {notifications.length >= BELL_LIST_CAP && (
-                <span className="sub" style={{ marginRight: "auto" }}>
+                <span className="sub pull">
                   Showing the newest {notifications.length}
                 </span>
               )}

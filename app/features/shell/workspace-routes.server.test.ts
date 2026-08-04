@@ -386,14 +386,17 @@ describe("board create-task action", () => {
     expect(created.operator).toBeNull(); // triage tasks get no operator
   });
 
-  it("non-member is denied (RBAC in the phase-3 mutation)", async () => {
-    const result = (await postCreate(seedIds.deniz, "Should not exist")) as {
-      data: { ok: boolean; error: string };
-      init: { status: number };
-    };
-    expect(result.init?.status).toBe(403);
-    expect(result.data.ok).toBe(false);
-    expect(result.data.error).toContain("Only project members");
+  // E2: this used to assert the inner guard's 403 ("Only project members can
+  // create tasks") — the one reply in the app that confirmed a members-only
+  // project exists. The board action now runs `requireVisibleProject` first, so
+  // a non-member gets the same unknown-slug 404 as every other route and intent.
+  // Per-intent coverage lives in app/routes/project.board.server.test.ts.
+  it("non-member is refused as an unknown slug (R15-4 secrecy)", async () => {
+    const thrown = (await postCreate(seedIds.deniz, "Should not exist").catch(
+      (e) => e,
+    )) as { data: unknown; init: { status: number } };
+    expect(thrown.init?.status).toBe(404);
+    expect(String(thrown.data)).toBe("No project at projects/viberr-core.");
   });
 });
 

@@ -35,7 +35,11 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
-import { checksPill, reviewPill } from "~/features/github/github-pills";
+import {
+  checksPill,
+  prStatePill,
+  reviewPill,
+} from "~/features/github/github-pills";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -166,7 +170,7 @@ function OwnerLine({ task }: { task: TaskSummary }) {
   }
   return (
     <div className="card-owner">
-      <span className="avatar" style={{ opacity: 0.5 }}>
+      <span className="avatar ghost">
         ?
       </span>
       <span className="lbl">{task.operator ? "awaiting owner" : "unassigned"}</span>
@@ -274,6 +278,33 @@ function TaskCard({
               <Icon name="pr" />#{task.pr.number}
             </span>
           )}
+          {/* R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
+              full-autonomy task reaches the done stage with its PR still open —
+              `pr.state: "accepted"` is exactly "a human accepted the completion
+              but the real merge is still pending". The card drew that as the
+              green "accepted" readiness pill and a stateless "#124" chip, which
+              is what a merged task looks like too. Done meant two things and the
+              card showed one.
+
+              The closed case is the same omission from the other side (live
+              finding H10): closing PR #124 unmerged produced a decision packet,
+              a "PR closed" badge and a divergence notification on the DETAIL
+              page, while the card still read "ready · awaiting verdict".
+
+              Both earn a pill under this card's density rule (only ACTIONABLE
+              state, per the checks/review pills below): each names work that
+              cannot finish without a human. `merged` and `review` stay silent —
+              the readiness pill and the PR chip already carry those.
+
+              The vocabulary comes from `prStatePill`, the one PR-state → pill
+              mapping the GitHub view and the task branch panel already read.
+              Restating it here is how "merge pending" would come to mean one
+              thing on the card and another two screens away. */}
+          {(task.pr?.state === "accepted" || task.pr?.state === "closed") && (
+            <Pill kind={prStatePill(task.pr.state).kind} sm>
+              {prStatePill(task.pr.state).label}
+            </Pill>
+          )}
           {/* P13-D-28: CI health, but only when it is ACTIONABLE. The card is
               already dense and "N checks passing" is not news; a failing build
               on a task sitting in Review is. The full passing/running/failing
@@ -291,7 +322,7 @@ function TaskCard({
             </Pill>
           )}
           {/* P13-D-6 (FR24): the card drew stage, agent and waiting state but
-              NOT validation — while the "Needs attention" filter matched on it.
+              NOT validation — while the "Blocked or waiting" filter matched on it.
               A reviewer's request_changes sets validation:"failing" and the card
               was pixel-identical to a healthy one. Deliberate departure from the
               HTML mock (design/html-app/app/board.jsx), which omits it too.
@@ -444,38 +475,21 @@ function ListView({
 }) {
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   return (
-    <div
-      className="board"
-      style={{
-        gridAutoFlow: "row",
-        gridAutoColumns: "auto",
-        display: "block",
-        padding: "0 1.4rem 1.4rem",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: ".6rem",
-          maxWidth: 920,
-        }}
-      >
+    <div className="board list">
+      <div className="board-list">
         {tasks.length === 0 && <div className="empty">{emptyCopy}</div>}
         {tasks.map((t) => (
           <div
             key={t.key}
-            className="card"
-            style={{ flexDirection: "row", alignItems: "center", gap: "1rem" }}
+            className="card list-row"
           >
             <Link
               className="key"
-              style={{ width: 64 }}
               to={`/projects/${t.projectSlug}/tasks/${t.key}`}
             >
               {t.key}
             </Link>
-            <h3 style={{ flex: 1 }}>
+            <h3>
               <Link to={`/projects/${t.projectSlug}/tasks/${t.key}`}>
                 {t.title}
               </Link>
@@ -538,6 +552,11 @@ function NewTaskModal({
   const closedRef = useRef(false);
 
   const valid = title.trim().length >= 3;
+  // The dialog opened on an empty title, so `!valid` was true from first paint
+  // and the footer greeted every new task with "A title is required." — an error
+  // for something the person had not had a chance to do yet. The requirement is
+  // only *unmet* once they have left the field or tried to submit.
+  const [titleTouched, setTitleTouched] = useState(false);
   const serverError = fetcher.data && fetcher.data.ok === false
     ? fetcher.data.error
     : null;
@@ -556,6 +575,7 @@ function NewTaskModal({
   }, [fetcher.data, onClose, push]);
 
   const submit = () => {
+    setTitleTouched(true);
     if (!valid || busy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -568,9 +588,8 @@ function NewTaskModal({
 
   return (
     <dialog
-      className="modal-card"
+      className="modal-card modal-narrow"
       aria-label="New task"
-      style={{ width: "min(560px, calc(100vw - 2rem))" }}
       ref={panelRef}
     >
       <div className="modal-head">
@@ -603,6 +622,7 @@ function NewTaskModal({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => setTitleTouched(true)}
             placeholder="e.g. Reconcile PR state after force-push"
             autoFocus
             onKeyDown={(e) => {
@@ -653,12 +673,16 @@ function NewTaskModal({
         </div>
       </div>
       <div className="modal-foot">
-        <span className={"foot-hint" + (valid && !serverError ? "" : " err")}>
+        <span
+          className={
+            "foot-hint" + (serverError || (titleTouched && !valid) ? " err" : "")
+          }
+        >
           {serverError
             ? serverError
-            : valid
-              ? "The task key is assigned on create."
-              : "A title is required."}
+            : titleTouched && !valid
+              ? "A title is required."
+              : "The task key is assigned on create."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>
@@ -689,7 +713,11 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "all", label: "All tasks", icon: "board" },
   { id: "human", label: "Waiting on me", icon: "hand" },
   { id: "agent", label: "Agent working", icon: "cpu" },
-  { id: "risk", label: "Needs attention", icon: "alert" },
+  // R16-2: "Needs attention" read as a danger filter and matched only alarming
+  // states; the owner ruling renames it to what it selects — work that cannot
+  // proceed (blocked, waiting on an answer, failing validation, urgent, or a
+  // rejected PR). See matchesBoardFilter.
+  { id: "risk", label: "Blocked or waiting", icon: "alert" },
   // R14-3: archived tasks are out of every other view; this is the way back to
   // them. The chip only renders when the project has any (see FilterBar).
   { id: "archived", label: "Archived", icon: "lock" },
@@ -823,10 +851,10 @@ function FilterBar({
           <Icon name={f.icon} />
           {f.label}
           {f.id === "human" && waitingOnMe > 0 && (
-            <span style={{ opacity: 0.7 }}>· {waitingOnMe}</span>
+            <span className="tally">· {waitingOnMe}</span>
           )}
           {f.id === "archived" && archived > 0 && (
-            <span style={{ opacity: 0.7 }}>· {archived}</span>
+            <span className="tally">· {archived}</span>
           )}
         </button>
       ))}

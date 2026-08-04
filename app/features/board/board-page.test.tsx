@@ -156,7 +156,7 @@ describe("P13-D-6: the card and the list row draw validation status (FR24)", () 
     // Before the fix `grep -c validation board-page.tsx` was 0: a reviewer's
     // request_changes set validation:"failing" and touched nothing the card
     // drew, so a rejected revision looked identical to a healthy one — while
-    // the "Needs attention" filter matched on exactly that field.
+    // the "Blocked or waiting" filter matched on exactly that field.
     const { container } = renderBoard([
       task({ key: "VIB-1", validation: "failing" }),
     ]);
@@ -244,7 +244,7 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
       c.querySelector(".col-head .nm")!.textContent!.includes("In Progress"),
     )!;
     expect(implBoth.querySelector(".empty")!.textContent).toBe(
-      "The 1 task here is hidden by the “Needs attention” filter and the search “zzz”.",
+      "The 1 task here is hidden by the “Blocked or waiting” filter and the search “zzz”.",
     );
   });
 
@@ -397,5 +397,123 @@ describe("R15-5: the board owns its own filter box", () => {
     fireEvent.change(input, { target: { value: "rotate" } });
     await waitFor(() => expect(queryByText("Attach a project credential")).toBeNull());
     expect(queryByText("Rotate the PAT")).toBeTruthy();
+  });
+});
+
+/**
+ * R16-2 (owner ruling). Live in pass 16, the board drew an amber "input
+ * required" chip on a card and its own attention filter matched 0 of 4 tasks —
+ * the state the card flagged was the one state the predicate omitted. The chip
+ * is renamed to what it selects, and this binds the two: the label on the chip
+ * and the tasks that survive the click are asserted in the same test, so a
+ * future edit cannot rename one without the other.
+ */
+describe("R16-2: the attention chip says what it selects", () => {
+  const chip = (container: HTMLElement) =>
+    [...container.querySelectorAll(".fchip, .chip, button")].find(
+      (el) => el.textContent!.trim() === "Blocked or waiting",
+    );
+
+  it('is labelled "Blocked or waiting", not "Needs attention"', () => {
+    const { container } = renderBoard([task()]);
+    expect(chip(container)).toBeTruthy();
+    expect(container.textContent).not.toContain("Needs attention");
+  });
+
+  it("keeps an input_required card visible under that filter", async () => {
+    const { container, queryByText } = renderBoard([
+      task({
+        key: "VIB-1",
+        title: "Waiting on an answer",
+        readiness: "input_required",
+        displayReadiness: "input_required",
+        waiting: "human",
+      }),
+      task({ key: "VIB-2", title: "Perfectly fine", readiness: "ready" }),
+    ]);
+    fireEvent.click(chip(container)!);
+    await waitFor(() => expect(queryByText("Perfectly fine")).toBeNull());
+    expect(queryByText("Waiting on an answer")).toBeTruthy();
+  });
+});
+
+describe("the new-task dialog does not accuse an untouched form", () => {
+  const openDialog = () => {
+    const r = renderBoard([task()]);
+    const btn = [...r.container.querySelectorAll("button")].find((b) =>
+      b.textContent!.includes("New task"),
+    )!;
+    fireEvent.click(btn);
+    return r;
+  };
+
+  it("offers guidance, not an error, before the title is touched", () => {
+    const { container } = openDialog();
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("The task key is assigned on create.");
+    expect(hint.className).not.toContain("err");
+  });
+
+  it("states the requirement once the field is left empty", () => {
+    const { container } = openDialog();
+    fireEvent.blur(container.querySelector("#new-task-title")!);
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("A title is required.");
+    expect(hint.className).toContain("err");
+  });
+
+  it("clears the error once a valid title is typed", () => {
+    const { container } = openDialog();
+    const input = container.querySelector("#new-task-title")!;
+    fireEvent.blur(input);
+    fireEvent.change(input, { target: { value: "A real title" } });
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("The task key is assigned on create.");
+    expect(hint.className).not.toContain("err");
+  });
+});
+
+describe("R16-6: the card says when Done still needs a human", () => {
+  // Owner ruling 2026-08-04: `merge-pull-request` stays human-only, so a
+  // full-autonomy task reaches the done stage with its PR open. `pr.state`
+  // already carries that as "accepted" ("a human accepted the completion but
+  // the real merge is still pending") — the card just never drew it, so a
+  // merge-pending task and a merged one looked the same.
+
+  it("draws `merge pending` on an accepted-but-unmerged PR", () => {
+    const { getByText, queryByText } = renderBoard([
+      task({
+        stage: "done",
+        displayReadiness: "accepted",
+        pr: { number: 124, state: "accepted", title: "Attach a credential" },
+      }),
+    ]);
+    expect(getByText("merge pending")).toBeTruthy();
+    // The PR chip still names the PR; the pill is the addition, not a swap.
+    expect(getByText("#124")).toBeTruthy();
+    expect(queryByText("closed")).toBeNull();
+  });
+
+  it("draws the shared `closed` pill on a PR closed without merging (H10)", () => {
+    const { getByText, queryByText } = renderBoard([
+      task({
+        pr: { number: 124, state: "closed", title: "Attach a credential" },
+      }),
+    ]);
+    expect(getByText("closed")).toBeTruthy();
+    expect(queryByText("merge pending")).toBeNull();
+  });
+
+  it("stays silent for a merged PR and for one still under review", () => {
+    // Density rule: only ACTIONABLE state earns a pill. The readiness pill and
+    // the PR chip already carry these two.
+    for (const state of ["merged", "review"] as const) {
+      const { queryByText, unmount } = renderBoard([
+        task({ pr: { number: 124, state, title: "Attach a credential" } }),
+      ]);
+      expect(queryByText("merge pending"), state).toBeNull();
+      expect(queryByText("closed"), state).toBeNull();
+      unmount();
+    }
   });
 });

@@ -8,14 +8,13 @@ import {
 /**
  * The @-mention autocomplete dropdown for the comment composer. A listbox of
  * matching agents / reserved handles / users; the active row is highlighted
- * and the typed substring is wrapped in the shared `.mention` chip. Rendered
- * as a positioned overlay below the composer box (parent supplies the
- * `position: relative` wrapper). Selection is driven by the parent via
- * keyboard; each row is also clickable.
+ * and the typed substring is marked. Rendered as a positioned overlay below the
+ * composer box (parent supplies the `position: relative` wrapper). Selection is
+ * driven by the parent via keyboard; each row is also clickable.
  *
  * Design-system only: reuses `.rsel-menu` / `.rsel-item` (the run-selector
- * menu) + `.mention` for the highlight; the AgentGlyph / Avatar match every
- * other identity surface. No new CSS, no inline hex.
+ * menu); the AgentGlyph / Avatar match every other identity surface. No inline
+ * hex.
  */
 
 function RowGlyph({ s }: { s: MentionSuggestion }) {
@@ -24,14 +23,27 @@ function RowGlyph({ s }: { s: MentionSuggestion }) {
   return <AgentGlyph backend={s.backend} />;
 }
 
-/** The primary label with the matched substring wrapped in `.mention`. */
+/**
+ * The label with the matched substring marked.
+ *
+ * This used to borrow `.mention`, the chip class the two renderers use to draw
+ * a REAL mention. It is not one — it is "the part of this name that matched
+ * what you typed", and the two carry different promises: `.mention` is being
+ * given a screen-reader affordance (a visually-hidden "mention " prefix), which
+ * would make an arbitrary matched substring in this dropdown announce itself as
+ * a mention. It gets its own class.
+ *
+ * `<mark>` is the honest element for a search hit: the platform already means
+ * "relevant to the user's current activity" by it, so the meaning does not
+ * depend on a stylesheet rule landing.
+ */
 function Highlighted({ label, query }: { label: string; query: string }) {
   const { before, match, after } = splitHighlight(label, query);
   if (!match) return <>{label}</>;
   return (
     <>
       {before}
-      <span className="mention">{match}</span>
+      <mark className="mention-match">{match}</mark>
       {after}
     </>
   );
@@ -58,18 +70,13 @@ export function MentionMenu({
   if (items.length === 0) return null;
   return (
     <div
+      // `.mention-menu` is the left-anchored modifier on `.rsel-menu`'s chrome;
+      // its geometry used to be an inline style object here and now lives in
+      // the sheet (P16-UI-02).
       className="rsel-menu mention-menu"
       role="listbox"
       id={id}
       aria-label="Mention suggestions"
-      style={{
-        position: "absolute",
-        left: 0,
-        right: "auto",
-        top: "calc(100% + 6px)",
-        minWidth: "260px",
-        maxWidth: "360px",
-      }}
     >
       {items.map((s, i) => (
         <button
