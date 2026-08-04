@@ -254,6 +254,45 @@ export function resolveDeployedSpecialist(
   };
 }
 
+/**
+ * R18-1: the KB grants the task's DELIVERING engagement used, so a reviewer can
+ * judge the work against the same conventions. Returns [] when there is no
+ * deliverer, when the deliverer IS this profile (its own run already carries
+ * them), or when the deliverer is undeployed since delivery (its live grants
+ * cannot be confirmed — the reviewer keeps its own KBs). `resolveKb` throwing
+ * (undeployed profile) is treated as "no extras".
+ */
+function deliveringKbGrants(
+  frontmatter: Parameters<typeof deliveringEngagement>[0],
+  reviewerProfileId: string,
+  resolveKb: (profileId: string) => string[],
+): string[] {
+  const deliverer = deliveringEngagement(frontmatter);
+  if (!deliverer || deliverer.profileId === reviewerProfileId) return [];
+  try {
+    return resolveKb(deliverer.profileId);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Append the delivering engagement's KBs (lazily resolved) onto the reviewer's
+ * own KB list, reviewer's first, deduped so a KB both grant never injects — or
+ * double-charges the shared injection budget — twice.
+ */
+function withDeliveringKb(own: string[], resolveExtras: () => string[]): string[] {
+  const seen = new Set(own);
+  const merged = [...own];
+  for (const name of resolveExtras()) {
+    if (!seen.has(name)) {
+      seen.add(name);
+      merged.push(name);
+    }
+  }
+  return merged;
+}
+
 function agentEvent(text: string): TaskFileEvent {
   return {
     occurredAt: new Date().toISOString(),
@@ -725,6 +764,29 @@ export async function startAgentRun(
       resolved,
       existing.parsed.frontmatter.stage,
       projectBoard(ctx, input.projectSlug),
+    );
+  }
+
+  // R18-1: a REVIEWER must judge the work against the SAME knowledge-base
+  // conventions the DELIVERER used. Grants are per-profile, so a reviewer with
+  // `kb: []` (or a different KB set) reviewed against different conventions and
+  // produced false `request_changes` verdicts (live-caught: a reviewer flagged
+  // a KB-required footer as unsubstantiated because it lacked the KB). Union the
+  // delivering engagement's live KB grants into this reviewer run's kb list —
+  // reviewer's own KBs first, the deliverer's extras appended, deduped so a KB
+  // both grant injects (and charges the shared budget) once. Only for a
+  // non-delivering run: the deliverer's own run already carries these, and the
+  // operator runs a separate path (buildOperatorSystemPrompt). Tolerant of an
+  // undeployed deliverer (resolve throws → skip), like the reviewer's own
+  // resolve above.
+  if (!delivers) {
+    kb = withDeliveringKb(kb, () =>
+      deliveringKbGrants(
+        existing.parsed.frontmatter,
+        engagement.profileId,
+        (profileId) =>
+          resolveDeployedSpecialist(ctx, input.projectSlug, profileId).kb,
+      ),
     );
   }
 
@@ -1509,10 +1571,26 @@ export function resolveResumeConfinement(
     // gets the same honest prompt as a fresh one.
     const resumeMcps = resolveSpecialistMcpServersDetailed(db, resolved.mcps);
     const mcpServers = resumeMcps.servers;
+    // R18-1 parity: a resumed/@mention reviewer must keep the deliverer's KBs it
+    // had on the fresh run, or it silently loses those conventions mid-thread.
+    const resumeTask = readTaskFile(
+      taskRef(ctx, input.projectSlug, input.taskKey),
+    );
+    const kb =
+      !input.delivers && resumeTask
+        ? withDeliveringKb(resolved.kb, () =>
+            deliveringKbGrants(
+              resumeTask.parsed.frontmatter,
+              input.profileId,
+              (profileId) =>
+                resolveDeployedSpecialist(ctx, input.projectSlug, profileId).kb,
+            ),
+          )
+        : resolved.kb;
     const persona = buildSpecialistPersona({
       profileId: input.profileId,
       skills: resolved.skills,
-      kb: resolved.kb,
+      kb,
       mcps: Object.keys(mcpServers),
       unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),

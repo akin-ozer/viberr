@@ -29,7 +29,7 @@ import type {
 } from "~/server/runtimes/adapter.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
-import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { installFakeRuntime, lastRunSpec } from "../../../test-support/fake-runtime";
 import {
   assignReviewer,
   assignSpecialist,
@@ -1501,5 +1501,100 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).not.toContain("SENTINEL-SKILL-UNRELATED");
     expect(persona).not.toContain("reviewer-expertise");
     expect(persona).not.toContain("terraform-review");
+  });
+});
+
+describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => {
+  /** Deploy a `dev` deliverer granting KB `deliverKb` and a `critic` reviewer
+   *  granting KB `reviewKb` (may be []). */
+  function deployKbPair(deliverKb: string[], reviewKb: string[]): void {
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "developer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: [], mcps: [], kb: deliverKb },
+          },
+        } as never,
+        {
+          profileId: "critic",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "critic", role: "reviewer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: [], mcps: [], kb: reviewKb },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function writeKb(name: string, body: string): void {
+    mkdirSync(path.join(store.dataRoot, "kb", name), { recursive: true });
+    writeFileSync(path.join(store.dataRoot, "kb", name, "conventions.md"), body);
+  }
+
+  async function engageAndRunCritic(): Promise<string> {
+    await assignSpecialist(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const result = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    expect(result.role).toBe("reviewer");
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      actor(store.users.arda));
+    return lastRunSpec()?.systemPrompt ?? "";
+  }
+
+  it("a reviewer with kb:[] resolves the delivering engagement's KB bodies", async () => {
+    deployKbPair(["foo"], []);
+    writeKb("foo", "# Conventions\n\nSENTINEL-DELIVERER-KB");
+    const sys = await engageAndRunCritic();
+    expect(sys).toContain("foo (knowledge base)");
+    expect(sys).toContain("SENTINEL-DELIVERER-KB");
+  });
+
+  it("does not double-inject a KB both the reviewer and deliverer grant", async () => {
+    deployKbPair(["shared"], ["shared"]);
+    writeKb("shared", "# Shared\n\nSENTINEL-SHARED-KB");
+    const sys = await engageAndRunCritic();
+    expect(sys.split("shared (knowledge base)").length - 1).toBe(1);
+  });
+
+  it("does NOT leak the reviewer's own KB back onto the delivering run", async () => {
+    // critic grants "bar"; dev grants nothing. Running dev (the deliverer) must
+    // not gain the reviewer's KB — inheritance is one-directional.
+    deployKbPair([], ["bar"]);
+    writeKb("bar", "# Bar\n\nSENTINEL-REVIEWER-ONLY-KB");
+    await assignSpecialist(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const devRun = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId },
+      actor(store.users.arda));
+    expect(lastRunSpec()?.systemPrompt ?? "").not.toContain("SENTINEL-REVIEWER-ONLY-KB");
   });
 });
