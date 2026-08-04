@@ -118,6 +118,14 @@ export interface NotificationListItem extends NotificationRecord {
   /** Resolved destination, or null when this row concerns no navigable
    *  surface — the signal a renderer uses to style it as non-clickable. */
   href: string | null;
+  /**
+   * F18-1: the row names a project (projectSlug set) that no longer exists in
+   * the store — e.g. the project was deleted after the notification was written.
+   * Its `href` is nulled (clicking it 404'd on a shell-less error page), the
+   * renderer shows a "no longer exists" note, and it is dropped from the unread
+   * badge (`countUnreadNotifications`) so a wiped project stops inflating it.
+   */
+  targetMissing: boolean;
 }
 
 /**
@@ -207,6 +215,12 @@ export function listNotifications(
   const { waitingOnYou: mine } = indexDecisionInbox(db, userId);
   return rows.map((row) => {
     const record = mapNotificationRow(row);
+    // F18-1: the LEFT JOIN yields a null project name only when no projects row
+    // matches the slug — i.e. the project this row points at is gone. Such a row
+    // has no live surface to open (its board/task 404s), so it is not clickable
+    // and the renderer flags it as orphaned. (A null project_slug is an org-wide
+    // row, not an orphan.)
+    const targetMissing = record.projectSlug != null && row.project_name == null;
     const scoped: NotificationListItem = {
       ...record,
       waitingOnYou:
@@ -214,7 +228,8 @@ export function listNotifications(
         record.projectSlug != null &&
         record.taskKey != null &&
         mine.has(`${record.projectSlug}::${record.taskKey}`),
-      href: notificationHref(record),
+      href: targetMissing ? null : notificationHref(record),
+      targetMissing,
     };
     return scoped.from ? { ...scoped, from: overlay(scoped.from) } : scoped;
   });
@@ -224,9 +239,16 @@ export function countUnreadNotifications(
   db: DatabaseSync,
   userId: string,
 ): number {
+  // F18-1: an unread row that points at a DELETED project is not actionable —
+  // clicking it 404s — so it must not inflate the bell badge. Count unread rows
+  // that are either org-wide (no project_slug) or whose project still exists.
   const row = db
     .prepare(
-      `SELECT count(*) AS c FROM notifications WHERE user_id = ? AND read_at IS NULL`,
+      `SELECT count(*) AS c
+       FROM notifications n
+       LEFT JOIN projects p ON p.slug = n.project_slug
+       WHERE n.user_id = ? AND n.read_at IS NULL
+         AND (n.project_slug IS NULL OR p.slug IS NOT NULL)`,
     )
     .get(userId) as { c: number };
   return row.c;

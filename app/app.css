@@ -2559,6 +2559,10 @@ dialog[data-closing]::backdrop {
 .ntf-item-main .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .76rem; color: var(--faint); line-height: 1.45; margin-top: .15rem; }
 .ntf-item-main .mt { display: block; font-family: var(--font-mono); font-size: .66rem; color: var(--placeholder); margin-top: .3rem; }
 .ntf-item .unread-dot { margin-top: .45rem; flex: none; }
+/* F18-1: an orphan (its project was deleted) is not navigable — dim it and drop
+   the pointer cursor so it reads as a dead record, not a live link. */
+.ntf-item.orphaned { opacity: .6; cursor: default; }
+.ntf-item.orphaned:hover { background: none; }
 .ntf-pop-foot { border-top: 1px solid var(--hairline); padding: .45rem .55rem; display: flex; justify-content: flex-end; }
 .ntf-pop-foot .btn { text-decoration: none; }
 

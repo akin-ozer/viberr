@@ -25,6 +25,8 @@ import {
  */
 
 function keybtnLabel(n: NotificationPageItem): string {
+  // F18-1: an orphan has nowhere to open — say so instead of a live-looking link.
+  if (n.targetMissing) return "project no longer exists";
   return (n.projectName ? n.projectName + " · " : "") + (n.taskKey ?? "");
 }
 
