@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Icon } from "~/ui/icon";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import type { NotificationView } from "~/features/notifications/notification-item";
 import { CommandPalette } from "./command-palette";
+import { useCommandPaletteShortcut } from "./use-command-palette";
 import { TopBell } from "./top-bell";
 import { UserMenu, type MenuUser } from "./user-menu";
 import { boardHref, workspaceViewFromPathname, workspaceViewLabel } from "./nav";
@@ -64,16 +65,26 @@ export function Topbar({
   const [palette, setPalette] = useState(false);
 
   // ⌘K / Ctrl-K opens the palette (R15-5 — it used to focus a board filter).
+  // UI-C: ONE implementation, shared with Home (inventory rough edge #8).
+  useCommandPaletteShortcut(() => setPalette(true));
+
+  // F15-18/UI-C: the mobile rail is an overlay; Escape has to be able to get
+  // out of it, and focus has to land back on the control that opened it. The
+  // scrim is pointer-only by construction (`routes/project.tsx`), so this is
+  // the keyboard half of that dismissal — not a duplicate of it.
+  const railToggleRef = useRef<HTMLButtonElement>(null);
+  const toggleRailRef = useRef(onToggleRail);
+  toggleRailRef.current = onToggleRail;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPalette(true);
-      }
+    if (!railOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      toggleRailRef.current?.();
+      railToggleRef.current?.focus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [railOpen]);
 
   return (
     <div className="topbar">
@@ -81,6 +92,7 @@ export function Topbar({
           rail is always on screen and a toggle would be noise. */}
       {onToggleRail && (
         <button
+          ref={railToggleRef}
           type="button"
           className="rail-toggle"
           aria-label="Project navigation"

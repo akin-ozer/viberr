@@ -22,14 +22,21 @@ const at = (
 ): string => new Date(y, m, d, hh, mm, 0).toISOString();
 
 describe("formatClock", () => {
-  it("renders 24h with no leading hour zero", () => {
-    expect(formatClock(at(2026, 6, 4, 9, 41))).toBe("9:41");
+  it("renders a zero-padded 24h clock", () => {
+    expect(formatClock(at(2026, 6, 4, 9, 41))).toBe("09:41");
     expect(formatClock(at(2026, 6, 3, 16, 4))).toBe("16:04");
-    expect(formatClock(at(2026, 6, 4, 0, 5))).toBe("0:05");
+    // F19 — the case the design mock never contained, and the one the running
+    // app hits constantly: store timestamps are UTC, so an evening event in a
+    // UTC+3 viewer renders past local midnight on the 0 hour. Unpadded this
+    // printed "0:05", which the audit panel stamped "today 0:05".
+    expect(formatClock(at(2026, 6, 4, 0, 5))).toBe("00:05");
+    expect(formatClock(at(2026, 6, 4, 0, 0))).toBe("00:00");
+    expect(formatClock(at(2026, 6, 4, 0, 27))).toBe("00:27");
   });
   it("returns empty string for garbage", () => {
     expect(formatClock("not-a-date")).toBe("");
   });
+
 });
 
 describe("formatDayBucket", () => {
@@ -42,7 +49,7 @@ describe("formatDayBucket", () => {
 
 describe("formatDayTime (notification meta form)", () => {
   it("today shows the bare clock", () => {
-    expect(formatDayTime(at(2026, 6, 4, 9, 41), NOW)).toBe("9:41");
+    expect(formatDayTime(at(2026, 6, 4, 9, 41), NOW)).toBe("09:41");
   });
   it("other days prefix the bucket", () => {
     expect(formatDayTime(at(2026, 6, 3, 16, 4), NOW)).toBe("Yesterday 16:04");
@@ -52,7 +59,7 @@ describe("formatDayTime (notification meta form)", () => {
 
 describe("formatDayDotTime (timeline form)", () => {
   it("uses the dot separator off-today", () => {
-    expect(formatDayDotTime(at(2026, 6, 4, 9, 41), NOW)).toBe("9:41");
+    expect(formatDayDotTime(at(2026, 6, 4, 9, 41), NOW)).toBe("09:41");
     expect(formatDayDotTime(at(2026, 6, 3, 16, 4), NOW)).toBe(
       "Yesterday · 16:04",
     );
@@ -63,7 +70,8 @@ describe("UTC variants (hydration-deterministic first pass)", () => {
   // Fixed UTC instants — output must not depend on the host timezone.
   const NOW_UTC = new Date("2026-07-04T10:45:00.000Z");
   it("formatClockUTC renders the UTC wall clock", () => {
-    expect(formatClockUTC("2026-07-04T09:41:00.000Z")).toBe("9:41");
+    expect(formatClockUTC("2026-07-04T09:41:00.000Z")).toBe("09:41");
+    expect(formatClockUTC("2026-07-04T00:18:00.000Z")).toBe("00:18");
     expect(formatClockUTC("2026-07-04T16:04:00.000Z")).toBe("16:04");
     expect(formatClockUTC("not-a-date")).toBe("");
   });
@@ -76,7 +84,9 @@ describe("UTC variants (hydration-deterministic first pass)", () => {
     expect(formatDayBucketUTC("not-a-date")).toBe("");
   });
   it("formatDayDotTimeUTC buckets by UTC day", () => {
-    expect(formatDayDotTimeUTC("2026-07-04T09:41:00.000Z", NOW_UTC)).toBe("9:41");
+    expect(formatDayDotTimeUTC("2026-07-04T09:41:00.000Z", NOW_UTC)).toBe(
+      "09:41",
+    );
     expect(formatDayDotTimeUTC("2026-07-03T16:04:00.000Z", NOW_UTC)).toBe(
       "Yesterday · 16:04",
     );

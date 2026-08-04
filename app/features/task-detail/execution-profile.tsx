@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router";
+import { useDismiss } from "~/ui/use-dismiss";
 import { type ProjectRole, roleCan } from "~/shared/rbac";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import { Avatar } from "~/ui/avatar";
@@ -101,25 +102,7 @@ function OwnerControl({
     "release-any-ownership",
   );
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   if (!o) {
     // Only contributor+ may take ownership (Q5) — hide from viewers/non-members.
@@ -268,23 +251,7 @@ function SpecialistControl({
   onAssign: (profileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   // P14-WL-07: G9 disabled the RUN buttons on a closed task but left the two
   // engage menus fully live, so a Done+merged task still offered to assign a
@@ -385,23 +352,7 @@ function ReviewerControl({
   onAssign: (profileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   // P14-WL-07: same reason as SpecialistControl — a closed task must not offer
   // to engage a reviewer whose Run button would then render disabled.

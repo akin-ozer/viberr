@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
+import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -554,7 +555,8 @@ export function UsersPanel({
       <div className="pol-note">
         <Icon name="shield" />
         <span>
-          <strong>{users.length} instance accounts</strong> — GitHub &amp; Google access
+          <strong>{countLabel(users.length, "instance account")}</strong> — GitHub &amp;
+          Google access
           is whitelist-based: allowed people simply sign in, no invite emails. Board
           permissions are granted per project.
         </span>

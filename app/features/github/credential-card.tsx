@@ -223,15 +223,7 @@ export function CredentialManageActions({
   const [confirming, setConfirming] = useState(false);
   if (!canManage) return null;
   return (
-    <div
-      className="cred-manage"
-      style={{
-        display: "flex",
-        gap: ".4rem",
-        marginTop: ".6rem",
-        flexWrap: "wrap",
-      }}
-    >
+    <div className="cred-manage">
       <button
         type="button"
         className="btn ghost sm"

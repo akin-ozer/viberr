@@ -1,4 +1,4 @@
-import type { CSSProperties, Dispatch, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
 import { Icon } from "~/ui/icon";
@@ -79,21 +79,6 @@ const EFFORT_LABEL: Record<string, string> = {
 function effortLabel(id: string): string {
   return EFFORT_LABEL[id] ?? id;
 }
-
-/** Inline styling mirroring `.field input` (app.css) — the design system has
- * no `<select>` rule and this feature may not edit app.css, so the dropdowns
- * match the modal's other fields via matching tokens here. */
-const selectStyle: CSSProperties = {
-  width: "100%",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-button)",
-  padding: ".55rem .7rem",
-  background: "var(--surface)",
-  color: "var(--fg)",
-  fontFamily: "var(--font-body)",
-  fontSize: ".9rem",
-  outline: 0,
-};
 
 // Repo-write grants that mark a profile as a DELIVERING builder (mirrors
 // listDeployedSpecialists' delivery heuristic) — used to seed the verdict
@@ -368,7 +353,6 @@ function ModelEffortFields({
           value={model}
           onChange={(e) => setModel(e.target.value)}
           disabled={!backend || catalogLoading}
-          style={selectStyle}
         >
           {!backend && <option value="">Pick a backend first</option>}
           {/* Preserve a seeded value that is not in the catalog. */}
@@ -402,8 +386,7 @@ function ModelEffortFields({
             value={effort}
             onChange={(e) => setEffort(e.target.value)}
             disabled={!backend || catalogLoading}
-            style={selectStyle}
-          >
+            >
             {!backend && <option value="">—</option>}
             {effort && !effortOptions.includes(effort) && (
               <option value={effort}>{effortLabel(effort)}</option>

@@ -341,11 +341,7 @@ export function Timeline({
           </div>
         )}
         <div className="composer-box">
-          <div
-            className="composer-input"
-            style={{ position: "relative" }}
-            ref={composerBoxRef}
-          >
+          <div className="composer-input" ref={composerBoxRef}>
             {/* Lexical plain-text editor: known @mentions highlight live as
                 character-editable text (no backdrop mirroring); the posted
                 value stays exactly the trimmed plain draft. */}

@@ -1,5 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { useFetcher, useNavigate } from "react-router";
+import {
+  DragDropProvider,
+  KeyboardSensor,
+  PointerSensor,
+  type DragEndEvent,
+  type DragMoveEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/react";
+import { useSortable } from "@dnd-kit/react/sortable";
+import { OptimisticSortingPlugin } from "@dnd-kit/dom/sortable";
+import {
+  Accessibility,
+  defaultPreset,
+  Feedback,
+  PointerActivationConstraints,
+} from "@dnd-kit/dom";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
@@ -11,10 +28,13 @@ import {
   CredentialCard,
   CredentialManageActions,
 } from "~/features/github/credential-card";
+// The one shared "Escape or an outside press closes me" hook.
+import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * Project settings: project identity and workflow-stages editor
@@ -207,6 +227,377 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
   );
 }
 
+/* ------------------------------------------------------------ stage reorder
+ *
+ * ONE drag language (pass 16). The board migrated to dnd-kit on 2026-08-03
+ * under a deliberate affordance ruling: the whole card is the drag surface and
+ * there is NO grip handle. This list shipped the opposite — a hand-rolled
+ * HTML5 `draggable` row with a visible `.stg-handle` grip — so the product
+ * taught two contradictory gestures for the same verb. It is now the same
+ * foundation, the same sensors, the same "nothing reorders client-side" rule,
+ * and the same carve-out that keeps real controls inside the row clickable.
+ */
+const STAGE_SENSORS = [
+  PointerSensor.configure({
+    // The row contains a rename button, a Move menu and a remove ✕. Only those
+    // opt out of dragging — everything else in the row lifts it, which is what
+    // makes a grip unnecessary.
+    preventActivation: (event: PointerEvent) => {
+      const target = event.target;
+      return (
+        target instanceof Element &&
+        Boolean(target.closest("button, input, select, textarea"))
+      );
+    },
+    // Mouse: distance only, so a slow press on the row's name still clicks.
+    // Touch: a short press, so scrolling the settings column is never hijacked.
+    activationConstraints: (event: PointerEvent) =>
+      event.pointerType === "touch"
+        ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
+        : [new PointerActivationConstraints.Distance({ value: 5 })],
+  }),
+  KeyboardSensor,
+];
+
+/* Same call as the board: the Accessibility plugin's role="button" wrapper
+ * would nest the rename/move/remove controls inside an interactive element
+ * (axe: nested-interactive, serious). Drag stays pointer-only and the
+ * accessible path is the per-row Move menu below. */
+const STAGE_PLUGINS = defaultPreset.plugins.filter(
+  (plugin) => plugin !== Accessibility,
+);
+
+/** Sortable payload — the id of the row below this one, so a drop past a row's
+ *  midpoint can resolve to "after it" without a global lookup (board parity). */
+interface StageDragData {
+  nextId: string | null;
+  [key: string]: unknown;
+}
+
+/**
+ * Resolve a finished stage drag — or a Move-menu pick — into the ordered id
+ * list the `reorder-stages` action takes, or null when nothing should be
+ * submitted. Pure, so the pinning and no-op rules are unit-testable without a
+ * drag library; the direct counterpart of `board-dnd.ts:resolveBoardDrop`.
+ *
+ * `beforeId` names the stage the moved one should land immediately BEFORE
+ * (null = the end of the list), exactly like the board's `beforeKey`.
+ */
+export function resolveStageOrder(
+  stages: readonly { id: string }[],
+  moveId: string,
+  beforeId: string | null,
+): string[] | null {
+  const ids = stages.map((s) => s.id);
+  if (!ids.includes(moveId)) return null;
+  if (beforeId === moveId) return null;
+  const rest = ids.filter((id) => id !== moveId);
+  // A target that vanished under the drag (the list can change via SSE
+  // revalidation) degrades to the end rather than submitting a reference the
+  // server cannot place.
+  const found = beforeId === null ? -1 : rest.indexOf(beforeId);
+  const insertAt = beforeId === null || found < 0 ? rest.length : found;
+  const next = [...rest.slice(0, insertAt), moveId, ...rest.slice(insertAt)];
+  // Entry stays first, terminal stays last — pinned by CURRENT identity, not by
+  // literal id, mirroring what the server re-applies on top of whatever we send.
+  const entryId = ids[0];
+  const terminalId = ids.length > 1 ? ids[ids.length - 1] : undefined;
+  const pinned = [
+    ...(entryId === undefined ? [] : [entryId]),
+    ...next.filter((id) => id !== entryId && id !== terminalId),
+    ...(terminalId === undefined ? [] : [terminalId]),
+  ];
+  if (pinned.every((id, i) => id === ids[i])) return null;
+  return pinned;
+}
+
+/** The stages a member may actually reorder: everything between the pinned
+ *  entry and terminal stages. */
+function movableStages<T extends { id: string }>(stages: readonly T[]): T[] {
+  return stages.length > 2 ? stages.slice(1, -1) : [];
+}
+
+/**
+ * Every reorder this row can perform, as `{label, beforeId}` pairs. Empty when
+ * the row cannot move, which is what hides the Move control.
+ */
+export function stageMoveOptions(
+  stages: readonly { id: string; name: string }[],
+  stageId: string,
+): { label: string; beforeId: string | null }[] {
+  const movable = movableStages(stages);
+  const i = movable.findIndex((s) => s.id === stageId);
+  if (i < 0 || movable.length < 2) return [];
+  const out: { label: string; beforeId: string | null }[] = [];
+  if (i > 0) {
+    out.push({ label: "Move earlier", beforeId: movable[i - 1]!.id });
+    if (i > 1) out.push({ label: "Move to first", beforeId: movable[0]!.id });
+  }
+  if (i < movable.length - 1) {
+    // Land after my current neighbour: before whatever follows it.
+    out.push({ label: "Move later", beforeId: movable[i + 2]?.id ?? null });
+    if (i < movable.length - 2) out.push({ label: "Move to last", beforeId: null });
+  }
+  return out;
+}
+
+/**
+ * The keyboard/AT path for stage reordering, modelled on `ui/stage-menu.tsx` —
+ * the board's sanctioned non-drag path. Drag here is pointer-only for the same
+ * reason it is on the board, and before this the stage order was reachable by
+ * MOUSE ONLY: HTML5 drag events have no keyboard equivalent and no touch one,
+ * so a keyboard user could rename and delete stages but never reorder them.
+ *
+ * Same contract as StageMenu: a real <button aria-haspopup="menu"> whose label
+ * names the current position, `role="menu"` items, ↑/↓ wrapping, Home/End,
+ * Escape closes and returns focus to the trigger, an outside press closes.
+ */
+function StageMoveMenu({
+  stage,
+  position,
+  total,
+  options,
+  onMove,
+}: {
+  stage: { id: string; name: string };
+  position: number;
+  total: number;
+  options: { label: string; beforeId: string | null }[];
+  onMove: (beforeId: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // The one shared "Escape or an outside press closes me" hook.
+  const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+
+  const items = () =>
+    Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ??
+        [],
+    );
+
+  // StageMenu's contract: opening moves focus into the first item so the arrow
+  // keys have an anchor. Reads the ref inline so the effect has no stale-closure
+  // dependency to declare.
+  useEffect(() => {
+    if (!open) return;
+    menuRef.current
+      ?.querySelector<HTMLButtonElement>('[role="menuitem"]')
+      ?.focus();
+  }, [open]);
+
+  const closeAndReturnFocus = () => {
+    setOpen(false);
+    btnRef.current?.focus();
+  };
+
+  const onMenuKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const all = items();
+    if (all.length === 0) return;
+    const i = all.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      // Keep the document-level listener from acting on the same press; focus
+      // return is this menu's job, not the shared hook's.
+      event.stopPropagation();
+      closeAndReturnFocus();
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      all[i < 0 ? 0 : (i + 1) % all.length]!.focus();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      all[i <= 0 ? all.length - 1 : i - 1]!.focus();
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      all[0]!.focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      all[all.length - 1]!.focus();
+    }
+  };
+
+  if (options.length === 0) return null;
+
+  return (
+    <div className="own-wrap" ref={wrapRef}>
+      <button
+        ref={btnRef}
+        type="button"
+        className={"own-btn" + (open ? " open" : "")}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Move ${stage.name} — currently stage ${position} of ${total}`}
+        title="Move this stage in the workflow order"
+        onClick={() => setOpen(!open)}
+      >
+        Move
+        <Icon name="chevron" />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          // The menu is 258px wide and this trigger sits at the right edge of a
+          // horizontally-clipped settings column, so it anchors right instead of
+          // left — `.own-menu.to-right` in the sheet, which also moves the
+          // entrance transform-origin with it (P16-UI-25).
+          className="own-menu to-right"
+          role="menu"
+          aria-label={`Move ${stage.name}`}
+          onKeyDown={onMenuKey}
+        >
+          <div className="own-lbl">Workflow order</div>
+          {options.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              className="menu-item"
+              role="menuitem"
+              onClick={() => {
+                closeAndReturnFocus();
+                onMove(option.beforeId);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StageRow({
+  stage,
+  index,
+  taskCount,
+  locked,
+  canManage,
+  editing,
+  dragging,
+  over,
+  nextId,
+  moveOptions,
+  totalStages,
+  onStartRename,
+  onCommitName,
+  onCancelRename,
+  onMove,
+  onRemove,
+  entryId,
+}: {
+  stage: SettingsViewData["stages"][number];
+  index: number;
+  taskCount: number;
+  locked: string | null;
+  canManage: boolean;
+  editing: boolean;
+  dragging: boolean;
+  over: boolean;
+  nextId: string | null;
+  moveOptions: { label: string; beforeId: string | null }[];
+  totalStages: number;
+  onStartRename: () => void;
+  onCommitName: (raw: string) => void;
+  onCancelRename: () => void;
+  onMove: (beforeId: string | null) => void;
+  onRemove: () => void;
+  entryId: string | undefined;
+}) {
+  // Whole row is the drag surface. Optimistic sorting is OFF — this list never
+  // reorders client-side; the `.over` insertion line shows the requested slot
+  // and the server's answer, arriving by revalidation, is the only commit.
+  const canDrag = canManage && !locked && !editing;
+  const { ref } = useSortable<StageDragData>({
+    id: stage.id,
+    index,
+    data: { nextId },
+    disabled: !canDrag,
+    plugins: (defaults) => [
+      ...defaults.filter((plugin) => plugin !== OptimisticSortingPlugin),
+      Feedback.configure({ feedback: "clone" }),
+    ],
+  });
+  return (
+    <div
+      ref={ref}
+      // `.draggable` is the grab-cursor hook, named to match the board's
+      // `.card-wrap.draggable` (app.css:672-673) — the whole-row surface has no
+      // grip, so the cursor is its only pointer affordance.
+      className={
+        "stg-row" +
+        (canDrag ? " draggable" : "") +
+        (dragging ? " dragging" : "") +
+        (over ? " over" : "")
+      }
+    >
+      {/* The grip is gone (it was the affordance the board deliberately
+          rejected), but the slot stays so locked and unlocked rows still line
+          up — and it is where the entry/terminal lock glyph lives. */}
+      <span
+        className="stg-handle off"
+        title={locked ? `${stage.name} is fixed — ${locked}` : undefined}
+      >
+        {locked && <Icon name="lock" />}
+      </span>
+      <span className="sdot" style={{ background: stage.color }}></span>
+      {editing ? (
+        <input
+          type="text"
+          className="stg-input"
+          aria-label={"Rename " + stage.name}
+          defaultValue={stage.name}
+          autoFocus
+          onFocus={(e) => e.target.select()}
+          onBlur={(e) => onCommitName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") onCancelRename();
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          className="stg-name"
+          title="Rename stage"
+          disabled={!canManage}
+          onClick={onStartRename}
+        >
+          {stage.name}
+        </button>
+      )}
+      <span className="stg-count">
+        {taskCount} {taskCount === 1 ? "task" : "tasks"}
+      </span>
+      {canManage && (
+        <StageMoveMenu
+          stage={stage}
+          position={index + 1}
+          total={totalStages}
+          options={moveOptions}
+          onMove={onMove}
+        />
+      )}
+      <button
+        type="button"
+        className={"stg-x" + (locked ? " off" : "")}
+        aria-label={"Remove " + stage.name}
+        title={
+          locked
+            ? `${stage.name} is a required ${stage.id === entryId ? "entry" : "terminal"} stage and can't be removed`
+            : "Remove stage"
+        }
+        // F10-22: entry/terminal stages are model-locked; the control is
+        // truly disabled (not just greyed) so it never looks actionable.
+        disabled={!canManage || Boolean(locked)}
+        onClick={onRemove}
+      >
+        <Icon name="x" />
+      </button>
+    </div>
+  );
+}
+
 export function StagesPanel({
   stages,
   counts,
@@ -232,9 +623,12 @@ export function StagesPanel({
 }) {
   const push = useToast();
   const [dragId, setDragId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
+  // The row the dragged stage would land immediately BEFORE (null = the end),
+  // drawn as the `.stg-row.over` insertion line. Board parity: `beforeKey`.
+  const [beforeId, setBeforeId] = useState<string | null>(null);
 
   const count = (id: string) => counts[id] ?? 0;
+  const entryId = stages[0]?.id;
 
   const commitName = (s: { id: string; name: string }, raw: string) => {
     setEditingId(null);
@@ -257,24 +651,47 @@ export function StagesPanel({
     onRemove(s.id);
   };
 
-  const drop = (targetId: string) => {
-    const src = dragId;
+  /** Drag and the Move menu land on the SAME governed submission. */
+  const move = (moveId: string, before: string | null) => {
+    const next = resolveStageOrder(stages, moveId, before);
+    if (!next) return;
+    onReorder(next);
+  };
+
+  // dnd-kit event flow, mirroring the board's: a row target proposes "insert
+  // before that row"; onDragMove refines it against the pointer's vertical
+  // midpoint (top half → before it, bottom half → before the next one).
+  const onDragStart = (event: DragStartEvent) => {
+    setDragId(String(event.operation.source?.id ?? "") || null);
+    setBeforeId(null);
+  };
+  const onDragOver = (event: DragOverEvent) => {
+    const target = event.operation.target;
+    setBeforeId(target ? String(target.id) : null);
+  };
+  const onDragMove = (event: DragMoveEvent) => {
+    const target = event.operation.target;
+    const element = target?.element;
+    if (!target || !element) return;
+    const rect = element.getBoundingClientRect();
+    const id = String(target.id);
+    const nextId =
+      (target.data as Partial<StageDragData> | undefined)?.nextId ?? null;
+    const before =
+      event.operation.position.current.y < rect.top + rect.height / 2
+        ? id
+        : nextId;
+    setBeforeId((prev) => (prev === before ? prev : before));
+  };
+  // Fires on drop AND on cancel (Escape, released outside the list). Nothing
+  // commits client-side; a resolved drop submits the governed reorder and
+  // revalidation applies the server's order.
+  const onDragEnd = (event: DragEndEvent) => {
+    const active = dragId;
     setDragId(null);
-    setOverId(null);
-    if (!src || src === targetId) return;
-    const reordered = [...stages];
-    const [moved] = reordered.splice(reordered.findIndex((s) => s.id === src), 1);
-    reordered.splice(reordered.findIndex((s) => s.id === targetId), 0, moved!);
-    // Entry stays first, terminal stays last (the server re-applies this
-    // regardless), pinned by current identity not literal ids.
-    const entryId = stages[0]?.id;
-    const terminalId = stages[stages.length - 1]?.id;
-    const next = [
-      reordered.find((s) => s.id === entryId),
-      ...reordered.filter((s) => s.id !== entryId && s.id !== terminalId),
-      reordered.find((s) => s.id === terminalId),
-    ].filter((s): s is NonNullable<typeof s> => Boolean(s));
-    onReorder(next.map((s) => s.id));
+    setBeforeId(null);
+    if (!active || event.canceled) return;
+    move(active, beforeId);
   };
 
   return (
@@ -283,94 +700,42 @@ export function StagesPanel({
         <Icon name="branch" />
         <h2>Workflow stages</h2>
         <span className="right sub" style={PANEL_COUNT_STYLE}>
-          {stages.length} stages
+          {countLabel(stages.length, "stage")}
         </span>
       </div>
-      <div className="stg-list">
-        {stages.map((s) => {
-          const locked = stageLockReason(s.id, stages);
-          const n = count(s.id);
-          return (
-            <div
-              className={
-                "stg-row" +
-                (dragId === s.id ? " dragging" : "") +
-                (overId === s.id && dragId !== s.id ? " over" : "")
-              }
+      <DragDropProvider
+        sensors={STAGE_SENSORS}
+        plugins={STAGE_PLUGINS}
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDragMove={onDragMove}
+        onDragEnd={onDragEnd}
+      >
+        <div className="stg-list">
+          {stages.map((s, i) => (
+            <StageRow
               key={s.id}
-              draggable={canManage && !locked && editingId !== s.id}
-              onDragStart={(e) => {
-                setDragId(s.id);
-                e.dataTransfer.effectAllowed = "move";
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (overId !== s.id) setOverId(s.id);
-              }}
-              onDragLeave={() => {
-                if (overId === s.id) setOverId(null);
-              }}
-              onDrop={() => drop(s.id)}
-              onDragEnd={() => {
-                setDragId(null);
-                setOverId(null);
-              }}
-            >
-              <span
-                className={"stg-handle" + (locked ? " off" : "")}
-                title={locked ? `${s.name} is fixed — ${locked}` : "Drag to reorder"}
-              >
-                <Icon name={locked ? "lock" : "grip"} />
-              </span>
-              <span className="sdot" style={{ background: s.color }}></span>
-              {editingId === s.id ? (
-                <input
-                  type="text"
-                  className="stg-input"
-                  aria-label={"Rename " + s.name}
-                  defaultValue={s.name}
-                  autoFocus
-                  onFocus={(e) => e.target.select()}
-                  onBlur={(e) => commitName(s, e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                    if (e.key === "Escape") setEditingId(null);
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="stg-name"
-                  title="Rename stage"
-                  disabled={!canManage}
-                  onClick={() => setEditingId(s.id)}
-                >
-                  {s.name}
-                </button>
-              )}
-              <span className="stg-count">
-                {n} {n === 1 ? "task" : "tasks"}
-              </span>
-              <button
-                type="button"
-                className={"stg-x" + (locked ? " off" : "")}
-                aria-label={"Remove " + s.name}
-                title={
-                  locked
-                    ? `${s.name} is a required ${s.id === stages[0]?.id ? "entry" : "terminal"} stage and can't be removed`
-                    : "Remove stage"
-                }
-                // F10-22: entry/terminal stages are model-locked; the control is
-                // truly disabled (not just greyed) so it never looks actionable.
-                disabled={!canManage || Boolean(locked)}
-                onClick={() => remove(s)}
-              >
-                <Icon name="x" />
-              </button>
-            </div>
-          );
-        })}
-      </div>
+              stage={s}
+              index={i}
+              taskCount={count(s.id)}
+              locked={stageLockReason(s.id, stages)}
+              canManage={canManage}
+              editing={editingId === s.id}
+              dragging={dragId === s.id}
+              over={beforeId === s.id && dragId !== s.id}
+              nextId={stages[i + 1]?.id ?? null}
+              moveOptions={stageMoveOptions(stages, s.id)}
+              totalStages={stages.length}
+              entryId={entryId}
+              onStartRename={() => setEditingId(s.id)}
+              onCommitName={(raw) => commitName(s, raw)}
+              onCancelRename={() => setEditingId(null)}
+              onMove={(before) => move(s.id, before)}
+              onRemove={() => remove(s)}
+            />
+          ))}
+        </div>
+      </DragDropProvider>
       {canManage && <AddStageControl onAdd={onAdd} />}
       {/* P13-D-1: this used to point at Policy for "who may move tasks between
           stages" as if transitions were authored there — Policy only flips the
@@ -379,9 +744,10 @@ export function StagesPanel({
       <div className="pol-note" style={POL_NOTE_STYLE}>
         <Icon name="shield" />
         <span>
-          Drag to reorder · click a name to rename. Adding or removing a stage
-          re-wires the transition chain around it — the new hop inherits the
-          boundary it replaced. Loosen or tighten a boundary in{" "}
+          Drag a row to reorder, or use its Move menu · click a name to rename.
+          Adding or removing a stage re-wires the transition chain around it —
+          the new hop inherits the boundary it replaced. Loosen or tighten a
+          boundary in{" "}
           <button type="button" className="keybtn" onClick={onNavPolicy}>
             Policy → Workflow rules
           </button>

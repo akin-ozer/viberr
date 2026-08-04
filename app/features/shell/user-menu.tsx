@@ -7,6 +7,7 @@ import { CsrfInput, useCsrfToken } from "~/ui/csrf-input";
 import { applyThemePreference } from "./theme-preference";
 import { Icon } from "~/ui/icon";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { useDismiss } from "~/ui/use-dismiss";
 import { useToast } from "~/ui/toast";
 
 /**
@@ -67,14 +68,11 @@ export function UserMenu({
   const csrf = useCsrfToken();
   const push = useToast();
 
-  useEffect(() => {
-    if (!menu) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenu(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [menu]);
+  // P16-UI-12: one shared dismiss hook (`app/ui/use-dismiss.ts`) instead of a
+  // hand-rolled listener. `outside: false` preserves the deliberate behaviour
+  // here — this menu stays open until Escape or an explicit action, because the
+  // Theme item is meant to be cycled in place.
+  useDismiss(menu, () => setMenu(false), { outside: false });
 
   // Toast only once the server confirms the theme write — a failed POST
   // (expired session/CSRF) reports the failure, not a false success (P11-40).

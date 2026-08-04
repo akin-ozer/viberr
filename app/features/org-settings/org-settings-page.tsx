@@ -1,5 +1,6 @@
 import { useNavigate, useSearchParams } from "react-router";
 import type { OrgSettingsView } from "~/server/org/org-view.server";
+import { countLabel } from "~/shared/text/plural";
 import { Icon, type IconName } from "~/ui/icon";
 import { ConnectionsPanel } from "./connections-panel";
 import { ResourcesPanel } from "./resources-panel";
@@ -46,9 +47,17 @@ export function OrgSettingsPage({
     resources: resourceCount,
   };
   const countHint: Record<OrgSettingsTab, string> = {
-    connections: `${view.connections.length} GitHub connection${view.connections.length === 1 ? "" : "s"}`,
-    users: `${view.users.length} user${view.users.length === 1 ? "" : "s"}`,
-    resources: `${view.kbs.length} knowledge bases · ${view.mcps.length} MCP · ${view.skills.length} skills — plus ${view.gagents.length} agent profile${view.gagents.length === 1 ? "" : "s"}`,
+    connections: countLabel(view.connections.length, "GitHub connection"),
+    users: countLabel(view.users.length, "user"),
+    // The KB/MCP/skill triple was hardcoded plural, so a one-of-each instance
+    // advertised "1 knowledge bases · 1 MCP · 1 skills" — the same disagreement
+    // as the Users tab's "1 instance accounts", three times in one string.
+    resources: [
+      countLabel(view.kbs.length, "knowledge base"),
+      countLabel(view.mcps.length, "MCP server"),
+      countLabel(view.skills.length, "skill"),
+    ].join(" · ") +
+      ` — plus ${countLabel(view.gagents.length, "agent profile")}`,
   };
 
   return (

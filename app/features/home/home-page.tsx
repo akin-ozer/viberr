@@ -11,6 +11,7 @@ import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import type { SessionUser } from "~/server/auth/require-user.server";
 import type { HomePrefs } from "~/server/prefs/user-prefs.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
+import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
 import { useRelativeTime } from "~/ui/use-relative-time";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
@@ -24,6 +25,7 @@ import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import type { NotificationView } from "~/features/notifications/notification-item";
 import { CommandPalette } from "~/features/shell/command-palette";
+import { useCommandPaletteShortcut } from "~/features/shell/use-command-palette";
 import { TopBell } from "~/features/shell/top-bell";
 import { UserMenu } from "~/features/shell/user-menu";
 import type {
@@ -147,13 +149,13 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
   }
   return (
     <div className="pj-stats">
-      <span>{total + " task" + (total === 1 ? "" : "s")}</span>
+      <span>{countLabel(total, "task")}</span>
       {p.running > 0 && (
         <>
           <span>·</span>
           <span className="running">
             <span className="working"></span>
-            {p.running + " agent" + (p.running === 1 ? "" : "s") + " running"}
+            {countLabel(p.running, "agent") + " running"}
           </span>
         </>
       )}
@@ -309,6 +311,7 @@ function NewProjectNameFields({
   setName,
   effKey,
   setKey,
+  keyTouched,
   setKeyTouched,
   keyStripped,
   setKeyStripped,
@@ -319,6 +322,7 @@ function NewProjectNameFields({
   setName: (v: string) => void;
   effKey: string;
   setKey: (v: string) => void;
+  keyTouched: boolean;
   setKeyTouched: (v: boolean) => void;
   keyStripped: boolean;
   setKeyStripped: (v: boolean) => void;
@@ -359,6 +363,9 @@ function NewProjectNameFields({
           value={effKey}
           placeholder="PAY"
           aria-describedby="np-key-note"
+          // Same derived-value trap as the repo field (F14): "VIB" is real text,
+          // and appending to it silently truncated at the 4-letter cap.
+          onFocus={selectDerivedOnFocus(!keyTouched)}
           onChange={(e) => {
             setKeyTouched(true);
             const raw = e.target.value;
@@ -461,14 +468,33 @@ function NewProjectConnectionField({
   );
 }
 
+/**
+ * F14/UI-D: typing a project name auto-fills this field, and the filled value
+ * is REAL text, not a placeholder. Clicking in put the caret at the end, so the
+ * next keystroke appended to the derived slug — live, "Viberr" then typing the
+ * repo name produced `viberrviberr`, and the dialog looked like it was fighting
+ * the typist. `selectDerivedOnFocus` selects the whole derived value on focus,
+ * so the first keystroke REPLACES it; once the field is edited it holds the
+ * user's value and is never selected out from under them again. (The derive
+ * itself already stopped on first edit — the pass-8 P1 `*Touched` rule.)
+ */
+export function selectDerivedOnFocus(derived: boolean) {
+  return (e: React.FocusEvent<HTMLInputElement>) => {
+    if (derived) e.currentTarget.select();
+  };
+}
+
 function NewProjectRepoField({
   repo,
   setRepo,
+  derived,
   effOwner,
   effRepo,
 }: {
   repo: string;
   setRepo: (v: string) => void;
+  /** The value on screen came from the project name, not from the typist. */
+  derived: boolean;
   effOwner: string;
   effRepo: string;
 }) {
@@ -479,9 +505,11 @@ function NewProjectRepoField({
         {/* P13-D-5: "task-level override later" promised a feature that was
             never built and is now deleted — one project, one repository. */}
         <span className="fhint">
-          {effOwner
-            ? "every task in this project uses it"
-            : "requires a GitHub connection"}
+          {!effOwner
+            ? "requires a GitHub connection"
+            : derived && repo
+              ? "from the project name — type to replace"
+              : "every task in this project uses it"}
         </span>
       </label>
       <div className="repo-input">
@@ -492,6 +520,7 @@ function NewProjectRepoField({
           value={repo}
           placeholder={effRepo || "repo-name"}
           disabled={!effOwner}
+          onFocus={selectDerivedOnFocus(derived)}
           onChange={(e) => setRepo(e.target.value)}
         />
       </div>
@@ -789,6 +818,7 @@ function NewProjectModal({
           setName={editName}
           effKey={effKey}
           setKey={setKey}
+          keyTouched={keyTouched}
           setKeyTouched={setKeyTouched}
           keyStripped={keyStripped}
           setKeyStripped={setKeyStripped}
@@ -803,6 +833,7 @@ function NewProjectModal({
         <NewProjectRepoField
           repo={repo}
           setRepo={editRepo}
+          derived={!repoTouched}
           effOwner={effOwner}
           effRepo={effRepo}
         />
@@ -1007,10 +1038,7 @@ function HomeHero({
               All quiet — no agent runs right now.{" "}
               {totalWaiting > 0 ? (
                 <>
-                  <b>
-                    {totalWaiting}{" "}
-                    {totalWaiting === 1 ? "decision" : "decisions"}
-                  </b>{" "}
+                  <b>{countLabel(totalWaiting, "decision")}</b>{" "}
                   waiting on you across all your projects.
                 </>
               ) : (
@@ -1022,12 +1050,10 @@ function HomeHero({
               Your agents kept working —{" "}
               <b>
                 <span className="working"></span>
-                {totalRunning} {totalRunning === 1 ? "run" : "runs"} active
+                {countLabel(totalRunning, "run")} active
               </b>{" "}
-              across {activeIn} {activeIn === 1 ? "project" : "projects"},{" "}
-              <b>
-                {totalWaiting} {totalWaiting === 1 ? "decision" : "decisions"}
-              </b>{" "}
+              across {countLabel(activeIn, "project")},{" "}
+              <b>{countLabel(totalWaiting, "decision")}</b>{" "}
               waiting on you across all your projects.
             </>
           )}
@@ -1305,8 +1331,7 @@ function SettingsPanel({
           <span className="val">
             <span>
               <span className="nm">
-                {org.connectionOwners.length} connection
-                {org.connectionOwners.length === 1 ? "" : "s"}
+                {countLabel(org.connectionOwners.length, "connection")}
               </span>
               <div className="sub">
                 {org.connectionOwners.join(" · ") || "none connected"}
@@ -1322,12 +1347,10 @@ function SettingsPanel({
           <span className="val">
             <MemberStack members={org.users.first} />
             <span>
-              <span className="nm">
-                {org.users.total} user{org.users.total === 1 ? "" : "s"}
-              </span>
+              <span className="nm">{countLabel(org.users.total, "user")}</span>
               <div className="sub">
-                {org.users.admins} admin{org.users.admins === 1 ? "" : "s"} ·{" "}
-                {org.users.members} member{org.users.members === 1 ? "" : "s"}
+                {countLabel(org.users.admins, "admin")} ·{" "}
+                {countLabel(org.users.members, "member")}
                 {org.users.disabled > 0
                   ? ` · ${org.users.disabled} disabled`
                   : ""}
@@ -1347,12 +1370,16 @@ function SettingsPanel({
             </span>
             <span>
               <span className="nm">
-                {org.globalAgents} agent {org.globalAgents === 1 ? "profile" : "profiles"}
+                {countLabel(org.globalAgents, "agent profile")}
                 <span className="muted"> · + operator</span>
               </span>
+              {/* Hardcoded plurals here read "1 knowledge bases · 1 MCP ·
+                  1 skills" on a one-of-each instance — the Users-tab
+                  disagreement, three nouns at a time. */}
               <div className="sub">
-                {org.knowledgeBases} knowledge bases · {org.mcpServers} MCP ·{" "}
-                {org.skills} skills
+                {countLabel(org.knowledgeBases, "knowledge base")} ·{" "}
+                {countLabel(org.mcpServers, "MCP server")} ·{" "}
+                {countLabel(org.skills, "skill")}
               </div>
             </span>
           </span>
@@ -1380,19 +1407,41 @@ function StoreStrip({
   if (!isAdmin) return null;
   return (
     <footer className="store-strip" data-screen-label="Store strip">
-      <button type="button" className="btn ghost sm" onClick={onRescan}>
-        <Icon name="refresh" className={scanning ? "spin" : ""} />
-        {scanning ? "Scanning…" : "Re-scan"}
-      </button>
-      <button
-        type="button"
-        className="btn ghost sm"
-        onClick={onRebuild}
-        title="Drop every projection row and re-project the whole store from files"
-      >
-        <Icon name="memory" className={rebuilding ? "spin" : ""} />
-        {rebuilding ? "Rebuilding…" : "Rebuild projections"}
-      </button>
+      {/* F13/UI-D: this footer was two unlabelled buttons on the landing page,
+          one of which carried "Drop every projection row and re-project the
+          whole store from files" as its only explanation — in a `title`
+          tooltip, i.e. invisible on touch and to a keyboard. It read as a dev
+          drawer leaking into product chrome. The capability is unchanged; it
+          now says whose it is and what it is for, and the destructive half is
+          styled as such and confirmed before it runs. */}
+      <Icon name="memory" />
+      <span>
+        <b>Store maintenance</b> · admins only — the board is a projection of the
+        task files on disk. Neither action edits a task file.
+      </span>
+      {/* The auto margin now lives on `.store-strip > :last-child`, so the
+          GROUP is pushed to the end rather than the first button. What stays
+          inline is this row's own layout, not compensation for that. */}
+      <span style={{ display: "flex", gap: ".45rem" }}>
+        <button
+          type="button"
+          className="btn ghost sm"
+          onClick={onRescan}
+          title="Re-read the task files and update any board row that drifted from them"
+        >
+          <Icon name="refresh" className={scanning ? "spin" : ""} />
+          {scanning ? "Scanning…" : "Re-scan store"}
+        </button>
+        <button
+          type="button"
+          className="btn ghost sm danger"
+          onClick={onRebuild}
+          title="Recovery: drop every projection row and re-project the whole store from files"
+        >
+          <Icon name="memory" className={rebuilding ? "spin" : ""} />
+          {rebuilding ? "Rebuilding…" : "Rebuild projections…"}
+        </button>
+      </span>
     </footer>
   );
 }
@@ -1433,17 +1482,13 @@ export function HomePage({
   // R15-5: ⌘K is ONE shortcut app-wide — it opens the palette here exactly as it
   // does inside a project. Home's own box stays what it says it is ("Find a
   // project…"), a filter over the grid on screen.
+  //
+  // …and ONE implementation of it: this effect was a second copy of the
+  // topbar's, free to drift from it. Both surfaces call the shared hook, which
+  // also stops swallowing ⌥⌘K / Ctrl-Alt-K (OS and IDE combinations these
+  // hand-rolled handlers claimed by matching on metaKey||ctrlKey alone).
   const [palette, setPalette] = useState(false);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPalette(true);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useCommandPaletteShortcut(() => setPalette(true));
 
   // Optimistic prefs: reflect an in-flight pin/view submit immediately.
   const optimistic = prefsFetcher.formData;
@@ -1538,7 +1583,7 @@ export function HomePage({
       const d = rebuildFetcher.data;
       push(
         d.ok
-          ? `Projections rebuilt from files — ${d.projects} project${d.projects === 1 ? "" : "s"}, ${d.tasks} task${d.tasks === 1 ? "" : "s"} re-projected`
+          ? `Projections rebuilt from files — ${countLabel(d.projects ?? 0, "project")}, ${countLabel(d.tasks ?? 0, "task")} re-projected`
           : (d.error ?? "Rebuild failed — check the server log"),
       );
     }
@@ -1673,10 +1718,13 @@ function RebuildConfirm({
       </div>
       <h3 id="rebuild-confirm-title">Rebuild all projections?</h3>
       <p>
-        Drops every derived board/task row and re-projects the whole store
-        from the files on disk. Canonical task files are never touched.
-        Day-to-day drift only needs Re-scan — rebuild when projections look
-        wrong.
+        Drops every derived board/task row and re-projects the whole store from
+        the files on disk. Nothing is lost: task files, repositories and pull
+        requests are never touched, and every row here is rebuilt from them.
+      </p>
+      <p>
+        This is a recovery action. Day-to-day drift only needs{" "}
+        <b>Re-scan store</b> — rebuild when the board disagrees with the files.
       </p>
       <div className="confirm-actions">
         <button type="button" className="btn ghost" onClick={close}>

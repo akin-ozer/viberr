@@ -538,6 +538,11 @@ function NewTaskModal({
   const closedRef = useRef(false);
 
   const valid = title.trim().length >= 3;
+  // The dialog opened on an empty title, so `!valid` was true from first paint
+  // and the footer greeted every new task with "A title is required." — an error
+  // for something the person had not had a chance to do yet. The requirement is
+  // only *unmet* once they have left the field or tried to submit.
+  const [titleTouched, setTitleTouched] = useState(false);
   const serverError = fetcher.data && fetcher.data.ok === false
     ? fetcher.data.error
     : null;
@@ -556,6 +561,7 @@ function NewTaskModal({
   }, [fetcher.data, onClose, push]);
 
   const submit = () => {
+    setTitleTouched(true);
     if (!valid || busy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -603,6 +609,7 @@ function NewTaskModal({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => setTitleTouched(true)}
             placeholder="e.g. Reconcile PR state after force-push"
             autoFocus
             onKeyDown={(e) => {
@@ -653,12 +660,16 @@ function NewTaskModal({
         </div>
       </div>
       <div className="modal-foot">
-        <span className={"foot-hint" + (valid && !serverError ? "" : " err")}>
+        <span
+          className={
+            "foot-hint" + (serverError || (titleTouched && !valid) ? " err" : "")
+          }
+        >
           {serverError
             ? serverError
-            : valid
-              ? "The task key is assigned on create."
-              : "A title is required."}
+            : titleTouched && !valid
+              ? "A title is required."
+              : "The task key is assigned on create."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>

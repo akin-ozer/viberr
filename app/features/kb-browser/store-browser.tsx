@@ -425,7 +425,16 @@ function StoreTree({
                   <FileMtime iso={r.node.mtime} />
                 </span>
               )}
-              <span className="fm-acts" onClick={(e) => e.stopPropagation()}>
+              {/* Row actions are ALWAYS drawn (pass 16). `.fm-acts` faded them
+                  in on `:hover`/`:focus-within`, which is a mouse-only reveal —
+                  and `opacity: 0` does not remove hit-testing, so on a touch
+                  device these buttons were invisible but still tappable: a tap
+                  near the right edge of a row could hit Delete with nothing on
+                  screen to explain it. `.rsrc-acts` is the always-visible row-
+                  action wrapper the org-settings resource rows already use, so
+                  this is also the app's one row-action shape rather than a
+                  third. (For UI-A: `.fm-acts` at app.css:3242-3243 is now dead.) */}
+              <span className="rsrc-acts" onClick={(e) => e.stopPropagation()}>
                 {r.node.type === "dir" && (
                   <>
                     <button

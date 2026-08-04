@@ -436,3 +436,39 @@ describe("R16-2: the attention chip says what it selects", () => {
     expect(queryByText("Waiting on an answer")).toBeTruthy();
   });
 });
+
+describe("the new-task dialog does not accuse an untouched form", () => {
+  const openDialog = () => {
+    const r = renderBoard([task()]);
+    const btn = [...r.container.querySelectorAll("button")].find((b) =>
+      b.textContent!.includes("New task"),
+    )!;
+    fireEvent.click(btn);
+    return r;
+  };
+
+  it("offers guidance, not an error, before the title is touched", () => {
+    const { container } = openDialog();
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("The task key is assigned on create.");
+    expect(hint.className).not.toContain("err");
+  });
+
+  it("states the requirement once the field is left empty", () => {
+    const { container } = openDialog();
+    fireEvent.blur(container.querySelector("#new-task-title")!);
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("A title is required.");
+    expect(hint.className).toContain("err");
+  });
+
+  it("clears the error once a valid title is typed", () => {
+    const { container } = openDialog();
+    const input = container.querySelector("#new-task-title")!;
+    fireEvent.blur(input);
+    fireEvent.change(input, { target: { value: "A real title" } });
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("The task key is assigned on create.");
+    expect(hint.className).not.toContain("err");
+  });
+});

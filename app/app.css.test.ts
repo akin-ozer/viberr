@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -15,7 +16,12 @@ import { describe, expect, it } from "vitest";
  *     Scheduled re-runs panel rendered with no border and no background, in
  *     both themes.
  *   P13-D-19 — four class names used in TSX that no rule defines, including two
- *     primary CTAs that fell back to the plain grey `.btn`.
+ *     primary CTAs that fell back to the plain grey `.btn`. The check that
+ *     shipped with it named those four by hand, so the next nine went
+ *     unnoticed for three passes (P16-UI-02: `composer-input`, `mention-menu`,
+ *     `cred-manage`, `cursor`, `faint`, `ho-exc`, `trans-list`,
+ *     `ntf-truncated`, `rsrc-wrap`). It now scans every `className` literal in
+ *     `app/` instead — see the last describe block.
  *   P13-D-12 — `--faint` (3.58:1) and `--placeholder` (2.37:1) carried small
  *     body text on white while `prd.md` promised a WCAG 2.2 AA baseline and the
  *     profile page asserted it to the user.
@@ -122,7 +128,9 @@ describe("app.css custom properties (P13-D-18)", () => {
 
   it("gives the Scheduled re-runs panel a real border and background", () => {
     // The panel that D-18 found rendering completely unstyled.
-    for (const selector of [".sched-row", ".sched-form", ".sched-controls select", ".sched-note"]) {
+    // `.sched-controls select` used to be checked here too; P16-UI-05 folded it
+    // into the one app-wide `select` rule, which the next test locks instead.
+    for (const selector of [".sched-row", ".sched-form", ".sched-note"]) {
       const rule = CODE.match(
         new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
       );
@@ -151,6 +159,242 @@ describe("app.css utility classes (P13-D-19)", () => {
     // The stylesheet is the source of truth for the vocabulary: if these ever
     // appear, the TSX assertion in task-detail-components.test.tsx is moot.
     expect(CODE).not.toMatch(/\.btn-(primary|ghost|danger)\b/);
+  });
+});
+
+describe("app.css keyboard focus ring (P16-UI-01)", () => {
+  /** The `:where(…):focus-visible` block, declarations only. */
+  const ringRule = CODE.match(/:where\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*:focus-visible\s*\{([^}]*)\}/);
+
+  it("declares one app-wide :focus-visible ring on the brand accent", () => {
+    // Before this, exactly four selectors had a focus ring and every other
+    // button, link, chip and menu item fell back to the UA outline — which
+    // matches nothing in the design language and differs per theme. axe does
+    // not catch it (2.4.7 / 2.4.11 are manual), so it is checked here.
+    expect(ringRule, "the app-wide :focus-visible rule must exist").toBeTruthy();
+    expect(ringRule![2]).toMatch(/outline:\s*2px solid var\(--blue\)/);
+    expect(ringRule![2]).toMatch(/outline-offset:/);
+  });
+
+  it("covers the control kinds the markup actually uses", () => {
+    const selector = ringRule![1];
+    for (const part of [
+      "a[href]",
+      "button",
+      "summary",
+      "select",
+      "input",
+      "textarea",
+      '[role="option"]',
+      '[role="menuitem"]',
+      '[role="menuitemradio"]',
+      '[role="switch"]',
+    ]) {
+      expect(selector, `${part} must carry the ring`).toContain(part);
+    }
+    // tabindex="-1" is programmatic focus (skip-link target, dialog panel,
+    // roving-tabindex resting item) — a ring around a whole region is noise.
+    expect(selector).toContain('[tabindex="0"]');
+    expect(selector).not.toContain('[tabindex="-1"]');
+  });
+
+  it("is wrapped in :where() so component focus rules still win", () => {
+    // `.field input:focus { outline: 0 }` and friends must keep their own
+    // treatment without needing !important. :where() weighs 0, so the whole
+    // selector is one pseudo-class.
+    expect(CODE).toMatch(/:where\([^)]*(?:\([^)]*\)[^)]*)*\)\s*:focus-visible/);
+  });
+
+  it("dropped the four per-selector copies it replaced", () => {
+    for (const dead of [
+      ".card:focus-visible",
+      ".cap-advisory > summary:focus-visible",
+      ".pj-link:focus-visible",
+      ".log-more:focus-visible",
+    ]) {
+      expect(CODE, `${dead} is redundant now`).not.toContain(dead);
+    }
+  });
+
+  it("the ring colour clears 3:1 against every surface it lands on", () => {
+    // WCAG 1.4.11: a focus indicator needs 3:1 against its adjacent colours.
+    // This is what stops --blue drifting lighter for aesthetic reasons.
+    for (const [theme, block] of [["light", LIGHT_ROOT], ["dark", DARK_ROOT]] as const) {
+      const blue = tokenIn(block, "--blue");
+      for (const against of ["--bg", "--surface"] as const) {
+        expect(
+          contrastRatio(blue, tokenIn(block, against)),
+          `${theme} --blue (${blue}) vs ${against}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it("gives the two borderless search fields a wrapper ring", () => {
+    // `.top-search input` and `.board-filter-input input` set `outline: 0`
+    // unconditionally — they are borderless fills inside a framed wrapper — so
+    // the ring has to be drawn by the wrapper or the field has no focus
+    // indicator at all. Home's project finder had none.
+    expect(CODE).toMatch(/div\.top-search:focus-within/);
+    expect(CODE).toMatch(/\.board-filter-input:focus-within/);
+  });
+});
+
+describe("app.css dead-and-drifted rules (P16-UI-04)", () => {
+  // Five rules that were doing nothing, doing it twice, or doing it to the
+  // wrong element. Each one read like live intent to the next person, which is
+  // the cost — a stylesheet you cannot trust is one you stop reading.
+
+  it("declares --font-display exactly once", () => {
+    // It was declared twice: the Roobert-first stack in the token block at the
+    // top, and an overriding `:root { --font-display: "Manrope" }` 2600 lines
+    // down. Manrope won, so the token block — the first place anyone looks —
+    // gave the wrong answer.
+    const declarations = [...CODE.matchAll(/--font-display\s*:/g)];
+    expect(declarations.length).toBe(1);
+    expect(CODE).toMatch(/--font-display:\s*"Manrope"/);
+  });
+
+  it("has no `.card.wait-human` no-op", () => {
+    // `.card.wait-human { box-shadow: var(--shadow-card) }` re-stated the base
+    // card's own shadow to neutralise a treatment ruling 16 had removed.
+    expect(CODE).not.toContain("wait-human");
+  });
+
+  it("paints the board scroll fade only when there is something to scroll to", () => {
+    // It used to paint unconditionally, tinting the right edge of a board that
+    // fits and of a board already scrolled to its end. Driven by the board's
+    // own scroll progress now; the base state MUST be hidden, because an
+    // inactive timeline (no overflow) produces no animation output and the base
+    // is what stands.
+    expect(CODE).toMatch(/\.board\s*\{[^}]*scroll-timeline:\s*--board-scroll-x inline/);
+    expect(CODE).toMatch(/\.board-wrap\s*\{[^}]*timeline-scope:\s*--board-scroll-x/);
+    const fade = CODE.match(/\.board-wrap::after\s*\{([^}]*)\}/);
+    expect(fade).toBeTruthy();
+    expect(fade![1], "the base state must be hidden").toMatch(/opacity:\s*0\s*;/);
+    expect(fade![1]).toMatch(/animation-timeline:\s*--board-scroll-x/);
+    // The [data-motion="reduce"] kill switch clamps every animation-duration to
+    // .01ms !important, which on a progress-based timeline hides the fade for
+    // good. It is an indicator, not decoration.
+    expect(CODE).toMatch(
+      /\[data-motion="reduce"\]\s*\.board-wrap::after\s*\{[^}]*animation-duration:\s*auto\s*!important/,
+    );
+  });
+
+  it("lets each `.live-table` own its own column template", () => {
+    // The shared rule carried the agents roster's five columns and `.gh-table`
+    // overrode them, so editing the roster silently moved GitHub's branches
+    // table. Two tables, two templates, one shared chrome rule.
+    const shared = CODE.match(/(?:^|[};])\s*\.live-head,\s*\.live-row\s*\{([^}]*)\}/);
+    expect(shared, "the shared rule must exist").toBeTruthy();
+    expect(shared![1], "the shared rule must not pick a column count").not.toMatch(
+      /grid-template-columns/,
+    );
+    expect(CODE).toMatch(/\.live-wrap \.live-head,\s*\.live-wrap \.live-row\s*\{[^}]*grid-template-columns/);
+    expect(CODE).toMatch(/\.gh-table \.live-head,\s*\.gh-table \.live-row\s*\{[^}]*grid-template-columns/);
+  });
+
+  it("makes `.stg-x` neutral by default and names its destructive sites", () => {
+    // `.stg-x` is the generic 24px row-action button now (browse, re-scan,
+    // test, edit, enable, disable, dismiss AND remove), but its hover was
+    // destructive coral for every one of them, with two `.rsrc-row` rules
+    // patching the semantics back — so "Edit" hovered on a coral tint with
+    // neutral text, which is neither.
+    const hover = CODE.match(/(?:^|[};])\s*\.stg-x:hover\s*\{([^}]*)\}/);
+    expect(hover, "`.stg-x:hover` must exist").toBeTruthy();
+    expect(hover![1], "the default hover must not be destructive").not.toContain("coral");
+    expect(hover![1]).toMatch(/color:\s*var\(--fg\)/);
+    // The destructive treatment is opt-in, and every list puts its remove last.
+    expect(CODE).toMatch(/\.rsrc-acts \.stg-x:last-child:not\(\.off\):hover/);
+    expect(CODE).toMatch(/\.member-row \.stg-x:last-child:not\(\.off\):hover/);
+    // The per-site colour patches are gone.
+    expect(CODE).not.toMatch(/\.rsrc-row \.stg-x[^{]*:hover\s*\{/);
+  });
+
+  it("has no `.fm-acts` rules left", () => {
+    // The KB browser's row actions are always drawn now (`.rsrc-acts`), so the
+    // opacity-0 hover-reveal has no emitter — and hover-reveal was the touch
+    // hazard that moved them in the first place.
+    expect(CODE).not.toContain("fm-acts");
+  });
+
+  it("puts the grab cursor on the row that drags, not on the missing grip", () => {
+    // The stage list is gripless (board parity). `.stg-handle` kept
+    // `cursor: grab` + `:active { cursor: grabbing }` on a 22px square that now
+    // holds only a lock glyph — a cursor promising a gesture it cannot answer.
+    const handle = CODE.match(/(?:^|[};])\s*\.stg-handle\s*\{([^}]*)\}/);
+    expect(handle, "`.stg-handle` must still exist for row alignment").toBeTruthy();
+    expect(handle![1]).not.toMatch(/cursor:/);
+    expect(CODE).not.toMatch(/\.stg-handle:active/);
+    // The affordance mirrors the board's exactly — one drag idiom, one cursor.
+    expect(CODE).toMatch(/\.stg-row\.draggable\s*\{[^}]*cursor:\s*grab/);
+    expect(CODE).toMatch(/\.stg-row\.draggable:active\s*\{[^}]*cursor:\s*grabbing/);
+    expect(CODE).toMatch(/\.card-wrap\.draggable\s*\{[^}]*cursor:\s*grab/);
+  });
+
+  it("offers a right-anchored `.own-menu` variant instead of an inline style", () => {
+    const rule = CODE.match(/\.own-menu\.to-right\s*\{([^}]*)\}/);
+    expect(rule).toBeTruthy();
+    expect(rule![1]).toMatch(/left:\s*auto/);
+    expect(rule![1]).toMatch(/right:\s*0/);
+    // §4.1: a menu grows from the edge that touches its trigger. Re-anchoring
+    // without moving the origin is the tell that it was done by hand.
+    expect(rule![1]).toMatch(/transform-origin:\s*top right/);
+  });
+
+  it("pushes the store strip's action GROUP right, not every button in it", () => {
+    // `.store-strip .btn { margin-left: auto }` is a descendant selector, so
+    // both maintenance buttons took an auto margin and floated apart with the
+    // explanatory label stretched between them.
+    expect(CODE).not.toMatch(/\.store-strip \.btn\s*\{[^}]*margin-left:\s*auto/);
+    expect(CODE).toMatch(/\.store-strip > :last-child\s*\{[^}]*margin-left:\s*auto/);
+  });
+
+  it("does not reset a border on `.rail-scrim`, which is a div", () => {
+    // Leftover from when the scrim was a <button>.
+    const scrim = CODE.match(/\.rail-scrim\s*\{([^}]*)\}[\s\S]*?/);
+    expect(scrim).toBeTruthy();
+    const railOpen = CODE.match(/\.app\[data-rail-open="true"\] \.rail-scrim\s*\{([^}]*)\}/);
+    expect(railOpen).toBeTruthy();
+    expect(railOpen![1]).not.toMatch(/border:/);
+  });
+});
+
+describe("app.css select treatment (P16-UI-05)", () => {
+  const base = CODE.match(/(?:^|[};])\s*select\s*\{([^}]*)\}/);
+
+  it("declares one base rule that matches the app's inputs", () => {
+    // Four ad-hoc select looks shipped before this: `.op-sel`,
+    // `.sched-controls select`, `.fm-toolbar select`, and an inline
+    // `selectStyle` in create-profile-modal.tsx whose comment said the design
+    // system had no select rule.
+    expect(base, "a base `select` rule must exist").toBeTruthy();
+    expect(base![1]).toMatch(/border:\s*1px solid var\(--border\)/);
+    expect(base![1]).toMatch(/border-radius:\s*var\(--radius-button\)/);
+    expect(base![1]).toMatch(/background:\s*var\(--surface\)/);
+    expect(base![1]).toMatch(/color:\s*var\(--fg\)/);
+  });
+
+  it("gives it the same focus ring the app's text inputs use", () => {
+    const focus = CODE.match(/(?:^|[};])\s*select:focus\s*\{([^}]*)\}/);
+    expect(focus, "`select:focus` must exist").toBeTruthy();
+    expect(focus![1]).toMatch(/border-color:\s*var\(--blue\)/);
+    expect(focus![1]).toMatch(/box-shadow:\s*0 0 0 3px color-mix\(/);
+  });
+
+  it("leaves the remaining select rules as variants, not re-inventions", () => {
+    // The variants may change size/typeface; re-declaring the box means the
+    // consolidation has been undone.
+    for (const selector of [".op-sel", ".fm-toolbar select"]) {
+      const rule = CODE.match(
+        new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
+      );
+      if (!rule) continue;
+      expect(rule[1], `${selector} must not re-declare the border`).not.toMatch(/border:/);
+      expect(rule[1], `${selector} must not re-declare the background`).not.toMatch(
+        /background:/,
+      );
+    }
   });
 });
 
@@ -238,6 +482,198 @@ describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
         contrastRatio(tokenIn(block, "--cta-bg"), tokenIn(block, "--surface")),
         `${theme} CTA background vs --surface`,
       ).toBeGreaterThanOrEqual(3);
+    }
+  });
+});
+
+/* ------------------------------------------- every class name used in app/ */
+
+/**
+ * P16-UI-02. The P13-D-19 gate above named four classes by hand, so it could
+ * only ever catch the four it already knew about — and nine more orphans
+ * accumulated behind it. This block diffs *every* class name the markup uses
+ * against the stylesheet.
+ *
+ * An orphan class is invisible: the browser drops the unknown selector, the
+ * element renders with UA defaults, and the page still looks plausible. That is
+ * exactly why it needs a static check rather than a review pass.
+ */
+
+const APP_DIR = fileURLToPath(new URL(".", import.meta.url));
+
+function sourceFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) sourceFiles(full, out);
+    else if (/\.tsx?$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+/** Every `class` selector the stylesheet defines, compound parts included —
+ *  `.stg-x.off` declares both `stg-x` and `off`. */
+function definedClasses(css: string): Set<string> {
+  return new Set([...css.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1]));
+}
+
+/** The raw text of every `className=` attribute value: a quoted string, or the
+ *  full balanced `{…}` expression. */
+function classNameExpressions(src: string): string[] {
+  const out: string[] = [];
+  const re = /className\s*=\s*/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src))) {
+    let i = m.index + m[0].length;
+    const quote = src[i];
+    if (quote === '"' || quote === "'") {
+      const end = src.indexOf(quote, i + 1);
+      if (end > 0) out.push(src.slice(i + 1, end));
+      continue;
+    }
+    if (quote !== "{") continue;
+    let depth = 0;
+    let j = i;
+    for (; j < src.length; j++) {
+      if (src[j] === "{") depth++;
+      else if (src[j] === "}" && --depth === 0) break;
+    }
+    out.push(src.slice(i + 1, j));
+  }
+  return out;
+}
+
+/** Inside a `className={…}` expression, plenty of string literals are not class
+ *  names: `view === "grid" ? "on" : ""`, `mode.startsWith("kb")`. Drop the ones
+ *  in an operand or argument position before harvesting. */
+function stripNonClassLiterals(expr: string): string {
+  return expr
+    .replace(/(?:===|!==|==|!=)\s*(["'])(?:(?!\1).)*\1/g, " ")
+    .replace(/(["'])(?:(?!\1).)*\1\s*(?:===|!==|==|!=)/g, " ")
+    .replace(/\.\w+\(\s*(["'])(?:(?!\1).)*\1/g, " ");
+}
+
+function literalChunks(expr: string): string[] {
+  const parts: string[] = [];
+  for (const m of expr.matchAll(/"([^"\\]*)"/g)) parts.push(m[1]);
+  for (const m of expr.matchAll(/'([^'\\]*)'/g)) parts.push(m[1]);
+  // Template literals contribute their static chunks; `${…}` holes are dynamic.
+  for (const m of expr.matchAll(/`([^`]*)`/g)) {
+    for (const chunk of m[1].split(/\$\{[^}]*\}/)) parts.push(chunk);
+  }
+  return parts;
+}
+
+/**
+ * Classes the markup names that deliberately carry no rule. Every entry states
+ * why, because an unexplained entry is how this check rots back into the
+ * hand-maintained list it replaced.
+ */
+// Empty on purpose. Do NOT grow this map to keep a red build green: an entry
+// here is a class the markup ships and the sheet does not style, which is the
+// exact defect this suite exists to catch. Its one occupant (`rsrc-wrap`) was
+// deleted from resources-panel.tsx rather than excused.
+const CLASSLESS_BY_DESIGN: Record<string, string> = {};
+
+describe("app.css defines every class the markup uses (P16-UI-02)", () => {
+  const defined = definedClasses(CODE);
+  const files = sourceFiles(APP_DIR);
+  /** class -> the files that use it, for a failure message that can be acted on */
+  const used = new Map<string, Set<string>>();
+  /** `"pev-ico act-" + r.type` — a static prefix completed at runtime. */
+  const prefixes = new Map<string, Set<string>>();
+
+  for (const file of files) {
+    const src = readFileSync(file, "utf8");
+    const rel = path.relative(path.dirname(APP_DIR), file);
+    const expressions = classNameExpressions(src);
+    // The one imperative site in the app (`lexical-mention-plugin.tsx`).
+    for (const m of src.matchAll(/classList\.(?:add|remove|toggle)\(\s*"([^"]*)"/g)) {
+      expressions.push(JSON.stringify(m[1]));
+    }
+    for (const expr of expressions) {
+      const isPlainString = !/[{}`'"]/.test(expr);
+      const chunks = isPlainString ? [expr] : literalChunks(stripNonClassLiterals(expr));
+      for (const chunk of chunks) {
+        for (const token of chunk.split(/\s+/)) {
+          if (!token) continue;
+          const bucket = token.endsWith("-") ? prefixes : used;
+          if (!/^-?[_a-zA-Z][\w-]*$/.test(token.replace(/-$/, "x"))) continue;
+          if (!bucket.has(token)) bucket.set(token, new Set());
+          bucket.get(token)!.add(rel);
+        }
+      }
+    }
+  }
+
+  it("scanned the whole app, not a hand-written list", () => {
+    // A silent regression in the scanner (a rename of `app/`, a changed
+    // attribute spelling) would turn every assertion below green for free.
+    expect(files.length).toBeGreaterThan(150);
+    expect(used.size).toBeGreaterThan(500);
+    expect(used.has("btn")).toBe(true);
+    expect(used.has("panel")).toBe(true);
+  });
+
+  it("has a rule for every class name used in app/", () => {
+    const orphans = [...used.entries()]
+      .filter(([name]) => !defined.has(name) && !(name in CLASSLESS_BY_DESIGN))
+      // Named with their sites, not counted: a bare count sends the next person
+      // back to grepping the tree, which is how P13-D-19 shipped in the first
+      // place.
+      .map(([name, sites]) => `${name} (${[...sites].sort().join(", ")})`)
+      .sort();
+    expect(orphans).toEqual([]);
+  });
+
+  it("has at least one rule behind every runtime-completed class prefix", () => {
+    // `className={"pev-ico act-" + r.type}` cannot be resolved statically, but a
+    // prefix that matches NO rule at all is dead for every possible suffix.
+    const dead = [...prefixes.entries()]
+      .filter(([prefix]) => ![...defined].some((c) => c.startsWith(prefix)))
+      .map(([prefix, sites]) => `${prefix}* (${[...sites].sort().join(", ")})`)
+      .sort();
+    expect(dead).toEqual([]);
+  });
+
+  it("keeps the classless-by-design list short and justified", () => {
+    // The escape hatch is the failure mode: if it grows, the gate is gone.
+    expect(Object.keys(CLASSLESS_BY_DESIGN).length).toBeLessThanOrEqual(3);
+    for (const [name, why] of Object.entries(CLASSLESS_BY_DESIGN)) {
+      expect(why.length, `${name} needs a real reason`).toBeGreaterThan(20);
+    }
+  });
+
+  it("still defines the nine orphans P16-UI-02 found", () => {
+    // Regression anchors. These rendered unstyled on shipping surfaces: the
+    // comment composer's positioning contract lived in a JSX inline style, the
+    // mention listbox and the credential-card action row had no rule at all.
+    for (const name of [
+      "composer-input",
+      "mention-menu",
+      "cred-manage",
+      "cursor",
+      "faint",
+      "ho-exc",
+      "trans-list",
+      "ntf-truncated",
+    ]) {
+      expect(defined.has(name), `.${name} must have a rule`).toBe(true);
+    }
+  });
+
+  it("keeps the composer's positioning contract in the stylesheet (P16-UI-03)", () => {
+    // `.composer-box .composer-placeholder` is position:absolute and MentionMenu
+    // positions itself absolutely, so both need a positioned ancestor. It used
+    // to be an inline `style={{position:"relative"}}` in timeline.tsx — delete
+    // that attribute and both jump to the viewport.
+    for (const selector of [".composer-box", ".composer-input"]) {
+      const rule = CODE.match(
+        new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`),
+      );
+      expect(rule, `${selector} must have a rule`).toBeTruthy();
+      expect(rule![1], `${selector} must be a containing block`).toMatch(
+        /position:\s*relative/,
+      );
     }
   });
 });

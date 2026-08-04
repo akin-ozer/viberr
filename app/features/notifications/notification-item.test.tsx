@@ -37,7 +37,7 @@ describe("NotificationItem (shared bell/page row)", () => {
     expect(container.querySelector(".tx")!.textContent).toContain("PR #318");
     expect(container.querySelector(".tx")!.textContent).not.toContain("**");
     expect(container.querySelector(".mt")!.textContent).toBe(
-      "Viberr Core · VIB-142 · 9:41",
+      "Viberr Core · VIB-142 · 09:41",
     );
     expect(container.querySelector(".unread-dot")).not.toBeNull();
     // Packet/input → completion palette.

@@ -426,3 +426,45 @@ describe("P13-D-11: the console pages backwards", () => {
     expect(getByText("8 events")).toBeTruthy();
   });
 });
+
+/**
+ * P16-UI-12 — the AgentPicker's hand-rolled outside-mousedown effect was
+ * replaced by the shared `useDismiss` hook. It had NO document-level Escape:
+ * the only Escape handler was a React `onKeyDown` on the trigger, so once focus
+ * moved into the open listbox — which is the whole point of a listbox — Escape
+ * did nothing and the only way out was a click elsewhere. The hook gives it the
+ * same Escape every other popover in the app has.
+ */
+describe("AgentPicker dismissal (shared useDismiss)", () => {
+  function openPicker() {
+    const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });
+    const dev = mkRun({ id: "primary", who: { kind: "agent", backend: "claude", name: "dev", role: "developer" }, state: "idle", lifecycle: "finished" });
+    const view = render(
+      <AgentLogsPanel runtime={[op, dev]} sel="primary" onSel={() => {}} linesByThread={{ op: [], primary: [] }} />,
+    );
+    fireEvent.click(view.container.querySelector(".rsel-btn")!);
+    expect(view.container.querySelector('[role="listbox"]')).not.toBeNull();
+    return view;
+  }
+
+  it("Escape closes it from anywhere, not just from the trigger", () => {
+    const { container } = openPicker();
+    // Fired on the document, i.e. exactly the case the old trigger-scoped
+    // React handler could not reach.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    expect(container.querySelector(".rsel-btn")!.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("an outside press still closes it", () => {
+    const { container } = openPicker();
+    fireEvent.mouseDown(document.body);
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+  });
+
+  it("a press inside the picker leaves it open", () => {
+    const { container } = openPicker();
+    fireEvent.mouseDown(container.querySelector('[role="listbox"]')!);
+    expect(container.querySelector('[role="listbox"]')).not.toBeNull();
+  });
+});

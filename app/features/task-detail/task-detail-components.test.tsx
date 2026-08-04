@@ -9,7 +9,8 @@ import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter, createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { DecisionPacket, observationLabel } from "./decision-packet";
-import { GithubTrace, ScheduledActions, TaskHero } from "./task-detail-page";
+import { GithubTrace } from "./task-side-panels";
+import { ScheduledActions, TaskHero } from "./task-main-sections";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
 import {
@@ -167,7 +168,7 @@ describe("TimelineItem", () => {
     expect(container.querySelector(".comment-card")).not.toBeNull();
     expect(container.querySelector(".comment-card.toagent")).toBeNull();
     expect(container.querySelector(".tl-meta .pill")).toBeNull();
-    expect(container.querySelector(".tl-time")!.textContent).toBe("9:41");
+    expect(container.querySelector(".tl-time")!.textContent).toBe("09:41");
     // Comments render as GFM markdown (multi-line agent replies + user
     // comments), and @mentions inside a comment are re-chipped by the
     // rehypeMentions pass so they get the shared `.mention` highlight back.
@@ -805,6 +806,51 @@ describe("ExecutionProfile — owner hand-off candidates", () => {
     expect(names.join(" ")).toContain("Murat Yıldız"); // maintainer — can own
     expect(names.join(" ")).toContain("Selin Aksoy"); // contributor — can own
   });
+});
+
+/* ------------------------------------------- popover dismissal (shared hook) */
+
+/**
+ * Pass 16: the three menus on this panel each carried their own copy of the
+ * "Escape + outside mousedown closes me" effect, and none of them was covered —
+ * so the behaviour could quietly diverge between them (it already had, app-wide:
+ * `window` vs `document`, some popovers with no outside-close at all). They now
+ * share `use-dismiss.ts`, and this asserts the shared contract on all three at
+ * once so a future divergence is a test failure.
+ */
+describe("ExecutionProfile — every menu dismisses the same way", () => {
+  const menus: [label: string, trigger: string, panel: string][] = [
+    ["owner", "Manage", "Manage task ownership"],
+    ["delivering agent", "Assign delivering agent", "Assign a delivering agent"],
+    ["reviewer", "Engage reviewer", "Engage a reviewer"],
+  ];
+
+  for (const [name, trigger, panel] of menus) {
+    it(`${name} menu: Escape closes it`, () => {
+      const { container } = renderExec(execTask());
+      const btn = Array.from(container.querySelectorAll(".own-btn, .rev-add")).find(
+        (b) => b.textContent?.includes(trigger),
+      ) as HTMLButtonElement;
+      expect(btn).toBeDefined();
+      fireEvent.click(btn);
+      expect(container.querySelector(`[aria-label="${panel}"]`)).not.toBeNull();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(container.querySelector(`[aria-label="${panel}"]`)).toBeNull();
+    });
+
+    it(`${name} menu: a press outside closes it, a press inside does not`, () => {
+      const { container } = renderExec(execTask());
+      const btn = Array.from(container.querySelectorAll(".own-btn, .rev-add")).find(
+        (b) => b.textContent?.includes(trigger),
+      ) as HTMLButtonElement;
+      fireEvent.click(btn);
+      const open = () => container.querySelector(`[aria-label="${panel}"]`);
+      fireEvent.mouseDown(open()!);
+      expect(open()).not.toBeNull();
+      fireEvent.mouseDown(document.body);
+      expect(open()).toBeNull();
+    });
+  }
 });
 
 /* -------------------------------------------------- GithubTrace force-accept */

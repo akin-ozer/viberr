@@ -11,7 +11,7 @@ import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { listAgentDeployments } from "~/server/projections/agent-deployments.server";
 import { buildResourceCatalog } from "~/server/org/resource-catalog.server";
-import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
+import { backendCredentialHealth } from "~/server/runtimes/runtime-registry.server";
 import {
   createAgentProfile,
   deleteAgentProfile,
@@ -43,6 +43,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!project) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
+  // F16: ONE credential probe per backend, feeding both the boolean the modals
+  // already consumed and the roster's new health line. `backendCredentialHealth`
+  // is the single source the run service and the logs read (D1/D2) — deriving
+  // `available` from it here is what keeps the page from growing a second,
+  // quietly divergent answer to "can this profile actually run?".
+  const backendHealth = {
+    claude: backendCredentialHealth("claude"),
+    codex: backendCredentialHealth("codex"),
+  };
   return {
     profiles: assembleAgentRoster(db, params.slug),
     // The org-level template LIBRARY, minus what this project already runs
@@ -77,9 +86,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // configured so a new profile can't be pinned to a runtime whose every run
     // would fail (RU-2).
     backendAvailable: {
-      claude: isBackendAvailable("claude"),
-      codex: isBackendAvailable("codex"),
+      claude: backendHealth.claude.available,
+      codex: backendHealth.codex.available,
     },
+    // …and WHY, in words, for the roster (F16): the task-level Execution
+    // profile panel already said "Codex — not configured" while this page
+    // called the same profile "idle · available".
+    backendHealth,
   };
 }
 
@@ -190,6 +203,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       myRole={layout?.myRole ?? null}
       resourceCatalog={loaderData.resourceCatalog}
       backendAvailable={loaderData.backendAvailable}
+      backendHealth={loaderData.backendHealth}
     />
   );
 }

@@ -16,7 +16,13 @@ import {
   CreateProfileModal,
   type ProfileFormPayload,
 } from "./create-profile-modal";
-import { AgentsPage, LibraryPicker, LiveRoster, ProfileDetail } from "./agents-page";
+import {
+  AgentsPage,
+  LibraryPicker,
+  LiveRoster,
+  ProfileDetail,
+  type BackendHealthMap,
+} from "./agents-page";
 import { ToastProvider } from "~/ui/toast";
 
 afterEach(cleanup);
@@ -120,7 +126,9 @@ function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
     modelLabel: "GPT-5.5",
     modelKnown: false,
     effort: "",
-    scope: "Global base · customized for Viberr Core",
+    // F17: the phantom-workspace literal is gone from the seed; the fixture
+    // must not keep teaching it (see agent-catalog.server.test.ts).
+    scope: "Global base",
     desc: "Implements stage work on the task-key branch.",
     definition: "",
     stages: ["ready", "impl"],
@@ -1083,5 +1091,119 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
     expect(toast.textContent).toContain("That template no longer exists.");
     // `alert` is the triangle path; `check` is the tick.
     expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
+  });
+});
+
+/**
+ * F16 (live): a Codex-backed profile on an instance with no Codex credential
+ * read "idle · available" on this page, while the task-level Execution profile
+ * panel one click away read "Codex — not configured". Availability is two
+ * claims — nothing is running it, AND a run could start — and only the first
+ * was ever checked here. The health comes from `backendCredentialHealth`, the
+ * same probe the run service reads.
+ */
+describe("F16: the roster tells the truth about backend credentials", () => {
+  // The REAL shape `backendCredentialHealth()` returns, not a happy-path
+  // narrowing of it — `verification` is a 4-way union and `detail` carries the
+  // actionable sentence exactly when something is wrong.
+  const HEALTHY: BackendHealthMap = {
+    codex: {
+      backend: "codex" as const,
+      available: true,
+      verification: "credential" as const,
+      detail: null,
+    },
+    claude: {
+      backend: "claude" as const,
+      available: true,
+      verification: "credential" as const,
+      detail: null,
+    },
+  };
+  const NO_CODEX: BackendHealthMap = {
+    ...HEALTHY,
+    codex: {
+      backend: "codex" as const,
+      available: false,
+      verification: "none" as const,
+      detail:
+        "VIBERR_CODEX_USE_CLI_AUTH=1 is set, but the Codex CLI login file is missing at `/home/.codex/auth.json`.",
+    },
+  };
+
+  const renderDetail = (backendHealth?: BackendHealthMap) =>
+    render(
+      <ProfileDetail
+        a={mkProfile({})}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        {...(backendHealth ? { backendHealth } : {})}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+
+  it("still says 'idle · available' when the backend really is configured", () => {
+    const { getByText, queryByText } = renderDetail(HEALTHY);
+    expect(getByText("idle · available")).toBeTruthy();
+    expect(queryByText(/not configured/)).toBeNull();
+  });
+
+  it("names the missing credential instead of claiming availability", () => {
+    const { container, getByText, queryByText } = renderDetail(NO_CODEX);
+    // `mkProfile` runs Codex first — "a run uses the first".
+    expect(queryByText("idle · available")).toBeNull();
+    expect(getByText("idle · Codex not configured")).toBeTruthy();
+    // The backend chip mirrors the task-level panel's wording…
+    expect(container.querySelector(".be-chip .model-sub")!.textContent).toContain(
+      "not configured",
+    );
+    // …and the actionable detail is the registry's own sentence, on screen,
+    // not buried in a tooltip.
+    expect(container.textContent).toContain("auth.json");
+    // The empty-deployments copy stops calling it assignable.
+    expect(container.textContent).toContain(
+      "assigning it would produce a refused run",
+    );
+  });
+
+  it("claims nothing either way when health was not probed", () => {
+    const { getByText, queryByText } = renderDetail(undefined);
+    expect(getByText("idle · available")).toBeTruthy();
+    expect(queryByText(/not configured/)).toBeNull();
+  });
+
+  it("flags the unusable profile in the roster list too", () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[mkProfile({})]}
+              deployments={[]}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole="admin"
+              backendHealth={NO_CODEX}
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/viberr-core/agents"]} />,
+    );
+    // The row badge stops saying the flat "idle" and carries the reason.
+    expect(container.querySelector(".profile-list .ag-idle")).toBeNull();
+    const badge = container.querySelector(".profile-list .model-sub")!;
+    expect(badge.getAttribute("title")).toContain("auth.json");
+    expect(badge.textContent).toContain("no runtime");
   });
 });

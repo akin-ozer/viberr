@@ -5,6 +5,14 @@ import { RichText } from "./rich-text";
 
 afterEach(cleanup);
 
+/** What a sighted reader sees: everything except the visually-hidden AT-only
+ *  labels (P16-UI-20). */
+function visibleText(container: HTMLElement): string {
+  const clone = container.cloneNode(true) as HTMLElement;
+  for (const vh of clone.querySelectorAll(".mention-vh")) vh.remove();
+  return clone.textContent ?? "";
+}
+
 describe("RichText (THE shared micro-format renderer, ruling 14)", () => {
   it("renders **bold**, `code` and @mentions from one pass", () => {
     const { container } = render(
@@ -16,9 +24,27 @@ describe("RichText (THE shared micro-format renderer, ruling 14)", () => {
     expect(code.textContent).toBe("pull_request:write");
     const mention = container.querySelector("span.mention")!;
     expect(mention.textContent).toBe("@operator");
-    expect(container.textContent).toBe(
+    expect(visibleText(container)).toBe(
       "Decision: widen pull_request:write — ping @operator now",
     );
+  });
+
+  it("gives every mention chip a visually-hidden label (P16-UI-20)", () => {
+    // The chip's only distinction from the prose around it is colour +
+    // background, so a screen reader read "@Selin" exactly like the word
+    // "Selin". The label sits BESIDE the chip so `.mention`'s own text stays
+    // the literal mention the shared matcher produced.
+    const { container } = render(<RichText text="ping @operator and @dev" />);
+    const labels = [...container.querySelectorAll(".mention-vh")].map(
+      (n) => n.textContent,
+    );
+    expect(labels).toEqual(["mention ", "mention "]);
+    expect(container.textContent).toBe("ping mention @operator and mention @dev");
+    // ...and it changes nothing on screen.
+    expect(visibleText(container)).toBe("ping @operator and @dev");
+    for (const label of container.querySelectorAll(".mention-vh")) {
+      expect(label.nextElementSibling!.className).toBe("mention");
+    }
   });
 
   it("passes plain text through untouched", () => {

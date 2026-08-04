@@ -161,3 +161,65 @@ describe("StageMenu keyboard contract (F10-25)", () => {
     expect(view.getByLabelText("Change stage (currently Done)")).toBeTruthy();
   });
 });
+
+/**
+ * P16-UI-12 — the hand-rolled "Escape or an outside press closes me" effect was
+ * replaced by the shared `useDismiss` hook. The three behaviours it carried are
+ * asserted here because the conversion is exactly the kind of change that looks
+ * like a no-op and is not: this popover is PORTALED to <body>, so the trigger is
+ * outside the hook's own ref, and it is FIXED-positioned from the trigger's
+ * rect, so it has to close when anything scrolls.
+ */
+describe("StageMenu dismissal (shared useDismiss)", () => {
+  it("an outside press closes it", () => {
+    const view = renderMenu();
+    openMenu(view);
+    fireEvent.mouseDown(document.body);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("a press on the TRIGGER does not dismiss-then-reopen", () => {
+    // The popover is portaled to <body>, so without `also: [btnRef]` the
+    // trigger counts as "outside" and the toggle would fight the dismiss.
+    const view = renderMenu();
+    openMenu(view);
+    fireEvent.mouseDown(trigger(view));
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  });
+
+  it("a press inside the menu does not close it", () => {
+    const view = renderMenu();
+    const menu = openMenu(view);
+    fireEvent.mouseDown(menu.querySelector(".sm-head")!);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  });
+
+  it("a scroll ANYWHERE closes it — the position is a stale rect otherwise", () => {
+    // capture:true, because the board column scrolls, not the window.
+    const view = renderMenu();
+    openMenu(view);
+    fireEvent.scroll(document.body);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("a resize closes it for the same reason", () => {
+    const view = renderMenu();
+    openMenu(view);
+    fireEvent(window, new Event("resize"));
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("subscribes nothing while closed", () => {
+    const add = vi.spyOn(document, "addEventListener");
+    const view = renderMenu();
+    expect(
+      add.mock.calls.filter(([type]) => type === "mousedown" || type === "keydown"),
+    ).toEqual([]);
+    openMenu(view);
+    expect(
+      add.mock.calls.filter(([type]) => type === "mousedown" || type === "keydown")
+        .length,
+    ).toBe(2);
+    add.mockRestore();
+  });
+});

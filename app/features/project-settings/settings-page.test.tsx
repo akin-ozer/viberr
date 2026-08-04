@@ -9,6 +9,8 @@ import {
   ProjectPanel,
   RepoPanel,
   StagesPanel,
+  resolveStageOrder,
+  stageMoveOptions,
 } from "./settings-page";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 
@@ -124,8 +126,11 @@ describe("StagesPanel", () => {
     );
     expect(getByText("5 stages")).toBeTruthy();
     expect(container.querySelectorAll(".stg-row")).toHaveLength(5);
-    // triage + done rows are locked (lock icon handle, dimmed remove).
-    expect(container.querySelectorAll(".stg-handle.off")).toHaveLength(2);
+    // triage + done rows are locked: only they draw a glyph in the handle slot
+    // (the lock), and only their remove control is dimmed. The slot itself is
+    // on every row so locked and unlocked rows stay aligned.
+    expect(container.querySelectorAll(".stg-handle")).toHaveLength(5);
+    expect(container.querySelectorAll(".stg-handle .ico")).toHaveLength(2);
     expect(container.querySelectorAll(".stg-x.off")).toHaveLength(2);
     expect(getByText("Add stage")).toBeTruthy();
     expect(getByText("Policy → Workflow rules")).toBeTruthy();
@@ -196,6 +201,192 @@ describe("StagesPanel", () => {
         (b) => (b as HTMLButtonElement).disabled,
       ),
     ).toBe(true);
+    // No Move control either — reordering is a manage action.
+    expect(container.querySelectorAll(".own-btn")).toHaveLength(0);
+  });
+
+  // ONE drag language (pass 16): the board deliberately drags the whole card
+  // with NO grip, and this list shipped the opposite affordance on a hand-rolled
+  // HTML5 implementation. Both are now dnd-kit, whole-row, gripless.
+  it("has no grip handle and no HTML5 draggable rows", () => {
+    const { container } = render(
+      <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
+    );
+    // The rejected affordance: a grip icon, and `draggable` on the row itself.
+    expect(container.querySelector(".stg-handle .ico + .ico")).toBeNull();
+    expect(container.querySelectorAll("[draggable]")).toHaveLength(0);
+    expect(container.querySelectorAll('[title="Drag to reorder"]')).toHaveLength(
+      0,
+    );
+  });
+
+  describe("Move menu — the keyboard/AT reorder path", () => {
+    it("offers only the moves a row can make, and never for a pinned stage", () => {
+      const { queryByLabelText, getByLabelText } = render(
+        <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
+      );
+      // Entry and terminal are pinned by the model — no Move control at all.
+      expect(queryByLabelText(/^Move Triage/)).toBeNull();
+      expect(queryByLabelText(/^Move Done/)).toBeNull();
+      // The label names the current position, like StageMenu's does.
+      expect(
+        getByLabelText("Move Ready — currently stage 2 of 5"),
+      ).toBeTruthy();
+
+      // First movable row: forward moves only.
+      fireEvent.click(getByLabelText("Move Ready — currently stage 2 of 5"));
+      const labels = Array.from(
+        document.querySelectorAll('[role="menuitem"]'),
+      ).map((n) => n.textContent);
+      expect(labels).toEqual(["Move later", "Move to last"]);
+    });
+
+    it("picking a move submits the full ordered id list", () => {
+      const onReorder = vi.fn();
+      const { getByLabelText, getByText } = render(
+        <StagesPanel
+          {...base}
+          onReorder={onReorder}
+          onRename={() => {}}
+          onRemove={() => {}}
+        />,
+      );
+      fireEvent.click(getByLabelText("Move Review — currently stage 4 of 5"));
+      fireEvent.click(getByText("Move to first"));
+      // Review hops to the front of the MOVABLE window; triage/done stay pinned.
+      expect(onReorder).toHaveBeenCalledWith([
+        "triage",
+        "review",
+        "ready",
+        "impl",
+        "done",
+      ]);
+    });
+
+    it("arrow keys wrap, Home/End jump, Escape closes and returns focus", () => {
+      const { getByLabelText } = render(
+        <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
+      );
+      const trigger = getByLabelText(
+        "Move In Progress — currently stage 3 of 5",
+      ) as HTMLButtonElement;
+      fireEvent.click(trigger);
+      const menu = document.querySelector('[role="menu"]')!;
+      const items = Array.from(
+        menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+      );
+      expect(items.length).toBeGreaterThan(1);
+      // Focus lands on the first item on open.
+      expect(document.activeElement).toBe(items[0]);
+      fireEvent.keyDown(menu, { key: "ArrowUp" });
+      expect(document.activeElement).toBe(items[items.length - 1]);
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(items[0]);
+      fireEvent.keyDown(menu, { key: "End" });
+      expect(document.activeElement).toBe(items[items.length - 1]);
+      fireEvent.keyDown(menu, { key: "Home" });
+      expect(document.activeElement).toBe(items[0]);
+      fireEvent.keyDown(menu, { key: "Escape" });
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it("an outside press closes it (the shared dismiss hook)", () => {
+      const { getByLabelText } = render(
+        <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
+      );
+      fireEvent.click(getByLabelText("Move Ready — currently stage 2 of 5"));
+      expect(document.querySelector('[role="menu"]')).not.toBeNull();
+      fireEvent.mouseDown(document.body);
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+    });
+  });
+});
+
+describe("resolveStageOrder", () => {
+  const ids = STAGES;
+
+  it("inserts before the named stage and returns the whole order", () => {
+    expect(resolveStageOrder(ids, "review", "ready")).toEqual([
+      "triage",
+      "review",
+      "ready",
+      "impl",
+      "done",
+    ]);
+  });
+
+  it("null beforeId lands at the end of the MOVABLE window", () => {
+    expect(resolveStageOrder(ids, "ready", null)).toEqual([
+      "triage",
+      "impl",
+      "review",
+      "ready",
+      "done",
+    ]);
+  });
+
+  it("pins entry first and terminal last by current identity", () => {
+    // Asking to drop a stage before the entry, or the entry itself anywhere,
+    // cannot move the pinned rows.
+    expect(resolveStageOrder(ids, "review", "triage")).toEqual([
+      "triage",
+      "review",
+      "ready",
+      "impl",
+      "done",
+    ]);
+    expect(resolveStageOrder(ids, "triage", "review")).toBeNull();
+  });
+
+  it("returns null for every no-op instead of posting a pointless reorder", () => {
+    expect(resolveStageOrder(ids, "ready", "ready")).toBeNull(); // onto itself
+    expect(resolveStageOrder(ids, "ready", "impl")).toBeNull(); // already there
+    expect(resolveStageOrder(ids, "ghost", "ready")).toBeNull(); // unknown stage
+  });
+
+  it("degrades a vanished target to the end rather than referencing it", () => {
+    expect(resolveStageOrder(ids, "ready", "gone")).toEqual([
+      "triage",
+      "impl",
+      "review",
+      "ready",
+      "done",
+    ]);
+  });
+});
+
+describe("stageMoveOptions", () => {
+  it("gives a pinned stage nothing to do", () => {
+    expect(stageMoveOptions(STAGES, "triage")).toEqual([]);
+    expect(stageMoveOptions(STAGES, "done")).toEqual([]);
+  });
+
+  it("omits the direction a row is already at the end of", () => {
+    expect(stageMoveOptions(STAGES, "ready").map((o) => o.label)).toEqual([
+      "Move later",
+      "Move to last",
+    ]);
+    expect(stageMoveOptions(STAGES, "review").map((o) => o.label)).toEqual([
+      "Move earlier",
+      "Move to first",
+    ]);
+    expect(stageMoveOptions(STAGES, "impl").map((o) => o.label)).toEqual([
+      "Move earlier",
+      "Move later",
+    ]);
+  });
+
+  it("a two-stage board has nothing movable at all", () => {
+    expect(stageMoveOptions(STAGES.slice(0, 2), "ready")).toEqual([]);
+  });
+
+  it("every option resolves to a real reorder", () => {
+    for (const stage of STAGES) {
+      for (const option of stageMoveOptions(STAGES, stage.id)) {
+        expect(resolveStageOrder(STAGES, stage.id, option.beforeId)).not.toBeNull();
+      }
+    }
   });
 });
 

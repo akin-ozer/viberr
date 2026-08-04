@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useNavigate, useSearchParams } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
+import { countLabel } from "~/shared/text/plural";
+import type { BackendCredentialHealth } from "~/server/runtimes/runtime-registry.server";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -54,11 +56,62 @@ export interface WorkflowEdgeView {
 
 // ------------------------------------------------------------ small parts
 
-function BackendChip({ b }: { b: string }) {
+/**
+ * F16: per-backend credential health, as the server's ONE answer to it
+ * (`backendCredentialHealth` in runtime-registry.server.ts — the same source the
+ * run service and the logs read). Absent ⇒ unknown here, and nothing is claimed
+ * either way; the page never invents a second, quietly divergent check.
+ */
+export type BackendHealthMap = Partial<
+  Record<"codex" | "claude", BackendCredentialHealth>
+>;
+
+/** The backend a run would actually resolve — the profile's FIRST (the
+ *  "a run uses the first" rule the runtime row already states). */
+function primaryBackend(a: AgentProfileView): "codex" | "claude" | null {
+  return a.backends[0] ?? null;
+}
+
+/** The health entry for a profile's primary backend, or null when the page has
+ *  no health data (or the profile has no backend — the operator's
+ *  orchestration runtime). */
+function primaryBackendHealth(
+  a: AgentProfileView,
+  health: BackendHealthMap | undefined,
+): BackendCredentialHealth | null {
+  const backend = primaryBackend(a);
+  if (!backend || !health) return null;
+  return health[backend] ?? null;
+}
+
+function BackendChip({
+  b,
+  health,
+}: {
+  b: string;
+  /** Undefined = not probed on this surface; nothing is claimed. */
+  health?: BackendCredentialHealth | undefined;
+}) {
+  // Mirrors the task-level Execution profile panel verbatim ("Codex — not
+  // configured"), which was already telling this truth while this page said
+  // "available" about the same profile. `.model-sub` is the runtime row's
+  // existing "this value is not what it looks like" badge (the model cell's
+  // DEFAULT flag) — same amber, same alert glyph, same cursor:help, no new
+  // class name with no rule behind it.
+  const missing = health ? !health.available : false;
   return (
     <span className="be-chip">
       <AgentGlyph backend={b} />
       {b === "claude" ? "Claude Code" : "Codex"}
+      {missing && (
+        <span
+          className="model-sub"
+          {...(health?.detail ? { title: health.detail } : {})}
+        >
+          <Icon name="alert" />
+          not configured
+        </span>
+      )}
     </span>
   );
 }
@@ -76,12 +129,27 @@ function ProfileGlyph({ a, lg }: { a: AgentProfileView; lg?: boolean }) {
   );
 }
 
-function ActiveBadge({ count }: { count: number }) {
+function ActiveBadge({
+  count,
+  unusable,
+}: {
+  count: number;
+  /** F16: the profile's backend holds no credential — every run it is given
+   *  refuses before it starts, so "idle" alone is a half-truth. */
+  unusable?: string | undefined;
+}) {
   if (count > 0)
     return (
       <span className="ag-active">
         <span className="working" />
         {count}
+      </span>
+    );
+  if (unusable)
+    return (
+      <span className="model-sub" title={unusable}>
+        <Icon name="alert" />
+        no runtime
       </span>
     );
   return <span className="ag-idle">idle</span>;
@@ -90,14 +158,22 @@ function ActiveBadge({ count }: { count: number }) {
 function ProfileItem({
   a,
   count,
+  health,
   on,
   onClick,
 }: {
   a: AgentProfileView;
   count: number;
+  health?: BackendHealthMap | undefined;
   on: boolean;
   onClick: () => void;
 }) {
+  const backendHealth = primaryBackendHealth(a, health);
+  const unusable =
+    backendHealth && !backendHealth.available
+      ? (backendHealth.detail ??
+        `${backendHealth.backend === "claude" ? "Claude Code" : "Codex"} is not configured on this instance — runs for this profile would fail.`)
+      : undefined;
   return (
     <button type="button" className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
       <ProfileGlyph a={a} />
@@ -105,7 +181,7 @@ function ProfileItem({
         <span className="nm">{a.name}</span>
         <span className="sub">{profileRoleLabel(a.name, a.role, a.kind)}</span>
       </span>
-      <ActiveBadge count={count} />
+      <ActiveBadge count={count} unusable={unusable} />
     </button>
   );
 }
@@ -293,7 +369,7 @@ export function StageEligibility({
       ? "no stage restriction — eligible everywhere"
       : resolved.length === 0
         ? "declared stages don't exist here — eligible everywhere"
-        : `${onBoard} of ${stages.length} stages`;
+        : `${onBoard} of ${countLabel(stages.length, "stage")}`;
   return (
     <div className="panel">
       <div className="panel-head">
@@ -468,6 +544,7 @@ export function ProfileDetail({
   stages,
   workflow,
   resourceCatalog,
+  backendHealth,
   insts,
   projectName,
   canManage,
@@ -479,6 +556,8 @@ export function ProfileDetail({
   stages: StageView[];
   /** R14-1: the board's edges — eligibility resolves by structural role too. */
   workflow: WorkflowEdgeView[];
+  /** F16: per-backend credential health from `backendCredentialHealth`. */
+  backendHealth?: BackendHealthMap | undefined;
   /** P14-KM-11: the live store catalog, so a grant naming a resource the store
    *  no longer holds renders as missing rather than healthy. */
   resourceCatalog?: readonly ResCatalogGroup[];
@@ -491,6 +570,15 @@ export function ProfileDetail({
 }) {
   const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
   const [confirm, setConfirm] = useState(false);
+  // F16: "idle · available" was the page's answer no matter what — live, a
+  // Codex profile on an instance with no Codex credential read "idle ·
+  // available" here while the task-level Execution panel, one click away, read
+  // "Codex — not configured". Availability is two claims, and only one of them
+  // is about engagements: nothing is running it, AND a run could start. The
+  // second is the backend's to answer.
+  const runHealth = primaryBackendHealth(a, backendHealth);
+  const backendMissing = runHealth !== null && !runHealth.available;
+  const backendLabel = runHealth?.backend === "claude" ? "Claude Code" : "Codex";
   // F15-05/F15-06: the capability columns show GOVERNED policy only — the same
   // partition the matrix draws between its curated groups and "Other actions".
   // A grant with no runtime consumer (advisory catalog id, bespoke extra) is
@@ -555,9 +643,12 @@ export function ProfileDetail({
             {activeKeys.length > 0 ? (
               <span className="ag-running">
                 <span className="working" />
-                running on {activeKeys.length}{" "}
-                {activeKeys.length > 1 ? "tasks" : "task"}
+                running on {countLabel(activeKeys.length, "task")}
               </span>
+            ) : backendMissing ? (
+              <Pill kind="risk" sm>
+                idle · {backendLabel} not configured
+              </Pill>
             ) : (
               <span className="ag-idle">idle · available</span>
             )}
@@ -610,9 +701,8 @@ export function ProfileDetail({
             <summary>
               <Icon name="shield" />
               <span>
-                Advisory only · {advisory.length}{" "}
-                {advisory.length === 1 ? "line" : "lines"} the runtime does not
-                read
+                Advisory only · {countLabel(advisory.length, "line")} the runtime
+                does not read
               </span>
             </summary>
             <div className="cap-advisory-body">
@@ -658,7 +748,13 @@ export function ProfileDetail({
                   live choice — and the editor writes exactly one. */}
               <div className="be-list">
                 {a.backends.length ? (
-                  a.backends.map((b) => <BackendChip key={b} b={b} />)
+                  a.backends.map((b) => (
+                    <BackendChip
+                      key={b}
+                      b={b}
+                      {...(backendHealth?.[b] ? { health: backendHealth[b] } : {})}
+                    />
+                  ))
                 ) : (
                   <span className="be-chip">
                     <span className="agent-glyph op" style={{ width: 22, height: 22 }}>
@@ -706,6 +802,19 @@ export function ProfileDetail({
             </div>
           </div>
         </div>
+        {/* F16: the actionable half of "not configured" — the registry's own
+            sentence naming the specific misconfiguration, rather than leaving
+            an admin to guess which of five env vars is missing. */}
+        {backendMissing && (
+          <div className="def-note">
+            <Icon name="alert" />
+            <span>
+              <b>{backendLabel} has no usable credential on this instance</b> —
+              a run assigned to this profile refuses before it starts.{" "}
+              {runHealth?.detail ?? ""}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -716,13 +825,14 @@ export function ProfileDetail({
             className="right sub"
             style={{ fontSize: ".76rem", color: "var(--faint)" }}
           >
-            {insts.length} engagement{insts.length === 1 ? "" : "s"}
+            {countLabel(insts.length, "engagement")}
           </span>
         </div>
         {insts.length === 0 ? (
           <div className="empty" style={{ padding: "1rem .5rem" }}>
-            Not currently engaged on any task. This profile is approved and
-            available for assignment.
+            {backendMissing
+              ? `Not currently engaged on any task. This profile is approved, but ${backendLabel} is not configured — assigning it would produce a refused run.`
+              : "Not currently engaged on any task. This profile is approved and available for assignment."}
           </div>
         ) : (
           <div className="deploy-list">
@@ -906,6 +1016,7 @@ export function AgentsPage({
   myRole,
   resourceCatalog,
   backendAvailable,
+  backendHealth,
 }: {
   profiles: AgentProfileView[];
   /** Org templates not yet deployed here — the "Add from library" options. */
@@ -923,6 +1034,9 @@ export function AgentsPage({
   /** Per-backend credential availability — the create/edit modal disables a
    *  backend that isn't configured so a profile can't be pinned to it (RU-2). */
   backendAvailable?: Record<"codex" | "claude", boolean>;
+  /** F16: the SAME probe, with its reason — the roster says whether a profile
+   *  could actually run, not only whether anything is running it. */
+  backendHealth?: BackendHealthMap | undefined;
 }) {
   const navigate = useNavigate();
   const push = useToast();
@@ -1162,6 +1276,7 @@ export function AgentsPage({
               <ProfileItem
                 a={operator}
                 count={counts[operator.id] ?? 0}
+                {...(backendHealth ? { health: backendHealth } : {})}
                 on={current?.id === operator.id}
                 onClick={() => setSel(operator.id)}
               />
@@ -1185,6 +1300,7 @@ export function AgentsPage({
                 key={p.id}
                 a={p}
                 count={counts[p.id] ?? 0}
+                {...(backendHealth ? { health: backendHealth } : {})}
                 on={current?.id === p.id}
                 onClick={() => setSel(p.id)}
               />
@@ -1212,6 +1328,7 @@ export function AgentsPage({
               stages={stages}
               workflow={workflow}
               {...(resourceCatalog ? { resourceCatalog } : {})}
+              {...(backendHealth ? { backendHealth } : {})}
               insts={deployments.filter((d) => d.profileId === current.id)}
               projectName={projectName}
               canManage={canManage}

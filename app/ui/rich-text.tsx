@@ -44,10 +44,19 @@ export function RichText({
         </code>,
       );
     } else {
+      // P16-UI-20: the chip's only distinction from surrounding prose is colour
+      // + background, so a screen reader read "@Selin" exactly like the word
+      // "Selin". A visually-hidden word in front restores the distinction.
+      // It sits BESIDE the chip, not inside it: `.mention`'s text content is
+      // the literal mention span the shared matcher produced, and the renderer
+      // must not change that (task-detail asserts it, and so does the server's
+      // own grammar). `.mention-vh` is `user-select: none`, so copying a comment
+      // still yields the author's text.
       parts.push(
-        <span key={i++} className="mention">
-          {tok}
-        </span>,
+        <Fragment key={i++}>
+          <span className="mention-vh">mention </span>
+          <span className="mention">{tok}</span>
+        </Fragment>,
       );
     }
     last = m.index + tok.length;

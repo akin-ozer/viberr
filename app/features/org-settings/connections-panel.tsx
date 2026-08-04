@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ConnectionRecord } from "~/server/org/connections.server";
 import { slugify } from "~/shared/ids/slugify";
 import { formatCalendarDate } from "~/shared/dates/format";
+import { countLabel } from "~/shared/text/plural";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
@@ -122,11 +123,21 @@ function ConnectionModal({
           Personal access token<span className="req">*</span>{" "}
           <span className="fhint">stored encrypted · never displayed</span>
         </label>
+        {/* F11/UI-D: the label promises the token is never displayed while the
+            field displayed it in clear text as you pasted it — over a shoulder,
+            in a screen share, and to every password manager and spell-checker
+            that scrapes text inputs. A secret field is `type="password"`; the
+            autofill/spellcheck opt-outs keep the value out of the same stores.
+            Nothing else changes: the value is still submitted verbatim, and the
+            server still never sends one back. */}
         <input
           id="cn-token"
-          type="text"
+          type="password"
           className="mono"
           value={token}
+          autoComplete="off"
+          spellCheck={false}
+          data-1p-ignore
           placeholder="ghp_…"
           onChange={(e) => {
             setToken(e.target.value);
@@ -203,9 +214,7 @@ export function ConnectionsPanel({
       <div className="pol-note">
         <Icon name="shield" />
         <span>
-          <strong>
-            {connections.length} connection{connections.length === 1 ? "" : "s"}.
-          </strong>{" "}
+          <strong>{countLabel(connections.length, "connection")}.</strong>{" "}
           Every project picks one at creation — it sets the repository root. Each
           authenticates with a <strong>PAT</strong>, validated against the minimum
           scopes before anything is saved.

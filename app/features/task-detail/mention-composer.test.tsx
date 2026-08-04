@@ -132,8 +132,12 @@ describe("comment composer @-mention autocomplete", () => {
       o.textContent?.includes("dev"),
     )!;
     expect(devRow).toBeTruthy();
-    // …with the typed "de" wrapped in a .mention highlight span.
-    const hl = devRow.querySelector(".mention");
+    // …with the typed "de" marked as a SEARCH HIT, not as a mention chip. The
+    // two are different claims: `.mention` is the real-mention class and now
+    // carries a screen-reader "mention " prefix, so an arbitrary matched
+    // substring in this dropdown must not borrow it.
+    expect(devRow.querySelector(".mention")).toBeNull();
+    const hl = devRow.querySelector("mark.mention-match");
     expect(hl).toBeTruthy();
     expect(hl!.textContent!.toLowerCase()).toBe("de");
   });

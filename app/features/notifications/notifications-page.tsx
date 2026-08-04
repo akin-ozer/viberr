@@ -266,10 +266,7 @@ export function NotificationsPage({
         />
         <NtfStream items={rest} onRead={onRead} onOpen={onOpen} />
         {truncated && (
-          <p
-            className="ntf-truncated sub"
-            style={{ textAlign: "center", color: "var(--faint)", margin: 0 }}
-          >
+          <p className="ntf-truncated sub">
             Showing the most recent {limit} notifications. Older ones aren't
             listed here.
           </p>
