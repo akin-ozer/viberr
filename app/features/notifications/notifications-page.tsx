@@ -227,9 +227,14 @@ export function NotificationsPage({
           </div>
         </div>
         <div className="board-tools">
+          {/* UI-58/G3: `role="radiogroup"` with plain buttons is a broken ARIA
+              contract (it promises radio-arrow navigation the markup never wires
+              and conveys the active filter by CSS class alone). Mirror the
+              activity page: `role="group"` + `aria-pressed` on each toggle —
+              which is what this markup actually implements. */}
           <div
             className="mini-seg"
-            role="radiogroup"
+            role="group"
             aria-label="Filter notifications"
           >
             {(
@@ -242,6 +247,7 @@ export function NotificationsPage({
                 type="button"
                 key={id}
                 className={f === id ? "on" : ""}
+                aria-pressed={f === id}
                 onClick={() => setF(id)}
               >
                 {l}
