@@ -1801,9 +1801,14 @@ export async function operatorDeliverForReview(
       message: "Recommended delivering the branch & opening the review PR.",
     };
   }
+  // F17-1: delivery THROUGH the operator's own tool is operator-authorized by
+  // definition — mark the ctx so `performDelivery` attributes the "Opened PR"
+  // event to the Operator, not to the sentinel "operator" user id rendered as a
+  // human with a bogus "no longer a member" guest pill. (A human manual delivery
+  // reaches performDelivery WITHOUT this flag and still renders as that human.)
   const outcome = await performDelivery(
     db,
-    ctx,
+    { ...ctx, operatorAuthorized: true },
     input.projectSlug,
     input.taskKey,
     OPERATOR_TASK_ACTOR,

@@ -417,6 +417,30 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
     expect(r.outcome).toBe("denied");
     expect(pushMock).not.toHaveBeenCalled();
   });
+
+  it("F17-1: the operator's delivery calls openTaskPr operator-authorized (so the PR-open event is the Operator, not a guest)", async () => {
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1" } as never);
+    openPrMock.mockResolvedValue({
+      status: "ok",
+      prNumber: 9,
+      created: true,
+      url: "https://github.com/x/y/pull/9",
+    });
+    await operatorDeliverForReview(
+      store.db,
+      dataCtx(),
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority(),
+    );
+    expect(openPrMock).toHaveBeenCalled();
+    // The third arg is the actor; a delivery THROUGH the operator tool must mark
+    // it operator-authorized so pr-open renders {kind:"operator"}, not a human.
+    // Canary: drop `operatorAuthorized: true` in operatorDeliverForReview and
+    // this reads false.
+    const actorArg = openPrMock.mock.calls.at(-1)![2] as { operatorAuthorized?: boolean };
+    expect(actorArg.operatorAuthorized).toBe(true);
+  });
 });
 
 describe("R15-2 safety net (b): manual delivery from the task page", () => {
