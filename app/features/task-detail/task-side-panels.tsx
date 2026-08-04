@@ -50,11 +50,20 @@ export function GithubTrace({
   // gate (task.blockReason) OR by an open blocked decision packet a crashed run left
   // behind. Surfaced for admins (onForceAccept present) regardless of branch/PR, so a
   // no-branch pre-work wedge is still escapable.
-  const forceAcceptReason =
-    task.blockReason ??
-    (task.packet?.type === "blocked"
-      ? "An open blocked decision is holding this task."
-      : null);
+  //
+  // F18-13: but never on a task that is ALREADY terminal. Force-accept BYPASSES the
+  // verdict gate (it never satisfies it), so `blockReason` persists after the task is
+  // accepted into Done — the card kept offering "Force accept (override review gate)"
+  // and "Acceptance is blocked …" on a task with nothing left to accept. A terminal
+  // task withdraws the affordance, same as R16-3 hides it while the PR is closed.
+  const isTerminal =
+    task.displayReadiness === "accepted" || task.displayReadiness === "merged";
+  const forceAcceptReason = isTerminal
+    ? null
+    : (task.blockReason ??
+      (task.packet?.type === "blocked"
+        ? "An open blocked decision is holding this task."
+        : null));
   const forceAcceptRow =
     forceAcceptReason && onForceAccept ? (
       <div className="force-accept">

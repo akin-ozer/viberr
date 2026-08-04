@@ -962,6 +962,32 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     );
     expect(btn).toBeUndefined();
   });
+
+  it("F18-13: renders NO force-accept + no 'Acceptance is blocked' on a terminal (accepted/merged) task, even for an admin whose blockReason still lingers", () => {
+    // Force-accept BYPASSES the verdict gate rather than satisfying it, so a
+    // task force-accepted into Done keeps a non-null blockReason. The card used
+    // to keep offering "Force accept" on a task with nothing left to accept.
+    for (const terminal of ["accepted", "merged"] as const) {
+      const onForceAccept = vi.fn();
+      const { container, queryByText } = render(
+        <MemoryRouter>
+          <GithubTrace
+            githubHost={GH_HOST}
+            task={traceTask({
+              displayReadiness: terminal,
+              blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+            })}
+            onForceAccept={onForceAccept}
+          />
+        </MemoryRouter>,
+      );
+      const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Force accept"),
+      );
+      expect(btn).toBeUndefined();
+      expect(queryByText(/Acceptance is blocked/)).toBeNull();
+    }
+  });
 })
 
 /* ------------------------------------------------ pass-13 honesty fixes */
