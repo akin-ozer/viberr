@@ -127,7 +127,15 @@ export function codexCliAuthDiagnostics(
   const source = path.resolve(resolveCodexAuthSource(env));
   const authJsonPath = path.join(source, "auth.json");
   const runHome = resolveCodexHome(env);
-  const defaultLoginPath = path.join(os.homedir(), ".codex", "auth.json");
+  // Derived from the env this function was HANDED, not from the process's.
+  // `os.homedir()` reads `process.env.HOME` directly, so the one field that
+  // reached around the `env` parameter was also the one that made the D1 copy
+  // branch on whether the machine running the code happens to hold a real
+  // `~/.codex` login — which is how the D1 test passed on a developer box with
+  // a Codex login and failed on CI without one. `os.homedir()` stays the
+  // fallback for the (Windows / no-$HOME) case where the env carries nothing.
+  const home = env.HOME ?? env.USERPROFILE ?? os.homedir();
+  const defaultLoginPath = path.join(home, ".codex", "auth.json");
   const exists = (file: string): boolean => {
     try {
       return existsSync(file);
