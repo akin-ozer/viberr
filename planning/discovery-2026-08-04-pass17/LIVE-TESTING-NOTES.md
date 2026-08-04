@@ -2,6 +2,9 @@
 
 Session: 2026-08-04, container `viberr-app-1` on :5173 (docker-data root), clean-sheet seed.
 This file is the running log for Phase B (live usage). Findings graduate into FINDINGS.md.
+**The consolidated enumeration of every executed use case (34, each with durable
+evidence pointers) is in `USE-CASES.md`** — this file kept only the working log,
+which under-recorded the list it was accumulating.
 
 ## Environment / accounts
 
