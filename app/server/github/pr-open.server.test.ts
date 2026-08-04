@@ -129,6 +129,52 @@ describe("openTaskPr", () => {
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain("github.pr.opened");
   });
 
+  it("F17-1: an operator-authorized delivery writes the OPEN-PR event as the operator, not a guest human", async () => {
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 51, html_url: "https://github.com/akin-ozer/viberr/pull/51", title: "[VIB-201] x", state: "open" },
+      },
+    });
+    // The operator threads its sentinel user id "operator" (not a users-table
+    // row) with operatorAuthorized:true — the bug rendered this as a human with
+    // a "no longer a member" guest pill.
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { userId: "operator", label: "operator", operatorAuthorized: true },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("ok");
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed;
+    const opened = parsed.timeline.find((e) => e.type === "github" && /Opened \*\*PR #51/.test(e.text ?? ""));
+    expect(opened, "the open-PR event exists").toBeTruthy();
+    expect(opened!.actor).toEqual({ kind: "operator" });
+  });
+
+  it("F17-1: a genuine human delivery still writes the OPEN-PR event as that human", async () => {
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 52, html_url: "https://github.com/akin-ozer/viberr/pull/52", title: "[VIB-201] x", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { userId: store.users.arda.id, label: "arda@viberr.test", operatorAuthorized: false },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("ok");
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed;
+    const opened = parsed.timeline.find((e) => e.type === "github" && /Opened \*\*PR #52/.test(e.text ?? ""));
+    expect(opened!.actor).toMatchObject({ kind: "human", userId: store.users.arda.id });
+  });
+
   // P13-D-26: `composePrBody` has always accepted `evidence` and this — its ONE
   // caller — never passed it, so the "## Evidence" section was unreachable in
   // production. The task record now carries real evidence rows on outcome

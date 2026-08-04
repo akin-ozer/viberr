@@ -3494,7 +3494,11 @@ export async function performDelivery(
     const result = await openTaskPr(
       db,
       { projectSlug, taskKey },
-      { userId: actor.userId, label: actor.label },
+      {
+        userId: actor.userId,
+        label: actor.label,
+        operatorAuthorized: ctx.operatorAuthorized === true,
+      },
       dataCtx,
     );
     if (result.status === "ok") {

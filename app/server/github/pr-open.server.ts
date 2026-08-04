@@ -152,7 +152,7 @@ interface GhPull {
 export async function openTaskPr(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
-  actor: AuditActor & { userId?: string },
+  actor: AuditActor & { userId?: string; operatorAuthorized?: boolean },
   ctx: OpenTaskPrContext = {},
 ): Promise<OpenTaskPrResult> {
   const ref = {
@@ -343,7 +343,7 @@ async function writePrToTask(
   input: { projectSlug: string; taskKey: string },
   gh: { repo: string },
   pr: GhPull,
-  actor: AuditActor & { userId?: string },
+  actor: AuditActor & { userId?: string; operatorAuthorized?: boolean },
   created: boolean,
   ctx: OpenTaskPrContext,
   existingPr: PrRef | null,
@@ -376,24 +376,34 @@ async function writePrToTask(
     await patchTaskFrontmatter(ref, { pr: next });
   }
   if (created) {
-    const nameHint = actor.userId
-      ? ((db.prepare(`SELECT name FROM users WHERE id = ?`).get(actor.userId) as
+    // Authorship of the "Opened PR" event: an operator-authorized delivery is
+    // the OPERATOR, not a human — its TaskActor carries the sentinel user id
+    // "operator", which is not a users-table row, so rendering it as a human
+    // produced a bogus "no longer a member" guest pill (F17-1). A genuine human
+    // delivery (manual button / applied recommendation) still renders as that
+    // human; the agentless fallback keeps its historical "Implementation" render.
+    const humanUserId =
+      !actor.operatorAuthorized && actor.userId ? actor.userId : null;
+    const nameHint = humanUserId
+      ? ((db.prepare(`SELECT name FROM users WHERE id = ?`).get(humanUserId) as
           | { name: string }
           | undefined)?.name ?? null)
       : null;
     await appendTimelineEvent(ref, {
       occurredAt: new Date().toISOString(),
       type: "github",
-      actor: actor.userId
-        ? { kind: "human", userId: actor.userId, nameHint }
-        : {
-            kind: "agent",
-            backend: "claude",
-            // Synthetic fallback author (no engaged profile in scope here) -
-            // renders as "Implementation" exactly as before.
-            profileId: "implementation",
-            roleHint: "Implementation",
-          },
+      actor: actor.operatorAuthorized
+        ? { kind: "operator" }
+        : humanUserId
+          ? { kind: "human", userId: humanUserId, nameHint }
+          : {
+              kind: "agent",
+              backend: "claude",
+              // Synthetic fallback author (no engaged profile in scope here) -
+              // renders as "Implementation" exactly as before.
+              profileId: "implementation",
+              roleHint: "Implementation",
+            },
       title: null,
       text: `Opened **PR #${pr.number}** for review.`,
       toAgent: false,
