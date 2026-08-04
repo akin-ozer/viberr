@@ -30,10 +30,12 @@ const BANNED = /\bgovern(ance|ed|or|ors|ing|s)?\b/i;
 /**
  * Allowed uses that are NOT rendered UI copy shown to an end user:
  *  - code identifiers (`GOVERNED_TEMPLATE`, `isGoverned`, `governed.direct`, the
- *    `governed-5` template id) — machinery, never rendered;
- *  - the login SPLASH hero, which states the product's OWN category exactly as
- *    the PRD executive summary does ("Governed AI delivery" / "a governed
- *    operator") — the product's positioning, not in-app workflow/permissions copy.
+ *    `governed-5` template id) — machinery, never rendered.
+ *
+ * There is NO rendered-copy exception. The login tagline had "governed" removed
+ * at design time (design/CONVERSATION-SUMMARY.md L182: *"'Self-hosted ·
+ * collaborative agentic AI delivery' (word 'governed' removed)"*), so the login
+ * hero is subject to the ban like every other surface — not allowlisted.
  */
 const ALLOW_SUBSTRINGS = [
   "GOVERNED_TEMPLATE",
@@ -45,9 +47,6 @@ const ALLOW_SUBSTRINGS = [
   "governed.forbidden",
   '"governed-5"',
   "governed-5",
-  // Login hero — product tagline, mirrors prd.md's executive summary.
-  "Governed AI delivery for small teams",
-  "Task-centered board with a governed operator",
 ];
 
 /** Strip `//` line comments and `/* … *\/` block comments while PRESERVING line
