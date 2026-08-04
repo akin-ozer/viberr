@@ -204,6 +204,18 @@ describe("knowledge bases", () => {
     expect(existsSync(kbDirPath("gone-soon", dataRoot))).toBe(false);
     expect(listKnowledgeBases(db, ctx)).toHaveLength(0);
   });
+
+  it("F18-4: a row whose store folder was wiped reports folderExists:false", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(db, { name: "Wiped", refresh: "manual" }, ACTOR, ctx);
+    // A healthy KB with no docs still exists on disk.
+    expect(getKnowledgeBase(db, kb.id, ctx)!.folderExists).toBe(true);
+    // Remove the folder out from under the row (a store reset / external delete).
+    rmSync(kbDirPath("wiped", dataRoot), { recursive: true, force: true });
+    const orphan = getKnowledgeBase(db, kb.id, ctx)!;
+    expect(orphan.folderExists).toBe(false);
+    expect(orphan.injectableCount).toBe(0); // indistinguishable from empty WITHOUT the flag
+  });
 });
 
 describe("skills", () => {

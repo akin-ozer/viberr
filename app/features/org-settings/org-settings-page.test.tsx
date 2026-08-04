@@ -308,7 +308,7 @@ const KBS: KbView[] = [
       ] },
       { type: "file", name: "overview.md", sizeBytes: 9100, mtime: new Date().toISOString() },
     ],
-    fileCount: 2, injectableCount: 2, uri: "store://kb/architecture-notes",
+    fileCount: 2, injectableCount: 2, folderExists: true, uri: "store://kb/architecture-notes",
   },
 ];
 const MCPS: McpView[] = [
@@ -531,6 +531,18 @@ describe("ResourcesPanel", () => {
         "store://kb/architecture-notes/ · 2 docs · agents read the live folder · 1 non-text file skipped",
       ),
     ).toBeTruthy();
+  });
+
+  it("F18-4: a KB whose store folder is gone reads 'folder missing', not a healthy empty KB", () => {
+    const missing: KbView[] = [
+      { ...KBS[0]!, tree: [], fileCount: 0, injectableCount: 0, folderExists: false },
+    ];
+    const { getByText, queryByText } = renderPanel(
+      <ResourcesPanel kbs={missing} mcps={[]} skills={[]} gagents={[]} stages={STAGES} />,
+    );
+    expect(getByText(/folder missing — no docs reach a granted agent/)).toBeTruthy();
+    // It must NOT read like a normal empty KB.
+    expect(queryByText(/0 docs · agents read the live folder/)).toBeNull();
   });
 
   it("P14-KM-09: MCP rows and the delete confirm count the templates that grant them", () => {

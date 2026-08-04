@@ -63,19 +63,35 @@ export function KbPanel({
                   "…docs agents read" / "read live" — which said "read" twice
                   and left the live-folder promise dangling. One clause each. */}
               <span className="sub mono">
-                store://kb/{kb.dir}/ · {kb.injectableCount} doc
-                {kb.injectableCount === 1 ? "" : "s"} · agents read the live
-                folder
-                {kb.fileCount > kb.injectableCount
-                  ? " · " +
-                    (kb.fileCount - kb.injectableCount) +
-                    " non-text file" +
-                    (kb.fileCount - kb.injectableCount === 1 ? "" : "s") +
-                    " skipped"
-                  : ""}
+                store://kb/{kb.dir}/ ·{" "}
+                {kb.folderExists ? (
+                  <>
+                    {kb.injectableCount} doc
+                    {kb.injectableCount === 1 ? "" : "s"} · agents read the live
+                    folder
+                    {kb.fileCount > kb.injectableCount
+                      ? " · " +
+                        (kb.fileCount - kb.injectableCount) +
+                        " non-text file" +
+                        (kb.fileCount - kb.injectableCount === 1 ? "" : "s") +
+                        " skipped"
+                      : ""}
+                  </>
+                ) : (
+                  // F18-4: the store folder is gone (wiped/renamed under the
+                  // row) — a granted agent gets NOTHING, so say so rather than
+                  // read like a healthy empty KB. Plain honest text, mirroring
+                  // the credUnreadable precedent below.
+                  <>
+                    folder missing — no docs reach a granted agent; re-create it
+                    or delete this knowledge base
+                  </>
+                )}
               </span>
               <span className="sub">
-                re-scanned {rel(kb.lastIndexedAt)}
+                {kb.folderExists
+                  ? "re-scanned " + rel(kb.lastIndexedAt)
+                  : "last scanned " + rel(kb.lastIndexedAt)}
                 {usedBy(kb.dir) > 0
                   ? " · " + usedBy(kb.dir) + " template" + (usedBy(kb.dir) === 1 ? "" : "s")
                   : ""}
