@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -40,7 +40,10 @@ import {
   resolveDeployedSpecialist,
   startAgentRun,
   buildSpecialistPersona,
+  stripUngovernedRepoCatalog,
 } from "./specialist-run.server";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 /**
  * Assign a deployed specialist + start a specialist run — the "deploy a
@@ -1501,6 +1504,55 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).not.toContain("SENTINEL-SKILL-UNRELATED");
     expect(persona).not.toContain("reviewer-expertise");
     expect(persona).not.toContain("terraform-review");
+  });
+});
+
+describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
+  const exec = promisify(execFile);
+
+  async function gitRepoWithClaude(): Promise<string> {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-strip-"));
+    await exec("git", ["-C", dir, "init", "-q"]);
+    await exec("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
+    await exec("git", ["-C", dir, "config", "user.name", "T"]);
+    mkdirSync(path.join(dir, ".claude", "commands"), { recursive: true });
+    mkdirSync(path.join(dir, ".claude", "skills", "react-doctor"), { recursive: true });
+    writeFileSync(path.join(dir, ".claude", "commands", "verify.md"), "# verify");
+    writeFileSync(path.join(dir, ".claude", "skills", "react-doctor", "SKILL.md"), "# rd");
+    writeFileSync(path.join(dir, ".claude", "launch.json"), "{}");
+    mkdirSync(path.join(dir, "src"));
+    writeFileSync(path.join(dir, "src", "app.ts"), "export const a = 1;\n");
+    await exec("git", ["-C", dir, "add", "-A"]);
+    await exec("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+    await exec("git", ["-C", dir, "checkout", "-q", "-b", "task-branch"]);
+    return dir;
+  }
+
+  it("removes the repo .claude from the worktree without staging a deletion", async () => {
+    const dir = await gitRepoWithClaude();
+    await stripUngovernedRepoCatalog(dir);
+    // The CLI can no longer discover the repo's ungoverned catalog…
+    expect(existsSync(path.join(dir, ".claude"))).toBe(false);
+    // …and git sees no pending change (skip-worktree hides the deletion).
+    const status = (await exec("git", ["-C", dir, "status", "--porcelain"])).stdout.trim();
+    expect(status).toBe("");
+    // The delivery step: a real change + `git add -A` (push-workspace.server).
+    writeFileSync(path.join(dir, "src", "app.ts"), "export const a = 2;\n");
+    await exec("git", ["-C", dir, "add", "-A"]);
+    await exec("git", ["-C", dir, "commit", "-q", "-m", "work"]);
+    const diff = (await exec("git", ["-C", dir, "diff", "--name-status", "HEAD~1", "HEAD"])).stdout;
+    // The review PR contains ONLY the real change — no `.claude` deletion.
+    expect(diff).toContain("src/app.ts");
+    expect(diff).not.toContain(".claude");
+    // …and the committed tree still carries the original `.claude` from the index.
+    const tree = (await exec("git", ["-C", dir, "ls-tree", "-r", "HEAD", "--name-only"])).stdout;
+    expect(tree).toContain(".claude/launch.json");
+  });
+
+  it("is a no-op when the clone has no .claude", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-strip-none-"));
+    await exec("git", ["-C", dir, "init", "-q"]);
+    await expect(stripUngovernedRepoCatalog(dir)).resolves.toBeUndefined();
   });
 });
 

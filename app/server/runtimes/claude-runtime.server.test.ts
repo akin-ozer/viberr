@@ -292,10 +292,14 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured?.effort).toBeUndefined();
   });
 
-  it("isolates every run from the host ~/.claude (settingSources + skills empty)", async () => {
+  it("isolates every run from the host ~/.claude (settingSources + skills empty, strict MCP)", async () => {
     const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
-    let captured: { settingSources?: string[]; skills?: string[] } | undefined;
-    const queryFn = (params: { options?: { settingSources?: string[]; skills?: string[] } }) => {
+    let captured:
+      | { settingSources?: string[]; skills?: string[]; strictMcpConfig?: boolean }
+      | undefined;
+    const queryFn = (params: {
+      options?: { settingSources?: string[]; skills?: string[]; strictMcpConfig?: boolean };
+    }) => {
       captured = params.options;
       const { q } = fakeQuery(result);
       return q;
@@ -306,6 +310,8 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // sees NONE of the operator-user's personal Claude Code skills/plugins.
     expect(captured?.settingSources).toEqual([]);
     expect(captured?.skills).toEqual([]);
+    // R18-3: only Viberr-granted MCP servers reach a run (ignore ambient MCP).
+    expect(captured?.strictMcpConfig).toBe(true);
   });
 
   it("denies the SDK bundled parity/governance tools on every run (keeps ToolSearch + coding tools), plus repo-mutation for operators", async () => {

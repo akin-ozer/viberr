@@ -70,6 +70,10 @@ export interface ClaudeQueryOptions {
    *  (F13), so a host-installed plugin's slash-commands/skills never reach a
    *  Viberr run. */
   plugins?: { type: "local"; path: string }[];
+  /** R18-3: `true` = ignore ambient MCP config (repo `.mcp.json`, user MCP,
+   *  plugin MCP) — only the servers Viberr passes via `mcpServers` reach the run.
+   *  Governance parity with `settingSources`, for the MCP catalog channel. */
+  strictMcpConfig?: boolean;
 }
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
@@ -537,6 +541,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           settingSources: [],
           skills: [],
           plugins: [],
+          // R18-3 (governance parity with settingSources): only Viberr-granted
+          // MCP servers reach a run — ignore a repo `.mcp.json`, user MCP config,
+          // and plugin MCP. Viberr passes its granted external MCPs + the
+          // in-process toolkit via `mcpServers`; nothing ambient should widen it.
+          strictMcpConfig: true,
         };
         if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
         // Base adapter env, overlaid with any per-run env (e.g. the specialist's

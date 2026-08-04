@@ -1709,6 +1709,51 @@ interface CloneOutcome {
   failure?: CloneFailure;
 }
 
+/**
+ * R18-3 / F18-8 — remove the cloned repo's own `.claude` catalog from the run's
+ * working tree so the Claude CLI cannot discover its ungoverned slash-commands
+ * and skills. Viberr injects each agent's GRANTED skill/KB as system-prompt text
+ * (buildSpecialistPersona), so a governed run needs nothing from the repo's
+ * `.claude` — it was purely a context/behavior leak on top of the grants.
+ *
+ * `.claude` is TRACKED in many repos (incl. viberr itself: launch.json, skills,
+ * submodule gitlinks), and delivery auto-commits the working tree with `git add
+ * -A` (push-workspace.server). A plain `rm -rf` would therefore ship a `.claude`
+ * DELETION into the review PR. We first mark every tracked `.claude` path
+ * `--skip-worktree`: git then treats the absent files as unchanged, `git add -A`
+ * never stages the deletion, and the committed tree keeps `.claude` from the
+ * index. (A run whose task is to edit the repo's own `.claude` cannot deliver
+ * those edits — the intended governance posture, not a bug.)
+ */
+export async function stripUngovernedRepoCatalog(repoDir: string): Promise<void> {
+  const catalog = path.join(repoDir, ".claude");
+  if (!existsSync(catalog)) return;
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["-C", repoDir, "ls-files", "-z", "--", ".claude"],
+      { timeout: 10_000 },
+    );
+    const tracked = stdout.split("\0").filter(Boolean);
+    if (tracked.length) {
+      await execFileAsync(
+        "git",
+        ["-C", repoDir, "update-index", "--skip-worktree", "--", ...tracked],
+        { timeout: 10_000 },
+      );
+    }
+  } catch (error) {
+    // Non-fatal: governance still wins — we strip the catalog regardless. The
+    // worst case of a skip-worktree failure is a `.claude` deletion surfacing in
+    // the delivery diff for a human to notice, never a silent catalog leak.
+    logger.warn("could not skip-worktree repo .claude before stripping", {
+      repoDir,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  rmSync(catalog, { recursive: true, force: true });
+}
+
 async function cloneRepo(
   db: DatabaseSync,
   input: {
@@ -1749,6 +1794,7 @@ async function cloneRepo(
         { timeout: 10_000 },
       );
       await setIdentity(dir);
+      await stripUngovernedRepoCatalog(dir);
       return { dir };
     }
     mkdirSync(path.dirname(dir), { recursive: true });
@@ -1767,6 +1813,7 @@ async function cloneRepo(
         env: clone.env,
       });
       await setIdentity(dir);
+      await stripUngovernedRepoCatalog(dir);
       return { dir };
     } finally {
       clone.dispose();
