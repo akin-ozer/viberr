@@ -1809,3 +1809,76 @@ describe("B2 — the operator may only withdraw ITS OWN packet", () => {
     );
   });
 });
+
+describe("operatorPostComment honest outcome (G1/B-FD8)", () => {
+  /** Deploy the operator roster, then turn the named anti-noise guardrails ON. */
+  function deployWithGuardrails(ids: string[]): void {
+    deployRoster(DEFAULT_POLICY);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      guardrails: ids.map((id) => ({ id, desc: `${id} on`, on: true })),
+    } as never);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  const base = (text: string) => ({ projectSlug: store.slug, taskKey: "VIB-1", text });
+
+  it("a chatter comment dropped by meaningful-comment returns NOOP + honest message + audit, and nothing lands on the timeline", async () => {
+    deployWithGuardrails(["meaningful-comment"]);
+    seedTask("triage");
+    const result = await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      base("ok"),
+      authority("full"),
+    );
+    // The model must be told the truth — NOT "Comment posted to the timeline."
+    expect(result.outcome).toBe("noop"); // a state refusal → the Codex executor narrates it
+    expect(result.message).toContain("NOT posted");
+    expect(task().timeline.some((e) => e.type === "comment")).toBe(false);
+    expect(
+      listAuditEvents(store.db, { action: "task.comment.dropped" }),
+    ).toHaveLength(1);
+  });
+
+  it("an exact duplicate of the last operator comment returns NOOP, not a false 'posted'", async () => {
+    deployWithGuardrails(["meaningful-comment", "no-duplicate-summary"]);
+    seedTask("triage");
+    const substantive = base("Assigned the developer; the first run is queued now.");
+    const first = await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      substantive,
+      authority("full"),
+    );
+    expect(first.outcome).toBe("done");
+    const second = await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      substantive,
+      authority("full"),
+    );
+    expect(second.outcome).toBe("noop");
+    expect(second.message).toContain("identical to your previous comment");
+    // Only ONE comment ever reached the record.
+    expect(task().timeline.filter((e) => e.type === "comment")).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, { action: "task.comment.dropped" }),
+    ).toHaveLength(1);
+  });
+
+  it("a substantive, first-time comment still reports DONE and posts", async () => {
+    deployWithGuardrails(["meaningful-comment", "no-duplicate-summary"]);
+    seedTask("triage");
+    const result = await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      base("Assigned the developer; the first run is queued now."),
+      authority("full"),
+    );
+    expect(result.outcome).toBe("done");
+    expect(result.message).toBe("Comment posted to the timeline.");
+    expect(task().timeline.some((e) => e.type === "comment")).toBe(true);
+  });
+});
