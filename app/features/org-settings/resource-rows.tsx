@@ -194,7 +194,17 @@ export function McpPanel({
                     : /* P13-UI-16: defensive — every save/test writes `up`, so a
                          null only appears for a row written outside Viberr. */
                       "not health-checked yet"}
-                {m.hasCred ? " · auth: configured" : ""}
+                {/* A9 (F17 hygiene): a stored credential that no longer decrypts
+                    (e.g. the encryption key was rotated without the PREVIOUS key)
+                    used to still read "auth: configured" while the server mounted
+                    anonymously. `credUnreadable` was computed for exactly this and
+                    never surfaced — say it plainly so an admin knows to rotate or
+                    re-enter it. */}
+                {m.hasCred
+                  ? m.credUnreadable
+                    ? " · auth: unreadable — rotate the encryption key or re-enter the credential"
+                    : " · auth: configured"
+                  : ""}
                 {/* P14-KM-09: KB and skill rows have counted their templates
                     since P13-KM-08; MCP rows showed nothing, so an admin about
                     to rename or remove a server had no idea what depended on

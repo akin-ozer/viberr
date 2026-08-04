@@ -152,21 +152,33 @@ Prior rulings still in force: R16-1..R16-7 (see pass-16 memory), R15-x, R6-2
 - FR14 vocabulary: PRD still says "consultant specialists"; the app says
   engagements/delivering/supporting/required-reviewer. Re-sync or note.
 
-## D. Code hygiene flagged by the reference-doc audit (verify, then fix)
+## D. Code hygiene flagged by the reference-doc audit (verified + dispositioned)
 
-- **AGENTS-RUNTIME:** `resolvePacket` still defaults a backend-less retry to
-  Claude; `credUnreadable` is dead; `skills-lock.json` has zero product
-  consumers (decide: wire or document as build-time only).
-- **RBAC:** stale docblock at
-  [require-project.server.ts:10-12](app/routes/project-visibility.server.ts) still
-  describes the deleted `appWide` concept (E1 residue in a comment).
-- **ARCHITECTURE:** `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` is intentionally read
-  from raw env (documented) but is absent from `.env.example`; add a commented
-  reference so operators can discover the rotation window. (Minor — NOT a schema
-  bug.) R16-7's premise is false: `docs/contributing-quickstart.md` and
-  `docs/testing-quickstart.md` DO exist — note the correction.
-- **UI:** confirm the split feature files (task-detail, home, resources) have no
-  dangling references; the doc already verified them.
+- **`credUnreadable` — WIRED (was dead).** It was computed for every MCP row and
+  never read, so a stored credential that no longer decrypts (key rotated without
+  the PREVIOUS key) still read "auth: configured" while the server mounted
+  anonymously — the exact A9 bug it was added to fix. Now surfaced as "auth:
+  unreadable — rotate the encryption key or re-enter the credential"
+  ([resource-rows.tsx:197](app/features/org-settings/resource-rows.tsx)), test added.
+  Chosen over deletion because it completes a real diagnostic.
+- **`.env.example` — DONE.** Added the commented `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`
+  block (the rotation window; read from raw env by design, not the Zod schema).
+- **`appWide` docblock — NOT-A-BUG.** The two remaining references are legitimate:
+  [rbac.ts:55](app/shared/rbac.ts) EXPLAINS the removal (design-decision doc), and
+  [project.tsx:43](app/routes/project.tsx) cites FR4's "app-wide read". The R15-4
+  docblock on `project-visibility.server.ts` never mentioned `appWide`. No stale
+  comment to fix.
+- **`resolvePacket` backend-less retry → Claude — OBSERVATION, left as-is.** A
+  `retry_other_backend` option is authored by the operator WITH an explicit
+  `backend`; a backend-less one is malformed and shouldn't occur. The `?? claude`
+  default is defensive for that degenerate case; a "true other backend" would
+  need the failed run's backend threaded in. Low impact — not changed on this
+  pass rather than alter retry behavior speculatively.
+- **`skills-lock.json` — build-time only, documented.** Zero product (runtime)
+  consumers by design; it pins the skill catalog at build/seed time. Not dead.
+- **R16-7 premise correction:** `docs/contributing-quickstart.md` and
+  `docs/testing-quickstart.md` DO exist (the branch deletion happened; the
+  missing-docs premise was wrong) — recorded in decisions.md by D9.
 
 ## E. Verified-working (do NOT re-open — evidence in LIVE-TESTING-NOTES)
 
