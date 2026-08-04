@@ -282,7 +282,9 @@ describe("WorkflowRules", () => {
       "No transition rule reaches this stage",
     );
     // …and the panel says so in words, naming the stage.
-    expect(container.textContent).toContain("Off the governed path:");
+    // F18-14: the copy avoids the banned "governed" word.
+    expect(container.textContent).toContain("Off the workflow path:");
+    expect(container.textContent).not.toContain("Off the governed path:");
     expect(container.querySelector(".pol-note strong")!.textContent).toBe("QA");
   });
 

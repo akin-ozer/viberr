@@ -417,7 +417,10 @@ export function WorkflowRules({
         <div className="pol-note before">
           <Icon name="alert" />
           <span>
-            Off the governed path:{" "}
+            {/* F18-14: the "govern/governance/governed" copy ban applies to
+                rendered UI (design/CONVERSATION-SUMMARY line 81 calls it out for
+                THIS page specifically) — say "workflow path". */}
+            Off the workflow path:{" "}
             <strong>{offChain.map((id) => S(id).name).join(", ")}</strong>. No
             transition rule reaches{" "}
             {offChain.length === 1 ? "that stage" : "those stages"}, so no agent
@@ -501,7 +504,7 @@ export function WorkflowRules({
           <em>Direct</em> — an explicit, audited opt-in that lets that operator
           close a task itself (it still refuses a failing-validation task). The
           per-transition <strong>Human approval / Human only</strong> boundaries
-          below govern <strong>human</strong> actors; an operator granted{" "}
+          below apply to <strong>human</strong> actors; an operator granted{" "}
           <em>Direct</em> stage transitions crosses them itself, so treat those
           settings as the rule for people, not for a direct-capability operator.
         </span>
