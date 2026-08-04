@@ -7,6 +7,7 @@ import {
 } from "~/server/auth/form-action.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
+import { heldDataRootLock } from "~/server/db/data-root-lock.server";
 import { getEnv } from "~/server/config/env.server";
 import {
   countUnreadNotifications,
@@ -59,6 +60,18 @@ export async function loader({ request }: Route.LoaderArgs) {
     // store-relative form of the same hint and no host layout. Loader-side, not
     // a render-time hide.
     storeRoot: user.role === "admin" ? getEnv().VIBERR_DATA_ROOT : null,
+    // F18-5: the single-writer lock holder, so an admin can SEE (not just infer
+    // from a health probe) which process owns this data root — the human-facing
+    // half of the fail-closed guard. Admin-only, like storeRoot.
+    lockHolder:
+      user.role === "admin"
+        ? (() => {
+            const h = heldDataRootLock()?.holder;
+            return h
+              ? { pid: h.pid, hostname: h.hostname, startedAt: h.startedAt }
+              : null;
+          })()
+        : null,
   };
 }
 

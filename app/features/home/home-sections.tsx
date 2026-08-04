@@ -536,12 +536,16 @@ export function StoreStrip({
   isAdmin,
   rebuilding,
   onRebuild,
+  lockHolder = null,
 }: {
   scanning: boolean;
   onRescan: () => void;
   isAdmin: boolean;
   rebuilding: boolean;
   onRebuild: () => void;
+  /** F18-5: the process that owns this data root's single-writer lock, so an
+   *  admin can SEE there is exactly one writer and who it is. */
+  lockHolder?: { pid: number; hostname: string; startedAt: string } | null;
 }) {
   // Both store-maintenance actions are org-admin only server-side; render them
   // only for an admin rather than a Re-scan button that silently 403s (MU-4).
@@ -559,6 +563,17 @@ export function StoreStrip({
       <span>
         <b>Store maintenance</b> · admins only — the board is a projection of the
         task files on disk. Neither action edits a task file.
+        {lockHolder && (
+          // F18-5: one writer per data root. Naming the holder makes a
+          // second-writer mistake visible instead of only surfacing as silent
+          // WAL loss (the incident this guard exists to stop).
+          <>
+            {" "}
+            <span className="sub">
+              Writer: pid {lockHolder.pid} on {lockHolder.hostname}.
+            </span>
+          </>
+        )}
       </span>
       {/* The auto margin now lives on `.store-strip > :last-child`, so the
           GROUP is pushed to the end rather than the first button. What stays
