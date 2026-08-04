@@ -389,12 +389,13 @@ function ProfileAppearance({
               account — it follows you to every browser you sign in from.
             </div>
           </span>
-          <span className="mini-seg">
+          <span className="mini-seg" role="group" aria-label="Theme">
             {THEMES.map(([v, l]) => (
               <button
                 type="button"
                 key={v}
                 className={theme === v ? "on" : ""}
+                aria-pressed={theme === v}
                 onClick={() => onTheme(v, l)}
               >
                 {l}
@@ -417,12 +418,13 @@ function ProfileAppearance({
               kept either way.
             </div>
           </span>
-          <span className="mini-seg">
+          <span className="mini-seg" role="group" aria-label="Timeline opens showing">
             {TLS.map(([v, l]) => (
               <button
                 type="button"
                 key={v}
                 className={tl === v ? "on" : ""}
+                aria-pressed={tl === v}
                 onClick={() => pickTl(v, l)}
               >
                 {l}

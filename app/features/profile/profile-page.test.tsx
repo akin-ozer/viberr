@@ -130,6 +130,12 @@ describe("ProfilePage", () => {
     const { getByText, queryByText, container } = renderProfile();
     expect(getByText("Appearance & workspace")).toBeTruthy();
 
+    // G5: the theme segmented control carries `aria-pressed`, not color alone.
+    const themeSeg = getByText("System").closest(".mini-seg")!;
+    expect(themeSeg.getAttribute("role")).toBe("group");
+    expect(getByText("System").getAttribute("aria-pressed")).toBe("true"); // stub theme="system"
+    expect(getByText("Light").getAttribute("aria-pressed")).toBe("false");
+
     fireEvent.click(getByText("Dark"));
     expect(lastTheme).toBe("dark");
 

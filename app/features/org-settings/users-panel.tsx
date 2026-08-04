@@ -300,11 +300,11 @@ function InviteModal({
         <span className="flabel">
           {isDomain ? "Role for everyone joining via this domain" : "Instance role"}
         </span>
-        <span className="mini-seg self-start">
-          <button type="button" className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>
+        <span className="mini-seg self-start" role="group" aria-label="Instance role">
+          <button type="button" className={role === "admin" ? "on" : ""} aria-pressed={role === "admin"} onClick={() => setRole("admin")}>
             Admin
           </button>
-          <button type="button" className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>
+          <button type="button" className={role === "member" ? "on" : ""} aria-pressed={role === "member"} onClick={() => setRole("member")}>
             Member
           </button>
         </span>
@@ -435,11 +435,11 @@ function EditUserModal({
       )}
       <div className="field">
         <span className="flabel">Instance role</span>
-        <span className="mini-seg self-start">
-          <button type="button" className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>
+        <span className="mini-seg self-start" role="group" aria-label="Instance role">
+          <button type="button" className={role === "admin" ? "on" : ""} aria-pressed={role === "admin"} onClick={() => setRole("admin")}>
             Admin
           </button>
-          <button type="button" className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>
+          <button type="button" className={role === "member" ? "on" : ""} aria-pressed={role === "member"} onClick={() => setRole("member")}>
             Member
           </button>
         </span>
@@ -672,10 +672,11 @@ export function UsersPanel({
                   disabled
                 </Pill>
               )}
-              <span className="mini-seg">
+              <span className="mini-seg" role="group" aria-label={`Role for ${u.name}`}>
                 <button
                   type="button"
                   className={u.role === "admin" ? "on" : ""}
+                  aria-pressed={u.role === "admin"}
                   onClick={() => setRole(u, "admin")}
                 >
                   Admin
@@ -683,6 +684,7 @@ export function UsersPanel({
                 <button
                   type="button"
                   className={u.role === "member" ? "on" : ""}
+                  aria-pressed={u.role === "member"}
                   onClick={() => setRole(u, "member")}
                 >
                   Member

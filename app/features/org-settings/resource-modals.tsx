@@ -57,9 +57,9 @@ export function KBModal({ initial, onClose }: { initial: KbView | null; onClose:
       </div>
       <div className="field">
         <span className="flabel">Re-index</span>
-        <span className="mini-seg self-start">
+        <span className="mini-seg self-start" role="group" aria-label="Re-index">
           {(["on change", "manual"] as const).map((r) => (
-            <button type="button" key={r} className={refresh === r ? "on" : ""} onClick={() => setRefresh(r)}>
+            <button type="button" key={r} className={refresh === r ? "on" : ""} aria-pressed={refresh === r} onClick={() => setRefresh(r)}>
               {r}
             </button>
           ))}
@@ -162,11 +162,11 @@ export function McpModal({
         </div>
         <div className="field">
           <span className="flabel">Transport</span>
-          <span className="mini-seg self-start">
-            <button type="button" className={transport === "HTTP" ? "on" : ""} onClick={() => setTransport("HTTP")}>
+          <span className="mini-seg self-start" role="group" aria-label="Transport">
+            <button type="button" className={transport === "HTTP" ? "on" : ""} aria-pressed={transport === "HTTP"} onClick={() => setTransport("HTTP")}>
               HTTP
             </button>
-            <button type="button" className={transport === "stdio" ? "on" : ""} onClick={() => setTransport("stdio")}>
+            <button type="button" className={transport === "stdio" ? "on" : ""} aria-pressed={transport === "stdio"} onClick={() => setTransport("stdio")}>
               stdio
             </button>
           </span>
