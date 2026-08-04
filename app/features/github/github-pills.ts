@@ -94,6 +94,21 @@ export function reviewPill(
 }
 
 /**
+ * F17-L6: an open PR's mergeability. The task-detail acceptance chain already
+ * names a conflicting PR ("conflicts with the base branch"); this surfaces the
+ * SAME fact on the GitHub page's PR list + execution branches, where a human
+ * decides whether a PR is safe to accept. Only "conflicting" earns a pill — a
+ * clean or unknown state is the silent default, matching checks/review.
+ */
+export function mergeablePill(
+  mergeable: "clean" | "conflicting" | "unknown" | null,
+): PillView | null {
+  return mergeable === "conflicting"
+    ? { kind: "risk", label: "conflicts" }
+    : null;
+}
+
+/**
  * Connection pill from the typed `checkRepoAccess` result (spec §7.9c: the
  * pill must not claim `connected` in any degraded state — no design exists
  * for these, so the labels below are the authored V1 vocabulary, documented

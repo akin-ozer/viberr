@@ -74,13 +74,30 @@ Prior rulings still in force: R16-1..R16-7 (see pass-16 memory), R15-x, R6-2
   Browser-pane toast throttling documented in [[viberr-motion-and-preview-quirks]].
   No code change.
 
-- **F17-L4 / F17-L6 (consistency) branch-collision + conflict surfacing.**
-  (a) Branch-collision policy fires only after a GitHub sync has happened, so the
-  same stale-branch class produced silent FF delivery (VIB-1) vs a blocked packet
-  (VIB-3/4) purely by sync timing. (b) The PR list / execution-branches table
-  don't show GitHub's mergeable/conflict state even when the acceptance chain
-  knows it ("conflicts with the base branch"). Decide one collision rule and add
-  a conflict pill. Verify in pr-adoption / reconciler / the policy-note writer.
+- **F17-L6 — DONE.** Conflict/mergeable pill added to the GitHub-page PR list and
+  execution-branches table (`mapPrMergeable` + `mergeablePill`), surfacing the
+  same "conflicts with the base branch" fact the acceptance chain already knew.
+- **F17-L4 (copy) — DONE.** `decidePrAdoption`'s `not_open` refusal split into
+  `merged` (its work is on the base → a fresh delivery fast-forwards, the
+  collision is only the stale branch NAME) vs `closed` (the remote branch still
+  holds unmerged commits → a fresh push conflicts). The two hazards now read
+  apart in the collision note.
+- **F17-L4 (behavior) — OWNER QUESTION, NOT changed this pass (needs a decision
+  + a careful repro).** The collision that BLOCKS delivery is inconsistent by
+  timing: `openTaskPr` queries `state:"open"` PRs only, so a stale MERGED/CLOSED
+  PR on the branch never blocks the delivery PR-open — but `reconcileWorkspaceDelivery`
+  (run from `performDelivery` after the push) and the reconciler both flag ANY
+  name-matched non-adoptable PR (incl. merged) and the real block is the PUSH
+  non-fast-forward against divergent remote history. VIB-1 delivered silently
+  because its remote branch was force-reset to the base tip at execution start;
+  VIB-3/VIB-4 hit blocked packets because their remote branches still carried the
+  old PR's divergent history. So the true variable is "was the remote task branch
+  reset before delivery", not sync timing per se. The safe fix (always reset/force
+  the remote task branch to base at execution start, so a reused key never
+  inherits foreign history) touches delivery push semantics and should be an owner
+  decision — recorded here rather than guessed. See
+  [pr-open.server.ts:228-259](app/server/github/pr-open.server.ts) (open-only),
+  [workspace-delivery.server.ts:460-514](app/server/github/workspace-delivery.server.ts).
 
 ## B. UX / interaction
 

@@ -5,6 +5,7 @@ import type {
   PacketObservation,
   PacketOption,
   PrChecks,
+  PrMergeable,
   PrRef,
   PrReviewState,
   Readiness,
@@ -185,6 +186,14 @@ export function mapPrChecks(pr: PrRef | null): PrChecksRender | null {
 export function mapPrReview(pr: PrRef | null): PrReviewState | null {
   if (!pr?.review) return null;
   return pr.state === "review" || pr.state === "accepted" ? pr.review : null;
+}
+
+/** F17-L6: GitHub's mergeability, shown only for an OPEN (review/accepted) PR —
+ *  a settled (merged/closed) PR's conflict state is moot. Same state gate as
+ *  {@link mapPrReview}. */
+export function mapPrMergeable(pr: PrRef | null): PrMergeable | null {
+  if (!pr?.mergeable) return null;
+  return pr.state === "review" || pr.state === "accepted" ? pr.mergeable : null;
 }
 
 function agentBackendName(backend: "codex" | "claude"): string {

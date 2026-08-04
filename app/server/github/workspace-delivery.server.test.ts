@@ -440,7 +440,10 @@ describe("reconcileWorkspaceDelivery", () => {
     const note = parsed.timeline.find((e) => /Branch name collision/.test(e.text));
     expect(note, "the collision is reported once").toBeTruthy();
     expect(note!.text).toContain("#113");
-    expect(note!.text).toContain("already merged or closed");
+    // F17-L4: a MERGED stranger PR names the fast-forward-safe cause, distinct
+    // from a closed-unmerged one (which warns of a push conflict).
+    expect(note!.text).toContain("already merged");
+    expect(note!.text).toContain("fast-forward");
     // Deduped through the same marker the server reconciler uses, so the note
     // does not repeat on the next run or poll tick.
     expect(parsed.frontmatter.github?.unownedPr).toBe(113);

@@ -10,6 +10,7 @@ import { RECONCILE_START_TOAST } from "./github-copy";
 import {
   checksPill,
   connectionPill,
+  mergeablePill,
   prStatePill,
   reviewPill,
   syncPill,
@@ -190,6 +191,13 @@ export function PullRequestsPanel({
                     {reviewPill(row.review).label}
                   </Pill>
                 )}
+                {/* F17-L6: a conflicting PR cannot be merged — surface it here,
+                    where a human decides whether it is safe to accept. */}
+                {mergeablePill(row.mergeable) && (
+                  <Pill kind={mergeablePill(row.mergeable)!.kind} sm>
+                    {mergeablePill(row.mergeable)!.label}
+                  </Pill>
+                )}
                 <Pill kind={pill.kind} sm dot>
                   {pill.label}
                 </Pill>
@@ -284,6 +292,13 @@ export function BranchesPanel({
                       {row.pr.review === "changes_requested" && (
                         <Pill kind={reviewPill(row.pr.review).kind} sm>
                           {reviewPill(row.pr.review).label}
+                        </Pill>
+                      )}
+                      {/* F17-L6: a conflict is actionable here too — the branch
+                          needs a rebase before its PR can merge. */}
+                      {mergeablePill(row.pr.mergeable) && (
+                        <Pill kind={mergeablePill(row.pr.mergeable)!.kind} sm>
+                          {mergeablePill(row.pr.mergeable)!.label}
                         </Pill>
                       )}
                     </>
