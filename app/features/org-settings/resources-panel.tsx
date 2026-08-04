@@ -7,7 +7,7 @@ import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { ConfirmDelete } from "./mini-modal";
 import { useOrgAction } from "./use-org-action";
-import { useBusyRow, rel } from "./resource-helpers";
+import { useBusyRow, rel, updatedLabel } from "./resource-helpers";
 import { KBModal, McpModal, SkillModal } from "./resource-modals";
 import { AgentModal } from "./agent-template-modal";
 import { AgentPanel, KbPanel, McpPanel, SkillPanel } from "./resource-rows";
@@ -225,7 +225,7 @@ export function ResourcesPanel({
         <StoreBrowser
           title={browsingSkill.name}
           subMono={browsingSkill.uri + "/ · SKILL.md + supporting files"}
-          metaTail={"updated " + rel(browsingSkill.updatedAt)}
+          metaTail={updatedLabel(browsingSkill.updatedAt)}
           tree={browsingSkill.tree}
           resource={{ kind: "skill", id: browsingSkill.id }}
           onClose={() => setBrowsing(null)}

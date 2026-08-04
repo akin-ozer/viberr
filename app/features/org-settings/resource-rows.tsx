@@ -5,7 +5,7 @@ import type { StageDef } from "~/schemas/project-file.schema";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { EditIco } from "./mini-modal";
-import { isStaleCheck, rel } from "./resource-helpers";
+import { isStaleCheck, rel, updatedLabel } from "./resource-helpers";
 
 /**
  * The four resource list panels (knowledge bases, MCP servers, skills, global
@@ -287,7 +287,7 @@ export function SkillPanel({
               <span className="sub">{s.summary}</span>
               <span className="sub mono">
                 store://skills/{s.name}/ · {s.fileCount} file
-                {s.fileCount === 1 ? "" : "s"} · updated {rel(s.updatedAt)}
+                {s.fileCount === 1 ? "" : "s"} · {updatedLabel(s.updatedAt)}
                 {usedBy(s.name) > 0
                   ? " · " + usedBy(s.name) + " template" + (usedBy(s.name) === 1 ? "" : "s")
                   : ""}

@@ -175,7 +175,13 @@ function SetNewPassword({
           <div>
             <h1>Set a new password</h1>
             <div className="sub">
-              An admin reset your password — choose a new one to continue.
+              {/* F17-L11: this screen shows for BOTH a freshly whitelisted
+                  account (temp password, never had one) and an admin reset of an
+                  existing one — the old copy asserted "an admin reset your
+                  password", false for a brand-new account. Both share one truth:
+                  a temporary password was issued and must be replaced. */}
+              You signed in with a temporary password — choose your own to
+              continue.
             </div>
           </div>
         </div>
