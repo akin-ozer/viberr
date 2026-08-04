@@ -754,6 +754,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
           skills: SKILLS,
           gagents: GAGENTS,
           stages: STAGES,
+          providers: { github: false, google: false },
         }}
         meId={ME.id}
       />,
@@ -785,6 +786,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
           skills: SKILLS,
           gagents: GAGENTS,
           stages: STAGES,
+          providers: { github: false, google: false },
         }}
         meId={ME.id}
       />,

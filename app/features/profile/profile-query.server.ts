@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { getEnv } from "~/server/config/env.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import { ROLE_IDS } from "~/features/policy/policy-data";
@@ -56,6 +57,12 @@ export interface ProfileView {
    * contributor > viewer, the shared ROLE_RANK scale); null when the user
    * is in no project. */
   accessRole: ProjectRole | null;
+  /**
+   * F18-3: whether GitHub OAuth is configured on this deployment. When false, a
+   * "Connect" here can only ever fail — so the card shows a quiet one-liner
+   * instead of warn scope chips + a doomed Connect button (mirrors R17-4).
+   */
+  githubConfigured: boolean;
   prefs: {
     notifs: NotifPrefs;
     motion: MotionPreference;
@@ -157,6 +164,9 @@ export function getProfileView(
     },
     memberships,
     accessRole,
+    githubConfigured: Boolean(
+      getEnv().GITHUB_OAUTH_CLIENT_ID && getEnv().GITHUB_OAUTH_CLIENT_SECRET,
+    ),
     prefs: {
       notifs: getNotifPrefs(db, userId),
       motion: getMotionPref(db, userId),

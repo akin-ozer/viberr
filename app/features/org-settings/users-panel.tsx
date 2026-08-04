@@ -59,11 +59,23 @@ export interface SetupNotice {
 function InviteModal({
   onClose,
   onSetupNotice,
+  providers,
 }: {
   onClose: () => void;
   onSetupNotice: (notice: SetupNotice) => void;
+  providers: { github: boolean; google: boolean };
 }) {
-  const [idp, setIdp] = useState<"github" | "google" | "local">("github");
+  // F18-3: default to a method this deployment can actually grant. A whitelisted
+  // GitHub/Google account can NEVER sign in if that OAuth provider is unset, so
+  // defaulting the modal to GitHub (and promising "allowed the moment they sign
+  // in with GitHub") on a local-only deployment sets a trap. Lead with the first
+  // configured OAuth provider, else Local — mirroring R17-4's login-page rule.
+  const defaultIdp: "github" | "google" | "local" = providers.github
+    ? "github"
+    : providers.google
+      ? "google"
+      : "local";
+  const [idp, setIdp] = useState<"github" | "google" | "local">(defaultIdp);
   const [handle, setHandle] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -159,11 +171,19 @@ function InviteModal({
             className={"be-opt" + (idp === "github" ? " on" : "")}
             onClick={() => setIdp("github")}
             aria-pressed={idp === "github"}
+            disabled={!providers.github}
+            title={
+              providers.github
+                ? undefined
+                : "GitHub sign-in isn't configured on this deployment"
+            }
           >
             <span className="be-ic">
               <Icon name="github" />
             </span>
-            <span className="bnm">GitHub</span>
+            <span className="bnm">
+              GitHub{providers.github ? "" : " · off"}
+            </span>
             <span className="bcheck">
               <Icon name="check" />
             </span>
@@ -173,11 +193,19 @@ function InviteModal({
             className={"be-opt" + (idp === "google" ? " on" : "")}
             onClick={() => setIdp("google")}
             aria-pressed={idp === "google"}
+            disabled={!providers.google}
+            title={
+              providers.google
+                ? undefined
+                : "Google sign-in isn't configured on this deployment"
+            }
           >
             <span className="be-ic">
               <span className="gmark lg">G</span>
             </span>
-            <span className="bnm">Google</span>
+            <span className="bnm">
+              Google{providers.google ? "" : " · off"}
+            </span>
             <span className="bcheck">
               <Icon name="check" />
             </span>
@@ -512,10 +540,13 @@ export function UsersPanel({
   users,
   domains,
   meId,
+  providers = { github: false, google: false },
 }: {
   users: OrgUserView[];
   domains: DomainRecord[];
   meId: string;
+  /** F18-3: which OAuth providers this deployment has configured. */
+  providers?: { github: boolean; google: boolean };
 }) {
   const [confirm, setConfirm] = useState<
     | { kind: "user"; item: OrgUserView }
@@ -717,6 +748,7 @@ export function UsersPanel({
         <InviteModal
           onClose={() => setInviting(false)}
           onSetupNotice={setSetupNotice}
+          providers={providers}
         />
       )}
       {editing && (

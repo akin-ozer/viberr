@@ -100,7 +100,12 @@ export function OrgSettingsPage({
         <div className="set-content">
           {tab === "connections" && <ConnectionsPanel connections={view.connections} />}
           {tab === "users" && (
-            <UsersPanel users={view.users} domains={view.domains} meId={meId} />
+            <UsersPanel
+              users={view.users}
+              domains={view.domains}
+              meId={meId}
+              providers={view.providers}
+            />
           )}
           {tab === "resources" && (
             <ResourcesPanel

@@ -42,6 +42,8 @@ export interface ProfileData {
   };
   memberships: { slug: string; name: string; role: ProjectRole }[];
   accessRole: ProjectRole | null;
+  /** F18-3: whether GitHub OAuth is configured on this deployment. */
+  githubConfigured: boolean;
   prefs: {
     notifs: NotifPrefs;
     motion: "full" | "reduce";
@@ -516,6 +518,11 @@ function ProfileGithub({
 }) {
   const { user } = data;
   const gh = user.githubConnected;
+  // F18-3: on a deployment with no GitHub OAuth, a Connect can only fail — so an
+  // UNconfigured + UNconnected card reads as a quiet fact, not warn chips + a
+  // doomed button. A CONNECTED card always keeps its full state (rare, but real
+  // if OAuth was configured, used, then removed). Mirrors R17-4.
+  const showConnectAffordance = gh || data.githubConfigured;
   useServerToast(fetcher);
   const error = actionError(fetcher);
   const [connectBusy, setConnectBusy] = useState(false);
@@ -579,6 +586,18 @@ function ProfileGithub({
           </span>
         </div>
       </div>
+      {!showConnectAffordance ? (
+        // Unconfigured + unconnected: a quiet, honest one-liner — no warn chips,
+        // no Connect that could only produce "GitHub sign-in couldn't start".
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            GitHub sign-in isn't configured on this deployment, so there's no
+            personal GitHub identity to connect. Your actions record under your
+            workspace identity above.
+          </span>
+        </div>
+      ) : (
       <div className="cred-card">
         <div className="cred-top">
           <Icon name="github" />
@@ -636,6 +655,7 @@ function ProfileGithub({
           </div>
         )}
       </div>
+      )}
       {(error || connectErr) && (
         <div className="login-err spaced" role="alert">
           <Icon name="alert" />

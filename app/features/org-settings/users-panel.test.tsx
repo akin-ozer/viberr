@@ -29,13 +29,15 @@ const ME: OrgUserView = {
 };
 const DOMAINS: DomainRecord[] = [];
 
-function renderPanel() {
+function renderPanel(
+  providers: { github: boolean; google: boolean } = { github: false, google: false },
+) {
   const Stub = createRoutesStub([
     {
       path: "/org/settings",
       Component: () => (
         <ToastProvider>
-          <UsersPanel users={[ME]} domains={DOMAINS} meId="u_arda" />
+          <UsersPanel users={[ME]} domains={DOMAINS} meId="u_arda" providers={providers} />
         </ToastProvider>
       ),
       action: async () => ({ ok: true, toast: "stub done" }),
@@ -82,5 +84,35 @@ describe("P13-D-10: the self-guard toasts are failures", () => {
     expect(await kindOf(container, "You can't remove your own account")).toBe(
       "error",
     );
+  });
+});
+
+describe("F18-3: the Allow-access modal keys its method off configured providers", () => {
+  const openModal = (container: HTMLElement, getByText: (t: string) => HTMLElement) => {
+    fireEvent.click(getByText("Allow access"));
+    return [...container.querySelectorAll(".be-opt")] as HTMLButtonElement[];
+  };
+
+  it("with NO OAuth provider: defaults to Local; GitHub + Google are disabled and marked off", () => {
+    const { container, getByText } = renderPanel({ github: false, google: false });
+    const opts = openModal(container, getByText);
+    const [github, google, local] = opts;
+    expect(github!.disabled).toBe(true);
+    expect(google!.disabled).toBe(true);
+    expect(local!.disabled).toBe(false);
+    // Local is the selected default (a whitelisted OAuth account could never
+    // sign in on this deployment).
+    expect(local!.getAttribute("aria-pressed")).toBe("true");
+    expect(github!.textContent).toContain("off");
+    expect(google!.textContent).toContain("off");
+  });
+
+  it("with GitHub configured: GitHub leads and is enabled", () => {
+    const { container, getByText } = renderPanel({ github: true, google: false });
+    const opts = openModal(container, getByText);
+    const [github, google] = opts;
+    expect(github!.disabled).toBe(false);
+    expect(github!.getAttribute("aria-pressed")).toBe("true");
+    expect(google!.disabled).toBe(true);
   });
 });

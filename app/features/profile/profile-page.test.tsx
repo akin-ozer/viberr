@@ -23,6 +23,7 @@ const BASE: ProfileData = {
   },
   memberships: [{ slug: "viberr-core", name: "Viberr Core", role: "maintainer" }],
   accessRole: "maintainer",
+  githubConfigured: true,
   prefs: { notifs: DEFAULT_NOTIF_PREFS, motion: "full", tlDefault: "all" },
 };
 
@@ -178,6 +179,19 @@ describe("ProfilePage", () => {
     expect(connect).toBeTruthy();
     expect(connect.textContent).toContain("Connect");
     expect(container.querySelector(".cred-warn a.btn")).toBeNull();
+  });
+
+  it("F18-3: GitHub identity is a quiet one-liner (no warn chips, no Connect) when OAuth is unconfigured", () => {
+    const { container, getByText } = renderProfile({
+      ...BASE,
+      githubConfigured: false,
+      user: { ...BASE.user, githubConnected: false },
+    });
+    expect(getByText("GitHub identity")).toBeTruthy();
+    // No doomed Connect affordance, no warn scope chips.
+    expect(container.querySelector(".cred-warn")).toBeNull();
+    expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(0);
+    expect(getByText(/GitHub sign-in isn't configured on this deployment/)).toBeTruthy();
   });
 
   it("GitHub identity: connected card offers Disconnect", () => {
