@@ -688,8 +688,18 @@ export async function removeMember(
     }
     if (member.role === "admin") {
       // UI-29: only LIVE, enabled accounts count — see countLiveAdmins.
+      // F18-6: guard the LAST LIVE admin only. A GHOST admin (its org account was
+      // deleted, so it's not counted live) removal never reduces the live-admin
+      // count — blocking it deadlocked the one recovery path (Members refused the
+      // removal, Policy pointed back to Members to do it). `targetLive` is false
+      // for a deleted/disabled account, so a ghost admin is always removable; a
+      // real last live admin is still protected.
+      const targetRow = db
+        .prepare(`SELECT disabled FROM users WHERE id = ?`)
+        .get(input.targetUserId) as { disabled: number } | undefined;
+      const targetLive = !!targetRow && targetRow.disabled !== 1;
       const admins = countLiveAdmins(db, parsed.frontmatter.members);
-      if (admins <= 1) {
+      if (targetLive && admins <= 1) {
         throw AppError.conflict(
           `${displayName} is the only admin — assign another admin in Policy first`,
         );
