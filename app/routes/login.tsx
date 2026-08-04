@@ -118,7 +118,9 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "set-password") {
-    const auth = await requireAuth(request, { allowPendingPasswordReset: true });
+    const auth = await requireAuth(request, {
+      allowPendingPasswordReset: true,
+    });
     await assertCsrf(request, auth.sessionId, formData);
     if (!auth.pwresetRequired) return redirect(returnTo ?? "/");
 
@@ -275,9 +277,9 @@ export default function Login({
   const serverErrHidden =
     dismissedServerErr !== undefined && dismissedServerErr === actionError;
   const [info, setInfo] = useState<string | null>(null);
-  const [providerBusy, setProviderBusy] = useState<
-    "github" | "google" | null
-  >(null);
+  const [providerBusy, setProviderBusy] = useState<"github" | "google" | null>(
+    null,
+  );
 
   if (mode === "reset") {
     return <SetNewPassword returnTo={returnTo} actionError={actionError} />;
@@ -287,9 +289,7 @@ export default function Login({
     navigation.state !== "idle" &&
     navigation.formData?.get("intent") === "login";
   const busy = providerBusy ?? (submitting ? "local" : null);
-  const err =
-    clientErr ??
-    (serverErrHidden ? null : actionError);
+  const err = clientErr ?? (serverErrHidden ? null : actionError);
 
   const provider = (which: "github" | "google") => {
     if (busy) return;
@@ -310,7 +310,10 @@ export default function Login({
         const res = await fetch("/api/auth/sign-in/social", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: which, callbackURL: returnTo ?? "/" }),
+          body: JSON.stringify({
+            provider: which,
+            callbackURL: returnTo ?? "/",
+          }),
         });
         // fetch() resolves on 4xx/5xx, so an error payload would otherwise be
         // read as a successful sign-in response.
@@ -330,6 +333,13 @@ export default function Login({
       }
     })();
   };
+
+  // R17-4 (UX-1): on a local-only deployment (neither OAuth provider
+  // configured) the card used to lead with two DISABLED provider buttons — its
+  // most prominent elements were things that cannot work. When SSO is entirely
+  // off, the local form leads and SSO shrinks to a one-line note; with at
+  // least one provider configured, the SSO-first ordering stands.
+  const ssoConfigured = providers.github || providers.google;
 
   return (
     <div className="login-wrap login-wrap-2col" data-screen-label="Login">
@@ -361,89 +371,92 @@ export default function Login({
           </div>
         </div>
 
-        <div className="login-providers">
-          {/* D12: OAuth providers are only usable when configured on this
+        {ssoConfigured && (
+          <>
+            <div className="login-providers">
+              {/* D12: OAuth providers are only usable when configured on this
               deployment (loader `providers` flags). Unconfigured ones render
               disabled with an explicit label rather than looking clickable. */}
-          <button
-            type="button"
-            className="btn provider github"
-            onClick={() => provider("github")}
-            disabled={!providers.github}
-            aria-busy={busy === "github" || undefined}
-            title={
-              providers.github
-                ? undefined
-                : "GitHub OAuth isn't configured on this deployment"
-            }
-            style={
-              !providers.github
-                ? { opacity: 0.55, cursor: "not-allowed" }
-                : busy === "github"
-                  ? { opacity: 0.7, pointerEvents: "none" }
-                  : undefined
-            }
-          >
-            <Icon
-              name={busy === "github" ? "refresh" : "github"}
-              className={busy === "github" ? "spin" : ""}
-            />
-            {busy === "github"
-              ? "Checking whitelist…"
-              : providers.github
-                ? "Continue with GitHub"
-                : "GitHub — not configured"}
-          </button>
-          <button
-            type="button"
-            className="btn provider"
-            onClick={() => provider("google")}
-            disabled={!providers.google}
-            aria-busy={busy === "google" || undefined}
-            title={
-              providers.google
-                ? undefined
-                : "Google OAuth isn't configured on this deployment"
-            }
-            style={
-              !providers.google
-                ? { opacity: 0.55, cursor: "not-allowed" }
-                : busy === "google"
-                  ? { opacity: 0.7, pointerEvents: "none" }
-                  : undefined
-            }
-          >
-            {busy === "google" ? (
-              <Icon name="refresh" className="spin" />
-            ) : (
-              <span className="gmark lg">G</span>
+              <button
+                type="button"
+                className="btn provider github"
+                onClick={() => provider("github")}
+                disabled={!providers.github}
+                aria-busy={busy === "github" || undefined}
+                title={
+                  providers.github
+                    ? undefined
+                    : "GitHub OAuth isn't configured on this deployment"
+                }
+                style={
+                  !providers.github
+                    ? { opacity: 0.55, cursor: "not-allowed" }
+                    : busy === "github"
+                      ? { opacity: 0.7, pointerEvents: "none" }
+                      : undefined
+                }
+              >
+                <Icon
+                  name={busy === "github" ? "refresh" : "github"}
+                  className={busy === "github" ? "spin" : ""}
+                />
+                {busy === "github"
+                  ? "Checking whitelist…"
+                  : providers.github
+                    ? "Continue with GitHub"
+                    : "GitHub — not configured"}
+              </button>
+              <button
+                type="button"
+                className="btn provider"
+                onClick={() => provider("google")}
+                disabled={!providers.google}
+                aria-busy={busy === "google" || undefined}
+                title={
+                  providers.google
+                    ? undefined
+                    : "Google OAuth isn't configured on this deployment"
+                }
+                style={
+                  !providers.google
+                    ? { opacity: 0.55, cursor: "not-allowed" }
+                    : busy === "google"
+                      ? { opacity: 0.7, pointerEvents: "none" }
+                      : undefined
+                }
+              >
+                {busy === "google" ? (
+                  <Icon name="refresh" className="spin" />
+                ) : (
+                  <span className="gmark lg">G</span>
+                )}
+                {busy === "google"
+                  ? "Checking whitelist…"
+                  : providers.google
+                    ? "Continue with Google"
+                    : "Google — not configured"}
+              </button>
+            </div>
+            {(!providers.github || !providers.google) && (
+              <div className="login-tag providers">
+                {/* Inside the ssoConfigured branch exactly one provider can be
+                missing — the both-missing deployment renders the local-first
+                layout below instead. */}
+                {!providers.github
+                  ? "GitHub sign-in isn't configured on this deployment — use a local account below."
+                  : "Google sign-in isn't configured on this deployment — use a local account below."}
+              </div>
             )}
-            {busy === "google"
-              ? "Checking whitelist…"
-              : providers.google
-                ? "Continue with Google"
-                : "Google — not configured"}
-          </button>
-        </div>
-        {(!providers.github || !providers.google) && (
-          <div
-            className="login-tag providers"
-          >
-            {!providers.github && !providers.google
-              ? "GitHub and Google sign-in aren't configured on this deployment — use a local account below."
-              : !providers.github
-                ? "GitHub sign-in isn't configured on this deployment — use a local account below."
-                : "Google sign-in isn't configured on this deployment — use a local account below."}
-          </div>
-        )}
-        {info && (
-          <div className="cred-warn" role="status">
-            <Icon name="alert" />
-            {info}
-          </div>
-        )}
+            {info && (
+              <div className="cred-warn" role="status">
+                <Icon name="alert" />
+                {info}
+              </div>
+            )}
 
-        <div className="login-div">or a local account</div>
+            <div className="login-div">or a local account</div>
+          </>
+        )}
 
         <Form
           method="post"
@@ -536,10 +549,28 @@ export default function Login({
           </div>
         </Form>
 
-        <div className="login-tag">
-          whitelist-based access — GitHub &amp; Google accounts sign in
-          directly once whitelisted
-        </div>
+        {/* The info box ("forgot password?" guidance) renders after the form
+            in the local-first layout so clicking the link doesn't shove the
+            form — and the button under the cursor — down the card. */}
+        {!ssoConfigured && info && (
+          <div className="cred-warn" role="status">
+            <Icon name="alert" />
+            {info}
+          </div>
+        )}
+
+        {ssoConfigured ? (
+          <div className="login-tag">
+            whitelist-based access — GitHub &amp; Google accounts sign in
+            directly once whitelisted
+          </div>
+        ) : (
+          <div className="login-tag providers">
+            GitHub &amp; Google SSO isn't configured on this deployment — sign
+            in with a local account. An admin can enable OAuth to let
+            whitelisted accounts sign in directly.
+          </div>
+        )}
       </div>
     </div>
   );

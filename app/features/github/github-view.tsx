@@ -109,9 +109,7 @@ export function RepositoryPanel({
             since it was hardcoded. One project, one repository. */}
         <div className="kv-row">
           <span className="k">Task attachment</span>
-          <span className="v plain">
-            every task uses this repository
-          </span>
+          <span className="v plain">every task uses this repository</span>
         </div>
       </div>
 
@@ -154,8 +152,8 @@ export function PullRequestsPanel({
           <div className="pol-note last">
             <Icon name="pr" />
             <span>
-              No pull requests yet — one is opened at the review boundary by
-              the server or the delivering agent.
+              No pull requests yet — one is opened at the review boundary by the
+              server or the delivering agent.
             </span>
           </div>
         )}
@@ -172,8 +170,8 @@ export function PullRequestsPanel({
               <span className="rq-main">
                 <div className="ttl">{row.title}</div>
                 <div className="sub">
-                  <span className="mono">{row.branch}</span> → {defaultBranch}{" "}
-                  · {row.taskKey}
+                  <span className="mono">{row.branch}</span> → {defaultBranch} ·{" "}
+                  {row.taskKey}
                 </div>
               </span>
               <span className="rq-meta">
@@ -319,8 +317,8 @@ export function BranchesPanel({
       <div className="pol-note" style={POL_NOTE_STYLE}>
         <Icon name="branch" />
         <span>
-          Branch names and commit messages carry the task key — task → branch
-          → commit → PR stays traceable without asking.
+          Branch names and commit messages carry the task key — task → branch →
+          commit → PR stays traceable without asking.
         </span>
       </div>
     </div>
@@ -353,7 +351,10 @@ export function GithubViewPage({
   // push "Updating branch and PR status from GitHub…" BEFORE submitting, so a
   // viewer clicked, watched fake progress, and then got a 403 — while the
   // sibling grant-scope control in this same file was correctly gated.
-  const canReconcile = roleCan(myRole as ProjectRole | null, "reconcile-github");
+  const canReconcile = roleCan(
+    myRole as ProjectRole | null,
+    "reconcile-github",
+  );
   const reconcile = () => {
     if (!canReconcile) return;
     // First toast on submit, completion toast from the action (spec §4.1).
@@ -429,6 +430,14 @@ export function GithubViewPage({
     />
   ) : undefined;
 
+  // R17-5 (UX-3): "never synced" and "stale cache" are different situations
+  // and the payload already distinguishes them (`at: null` vs an old
+  // timestamp) — but both rendered the coral alert tone, so a brand-new
+  // project's FIRST impression of this page was a warning about nothing being
+  // wrong. Only a genuinely old cache warns; never-synced reads neutral with a
+  // nudge to run the first sync.
+  const staleCache = data.reconcile.stale && data.reconcile.at !== null;
+
   return (
     <div className="board-wrap" data-screen-label="GitHub">
       {/* Live updates (phase 6): no subscription needed HERE — this route
@@ -441,8 +450,8 @@ export function GithubViewPage({
         <div>
           <h1>GitHub</h1>
           <div className="sub">
-            Execution surface for {data.project.name} — branches, pull
-            requests, and credential health
+            Execution surface for {data.project.name} — branches, pull requests,
+            and credential health
           </div>
         </div>
         <div className="board-tools">
@@ -450,17 +459,17 @@ export function GithubViewPage({
               refreshes it every 5 minutes, and "Update status" refreshes it now.
               Show how fresh it is so stale state can't look current. */}
           <span
-            className={"gh-freshness" + (data.reconcile.stale ? " stale" : "")}
+            className={"gh-freshness" + (staleCache ? " stale" : "")}
             title={
               data.reconcile.at
                 ? "Branch/PR state auto-refreshes every 5 minutes — click Update status to refresh now."
-                : "Branch/PR state has not been synced with GitHub yet."
+                : "Branch/PR state hasn't been synced with GitHub yet — nothing is wrong. Update status runs the first sync."
             }
           >
-            <Icon name={data.reconcile.stale ? "alert" : "clock"} />
+            <Icon name={staleCache ? "alert" : "clock"} />
             {data.reconcile.at
               ? `Updated ${data.reconcile.label}`
-              : "Not yet synced"}
+              : "Not synced yet"}
           </span>
           {canReconcile && (
             <button

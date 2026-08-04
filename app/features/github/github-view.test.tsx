@@ -550,7 +550,7 @@ describe("UI-05: a never-compared branch is not 'synced'", () => {
     );
     // Before the fix a branch with NO compare data borrowed "behindBy === 0"
     // and rendered the green "synced" pill, contradicting the page's own
-    // "Not yet synced" freshness chip.
+    // "Not synced yet" freshness chip.
     expect(pills).toContain("not compared");
     expect(pills).toContain("synced");
   });
@@ -594,5 +594,77 @@ describe("UI-37: 'Update status' is gated like the action it calls", () => {
   it("shows it to a maintainer", () => {
     const { getByText } = renderPage("maintainer");
     expect(getByText("Update status")).toBeTruthy();
+  });
+});
+
+describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
+  const pageData = (reconcile: {
+    at: string | null;
+    label: string | null;
+    stale: boolean;
+  }) =>
+    ({
+      project: {
+        slug: "viberr-core",
+        name: "Viberr Core",
+        repo: "akin-ozer/viberr",
+        defaultBranch: "main",
+      },
+      githubHost: "https://github.com",
+      connection: { status: "connected" as const },
+      credential: noneCredential,
+      prs: [],
+      branches: [],
+      reconcile,
+    }) as unknown as Parameters<typeof GithubViewPage>[0]["data"];
+
+  const renderChip = (reconcile: {
+    at: string | null;
+    label: string | null;
+    stale: boolean;
+  }) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage data={pageData(reconcile)} myRole="maintainer" />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/viberr-core/github"]} />,
+    );
+    return container.querySelector(".gh-freshness")!;
+  };
+
+  it("renders a never-reconciled surface neutral with a first-sync nudge", () => {
+    // A brand-new project's first look at this page used to be a coral alert
+    // ("Not yet synced") though nothing was wrong — no sync had simply run.
+    const chip = renderChip({ at: null, label: null, stale: true });
+    expect(chip.classList.contains("stale")).toBe(false);
+    expect(chip.textContent).toContain("Not synced yet");
+    expect(chip.getAttribute("title")).toContain("runs the first sync");
+  });
+
+  it("keeps the warn tone for a cache older than the staleness threshold", () => {
+    const chip = renderChip({
+      at: "2026-08-04T00:00:00.000Z",
+      label: "2h ago",
+      stale: true,
+    });
+    expect(chip.classList.contains("stale")).toBe(true);
+    expect(chip.textContent).toContain("Updated 2h ago");
+  });
+
+  it("renders a fresh cache neutral", () => {
+    const chip = renderChip({
+      at: "2026-08-04T00:00:00.000Z",
+      label: "3m ago",
+      stale: false,
+    });
+    expect(chip.classList.contains("stale")).toBe(false);
+    expect(chip.textContent).toContain("Updated 3m ago");
   });
 });

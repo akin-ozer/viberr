@@ -22,7 +22,7 @@ export interface PillView {
  * behind-by resolver defaulted to 0 when no `github.reconcile` provenance row
  * existed, so every branch on a project that has never successfully reconciled
  * (no credential, repo not found, poller failing) showed the green "synced"
- * pill — flatly contradicting the page-level "Not yet synced" freshness chip,
+ * pill — flatly contradicting the page-level "Not synced yet" freshness chip,
  * and read by maintainers as "this branch is up to date with main".
  */
 export type SyncState = "merged" | "behind_main" | "synced" | "unknown";

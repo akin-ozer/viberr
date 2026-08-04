@@ -370,6 +370,24 @@ it is regenerated from the filesystem rather than restated here.
     `runbook.md`, `testing.md`) to catch statements that a correct change elsewhere left stale
     is itself a required closing phase, alongside the disposition audit.
 
+45. **R17-4 (2026-08-04): the local sign-in form leads when NO OAuth provider is configured.**
+    On a local-only deployment the card used to lead with two DISABLED "not configured"
+    provider buttons — its most prominent elements were things that cannot work. When neither
+    GitHub nor Google OAuth is configured, the buttons are not rendered at all: the local form
+    comes first and SSO shrinks to a one-line footnote ("an admin can enable OAuth"). With at
+    least one provider configured, SSO-first stands, including the D12 disabled button for the
+    other provider. (`app/routes/login.tsx`)
+
+46. **R17-5 (2026-08-04): "never synced" is neutral; only a genuinely stale cache warns.**
+    The GitHub page's freshness chip rendered the coral alert tone both for a cache older than
+    an hour AND for a surface that had never reconciled — so a brand-new project's first
+    impression was a warning about nothing being wrong. The payload already distinguishes the
+    two (`reconcile.at: null` vs an old timestamp); the view now does too: never-synced reads
+    neutral ("Not synced yet", clock icon, title nudging that Update status runs the first
+    sync), and only `stale && at !== null` keeps the alert icon + `.stale` tone. This matches
+    the MCP-health precedent, where "never checked" was already "unknown", not "stale"
+    (`isMcpHealthStale`). (`app/features/github/github-view.tsx`)
+
 ## Route map
 
 ```

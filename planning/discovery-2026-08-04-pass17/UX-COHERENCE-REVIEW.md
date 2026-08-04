@@ -57,25 +57,29 @@ no-change, collision, credential-health copy).
    contrast bugs — pass-16 had caught one in org settings; none remained here).
    Mobile adapts (kanban goes horizontal-scroll, expected).
 
-## Net-new UX observations (owner's call — recorded, not unilaterally "fixed")
+## Net-new UX observations — asked, RULED, and implemented
 
 The goal said to ASK when unsure about a product-design choice rather than change it.
-These are judgment calls, each with the background for a decision:
+Both questions were put to the owner with background; both answers landed this pass:
 
-- **UX-1 — Login OAuth prominence.** On a local-only deployment, the two *disabled*
-  "GitHub — not configured" / "Google — not configured" buttons are the most
-  prominent elements on the sign-in card, above the local-account form that actually
-  works. Question: is the SSO-first ordering intentional (signaling SSO is the
-  preferred production path), or should the local form lead when OAuth is
-  unconfigured? Low-risk either way; it's a first-impression choice.
+- **UX-1 — Login OAuth prominence → RULED (R17-4): local form leads when OAuth is
+  off.** On a local-only deployment, the two *disabled* "GitHub — not configured" /
+  "Google — not configured" buttons were the most prominent elements on the sign-in
+  card, above the local-account form that actually works. Owner: when NEITHER
+  provider is configured, the disabled buttons are not rendered — the local form
+  leads and SSO shrinks to a one-line footnote. With at least one provider
+  configured, SSO-first stands (incl. the D12 disabled button for the other).
+  Implemented in `app/routes/login.tsx` + `app/routes/login.test.tsx`.
 
-- **UX-3 — "Not yet synced" reads as an error.** A GitHub surface that has never
-  reconciled (or whose cache is >1h old) shows a red ⚠ ("Not yet synced" /
-  "⚠ Updated 2h ago"). For a brand-new project this is the FIRST thing the user
-  sees and reads like something is broken, when nothing is — no sync has simply run
-  yet. Question: keep the warning tone as a nudge-to-sync, or split "never synced"
-  (neutral) from "stale cache" (warn)? The `isReconcileStale` rule already
-  distinguishes them at the data layer; only the visual tone conflates them.
+- **UX-3 — "Not yet synced" read as an error → RULED (R17-5): split never-synced
+  (neutral) from stale cache (warn).** A GitHub surface that had never reconciled
+  showed the same red ⚠ as a >1h-stale cache — a brand-new project's first
+  impression was a warning about nothing being wrong. Owner: never-synced reads
+  neutral ("Not synced yet", clock icon, title nudging that Update status runs the
+  first sync); only a genuinely old cache keeps the alert tone. Uses the
+  distinction `reconcile.at: null` already carried; matches the MCP-health
+  precedent ("never checked" = unknown, not stale). Implemented in
+  `app/features/github/github-view.tsx` + chip-tone tests.
 
 - **UX-4 — Mobile kanban density.** The board on mobile is horizontal-scroll (correct
   for kanban), but empty columns take a full viewport width each, so an empty board
