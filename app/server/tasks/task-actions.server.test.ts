@@ -3,14 +3,17 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import { COMPACTION_TITLE } from "./timeline-compaction.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { deriveValidation } from "~/schemas/task-file.schema";
 import type {
   Engagement,
   FileActorRef,
+  TaskFileEvent,
   WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -467,6 +470,54 @@ describe("appendComment", () => {
     expect(rows[0]!.kind).toBe("mention");
     // Attributed to the reviewer agent (kind agent + backend), NOT a human.
     expect(JSON.parse(rows[0]!.actor_json!)).toMatchObject({ kind: "agent", backend: "claude" });
+  });
+
+  // G7/B-FD9: the compression-threshold guardrail must fire on a pure
+  // agent-reply flood — the case it exists for. It ran only on operator/human
+  // comment writes, so a run of agent replies accreted with no compaction.
+  it("an agent-reply flood triggers compaction when compression-threshold is on", async () => {
+    const store = prepared();
+    // Turn the guardrail ON at a low threshold.
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      guardrails: [
+        { id: "compression-threshold", desc: "compress long timelines", on: true, value: 10, unit: "events" },
+      ],
+    } as never);
+    // Seed a flood of routine AGENT comments — no operator or human write.
+    const flood: TaskFileEvent[] = Array.from({ length: 15 }, (_, i) => ({
+      occurredAt: `2026-08-04T00:${String(i).padStart(2, "0")}:00.000Z`,
+      type: "comment",
+      actor: { kind: "agent", backend: "claude", profileId: "developer", roleHint: "Implementation" },
+      title: null,
+      text: `Progress note ${i}: still working through the implementation details here.`,
+      toAgent: false,
+      evidence: null,
+    }));
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+      timeline: flood,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    // One more agent reply — the ONLY compaction trigger for an agent flood.
+    await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      runId: "run_flood",
+      actorRef: REVIEWER_REF,
+      replyText: "Implementation reviewed end to end; the flow is correct and the tests pass.",
+    });
+
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    // The older routine comments folded into a compaction marker.
+    expect(timeline.some((e) => e.title === COMPACTION_TITLE)).toBe(true);
+    expect(timeline.length).toBeLessThan(flood.length + 1);
   });
 
   // S5-G3: same reply, ambiguous handle. The agent was told to tag the person

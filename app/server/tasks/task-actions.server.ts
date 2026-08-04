@@ -1538,11 +1538,35 @@ export async function postAgentReplyComment(
     recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, true);
     return;
   }
+  // G7/B-FD9: the compression-threshold guardrail must fire on a pure
+  // agent-reply flood too — the exact case the anti-noise guardrail was built
+  // for. It ran only on operator and human comment writes, so a run of agent
+  // replies accreted with no compaction pass even though B-FD9 made those
+  // replies foldable. Same threshold/keepRecent shape as the other two paths.
+  const { guardrailOn, guardrailValue } = await import(
+    "./comment-guardrails.server"
+  );
+  const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
+  const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
   // Returns the write promise so a caller (the operator react loop) can await
   // the reply landing before it re-reads the task. Errors are logged, never
   // propagated — the run finished and the transcript is in the logs.
   return updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift(prepared.event);
+    if (compactOn) {
+      parsed.timeline = compactTimelineEvents(
+        parsed.timeline,
+        compactAt != null
+          ? {
+              threshold: compactAt,
+              keepRecent: Math.min(
+                DEFAULT_COMPACTION.keepRecent,
+                Math.max(4, Math.floor(compactAt / 2)),
+              ),
+            }
+          : DEFAULT_COMPACTION,
+      );
+    }
   })
     .then(() => {
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
