@@ -394,6 +394,10 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
 describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () => {
   it("B-FD6: rows resolve to a task, a project, or NOTHING (never a dead click)", () => {
     const store = setupTestStore(ctx);
+    // F18-1: the project must exist in the PROJECTION for its rows to stay
+    // clickable (a deleted project → orphan, href null). Boot always rescans, so
+    // rebuild here to reflect the real "project exists" state this test asserts.
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const uid = store.users.murat.id;
     createNotification(store.db, { id: "n_task", userId: uid, kind: "quality", text: "t", projectSlug: store.slug, taskKey: "VIB-1", occurredAt: "2026-07-01T03:00:00.000Z" });
     createNotification(store.db, { id: "n_proj", userId: uid, kind: "policy", text: "t", projectSlug: store.slug, occurredAt: "2026-07-01T02:00:00.000Z" });

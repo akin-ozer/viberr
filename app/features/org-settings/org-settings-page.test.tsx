@@ -279,7 +279,13 @@ describe("UsersPanel", () => {
 
   it("invite modal switches idp fields and gates the save button", () => {
     const { getByText, getByPlaceholderText } = renderPanel(
-      <UsersPanel users={USERS} domains={DOMAINS} meId="u_arda" />,
+      // F18-3: with GitHub configured the modal leads with GitHub, as before.
+      <UsersPanel
+        users={USERS}
+        domains={DOMAINS}
+        meId="u_arda"
+        providers={{ github: true, google: true }}
+      />,
     );
     fireEvent.click(getByText("Allow access"));
     expect(getByPlaceholderText("username")).toBeTruthy();
