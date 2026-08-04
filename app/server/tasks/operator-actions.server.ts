@@ -62,6 +62,7 @@ import {
   notifyTaskWatchers,
   operatorPromptAgent,
   performDelivery,
+  revisionDriftNote,
   transitionStage,
   type TaskMutationContext,
 } from "./task-actions.server";
@@ -1800,9 +1801,14 @@ export async function operatorDeliverForReview(
       message: "Recommended delivering the branch & opening the review PR.",
     };
   }
+  // F17-1: delivery THROUGH the operator's own tool is operator-authorized by
+  // definition — mark the ctx so `performDelivery` attributes the "Opened PR"
+  // event to the Operator, not to the sentinel "operator" user id rendered as a
+  // human with a bogus "no longer a member" guest pill. (A human manual delivery
+  // reaches performDelivery WITHOUT this flag and still renders as that human.)
   const outcome = await performDelivery(
     db,
-    ctx,
+    { ...ctx, operatorAuthorized: true },
     input.projectSlug,
     input.taskKey,
     OPERATOR_TASK_ACTOR,
@@ -2040,6 +2046,8 @@ export async function operatorAcceptCompletion(
   // human path gate by gate and shipped with a subset more than once. The core
   // also re-checks the refusal gates inside the write lock (B-WF1).
   const hasPr = !!file.parsed.frontmatter.pr;
+  // R17-1 (F17-L12): name any reviewed-revision drift on the completion record.
+  const driftNote = revisionDriftNote(file.parsed.frontmatter);
   await applyAcceptanceWrite(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -2050,9 +2058,13 @@ export async function operatorAcceptCompletion(
       type: "completion",
       actor: { kind: "operator" },
       title: "Completion accepted",
-      text: hasPr
-        ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
-        : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`,
+      text:
+        (hasPr
+          ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
+          : file.parsed.frontmatter.noChanges
+            ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done, **completed with no changes required** (nothing to deliver or merge).`
+            : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`) +
+        driftNote,
       toAgent: false,
       evidence: null,
     },

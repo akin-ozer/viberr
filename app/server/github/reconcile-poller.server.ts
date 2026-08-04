@@ -82,7 +82,7 @@ async function nudgeMergePendingTasks(
         taskKey: row.key,
         kind: "policy",
         title,
-        text: `${row.key} was accepted into Done, but PR #${pr.number} is still open on GitHub — merge it to finish delivery. (Autonomous acceptance can't merge a PR; a human completes the merge from the task's Complete-merge button or via GitHub.)`,
+        text: `${row.key} was accepted into Done, but PR #${pr.number} is still open on GitHub — merge it to finish delivery. (The completion was accepted with the merge still pending — a full-autonomy operator can't merge, and a human accept records "merge pending" when GitHub was unreachable or the merge was refused; a human completes it from the task's Complete-merge button or via GitHub.)`,
         from: POLICY_ENGINE_NOTIFY_FROM,
       },
       ctx,

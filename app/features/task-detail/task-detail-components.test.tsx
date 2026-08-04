@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
@@ -108,8 +108,12 @@ describe("DecisionPacket", () => {
     expect(primary.textContent).toContain("Confirm decision");
     const radios = container.querySelectorAll('.options [role="radio"]');
     expect(radios[0]!.getAttribute("aria-checked")).toBe("true"); // rec preselected
+    // F17-L8: the accessible name echoes the CURRENTLY selected option even
+    // though the visible label stays "Confirm decision" (F-UI1 overflow fix).
+    expect(primary.getAttribute("aria-label")).toContain(packet142.options[0]!.t);
     fireEvent.click(radios[1]!);
     expect(radios[1]!.getAttribute("aria-checked")).toBe("true");
+    expect(primary.getAttribute("aria-label")).toContain(packet142.options[1]!.t);
     fireEvent.click(primary);
     // P11-71: resolve carries the (optional, here empty) note as a second arg.
     expect(onResolve).toHaveBeenCalledWith(1, "");
@@ -1404,6 +1408,46 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     expect(save.classList.contains("primary")).toBe(true);
     // The defect: both resolved to identical rules and rendered the same.
     expect(save.className).not.toBe(cancel.className);
+  });
+
+  // A wrapper that bumps editGoalSignal on click, mimicking a confirmed
+  // edit_goal decision — keeps the router/toast context stable across the bump.
+  function EditGoalHarness({ draft }: { draft: string | null }) {
+    const [sig, setSig] = useState(0);
+    return (
+      <>
+        <button type="button" onClick={() => setSig((n) => n + 1)}>
+          bump
+        </button>
+        <TaskHero
+          task={heroTask()}
+          stage={undefined}
+          canEditGoal
+          editGoalSignal={sig}
+          editGoalDraft={draft}
+        />
+      </>
+    );
+  }
+
+  it("F17-L3: a scoping decision opens the editor PREFILLED with the chosen deliverable, not the old goal", () => {
+    const { container, getByText } = renderWithRouter(
+      <EditGoalHarness draft={"Diagnostics: improve failure output\n\nDeliverable: name the failing step."} />,
+    );
+    fireEvent.click(getByText("bump"));
+    const ta = container.querySelector("textarea.goal-textarea") as HTMLTextAreaElement;
+    expect(ta).toBeTruthy();
+    expect(ta.value).toContain("Diagnostics: improve failure output");
+    expect(ta.value).not.toContain("Bound the timeline payload"); // NOT the old goal
+  });
+
+  it("F17-L3: a scoping decision with NO draft falls back to the current goal", () => {
+    const { container, getByText } = renderWithRouter(
+      <EditGoalHarness draft={null} />,
+    );
+    fireEvent.click(getByText("bump"));
+    const ta = container.querySelector("textarea.goal-textarea") as HTMLTextAreaElement;
+    expect(ta.value).toContain("Bound the timeline payload");
   });
 });
 

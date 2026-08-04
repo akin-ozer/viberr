@@ -17,6 +17,7 @@ import { useDialog } from "~/ui/use-dialog";
 export function AcceptConfirm({
   task,
   workRevisionSha,
+  noChanges = false,
   defaultBranch,
   /** True when this confirms the audited admin FORCE-accept (DG-2). */
   force = false,
@@ -29,6 +30,8 @@ export function AcceptConfirm({
   task: TaskDetail;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
+  /** R17-2: a verified no-change completion — the branch is empty, no PR. */
+  noChanges?: boolean;
   /** The merge target — the project's default branch. */
   defaultBranch: string;
   force?: boolean;
@@ -79,6 +82,11 @@ export function AcceptConfirm({
                   </Pill>{" "}
                   into <span className="mono">{defaultBranch}</span>
                 </>
+              ) : noChanges ? (
+                <>
+                  Nothing — <strong>completed with no changes</strong>. The
+                  branch is empty, so there is no pull request to merge.
+                </>
               ) : (
                 <>No linked pull request — the task closes without a merge.</>
               )}
@@ -94,6 +102,23 @@ export function AcceptConfirm({
               )}
             </span>
           </div>
+          {/* R17-1 (F17-L12): the PR head moved AHEAD of the reviewed revision
+              since the review — accepting still merges an ahead head, but the
+              human must see that those extra commits ship unreviewed and that
+              the merge head is NOT the revision pinned above. */}
+          {task.pr?.revisionDrift && (
+            <div className="obs warn">
+              <span className="k">Merge head</span>
+              <span>
+                <span className="mono">
+                  {task.pr.revisionDrift.headSha.slice(0, 12)}
+                </span>{" "}
+                — {task.pr.revisionDrift.aheadBy} commit
+                {task.pr.revisionDrift.aheadBy === 1 ? "" : "s"} added since
+                review; they merge unreviewed.
+              </span>
+            </div>
+          )}
           <div className="obs">
             <span className="k">Verdict</span>
             <span>

@@ -316,6 +316,13 @@ export function DecisionPacket({
               aria-disabled={blockReason !== null || undefined}
               aria-describedby={blockReason ? BLOCK_REASON_ID : undefined}
               aria-busy={busy}
+              // F17-L8: the visible label stays concise (echoing a multi-line
+              // option title overflowed the flex button — F-UI1), but the
+              // accessible name states WHAT is being confirmed, so a screen-reader
+              // user hears the chosen option, not a bare "Confirm decision".
+              aria-label={
+                selected ? `Confirm decision: ${selected.t}` : "Confirm decision"
+              }
               style={blockReason ? BLOCKED_BTN_STYLE : undefined}
               onClick={() => {
                 if (blockReason) return;
@@ -326,7 +333,8 @@ export function DecisionPacket({
               {/* A concise, stable label — echoing the full (often multi-line)
                   option title here overflowed the flex button and rendered the
                   text overlapping itself (F-UI1). The chosen option is already
-                  highlighted in the radiogroup above. */}
+                  highlighted in the radiogroup above, and the accessible name
+                  (aria-label) states the selection for non-visual users. */}
               Confirm decision
             </button>
           )}

@@ -12,6 +12,9 @@ export interface ReviewRowView {
     state: "review" | "merged" | "closed";
     /** P14-LV-07: GitHub's live mergeability for an open PR; absent = never read. */
     mergeable?: "clean" | "conflicting" | "unknown" | null;
+    /** R17-1 (F17-L12): the PR head is ahead of the reviewed revision by
+     *  `aheadBy` commits; the subline warns they would merge unreviewed. */
+    revisionDrift?: { aheadBy: number } | null;
   } | null;
   validation: ValidationValue;
   /** F10-11: why the current revision is NOT acceptance-ready (null when it is).
@@ -40,6 +43,12 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   }
   if (pr.mergeable === "conflicting") {
     return `PR #${pr.number} conflicts with the base branch — GitHub can't merge it until the branch is rebased.`;
+  }
+  // R17-1 (F17-L12): commits landed on the PR head after the review — accepting
+  // still merges them, but they ship unreviewed, so the boundary says so.
+  if (pr.revisionDrift && pr.revisionDrift.aheadBy > 0) {
+    const n = pr.revisionDrift.aheadBy;
+    return `PR #${pr.number} is open — ${n} commit${n === 1 ? "" : "s"} added since review would merge unreviewed.`;
   }
   return `PR #${pr.number} is open for review on GitHub.`;
 }

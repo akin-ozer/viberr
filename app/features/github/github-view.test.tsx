@@ -70,6 +70,8 @@ const prs: PrRowView[] = [
     branch: "vib-142-attach-workspace",
     checks: null,
     review: null,
+    // F17-L6: an open PR that conflicts with the base branch.
+    mergeable: "conflicting",
   },
   {
     taskKey: "VIB-139",
@@ -79,6 +81,7 @@ const prs: PrRowView[] = [
     branch: "vib-139-policy-split",
     checks: null,
     review: null,
+    mergeable: null,
   },
   {
     taskKey: "VIB-777",
@@ -88,6 +91,7 @@ const prs: PrRowView[] = [
     branch: "vib-777-spike",
     checks: null,
     review: null,
+    mergeable: null,
   },
 ];
 
@@ -96,7 +100,7 @@ const branches: BranchRowView[] = [
     taskKey: "VIB-142",
     title: "Attach execution workspace to task runtime",
     branch: "vib-142-attach-workspace",
-    pr: { number: 318, state: "review", checks: null, review: null },
+    pr: { number: 318, state: "review", checks: null, review: null, mergeable: "conflicting" },
     sync: "synced",
     commitCount: 3,
   },
@@ -112,7 +116,7 @@ const branches: BranchRowView[] = [
     taskKey: "VIB-139",
     title: "Separate human RBAC from agent capability policy",
     branch: "vib-139-policy-split",
-    pr: { number: 298, state: "merged", checks: null, review: null },
+    pr: { number: 298, state: "merged", checks: null, review: null, mergeable: null },
     sync: "merged",
     commitCount: 0,
   },
@@ -424,7 +428,7 @@ describe("PullRequestsPanel", () => {
     expect(rows[0]!.querySelector(".sub")!.textContent).toBe(
       "vib-142-attach-workspace → main · VIB-142",
     );
-    expect(rows[0]!.querySelector(".pill")!.textContent).toContain("in review");
+    expect(rows[0]!.textContent).toContain("in review");
     expect(rows[1]!.querySelector(".pill.done")!.textContent).toContain(
       "merged",
     );
@@ -432,6 +436,13 @@ describe("PullRequestsPanel", () => {
     expect(rows[2]!.querySelector(".pill.risk")!.textContent).toContain(
       "closed",
     );
+    // F17-L6: the conflicting open PR surfaces a risk "conflicts" pill so a
+    // human sees it cannot be merged, right where they decide to accept.
+    expect(rows[0]!.querySelector(".pill.risk")!.textContent).toContain(
+      "conflicts",
+    );
+    // A merged / clean PR shows no conflict pill.
+    expect(rows[1]!.textContent).not.toContain("conflicts");
     fireEvent.click(rows[0]!);
     expect(onOpenTask).toHaveBeenCalledWith("VIB-142");
     // Footer note is verbatim contract (B10: honest about the offline path).
@@ -479,6 +490,11 @@ describe("BranchesPanel", () => {
     expect(rows[0]!.querySelector(".pill.ready")!.textContent).toContain(
       "synced",
     );
+    // F17-L6: VIB-142's open PR conflicts — the branch row surfaces it too, so
+    // a rebase-needed branch is visible in the execution-branches table.
+    expect(rows[0]!.textContent).toContain("conflicts");
+    // A merged branch row shows no conflict pill.
+    expect(rows[2]!.textContent).not.toContain("conflicts");
 
     // VIB-151: no PR → em-dash placeholder; behind main risk pill.
     expect(rows[1]!.textContent).toContain("—");
@@ -534,7 +550,7 @@ describe("UI-05: a never-compared branch is not 'synced'", () => {
     );
     // Before the fix a branch with NO compare data borrowed "behindBy === 0"
     // and rendered the green "synced" pill, contradicting the page's own
-    // "Not yet synced" freshness chip.
+    // "Not synced yet" freshness chip.
     expect(pills).toContain("not compared");
     expect(pills).toContain("synced");
   });
@@ -578,5 +594,77 @@ describe("UI-37: 'Update status' is gated like the action it calls", () => {
   it("shows it to a maintainer", () => {
     const { getByText } = renderPage("maintainer");
     expect(getByText("Update status")).toBeTruthy();
+  });
+});
+
+describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
+  const pageData = (reconcile: {
+    at: string | null;
+    label: string | null;
+    stale: boolean;
+  }) =>
+    ({
+      project: {
+        slug: "viberr-core",
+        name: "Viberr Core",
+        repo: "akin-ozer/viberr",
+        defaultBranch: "main",
+      },
+      githubHost: "https://github.com",
+      connection: { status: "connected" as const },
+      credential: noneCredential,
+      prs: [],
+      branches: [],
+      reconcile,
+    }) as unknown as Parameters<typeof GithubViewPage>[0]["data"];
+
+  const renderChip = (reconcile: {
+    at: string | null;
+    label: string | null;
+    stale: boolean;
+  }) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage data={pageData(reconcile)} myRole="maintainer" />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/viberr-core/github"]} />,
+    );
+    return container.querySelector(".gh-freshness")!;
+  };
+
+  it("renders a never-reconciled surface neutral with a first-sync nudge", () => {
+    // A brand-new project's first look at this page used to be a coral alert
+    // ("Not yet synced") though nothing was wrong — no sync had simply run.
+    const chip = renderChip({ at: null, label: null, stale: true });
+    expect(chip.classList.contains("stale")).toBe(false);
+    expect(chip.textContent).toContain("Not synced yet");
+    expect(chip.getAttribute("title")).toContain("runs the first sync");
+  });
+
+  it("keeps the warn tone for a cache older than the staleness threshold", () => {
+    const chip = renderChip({
+      at: "2026-08-04T00:00:00.000Z",
+      label: "2h ago",
+      stale: true,
+    });
+    expect(chip.classList.contains("stale")).toBe(true);
+    expect(chip.textContent).toContain("Updated 2h ago");
+  });
+
+  it("renders a fresh cache neutral", () => {
+    const chip = renderChip({
+      at: "2026-08-04T00:00:00.000Z",
+      label: "3m ago",
+      stale: false,
+    });
+    expect(chip.classList.contains("stale")).toBe(false);
+    expect(chip.textContent).toContain("Updated 3m ago");
   });
 });

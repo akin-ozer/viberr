@@ -78,6 +78,7 @@ export function TaskDetailPage({
   githubHost,
   githubReconciledAt = null,
   workRevisionSha = null,
+  noChanges = false,
   defaultBranch = "main",
   canDeliver = false,
 }: {
@@ -124,6 +125,8 @@ export function TaskDetailPage({
   githubReconciledAt?: string | null;
   /** R15-1: the delivered revision's head sha (task file) for the confirm. */
   workRevisionSha?: string | null;
+  /** R17-2: a verified no-change completion (empty branch, no PR). */
+  noChanges?: boolean;
   /** The merge target named in the accept confirm — the project's default branch. */
   defaultBranch?: string;
   /** R15-2 safety net (b): the viewer may deliver by hand (maintainer+ or owner). */
@@ -158,12 +161,16 @@ export function TaskDetailPage({
   // A confirmed edit_goal packet decision drops the human straight into the
   // goal editor (TaskHero opens + focuses it on this signal).
   const [editGoalSignal, setEditGoalSignal] = useState(0);
+  // F17-L3: the deliverable of the chosen scoping option, so the editor opens
+  // prefilled with the scope the human just picked (not the old vague goal).
+  const [editGoalDraft, setEditGoalDraft] = useState<string | null>(null);
   useEffect(() => {
     if (
       resolveFetcher.state === "idle" &&
       resolveFetcher.data?.ok &&
       resolveFetcher.data.kind === "edit_goal"
     ) {
+      setEditGoalDraft(resolveFetcher.data.goalDraft ?? null);
       setEditGoalSignal((n) => n + 1);
     }
   }, [resolveFetcher.state, resolveFetcher.data]);
@@ -342,6 +349,7 @@ export function TaskDetailPage({
           archived={archived}
           agentWorking={anyRunLive}
           editGoalSignal={editGoalSignal}
+          editGoalDraft={editGoalDraft}
         />
 
         {runtime.length > 0 ? (
@@ -484,6 +492,7 @@ export function TaskDetailPage({
         <AcceptConfirm
           task={task}
           workRevisionSha={workRevisionSha}
+          noChanges={noChanges}
           defaultBranch={defaultBranch}
           force={confirmAccept === "force"}
           blockedReason={

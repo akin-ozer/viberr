@@ -142,6 +142,8 @@ describe("loader", () => {
       // narrowing them away, which is what the finding was about.
       checks: null,
       review: null,
+      // F17-L6: the demo fixture's PR carries no reconciled mergeability.
+      mergeable: null,
     });
     expect(view.prs.map((p) => p.state)).toEqual([
       "review",
@@ -181,6 +183,7 @@ describe("loader", () => {
       state: "review",
       checks: null, // P13-D-28: carried, not narrowed away
       review: null,
+      mergeable: null, // F17-L6: carried, not narrowed away
     });
     expect(byKey["VIB-151"]!.pr).toBeNull();
   });

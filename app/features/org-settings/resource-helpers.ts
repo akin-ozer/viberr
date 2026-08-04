@@ -15,6 +15,15 @@ export function rel(iso: string | null): string {
   return iso ? formatRelative(iso) : "never";
 }
 
+/**
+ * F17-L2: a skill/resource that has never been edited since it was seeded read
+ * "updated never", which sounds like something went wrong. An un-edited resource
+ * reads "not yet edited"; an edited one keeps "updated <when>".
+ */
+export function updatedLabel(iso: string | null): string {
+  return iso ? "updated " + formatRelative(iso) : "not yet edited";
+}
+
 /** P13-D-32: the "older than an hour reads as STALE" rule is interpretation,
  * which `architecture.md` forbids a UI component from owning — it now lives in
  * the shared freshness policy (server door:

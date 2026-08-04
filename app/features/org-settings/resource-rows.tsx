@@ -5,7 +5,7 @@ import type { StageDef } from "~/schemas/project-file.schema";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { EditIco } from "./mini-modal";
-import { isStaleCheck, rel } from "./resource-helpers";
+import { isStaleCheck, rel, updatedLabel } from "./resource-helpers";
 
 /**
  * The four resource list panels (knowledge bases, MCP servers, skills, global
@@ -194,7 +194,17 @@ export function McpPanel({
                     : /* P13-UI-16: defensive — every save/test writes `up`, so a
                          null only appears for a row written outside Viberr. */
                       "not health-checked yet"}
-                {m.hasCred ? " · auth: configured" : ""}
+                {/* A9 (F17 hygiene): a stored credential that no longer decrypts
+                    (e.g. the encryption key was rotated without the PREVIOUS key)
+                    used to still read "auth: configured" while the server mounted
+                    anonymously. `credUnreadable` was computed for exactly this and
+                    never surfaced — say it plainly so an admin knows to rotate or
+                    re-enter it. */}
+                {m.hasCred
+                  ? m.credUnreadable
+                    ? " · auth: unreadable — rotate the encryption key or re-enter the credential"
+                    : " · auth: configured"
+                  : ""}
                 {/* P14-KM-09: KB and skill rows have counted their templates
                     since P13-KM-08; MCP rows showed nothing, so an admin about
                     to rename or remove a server had no idea what depended on
@@ -287,7 +297,7 @@ export function SkillPanel({
               <span className="sub">{s.summary}</span>
               <span className="sub mono">
                 store://skills/{s.name}/ · {s.fileCount} file
-                {s.fileCount === 1 ? "" : "s"} · updated {rel(s.updatedAt)}
+                {s.fileCount === 1 ? "" : "s"} · {updatedLabel(s.updatedAt)}
                 {usedBy(s.name) > 0
                   ? " · " + usedBy(s.name) + " template" + (usedBy(s.name) === 1 ? "" : "s")
                   : ""}

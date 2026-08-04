@@ -22,7 +22,7 @@ export interface PillView {
  * behind-by resolver defaulted to 0 when no `github.reconcile` provenance row
  * existed, so every branch on a project that has never successfully reconciled
  * (no credential, repo not found, poller failing) showed the green "synced"
- * pill — flatly contradicting the page-level "Not yet synced" freshness chip,
+ * pill — flatly contradicting the page-level "Not synced yet" freshness chip,
  * and read by maintainers as "this branch is up to date with main".
  */
 export type SyncState = "merged" | "behind_main" | "synced" | "unknown";
@@ -91,6 +91,21 @@ export function reviewPill(
   if (review === "changes_requested") return { kind: "risk", label: "changes requested" };
   if (review === "approved") return { kind: "ready", label: "approved" };
   return { kind: "input", label: "review required" };
+}
+
+/**
+ * F17-L6: an open PR's mergeability. The task-detail acceptance chain already
+ * names a conflicting PR ("conflicts with the base branch"); this surfaces the
+ * SAME fact on the GitHub page's PR list + execution branches, where a human
+ * decides whether a PR is safe to accept. Only "conflicting" earns a pill — a
+ * clean or unknown state is the silent default, matching checks/review.
+ */
+export function mergeablePill(
+  mergeable: "clean" | "conflicting" | "unknown" | null,
+): PillView | null {
+  return mergeable === "conflicting"
+    ? { kind: "risk", label: "conflicts" }
+    : null;
 }
 
 /**

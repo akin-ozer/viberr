@@ -13,7 +13,15 @@ import type { RunView } from "~/features/runtime/runtime-types";
  */
 
 export type ActionResult =
-  | { ok: true; toast?: string; navigateTo?: string; kind?: string }
+  | {
+      ok: true;
+      toast?: string;
+      navigateTo?: string;
+      kind?: string;
+      /** R17-2/F17-L3: a suggested new goal from a resolved scoping (edit_goal)
+       *  packet option — the editor prefills with THIS instead of the old goal. */
+      goalDraft?: string;
+    }
   | { ok: false; error: string };
 
 /** Toast + optional redirect once per completed fetcher submission. */

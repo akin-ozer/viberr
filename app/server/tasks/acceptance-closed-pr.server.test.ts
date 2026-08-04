@@ -212,6 +212,124 @@ describe("path 3 — operatorAcceptCompletion", () => {
     expect(task().frontmatter.pr?.state).toBe("closed");
   });
 
+  it("R17-1: a full-autonomy accept of a drifted-head PR names the divergence in the completion event", async () => {
+    deployOperator();
+    // An OPEN review PR whose head drifted ahead of the reviewed revision by 2.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        validation: "healthy",
+        ownerUserId: store.users.arda.id,
+        title: "Attach execution workspace",
+        branch: "vib-1-attach-execution-workspace",
+        pr: {
+          number: 318,
+          state: "review",
+          title: "[VIB-1] Attach execution workspace",
+          revisionDrift: { aheadBy: 2, headSha: "aheadhead0000" },
+        },
+      }),
+      goal: "Prove the divergence note lands on the completion record.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const result = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+        autonomy: "full",
+      }),
+    );
+    expect(result.message).toMatch(/accepted|Done/i);
+    expect(task().frontmatter.stage).toBe("done");
+    const completion = task().timeline.find((e) => e.type === "completion");
+    expect(completion?.text).toContain("2 commits were added to the PR head");
+    // The note shows the first 12 chars of the drifted head sha.
+    expect(completion?.text).toContain("aheadhead000");
+  });
+
+  it("R17-2: a full-autonomy accept of a verified no-change task closes to Done with a distinct completion", async () => {
+    deployOperator();
+    // A delivered task whose branch is empty (no PR) — the R17-2 no-change flag.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        validation: "healthy",
+        ownerUserId: store.users.arda.id,
+        title: "Normalize headings",
+        branch: "vib-1-normalize",
+        pr: null,
+        noChanges: true,
+        workRevision: {
+          id: "rev_1",
+          headSha: "maintipsha000",
+          treeSha: null,
+          branch: "vib-1-normalize",
+          createdAt: "2026-08-04T08:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+      }),
+      goal: "Normalize the headings (already consistent).",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const result = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+        autonomy: "full",
+      }),
+    );
+    expect(result.message).toMatch(/Done|accepted/i);
+    expect(task().frontmatter.stage).toBe("done");
+    const completion = task().timeline.find((e) => e.type === "completion");
+    expect(completion?.text).toContain("completed with no changes required");
+    // Nothing was merged — no PR ever existed.
+    expect(task().frontmatter.pr).toBeNull();
+  });
+
+  it("R17-2: WITHOUT the no-change flag, a delivered-no-PR task is still refused", async () => {
+    deployOperator();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        validation: "healthy",
+        ownerUserId: store.users.arda.id,
+        title: "Ship the feature",
+        branch: "vib-1-feature",
+        pr: null,
+        // no `noChanges` — delivered work that simply never opened a PR.
+        workRevision: {
+          id: "rev_1",
+          headSha: "realworksha00",
+          treeSha: null,
+          branch: "vib-1-feature",
+          createdAt: "2026-08-04T08:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+      }),
+      goal: "Ship it.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const result = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+        autonomy: "full",
+      }),
+    );
+    expect(result.outcome).toBe("noop");
+    expect(result.message).toMatch(/no review pull request|deliver the branch/i);
+    expect(task().frontmatter.stage).toBe("review");
+  });
+
   it("supervised does not even RECOMMEND acceptance on a closed-PR task", async () => {
     deployOperator();
     seedClosedPrTask();

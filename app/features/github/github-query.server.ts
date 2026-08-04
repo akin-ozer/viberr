@@ -22,9 +22,11 @@ import {
 import type { SyncState } from "./github-pills";
 import {
   mapPrChecks,
+  mapPrMergeable,
   mapPrReview,
   type PrChecksRender,
 } from "~/shared/mapping/task.server";
+import type { PrMergeable } from "~/schemas/task-file.schema";
 import type { PrReviewState } from "~/schemas/task-file.schema";
 
 /**
@@ -55,6 +57,10 @@ export interface PrRowView {
    *  IS the "every consumer narrows" the finding describes. */
   checks: PrChecksRender | null;
   review: PrReviewState | null;
+  /** P14-LV-07 / F17-L6: GitHub's last-read mergeability for an open PR — the
+   *  conflict state the acceptance chain already knows but this page did not
+   *  surface. Null = never read / not applicable (a settled PR). */
+  mergeable: PrMergeable | null;
 }
 
 export interface BranchRowView {
@@ -68,6 +74,8 @@ export interface BranchRowView {
     /** P13-D-28. */
     checks: PrChecksRender | null;
     review: PrReviewState | null;
+    /** F17-L6: conflict/mergeable state for an open PR (null when settled). */
+    mergeable: PrMergeable | null;
   } | null;
   sync: SyncState;
   /** Task-key-associated commits from the github cache (VIB-142 seeds 3). */
@@ -186,6 +194,7 @@ export async function getGithubViewData(
               state: t.pr.state,
               checks: mapPrChecks(t.pr),
               review: mapPrReview(t.pr),
+              mergeable: mapPrMergeable(t.pr),
             }
           : null,
         // UI-05: a merged PR is authoritative regardless of compare data;
@@ -213,6 +222,7 @@ export async function getGithubViewData(
       branch: t.branch,
       checks: mapPrChecks(t.pr),
       review: mapPrReview(t.pr),
+      mergeable: mapPrMergeable(t.pr),
     }))
     .sort((a, b) => b.number - a.number);
 

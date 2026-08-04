@@ -310,6 +310,14 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       // …and the refusal reaches the timeline, like every other delivery failure.
       const event = fm().timeline.find((e) => e.type === "github");
       expect(event?.text).toContain(c.says);
+      // R17-2: an empty branch (nothing_to_review) marks the task as a verified
+      // no-change completion so acceptance can close it to Done cleanly; the
+      // other not-deliverable outcomes are genuine failures and must NOT.
+      if (c.outcome === "nothing_to_review") {
+        expect(fm().frontmatter.noChanges).toBe(true);
+      } else {
+        expect(fm().frontmatter.noChanges).toBeFalsy();
+      }
     });
   }
 });
@@ -408,6 +416,30 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
     );
     expect(r.outcome).toBe("denied");
     expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("F17-1: the operator's delivery calls openTaskPr operator-authorized (so the PR-open event is the Operator, not a guest)", async () => {
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1" } as never);
+    openPrMock.mockResolvedValue({
+      status: "ok",
+      prNumber: 9,
+      created: true,
+      url: "https://github.com/x/y/pull/9",
+    });
+    await operatorDeliverForReview(
+      store.db,
+      dataCtx(),
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority(),
+    );
+    expect(openPrMock).toHaveBeenCalled();
+    // The third arg is the actor; a delivery THROUGH the operator tool must mark
+    // it operator-authorized so pr-open renders {kind:"operator"}, not a human.
+    // Canary: drop `operatorAuthorized: true` in operatorDeliverForReview and
+    // this reads false.
+    const actorArg = openPrMock.mock.calls.at(-1)![2] as { operatorAuthorized?: boolean };
+    expect(actorArg.operatorAuthorized).toBe(true);
   });
 });
 

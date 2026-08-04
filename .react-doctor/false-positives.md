@@ -131,6 +131,14 @@ against stale copies — `design/support.js` alone accounted for 45 phantom
   request body, external API response, or file the user can hand-edit — those must be
   wrapped and shape-checked.
 
+- `react-doctor/only-export-components` — decision-packet.tsx `observationLabel` /
+  `observationValue`: P13 rendering helpers co-owned by the component that are also
+  imported by jsdom tests and sibling packet renderers; the module IS the packet's
+  public surface, and moving two pure one-liners to a satellite file to appease Fast
+  Refresh would split one concern across two files. Verify the flagged exports are
+  pure formatting helpers colocated with their sole component consumer — hooks or
+  stateful exports do not qualify.
+
 ## Deliberate deferrals (real findings, suppressed by product/design decision)
 
 The canonical UI design is frozen; a11y fixes must be markup-additive. These need a

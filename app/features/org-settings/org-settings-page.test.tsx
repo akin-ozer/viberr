@@ -363,6 +363,27 @@ describe("ResourcesPanel", () => {
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();
   });
 
+  it("A9/F17: an MCP whose stored credential no longer decrypts reads 'auth: unreadable', not 'configured'", () => {
+    const brokenMcps: McpView[] = [
+      {
+        id: "m9",
+        name: "broken-mcp",
+        transport: "HTTP",
+        target: "https://mcp.internal:7810/sse",
+        hasCred: true,
+        credUnreadable: true,
+        tools: null,
+        up: null,
+        lastCheckedAt: new Date().toISOString(),
+      },
+    ];
+    const { getByText, queryByText } = renderPanel(
+      <ResourcesPanel kbs={[]} mcps={brokenMcps} skills={[]} gagents={[]} stages={STAGES} />,
+    );
+    expect(getByText(/auth: unreadable/)).toBeTruthy();
+    expect(queryByText(/auth: configured/)).toBeNull();
+  });
+
   it("P14-WL-06: says 'resource' for one and 'resources' for several", () => {
     // The `used in N project(s)` half of the same line always pluralized; the
     // resource count always said "resources", so a single grant read

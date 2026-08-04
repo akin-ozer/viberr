@@ -317,6 +317,20 @@ export const prRefSchema = z
     // P14-LV-07: same optional-key convention as `checks`/`review` — an absent
     // key is "never read", which is NOT the same as "merges cleanly".
     mergeable: z.enum(PR_MERGEABLE_VALUES).nullish().catch(null),
+    // R17-1 (F17-L12): the PR head is STRICTLY AHEAD of the reviewed/delivered
+    // revision — it contains it plus `aheadBy` extra commits pushed after the
+    // review. Acceptance still merges an ahead head (owner ruling: keep "ahead"),
+    // but the accept/force dialogs, the review-queue subline and the completion
+    // record must SURFACE that those extra commits ship unreviewed. Absent when
+    // the head equals the reviewed revision (or the drift is unknown). Same
+    // optional-key + `.catch(null)` convention as the facts above.
+    revisionDrift: z
+      .object({
+        aheadBy: z.number().int().positive(),
+        headSha: z.string().min(1),
+      })
+      .nullish()
+      .catch(null),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
@@ -487,6 +501,14 @@ export const taskFrontmatterSchema = z.object({
   // null read path. An existing `repo:` line in a task.md is now an UNKNOWN key:
   // preserved verbatim on round-trip, ignored by every resolver.
   pr: prRefSchema.nullable(),
+  // R17-2 (F17-L9): the last delivery attempt confirmed the execution branch has
+  // NO commits ahead of the default branch — a verified no-change completion (the
+  // goal was already satisfied). Acceptance of a `workRevision && !pr` task is
+  // normally refused ("deliver the branch & open the PR"); this flag is the ONE
+  // signal that turns that refusal into a first-class "Completed — no changes"
+  // acceptance that closes to Done without a PR or merge. Set on a delivery's
+  // `nothing_to_review` result; cleared the moment a delivery opens a PR.
+  noChanges: z.boolean().optional(),
   github: githubCacheSchema.nullable(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
@@ -689,6 +711,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   // P13-D-5: "repo" deliberately NOT listed — it is an unknown key now, so an
   // existing task.md keeps its line verbatim instead of losing it on rewrite.
   "pr",
+  "noChanges",
   "github",
   "createdAt",
   "updatedAt",
@@ -1024,6 +1047,14 @@ export function parseTaskFrontmatter(
     ),
     // P13-D-5: no `repo` read — the task-level override is gone.
     pr: tolerant(diagnostics, "pr", data.pr, taskFrontmatterSchema.shape.pr, null),
+    // R17-2: absent means "not a no-change completion" — never a diagnostic.
+    noChanges: tolerant(
+      diagnostics,
+      "noChanges",
+      data.noChanges,
+      taskFrontmatterSchema.shape.noChanges,
+      undefined,
+    ),
     github: tolerant(
       diagnostics,
       "github",

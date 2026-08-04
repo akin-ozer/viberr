@@ -30,8 +30,14 @@ import type { PrCacheState } from "./pr-linker.server";
  */
 
 export type PrAdoptionRefusal =
-  /** Merged or closed — a settled PR can never become a task's live review. */
-  | "not_open"
+  /** MERGED — its work is already on the base branch, so a fresh delivery
+   *  fast-forwards cleanly; the collision is only about the stale branch name,
+   *  not a history conflict (F17-L4). */
+  | "merged"
+  /** CLOSED without merging — the remote branch carries commits that are NOT on
+   *  the base, so a fresh push risks a non-fast-forward; the collision is a real
+   *  history hazard, not just a name clash (F17-L4). */
+  | "closed"
   /** The task has delivered no revision, so nothing can stand for its work. */
   | "no_revision"
   /** The PR's head sha could not be read — unprovable, so refused (fail closed). */
@@ -50,7 +56,14 @@ export function decidePrAdoption(input: {
   /** `workRevision.headSha` — the task's delivered revision. */
   revisionHeadSha: string | null | undefined;
 }): PrAdoptionDecision {
-  if (input.state !== "review") return { adopt: false, refusal: "not_open" };
+  if (input.state !== "review") {
+    // F17-L4: merged and closed are BOTH un-adoptable, but they carry different
+    // delivery hazards — name them apart so the refusal copy is honest.
+    return {
+      adopt: false,
+      refusal: input.state === "merged" ? "merged" : "closed",
+    };
+  }
   const revision = input.revisionHeadSha?.trim();
   if (!revision) return { adopt: false, refusal: "no_revision" };
   const head = input.prHeadSha?.trim();
@@ -67,8 +80,10 @@ function refusalCause(input: {
   revisionHeadSha?: string | null;
 }): string {
   switch (input.refusal) {
-    case "not_open":
-      return `that PR is already merged or closed, so it cannot stand for ${input.taskKey}'s review`;
+    case "merged":
+      return `that PR is already merged — its work is on the base branch, so a fresh delivery fast-forwards cleanly once the stale branch name is cleared`;
+    case "closed":
+      return `that PR was closed without merging — the remote branch still holds its commits, so a fresh push would conflict until the branch is cleared`;
     case "no_revision":
       return `${input.taskKey} has delivered no revision, so no pull request can stand for its work yet`;
     case "head_unknown":

@@ -202,6 +202,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // revision (task file) and the merge target (project default branch).
   const workRevisionSha =
     taskFile?.parsed.frontmatter.workRevision?.headSha ?? null;
+  // R17-2: a verified no-change completion (empty branch, no PR) accepts to Done
+  // without a merge — the confirm says so instead of implying delivered work.
+  const noChanges = taskFile?.parsed.frontmatter.noChanges === true;
   const project = getProject(db, params.slug);
   const defaultBranch = project?.defaultBranch || "main";
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
@@ -261,6 +264,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
     // R15-1 accept confirm + R15-2 manual-delivery affordance.
     workRevisionSha,
+    noChanges,
     defaultBranch,
     canDeliver,
     // Host for GitHub browse links (PR/branch/repo), derived server-side.
@@ -395,6 +399,17 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           kind: option.kind,
           toast,
+          // F17-L3: a scoping (edit_goal) decision drops the human into the goal
+          // editor — prefill it with the CHOSEN option's deliverable so they
+          // don't have to retype the scope they just picked. The option title is
+          // the headline; its description carries the deliverable + acceptance.
+          ...(option.kind === "edit_goal"
+            ? {
+                goalDraft: option.d?.trim()
+                  ? `${option.t}\n\n${option.d.trim()}`
+                  : option.t,
+              }
+            : {}),
           // Mock flow: blocking on policy opens the repository settings.
           ...(option.kind === "block_on_policy"
             ? { navigateTo: `/projects/${projectSlug}/settings` }
@@ -848,6 +863,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
       workRevisionSha={loaderData.workRevisionSha}
+      noChanges={loaderData.noChanges}
       defaultBranch={loaderData.defaultBranch}
       canDeliver={loaderData.canDeliver}
     />
