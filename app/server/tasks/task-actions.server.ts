@@ -3447,6 +3447,14 @@ export async function performDelivery(
         taskKey,
         push.status === "no_commits" ? "Nothing to deliver" : "Delivery could not run",
         message,
+        // R17-2 (F17-L9): `no_commits` is a verified empty branch — mark the task
+        // a no-change completion so acceptance can close it to Done cleanly. The
+        // other push outcomes are genuine failures and must NOT set the flag.
+        push.status === "no_commits"
+          ? (fm) => {
+              fm.noChanges = true;
+            }
+          : undefined,
       );
       // "Nothing to review" is the honest bucket for an empty branch; the rest
       // are failures to deliver at all.
@@ -3502,6 +3510,15 @@ export async function performDelivery(
       dataCtx,
     );
     if (result.status === "ok") {
+      // R17-2: a real PR now stands for review — clear any stale no-change flag
+      // from an earlier empty-branch attempt (a later delivery produced commits).
+      const cur = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+      if (cur?.parsed.frontmatter.noChanges) {
+        await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+          delete parsed.frontmatter.noChanges;
+        });
+        reprojectTask(db, ctx, projectSlug, taskKey);
+      }
       return {
         status: "delivered",
         prNumber: result.prNumber,
@@ -3535,6 +3552,10 @@ export async function performDelivery(
         "No review pull request could be opened — the execution branch has no " +
         "commits ahead of the default branch. The delivery may have produced no " +
         "change, or the commits never reached the remote.";
+      // R17-2 (F17-L9): the branch is verified empty (zero commits ahead of the
+      // default branch). Mark the task as a no-change completion so acceptance
+      // can close it to Done cleanly instead of dead-ending on "deliver the
+      // branch & open the PR" — which cannot be done for an empty branch.
       await surfaceDeliveryEvent(
         db,
         ctx,
@@ -3542,6 +3563,9 @@ export async function performDelivery(
         taskKey,
         "Review has no PR",
         message,
+        (fm) => {
+          fm.noChanges = true;
+        },
       );
       return { status: "nothing_to_review", message };
     }
@@ -3651,6 +3675,9 @@ async function surfaceDeliveryEvent(
   taskKey: string,
   title: string,
   text: string,
+  /** Optional frontmatter mutation applied in the SAME write (e.g. R17-2's
+   *  `noChanges` flag on a `nothing_to_review` result). */
+  mutateFm?: (fm: TaskFrontmatter) => void,
 ): Promise<void> {
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
@@ -3663,6 +3690,7 @@ async function surfaceDeliveryEvent(
         toAgent: false,
         evidence: null,
       });
+      mutateFm?.(parsed.frontmatter);
     });
     reprojectTask(db, ctx, projectSlug, taskKey);
     notifyTaskWatchers(
@@ -4186,7 +4214,9 @@ export async function resolvePacket(
         title: "Completion accepted",
         text:
           (!hasPr
-            ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
+            ? existing.parsed.frontmatter.noChanges
+              ? "Human acceptance recorded — **completed with no changes required**. Task transitioned to **Done**; the goal was already satisfied, so nothing was delivered or merged."
+              : "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
             : alreadyMerged
               ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
               : reallyMerged
@@ -4625,6 +4655,10 @@ function verdictGateReason(fm: TaskFrontmatter, taskKey: string): string | null 
   // Delivered work with no PR: nothing stands for review, so acceptance would
   // close the task on work no PR ever carried (R15-1 gate 1).
   if (!fm.pr) {
+    // R17-2 (F17-L9): unless the branch is verified empty — a "Completed, no
+    // changes" outcome. The goal was already satisfied, so there is nothing to
+    // deliver or open a PR for; acceptance closes it to Done without a merge.
+    if (fm.noChanges) return null;
     return `${taskKey} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
   }
   const validation = deriveValidation(fm);
@@ -5144,7 +5178,9 @@ async function acceptCompletion(
     title: "Completion accepted",
     text:
       (!hasPr
-        ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
+        ? existing.parsed.frontmatter.noChanges
+          ? `Human acceptance recorded — **completed with no changes required**. ${input.taskKey} transitioned to **Done**; the goal was already satisfied, so nothing was delivered or merged.`
+          : `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
         : alreadyMerged
           ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
           : reallyMerged

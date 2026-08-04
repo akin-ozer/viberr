@@ -78,6 +78,7 @@ export function TaskDetailPage({
   githubHost,
   githubReconciledAt = null,
   workRevisionSha = null,
+  noChanges = false,
   defaultBranch = "main",
   canDeliver = false,
 }: {
@@ -124,6 +125,8 @@ export function TaskDetailPage({
   githubReconciledAt?: string | null;
   /** R15-1: the delivered revision's head sha (task file) for the confirm. */
   workRevisionSha?: string | null;
+  /** R17-2: a verified no-change completion (empty branch, no PR). */
+  noChanges?: boolean;
   /** The merge target named in the accept confirm — the project's default branch. */
   defaultBranch?: string;
   /** R15-2 safety net (b): the viewer may deliver by hand (maintainer+ or owner). */
@@ -484,6 +487,7 @@ export function TaskDetailPage({
         <AcceptConfirm
           task={task}
           workRevisionSha={workRevisionSha}
+          noChanges={noChanges}
           defaultBranch={defaultBranch}
           force={confirmAccept === "force"}
           blockedReason={

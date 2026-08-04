@@ -2056,7 +2056,9 @@ export async function operatorAcceptCompletion(
       text:
         (hasPr
           ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
-          : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`) +
+          : file.parsed.frontmatter.noChanges
+            ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done, **completed with no changes required** (nothing to deliver or merge).`
+            : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`) +
         driftNote,
       toAgent: false,
       evidence: null,

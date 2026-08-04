@@ -202,6 +202,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // revision (task file) and the merge target (project default branch).
   const workRevisionSha =
     taskFile?.parsed.frontmatter.workRevision?.headSha ?? null;
+  // R17-2: a verified no-change completion (empty branch, no PR) accepts to Done
+  // without a merge — the confirm says so instead of implying delivered work.
+  const noChanges = taskFile?.parsed.frontmatter.noChanges === true;
   const project = getProject(db, params.slug);
   const defaultBranch = project?.defaultBranch || "main";
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
@@ -261,6 +264,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
     // R15-1 accept confirm + R15-2 manual-delivery affordance.
     workRevisionSha,
+    noChanges,
     defaultBranch,
     canDeliver,
     // Host for GitHub browse links (PR/branch/repo), derived server-side.
@@ -848,6 +852,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
       workRevisionSha={loaderData.workRevisionSha}
+      noChanges={loaderData.noChanges}
       defaultBranch={loaderData.defaultBranch}
       canDeliver={loaderData.canDeliver}
     />

@@ -501,6 +501,14 @@ export const taskFrontmatterSchema = z.object({
   // null read path. An existing `repo:` line in a task.md is now an UNKNOWN key:
   // preserved verbatim on round-trip, ignored by every resolver.
   pr: prRefSchema.nullable(),
+  // R17-2 (F17-L9): the last delivery attempt confirmed the execution branch has
+  // NO commits ahead of the default branch — a verified no-change completion (the
+  // goal was already satisfied). Acceptance of a `workRevision && !pr` task is
+  // normally refused ("deliver the branch & open the PR"); this flag is the ONE
+  // signal that turns that refusal into a first-class "Completed — no changes"
+  // acceptance that closes to Done without a PR or merge. Set on a delivery's
+  // `nothing_to_review` result; cleared the moment a delivery opens a PR.
+  noChanges: z.boolean().optional(),
   github: githubCacheSchema.nullable(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
@@ -703,6 +711,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   // P13-D-5: "repo" deliberately NOT listed — it is an unknown key now, so an
   // existing task.md keeps its line verbatim instead of losing it on rewrite.
   "pr",
+  "noChanges",
   "github",
   "createdAt",
   "updatedAt",
@@ -1038,6 +1047,14 @@ export function parseTaskFrontmatter(
     ),
     // P13-D-5: no `repo` read — the task-level override is gone.
     pr: tolerant(diagnostics, "pr", data.pr, taskFrontmatterSchema.shape.pr, null),
+    // R17-2: absent means "not a no-change completion" — never a diagnostic.
+    noChanges: tolerant(
+      diagnostics,
+      "noChanges",
+      data.noChanges,
+      taskFrontmatterSchema.shape.noChanges,
+      undefined,
+    ),
     github: tolerant(
       diagnostics,
       "github",

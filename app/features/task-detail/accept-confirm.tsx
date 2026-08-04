@@ -17,6 +17,7 @@ import { useDialog } from "~/ui/use-dialog";
 export function AcceptConfirm({
   task,
   workRevisionSha,
+  noChanges = false,
   defaultBranch,
   /** True when this confirms the audited admin FORCE-accept (DG-2). */
   force = false,
@@ -29,6 +30,8 @@ export function AcceptConfirm({
   task: TaskDetail;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
+  /** R17-2: a verified no-change completion — the branch is empty, no PR. */
+  noChanges?: boolean;
   /** The merge target — the project's default branch. */
   defaultBranch: string;
   force?: boolean;
@@ -78,6 +81,11 @@ export function AcceptConfirm({
                     PR #{task.pr.number} · {task.pr.state}
                   </Pill>{" "}
                   into <span className="mono">{defaultBranch}</span>
+                </>
+              ) : noChanges ? (
+                <>
+                  Nothing — <strong>completed with no changes</strong>. The
+                  branch is empty, so there is no pull request to merge.
                 </>
               ) : (
                 <>No linked pull request — the task closes without a merge.</>
