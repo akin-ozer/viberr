@@ -258,6 +258,83 @@ function SetNewPassword({
   );
 }
 
+/** The two OAuth buttons (rendered only when ≥1 provider is configured —
+ *  R17-4). D12: an unconfigured provider renders disabled with an explicit
+ *  label rather than looking clickable. */
+function ProviderButtons({
+  providers,
+  busy,
+  onProvider,
+}: {
+  providers: { github: boolean; google: boolean };
+  busy: "github" | "google" | "local" | null;
+  onProvider: (which: "github" | "google") => void;
+}) {
+  return (
+    <div className="login-providers">
+      <button
+        type="button"
+        className="btn provider github"
+        onClick={() => onProvider("github")}
+        disabled={!providers.github}
+        aria-busy={busy === "github" || undefined}
+        title={
+          providers.github
+            ? undefined
+            : "GitHub OAuth isn't configured on this deployment"
+        }
+        style={
+          !providers.github
+            ? { opacity: 0.55, cursor: "not-allowed" }
+            : busy === "github"
+              ? { opacity: 0.7, pointerEvents: "none" }
+              : undefined
+        }
+      >
+        <Icon
+          name={busy === "github" ? "refresh" : "github"}
+          className={busy === "github" ? "spin" : ""}
+        />
+        {busy === "github"
+          ? "Checking whitelist…"
+          : providers.github
+            ? "Continue with GitHub"
+            : "GitHub — not configured"}
+      </button>
+      <button
+        type="button"
+        className="btn provider"
+        onClick={() => onProvider("google")}
+        disabled={!providers.google}
+        aria-busy={busy === "google" || undefined}
+        title={
+          providers.google
+            ? undefined
+            : "Google OAuth isn't configured on this deployment"
+        }
+        style={
+          !providers.google
+            ? { opacity: 0.55, cursor: "not-allowed" }
+            : busy === "google"
+              ? { opacity: 0.7, pointerEvents: "none" }
+              : undefined
+        }
+      >
+        {busy === "google" ? (
+          <Icon name="refresh" className="spin" />
+        ) : (
+          <span className="gmark lg">G</span>
+        )}
+        {busy === "google"
+          ? "Checking whitelist…"
+          : providers.google
+            ? "Continue with Google"
+            : "Google — not configured"}
+      </button>
+    </div>
+  );
+}
+
 export default function Login({
   loaderData,
   actionData,
@@ -373,70 +450,11 @@ export default function Login({
 
         {ssoConfigured && (
           <>
-            <div className="login-providers">
-              {/* D12: OAuth providers are only usable when configured on this
-              deployment (loader `providers` flags). Unconfigured ones render
-              disabled with an explicit label rather than looking clickable. */}
-              <button
-                type="button"
-                className="btn provider github"
-                onClick={() => provider("github")}
-                disabled={!providers.github}
-                aria-busy={busy === "github" || undefined}
-                title={
-                  providers.github
-                    ? undefined
-                    : "GitHub OAuth isn't configured on this deployment"
-                }
-                style={
-                  !providers.github
-                    ? { opacity: 0.55, cursor: "not-allowed" }
-                    : busy === "github"
-                      ? { opacity: 0.7, pointerEvents: "none" }
-                      : undefined
-                }
-              >
-                <Icon
-                  name={busy === "github" ? "refresh" : "github"}
-                  className={busy === "github" ? "spin" : ""}
-                />
-                {busy === "github"
-                  ? "Checking whitelist…"
-                  : providers.github
-                    ? "Continue with GitHub"
-                    : "GitHub — not configured"}
-              </button>
-              <button
-                type="button"
-                className="btn provider"
-                onClick={() => provider("google")}
-                disabled={!providers.google}
-                aria-busy={busy === "google" || undefined}
-                title={
-                  providers.google
-                    ? undefined
-                    : "Google OAuth isn't configured on this deployment"
-                }
-                style={
-                  !providers.google
-                    ? { opacity: 0.55, cursor: "not-allowed" }
-                    : busy === "google"
-                      ? { opacity: 0.7, pointerEvents: "none" }
-                      : undefined
-                }
-              >
-                {busy === "google" ? (
-                  <Icon name="refresh" className="spin" />
-                ) : (
-                  <span className="gmark lg">G</span>
-                )}
-                {busy === "google"
-                  ? "Checking whitelist…"
-                  : providers.google
-                    ? "Continue with Google"
-                    : "Google — not configured"}
-              </button>
-            </div>
+            <ProviderButtons
+              providers={providers}
+              busy={busy}
+              onProvider={provider}
+            />
             {(!providers.github || !providers.google) && (
               <div className="login-tag providers">
                 {/* Inside the ssoConfigured branch exactly one provider can be
