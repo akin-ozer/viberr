@@ -72,9 +72,7 @@ export function RepositoryPanel({
             {data.project.repo ? (
               <span className="mono">{data.project.repo}</span>
             ) : (
-              <span style={{ color: "var(--placeholder)", fontSize: ".8rem" }}>
-                —
-              </span>
+              <span className="fine md dim">—</span>
             )}
           </span>
         </div>
@@ -97,15 +95,7 @@ export function RepositoryPanel({
               {conn.label}
             </Pill>
             {showProbeNote && (
-              <span
-                style={{
-                  flexBasis: "100%",
-                  fontSize: ".75rem",
-                  fontWeight: 400,
-                  color: "var(--faint)",
-                  lineHeight: 1.4,
-                }}
-              >
+              <span className="probe-note">
                 Live repository probe — the stored project credential is shown
                 below.
               </span>
@@ -118,15 +108,7 @@ export function RepositoryPanel({
             since it was hardcoded. One project, one repository. */}
         <div className="kv-row">
           <span className="k">Task attachment</span>
-          <span
-            className="v"
-            style={{
-              fontWeight: 400,
-              fontFamily: "var(--font-body)",
-              fontSize: ".8rem",
-              color: "var(--faint)",
-            }}
-          >
+          <span className="v plain">
             every task uses this repository
           </span>
         </div>
@@ -168,7 +150,7 @@ export function PullRequestsPanel({
       <div className="rq-list">
         {prs.length === 0 && (
           // Empty state the mock never designed (spec §7.9a) — quiet copy.
-          <div className="pol-note" style={{ marginBottom: 0 }}>
+          <div className="pol-note last">
             <Icon name="pr" />
             <span>
               No pull requests yet — one is opened at the review boundary by
@@ -254,7 +236,7 @@ export function BranchesPanel({
           </div>
           {branches.length === 0 && (
             // Empty state the mock never designed (spec §7.9b).
-            <div className="empty" style={{ padding: "1rem" }}>
+            <div className="empty sm">
               No execution branches yet — a task-key branch is created when
               execution starts.
             </div>
@@ -273,20 +255,13 @@ export function BranchesPanel({
                   <span className="key mono">{row.taskKey}</span>{" "}
                   <span className="ttl">{row.title}</span>
                 </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: ".45rem",
-                    minWidth: 0,
-                  }}
-                >
-                  <span className="trace ok" style={{ fontSize: ".75rem" }}>
+                <span className="live-branch">
+                  <span className="trace ok">
                     <Icon name="branch" />
                     {row.branch}
                   </span>
                   {row.commitCount > 0 && (
-                    <span style={{ color: "var(--faint)", fontSize: ".75rem" }}>
+                    <span className="fine xs">
                       {row.commitCount}{" "}
                       {row.commitCount === 1 ? "commit" : "commits"}
                     </span>
@@ -313,11 +288,7 @@ export function BranchesPanel({
                       )}
                     </>
                   ) : (
-                    <span
-                      style={{ color: "var(--placeholder)", fontSize: ".8rem" }}
-                    >
-                      —
-                    </span>
+                    <span className="fine md dim">—</span>
                   )}
                 </span>
                 <span>
@@ -397,14 +368,7 @@ export function GithubViewPage({
   // The cred-warn action slot: Grant scope (re-check, lives here until the
   // Phase-9 Settings card exists) + the mock's Fix in Settings navigation.
   const warnActions = (
-    <span
-      style={{
-        marginLeft: "auto",
-        display: "inline-flex",
-        gap: ".4rem",
-        flex: "none",
-      }}
-    >
+    <span className="warn-acts">
       {canGrant && hasCredential && (
         <button
           type="button"

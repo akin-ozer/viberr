@@ -5,6 +5,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   acceptanceBlockedReason,
+  closedPrBlockedReason,
   deliveringEngagement,
   deriveValidation,
   supportingEngagements,
@@ -286,11 +287,24 @@ function listTaskDirs(slug: string, dataRoot?: string): string[] {
  * is the dead end R14-2/P14-LV-06 exist to abolish.
  *
  * Mirrors `acceptanceRefusalReason` (task-actions.server.ts) in the same order,
- * and must move with it. The other gates there — archived, stage boundary, open
- * blocked packet, closed/conflicting PR — are per-reader state the consumers
+ * and must move with it. The remaining gates there — archived, stage boundary,
+ * open blocked packet, conflicting PR — are per-reader state the consumers
  * already filter on, so they stay out of this column.
  */
 function acceptanceBlockReason(fm: TaskFrontmatter): string | null {
+  // R16-3 (owner ruling 2026-08-04): a TERMINAL GitHub fact outranks every
+  // process gate below it, so it is named FIRST here exactly as it is in
+  // `acceptanceRefusalReason`. This gate used to be excluded as "per-reader
+  // state the consumers already filter on" — and they do filter the ROW out
+  // (review queue `isReady`, `decisionsRequiring`), while still rendering this
+  // SENTENCE next to it: a closed-PR task read "…no approving verdict yet — run
+  // a review for a verdict, or an admin can force-accept", naming the process
+  // gate over the terminal fact and offering the one override the task page
+  // withholds once the PR is gone (`acceptanceTerminallyBlocked`). The PR's
+  // last-reconciled state is in the very frontmatter this projection is built
+  // from, so naming it here fabricates nothing the file does not already say.
+  const closedPr = closedPrBlockedReason(fm, fm.key);
+  if (closedPr) return closedPr;
   // F10-15: every required reviewer must have approved the current revision.
   const reviewerBlock = acceptanceBlockedReason(fm);
   if (reviewerBlock) return reviewerBlock;

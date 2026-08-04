@@ -300,3 +300,42 @@ describe("WorkflowRules", () => {
     expect(getByText("Human acceptance of the completion report")).toBeTruthy();
   });
 });
+
+// E4: a disabled boundary radio used to be the whole message — dimmed, inert,
+// and silent. `locked` had a chip on its row; "your role may not change this"
+// had nothing anywhere, and a `title` would never have opened on a disabled
+// button. These pin the visible reason and the two cases staying distinct.
+describe("WorkflowRules — the not-permitted case says why", () => {
+  const render1 = (canManage: boolean) =>
+    render(
+      <WorkflowRules
+        stages={STAGES}
+        transitions={TRANSITIONS}
+        canManage={canManage}
+        busy={false}
+        onSetBoundary={() => {}}
+      />,
+    );
+
+  it("a non-manager gets every radio disabled AND a visible reason", () => {
+    const { container } = render1(false);
+    expect(
+      Array.from(container.querySelectorAll(".cap-seg button")).every(
+        (b) => (b as HTMLButtonElement).disabled,
+      ),
+    ).toBe(true);
+    const note = container.querySelector(".deny-note");
+    expect(note).not.toBeNull();
+    // Names the grant, not just "no permission" — the reader has to know what
+    // to ask for.
+    expect(note!.textContent).toContain("Edit workflow & policy");
+  });
+
+  it("a manager gets no denial note, and `locked` keeps its own separate chip", () => {
+    const { container, getByText } = render1(true);
+    expect(container.querySelector(".deny-note")).toBeNull();
+    // The V1 lock is a different reason and must survive independently: it
+    // still applies to a manager.
+    expect(getByText("locked · V1")).toBeTruthy();
+  });
+});

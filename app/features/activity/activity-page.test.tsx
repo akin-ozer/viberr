@@ -322,7 +322,7 @@ describe("stream vocabulary (P14-UI-62)", () => {
  * forms only swap in after hydration (useHydrated flips inside an effect, so
  * the testing-library renders above assert the LOCAL forms). On a UTC host
  * the local and UTC clock forms coincide and this test loses its edge — the
- * e2e spec (e2e/10-activity-hydration.spec.ts) forces a 13-hour split against
+ * e2e spec (e2e/06-activity-hydration.spec.ts) forces a 13-hour split against
  * the production image regardless of the host.
  */
 describe("hydration first pass (SSR)", () => {

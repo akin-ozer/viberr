@@ -198,7 +198,7 @@ promise. No forms, no fetchers.
 - **Hydration**: `useHydrated()` `:276` picks UTC formatters for the first pass, then regroups
   viewer-local. The grouping *key* is absolute-UTC on purpose (`groupStreamByDayUTC`,
   `auditTimeLabelUTC` in `feed-helpers.ts`) so it can't depend on when "now" is sampled. Gated by
-  `e2e/10-activity-hydration.spec.ts` (Auckland viewer vs UTC container).
+  `e2e/06-activity-hydration.spec.ts` (Auckland viewer vs UTC container).
 
 ### 2.5 Agents — `app/features/agents/agents-page.tsx` (1281 lines)
 
@@ -703,7 +703,7 @@ mirror backdrop in 2026-08-03 (A3).
 - **ARIA**: the `ContentEditable` is the combobox — `role="combobox"`, `aria-expanded`,
   `aria-controls`, `aria-activedescendant`, `aria-autocomplete="list"`; the menu is
   `role="listbox"` with `role="option"` rows carrying `id={listId}-opt-{i}`. Rows `preventDefault`
-  their `mousedown` so the editor keeps focus. Covered by `e2e/09-task-comment-composer.spec.ts:148`.
+  their `mousedown` so the editor keeps focus. Covered by `e2e/05-task-comment-composer.spec.ts:148`.
 - **Imperative handle**: `focus()`, `prefillIfEmpty(text)` (ask-operator → `"@operator "`),
   `clearAfterSuccess()` which also dispatches `CLEAR_HISTORY_COMMAND` so ⌘Z cannot resurrect a
   posted comment. A failed post keeps the draft.

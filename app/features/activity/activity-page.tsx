@@ -145,10 +145,7 @@ function AuditLogs({
       <div className="panel-head">
         <Icon name="lock" />
         <h2>Audit logs</h2>
-        <span
-          className="right sub"
-          style={{ fontSize: ".76rem", color: "var(--faint)" }}
-        >
+        <span className="right sub fine">
           {/* UI-46: this panel is deliberately UNFILTERED — say so, now that the
               actor filter sits inside the Stream panel and no longer looks
               page-level. */}
@@ -204,21 +201,12 @@ function AuditLogs({
           );
         })}
         {entries.length === 0 && (
-          <div
-            style={{
-              fontSize: ".85rem",
-              color: "var(--faint)",
-              padding: ".6rem 0",
-            }}
-          >
-            No policy or access events yet.
-          </div>
+          <div className="feed-empty">No policy or access events yet.</div>
         )}
         {remaining > 0 && (
           <button
             type="button"
-            className="btn ghost sm"
-            style={{ width: "100%", marginTop: ".6rem" }}
+            className="btn ghost sm more-act"
             onClick={onShowOlder}
           >
             <Icon name="chevron" />
@@ -226,13 +214,7 @@ function AuditLogs({
           </button>
         )}
         {capped && (
-          <div
-            style={{
-              fontSize: ".78rem",
-              color: "var(--faint)",
-              padding: ".6rem 0 0",
-            }}
-          >
+          <div className="feed-capped">
             Showing the newest {AUDIT_MAX} entries.
           </div>
         )}
@@ -330,7 +312,7 @@ export function ActivityPage({
                   UI-58: `role="radiogroup"` with plain buttons is a broken ARIA
                   contract; `aria-pressed` on each toggle is what the markup
                   actually implements. */}
-              <span className="right" style={{ display: "flex", gap: ".5rem", alignItems: "center" }}>
+              <span className="right act-filter-right">
                 <span className="mini-seg" role="group" aria-label="Filter the stream by actor">
                   {FILTERS.map(([id, l]) => (
                     <button
@@ -344,10 +326,7 @@ export function ActivityPage({
                     </button>
                   ))}
                 </span>
-                <span
-                  className="sub"
-                  style={{ fontSize: ".76rem", color: "var(--faint)" }}
-                >
+                <span className="sub fine">
                   {/* UI-47: `total` counts the FILTERED, already-bounded loaded
                       slice — it never described the project. Say what it is. */}
                   {total} of {streamTotal} events
@@ -385,13 +364,7 @@ export function ActivityPage({
               </div>
             ))}
             {!shown.length && (
-              <div
-                style={{
-                  fontSize: ".85rem",
-                  color: "var(--faint)",
-                  padding: ".6rem 0",
-                }}
-              >
+              <div className="feed-empty">
                 {stream.length === 0
                   ? "No activity yet."
                   : "No events match this filter."}
@@ -400,8 +373,7 @@ export function ActivityPage({
             {streamRemaining > 0 && (
               <button
                 type="button"
-                className="btn ghost sm"
-                style={{ width: "100%", marginTop: ".6rem" }}
+                className="btn ghost sm more-act"
                 onClick={() =>
                   showOlder(
                     "stream",
@@ -414,14 +386,7 @@ export function ActivityPage({
               </button>
             )}
             {streamCapped && (
-              <div
-                className="sub"
-                style={{
-                  fontSize: ".78rem",
-                  color: "var(--faint)",
-                  padding: ".6rem 0 0",
-                }}
-              >
+              <div className="sub feed-capped">
                 Showing the newest {STREAM_MAX} events — older activity stays in
                 the task timelines.
               </div>

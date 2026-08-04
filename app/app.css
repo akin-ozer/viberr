@@ -101,7 +101,15 @@ body {
   overflow: hidden;
 }
 
-button { font: inherit; color: inherit; cursor: pointer; }
+/* `background: none` is load-bearing, not tidiness. Without it a button whose
+   class declares no background keeps the UA `ButtonFace`, which Chrome resolves
+   PER COLOR-SCHEME — #efefef in light, #6b6b6b in dark. The settings tab rail
+   (`.nav-item`, a <button> there and an <a> in the workspace rail) painted that
+   mid-grey block in dark mode, dropping `--muted` to 3.2:1 and its `.count` to
+   1.9:1. Found by the dark-theme axe sweep this pass extended to org settings;
+   every button's surface comes from its own class, so clearing it here is the
+   one place the next such button is covered too. */
+button { font: inherit; color: inherit; cursor: pointer; background: none; }
 input, textarea { font: inherit; }
 svg.ico { width: 16px; height: 16px; flex: none; }
 
@@ -208,6 +216,39 @@ div.top-search:focus-within,
   font-size: .74rem;
   color: var(--placeholder);
 }
+
+/* P16-F3 — the four idioms that JSX inline styles were re-typing by hand.
+   `grep 'style={{' app` stood at 182 sites; the ones that were STATIC
+   typography, colour or spacing belong here, where a theme change or a density
+   pass can reach them. The sizes below are the ones the pages already shipped:
+   this moves WHERE the declaration lives, not what it says, so `.fine` carries
+   the whole ladder of hand-tuned sizes rather than rounding them together (a
+   .75rem → .76rem "tidy-up" moves paragraph wrap points).
+
+   Named `.fine` (fine print), not `.note`: `.tl-node.note` already occupies
+   that word for the timeline's node kinds. */
+.fine { font-size: .76rem; color: var(--faint); }
+.fine.xs { font-size: .75rem; }
+.fine.sm { font-size: .78rem; }
+.fine.md { font-size: .8rem; }
+.fine.lg { font-size: .85rem; }
+.fine.dim { color: var(--placeholder); }
+/* A control that spans its container (side-panel actions, modal footers). */
+.full { width: 100%; }
+/* Shove this child to the end of its flex row (`.pull`: to the start of the
+   trailing group). `.panel-head .right` is the same idiom scoped to one
+   container; these are the unscoped ones. */
+.push { margin-left: auto; }
+.pull { margin-right: auto; }
+/* Opt out of the row's `align-items` for one child. */
+.self-start { align-self: flex-start; }
+.self-center { align-self: center; }
+/* Icon + label on one line — the app's most-repeated ad-hoc flex row. */
+.inline-row { display: inline-flex; align-items: center; gap: .45rem; }
+/* A count appended to a control's own label ("Live · 4"), subordinate to it. */
+.tally { opacity: .6; }
+/* A file picker driven by a button elsewhere; never rendered itself. */
+.file-input { display: none; }
 
 h1, h2, h3, h4 {
   font-family: var(--font-display);
@@ -389,9 +430,22 @@ h1, h2, h3, h4 {
    — it keeps the input's silhouette so the topbar's layout tiers are untouched.
    Home's box stays a real input (a project finder), so scope this to the
    button. */
-button.top-search { text-align: left; cursor: pointer; transition: border-color .14s ease; }
-button.top-search:hover { border-color: var(--border); }
-.top-search-label { flex: 1; font-size: .88rem; color: var(--placeholder); }
+/* P16-F6: the two boxes have to stay RELATED — R15-5 gave the workspace box the
+   input's silhouette on purpose, so the topbar's truncation tiers keep working —
+   and they must not be identical, because one is typed into and one opens a
+   dialog. The trigger takes the app's control treatment (a filled face, and a
+   LABEL in `--muted` rather than placeholder-grey); Home's finder stays a white
+   well with placeholder text and a caret. Same shape, two readable states. */
+button.top-search {
+  text-align: left; cursor: pointer;
+  background: color-mix(in srgb, var(--surface), var(--fg) 5%);
+  transition: border-color .14s ease, background .14s ease;
+}
+button.top-search:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface), var(--fg) 8%);
+}
+.top-search-label { flex: 1; font-size: .88rem; color: var(--muted); }
 .top-search input { border: 0; outline: 0; background: transparent; width: 100%; color: var(--fg); font-size: .88rem; }
 .top-search input::placeholder { color: var(--placeholder); }
 /* The shortcut chip is the palette's affordance on Home (R15-5), so it reacts. */
@@ -704,9 +758,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    decoration — same reasoning as `.route-pending .rp-fill` below — so restore
    the timeline-length duration. Nothing here moves or repeats. */
 [data-motion="reduce"] .board-wrap::after { animation-duration: auto !important; }
-@media (max-width: 1100px) {
-  .board { grid-auto-columns: minmax(200px, 1fr); }
-}
 
 .board-orphans {
   display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
@@ -782,6 +833,19 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    or keyboard focus so it stays discoverable without cluttering every card. */
 .card-move { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity .12s var(--ease-out); z-index: 2; }
 .card-wrap:hover .card-move, .card-move:focus-within { opacity: 1; }
+/* P16-F7: `opacity: 0` leaves an invisible-but-hit-testable control in the
+   card's top-right corner — the same hazard `.fm-acts` was deleted for. The KB
+   browser's fix (draw the row actions always, `.rsrc-acts`) cannot be copied
+   wholesale here: the WHOLE card is the drag source (dnd-kit, no grip — a grip
+   was proposed and rejected), so a button painted on every card at every width
+   would compete with the gesture it sits on top of.
+   `(hover: none)` is exactly the population that can never reveal it, and on
+   those devices the button ALREADY occupies that corner — drawing it steals no
+   drag surface that was not already gone, it only explains what a finger can
+   already hit. Pointer devices keep the hover reveal. */
+@media (hover: none) {
+  .card-move { opacity: 1; }
+}
 .card-move .stage-menu-btn { font-size: .68rem; padding: .12rem .35rem; }
 .card-move .sm-name { display: none; }
 .card-wrap.draggable { cursor: grab; }
@@ -1139,7 +1203,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .tl-filter button.on { background: var(--fg); color: var(--surface); border-color: var(--fg); }
 
-.timeline { display: flex; flex-direction: column; }
+/* P16-F3: the top separation from the composer above used to be an inline
+   `marginTop` on the only element that carries this class. */
+.timeline { display: flex; flex-direction: column; margin-top: 1.1rem; }
 .tl-item {
   display: grid;
   grid-template-columns: 30px 1fr;
@@ -1364,6 +1430,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 .empty { color: var(--placeholder); font-size: .86rem; text-align: center; padding: 2rem 1rem; }
+/* P16-F3: the empty state inside a side panel or a card is tighter than the
+   page-level one. Eight sites re-typed one of these three paddings as an inline
+   style; the values are unchanged, only their home is. */
+.empty.sm { padding: 1rem .5rem; }
+.empty.xs { padding: .75rem .5rem; }
+.empty.flush { padding: .4rem 0; }
 
 /* ============================================================
    AGENTS
@@ -1494,7 +1566,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .rt-val { margin-top: .5rem; }
 /* Model cell: the resolved model name, plus a substitution flag when the saved
  * profile model isn't a recognized id (runs fall back to the default). */
-.model-val { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
+/* .82rem, not the `.mono` utility's .76rem: this cell carries a model id and
+   was sized inline before F3 moved it here. */
+.model-val { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; font-size: .82rem; }
 .model-sub {
   display: inline-flex; align-items: center; gap: .25rem;
   /* P13-D-18: was var(--font-sans) — undefined, so the badge inherited the
@@ -1828,9 +1902,6 @@ dialog[data-closing]::backdrop {
 .tag button:hover { color: var(--coral-dark); background: color-mix(in srgb, var(--coral-light), transparent 50%); }
 .tag button .ico { width: 11px; height: 11px; }
 
-@media (max-width: 1100px) {
-  .field-row { grid-template-columns: 1fr; }
-}
 
 /* capability matrix modal */
 .modal-card.modal-wide { width: min(1060px, calc(100vw - 2rem)); }
@@ -1858,16 +1929,6 @@ dialog[data-closing]::backdrop {
 .mx-cell.human .d { background: var(--coral-dark); }
 .mx-cell.off .d { background: var(--ring); }
 
-@media (max-width: 1100px) {
-  .detail { grid-template-columns: 1fr; }
-  .detail-side { flex-direction: row; flex-wrap: wrap; }
-  .detail-side > * { flex: 1; min-width: 280px; }
-  .agents-layout { grid-template-columns: 1fr; }
-  .profile-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding-bottom: .5rem; }
-  .profile-list .ag-group-label { display: none; }
-  .ag-item { min-width: 200px; }
-  .cap-cols, .res-groups, .runtime-row { grid-template-columns: 1fr; }
-}
 
 /* ============================================================
    POLICY
@@ -2109,9 +2170,6 @@ dialog[data-closing]::backdrop {
 .act-toggle { font-size: .78rem; font-weight: 600; color: var(--teal-dark); }
 .pev-t { font-family: var(--font-mono); font-size: .7rem; color: var(--placeholder); flex: none; padding-top: .3rem; white-space: nowrap; }
 
-@media (max-width: 1100px) {
-  .policy-cols { grid-template-columns: 1fr; }
-}
 
 /* ============================================================
    ACTIVITY
@@ -2140,9 +2198,6 @@ dialog[data-closing]::backdrop {
 .pev-ico.act-transition { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-blocked { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .pev-ico.act-agent { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
-@media (max-width: 1100px) {
-  .activity-cols { grid-template-columns: 1fr; }
-}
 
 /* ============================================================
    SETTINGS
@@ -2283,10 +2338,6 @@ dialog[data-closing]::backdrop {
   .rq-go { transition: color .14s ease; }
   .rq-row:hover .rq-go { transform: none; }
 }
-@media (max-width: 1100px) {
-  .rq-row { flex-wrap: wrap; }
-  .rq-main { min-width: 220px; }
-}
 
 .gh-table .live-head, .gh-table .live-row { grid-template-columns: 1.8fr 1.4fr .9fr 1fr; }
 
@@ -2334,9 +2385,6 @@ dialog[data-closing]::backdrop {
 
 .profile-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; align-items: start; }
 .profile-col { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; }
-@media (max-width: 1100px) {
-  .profile-cols { grid-template-columns: 1fr; }
-}
 
 .profile-id { display: flex; gap: 1.1rem; align-items: flex-start; }
 .profile-id .profile-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .9rem; }
@@ -2678,10 +2726,6 @@ dialog[data-closing]::backdrop {
 :root[data-theme="dark"] .console { background: #0b0d12; border-color: #262b38; }
 :root[data-theme="dark"] .run-cell { background: color-mix(in srgb, var(--bg), transparent 20%); }
 
-@media (max-width: 1100px) {
-  .run-actions { margin-left: 0; width: 100%; }
-  .log-line { grid-template-columns: 54px 100px minmax(0, 1fr); }
-}
 
 /* ============================================================
    HUMAN REVIEWERS — task-scoped review assignment
@@ -2788,7 +2832,12 @@ dialog[data-closing]::backdrop {
 @media (max-width: 1080px) {
   .topbar { gap: .7rem; padding: 0 1rem; }
   .home-brand b { display: none; }
-  .kbd { display: none; }
+  /* P16-G3: this was an unscoped `.kbd`, so it also hid Home's palette BUTTON
+     (`button.kbd` is the only control that opens the palette there) and the
+     command palette's own "esc" hint — the palette renders INSIDE this topbar,
+     so `.topbar .kbd` would still have caught it. Only the trigger's own chip
+     is competing with the crumbs for room. */
+  .topbar > .top-search .kbd { display: none; }
   .crumbs .crumb-root, .crumbs .sep-root { display: none; }
   .top-search { flex-basis: 260px; min-width: 130px; }
 }
@@ -2836,7 +2885,9 @@ dialog[data-closing]::backdrop {
   /* The crumb trail is already reduced to the current view at this width; the
      palette trigger keeps its icon + shortcut chip and drops the label. */
   .topbar { gap: .5rem; padding: 0 .7rem; }
-  .top-search { flex: 0 0 auto; min-width: 0; padding: .42rem .55rem; }
+  /* P16-G3: icon-only from here down, so it needs a target a finger can hit
+     (WCAG 2.5.8) — the same 34px square as `.rail-toggle` beside it. */
+  .top-search { flex: 0 0 auto; min-width: 0; padding: .42rem .55rem; min-height: 34px; }
   .top-search-label { display: none; }
   .filter-bar, .board { padding-left: .8rem; padding-right: .8rem; }
   .board-filter-input { flex-basis: 100%; }
@@ -3516,13 +3567,37 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   .rsrc-grid { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 1100px) {
-  .pj-row .pj-stats .pill { display: none; }
-}
 
 @media (max-width: 900px) {
   .org-tiles { grid-template-columns: 1fr; }
-  .home-top .top-search { display: none; }
+  /* P16-G3: this used to be `display: none`, which cost a phone BOTH Home's
+     project finder AND the only control that opens the command palette — and a
+     keyboard shortcut is not an affordance on a device with no ⌘ key. The box
+     collapses to the palette trigger instead: the palette finds projects too,
+     so the finder does not disappear, it moves behind the same magnifier the
+     workspace topbar uses at this width.
+     The magnifier is a real <svg> SIBLING of the button and cannot be moved
+     inside it from CSS, so the button is stretched over the whole box and the
+     icon is laid on top, click-through. `font-size: 0` drops the "⌘K" text —
+     the accessible name lives on the button's aria-label, not in that glyph. */
+  .home-top .top-search {
+    position: relative;
+    flex: 0 0 auto;
+    width: 36px; height: 36px;
+    min-width: 0;
+    padding: 0;
+  }
+  .home-top .top-search > .ico { position: absolute; inset: 0; margin: auto; pointer-events: none; }
+  .home-top .top-search input { display: none; }
+  .home-top .top-search .kbd {
+    display: block;
+    position: absolute; inset: 0;
+    border: 0; border-radius: inherit; background: none;
+    font-size: 0;
+  }
+  /* The wrapper already paints the ring (`div.top-search:focus-within`), same
+     contract the borderless input has. */
+  .home-top .top-search .kbd:focus-visible { outline: 0; }
   .pj-row .pj-stats { display: none; }
 }
 
@@ -3652,3 +3727,210 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* P16-UI-01: the focus ring comes from the app-wide `:focus-visible` rule —
    --blue reads against the console's fixed dark surface in both themes. */
 .log-more-note { color: #5f6a85; }
+
+/* ============================================================
+   P16-F3 — declarations reclaimed from JSX `style={{…}}`
+   ============================================================
+   `grep -rho 'style={{' app --include='*.tsx' | wc -l` stood at 182. The rule
+   used to split them: a declaration whose value is a LITERAL is a design
+   decision and belongs in the sheet; a declaration whose value reads a runtime
+   value (a stage's colour, a tree row's depth, a computed popover position)
+   belongs in the markup, because the sheet cannot know it. Twenty-one sites
+   survive, and every one of them reads a runtime value.
+
+   The names are compounded modifiers on the class that is already there
+   (`.pol-note.after`, `.empty.sm`, `.card.list-row`) rather than new component
+   classes, so the sheet keeps saying WHICH component and gains only the
+   variant. `.spaced` is the one that only ever appears compounded: it means
+   "separated from what precedes it", and the amount is the component's own —
+   there is no app-wide spacing step to guess at.
+
+   Placed at the end of the sheet on purpose: several of these must out-order a
+   same-specificity rule that used to lose to the inline style (`.n.agent` vs
+   `.ag-stat .n`, `.count.violations` vs `.nav-item .count`). */
+
+/* --- task detail: GitHub, permissions, acceptance and state side panels --- */
+.panel-act { width: 100%; margin-top: .8rem; }
+.more-act { width: 100%; margin-top: .6rem; }
+.force-accept { margin-top: .8rem; }
+.force-accept .hint { margin: 0 0 .4rem; }
+.diff-add { color: var(--teal-dark); }
+.diff-del { color: var(--coral-dark); }
+.commit-list { margin-top: .7rem; }
+.commit-list .flabel { margin-bottom: .3rem; }
+.perm-intro { margin: 0 0 .55rem; line-height: 1.4; }
+.archive-hint { margin: .35rem 0 0; }
+.by-human { color: var(--blue-pressed); }
+.by-agent { color: var(--agent-dark); }
+/* The stage dot shrinks inside a pill or a `.kv-row`; only its COLOUR is the
+   stage's, so only the colour stays inline. */
+.col-stage-dot.sm { width: .5rem; height: .5rem; }
+.packet-obs.flush { margin: 0; }
+.modal-body.tight { gap: 1.05rem; }
+.from-name { font-family: var(--font-display); }
+.packet-lede { color: var(--muted); font-size: .92rem; line-height: 1.55; margin: 0; }
+.field.packet-note-field { margin-top: .75rem; }
+.composer-err { font-size: .75rem; color: var(--coral-dark); }
+
+/* --- activity / review / notifications feeds --- */
+.feed-empty { font-size: .85rem; color: var(--faint); padding: .6rem 0; }
+.feed-capped { font-size: .78rem; color: var(--faint); padding: .6rem 0 0; }
+.act-filter-right { display: flex; align-items: center; gap: .5rem; }
+
+/* --- agents --- */
+/* Only the ORCHESTRATION-runtime chip's glyph shrinks: the backend chips
+   beside it (`AgentGlyph`) keep the base 26px they share with every other
+   glyph on the page. */
+.be-chip .agent-glyph.op { width: 22px; height: 22px; }
+.rt-val.mem-row { margin-top: 0; }
+.ag-stat .n.agent { color: var(--agent-dark); }
+.ag-stat .n.human { color: var(--blue-pressed); }
+.ta-brief { min-height: 72px; }
+.ta-long { min-height: 120px; }
+.fhint.flush { margin-left: 0; }
+/* Capability legend/summary dots. The four names are the ones `.mx-cell` already
+   uses for the same four states, so the legend and the matrix cannot drift. */
+.d.direct { background: var(--teal-dark); }
+.d.recommend { background: var(--blue); }
+.d.human { background: var(--coral-dark); }
+.d.off { background: var(--ring); }
+.d.none { background: var(--placeholder); }
+
+/* --- board --- */
+/* The list view. `grid-auto-flow`/`grid-auto-columns` used to be set here too;
+   they are inert under `display: block` and are not carried over. */
+.board.list { display: block; padding: 0 1.4rem 1.4rem; }
+.board-list { display: flex; flex-direction: column; gap: .6rem; max-width: 920px; }
+.card.list-row { flex-direction: row; align-items: center; gap: 1rem; }
+/* The list row's key is the SAME thing the grid card's `.card-top .key` is —
+   a task key — and it was the only one in the app rendered in the body face,
+   because every other `.key` rule is scoped to a container this row is not in
+   (`.card-top`, `.task-hero`, `.live-task`, `.pj-name`). It read as a different
+   kind of value at a glance. Only the width was ever declared here (P16-F3 moved
+   it out of an inline style, which is how the gap surfaced). */
+.card.list-row .key {
+  width: 64px;
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  color: var(--faint);
+}
+.card.list-row h3 { flex: 1; }
+.avatar.ghost { opacity: .5; }
+/* The board filter chips' counts sit a shade stronger than `.tally`'s default —
+   they are the only number on the chip. */
+.fchip .tally { opacity: .7; }
+.modal-card.modal-narrow { width: min(560px, calc(100vw - 2rem)); }
+
+/* --- policy / GitHub view / project settings --- */
+.pol-note.after { margin-top: .85rem; }
+.pol-note.before { margin-bottom: .85rem; }
+.pol-note.last { margin-bottom: 0; }
+.deny-note.before { margin-bottom: .55rem; }
+.flabel.danger { color: var(--coral-dark); }
+.probe-note {
+  flex-basis: 100%;
+  font-size: .75rem; font-weight: 400; line-height: 1.4;
+  color: var(--faint);
+}
+/* A `.kv-row` value that is prose, not a datum: body face, not the display
+   face `.kv-row .v` sets. */
+.kv-row .v.plain {
+  font-weight: 400; font-family: var(--font-body);
+  font-size: .8rem; color: var(--faint);
+}
+.kv-row .v.light { font-weight: 400; }
+.kv-row .k.strong { color: var(--fg); }
+.live-branch { display: inline-flex; align-items: center; gap: .45rem; min-width: 0; }
+.live-branch .trace { font-size: .75rem; }
+.warn-acts { margin-left: auto; display: inline-flex; gap: .4rem; flex: none; }
+.field-row.name-key { grid-template-columns: 1fr 120px; }
+.kv.after-fields { margin-top: .4rem; }
+.stg-add.spaced { margin-top: .8rem; }
+.field.spaced { margin-top: .6rem; }
+.member-list.last { margin-bottom: 0; }
+.repair-note { color: var(--muted); font-size: .82rem; }
+.repair-btn { margin-left: .5rem; }
+/* The repo-repair acknowledgement is a LABEL wrapping a checkbox, so the whole
+   warning band is the hit target. */
+.cred-warn.ack { cursor: pointer; }
+.cred-warn.ack input { margin-top: .15rem; }
+.branch-cleanup {
+  display: flex; align-items: center; gap: .45rem;
+  font-family: var(--font-body); font-size: .8rem; color: var(--muted);
+}
+
+/* --- org settings --- */
+.key-row.even { grid-template-columns: 1fr 1fr; }
+.def-note.spaced { margin-top: .8rem; }
+.def-note.after { margin-top: .55rem; }
+/* The note explains the field group directly above it, which already carries
+   the group's own bottom gap. */
+.def-note.pulled { margin-top: -.6rem; }
+.scope-chips.flush { margin-top: 0; }
+.mode-radios { display: flex; gap: .4rem; flex-wrap: wrap; }
+.modal-head .conn-ico { width: 34px; height: 34px; border-radius: 10px; }
+/* The KB browser's confirm dialogs open ON TOP of the file modal, which is
+   itself a top-layer dialog. */
+.confirm-card.over-modal { z-index: 71; }
+
+/* --- shell / home / login --- */
+.count.violations { color: var(--coral-dark); font-weight: 700; }
+.kv.spaced { margin-top: .9rem; }
+.login-err.spaced { margin-top: .7rem; }
+.login-tag.providers { margin-top: .2rem; }
+.sub.sec-lede { margin: 0 0 .75rem; }
+.pj-mark.draft { box-shadow: inset 0 -8px 0 color-mix(in srgb, var(--blue), transparent 55%); }
+/* The "New project" affordance at the END of a populated grid, not the empty
+   state's tile. Needs `.home` to out-specify `.home[data-density="compact"]
+   .pj-new`, which used to lose to the inline style. */
+.home .pj-new.inline { min-height: 0; padding: .7rem; margin-top: .5rem; }
+.sdot.brand { background: var(--blue); }
+
+/* ============================================================
+   1100px — THE TWO-COLUMN COLLAPSE
+   ============================================================
+   P16-F8. Below this width no 2-up desktop layout survives: the app's content
+   column can no longer hold two readable columns side by side, so every one of
+   them goes 1-up and the two horizontal lists (agent profiles, review rows)
+   reflow instead of squeezing.
+
+   It used to be NINE separate `@media (max-width: 1100px)` blocks scattered
+   over 2800 lines, each next to the rules it modified, with nothing naming the
+   number or tying the copies together — so "move the collapse to 1180" was nine
+   edits and eight of them were easy to miss. A CSS custom property cannot be
+   used in a media query and custom media (`@custom-media`) would need a build
+   plugin this project does not run, so the honest fix is to leave the number
+   exactly one place. Locality is the cost; `app.css.test.ts` pins the count at
+   one and pins the whole breakpoint set with what each value means, so a tenth
+   copy or a stray 1120 fails the build rather than the eye.
+
+   One rule did NOT come across: `.board { grid-auto-columns: minmax(200px, 1fr) }`
+   was already set, identically, by the `max-width: 1400px` block above — every
+   viewport this matched matched that one too, and that one comes later. It was
+   dead, so it is gone rather than copied. */
+@media (max-width: 1100px) {
+  /* forms */
+  .field-row { grid-template-columns: 1fr; }
+  /* task detail: side panels move under the main column and go side-by-side */
+  .detail { grid-template-columns: 1fr; }
+  .detail-side { flex-direction: row; flex-wrap: wrap; }
+  .detail-side > * { flex: 1; min-width: 280px; }
+  /* agents: the profile rail becomes a horizontal strip */
+  .agents-layout { grid-template-columns: 1fr; }
+  .profile-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding-bottom: .5rem; }
+  .profile-list .ag-group-label { display: none; }
+  .ag-item { min-width: 200px; }
+  .cap-cols, .res-groups, .runtime-row { grid-template-columns: 1fr; }
+  /* the three 2-up pages */
+  .policy-cols { grid-template-columns: 1fr; }
+  .activity-cols { grid-template-columns: 1fr; }
+  .profile-cols { grid-template-columns: 1fr; }
+  /* review queue rows wrap instead of crushing the title */
+  .rq-row { flex-wrap: wrap; }
+  .rq-main { min-width: 220px; }
+  /* run console: the action group takes its own line, log columns narrow */
+  .run-actions { margin-left: 0; width: 100%; }
+  .log-line { grid-template-columns: 54px 100px minmax(0, 1fr); }
+  /* home project rows drop the least-load-bearing stat */
+  .pj-row .pj-stats .pill { display: none; }
+}

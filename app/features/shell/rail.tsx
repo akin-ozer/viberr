@@ -72,8 +72,7 @@ export function Rail({
           {n.id === "review" && <span className="count">{reviewCount}</span>}
           {n.id === "settings" && violations > 0 && (
             <span
-              className="count"
-              style={{ color: "var(--coral-dark)", fontWeight: 700 }}
+              className="count violations"
             >
               {violations}
             </span>

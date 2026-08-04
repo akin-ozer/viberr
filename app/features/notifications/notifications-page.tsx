@@ -46,10 +46,7 @@ function NtfNeedsYou({
       <div className="panel-head">
         <Icon name="hand" />
         <h2>Waiting on you</h2>
-        <span
-          className="right sub"
-          style={{ fontSize: ".76rem", color: "var(--faint)" }}
-        >
+        <span className="right sub fine">
           {/* UI-54: the count is the TRUE number of pending decisions. It used
               to be computed after the All/Unread filter, so three already-read
               decisions under "Unread" reported "0 decisions". */}

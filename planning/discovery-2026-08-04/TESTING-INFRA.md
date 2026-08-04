@@ -19,7 +19,7 @@ Config: `vitest.config.ts` (21 lines, whole file).
 environment: "node"                                   # default for the suite
 setupFiles: ["./test-support/setup-env.ts",
              "./test-support/setup-dom.ts"]           # vitest.config.ts:15
-include:    ["app/**/*.test.{ts,tsx}", "db/**/*.test.ts"]   # :16-19
+include:    ["app/**/*.test.{ts,tsx}"]                # :16-19 (see gotcha)
 resolve.tsconfigPaths: true                           # :7 — Vite 8 resolves ~/* natively
 ```
 
@@ -27,7 +27,7 @@ Counts (2026-08-04):
 
 | metric | value |
 |---|---|
-| test files matched | **207** (`app/**`; `db/**` currently matches 0 — see gotcha below) |
+| test files matched | **207**, all under `app/**` |
 | `test(` / `it(` call sites | **2434** (IMPLEMENTATION.md records **2478** executed tests — loops/`describe.each` inflate) |
 | `*.server.test.ts` (node env, server modules) | 144 |
 | `*.test.tsx` (component) | 33 |
@@ -57,10 +57,14 @@ Densest directories: `app/server/tasks` (28), `app/server/runtimes` (15),
   `app/features/org-settings/org-settings-route.server.test.ts:66`,
   `app/features/shell/workspace-routes.server.test.ts:339`.
 
-**`db/**/*.test.ts` matches nothing.** `db/` contains only
-`db/migrations/0001_baseline.sql`. The migration-runner test lives at
-`app/server/db/migration-runner.server.test.ts`. Harmless, but don't put a new
-test in `db/` expecting a matching convention.
+**There is no `db/` test convention** — don't invent one. `include` carried a
+`"db/**/*.test.ts"` glob that had matched zero files ever since the migrations
+were squashed (`db/` holds `db/migrations/0001_baseline.sql` and nothing else);
+G10 removed it. A glob matching nothing is not harmless: it advertises a
+convention, and the next person to write a schema test puts it somewhere the
+`app/**` glob never reaches. The migration-runner test lives at
+`app/server/db/migration-runner.server.test.ts`; schema behaviour is asserted by
+the projection suites that own the tables.
 
 ### 1.2 Setup file 1 — `test-support/setup-env.ts` (hermetic env)
 
@@ -123,17 +127,25 @@ Both guards are `typeof window !== "undefined"` so the file no-ops under node.
 |---|---|---|
 | `auth.setup.ts` | 1 (setup project) | Logs in through the **real `/login` UI** as `arda@viberr.dev` / `viberr-dev-2828` (`SEED_DEFAULT_PASSWORD`, imported from `test-support/demo-seed`), saves storage state to `e2e/.auth/arda.json`. Waits `networkidle` then retries the whole fill+submit inside `expect(...).toPass({timeout: 30_000})` — the inputs are React-controlled, so a fill landing before hydration gets wiped. |
 | `01-home-board.spec.ts` | 6 | Golden path (a): Home lists the three seeded projects, viberr-core board renders stage columns with VIB-142 in Review; **plus 4 dnd-kit drag scenarios with real pointer input** (same-stage non-append slot on the wire, cross-stage append onto a column body, Escape cancels with zero requests, Done-stage drop without an accepted verdict refused with an error toast). Helpers: `column()`, `reorderPost()` (asserts on the submitted `intent=reorder` POST body), `liftOver()` (`mouse.down` → `mouse.move(..., {steps: 12})`). |
-| `05-feeds-profile.spec.ts` | 5 | Review queue partitions VIB-142 correctly and its rows name their primary action (R15-11); activity feed renders day-grouped events; notifications mark-all-read clears every unread row; profile theme switch persists across reload. |
-| `06-org-settings-store.spec.ts` | 3 | Org settings tabs render for an org admin; settings headings name their own scope (R15-13); **StoreBrowser performs a REAL file-store mkdir through the UI**. |
+| `02-feeds-profile.spec.ts` | 5 | Review queue partitions VIB-142 correctly and its rows name their primary action (R15-11); activity feed renders day-grouped events; notifications mark-all-read clears every unread row; profile theme switch persists across reload. |
+| `03-org-settings-store.spec.ts` | 3 | Org settings tabs render for an org admin; settings headings name their own scope (R15-13); **StoreBrowser performs a REAL file-store mkdir through the UI**. |
+| `04-palette-mobile.spec.ts` | 4 | ⌘K global palette jumps to the task (R15-5); the board keeps its own board-scoped filter; at 375px the workspace rail collapses behind a toggle with no sideways scroll (F15-18); a non-member gets the unknown-slug 404 on a project board (R15-4). |
+| `05-task-comment-composer.spec.ts` | 7 | Lexical composer against the production image: typing plain text posts the trimmed draft; Enter = line break and ControlOrMeta+Enter sends multiline; @-mention keyboard selection inserts a live chip; @-mention click insertion with the posted bytes asserted on the wire; Escape closes the menu without inserting; undo cannot resurrect a sent comment; the composer is an accessible combobox wired to the mention listbox. **Every test gates on zero `pageerror`** via `beforeEach` collector + `afterEach` assertion (`:17-27`). |
+| `06-activity-hydration.spec.ts` | 1 | Activity page hydrates clean under `test.use({ timezoneId: "Pacific/Auckland" })` — zero page errors and no `Today`/`Yesterday` in the SSR HTML. Auckland is chosen so the spec still discriminates when the Playwright host itself is UTC (CI), and because it pushes most UTC timestamps across a **day** boundary, exercising the day-bucket regroup and not just clock text. |
 | `07-accessibility.spec.ts` | 14 | WCAG 2.2 AA gate (P13-D-12). 6 surfaces (board, task detail, review, policy, home, agents) × 2 themes = 12, plus login signed-out × 2 themes. `@axe-core/playwright` with tags `wcag2a`/`wcag2aa`/`wcag22aa` **only** — best-practice rules are opinions and failing CI on an opinion trains people to ignore the gate (`:16-19`). Theme is set via the `viberr_theme` cookie scoped to `new URL(page.url()).origin` (the stack serves on a derived 127.0.0.1 port; a hard-coded host silently never applies). Login waits on `getAnimations({subtree:true})` finishing before axe samples computed colors. |
-| `08-palette-mobile.spec.ts` | 4 | ⌘K global palette jumps to the task (R15-5); the board keeps its own board-scoped filter; at 375px the workspace rail collapses behind a toggle with no sideways scroll (F15-18); a non-member gets the unknown-slug 404 on a project board (R15-4). |
-| `09-task-comment-composer.spec.ts` | 7 | Lexical composer against the production image: typing plain text posts the trimmed draft; Enter = line break and ControlOrMeta+Enter sends multiline; @-mention keyboard selection inserts a live chip; @-mention click insertion with the posted bytes asserted on the wire; Escape closes the menu without inserting; undo cannot resurrect a sent comment; the composer is an accessible combobox wired to the mention listbox. **Every test gates on zero `pageerror`** via `beforeEach` collector + `afterEach` assertion (`:17-27`). |
-| `10-activity-hydration.spec.ts` | 1 | Activity page hydrates clean under `test.use({ timezoneId: "Pacific/Auckland" })` — zero page errors and no `Today`/`Yesterday` in the SSR HTML. Auckland is chosen so the spec still discriminates when the Playwright host itself is UTC (CI), and because it pushes most UTC timestamps across a **day** boundary, exercising the day-bucket regroup and not just clock text. |
 
-Note the numbering gap: `02`, `03`, `04` were deleted along with the simulated
-runtime (ruling R7-2, "don't simulate at all"). The remaining specs were rewritten
-to describe seeded state rather than the mutations those specs produced
-(`05-feeds-profile.spec.ts:8-11`).
+The numbering used to run `01, 05..10` — `02`, `03`, `04` had been deleted with
+the simulated runtime (ruling R7-2, "don't simulate at all"), and the survivors
+were rewritten to describe seeded state rather than the mutations those specs
+produced (`02-feeds-profile.spec.ts:8-11`). G10 renumbered them contiguously,
+because a permanent gap reads as "three specs are missing" to everyone who did
+not live through R7-2. The prefix is **presentation only** —
+`playwright.config.ts:28` takes the whole `testDir`, so nothing selects a spec by
+number — but with `fullyParallel: false, workers: 1` it *is* the run order, so
+`07-accessibility.spec.ts` deliberately kept its number instead of sliding to
+`04`: it is the cross-cutting gate, it is nicer last, and its filename is cited
+from `app/app.css.test.ts` (the static-token check names the rendered-page
+counterpart).
 
 ### 1.6 How `npm run e2e` works now
 
@@ -435,9 +447,53 @@ branch) are harmless to the runner.
 
 Historical note, now stale: a `scripts/gen-better-auth-schema.ts` generator and a
 `db/better-auth-reference.sql` reference dump are referenced in older planning
-notes — **neither exists on `main` today**. On a better-auth bump, dump the
-better-auth tables from a fresh migrated DB with the query above and fold the
-diff into `0001_baseline.sql` by hand.
+notes — **neither exists on `main` today**. Use §3.7b instead; dumping the live
+schema only tells you what the baseline already said, not what the new
+better-auth wants.
+
+### 3.7b better-auth schema refresh (G8)
+
+`0001_baseline.sql` ends with four hand-inlined statements — `"user"`,
+`"session"`, `"account"`, `"verification"` — plus their three indexes. They are
+lower-cased and quoted (`"id" text not null primary key`) unlike everything else
+in the file, because they are **pasted `@better-auth/cli generate` output**, not
+hand-written. Until G8 nothing in the repo said so, and there was no way to tell
+a deliberate divergence from a stale paste.
+
+`@better-auth/cli` is deliberately **not a dependency**. It is codegen run by
+hand at version-bump time, it drags better-auth's whole plugin surface in, and it
+would earn its install cost roughly once a year. Run it with `npx` at the pinned
+version instead:
+
+```sh
+# check `generate --help` first: the flag names have moved across majors,
+# but the shape is always config-in, SQL-out.
+npx @better-auth/cli@1.6.25 generate \
+  --config app/lib/auth.server.ts --output /tmp/ba-schema.sql -y
+diff <(sed -n '/CREATE TABLE "user"/,$p' db/migrations/0001_baseline.sql) /tmp/ba-schema.sql
+```
+
+Fold the diff in by hand. Three things to know:
+
+- **`githubHandle` on `"user"` is ours**, from `user.additionalFields` in
+  `buildAuthOptions` plus the GitHub provider's `mapProfileToUser`. The CLI emits
+  it only when it successfully loads the config; if it vanishes from the output,
+  the CLI failed to read `auth.server.ts`, not better-auth dropped a column.
+- **`verification` is live, despite no app code naming it.** `createAuthContext`
+  picks `account.storeStateStrategy || (isStateful ? "database" : "cookie")` and
+  `isStateful` is just `!!options.database` — we pass one, so every OAuth
+  sign-in INSERTs its signed state there (`generateGenericState`) and the
+  callback reads-then-deletes it (`parseGenericState`, `dist/state.mjs`). Drop
+  the table and GitHub/Google login dies with better-auth's own *"there is a
+  verification table in the database"* error. There is no unit test for this —
+  the app has no OAuth credentials in test — so the comment on the table is the
+  gate.
+- A column ADDITION or a new plugin table pastes straight in; a **rename** means
+  read the changelog first, since better-auth does not rename core columns
+  outside a major.
+
+Then re-baseline (`npm run seed -- --reset`): there is no ALTER path, per the
+squashed-baseline convention above.
 
 ### 3.8 Bonus conventions worth knowing
 
@@ -623,6 +679,14 @@ So a dev server launched via `.claude/launch.json` and the compose container
 means "the app doesn't show my data" is often just the wrong root. Always confirm
 which root a process is on before concluding anything about state.
 
+`.env` is gitignored, so the repo cannot fix the live one. What the repo *can*
+do, and now does (B7): **`.env.example` sets `VIBERR_DATA_ROOT=./docker-data`
+uncommented**, and says in place why the value must match `.claude/launch.json`.
+The old example left it commented out at the `./data` default, which is how the
+mismatch reads as a deliberate choice instead of a leftover. Fixing your own
+`.env` is still a manual step — do it, then confirm with the boot log's data-root
+line before trusting anything you see in the UI.
+
 Note `vite.config.ts:18` resolves the same variable to exclude the data root from
 the dev watcher (task workspaces are full nested clones with their own `.git` and
 `tsconfig.json`; Vite would treat them as app source — F10-36).
@@ -655,7 +719,7 @@ the dev watcher (task workspaces are full nested clones with their own `.git` an
 
 `e2e/.auth/` and `test-results/` are gitignored (`.gitignore:11-14`).
 
-To run a single spec: `npm run e2e -- e2e/09-task-comment-composer.spec.ts`.
+To run a single spec: `npm run e2e -- e2e/05-task-comment-composer.spec.ts`.
 To keep the stack alive for manual poking: `VIBERR_E2E_KEEP=1 npm run e2e`.
 
 ---
@@ -754,7 +818,7 @@ For any code change:
       `e2e/07-accessibility.spec.ts` so it is audited in **both** themes. A new
       interactive control shipping outside that sweep is a known past failure (R15-12).
 - [ ] **11. New page/route:** gate on **zero `pageerror`** (the
-      `09-task-comment-composer.spec.ts:17-27` pattern). Any timestamp or
+      `05-task-comment-composer.spec.ts:17-27` pattern). Any timestamp or
       locale-dependent SSR text must render a **UTC-deterministic first pass** and
       swap in viewer-local after hydration (`app/ui/local-time.tsx`), or you ship a
       React #418 that regenerates the page client-side.

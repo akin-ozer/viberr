@@ -147,7 +147,7 @@ export function TopBell({
                   cap instead of letting the count silently disagree with the
                   rows — the same truncation notice /notifications already got. */}
               {notifications.length >= BELL_LIST_CAP && (
-                <span className="sub" style={{ marginRight: "auto" }}>
+                <span className="sub pull">
                   Showing the newest {notifications.length}
                 </span>
               )}

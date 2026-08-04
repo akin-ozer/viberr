@@ -149,7 +149,7 @@ function ConnectionModal({
       </div>
       <div className="field">
         <span className="flabel">Required scopes</span>
-        <span className="scope-chips" style={{ marginTop: 0 }}>
+        <span className="scope-chips flush">
           {SCOPES.map((s) => (
             <span className="scope-chip" key={s}>
               {s}

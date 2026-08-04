@@ -15,6 +15,20 @@
   while the PR is closed** — the recovery packet is the path.
 - **R16-4 — Scope order.** Every S1/S2 correctness item lands first, with tests; then the full UI/a11y list.
   Nothing is deferred out of the pass.
+- **R16-5 — MCP stays outside the capability matrix** (answers Q-C3). Viberr cannot know what a third-party tool
+  does, so it will not pretend to bound one: granting a server IS the grant, and an agent whose
+  `execute-code-or-write-repo` is withheld still gets whatever a granted server's tools can do. The decision is
+  the ruling; the work is making it explicit rather than looking like an oversight — the disclosure now names
+  the consequence, and `specialist-tool-policy.test.ts` pins the absence of an `mcp__*` deny rule so the
+  "obvious fix" (denying `mcp__*` alongside Edit/Write) cannot land silently and revoke read-only servers.
+- **R16-6 — Merge stays human-only** (answers Q12/G5). `merge-pull-request` remains in `ALWAYS_HUMAN`, so a
+  full-autonomy task reaches the done stage with its PR open. That is intended; what was not intended is that
+  "Done" therefore means two different things by preset and the board drew only one of them. The
+  merge-pending state (`pr.state: "accepted"`) and the closed-PR state must be visible where the task is —
+  card and review queue — not only on the detail page.
+- **R16-7 — `codex/gpt-5-6-sol-agents` deleted.** The branch added a root `AGENTS.md` — a GPT-5.6-Sol harness
+  working agreement, not product code — and cited `docs/contributing-quickstart.md` / `docs/testing-quickstart.md`,
+  neither of which still exists. Deleted local and remote after review; tip `461d34ab` if it is ever wanted back.
 
 
 Master backlog feeding the implementation phase. Sources: 7 doc agents (see sibling docs), live UI walkthrough
@@ -188,3 +202,52 @@ Top queue (ask owner in batches during phase 2):
 - H7 `live` Invited local users are gated by pwreset (`readiness` of accounts): sign-in succeeds but every page 302s
   to /login until intent=set-password completes. Correct behavior, but the "setup pending" pill is the only UI hint;
   admin-facing copy could say the user must set a password at first sign-in before they can be assigned work.
+
+---
+
+## Disposition ledger (end of pass)
+
+The checkboxes above are the backlog AS DISCOVERED. This section is what actually happened, and it
+was not taken from the commit messages: after the implementation waves, seven agents — one per
+section — re-derived every item's true state from the tree. Over the 70 items that audit returned
+**42 fixed, 3 not-a-bug, 7 owner-question, 7 open and 11 partial**. The open and partial ones
+became wave 3, and the "partial" verdicts are the useful part of the record: several items had
+landed convincingly enough to read as done.
+
+Examples of what "partial" meant, so the shape is recognisable next pass:
+
+- **E3** — three of four call sites were routed through `roleCan`; `MembersPanel` still read
+  `myRole === "admin"`. The three that landed were also *unpinned*: `update-goal` and `run-agents`
+  resolve to the same tier today, so a wrong action id would not have failed anything.
+- **B11** — the URL-encoding half landed; the scopeless-classic-PAT half did not, so a token with
+  an empty `x-oauth-scopes` header still showed an "assumed granted" chip.
+- **F10** — two of three oversized files were split; `home-page.tsx` was not, and had *grown* to
+  1739 lines during the pass.
+- **G2** — the task page obeyed R16-3; the review queue still named the process gate over the
+  terminal fact and still offered a force-accept the task page withheld.
+
+Two items came back as **not defects**, which is the result that mattered most:
+
+- **`verification`** reads as a dead table (no app query names it) and was one edit from deletion.
+  better-auth writes it on every social sign-in; dropping it kills GitHub login. Now pinned by
+  `migration-runner.server.test.ts`, canaried by deleting the `CREATE TABLE`.
+- **`task_projections.repo`** likewise looks dead but feeds the task-detail GitHub links. Only its
+  comment was stale.
+
+"Nothing reads it" is not proof something is dead when a library or a projection consumer owns it.
+
+Owner questions that remain owner questions (no code half was attempted, by design): **G3** was
+reclassified — "the palette is unreachable on a phone" is a defect, not a preference, and was
+fixed; **G4/G5/C3** were answered by rulings R16-7/R16-6/R16-5; **G6** (dev `.env` vs launch.json
+data root) stays a local config choice, now documented in `.env.example`.
+
+### Residual, recorded rather than papered over
+
+R16-1 stops a foreign PR from being adopted; it does not un-adopt one that was bound BEFORE the
+rule existed. `github-reconciler.server.ts:288` treats a discovery that matches the cached number
+as an owned link and keeps its live facts — which is right in general (a task's own PR moves its
+head) but means VIB-4 in the dev data root still carries merged PR #113 in its `task.md`. The
+product does have a path out (the operator raises the branch-collision packet, and
+`archive_task(+deleteBranch)` is the recovery), and no NEW task can be polluted; a self-heal for
+pre-rule bindings would need its own rule about when Viberr is allowed to drop a PR reference it
+once wrote, which is an owner decision, not hygiene.

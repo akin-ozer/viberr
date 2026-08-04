@@ -1,5 +1,12 @@
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { unreachableFetch } from "../../../test-support/fake-github";
@@ -345,6 +352,51 @@ describe("skills", () => {
     );
     expect(kept.toast).toContain("existing SKILL.md kept");
     expect(readFileSync(onDisk, "utf8")).toHaveLength(256 * 1024 + 10);
+  });
+
+  // A5-followup: the editor's reader dereferenced links while the INJECTION
+  // reader refuses them, so a symlinked SKILL.md showed the link target's
+  // content as if it were the skill — text no run would ever see — and the
+  // editor's `writeFileSync` would then have replaced that target's content
+  // with whatever was in the textarea. Deliberate answer: the editor obeys the
+  // same containment rule as the injector, and says so instead of logging it.
+  it("refuses to read or write a SKILL.md that links out of the store", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { skill } = await saveSkill(
+      db,
+      { name: "linked-skill", summary: "Linked.", body: "# in the store" },
+      ACTOR,
+      ctx,
+    );
+    const dir = skillDirPath("linked-skill", dataRoot);
+    const outside = path.join(dataRoot, "outside-the-store.md");
+    writeFileSync(outside, "# secrets from outside the store");
+    rmSync(path.join(dir, "SKILL.md"));
+    symlinkSync(outside, path.join(dir, "SKILL.md"));
+
+    // READ: the editor shows nothing rather than the target's content.
+    expect(getSkill(db, skill.id, ctx)!.body).toBe("");
+
+    // WRITE: refused, and the link target is untouched.
+    await expect(
+      saveSkill(
+        db,
+        { id: skill.id, name: "linked-skill", summary: "Linked.", body: "clobbered" },
+        ACTOR,
+        ctx,
+      ),
+    ).rejects.toThrowError(/symlink/);
+    expect(readFileSync(outside, "utf8")).toBe("# secrets from outside the store");
+
+    // A summary-only save (empty body → keep on disk) still works: it writes
+    // no SKILL.md at all, so there is nothing to refuse.
+    const kept = await saveSkill(
+      db,
+      { id: skill.id, name: "linked-skill", summary: "New summary here.", body: "" },
+      ACTOR,
+      ctx,
+    );
+    expect(kept.toast).toContain("existing SKILL.md kept");
   });
 
   it("rename moves the skill folder; delete removes it", async () => {

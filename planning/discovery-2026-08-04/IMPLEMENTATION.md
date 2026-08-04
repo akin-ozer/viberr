@@ -85,3 +85,125 @@ Grouped so each agent owns a disjoint slice:
 3. Live UI verification in the running dev server with screenshots for anything user-visible.
 4. `npm run e2e` (production-image compose stack) — run ONCE at the end, by the parent only, after the dev
    server is stopped (single-writer rule).
+
+### Wave 2 outcome — LANDED (commit `53b796d`, 63 files, +6379/−3022)
+
+Gates at commit: **2722 unit tests / 213 files green, `npm run typecheck` clean.**
+
+What the wave actually turned up, beyond the listed items:
+
+- **The app's only live region was inert whenever a dialog was open.** The toast host entered
+  the top layer at the same instant its first message appeared, and that is precisely the case
+  screen readers do not announce — so every dialog-driven confirmation in the product was
+  silent. The fix takes the slot empty and commits the message a frame later. `aria-atomic` is
+  `false`, not `true`: `role="status"` implies `true`, which would re-read the whole (now
+  4-deep) stack on every arrival. My original instruction said `true` and was wrong.
+- **Project settings dragged stages with a grip and reordered optimistically** — the exact
+  opposite of the board's whole-card, server-authoritative language, which had rejected the
+  grip on purpose. Worse, dragging onto a neighbour POSTed a no-op reorder and toasted success
+  for a change that never happened.
+- **A CSS/TSX integrity test now scans every className in `app/` against the sheet** (628
+  classes, no allowlist) and caught a regression mid-wave. `CLASSLESS_BY_DESIGN` is empty.
+
+Two findings were closed as NOT bugs after investigation, and are recorded in FINDINGS.md (H14,
+H16) so a later pass does not re-file them.
+
+## Post-wave-2 verification — two real regressions caught by the extended gates
+
+Running the full production-image e2e stack after wave 2 failed twice, and both were mine:
+
+- **Dark-theme contrast on org settings.** The global `button` reset took `font`, `color` and
+  `cursor` but never `background`, so any button whose class declares no surface kept the UA
+  `ButtonFace` — which Chrome resolves PER COLOR-SCHEME (#efefef light, #6b6b6b dark). The
+  settings tab rail (`.nav-item`) painted that mid-grey block in dark mode: `--muted` at 3.2:1
+  and its `.count` at 1.9:1. Measured live before and after (9.81:1 and 6.64:1 now). Fixed at
+  the root — `background: none` in the element reset, so the next such button is covered — and
+  pinned in `app.css.test.ts`. This existed before the pass; only extending the axe sweep to
+  org settings in BOTH themes exposed it. A live sweep of every audited surface found exactly
+  one other UA-background control (`.rail-toggle`), which is `display:none` above its media
+  query and so never painted.
+- **The ⌘K e2e spec broke on the a11y fix.** Giving the palette input `role="combobox"`
+  REPLACES its implicit `textbox` role, so `getByRole("textbox")` matched nothing. The spec now
+  asks for the combobox — the shape the palette should be held to.
+
+## Wave 3 — closing the backlog honestly
+
+Before writing an outcome record I ran a **disposition audit**: seven agents, one per findings
+section, each determining every item's true state from the tree rather than from the commit
+messages. Result over 70 items: 42 fixed, 3 not-a-bug, 7 owner-question, **7 open, 11 partial**.
+Several "fixed" items were fixed only in part, and the audit named exactly what was left. That
+list became wave 3.
+
+| WS | Owns | Items |
+|----|------|-------|
+| W1 RBAC display | `project-settings/settings-page`, `policy/policy-page`, `task-detail/decision-packet`, `projections/notifications`, `home/home-query` | E3-rest (MembersPanel action id), E4 (disabled controls with no reason), E6 (two answers to "waiting on you") |
+| W2 review queue | `features/review/**`, `projections/rebuilder`, `projections/review-queue` | G2 (terminal GitHub facts outrank process gates in the QUEUE too) |
+| W3 mentions | `ui/rich-text`, `task-detail/timeline` | F20 (chip only real names; multi-word names chip whole) |
+| W4 runtime hygiene | `server/runtimes/**`, `specialist-run`, `secrets/pat-validator`, `org/resources`, `files/**` | D4 (allowedTools never reaches a run, cannot survive resume), D5 (three lying docstrings), B3, B11-rest, A5-followup, C5-followup |
+| W6 repo hygiene | `vitest.config`, `.dockerignore`, `db/migrations/0001_baseline.sql`, `auth/identity`, `profile-actions`, `seed/default-assets`, `.env.example` | E8, G7, G8, G10, B7-rest |
+| W7 structure | `features/home/**` | F10 (the one >1200-line file wave 2 missed) |
+| W5 stylesheet | `app.css`, `app.css.test.ts`, `style={{}}` props app-wide | F3, F6-rest, F7-rest, F8-rest, G3 |
+
+Parent-held work (files no workstream owned): R16-5, R16-6, and the five handoffs the
+workstreams reported.
+
+### Two items came back as "not a defect" — and that is the useful result
+
+- **`verification` is not a dead table.** It reads as dead (no app query names it) and pass 16
+  came within one edit of dropping it. better-auth writes it on every social sign-in, so
+  dropping it kills GitHub login — and nothing in the suite would have said so. It is now
+  pinned by `migration-runner.server.test.ts` with the reason, canaried by deleting the CREATE
+  TABLE.
+- **`task_projections.repo` is load-bearing**, not dead: the task-detail GitHub links render
+  off it. Only the stale comment was wrong. Removing the column is a real product change, not
+  hygiene, so it was not done under a hygiene brief.
+
+### Wave 3 outcome — LANDED
+
+Gates: **2794 unit tests / 213 files green, `npm run typecheck` clean.**
+
+What the wave produced beyond closing the list:
+
+- **E3 is now tier-coincidence-proof.** The remaining `myRole === "admin"` literal in
+  project settings was replaced by the action id each panel's own SERVER guard checks —
+  which turned out not to be admin: `edit-policy` governs the identity, stages and repo
+  panels, `manage-members` only the members panel. The new tests mock `roleCan` to answer
+  for exactly ONE action id, so swapping two ids that resolve to the same role tier today
+  still fails. A role-tier assertion would have caught none of the three canary swaps.
+- **E4 was two different defects wearing one number.** The policy radios were disabled with
+  no visible reason at all; the decision-packet Confirm button put its reason in `title` on
+  a `disabled` element, which can never surface it — while the option radios twelve lines
+  above used `aria-disabled` and their titles *did* work. Role refusals are now
+  `aria-disabled` + a refusing click handler (so the control keeps focus and its
+  description), with the reason as visible text bound by `aria-describedby`; `busy` and
+  "no options" stay genuinely `disabled`. `title` is gone, asserted by test.
+- **E6 was resolved in code, not in a comment.** Both surfaces now call one
+  `indexDecisionInbox`, which makes the mine/override-eligible split once. The conclusion —
+  an org admin's override reach is governance, not a personal inbox item — is now
+  structurally impossible to answer two ways.
+- **F3 is enforced, not documented.** 182 → 20 inline styles, and the new test parses each
+  surviving style object and fails any site whose values are all literals. The rule it
+  encodes: a literal value is a design decision and belongs in the sheet where a
+  theme/density/breakpoint rule can reach it; a value read at runtime belongs in the markup.
+- **F8's mechanism is consolidation, and the test says why.** Custom properties do not work
+  inside media queries and `@custom-media` needs build config this project does not run, so
+  the only mechanism that makes a half-update *inexpressible* is one occurrence. Nine
+  `@media (max-width: 1100px)` blocks became one, and the whole nine-value breakpoint
+  inventory is pinned with the job each does.
+- **G3 was reclassified from question to defect and fixed.** Below 900px Home hid its search
+  box outright and a global rule hid the `.kbd` chip below 1080px, so a phone lost both the
+  project finder AND the only palette trigger — with a keyboard shortcut as the "answer".
+  The box now collapses to a 36px magnifier button. New e2e assertions cover it at 375px.
+- **One inconsistency surfaced by the F3 migration, not caused by it.** The board LIST row's
+  task key matched no `.key` rule (every one is scoped to a container the row is not in), so
+  it alone rendered in the body face. Fixed and pinned against the grid card's treatment.
+
+Parent-held items landed alongside: R16-5 (MCP-outside-the-matrix disclosure + the test that
+pins the *absence* of an `mcp__*` deny rule), R16-6's card half via the shared `prStatePill`
+mapping, the C5 dedupe into an isomorphic `app/shared/text/store-extensions.ts` (the store
+browser runs in the browser and cannot import a `.server` module), the `verification` gate,
+and the five e2e filename references the renumbering left behind.
+
+R16-6's review-queue half turned out to be structurally out of scope: the queue lists
+review-stage tasks only, and a merge-pending task is in Done. It is surfaced on the board
+card, the task detail page and the GitHub view instead.

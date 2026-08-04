@@ -120,6 +120,52 @@ export interface NotificationListItem extends NotificationRecord {
   href: string | null;
 }
 
+/**
+ * E6: ONE reading of "waiting on you", shared by the two surfaces that answer
+ * that question — this inbox and Home's project cards. They each used to pick
+ * their own bucket out of `decisionsRequiring`, which is a comment-deep
+ * agreement: nothing failed if one of them started counting the other bucket.
+ *
+ * The reading: a decision waits on YOU iff it is in `mine`. The org-admin
+ * `overrideEligible` bucket is deliberately NOT folded in — the D2 override is
+ * governance reach into a project the admin holds no acting role in, not a
+ * personal to-do, and folding it in would tell an org admin they personally owe
+ * an answer on every project in the instance. It is not dropped either: Home
+ * carries it as its own `overrideWaiting` counter, under its own label, so the
+ * reach stays visible without inflating the inbox number. The notifications
+ * list has no second counter because it has no row to hang one on — a
+ * notification exists only for someone who was actually notified.
+ */
+export interface DecisionInboxIndex {
+  /** `${projectSlug}::${taskKey}` for every decision waiting on this user. */
+  waitingOnYou: Set<string>;
+  /** projectSlug → how many decisions wait on this user there. */
+  waitingBySlug: Map<string, number>;
+  /** projectSlug → how many are reachable ONLY through the org-admin override. */
+  overrideBySlug: Map<string, number>;
+}
+
+export function indexDecisionInbox(
+  db: DatabaseSync,
+  userId: string,
+): DecisionInboxIndex {
+  const decisions = decisionsRequiring(db, userId);
+  const waitingOnYou = new Set<string>();
+  const waitingBySlug = new Map<string, number>();
+  for (const d of decisions.mine) {
+    waitingOnYou.add(`${d.projectSlug}::${d.taskKey}`);
+    waitingBySlug.set(d.projectSlug, (waitingBySlug.get(d.projectSlug) ?? 0) + 1);
+  }
+  const overrideBySlug = new Map<string, number>();
+  for (const d of decisions.overrideEligible) {
+    overrideBySlug.set(
+      d.projectSlug,
+      (overrideBySlug.get(d.projectSlug) ?? 0) + 1,
+    );
+  }
+  return { waitingOnYou, waitingBySlug, overrideBySlug };
+}
+
 /** Newest-first by real timestamp (deliberate divergence from the mock's
  * splice order — ruling 9). Joins project display names where resolvable,
  * plus the LIVE task decision state (F7-NOTIF1): packet/approval rows are
@@ -152,14 +198,13 @@ export function listNotifications(
   // users-table identity so renames reflect in the inbox immediately.
   const overlay = createActorRenderOverlay(db);
   // R8-3: "Waiting on you" is member-scoped — a decision notification waits on
-  // THIS user only if its task is in the user's actionable decision set (the
-  // shared `decisionsRequiring` helper: maintainer+ / task-owner, and NOT the
-  // org-admin override). This subsumes the old live-decision check AND drops
-  // decisions the viewer can't act on (non-member inflation) and superseded
-  // packets (the set keys off live task state, one decision per task).
-  const mine = new Set(
-    decisionsRequiring(db, userId).mine.map((d) => `${d.projectSlug}::${d.taskKey}`),
-  );
+  // THIS user only if its task is in the user's actionable decision set
+  // (maintainer+ / task-owner, and NOT the org-admin override). This subsumes
+  // the old live-decision check AND drops decisions the viewer can't act on
+  // (non-member inflation) and superseded packets (the set keys off live task
+  // state, one decision per task). E6: the bucket choice is `indexDecisionInbox`
+  // above, which Home reads too — not a local pick out of `decisionsRequiring`.
+  const { waitingOnYou: mine } = indexDecisionInbox(db, userId);
   return rows.map((row) => {
     const record = mapNotificationRow(row);
     const scoped: NotificationListItem = {

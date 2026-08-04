@@ -89,7 +89,7 @@ export function ProjectPanel({
         <h2>Project</h2>
       </div>
       <div className="set-fields">
-        <div className="field-row" style={{ gridTemplateColumns: "1fr 120px" }}>
+        <div className="field-row name-key">
           <div className="field">
             <label className="flabel" htmlFor="set-project-name">
               Project name
@@ -132,7 +132,7 @@ export function ProjectPanel({
           ></textarea>
         </div>
       </div>
-      <div className="kv" style={{ marginTop: ".4rem" }}>
+      <div className="kv after-fields">
         <div className="kv-row">
           <span className="k">Task keys</span>
           <span className="v">
@@ -183,8 +183,7 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
     return (
       <button
         type="button"
-        className="btn ghost sm"
-        style={{ width: "100%", marginTop: ".8rem" }}
+        className="btn ghost sm panel-act"
         onClick={() => setNaming(true)}
       >
         <Icon name="plus" />
@@ -193,7 +192,7 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
     );
   }
   return (
-    <div className="stg-add" style={{ marginTop: ".8rem" }}>
+    <div className="stg-add spaced">
       <input
         ref={inputRef}
         className="stg-input"
@@ -834,7 +833,7 @@ export function MembersPanel({
             : ""}
         </span>
       </div>
-      <div className="member-list" style={{ marginBottom: 0 }}>
+      <div className="member-list last">
         {members.map((m) => (
           <div className="member-row" key={m.userId}>
             <Avatar person={{ initials: m.initials, tone: m.tone }} />
@@ -974,21 +973,19 @@ function RepairRepoDialog({
           data-autofocus=""
         />
       </div>
-      <p style={{ color: "var(--muted)", fontSize: ".82rem" }}>
+      <p className="repair-note">
         {hasCredential
           ? "The new repository is verified with the attached credential before anything changes — a repo the token can't see refuses the repair."
           : "No credential is attached, so the new repository can't be verified until one is."}
       </p>
       {footprintTasks > 0 && (
         <label
-          className="cred-warn"
-          style={{ display: "flex", gap: ".5rem", cursor: "pointer" }}
+          className="cred-warn ack"
         >
           <input
             type="checkbox"
             checked={ack}
             onChange={(e) => setAck(e.target.checked)}
-            style={{ marginTop: ".15rem" }}
           />
           <span>
             {footprintTasks} task{footprintTasks === 1 ? "" : "s"} in this
@@ -1087,15 +1084,12 @@ export function RepoPanel({
             {repo ? (
               <span className="mono">{repo}</span>
             ) : (
-              <span style={{ color: "var(--placeholder)", fontSize: ".8rem" }}>
-                —
-              </span>
+              <span className="fine md dim">—</span>
             )}
             {canRepair && (
               <button
                 type="button"
-                className="btn ghost sm"
-                style={{ marginLeft: ".5rem" }}
+                className="btn ghost sm repair-btn"
                 onClick={() => setRepairing(true)}
                 title="Fix a repository that was misconfigured at creation — verified against the attached credential before anything changes"
               >
@@ -1110,15 +1104,7 @@ export function RepoPanel({
             either direction. One project, one repository — stated plainly. */}
         <div className="kv-row">
           <span className="k">Task attachment</span>
-          <span
-            className="v"
-            style={{
-              fontWeight: 400,
-              fontFamily: "var(--font-body)",
-              fontSize: ".8rem",
-              color: "var(--faint)",
-            }}
-          >
+          <span className="v plain">
             every task uses this repository
           </span>
         </div>
@@ -1127,17 +1113,10 @@ export function RepoPanel({
             still refuses the default branch and any branch with an open PR. */}
         <div className="kv-row">
           <span className="k">After merge</span>
-          <span className="v" style={{ fontWeight: 400 }}>
+          <span className="v light">
             <label
-              style={{
-                display: "flex",
-                gap: ".45rem",
-                alignItems: "center",
-                fontFamily: "var(--font-body)",
-                fontSize: ".8rem",
-                color: "var(--muted)",
-                cursor: canRepair ? "pointer" : "default",
-              }}
+              className="branch-cleanup"
+              style={{ cursor: canRepair ? "pointer" : "default" }}
             >
               <input
                 type="checkbox"
@@ -1172,8 +1151,7 @@ export function RepoPanel({
           canGrant && credential.source !== "none" ? (
             <button
               type="button"
-              className="btn sm"
-              style={{ marginLeft: "auto" }}
+              className="btn sm push"
               onClick={onGrantScope}
               disabled={busy}
               title="Re-check the credential's scopes against GitHub"
@@ -1231,7 +1209,7 @@ function DeleteProjectDialog({
         Removes tasks, timelines, and audit logs. This cannot be undone.
         Type <strong>{projectName}</strong> to confirm.
       </p>
-      <div className="field" style={{ marginTop: ".6rem" }}>
+      <div className="field spaced">
         <input
           type="text"
           value={confirmName}
@@ -1298,7 +1276,7 @@ export function DangerZone({
           event reaches it. State the authority once, visibly, above the rows
           it governs. */}
       {!canManageLifecycle && (
-        <p className="deny-note" style={{ marginBottom: ".55rem" }}>
+        <p className="deny-note before">
           <Icon name="lock" />
           Archiving and deleting {projectName} need the{" "}
           <strong>Edit workflow &amp; policy</strong> grant — ask a project
@@ -1389,13 +1367,17 @@ export function SettingsPage({
   useActionToast(credFetcher);
   useActionToast(dangerFetcher);
 
-  // `isAdmin` is a generic admin-only flag reused across three structurally
-  // distinct panels (project identity, stages/policy, members) that map to
-  // different admin-tier RbacActions — no single action names all three — so it
-  // stays an explicit role check. `canGrant` gates ONLY the
-  // GitHub-scope grant, whose exact role set (admin+maintainer) is the
-  // `grant-github-scope` action, so it routes through the shared helper.
-  const isAdmin = myRole === "admin";
+  // E3: every panel gate names the RbacAction its OWN server mutation checks,
+  // never a shared `myRole === "admin"` literal. Project identity, the stage
+  // editor and the repo panel (repair + branch-cleanup) all reach
+  // `requireProjectAction(..., "edit-policy", ...)` in settings-actions.server;
+  // membership CRUD reaches `manage-members`; the credential/scope actions
+  // reach `grant-github-scope` (project.github.tsx). `edit-policy` and
+  // `manage-members` resolve to the same admin tier TODAY — which is exactly
+  // why the literal survived and exactly why it can't stay: re-tier either one
+  // and the panels that don't belong to it would have followed along.
+  const canEditPolicy = roleCan(myRole as ProjectRole | null, "edit-policy");
+  const canManageMembers = roleCan(myRole as ProjectRole | null, "manage-members");
   const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
   const slug = data.project.slug;
 
@@ -1434,7 +1416,7 @@ export function SettingsPage({
             // identity fields change — replaces the old resync effect.
             key={`${data.project.name}\u0000${data.project.prefix}\u0000${data.project.description}`}
             project={data.project}
-            canManage={isAdmin}
+            canManage={canEditPolicy}
             onSave={(fields) =>
               identityFetcher.submit(
                 { intent: "save-project", _csrf: csrf, ...fields },
@@ -1445,7 +1427,7 @@ export function SettingsPage({
           <StagesPanel
             stages={data.stages}
             counts={data.stageCounts}
-            canManage={isAdmin}
+            canManage={canEditPolicy}
             editingId={editingStageId}
             setEditingId={setEditingStageId}
             onRename={(stageId, name) =>
@@ -1484,7 +1466,7 @@ export function SettingsPage({
             members={data.members}
             meId={meId}
             projectName={data.project.name}
-            canManage={isAdmin}
+            canManage={canManageMembers}
             busy={memberFetcher.state !== "idle"}
             onInvite={(name, email) =>
               memberFetcher.submit(
@@ -1506,7 +1488,7 @@ export function SettingsPage({
             canGrant={canGrant}
             busy={repoFetcher.state !== "idle"}
             credBusy={credFetcher.state !== "idle"}
-            canRepair={isAdmin}
+            canRepair={canEditPolicy}
             footprintTasks={data.repoFootprintTasks}
             branchCleanup={data.branchCleanupOnMerge}
             repairBusy={repoFetcher.state !== "idle"}

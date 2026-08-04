@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { NotificationItem, type NotificationView } from "./notification-item";
-import { StageMeter } from "~/features/home/home-page";
+import { StageMeter } from "~/features/home/project-cards";
 
 afterEach(cleanup);
 

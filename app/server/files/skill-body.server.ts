@@ -72,8 +72,14 @@ function realpathOr(target: string): string | null {
  * refuses a symlink outright (`lstatSync` does NOT dereference) and the resolved
  * file is then re-checked against the realpath'd skills root, so neither a
  * linked folder, nor a linked file, nor a linked ancestor can escape the store.
+ *
+ * Exported so the org-settings skill editor (`resources.server.ts`) asks the
+ * SAME question this injector does — A5-followup/pass-16. Its own reader
+ * dereferenced links, so the editor showed a linked target's content as if it
+ * were store content the runs would see (they refuse it), and its
+ * `writeFileSync` followed the link straight back out of the store.
  */
-function resolveSkillFile(
+export function resolveContainedSkillFile(
   name: string,
   dataRoot?: string,
 ): { file: string } | { reason: string } {
@@ -128,9 +134,9 @@ export function readSkillBodyDetailed(
   dataRoot?: string,
   budgetChars: number = SKILL_INJECTION_BUDGET,
 ): SkillInjection {
-  let resolved: ReturnType<typeof resolveSkillFile>;
+  let resolved: ReturnType<typeof resolveContainedSkillFile>;
   try {
-    resolved = resolveSkillFile(name, dataRoot);
+    resolved = resolveContainedSkillFile(name, dataRoot);
   } catch (error) {
     // `skillDirPath` throws on a traversal-shaped name (resolveStoreSegment).
     logger.warn("declared agent skill name is unsafe — run proceeds WITHOUT it", {

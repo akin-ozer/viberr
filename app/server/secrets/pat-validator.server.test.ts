@@ -79,6 +79,57 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
     expect(result.detail).toContain("workflow");
   });
 
+  // B11: an EMPTY `x-oauth-scopes` on a classic token is a positive fact — the
+  // token holds no scopes. The header branch used to require a NON-empty header,
+  // so this token fell into the fine-grained probe and came back
+  // `pull_request:write: assumed` ("fine-grained tokens expose no scope
+  // introspection") — an assumed-granted chip for a token GitHub had just told
+  // us can do nothing — while `tokenKind` on the same result said `classic`.
+  it("classic token with an EMPTY scopes header → insufficient_scope, not assumed", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "viberr-bot" },
+        headers: { "x-oauth-scopes": "" },
+      },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+    });
+    const result = await validatePatToken(CLASSIC, {
+      repo: REPO,
+      requiredScopes: SCOPES,
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.tokenKind).toBe("classic");
+    expect(result.status).toBe("insufficient_scope");
+    expect(result.missingScopes.sort()).toEqual(SCOPES.slice().sort());
+    for (const scope of result.scopes) {
+      expect(scope).toMatchObject({ ok: false, source: "header" });
+      expect(scope.note).toContain("no scopes at all");
+    }
+  });
+
+  // …but an empty header on a token whose PREFIX proves nothing stays unknown:
+  // GitHub omits the header entirely for fine-grained tokens, so absence there
+  // really is missing information and the probe branch is the honest one.
+  it("empty scopes header on an unknown-prefix token still probes", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "viberr-bot" },
+        headers: { "x-oauth-scopes": "" },
+      },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true } },
+      },
+      "GET /user/orgs": { body: [] },
+    });
+    const result = await validatePatToken("some_opaque_token_0123456789", {
+      repo: REPO,
+      requiredScopes: ["read:org"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.tokenKind).toBe("unknown");
+    expect(result.scopes[0]).toMatchObject({ id: "read:org", source: "probe" });
+  });
+
   it("401 with an 'expired' message → expired", async () => {
     const gh = fakeGithubFetch({
       "GET /user": {

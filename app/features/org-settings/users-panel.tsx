@@ -237,7 +237,7 @@ function InviteModal({
         </div>
       )}
       {idp === "local" && (
-        <div className="key-row" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="key-row even">
           <div className="field">
             <label className="flabel" htmlFor="inv-name">
               Full name<span className="req">*</span>
@@ -272,7 +272,7 @@ function InviteModal({
         <span className="flabel">
           {isDomain ? "Role for everyone joining via this domain" : "Instance role"}
         </span>
-        <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
+        <span className="mini-seg self-start">
           <button type="button" className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>
             Admin
           </button>
@@ -369,7 +369,7 @@ function EditUserModal({
       footHint={isYou ? "this is your own account" : undefined}
       onSave={save}
     >
-      <div className="key-row" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="key-row even">
         <div className="field">
           <label className="flabel" htmlFor="eu-name">
             Full name{isLocal && <span className="req">*</span>}
@@ -397,7 +397,7 @@ function EditUserModal({
         </div>
       </div>
       {!isLocal && (
-        <div className="def-note" style={{ marginTop: "-.6rem" }}>
+        <div className="def-note pulled">
           <Icon name="lock" />
           <span>
             Name &amp; email sync from {user.idp === "github" ? "GitHub" : "Google"} at
@@ -407,7 +407,7 @@ function EditUserModal({
       )}
       <div className="field">
         <span className="flabel">Instance role</span>
-        <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
+        <span className="mini-seg self-start">
           <button type="button" className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>
             Admin
           </button>
@@ -448,7 +448,7 @@ function EditUserModal({
                 <Icon name="lock" />
                 Reset password
               </button>
-              <div className="def-note" style={{ marginTop: ".55rem" }}>
+              <div className="def-note after">
                 <Icon name="lock" />
                 <span>
                   No email is sent — a temp password is generated for you to hand over;
@@ -571,9 +571,8 @@ export function UsersPanel({
           </span>
           <button
             type="button"
-            className="stg-x"
+            className="stg-x push"
             aria-label="Dismiss"
-            style={{ marginLeft: "auto" }}
             onClick={() => setSetupNotice(null)}
           >
             <Icon name="x" />
@@ -581,7 +580,7 @@ export function UsersPanel({
         </div>
       )}
       {domains.length > 0 && (
-        <div className="member-list" style={{ marginBottom: 0 }}>
+        <div className="member-list last">
           {domains.map((d) => (
             <div className="member-row" key={d.id}>
               <span className="dom-ic">

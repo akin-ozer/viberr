@@ -183,6 +183,49 @@ describe("ReviewQueuePage", () => {
   });
 });
 
+describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
+  // Live (H10): this row read "…no approving verdict yet — run a review for a
+  // verdict, or an admin can force-accept" next to a "PR #124 · closed" pill.
+  // The pill was the only thing telling the truth, and the sentence pointed at
+  // two paths that do not exist once GitHub has closed the PR — one of which
+  // the task page now withholds outright (acceptanceTerminallyBlocked).
+  const closedRow: ReviewRowView = {
+    key: "VIB-9",
+    title: "Delivered, then rejected on GitHub",
+    waiting: "human",
+    packet: null,
+    latestEventText: null,
+    pr: { number: 124, state: "closed" },
+    validation: "changed",
+    blockReason:
+      "VIB-9's delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.",
+  };
+
+  it("the subline names the closed PR and the queue never advertises force-accept", () => {
+    const { container } = renderQueue([], [closedRow]);
+    const row = container.querySelector(".rq-row")!;
+    expect(row.querySelector(".sub")!.textContent).toBe(
+      "PR #124 was closed on GitHub without merging — rework and reopen it, or archive the task.",
+    );
+    expect(row.textContent).not.toContain("force-accept");
+    expect(row.textContent).not.toContain("approving verdict");
+    // The pill stays — it was the only honest signal before, and it still
+    // carries the PR number the subline names.
+    expect(row.querySelector(".pill.neutral")!.textContent).toBe(
+      "PR #124 · closed",
+    );
+  });
+
+  it("an OPEN PR with the same gate still shows the process gate", () => {
+    const { container } = renderQueue([], [
+      { ...closedRow, pr: { number: 124, state: "review" } },
+    ]);
+    expect(container.querySelector(".rq-row .sub")!.textContent).toBe(
+      closedRow.blockReason,
+    );
+  });
+});
+
 describe("P13-D-9: the queue stops promising human-only Done unconditionally", () => {
   it("keeps the absolute claim when no operator holds the direct grant", () => {
     const { container, getByTitle } = renderQueue([rowHuman], [], 1, {

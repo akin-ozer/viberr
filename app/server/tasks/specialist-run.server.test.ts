@@ -827,6 +827,51 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(spec.webSearchWithheld).toBe(true);
   });
 
+  /**
+   * D4: the specialist spec merged its MCP servers but passed NO `allowedTools`,
+   * so the collaboration toolkit's `mcp__*` tools were never auto-approved. That
+   * only worked because every run is autonomous ⇒ `bypassPermissions` — a
+   * permission MODE holding up a capability GRANT. `startRun` derives the
+   * approval entries now, so this holds for fresh runs, resumes and the
+   * continuity reset alike.
+   */
+  it("D4: a mounted collaboration toolkit reaches the run auto-approved", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "post-task-comments", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "claude-sonnet-4-5",
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const spec = specs.at(-1)!;
+    for (const name of Object.keys(spec.mcpServers ?? {})) {
+      expect(spec.allowedTools).toContain(`mcp__${name}`);
+    }
+    // …and the toolkit really is mounted here, so the loop above is not vacuous.
+    expect(Object.keys(spec.mcpServers ?? {})).toContain("viberr_agent");
+  });
+
   it("its prompt offers no delivery step it cannot perform (XS-4)", async () => {
     undeployAll();
 

@@ -179,6 +179,26 @@ describe("TimelineItem", () => {
     expect(chip.textContent).toBe("@operator");
   });
 
+  it("F20: typed-event text chips known names whole and leaves unknown @words prose", () => {
+    // The typed-event branch used to render through RichText's own `@word`
+    // regex, so it chipped `@nobody` (routes nowhere) and chipped only "@Arda"
+    // out of the known name "@Arda Kaya". It now shares the comment renderer's
+    // known-name list, so the two branches cannot disagree.
+    const { container } = render(
+      <TimelineItem
+        ev={ev({
+          type: "handoff",
+          text: "Assigned to @Arda Kaya — @nobody was asked",
+        })}
+        mentionNames={["Arda Kaya"]}
+      />,
+    );
+    const mentions = [...container.querySelectorAll(".tl-text .mention")].map(
+      (m) => m.textContent,
+    );
+    expect(mentions).toEqual(["@Arda Kaya"]);
+  });
+
   it("agent-routed comment gets the toagent tint", () => {
     const { container } = render(<TimelineItem ev={ev({ toAgent: true })} />);
     expect(container.querySelector(".comment-card.toagent")).not.toBeNull();
@@ -1054,10 +1074,14 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(first.textContent).toContain("your role can't edit the goal");
     // The Confirm button refuses too — before the fix an owner-contributor
     // recorded the decision, got "type the new goal", and found no editor.
+    // E4: the refusal is `aria-disabled`, not `disabled`, so the reason it
+    // points at is reachable; the click handler is what actually refuses.
     const confirm = container.querySelector<HTMLButtonElement>(
       ".packet-actions .btn.primary",
     )!;
-    expect(confirm.disabled).toBe(true);
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(confirm);
+    expect(onResolve).not.toHaveBeenCalled();
   });
 
   it("offers edit_goal normally to a maintainer", () => {
@@ -1152,6 +1176,81 @@ describe("UI-42/UI-44: the decision packet", () => {
     const tabbable = opts.filter((o) => o.tabIndex === 0);
     expect(tabbable).toHaveLength(1);
     expect(tabbable[0]!.getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+// E4: the Confirm button used to park its refusal reason in `title` on a
+// `disabled` element — the one attribute+state combination that guarantees
+// nobody reads it: no hover, no focus, absent from the a11y tree. The reason
+// has to be on screen AND announced.
+describe("E4: the blocked Confirm button gives its reason to everybody", () => {
+  const completionPacket: PacketRender = {
+    ...packet142,
+    options: [
+      { kind: "accept_completion", t: "Accept the completion", d: "Move to Done.", rec: true },
+      { kind: "request_edit", t: "Request one edit", d: "Ask the developer.", rec: false },
+    ],
+  };
+
+  const renderBlocked = (onResolve = vi.fn()) =>
+    render(
+      <DecisionPacket
+        packet={completionPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion={false}
+        canEditGoal
+        canArchive
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+
+  it("renders the reason as visible text wired to the button by aria-describedby", () => {
+    const { container } = renderBlocked();
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    const described = confirm.getAttribute("aria-describedby");
+    expect(described).toBeTruthy();
+    const reason = container.querySelector(`#${described}`)!;
+    // In the document, not in a tooltip — this is the whole finding.
+    expect(reason).not.toBeNull();
+    expect(reason.textContent).toContain("Accepting completion is reserved");
+    // And no `title`, which is where it used to hide.
+    expect(confirm.getAttribute("title")).toBeNull();
+  });
+
+  it("stays focusable (aria-disabled, not disabled) yet still refuses the click", () => {
+    const onResolve = vi.fn();
+    const { container } = renderBlocked(onResolve);
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    // `disabled` would drop it out of the tab order and out of the a11y tree,
+    // taking the description with it.
+    expect(confirm.disabled).toBe(false);
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    confirm.focus();
+    expect(document.activeElement).toBe(confirm);
+    fireEvent.click(confirm);
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it("drops the reason — and resolves — the moment an allowed option is selected", () => {
+    const onResolve = vi.fn();
+    const { container } = renderBlocked(onResolve);
+    expect(container.querySelector(".deny-note")).not.toBeNull();
+    // Arrow to `request_edit`, which needs no extra grant.
+    fireEvent.keyDown(container.querySelector(".options")!, { key: "ArrowDown" });
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    expect(confirm.getAttribute("aria-disabled")).toBeNull();
+    expect(confirm.getAttribute("aria-describedby")).toBeNull();
+    expect(container.querySelector(".deny-note")).toBeNull();
+    fireEvent.click(confirm);
+    expect(onResolve).toHaveBeenCalledWith(1, "");
   });
 });
 

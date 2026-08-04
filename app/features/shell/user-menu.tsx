@@ -169,7 +169,7 @@ export function UserMenu({
             >
               <Icon name="sparkle" />
               Theme ·{" "}
-              <span style={{ color: "var(--faint)" }}>{themeLabel(theme)}</span>
+              <span className="faint">{themeLabel(theme)}</span>
             </button>
             {user.role === "admin" && (
               <Link

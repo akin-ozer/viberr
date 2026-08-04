@@ -106,7 +106,8 @@ export function TimelineItem({
   mentionNames = [],
 }: {
   ev: TimelineEventRender;
-  /** Known mentionable names, for whole-name highlight in comment bodies. */
+  /** Known mentionable names, for whole-name @mention chips in comment bodies
+   *  AND in typed-event text. */
   mentionNames?: string[];
 }) {
   const meta = eventMeta(ev.type);
@@ -174,7 +175,10 @@ export function TimelineItem({
               </div>
             )}
             <div className="tl-text">
-              <RichText text={ev.text} />
+              {/* F20: typed-event text goes through the SAME known-name filter
+                  the comment bodies use — a bare `@nobody` in a system-written
+                  line routes nowhere, so it must not look like a live tag. */}
+              <RichText text={ev.text} names={mentionNames} />
             </div>
             {ev.evidence && (
               <div className="tl-card evidence">
@@ -336,7 +340,7 @@ export function Timeline({
       <div className="composer">
         {/* R7-6: Done tasks stay commentable — one subtle line, no freeze. */}
         {taskClosed && (
-          <div style={{ fontSize: ".75rem", color: "var(--faint)" }}>
+          <div className="fine xs">
             This task is closed — comments are still recorded.
           </div>
         )}
@@ -355,24 +359,16 @@ export function Timeline({
             />
           </div>
           <div className="composer-foot">
-            <span style={{ fontSize: ".75rem", color: "var(--placeholder)" }}>
+            <span className="fine xs dim">
               Open to every registered user · @mentions route to agents
             </span>
             {commentError && (
-              <span
-                style={{ fontSize: ".75rem", color: "var(--coral-dark)" }}
-                role="alert"
-              >
+              <span className="composer-err" role="alert">
                 {commentError}
               </span>
             )}
             <span
-              style={{
-                marginLeft: "auto",
-                fontSize: ".75rem",
-                color: "var(--placeholder)",
-              }}
-              className="mono"
+              className="mono fine xs dim push"
               suppressHydrationWarning
             >
               {sendHint} to send
@@ -391,7 +387,7 @@ export function Timeline({
         </div>
       </div>
 
-      <div className="timeline" style={{ marginTop: "1.1rem" }}>
+      <div className="timeline">
         {/* UI-40: `items` is the FILTERED view of an already-bounded slice, so
             "this task hasn't started" was printed for a task with plenty of
             history whenever the active tab matched nothing — with "Show older
@@ -412,8 +408,7 @@ export function Timeline({
         {hasMore && (
           <button
             type="button"
-            className="btn ghost sm"
-            style={{ width: "100%", marginTop: ".6rem" }}
+            className="btn ghost sm more-act"
             onClick={showOlder}
           >
             <Icon name="chevron" />

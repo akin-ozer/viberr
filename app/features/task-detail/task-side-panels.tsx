@@ -57,16 +57,15 @@ export function GithubTrace({
       : null);
   const forceAcceptRow =
     forceAcceptReason && onForceAccept ? (
-      <div style={{ marginTop: ".8rem" }}>
+      <div className="force-accept">
         {/* P13-D-19: `.hint` used to exist only as `.pj-new .hint`, so this line
             rendered as an unstyled <p>; it is a global utility now. */}
-        <p className="hint" style={{ margin: "0 0 .4rem" }}>
+        <p className="hint">
           Acceptance is blocked: {forceAcceptReason}
         </p>
         <button
           type="button"
-          className="btn ghost sm"
-          style={{ width: "100%" }}
+          className="btn ghost sm full"
           disabled={merging}
           onClick={onForceAccept}
           title="Admin override: accept this task into Done past the review gate. Audited."
@@ -83,7 +82,7 @@ export function GithubTrace({
           <Icon name="github" />
           <h2>GitHub</h2>
         </div>
-        <div className="empty" style={{ padding: "1rem .5rem" }}>
+        <div className="empty sm">
           No branch yet. A task-key branch is created when execution starts.
         </div>
         {forceAcceptRow}
@@ -174,26 +173,16 @@ export function GithubTrace({
             <span className="v mono">
               {/* LV-09: "Diff 1 files" */}
               {task.changed.files} {task.changed.files === 1 ? "file" : "files"} ·{" "}
-              <span style={{ color: "var(--teal-dark)" }}>+{task.changed.add}</span>{" "}
-              <span style={{ color: "var(--coral-dark)" }}>−{task.changed.del}</span>
+              <span className="diff-add">+{task.changed.add}</span>{" "}
+              <span className="diff-del">−{task.changed.del}</span>
             </span>
           </div>
         )}
         {task.commits.length > 0 && (
-          <div style={{ marginTop: ".7rem" }}>
-            <div
-              className="lbl"
-              style={{
-                fontSize: ".68rem",
-                fontWeight: 900,
-                letterSpacing: ".05em",
-                textTransform: "uppercase",
-                color: "var(--placeholder)",
-                marginBottom: ".3rem",
-              }}
-            >
-              Commits
-            </div>
+          <div className="commit-list">
+            {/* P16-F3: `.flabel` IS these six declarations — the inline copy
+                was a second source for the same section-label treatment. */}
+            <div className="flabel">Commits</div>
             {task.commits.map((c) => (
               <div className="commit" key={c.sha}>
                 <span className="sha">{c.sha}</span>
@@ -211,8 +200,7 @@ export function GithubTrace({
             task.pr.state === "merged") && (
             <button
               type="button"
-              className="btn primary sm"
-              style={{ marginTop: ".8rem", width: "100%" }}
+              className="btn primary sm panel-act"
               disabled={delivering}
               onClick={onDeliver}
               title="Push the delivering agent's branch and open the review PR (audited)"
@@ -224,8 +212,7 @@ export function GithubTrace({
         {task.pr?.state === "accepted" && onCompleteMerge && (
           <button
             type="button"
-            className="btn primary sm"
-            style={{ marginTop: ".8rem", width: "100%" }}
+            className="btn primary sm panel-act"
             disabled={merging}
             onClick={onCompleteMerge}
             title="Run the real GitHub merge for this accepted PR (needs a valid project credential)"
@@ -237,8 +224,7 @@ export function GithubTrace({
         {forceAcceptRow}
         {ghHref && (
           <a
-            className="btn ghost sm"
-            style={{ marginTop: ".8rem", width: "100%" }}
+            className="btn ghost sm panel-act"
             href={ghHref}
             target="_blank"
             rel="noreferrer"
@@ -326,21 +312,9 @@ export function PolicyPanel({
       <div className="panel-head">
         <Icon name="shield" />
         <h2>Permissions</h2>
-        <span
-          className="right sub"
-          style={{ fontSize: ".75rem", color: "var(--faint)" }}
-        >
-          V1 rules
-        </span>
+        <span className="right sub fine xs">V1 rules</span>
       </div>
-      <p
-        style={{
-          margin: "0 0 .55rem",
-          fontSize: ".75rem",
-          lineHeight: 1.4,
-          color: "var(--faint)",
-        }}
-      >
+      <p className="fine xs perm-intro">
         Platform rules as they apply to <b>you on this task</b> — role grants,
         plus the owner authority R6-2 adds. This task's live stage, owner and
         waiting-on are in <b>Current state</b> above.
@@ -355,8 +329,7 @@ export function PolicyPanel({
         </div>
       ))}
       <Link
-        className="btn ghost sm"
-        style={{ width: "100%", marginTop: ".8rem" }}
+        className="btn ghost sm panel-act"
         to={`/projects/${projectSlug}/policy`}
       >
         <Icon name="shield" />
@@ -465,13 +438,11 @@ export function CurrentStatePanel({
               />
             ) : (
               <span className="stage-static">
+                {/* The colour is the STAGE's, so it stays in the markup; the
+                    size is a design decision and lives in the sheet. */}
                 <span
-                  className="col-stage-dot"
-                  style={{
-                    background: stage?.color,
-                    width: ".5rem",
-                    height: ".5rem",
-                  }}
+                  className="col-stage-dot sm"
+                  style={{ background: stage?.color }}
                 />
                 {stage?.name ?? ""}
               </span>
@@ -482,9 +453,9 @@ export function CurrentStatePanel({
           <span className="k">Waiting on</span>
           <span className="v">
             {task.waiting === "human" ? (
-              <span style={{ color: "var(--blue-pressed)" }}>Human decision</span>
+              <span className="by-human">Human decision</span>
             ) : task.waiting === "agent" ? (
-              <span style={{ color: "var(--agent-dark)" }}>Agent work</span>
+              <span className="by-agent">Agent work</span>
             ) : (
               "Nothing"
             )}
@@ -556,8 +527,7 @@ export function CurrentStatePanel({
             {acceptance.atBoundary && (
               <button
                 type="button"
-                className="btn primary sm"
-                style={{ width: "100%" }}
+                className="btn primary sm full"
                 disabled={!acceptance.canAccept || acceptBusy}
                 onClick={onAccept}
               >
@@ -600,15 +570,14 @@ export function CurrentStatePanel({
         <div className="state-acts">
           <button
             type="button"
-            className="btn ghost sm"
-            style={{ width: "100%" }}
+            className="btn ghost sm full"
             disabled={dispositionBusy}
             onClick={onArchive}
           >
             <Icon name={archived ? "refresh" : "lock"} />
             {archived ? "Restore from archive" : "Archive task"}
           </button>
-          <p className="hint" style={{ margin: ".35rem 0 0" }}>
+          <p className="hint archive-hint">
             {archived
               ? "Archived — off the board and out of the review queue. Restoring puts it back where it stood, waiting on a human."
               : "Keeps the record, takes the task off the board and out of the review queue. Reversible."}

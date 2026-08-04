@@ -423,7 +423,7 @@ export function TaskDetailPage({
               <Icon name="cpu" />
               <h2>Agent logs</h2>
             </div>
-            <p className="empty" style={{ padding: "1rem .5rem" }}>
+            <p className="empty sm">
               Raw agent output, wire envelopes and provider session ids are
               limited to project members. The run summary above is public to
               signed-in users.

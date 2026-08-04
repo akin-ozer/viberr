@@ -166,10 +166,7 @@ export function ReviewQueuePage({
           <div className="panel-head">
             <Icon name="hand" />
             <h2>Waiting on your acceptance</h2>
-            <span
-              className="right sub"
-              style={{ fontSize: ".76rem", color: "var(--faint)" }}
-            >
+            <span className="right sub fine">
               {ready.length} of {total}
             </span>
           </div>
@@ -185,10 +182,7 @@ export function ReviewQueuePage({
               reaches the boundary.
             </div>
           )}
-          <div
-            className="pol-note"
-            style={{ marginBottom: 0, marginTop: ".9rem" }}
-          >
+          <div className="pol-note after last">
             <Icon name={operatorCanAccept ? "bolt" : "lock"} />
             {/* P13-D-9: wording tracks the Policy note (policy-page.tsx) — one
                 exception, explicitly granted and audited, never a general
@@ -218,12 +212,7 @@ export function ReviewQueuePage({
           <div className="panel-head">
             <Icon name="activity" />
             <h2>Still in review</h2>
-            <span
-              className="right sub"
-              style={{ fontSize: ".76rem", color: "var(--faint)" }}
-            >
-              {working.length}
-            </span>
+            <span className="right sub fine">{working.length}</span>
           </div>
           {working.length ? (
             <div className="rq-list">

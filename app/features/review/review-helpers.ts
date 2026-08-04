@@ -47,6 +47,20 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
 /** The subline stripper is the shared `plainText` helper (same regexes as
  * the mock's `rqStripMd` — ruling 14, one stripper app-wide). */
 export function reviewRowSub(t: ReviewRowView): string {
+  // R16-3 (owner ruling 2026-08-04): a CLOSED PR is a TERMINAL GitHub fact and
+  // outranks every process gate. The row rendered `blockReason` first, so a
+  // delivered-but-unreviewed task whose PR had been closed on GitHub read
+  // "…no approving verdict yet — run a review for a verdict, or an admin can
+  // force-accept": the process gate spoken over the terminal fact, offering the
+  // one override the task page withholds once the PR is gone
+  // (`acceptanceTerminallyBlocked`). Running a review is not the path here;
+  // rework/reopen or archive is, which is what `prStateSub` says.
+  //
+  // Only `closed` jumps the gate. A MERGED PR is not a refusal — its "accept
+  // the completion" line would become the lie if a process gate is genuinely
+  // holding that acceptance, so a merged row keeps naming the gate, exactly as
+  // the task page does.
+  if (t.pr?.state === "closed") return prStateSub(t.pr);
   // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
   // no delivered revision) instead of a generic "needs a human decision".
   if (t.blockReason) return t.blockReason;

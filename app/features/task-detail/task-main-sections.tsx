@@ -49,7 +49,7 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecor
           </Pill>
         </span>
       </div>
-      <div className="packet-obs" style={{ margin: 0 }}>
+      <div className="packet-obs flush">
         {diagnostics.map((d) => (
           <div className="obs" key={d.id}>
             <span className="k">
@@ -138,12 +138,8 @@ export function TaskHero({
         )}
         <Pill kind="neutral">
           <span
-            className="col-stage-dot"
-            style={{
-              background: stage?.color,
-              width: ".5rem",
-              height: ".5rem",
-            }}
+            className="col-stage-dot sm"
+            style={{ background: stage?.color }}
           />
           {stage?.name ?? ""}
         </Pill>
@@ -310,7 +306,7 @@ export function ScheduledActions({
       </div>
 
       {schedules.length === 0 ? (
-        <p className="empty" style={{ padding: ".4rem 0" }}>
+        <p className="empty flush">
           No scheduled operator re-runs.
         </p>
       ) : (

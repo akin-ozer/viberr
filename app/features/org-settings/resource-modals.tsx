@@ -57,7 +57,7 @@ export function KBModal({ initial, onClose }: { initial: KbView | null; onClose:
       </div>
       <div className="field">
         <span className="flabel">Re-index</span>
-        <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
+        <span className="mini-seg self-start">
           {(["on change", "manual"] as const).map((r) => (
             <button type="button" key={r} className={refresh === r ? "on" : ""} onClick={() => setRefresh(r)}>
               {r}
@@ -162,7 +162,7 @@ export function McpModal({
         </div>
         <div className="field">
           <span className="flabel">Transport</span>
-          <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
+          <span className="mini-seg self-start">
             <button type="button" className={transport === "HTTP" ? "on" : ""} onClick={() => setTransport("HTTP")}>
               HTTP
             </button>
@@ -230,8 +230,7 @@ export function McpModal({
         {initial?.hasCred && (
           <button
             type="button"
-            className="btn sm ghost"
-            style={{ alignSelf: "flex-start" }}
+            className="btn sm ghost self-start"
             onClick={() => {
               setClearCred((v) => !v);
               setCred("");
@@ -344,7 +343,7 @@ export function SkillModal({
           <div
             role="radiogroup"
             aria-label="How the skill gets its content"
-            style={{ display: "flex", gap: ".4rem", flexWrap: "wrap" }}
+            className="mode-radios"
           >
             <button
               type="button"

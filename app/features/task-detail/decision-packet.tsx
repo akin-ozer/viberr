@@ -19,6 +19,14 @@ import { Pill } from "~/ui/pill";
  * visible-backticks was corrected so the model's markdown reads as intended.
  */
 
+/** Ties the Confirm button to its visible refusal reason (E4). */
+const BLOCK_REASON_ID = "pkt-block-reason";
+const DENY_NOTE_STYLE = { marginTop: ".75rem" } as const;
+/** `.btn:disabled` in the sheet is what dims a refused control; an
+ *  `aria-disabled` button is not `:disabled`, so it carries the dim itself —
+ *  the same inline treatment the blocked option radios below already use. */
+const BLOCKED_BTN_STYLE = { opacity: 0.55, cursor: "not-allowed" } as const;
+
 /** Render a string with `inline code` spans; everything else stays plain text. */
 function renderInlineCode(text: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -106,6 +114,34 @@ export function DecisionPacket({
   const [note, setNote] = useState("");
   const isBlocked = p.type === "blocked";
 
+  // E4: the reason the Confirm button can't be pressed. It used to live ONLY in
+  // `title` on a `disabled` button — the one place a browser guarantees nobody
+  // will ever read it: no hover, no focus, and out of the a11y tree entirely.
+  // The option radios in this same file already knew better (`aria-disabled`,
+  // whose titles DO reach a pointer). So the button stays reachable via
+  // `aria-disabled`, refuses the click itself, and the reason renders as the
+  // `.deny-note` the sheet defines for exactly this — visible to a sighted
+  // keyboard user and announced via `aria-describedby` to a screen reader.
+  const selected = p.options[sel];
+  // accept_completion is maintainer+ OR this task's own owner (R6-2, widened by
+  // R14-2); anyone else gets a server 403, so block the button while it's
+  // selected rather than let them click into one.
+  const completionBlocked =
+    selected?.kind === "accept_completion" && !canResolveCompletion;
+  // UI-42: same treatment for `edit_goal` — `update-goal` is admin|maintainer,
+  // so resolving it without that grant leaves the packet open with no way to
+  // type the new goal.
+  const selectedGoalBlocked = selected?.kind === "edit_goal" && !canEditGoal;
+  const selectedArchiveBlocked =
+    selected?.kind === "archive_task" && !canArchive;
+  const blockReason = completionBlocked
+    ? "Accepting completion is reserved for maintainers and this task's owner."
+    : selectedGoalBlocked
+      ? "Editing the goal is reserved for maintainers."
+      : selectedArchiveBlocked
+        ? "Archiving is reserved for maintainers and admins."
+        : null;
+
   // UI-44: roving tabindex + real focus movement. Every `role="radio"` used to
   // stay tabbable and the arrow handler only changed `sel`, so DOM focus stayed
   // on the previously focused radio while `aria-checked` moved elsewhere — a
@@ -131,19 +167,12 @@ export function DecisionPacket({
           <span className="agent-glyph op">
             <Icon name="shield" />
           </span>{" "}
-          <strong style={{ fontFamily: "var(--font-display)" }}>{p.from}</strong>
+          <strong className="from-name">{p.from}</strong>
         </span>
       </div>
       <div className="packet-body">
         <h2>{p.title}</h2>
-        <p
-          style={{
-            color: "var(--muted)",
-            fontSize: ".92rem",
-            lineHeight: 1.55,
-            margin: 0,
-          }}
-        >
+        <p className="packet-lede">
           {renderInlineCode(p.body)}
         </p>
 
@@ -249,7 +278,7 @@ export function DecisionPacket({
           // form language as every other input: `.field` + uppercase label +
           // hint (owner feedback 2026-07-26 — it was a bare textarea outside
           // `.field`, so none of the border/focus/typography tokens applied).
-          <div className="field" style={{ marginTop: ".75rem" }}>
+          <div className="field packet-note-field">
             <label className="flabel" htmlFor="pkt-note">
               Note for the operator
               <span className="fhint">
@@ -267,53 +296,40 @@ export function DecisionPacket({
           </div>
         )}
 
+        {canResolve && blockReason && (
+          <p className="deny-note" id={BLOCK_REASON_ID} style={DENY_NOTE_STYLE}>
+            <Icon name="lock" />
+            {blockReason}
+          </p>
+        )}
+
         <div className="packet-actions">
-          {(() => {
-            const selected = p.options[sel];
-            // accept_completion is maintainer+ OR this task's own owner (R6-2,
-            // widened by R14-2); anyone else gets a server 403, so block the
-            // button while it's selected rather than let them click into one.
-            const completionBlocked =
-              selected?.kind === "accept_completion" && !canResolveCompletion;
-            // UI-42: same treatment for `edit_goal` — `update-goal` is
-            // admin|maintainer, so resolving it without that grant leaves the
-            // packet open with no way to type the new goal.
-            const goalBlocked = selected?.kind === "edit_goal" && !canEditGoal;
-            const archiveBlocked =
-              selected?.kind === "archive_task" && !canArchive;
-            if (!canResolve) return null;
-            return (
-              <button
-                type="button"
-                className="btn primary"
-                disabled={
-                  busy ||
-                  p.options.length === 0 ||
-                  completionBlocked ||
-                  goalBlocked ||
-                  archiveBlocked
-                }
-                aria-busy={busy}
-                title={
-                  completionBlocked
-                    ? "Accepting completion is reserved for maintainers and this task's owner"
-                    : goalBlocked
-                      ? "Editing the goal is reserved for maintainers"
-                      : archiveBlocked
-                        ? "Archiving is reserved for maintainers and admins"
-                        : undefined
-                }
-                onClick={() => onResolve(sel, note)}
-              >
-                <Icon name="check" />
-                {/* A concise, stable label — echoing the full (often multi-line)
-                    option title here overflowed the flex button and rendered the
-                    text overlapping itself (F-UI1). The chosen option is already
-                    highlighted in the radiogroup above. */}
-                Confirm decision
-              </button>
-            );
-          })()}
+          {canResolve && (
+            <button
+              type="button"
+              className="btn primary"
+              // Only the transient/structural refusals are a real `disabled`:
+              // they need no explanation and `aria-busy` already narrates the
+              // first. A ROLE refusal stays focusable so its reason is
+              // reachable.
+              disabled={busy || p.options.length === 0}
+              aria-disabled={blockReason !== null || undefined}
+              aria-describedby={blockReason ? BLOCK_REASON_ID : undefined}
+              aria-busy={busy}
+              style={blockReason ? BLOCKED_BTN_STYLE : undefined}
+              onClick={() => {
+                if (blockReason) return;
+                onResolve(sel, note);
+              }}
+            >
+              <Icon name="check" />
+              {/* A concise, stable label — echoing the full (often multi-line)
+                  option title here overflowed the flex button and rendered the
+                  text overlapping itself (F-UI1). The chosen option is already
+                  highlighted in the radiogroup above. */}
+              Confirm decision
+            </button>
+          )}
           <button type="button" className="btn ghost" onClick={onAsk}>
             <Icon name="message" />
             Ask operator

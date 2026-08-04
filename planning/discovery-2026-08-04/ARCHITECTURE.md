@@ -909,7 +909,7 @@ exact current text, not a value one batch behind the keystroke); `send()` posts
 `fd.set("text", draftRef.current.trim())`. `EditorState` is never serialized. A fixture
 table in `mention-composer.test.tsx` (`describe("plain-text submission contract (exact
 posted bytes)")`) pins the exact byte contract, and
-`e2e/09-task-comment-composer.spec.ts` gates it live.
+`e2e/05-task-comment-composer.spec.ts` gates it live.
 
 **On read**, the same matcher drives every surface: `app/ui/mention-spans.ts`'s
 `findMentionSpans(text, names)` (longest-first known-name matching so `@Arda Kaya` beats
@@ -1058,7 +1058,7 @@ header at once.
 Consumers: `timeline.tsx` (`LocalDayDotTime`), `activity-page.tsx` (`useHydrated` selects
 `groupStreamByDay` vs `groupStreamByDayUTC`, `formatClock` vs `formatClockUTC`,
 `auditTimeLabel` vs `auditTimeLabelUTC`), `runs-panels.tsx` (`finishedClock` and the
-streamed log clock). Gated by `e2e/10-activity-hydration.spec.ts`: an Auckland-timezone
+streamed log clock). Gated by `e2e/06-activity-hydration.spec.ts`: an Auckland-timezone
 viewer against the UTC container, asserting zero page errors and no `Today`/`Yesterday` in
 the SSR HTML.
 

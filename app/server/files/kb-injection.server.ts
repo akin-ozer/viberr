@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { logger } from "~/server/logging/logger.server";
+import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
 import { kbDirPath } from "./file-store-root.server";
 
 /**
@@ -34,28 +35,19 @@ import { kbDirPath } from "./file-store-root.server";
  */
 
 /**
- * Extensions we treat as injectable text docs (lower-cased, with dot).
+ * THE list of store text-doc extensions now lives in an isomorphic module: the
+ * store browser needs it too and runs in the browser, so it cannot import this
+ * `.server` file. Re-exported here because this injector is the reason the list
+ * exists — `isInjectableKbDoc` below is its primary consumer, and callers that
+ * already import the injector should not have to learn a second module.
  *
- * C5/pass-16: this list MUST cover everything the in-app editor can author
- * (`EDITABLE_EXTENSIONS`, store-files.server.ts). It didn't — `.json`/`.yaml`/
- * `.yml` were offered by the "New document" flow, written to disk, counted in
- * the browser, and then invisible to every run. Authoring a dead-end format
- * in-app is the silent-resource failure this pass exists to close, and structured
- * config/spec docs are perfectly good agent context, so they inject now. (The
- * two lists are deliberately not shared: the editor also has to be able to open
- * a doc format we would never inject, should one ever be added.)
+ * C5/pass-16: the set MUST cover everything the in-app editor can author. It
+ * didn't — `.json`/`.yaml`/`.yml` were offered by the "New document" flow,
+ * written to disk, counted in the browser, and then invisible to every run.
+ * C5-followup: the first fix left three hand-maintained copies "separate but
+ * equal", which is how the divergence happened in the first place. One set now.
  */
-const KB_TEXT_EXTENSIONS = new Set([
-  ".md",
-  ".markdown",
-  ".mdx",
-  ".txt",
-  ".rst",
-  ".text",
-  ".json",
-  ".yaml",
-  ".yml",
-]);
+export { STORE_TEXT_EXTENSIONS };
 
 /**
  * Would this file name reach a run? P14-KM-13: the org-settings row counted
@@ -65,7 +57,7 @@ const KB_TEXT_EXTENSIONS = new Set([
  */
 export function isInjectableKbDoc(fileName: string): boolean {
   if (fileName.startsWith(".")) return false; // dotfiles are not content
-  return KB_TEXT_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+  return STORE_TEXT_EXTENSIONS.has(path.extname(fileName).toLowerCase());
 }
 
 /** Default per-run character budget across ALL of a KB's docs. */

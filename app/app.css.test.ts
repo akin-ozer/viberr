@@ -30,6 +30,18 @@ import { describe, expect, it } from "vitest";
  * statically. The e2e axe run (`e2e/07-accessibility.spec.ts`) is the
  * rendered-page counterpart; this file fails in milliseconds and names the
  * offending token.
+ *
+ * Pass 16 added four more properties in the same spirit — things a browser
+ * renders happily and only a human on the right device would ever notice:
+ *
+ *   P16-F7 — a hover-revealed control on a device with no hover. `opacity: 0`
+ *     still hit-tests, so a finger lands on a button nothing on screen names.
+ *   P16-F6 — two elements with the same silhouette and different behaviour (a
+ *     search FIELD and a dialog TRIGGER).
+ *   P16-F8 — one breakpoint value copied into nine unrelated blocks, so a
+ *     change to "the collapse width" was nine edits and eight easy misses.
+ *   P16-F3 — static styling living in JSX `style={{…}}` instead of here, where
+ *     no theme, density or breakpoint rule can reach it.
  */
 
 const CSS = readFileSync(
@@ -253,6 +265,19 @@ describe("app.css dead-and-drifted rules (P16-UI-04)", () => {
     const declarations = [...CODE.matchAll(/--font-display\s*:/g)];
     expect(declarations.length).toBe(1);
     expect(CODE).toMatch(/--font-display:\s*"Manrope"/);
+  });
+
+  it("clears the UA button background in the element reset", () => {
+    // The reset took `font`, `color` and `cursor` but left `background`, so a
+    // button whose class declares no surface kept `ButtonFace` — which Chrome
+    // resolves per color-scheme: #efefef light, #6b6b6b dark. `.nav-item` (the
+    // settings tab rail) hit exactly that, and the mid-grey block dropped
+    // `--muted` to 3.2:1 and its `.count` to 1.9:1 in dark. Caught by the axe
+    // sweep this pass extended to org settings; pinned here because the sweep
+    // only covers the buttons that happen to be on an audited surface.
+    const reset = CODE.match(/\nbutton\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(reset).not.toBe("");
+    expect(reset).toMatch(/background:\s*none/);
   });
 
   it("has no `.card.wait-human` no-op", () => {
@@ -675,6 +700,292 @@ describe("app.css defines every class the markup uses (P16-UI-02)", () => {
         /position:\s*relative/,
       );
     }
+  });
+});
+
+/* ------------------------------------------------- W5: F7 / F6 / F8 / G3 */
+
+describe("app.css hover-revealed board actions (P16-F7)", () => {
+  it("still hides `.card-move` behind hover on a pointer device", () => {
+    // The reveal is not the defect — a button drawn on every card at every
+    // width would compete with the drag gesture that owns the whole card.
+    expect(CODE).toMatch(/\.card-move\s*\{[^}]*opacity:\s*0\s*;/);
+    expect(CODE).toMatch(/\.card-wrap:hover \.card-move, \.card-move:focus-within\s*\{[^}]*opacity:\s*1/);
+  });
+
+  it("draws it unconditionally where hover cannot happen", () => {
+    // Without this the control is invisible-but-hit-testable in the card's
+    // top-right corner on every phone and tablet — the exact hazard `.fm-acts`
+    // was deleted for, and the one the KB browser's `.rsrc-acts` fixed.
+    const hoverNone = CODE.match(/@media \(hover: none\)\s*\{([\s\S]*?)\n\}/);
+    expect(hoverNone, "a `(hover: none)` block must exist").toBeTruthy();
+    expect(hoverNone![1]).toMatch(/\.card-move\s*\{[^}]*opacity:\s*1/);
+  });
+
+  it("solves it without reintroducing a grip", () => {
+    // A drag handle on the card was proposed and REJECTED (the board drags
+    // whole-card, like the stage list). The cursor stays on the card, and no
+    // rule may reappear that carves a grip out of the drag surface.
+    expect(CODE).not.toMatch(/\.card-(grip|handle)\b/);
+    expect(CODE).toMatch(/\.card-wrap\.draggable\s*\{[^}]*cursor:\s*grab/);
+  });
+});
+
+describe("app.css search field vs palette trigger (P16-F6)", () => {
+  /** Declarations of `button.top-search` — the workspace's palette trigger. */
+  const trigger = CODE.match(/(?:^|[};])\s*button\.top-search\s*\{([^}]*)\}/);
+  const box = CODE.match(/(?:^|[};])\s*\.top-search\s*\{([^}]*)\}/);
+
+  it("keeps one silhouette for both (R15-5)", () => {
+    // The trigger inherits the field's box on purpose: the topbar's truncation
+    // tiers (1080/760/720) target `.top-search` and would need three more
+    // copies if the two shapes diverged.
+    expect(box![1]).toMatch(/border-radius:\s*var\(--radius-button\)/);
+    expect(trigger![1], "the trigger must not re-declare the box").not.toMatch(
+      /border-radius:|border:\s/,
+    );
+  });
+
+  it("gives the trigger a filled face the field does not have", () => {
+    // Before this the two were pixel-identical: a <div> you type into and a
+    // <button> that opens a dialog, same border, same white fill, same grey
+    // text. Filled = a control, plain well = a field, which is the distinction
+    // the rest of the sheet already draws.
+    expect(box![1]).toMatch(/background:\s*var\(--surface\)/);
+    expect(trigger![1]).toMatch(
+      /background:\s*color-mix\(in srgb, var\(--surface\), var\(--fg\) \d+%\)/,
+    );
+  });
+
+  it("labels the trigger instead of faking a placeholder", () => {
+    // `--placeholder` is the colour of text a user is invited to overwrite.
+    // "Search…" on the button is a LABEL — nothing is typed there.
+    const label = CODE.match(/(?:^|[};])\s*\.top-search-label\s*\{([^}]*)\}/);
+    expect(label![1]).toMatch(/color:\s*var\(--muted\)/);
+    expect(CODE).toMatch(/\.top-search input::placeholder\s*\{[^}]*var\(--placeholder\)/);
+  });
+
+  it("the label clears 4.5:1 on the fill it now sits on", () => {
+    // The trigger's face is a 5% --fg tint of --surface, so the label is no
+    // longer measured against plain white/plain dark.
+    for (const [theme, block] of [["light", LIGHT_ROOT], ["dark", DARK_ROOT]] as const) {
+      const face = mixHex(tokenIn(block, "--surface"), tokenIn(block, "--fg"), 0.05);
+      expect(
+        contrastRatio(tokenIn(block, "--muted"), face),
+        `${theme} --muted on the trigger face (${face})`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+/**
+ * P16-F8. Every width breakpoint in the sheet, with the job it does. This map
+ * IS the documentation — CSS custom properties cannot be used inside a media
+ * query and `@custom-media` would need a build plugin this project does not
+ * run, so the number lives in exactly one place per breakpoint and this test is
+ * what makes that stick. Adding a rule at an existing breakpoint costs nothing;
+ * inventing a tenth value (a stray `1120px` "just for this panel") fails here
+ * until someone names what it means.
+ */
+const BREAKPOINTS: Record<string, string> = {
+  "max-width: 1400px": "board columns tighten before any layout reflows",
+  "max-width: 1300px": "the invite row's three fields stack",
+  "max-width: 1100px": "THE TWO-COLUMN COLLAPSE — every 2-up layout goes 1-up",
+  "max-width: 1080px": "topbar tier 1 — brand wordmark, root crumb, shortcut chip",
+  "max-width: 1000px": "settings tab rail goes horizontal",
+  "max-width: 900px": "home topbar collapses to the palette; project-row stats drop",
+  "min-width: 900px": "the login page earns its brand aside (the one min-width)",
+  "max-width: 760px": "topbar tier 2 — the middle crumb",
+  "max-width: 720px": "MOBILE SHELL — the project rail becomes an overlay",
+};
+
+describe("app.css breakpoints (P16-F8)", () => {
+  /** Every `(max-width: Npx)` / `(min-width: Npx)` in the sheet, in order. */
+  const widths = [...CODE.matchAll(/\((m(?:in|ax)-width:\s*\d+px)\)/g)].map((m) =>
+    m[1].replace(/\s+/g, " "),
+  );
+
+  it("uses only the breakpoints this map names", () => {
+    const stray = [...new Set(widths)].filter((w) => !(w in BREAKPOINTS)).sort();
+    // Named, not counted: the fix for a stray is either "use the existing tier"
+    // or "add it here with what it means", and the reader needs the value.
+    expect(stray).toEqual([]);
+  });
+
+  it("declares each breakpoint exactly once", () => {
+    // This is the whole mechanism. `max-width: 1100px` was NINE blocks spread
+    // over 2800 lines doing unrelated jobs, so changing the collapse width was
+    // nine edits and eight of them were easy to miss. One block per value means
+    // a half-update is not expressible.
+    const counts = new Map<string, number>();
+    for (const w of widths) counts.set(w, (counts.get(w) ?? 0) + 1);
+    const duplicated = [...counts.entries()]
+      .filter(([, n]) => n > 1)
+      .map(([w, n]) => `${w} × ${n}`)
+      .sort();
+    expect(duplicated).toEqual([]);
+  });
+
+  it("every named breakpoint is actually used", () => {
+    // The map documents the sheet; an entry with no block is a stale comment.
+    const unused = Object.keys(BREAKPOINTS).filter((w) => !widths.includes(w)).sort();
+    expect(unused).toEqual([]);
+  });
+
+  it("the 1100px block still carries all eight collapses", () => {
+    // Regression anchor for the consolidation: these are the rules the nine
+    // scattered blocks held. `.board { grid-auto-columns }` is deliberately NOT
+    // among them — the 1400px block sets the same value later, so the 1100px
+    // copy could never win and was dropped rather than carried.
+    const block = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/);
+    expect(block, "the consolidated block must exist").toBeTruthy();
+    for (const selector of [
+      ".field-row",
+      ".detail",
+      ".agents-layout",
+      ".policy-cols",
+      ".activity-cols",
+      ".profile-cols",
+      ".rq-row",
+      ".log-line",
+      ".pj-row .pj-stats .pill",
+    ]) {
+      expect(block![1], `${selector} must still collapse at 1100px`).toContain(selector);
+    }
+    expect(block![1], "the dead `.board` duplicate must not come back").not.toMatch(
+      /\.board\s*\{/,
+    );
+  });
+});
+
+describe("app.css palette reachability on touch (P16-G3)", () => {
+  it("hides the shortcut chip in the workspace topbar only", () => {
+    // The 1080 tier used to hide `.kbd` unscoped. On Home `button.kbd` IS the
+    // palette trigger (the only caller of `onOpenPalette` besides the keyboard
+    // hook), and `.kbd` is also the command palette's own "esc" hint — so a
+    // 1000px-wide window lost both to a rule about breadcrumb room.
+    // `.topbar >` matters: the palette renders inside the topbar, so a
+    // descendant selector would still swallow its "esc" chip.
+    expect(CODE).toMatch(/\.topbar > \.top-search \.kbd\s*\{\s*display:\s*none/);
+    expect(CODE, "an unscoped `.kbd { display: none }` takes Home's palette with it")
+      .not.toMatch(/(?:^|[};])\s*\.kbd\s*\{\s*display:\s*none/m);
+  });
+
+  it("collapses Home's box to a palette trigger instead of deleting it", () => {
+    const narrow = CODE.match(/@media \(max-width: 900px\)\s*\{([\s\S]*?)\n\}/);
+    expect(narrow, "the 900px block must exist").toBeTruthy();
+    // The regression: `display: none` on the whole box left a phone with no
+    // project finder AND no way into the palette at all.
+    expect(narrow![1]).not.toMatch(/\.home-top \.top-search\s*\{[^}]*display:\s*none/);
+    // What replaces it: the input goes, the BUTTON becomes the whole box.
+    expect(narrow![1]).toMatch(/\.home-top \.top-search input\s*\{[^}]*display:\s*none/);
+    const trigger = narrow![1].match(/\.home-top \.top-search \.kbd\s*\{([^}]*)\}/);
+    expect(trigger, "the chip must become the trigger").toBeTruthy();
+    expect(trigger![1]).toMatch(/position:\s*absolute/);
+    expect(trigger![1]).toMatch(/inset:\s*0/);
+    // "⌘K" is not a thing a phone can type; the magnifier is the affordance.
+    expect(trigger![1]).toMatch(/font-size:\s*0/);
+    expect(narrow![1]).toMatch(/\.home-top \.top-search > \.ico\s*\{[^}]*pointer-events:\s*none/);
+  });
+
+  it("gives the collapsed triggers a finger-sized target", () => {
+    // WCAG 2.5.8 (24×24 minimum); both match `.rail-toggle`'s 34px square.
+    const narrow = CODE.match(/@media \(max-width: 900px\)\s*\{([\s\S]*?)\n\}/);
+    const homeBox = narrow![1].match(/\.home-top \.top-search\s*\{([^}]*)\}/);
+    expect(homeBox![1]).toMatch(/width:\s*36px/);
+    expect(homeBox![1]).toMatch(/height:\s*36px/);
+    const mobile = CODE.match(/@media \(max-width: 720px\)\s*\{([\s\S]*?)\n\}/);
+    expect(mobile![1]).toMatch(/\.top-search\s*\{[^}]*min-height:\s*34px/);
+  });
+});
+
+/* ------------------------------------------------ W5: F3, inline styles */
+
+/** Every `style={{ … }}` expression in `app/`, as `file:line` → object body. */
+function inlineStyleSites(): { at: string; body: string }[] {
+  const out: { at: string; body: string }[] = [];
+  // Markup only: this file and the component tests quote `style={{` as prose.
+  const markup = sourceFiles(APP_DIR).filter(
+    (f) => f.endsWith(".tsx") && !f.includes(".test."),
+  );
+  for (const file of markup) {
+    const src = readFileSync(file, "utf8");
+    const rel = path.relative(path.dirname(APP_DIR), file);
+    const re = /style\s*=\s*\{\{/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      let depth = 1;
+      let i = m.index + m[0].length;
+      for (; i < src.length && depth > 0; i++) {
+        if (src[i] === "{") depth++;
+        else if (src[i] === "}") depth--;
+      }
+      out.push({
+        at: `${rel}:${src.slice(0, m.index).split("\n").length}`,
+        body: src.slice(m.index + m[0].length, i - 1),
+      });
+    }
+  }
+  return out;
+}
+
+/** A property value the stylesheet could have held: a bare literal. Anything
+ *  else — an identifier, a template literal, a ternary, a concatenation — reads
+ *  a runtime value the sheet cannot know. */
+function isLiteral(value: string): boolean {
+  return /^\s*(-?\d+(\.\d+)?|"[^"]*"|'[^']*')\s*$/.test(value);
+}
+
+describe("app.css draws a task key the same way everywhere (P16-F3 follow-on)", () => {
+  it("gives the list row's key the mono treatment the grid card's key has", () => {
+    // Every `.key` rule is scoped to a container (`.card-top`, `.task-hero`,
+    // `.live-task`, `.pj-name`) and the board's LIST row is in none of them, so
+    // its key alone rendered in the body face — the same value looking like a
+    // different kind of value depending on the view you picked. Surfaced when
+    // F3 moved its width out of an inline style and there was nothing else.
+    const grid = CODE.match(/\.card-top \.key\s*\{([^}]*)\}/)?.[1] ?? "";
+    const list = CODE.match(/\.card\.list-row \.key\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(grid, ".card-top .key must have a rule").not.toBe("");
+    expect(list, ".card.list-row .key must have a rule").not.toBe("");
+    for (const prop of ["font-family", "font-size", "color"]) {
+      const value = (re: string) =>
+        new RegExp(`${prop}\\s*:\\s*([^;]+)`).exec(re)?.[1]?.trim();
+      expect(value(list), `${prop} must match the grid card's key`).toBe(
+        value(grid),
+      );
+    }
+  });
+});
+
+describe("app.css owns static styling, not the JSX (P16-F3)", () => {
+  const sites = inlineStyleSites();
+
+  it("scanned the tree, not an empty list", () => {
+    expect(sites.length).toBeGreaterThan(10);
+  });
+
+  it("leaves no `style={{…}}` whose every value is a literal", () => {
+    // THE rule this pass applied: a literal value is a design decision and
+    // belongs in the sheet, where a theme or density change can reach it; a
+    // value read at runtime (a stage's colour, a tree row's depth, a measured
+    // popover position) belongs in the markup, because the sheet cannot know
+    // it. 182 sites went to 20 on that rule and every survivor is dynamic.
+    const staticSites = sites
+      .filter(({ body }) => {
+        const code = body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+        const decls = [...code.matchAll(/(?:^|,)\s*[\w"'[\]]+\s*:([^,]*(?:\([^)]*\)[^,]*)*)/g)];
+        return decls.length > 0 && decls.every((d) => isLiteral(d[1]));
+      })
+      .map(({ at, body }) => `${at} — ${body.trim().replace(/\s+/g, " ")}`)
+      .sort();
+    expect(staticSites).toEqual([]);
+  });
+
+  it("holds the line at 20 sites", () => {
+    // A ceiling, not a target. It exists because the previous pass moved the
+    // `<select>` half of this finding and left the inline-style half, and
+    // nothing noticed the count climbing back for three passes.
+    expect(sites.length).toBeLessThanOrEqual(20);
   });
 });
 

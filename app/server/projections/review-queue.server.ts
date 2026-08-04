@@ -1,5 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { Validation, Waiting } from "~/schemas/task-file.schema";
+import type {
+  PrMergeable,
+  Validation,
+  Waiting,
+} from "~/schemas/task-file.schema";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { getProject, listProjectTasks } from "./board-query.server";
@@ -44,14 +48,25 @@ export interface ReviewQueueRow {
   packet: { kind: string; title: string } | null;
   /** Newest timeline event's text (position 0) — the subline fallback. */
   latestEventText: string | null;
-  pr: { number: number; state: "review" | "merged" | "closed" } | null;
+  pr: {
+    number: number;
+    state: "review" | "merged" | "closed";
+    /** P14-LV-07: GitHub's last-read mergeability. The subline builder has
+     *  named a conflicting PR since LV-07 (review-helpers.ts `prStateSub`) and
+     *  this row never carried the field, so that branch could not fire on any
+     *  real queue — the one state the row could not describe was the one that
+     *  cannot be merged at all. Same convention as `prRefSchema`: an ABSENT key
+     *  means never read, which is NOT "merges cleanly". */
+    mergeable?: PrMergeable;
+  } | null;
   validation: Validation;
   /** F10-11/F10-15: null = the current revision is acceptance-ready (all
    *  required reviewers approved it, none requesting changes). A non-null reason
    *  means the task is NOT ready for acceptance (failing / awaiting a reviewer /
    *  no delivered revision, or R15-1's verdict gate: delivered work with no PR
    *  or no approving verdict) — it must NOT sit under "Waiting on your
-   *  acceptance". */
+   *  acceptance". R16-3: a PR closed unmerged is named here FIRST, ahead of any
+   *  process gate, because no verdict and no force-accept can undo it. */
   blockReason: string | null;
 }
 
@@ -111,6 +126,9 @@ export function getReviewQueue(
               : t.pr.state === "closed"
                 ? ("closed" as const)
                 : ("review" as const),
+          // Omitted rather than nulled when GitHub was never asked — the key's
+          // absence is the "never read" signal the file format itself uses.
+          ...(t.pr.mergeable ? { mergeable: t.pr.mergeable } : {}),
         }
       : null,
     validation: t.validation,

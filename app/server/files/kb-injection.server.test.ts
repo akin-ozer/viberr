@@ -1,9 +1,18 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   KB_INJECTION_BUDGET,
+  STORE_TEXT_EXTENSIONS,
   isInjectableKbDoc,
   readKbBodies,
   readKbBody,
@@ -206,5 +215,58 @@ describe("readKbBodyDetailed / readKbBodies — structured misses (C1)", () => {
     expect(set.parts[0]!.name).toBe("first");
     expect(set.parts[1]!.body).toContain("omitted entirely");
     expect(set.unresolved.map((u) => u.name)).toEqual(["second", "ghost"]);
+  });
+});
+
+/* ------------- C5-followup: one list, three places that need it ----------- */
+
+describe("STORE_TEXT_EXTENSIONS is the ONLY store text-doc list", () => {
+  /** Every app source file, so the assertion cannot be scoped away. */
+  function appSources(dir: URL, out: string[] = []): string[] {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const child = new URL(entry.name + (entry.isDirectory() ? "/" : ""), dir);
+      if (entry.isDirectory()) appSources(child, out);
+      else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+        out.push(fileURLToPath(child));
+      }
+    }
+    return out;
+  }
+
+  // The editable and injectable lists diverged once already (.json/.yaml/.yml
+  // were authorable in-app and invisible to every run), and the first fix left
+  // three copies "separate but equal" — which is the same defect wearing a
+  // test. There is one set now, in an isomorphic module the browser can import,
+  // and the invariant worth pinning is that nobody re-declares it: a second
+  // literal list is how the divergence starts, not how it is caught.
+  it("no source file declares its own copy of the extension list", () => {
+    const offenders: string[] = [];
+    for (const file of appSources(new URL("../../../app/", import.meta.url))) {
+      const source = readFileSync(file, "utf8");
+      // A literal list is only a copy if it holds the two extensions the
+      // divergence turned on — ".md" alone appears in plenty of honest places.
+      if (
+        source.includes('".markdown"') &&
+        source.includes('".mdx"') &&
+        !file.endsWith("shared/text/store-extensions.ts")
+      ) {
+        offenders.push(file.slice(file.indexOf("/app/") + 1));
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("the three consumers all resolve to the same set", async () => {
+    // Imported, not re-parsed: the point is that these are the SAME object now.
+    const shared = await import("~/shared/text/store-extensions");
+    const editor = await import("~/server/org/store-files.server");
+    expect(STORE_TEXT_EXTENSIONS).toBe(shared.STORE_TEXT_EXTENSIONS);
+    expect(new Set(shared.STORE_TEXT_EXTENSION_LIST)).toEqual(
+      new Set(STORE_TEXT_EXTENSIONS),
+    );
+    // `store-files.server` no longer exports a list of its own to compare —
+    // that IS the fix — so assert the module simply loads against the shared
+    // set without redeclaring one (the scan above proves the negative).
+    expect(typeof editor.readStoreDoc).toBe("function");
   });
 });

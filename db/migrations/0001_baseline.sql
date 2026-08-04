@@ -96,7 +96,10 @@ CREATE TABLE task_projections (
   reviewers_json TEXT NOT NULL DEFAULT '[]',
   operator_json TEXT,
   branch TEXT,
-  -- Effective repo: task-level override, else the project default.
+  -- The project's repo, denormalized onto every task row so the task-detail
+  -- GitHub links (task-side-panels) resolve without joining projects. P13-D-5
+  -- deleted the task-level OVERRIDE this once documented: the rebuilder now
+  -- writes `project.repo ?? null` unconditionally and nothing else may set it.
   repo TEXT,
   pr_json TEXT,
   github_json TEXT,
@@ -259,6 +262,16 @@ CREATE TABLE "agent_runs" (
   project_slug TEXT NOT NULL,
   thread_id TEXT NOT NULL,
   role TEXT NOT NULL,
+  -- NOT a role taxonomy — the DELIVERY axis, and the three values no longer
+  -- mean what their names suggest. 'operator' is the operator runtime's own
+  -- run; every other run is a generic agent engagement, tagged 'primary' when
+  -- that engagement DELIVERS and 'reviewer' when it merely supports
+  -- (`kind: delivers ? "primary" : "reviewer"`, specialist-run.server.ts) —
+  -- so a non-delivering developer is stored as 'reviewer'. The engagement's
+  -- real role rides `role` instead; run rows stopped carrying the
+  -- "Primary specialist"/"Reviewer" literals in the shadow-kind cleanup.
+  -- idx_agent_runs__one_delivering below is keyed on this, and reads correctly
+  -- BECAUSE 'primary' means delivering.
   kind TEXT NOT NULL CHECK (kind IN ('operator', 'primary', 'reviewer')),
   backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
   model TEXT NOT NULL,
@@ -295,9 +308,47 @@ CREATE TABLE run_log_lines (
   display_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+-- ---------------------------------------------------------------------------
+-- better-auth core tables (better-auth 1.6.25), hand-inlined.
+--
+-- PROVENANCE: these four statements are `npx @better-auth/cli@1.6.25 generate`
+-- output for app/lib/auth.server.ts's `buildAuthOptions`, pasted verbatim —
+-- hence the lower-case `not null` / quoted identifiers, which match nothing
+-- else in this file. The CLI is deliberately NOT a dependency: it is a codegen
+-- tool run by hand at version-bump time, and adding it would put better-auth's
+-- whole plugin surface in the production install for four DDL statements a
+-- year.
+--
+-- REFRESH RECIPE, after bumping the better-auth version in package.json:
+--   1. npx @better-auth/cli@<new-version> generate \
+--        --config app/lib/auth.server.ts --output /tmp/ba-schema.sql -y
+--      (check `generate --help` first — the flag names have moved across
+--      better-auth majors; the shape is always config-in, SQL-out.)
+--   2. Diff /tmp/ba-schema.sql against this block. Column ADDITIONS and NEW
+--      tables (a plugin's) get pasted in; better-auth never renames a core
+--      column without a major, so a rename means read its changelog first.
+--   3. `githubHandle` on "user" is OURS, not better-auth's — it comes from the
+--      `user.additionalFields` in buildAuthOptions and the GitHub provider's
+--      `mapProfileToUser`. Keep it through any regeneration; the CLI emits it
+--      only if it reads the config successfully.
+--   4. Re-baseline (`npm run seed -- --reset`) — see the convention note at the
+--      top of this file. There is no ALTER path.
+-- The longer version, with why the CLI is not vendored, is in
+-- planning/discovery-2026-08-04/TESTING-INFRA.md ("better-auth schema refresh").
 CREATE TABLE "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null, "githubHandle" text);
 CREATE TABLE "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
 CREATE TABLE "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);
+-- KEEP: `verification` looks dead (no app code names it, and Viberr ships no
+-- email-verification or password-reset flow) but better-auth writes it on EVERY
+-- OAuth sign-in. `createAuthContext` picks the OAuth state strategy as
+-- `account.storeStateStrategy || (isStateful ? "database" : "cookie")`, and
+-- `isStateful` is just `!!options.database` — we pass one, so the strategy is
+-- "database": `generateGenericState` INSERTs the signed state here at
+-- /sign-in/social and `parseGenericState` reads then deletes it at /callback/:id
+-- (better-auth 1.6.25, dist/state.mjs). Dropping the table makes every GitHub /
+-- Google login fail with better-auth's own "there is a verification table in the
+-- database" error. `verification_identifier_idx` below is the lookup that read
+-- path uses.
 CREATE TABLE "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
 
 -- ============================ indexes ===========================
@@ -336,8 +387,10 @@ CREATE UNIQUE INDEX idx_agent_runs__thread
 -- afterward — two racing dispatches can both pass that check during their
 -- awaits. This partial unique index makes the second insert fail atomically;
 -- startRun translates the constraint violation into a 409 conflict. Only
--- queued/running PRIMARY runs are constrained: operator/reviewer runs and any
--- terminal state (finished/error/interrupted) are unconstrained.
+-- queued/running kind='primary' runs are constrained — i.e. exactly the
+-- DELIVERING engagements (see the column's note; every supporting engagement is
+-- stored as 'reviewer' whatever its role). Operator runs, supporting runs and
+-- any terminal state (finished/error/interrupted) are unconstrained.
 CREATE UNIQUE INDEX idx_agent_runs__one_delivering
   ON agent_runs (project_slug, task_key)
   WHERE kind = 'primary' AND state IN ('queued', 'running');

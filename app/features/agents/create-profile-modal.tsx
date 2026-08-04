@@ -369,7 +369,7 @@ function ModelEffortFields({
           ))}
         </select>
         {selectedModel?.description && (
-          <span className="fhint" style={{ marginLeft: 0 }}>
+          <span className="fhint flush">
             {selectedModel.description}
           </span>
         )}
@@ -469,7 +469,7 @@ function DefinitionField({
           id={`${uid}-definition`}
           value={definition}
           onChange={(e) => setDefinition(e.target.value)}
-          style={{ minHeight: "72px" }}
+          className="ta-brief"
           placeholder="e.g. Owns database schema changes. Writes and verifies migrations against a shadow DB, and never touches application code without operator sign-off."
         />
       </div>
@@ -486,7 +486,7 @@ function DefinitionField({
           id={`${uid}-persona`}
           value={persona}
           onChange={(e) => setPersona(e.target.value)}
-          style={{ minHeight: "120px" }}
+          className="ta-long"
           placeholder="How this agent works: its responsibilities, standards, review checklist, reporting format…"
         />
       </div>
@@ -541,25 +541,25 @@ function CapabilityGrants({
                 <span className="cap-msum">
                   {c.direct > 0 && (
                     <span className="cs">
-                      <span className="d" style={{ background: "var(--teal-dark)" }} />
+                      <span className="d direct" />
                       {c.direct}
                     </span>
                   )}
                   {c.recommend > 0 && (
                     <span className="cs">
-                      <span className="d" style={{ background: "var(--blue)" }} />
+                      <span className="d recommend" />
                       {c.recommend}
                     </span>
                   )}
                   {c.human > 0 && (
                     <span className="cs">
-                      <span className="d" style={{ background: "var(--coral-dark)" }} />
+                      <span className="d human" />
                       {c.human}
                     </span>
                   )}
                   {c.off > 0 && (
                     <span className="cs">
-                      <span className="d" style={{ background: "var(--placeholder)" }} />
+                      <span className="d none" />
                       {c.off}
                     </span>
                   )}
@@ -650,7 +650,7 @@ function ResourcePicker({
                 <span className="cap-mglabel">{g.group}</span>
                 <span className="cap-msum">
                   <span className="cs">
-                    <span className="d" style={{ background: "var(--blue)" }} />
+                    <span className="d recommend" />
                     {sel.length} of {displayItems.length}
                   </span>
                 </span>

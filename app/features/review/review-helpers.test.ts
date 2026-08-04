@@ -86,3 +86,68 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     ).toBe("Waiting on 1 required reviewer approval of the current revision.");
   });
 });
+
+/**
+ * R16-3 (owner ruling 2026-08-04) — terminal GitHub facts outrank process
+ * gates, and force-accept is withheld while the PR is closed.
+ */
+describe("reviewRowSub terminal GitHub facts (R16-3)", () => {
+  const closedNoVerdict: ReviewRowView = {
+    ...base,
+    waiting: "human",
+    validation: "changed",
+    pr: { number: 124, state: "closed" },
+    blockReason:
+      "VIB-1's delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.",
+  };
+
+  it("a CLOSED PR is named over the verdict gate, and never offers force-accept", () => {
+    // Live (H10): a delivered task whose PR had been closed unmerged carried a
+    // correct "PR #124 closed — choose a recovery path" packet while this queue
+    // told the same human to run a review or have an admin force-accept. Both
+    // sentences were true-ish; only one is the path, and the task page already
+    // ranks them the other way (acceptanceRefusalReason).
+    const sub = reviewRowSub(closedNoVerdict);
+    expect(sub).toBe(
+      "PR #124 was closed on GitHub without merging — rework and reopen it, or archive the task.",
+    );
+    expect(sub).not.toContain("force-accept");
+    expect(sub).not.toContain("approving verdict");
+  });
+
+  it("an OPEN PR with the same gate keeps the process-gate copy verbatim", () => {
+    // The ruling reorders exactly one case. Nothing about an open PR changed:
+    // running a review IS the path there, and force-accept is still offered on
+    // the task page, so the queue must keep saying so.
+    expect(reviewRowSub({ ...closedNoVerdict, pr: { number: 124, state: "review" } })).toBe(
+      closedNoVerdict.blockReason,
+    );
+  });
+
+  it("a MERGED PR does not jump the gate — it is not a refusal", () => {
+    // `merged` is reachable (the poller records a merge performed on GitHub)
+    // but it is not terminal for acceptance: the task page still refuses under
+    // the verdict gate and still offers force-accept, so "accept the completion
+    // to close the task" would be the lie here.
+    const sub = reviewRowSub({ ...closedNoVerdict, pr: { number: 124, state: "merged" } });
+    expect(sub).toBe(closedNoVerdict.blockReason);
+    expect(sub).not.toContain("accept the completion");
+  });
+
+  it("a closed PR with NO block reason reads the same — one sentence, one source", () => {
+    expect(reviewRowSub({ ...closedNoVerdict, blockReason: null })).toBe(
+      "PR #124 was closed on GitHub without merging — rework and reopen it, or archive the task.",
+    );
+  });
+
+  it("the closed fact also outranks a pending packet header", () => {
+    // The recovery packet IS the path (R16-3), but the row has one line: the
+    // fact that makes the packet necessary is what a triage list must show.
+    expect(
+      reviewRowSub({
+        ...closedNoVerdict,
+        packet: { kind: "Blocked decision", title: "Pick a recovery path" },
+      }),
+    ).toContain("closed on GitHub without merging");
+  });
+});

@@ -50,8 +50,10 @@ export interface ClaudeQueryOptions {
   /** In-process SDK MCP servers (operator governance tools). */
   mcpServers?: Record<string, unknown>;
   /** Auto-approve allowlist. NOTE: this does NOT remove other tools from the
-   *  model's context — it only skips the permission prompt. Use `tools` to
-   *  restrict the available built-in set. */
+   *  model's context — it only skips the permission prompt. `disallowedTools`
+   *  below is the ONLY restriction channel this adapter has (D5/pass-16: this
+   *  line used to point at a `tools` option, which is not in this interface, is
+   *  passed nowhere, and would have read as a fence that does not exist). */
   allowedTools?: string[];
   /** Tool denylist — removes tools from the model's context entirely; binds
    *  even under bypassPermissions. */

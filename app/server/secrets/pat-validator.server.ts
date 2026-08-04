@@ -276,8 +276,18 @@ export async function validatePatToken(
 
   // 3. Scope introspection.
   const scopes: ScopeCheck[] = [];
-  if (scopesHeader !== null && scopesHeader !== "") {
+  if (scopesHeader !== null && (scopesHeader !== "" || tokenKind === "classic")) {
     // Classic token: the header is authoritative.
+    //
+    // B11/pass-16: an EMPTY header on a classic token is a positive fact — "this
+    // token holds no scopes" — not missing information. The condition used to
+    // require a non-empty header, so a scopeless `ghp_…` fell through to the
+    // fine-grained probe branch and came back `pull_request:write: assumed`
+    // ("fine-grained tokens expose no scope introspection") while `tokenKind`
+    // right above it still said `classic`: an assumed-granted chip for a token
+    // GitHub had just told us can do nothing. An empty header on an unknown-
+    // prefix token stays in the probe branch — there, absence really does prove
+    // nothing (GitHub omits the header entirely for fine-grained tokens).
     const granted = new Set(
       scopesHeader.split(",").flatMap((s) => {
         const scope = s.trim();
@@ -285,7 +295,17 @@ export async function validatePatToken(
       }),
     );
     for (const id of requiredScopes) {
-      scopes.push(classicScopeCheck(id, granted));
+      const check = classicScopeCheck(id, granted);
+      scopes.push(
+        granted.size === 0
+          ? {
+              ...check,
+              // Say WHICH nothing this is: "missing scope" reads like a partial
+              // grant, and the operator would go looking for one checkbox.
+              note: "this classic token was created with no scopes at all — regenerate it with `repo`",
+            }
+          : check,
+      );
     }
   } else {
     // Fine-grained (or headerless) token: probe what can be probed.

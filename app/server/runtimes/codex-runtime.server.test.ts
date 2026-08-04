@@ -6,6 +6,7 @@ import type {
 } from "@openai/codex-sdk";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
+  CODEX_SDK_VERIFIED_VERSION,
   createCodexAdapter,
   resolveCodexReasoningEffort,
   resolveCodexSandboxMode,
@@ -970,5 +971,35 @@ describe("codex idle timeout classifies as a hang, not a generic failure (P13-RT
     expect(lines.at(-1)?.display?.tag).toBe("error·idle_timeout");
     delete process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS;
     resetEnvCacheForTests();
+  });
+});
+
+/* -------------------- D5: the docstring cannot outlive the SDK ------------- */
+
+describe("D5 — the verified SDK version is a fact, not a claim", () => {
+  /** The repo's DECLARED `@openai/codex-sdk` range, base version only. */
+  async function declaredSdkVersion(): Promise<string> {
+    const { readFileSync } = await import("node:fs");
+    const pkg = JSON.parse(
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
+    ) as { dependencies: Record<string, string> };
+    return pkg.dependencies["@openai/codex-sdk"]!.replace(/^[\^~]/, "");
+  }
+
+  // The header claimed v0.144.1 for two releases while the dependency had moved
+  // to 0.146.0, and nothing could tell: a version claim in prose is
+  // unfalsifiable. Bumping the dependency now fails HERE — which is the moment
+  // to re-read the adapter — instead of quietly rotting the docstring.
+  it("matches the @openai/codex-sdk the app depends on", async () => {
+    expect(CODEX_SDK_VERIFIED_VERSION).toBe(await declaredSdkVersion());
+  });
+
+  it("is the version the adapter header quotes", async () => {
+    const { readFileSync } = await import("node:fs");
+    const header = readFileSync(
+      new URL("./codex-runtime.server.ts", import.meta.url),
+      "utf8",
+    ).slice(0, 3000);
+    expect(header).toContain(`v${CODEX_SDK_VERIFIED_VERSION}`);
   });
 });

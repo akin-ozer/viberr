@@ -208,7 +208,7 @@ export function HumanAccess({
           </tbody>
         </table>
       </div>
-      <div className="pol-note" style={{ marginTop: ".85rem" }}>
+      <div className="pol-note after">
         <Icon name="message" />
         <span>
           Rules that reach beyond project roles:{" "}
@@ -300,15 +300,15 @@ export function AgentCapability({
               ) : (
                 <>
                   <span className="cs">
-                    <span className="d" style={{ background: "var(--teal-dark)" }}></span>
+                    <span className="d direct"></span>
                     {p.actions.direct.length} direct
                   </span>
                   <span className="cs">
-                    <span className="d" style={{ background: "var(--blue)" }}></span>
+                    <span className="d recommend"></span>
                     {p.actions.recommend.length} recommend
                   </span>
                   <span className="cs">
-                    <span className="d" style={{ background: "var(--coral-dark)" }}></span>
+                    <span className="d human"></span>
                     {p.actions.forbidden.length} human
                   </span>
                 </>
@@ -319,7 +319,7 @@ export function AgentCapability({
       </div>
 
       <div className="human-only">
-        <div className="flabel" style={{ color: "var(--coral-dark)" }}>
+        <div className="flabel danger">
           Always reserved for humans
         </div>
         {ALWAYS_HUMAN_ROWS.map((row) => (
@@ -414,7 +414,7 @@ export function WorkflowRules({
       </div>
 
       {offChain.length > 0 && (
-        <div className="pol-note" style={{ marginBottom: ".85rem" }}>
+        <div className="pol-note before">
           <Icon name="alert" />
           <span>
             Off the governed path:{" "}
@@ -424,6 +424,19 @@ export function WorkflowRules({
             can move a task in or out — only an admin or maintainer can, by hand.
           </span>
         </div>
+      )}
+
+      {/* E4: the boundary radios were `disabled` for a non-manager with no
+          reason anywhere — the `locked` case gets its own chip on the row, but
+          "you may not change this" was silent (a `title` on a disabled button
+          never opens). Same `.deny-note` treatment the danger zone uses:
+          the authority stated once, visibly, above the rows it governs. */}
+      {!canManage && (
+        <p className="deny-note before">
+          <Icon name="lock" />
+          Read-only — changing a transition&apos;s boundary needs the{" "}
+          <strong>Edit workflow &amp; policy</strong> grant (project admin).
+        </p>
       )}
 
       <div className="trans-list">
@@ -478,7 +491,7 @@ export function WorkflowRules({
         })}
       </div>
 
-      <div className="pol-note" style={{ marginTop: ".85rem" }}>
+      <div className="pol-note after">
         <Icon name="lock" />
         <span>
           By default a human accepts completion: operators request{" "}

@@ -18,6 +18,13 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { createGithubClient } from "~/server/github/github-client.server";
+// C5-followup: the editor's own copy of this list is gone. What Viberr will
+// author, list as editable and inject is now ONE set — three hand-maintained
+// copies is how `.json`/`.yaml` came to be authorable but never injectable.
+import {
+  STORE_TEXT_EXTENSIONS,
+  STORE_TEXT_EXTENSION_LIST,
+} from "~/shared/text/store-extensions";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { getDefaultConnectionTokenFresh } from "./connections.server";
@@ -384,18 +391,6 @@ export function createStoreFolder(
 
 // ------------------------------------------------------------ author a doc
 
-/** Extensions the in-app editor will create/read (text docs only). */
-const EDITABLE_EXTENSIONS = new Set([
-  ".md",
-  ".markdown",
-  ".mdx",
-  ".txt",
-  ".rst",
-  ".text",
-  ".json",
-  ".yaml",
-  ".yml",
-]);
 
 export interface StoreDocResult {
   path: string[];
@@ -417,9 +412,9 @@ export function readStoreDoc(
   if (parts.length === 0) return null;
   const abs = path.join(target.rootAbs, ...parts);
   assertInsideRoot(target.rootAbs, abs);
-  if (!EDITABLE_EXTENSIONS.has(path.extname(abs).toLowerCase())) {
+  if (!STORE_TEXT_EXTENSIONS.has(path.extname(abs).toLowerCase())) {
     throw AppError.validation(
-      `Viberr only opens text documents (${[...EDITABLE_EXTENSIONS].join(", ")}).`,
+      `Viberr only opens text documents (${STORE_TEXT_EXTENSION_LIST.join(", ")}).`,
     );
   }
   if (!existsSync(abs) || !statSync(abs).isFile()) return null;
@@ -459,9 +454,9 @@ export function writeStoreDoc(
     throw AppError.validation("Give the document a file name.");
   }
   const withExt = path.extname(cleaned) ? cleaned : `${cleaned}.md`;
-  if (!EDITABLE_EXTENSIONS.has(path.extname(withExt).toLowerCase())) {
+  if (!STORE_TEXT_EXTENSIONS.has(path.extname(withExt).toLowerCase())) {
     throw AppError.validation(
-      `Viberr only edits text documents (${[...EDITABLE_EXTENSIONS].join(", ")}).`,
+      `Viberr only edits text documents (${STORE_TEXT_EXTENSION_LIST.join(", ")}).`,
     );
   }
   const dirAbs = path.join(target.rootAbs, ...base);

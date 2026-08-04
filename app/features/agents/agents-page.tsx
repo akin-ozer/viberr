@@ -250,12 +250,7 @@ function ResGroup({
             );
           })
         ) : (
-          <span
-            className="sub"
-            style={{ fontSize: ".8rem", color: "var(--placeholder)" }}
-          >
-            None
-          </span>
+          <span className="sub fine md dim">None</span>
         )}
       </div>
     </div>
@@ -375,12 +370,7 @@ export function StageEligibility({
       <div className="panel-head">
         <Icon name="board" />
         <h2>Eligible stages</h2>
-        <span
-          className="right sub"
-          style={{ fontSize: ".76rem", color: "var(--faint)" }}
-        >
-          {summary}
-        </span>
+        <span className="right sub fine">{summary}</span>
       </div>
       <div className="stage-chips">
         {stages.map((s) => {
@@ -414,7 +404,7 @@ export function StageEligibility({
           the failure we actually observed (Lightweight Lab, ids todo/doing/done).
           It DOES mean the declaration is dead weight, so say so. */}
       {!a.spanAll && a.stages.length > 0 && resolved.length === 0 && (
-        <div className="empty" style={{ padding: ".75rem .5rem" }}>
+        <div className="empty xs">
           None of this profile's declared stages ({a.stages.join(", ")}) exist on
           this board, by id or by role — the declaration says nothing here, so
           the profile is eligible everywhere. Edit it to restrict the profile to
@@ -482,7 +472,7 @@ export function LibraryPicker({
       </div>
       <div className="modal-body">
         {library.length === 0 ? (
-          <div className="empty" style={{ padding: "1rem .5rem" }}>
+          <div className="empty sm">
             Every global profile is already deployed here. Create more in org
             settings → Global agent profiles.
           </div>
@@ -757,7 +747,7 @@ export function ProfileDetail({
                   ))
                 ) : (
                   <span className="be-chip">
-                    <span className="agent-glyph op" style={{ width: 22, height: 22 }}>
+                    <span className="agent-glyph op">
                       <Icon name="shield" />
                     </span>
                     Orchestration runtime
@@ -778,7 +768,7 @@ export function ProfileDetail({
           ) : (
             <div className="rt-cell">
               <div className="lbl">Model</div>
-              <div className="rt-val mono model-val" style={{ fontSize: ".82rem" }}>
+              <div className="rt-val mono model-val">
                 <span>{a.modelLabel}</span>
                 {!a.modelKnown && (
                   <span
@@ -794,7 +784,7 @@ export function ProfileDetail({
           )}
           <div className="rt-cell">
             <div className="lbl">Continuity</div>
-            <div className="rt-val mem-row" style={{ marginTop: 0 }}>
+            <div className="rt-val mem-row">
               <Icon name="memory" />
               <span>
                 Re-anchors on <code className="mono">task.md</code>
@@ -821,15 +811,12 @@ export function ProfileDetail({
         <div className="panel-head">
           <Icon name="activity" />
           <h2>Active deployments</h2>
-          <span
-            className="right sub"
-            style={{ fontSize: ".76rem", color: "var(--faint)" }}
-          >
+          <span className="right sub fine">
             {countLabel(insts.length, "engagement")}
           </span>
         </div>
         {insts.length === 0 ? (
-          <div className="empty" style={{ padding: "1rem .5rem" }}>
+          <div className="empty sm">
             {backendMissing
               ? `Not currently engaged on any task. This profile is approved, but ${backendLabel} is not configured — assigning it would produce a refused run.`
               : "Not currently engaged on any task. This profile is approved and available for assignment."}
@@ -898,7 +885,7 @@ export function LiveRoster({
         </div>
         {sorted.length === 0 && (
           // Empty state the mock never designed (agents spec §4.4).
-          <div className="empty" style={{ padding: "1rem" }}>
+          <div className="empty sm">
             No agents are currently engaged.
           </div>
         )}
@@ -1207,7 +1194,7 @@ export function AgentsPage({
               onClick={() => setTab("live")}
             >
               <Icon name="activity" />
-              Live<span style={{ opacity: 0.6 }}>· {deployments.length}</span>
+              Live<span className="tally">· {deployments.length}</span>
             </button>
           </div>
           <button type="button" className="btn ghost sm" onClick={() => setMatrixOpen(true)}>
@@ -1223,7 +1210,7 @@ export function AgentsPage({
               <Icon name="agents" />
               Add from library
               {libraryProfiles.length > 0 && (
-                <span style={{ opacity: 0.6 }}>· {libraryProfiles.length}</span>
+                <span className="tally">· {libraryProfiles.length}</span>
               )}
             </button>
           )}
@@ -1250,13 +1237,13 @@ export function AgentsPage({
           <div className="l">tasks with a live operator</div>
         </div>
         <div className="ag-stat">
-          <div className="n" style={{ color: "var(--agent-dark)" }}>
+          <div className="n agent">
             {working}
           </div>
           <div className="l">specialists in a working state</div>
         </div>
         <div className="ag-stat">
-          <div className="n" style={{ color: "var(--blue-pressed)" }}>
+          <div className="n human">
             {waiting}
           </div>
           {/* P14-WL-04: this counted agent ENGAGEMENTS parked on a human in

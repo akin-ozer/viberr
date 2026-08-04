@@ -16,6 +16,7 @@ import {
 import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
+import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import {
   countUnreadNotifications,
   createNotification,
@@ -423,5 +424,87 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
     const elif = store.users.elif.id;
     createNotification(store.db, { id: "acc2", userId: elif, kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-106" });
     expect(listNotifications(store.db, elif)[0]?.waitingOnYou).toBe(false);
+  });
+});
+
+/**
+ * E6: the inbox and Home's project cards are the two surfaces that answer
+ * "waiting on you", and they used to make the `mine` / `overrideEligible` pick
+ * independently — agreeing only by comment. These drive BOTH off one store so a
+ * change to either reading fails here, and they pin the ruling: an org admin's
+ * override eligibility is governance reach, never a personal inbox item.
+ */
+describe("E6: 'waiting on you' reads the same on the inbox and on Home", () => {
+  const PACKET: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "Pick one",
+    body: "",
+    observations: [],
+    options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
+  };
+
+  /** One project, one open packet, plus an org admin with NO project role. */
+  function storeWithOpenPacket() {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-140", { stage: "review" }),
+      packet: PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const outsideAdmin = insertUser(store.db, {
+      id: "u_orgadmin_e6",
+      email: "orgadmin-e6@viberr.test",
+      name: "Org Admin",
+      role: "admin",
+    });
+    return { store, outsideAdmin };
+  }
+
+  const cardFor = (
+    db: DatabaseSync,
+    id: string,
+    role: "admin" | "member",
+    slug: string,
+  ) => listHomeProjectsForUser(db, { id, role }).find((p) => p.slug === slug)!;
+
+  it("a maintainer: the inbox says waiting, the card counts it, nothing lands in the override counter", () => {
+    const { store } = storeWithOpenPacket();
+    const uid = store.users.murat.id;
+    createNotification(store.db, { id: "e6m", userId: uid, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-140" });
+
+    expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(true);
+    const card = cardFor(store.db, uid, "member", store.slug);
+    expect(card.waiting).toBe(1);
+    expect(card.overrideWaiting).toBe(0);
+  });
+
+  it("an org admin with no project role: BOTH surfaces keep it out of the personal count, and only Home reports the override reach", () => {
+    const { store, outsideAdmin } = storeWithOpenPacket();
+    createNotification(store.db, { id: "e6a", userId: outsideAdmin.id, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-140" });
+
+    // The ruling: override eligibility is governance, not an inbox item. The
+    // inbox has no second counter to put it in, so it simply does not wait.
+    expect(listNotifications(store.db, outsideAdmin.id)[0]?.waitingOnYou).toBe(
+      false,
+    );
+    // Home does not drop it — it reports it as its own, differently-labelled
+    // number. Folding it into `waiting` would tell an org admin they personally
+    // owe an answer on every project in the instance.
+    const card = cardFor(store.db, outsideAdmin.id, "admin", store.slug);
+    expect(card.waiting).toBe(0);
+    expect(card.overrideWaiting).toBe(1);
+  });
+
+  it("a viewer reaches neither bucket on either surface", () => {
+    const { store } = storeWithOpenPacket();
+    const uid = store.users.elif.id;
+    createNotification(store.db, { id: "e6v", userId: uid, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-140" });
+
+    expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(false);
+    const card = cardFor(store.db, uid, "member", store.slug);
+    expect(card.waiting).toBe(0);
+    expect(card.overrideWaiting).toBe(0);
   });
 });

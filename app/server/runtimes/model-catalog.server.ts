@@ -101,7 +101,11 @@ const CLAUDE_CURATED: ModelCatalog = {
 /** Codex has no account-scoped list endpoint in the TypeScript SDK, so this is
  *  a hand-maintained snapshot of the current ChatGPT-plan model catalog. Keep
  *  effort values inside the SDK's ModelReasoningEffort union; the product's
- *  newer Max/Ultra UI modes are not ThreadOptions values in SDK 0.144.1. */
+ *  newer Max/Ultra UI modes are still not ThreadOptions values in the verified
+ *  SDK (`CODEX_SDK_VERIFIED_VERSION`, codex-runtime.server.ts — the union did
+ *  not move between 0.144.1 and 0.146.0). The union's `minimal` is deliberately
+ *  not OFFERED here; `resolveCodexReasoningEffort` still accepts it so a profile
+ *  that already stored it keeps running on the tier it was configured with. */
 const CODEX_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 
 const CODEX_MODELS: CatalogModel[] = [

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { createRoutesStub } from "react-router";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 import {
@@ -8,13 +9,41 @@ import {
   MembersPanel,
   ProjectPanel,
   RepoPanel,
+  SettingsPage,
   StagesPanel,
   resolveStageOrder,
   stageMoveOptions,
 } from "./settings-page";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 
-afterEach(cleanup);
+/**
+ * E3: `edit-policy`, `manage-members` and `grant-github-scope` are three
+ * DIFFERENT server guards that happen to overlap in tier today (the first two
+ * are both admin-only). A test that asserts "admin sees it, viewer doesn't"
+ * therefore passes with the wrong action id wired in — the exact reason the
+ * page carried a `myRole === "admin"` literal for so long. `grantOnly` makes
+ * `roleCan` answer for exactly ONE action id, so each panel's gate is pinned to
+ * the id it actually asks for and no other. Left null it delegates to the real
+ * implementation, so every other test in this file sees production behaviour.
+ */
+const { grantOnly } = vi.hoisted(() => ({
+  grantOnly: { action: null as string | null },
+}));
+vi.mock("~/shared/rbac", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/shared/rbac")>();
+  return {
+    ...actual,
+    roleCan: (role: ProjectRole | null | undefined, action: string) =>
+      grantOnly.action === null
+        ? actual.roleCan(role, action as Parameters<typeof actual.roleCan>[1])
+        : action === grantOnly.action,
+  };
+});
+
+afterEach(() => {
+  grantOnly.action = null;
+  cleanup();
+});
 
 const PROJECT: SettingsViewData["project"] = {
   slug: "viberr-core",
@@ -779,5 +808,118 @@ describe("DangerZone", () => {
       expect(del.disabled).toBe(!expectedEnabled);
       cleanup();
     }
+  });
+});
+
+// E3: the page's panel gates must name the action ids the SERVER guards name —
+// `edit-policy` for project identity / stages / repo repair + branch cleanup
+// (settings-actions.server.ts `requireProjectAction`), `manage-members` for
+// invite + remove (same file), `grant-github-scope` for the credential row
+// (routes/project.github.tsx). Two of the three resolve to admin-only today, so
+// these drive `roleCan` one action at a time: a panel wired to the wrong id
+// goes dark while its neighbour lights up, which no role-tier assertion could
+// ever catch.
+describe("SettingsPage — each panel gates on the action its own server guard checks", () => {
+  const DATA: SettingsViewData = {
+    project: PROJECT,
+    stages: STAGES,
+    stageCounts: { triage: 2, review: 2 },
+    members: MEMBERS,
+    credential: CREDENTIAL,
+    repoFootprintTasks: 0,
+    branchCleanupOnMerge: true,
+  };
+
+  function renderPage() {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <SettingsPage data={DATA} meId="u_arda" myRole="admin" />
+        ),
+      },
+    ]);
+    return render(<Stub initialEntries={["/"]} />);
+  }
+
+  /** What each panel offers a manager, keyed off DOM the panels own alone. */
+  function affordances(container: HTMLElement) {
+    return {
+      // ProjectPanel: identity inputs are present either way, enabled only for
+      // a manager — so read the property, not presence.
+      identity: !(container.querySelector("#set-project-name") as HTMLInputElement)
+        .disabled,
+      stages: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Add stage",
+        ),
+      ),
+      members: container.querySelector('input[placeholder="Full name"]') !== null,
+      repoRepair: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Repair…",
+        ),
+      ),
+      credential: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Grant scope",
+        ),
+      ),
+    };
+  }
+
+  it("grants ONLY edit-policy → identity, stages and repo repair; members and credentials stay shut", () => {
+    grantOnly.action = "edit-policy";
+    const { container } = renderPage();
+    expect(affordances(container)).toEqual({
+      identity: true,
+      stages: true,
+      members: false,
+      repoRepair: true,
+      credential: false,
+    });
+  });
+
+  it("grants ONLY manage-members → the members panel, and nothing else", () => {
+    grantOnly.action = "manage-members";
+    const { container } = renderPage();
+    expect(affordances(container)).toEqual({
+      identity: false,
+      stages: false,
+      members: true,
+      repoRepair: false,
+      credential: false,
+    });
+  });
+
+  it("grants ONLY grant-github-scope → the credential row, and nothing else", () => {
+    grantOnly.action = "grant-github-scope";
+    const { container } = renderPage();
+    expect(affordances(container)).toEqual({
+      identity: false,
+      stages: false,
+      members: false,
+      repoRepair: false,
+      credential: true,
+    });
+  });
+
+  // The branch-cleanup toggle rides `edit-policy` too (setBranchCleanup checks
+  // it), and it is the one repo control that renders for everybody — so its
+  // reason to be disabled has to track the same id, not the repair button's
+  // mere presence.
+  it("the after-merge branch-cleanup toggle follows edit-policy, not manage-members", () => {
+    grantOnly.action = "manage-members";
+    const shut = renderPage().container.querySelector(
+      '.kv-row input[type="checkbox"]',
+    ) as HTMLInputElement;
+    expect(shut.disabled).toBe(true);
+    cleanup();
+
+    grantOnly.action = "edit-policy";
+    const open = renderPage().container.querySelector(
+      '.kv-row input[type="checkbox"]',
+    ) as HTMLInputElement;
+    expect(open.disabled).toBe(false);
   });
 });

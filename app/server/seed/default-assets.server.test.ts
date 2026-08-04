@@ -2,8 +2,9 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { readdirSync } from "node:fs";
+import { logger } from "~/server/logging/logger.server";
 
 /**
  * P13 regression: the shipped agent assets must load under EVERY runtime, not
@@ -159,6 +160,44 @@ describe("shipped-asset refresh (B-OP1)", () => {
 
     seedDefaultAgentAssets(dataRoot);
     expect(storeCopy(dataRoot)).toBe(edited);
+  });
+
+  /**
+   * B7: preserving the edit is correct, but doing it SILENTLY is how the live
+   * `./data` store ended up running an operator.md that matches no shipped
+   * version and still names the deleted `prompt_specialist` /
+   * `assign_specialist` tools. Boot must name the file and the drift.
+   */
+  it("WARNS that a diverged copy is being kept, naming the asset and both hashes", async () => {
+    const { seedDefaultAgentAssets, assetHash } = await import(
+      "./default-assets.server"
+    );
+    const dataRoot = freshStore();
+    seedDefaultAgentAssets(dataRoot);
+
+    // A copy that hashes to nothing this app ever shipped — the shape of the
+    // real finding, not a hand-appended paragraph.
+    const diverged = "---\nid: operator\n---\n\nCall assign_specialist, then prompt_specialist.\n";
+    writeFileSync(path.join(dataRoot, OPERATOR_REL), diverged, "utf8");
+
+    const warn = vi.spyOn(logger, "warn");
+    try {
+      seedDefaultAgentAssets(dataRoot);
+
+      // Still preserved — the warning REPLACES silence, not the fail-safe.
+      expect(storeCopy(dataRoot)).toBe(diverged);
+
+      const call = warn.mock.calls.find(
+        ([, fields]) => (fields as { asset?: string } | undefined)?.asset === OPERATOR_REL,
+      );
+      expect(call, "no warning named the diverged asset").toBeDefined();
+      const fields = call![1] as { onDisk?: string; shipped?: string; path?: string };
+      expect(fields.onDisk).toBe(assetHash(diverged).slice(0, 12));
+      expect(fields.shipped).toBe(assetHash(shipped()).slice(0, 12));
+      expect(fields.path).toBe(path.join(dataRoot, OPERATOR_REL));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("adopts a pre-manifest store that is already current, so the NEXT rewrite reaches it", async () => {

@@ -35,7 +35,11 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
-import { checksPill, reviewPill } from "~/features/github/github-pills";
+import {
+  checksPill,
+  prStatePill,
+  reviewPill,
+} from "~/features/github/github-pills";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -166,7 +170,7 @@ function OwnerLine({ task }: { task: TaskSummary }) {
   }
   return (
     <div className="card-owner">
-      <span className="avatar" style={{ opacity: 0.5 }}>
+      <span className="avatar ghost">
         ?
       </span>
       <span className="lbl">{task.operator ? "awaiting owner" : "unassigned"}</span>
@@ -273,6 +277,33 @@ function TaskCard({
             <span className="trace pr">
               <Icon name="pr" />#{task.pr.number}
             </span>
+          )}
+          {/* R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
+              full-autonomy task reaches the done stage with its PR still open —
+              `pr.state: "accepted"` is exactly "a human accepted the completion
+              but the real merge is still pending". The card drew that as the
+              green "accepted" readiness pill and a stateless "#124" chip, which
+              is what a merged task looks like too. Done meant two things and the
+              card showed one.
+
+              The closed case is the same omission from the other side (live
+              finding H10): closing PR #124 unmerged produced a decision packet,
+              a "PR closed" badge and a divergence notification on the DETAIL
+              page, while the card still read "ready · awaiting verdict".
+
+              Both earn a pill under this card's density rule (only ACTIONABLE
+              state, per the checks/review pills below): each names work that
+              cannot finish without a human. `merged` and `review` stay silent —
+              the readiness pill and the PR chip already carry those.
+
+              The vocabulary comes from `prStatePill`, the one PR-state → pill
+              mapping the GitHub view and the task branch panel already read.
+              Restating it here is how "merge pending" would come to mean one
+              thing on the card and another two screens away. */}
+          {(task.pr?.state === "accepted" || task.pr?.state === "closed") && (
+            <Pill kind={prStatePill(task.pr.state).kind} sm>
+              {prStatePill(task.pr.state).label}
+            </Pill>
           )}
           {/* P13-D-28: CI health, but only when it is ACTIONABLE. The card is
               already dense and "N checks passing" is not news; a failing build
@@ -444,38 +475,21 @@ function ListView({
 }) {
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   return (
-    <div
-      className="board"
-      style={{
-        gridAutoFlow: "row",
-        gridAutoColumns: "auto",
-        display: "block",
-        padding: "0 1.4rem 1.4rem",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: ".6rem",
-          maxWidth: 920,
-        }}
-      >
+    <div className="board list">
+      <div className="board-list">
         {tasks.length === 0 && <div className="empty">{emptyCopy}</div>}
         {tasks.map((t) => (
           <div
             key={t.key}
-            className="card"
-            style={{ flexDirection: "row", alignItems: "center", gap: "1rem" }}
+            className="card list-row"
           >
             <Link
               className="key"
-              style={{ width: 64 }}
               to={`/projects/${t.projectSlug}/tasks/${t.key}`}
             >
               {t.key}
             </Link>
-            <h3 style={{ flex: 1 }}>
+            <h3>
               <Link to={`/projects/${t.projectSlug}/tasks/${t.key}`}>
                 {t.title}
               </Link>
@@ -574,9 +588,8 @@ function NewTaskModal({
 
   return (
     <dialog
-      className="modal-card"
+      className="modal-card modal-narrow"
       aria-label="New task"
-      style={{ width: "min(560px, calc(100vw - 2rem))" }}
       ref={panelRef}
     >
       <div className="modal-head">
@@ -838,10 +851,10 @@ function FilterBar({
           <Icon name={f.icon} />
           {f.label}
           {f.id === "human" && waitingOnMe > 0 && (
-            <span style={{ opacity: 0.7 }}>· {waitingOnMe}</span>
+            <span className="tally">· {waitingOnMe}</span>
           )}
           {f.id === "archived" && archived > 0 && (
-            <span style={{ opacity: 0.7 }}>· {archived}</span>
+            <span className="tally">· {archived}</span>
           )}
         </button>
       ))}

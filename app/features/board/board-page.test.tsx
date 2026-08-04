@@ -472,3 +472,48 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     expect(hint.className).not.toContain("err");
   });
 });
+
+describe("R16-6: the card says when Done still needs a human", () => {
+  // Owner ruling 2026-08-04: `merge-pull-request` stays human-only, so a
+  // full-autonomy task reaches the done stage with its PR open. `pr.state`
+  // already carries that as "accepted" ("a human accepted the completion but
+  // the real merge is still pending") — the card just never drew it, so a
+  // merge-pending task and a merged one looked the same.
+
+  it("draws `merge pending` on an accepted-but-unmerged PR", () => {
+    const { getByText, queryByText } = renderBoard([
+      task({
+        stage: "done",
+        displayReadiness: "accepted",
+        pr: { number: 124, state: "accepted", title: "Attach a credential" },
+      }),
+    ]);
+    expect(getByText("merge pending")).toBeTruthy();
+    // The PR chip still names the PR; the pill is the addition, not a swap.
+    expect(getByText("#124")).toBeTruthy();
+    expect(queryByText("closed")).toBeNull();
+  });
+
+  it("draws the shared `closed` pill on a PR closed without merging (H10)", () => {
+    const { getByText, queryByText } = renderBoard([
+      task({
+        pr: { number: 124, state: "closed", title: "Attach a credential" },
+      }),
+    ]);
+    expect(getByText("closed")).toBeTruthy();
+    expect(queryByText("merge pending")).toBeNull();
+  });
+
+  it("stays silent for a merged PR and for one still under review", () => {
+    // Density rule: only ACTIONABLE state earns a pill. The readiness pill and
+    // the PR chip already carry these two.
+    for (const state of ["merged", "review"] as const) {
+      const { queryByText, unmount } = renderBoard([
+        task({ pr: { number: 124, state, title: "Attach a credential" } }),
+      ]);
+      expect(queryByText("merge pending"), state).toBeNull();
+      expect(queryByText("closed"), state).toBeNull();
+      unmount();
+    }
+  });
+});

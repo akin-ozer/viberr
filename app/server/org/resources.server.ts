@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -31,6 +32,7 @@ import {
   skillsRootDir,
 } from "~/server/files/file-store-root.server";
 import { isInjectableKbDoc } from "~/server/files/kb-injection.server";
+import { resolveContainedSkillFile } from "~/server/files/skill-body.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
@@ -1312,14 +1314,62 @@ interface SkillRow {
   updated_at: string;
 }
 
+/**
+ * The editor reads the SAME contained path the injector does.
+ *
+ * A5-followup/pass-16: this reader used to build the path itself and
+ * `readFileSync` it, which dereferences. So a symlinked `SKILL.md` (or skill
+ * FOLDER) rendered the link TARGET's content in the org-settings editor as if it
+ * were the skill — text no run would ever see, because `readSkillBodyDetailed`
+ * refuses links. Two answers to "what is this skill?" is the silent-resource
+ * failure this pass exists to close, and here it also pointed the editor's own
+ * `writeFileSync` at a file outside the store (see `assertSkillBodyWritable`).
+ */
 function readSkillBody(name: string, ctx: OrgSeedContext): string {
-  const abs = path.join(skillDirPath(name, ctx.dataRoot), "SKILL.md");
-  if (!existsSync(abs)) return "";
+  let resolved: ReturnType<typeof resolveContainedSkillFile>;
   try {
-    const raw = readFileSync(abs);
+    resolved = resolveContainedSkillFile(name, ctx.dataRoot);
+  } catch {
+    return ""; // traversal-shaped name — `skillDirPath` refused it
+  }
+  if ("reason" in resolved) return "";
+  try {
+    const raw = readFileSync(resolved.file);
     return raw.subarray(0, SKILL_BODY_MAX_BYTES).toString("utf8");
   } catch {
     return "";
+  }
+}
+
+/**
+ * Refuse to SAVE over a `SKILL.md` that leaves the store.
+ *
+ * `writeFileSync` follows a symlink, so an uncontained SKILL.md turned the
+ * skill editor into a write-anywhere primitive: save once and the link's target
+ * — any file the server process can write — is replaced with the editor's
+ * textarea. The read half above already blanks the body for these skills, which
+ * would make an unguarded save even worse: it would blank the target. Same rule
+ * as the injector, stated to the human instead of logged.
+ */
+function assertSkillBodyWritable(name: string, ctx: OrgSeedContext): void {
+  const dir = skillDirPath(name, ctx.dataRoot);
+  const uncontained = () =>
+    AppError.validation(
+      `SKILL.md for ${name} is a symlink (or sits under one), so it points outside the skills store. Viberr never reads or writes through a link out of the store — replace it with a real file to edit it here.`,
+    );
+  const dirStat = lstatOr(dir);
+  if (dirStat?.isSymbolicLink()) throw uncontained();
+  // `lstat`, not `existsSync`: a link to a target that does not exist yet is
+  // still a link, and the write would CREATE the target outside the store.
+  if (!lstatOr(path.join(dir, "SKILL.md"))) return;
+  if ("reason" in resolveContainedSkillFile(name, ctx.dataRoot)) throw uncontained();
+}
+
+function lstatOr(target: string): ReturnType<typeof lstatSync> | null {
+  try {
+    return lstatSync(target);
+  } catch {
+    return null;
   }
 }
 
@@ -1480,6 +1530,13 @@ export async function saveSkill(
     throw AppError.validation(
       `SKILL.md for ${oldName} is larger than the 256 KB editor limit, so the editor only loaded a truncated copy. Saving would overwrite the full file with that truncated text — edit SKILL.md on disk (or re-upload it) instead.`,
     );
+  }
+
+  // A5-followup: a save must never write THROUGH a link out of the store. This
+  // runs BEFORE the rename below, which would otherwise move the linked folder
+  // first and report the refusal against a path that no longer exists.
+  if (oldName && !keepExistingBody && !filesMode) {
+    assertSkillBodyWritable(oldName, ctx);
   }
 
   if (oldName && name !== oldName) {

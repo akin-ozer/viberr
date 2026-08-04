@@ -16,7 +16,7 @@ import {
   initialsOfName,
 } from "~/shared/mapping/actor.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
-import { decisionsRequiring } from "~/server/projections/decisions.server";
+import { indexDecisionInbox } from "~/server/projections/notifications.server";
 
 /**
  * Home (`/`) read models — the project directory + org tile summaries
@@ -25,11 +25,11 @@ import { decisionsRequiring } from "~/server/projections/decisions.server";
  *
  * - `running`: distinct tasks with an `agent_runs` row in
  *   `state = 'running'` — the live run registry, not a `waiting`-field proxy.
- * - `waiting`: LIVE pending decisions, PROJECT-WIDE (ruling 10 — the
- *   "waiting on you" copy stays, scoping is V1-deliberate). Same rule as the
- *   notifications page's "Waiting on you" bucket (F7-NOTIF1): tasks with an
- *   open packet OR a pending operator recommendation, excluding the terminal
- *   stage — keep the two surfaces in step.
+ * - `waiting`: LIVE pending decisions this viewer can act on, and
+ *   `overrideWaiting` the ones only their org-admin override reaches. Both come
+ *   from `indexDecisionInbox` (notifications.server.ts) — the SAME call the
+ *   notifications page's "Waiting on you" bucket makes, so the two surfaces
+ *   stay in step by construction rather than by comment (E6).
  * - `accent`: stable per-slug hash over the mock palette (the mock's
  *   index-based accents shift when projects are created — spec §8 note 6).
  */
@@ -100,19 +100,14 @@ export function listHomeProjectsForUser(
 ): HomeProjectCard[] {
   const all = listHomeProjects(db);
   // R8-3: the card's "waiting on you" must mean decisions THIS viewer can act
-  // on — not a project-global tally. `decisionsRequiring` resolves each open
-  // decision against the viewer's project role + task ownership, splitting
-  // override-eligible (non-member org-admin reach) out of the personal count.
-  const decisions = decisionsRequiring(db, viewer.id);
-  const mineBySlug = new Map<string, number>();
-  const overrideBySlug = new Map<string, number>();
-  for (const d of decisions.mine)
-    mineBySlug.set(d.projectSlug, (mineBySlug.get(d.projectSlug) ?? 0) + 1);
-  for (const d of decisions.overrideEligible)
-    overrideBySlug.set(d.projectSlug, (overrideBySlug.get(d.projectSlug) ?? 0) + 1);
+  // on — not a project-global tally. E6: which decisions those are is decided
+  // ONCE, in `indexDecisionInbox`, which the notifications inbox reads too — so
+  // the two surfaces that answer "waiting on you" cannot answer it differently.
+  // The org-admin override reach is the counter next to it, never inside it.
+  const { waitingBySlug, overrideBySlug } = indexDecisionInbox(db, viewer.id);
   const scoped = all.map((p) => ({
     ...p,
-    waiting: mineBySlug.get(p.slug) ?? 0,
+    waiting: waitingBySlug.get(p.slug) ?? 0,
     overrideWaiting: overrideBySlug.get(p.slug) ?? 0,
   }));
 

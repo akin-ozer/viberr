@@ -392,6 +392,30 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(primaryDenied).not.toContain("Bash(git commit:*)");
   });
 
+  // D4/D5: `allowedTools` is the run's APPROVAL list and it has to reach the
+  // SDK — an `mcp__*` tool with no entry stalls on a permission prompt no human
+  // is there to answer. And there is no `tools` option: `disallowedTools` is the
+  // only restriction channel, which is what the interface docstring now says.
+  it("forwards the approval list, and has no `tools` restriction channel", async () => {
+    const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
+    let captured: Record<string, unknown> | undefined;
+    const queryFn = (params: { options?: Record<string, unknown> }) => {
+      captured = params.options;
+      const { q } = fakeQuery(result);
+      return q;
+    };
+    createClaudeAdapter({ queryFn: queryFn as never }).start(
+      { ...SPEC, allowedTools: ["mcp__viberr_agent", "mcp__everything__echo"] },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(captured?.allowedTools).toEqual([
+      "mcp__viberr_agent",
+      "mcp__everything__echo",
+    ]);
+    expect(captured).not.toHaveProperty("tools");
+  });
+
   it("interrupt() calls the SDK interrupt and ends interrupted (no result line)", async () => {
     const many = Array.from({ length: 20 }, (_, i) => ({ type: "assistant", message: { content: [{ type: "text", text: "line " + i }] } }));
     const { q, wasInterrupted } = fakeQuery(many);

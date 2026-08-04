@@ -171,7 +171,7 @@ export function ResourcesPanel({
           }}
         />
       </div>
-      <div className="def-note" style={{ marginTop: ".8rem" }}>
+      <div className="def-note spaced">
         <Icon name="shield" />
         <span>
           These are the shared base definitions. Each project's policy decides which

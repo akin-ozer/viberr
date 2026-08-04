@@ -91,7 +91,7 @@ export function CredentialCard({
       <div className="cred-top">
         <Icon name="lock" />
         <span className="cred-name">{credential.label}</span>
-        <span className="mono" style={{ marginLeft: "auto", color: "var(--faint)" }}>
+        <span className="mono push faint">
           {credential.masked}
         </span>
       </div>
@@ -103,7 +103,7 @@ export function CredentialCard({
           </span>
         ))}
         {!unverified && unproven.length > 0 && (
-          <span className="sub" style={{ alignSelf: "center" }}>
+          <span className="sub self-center">
             {unproven.map((s) => s.id).join(", ")} unproven — verified on
             first use
           </span>

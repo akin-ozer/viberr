@@ -498,4 +498,106 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
     expect(q.ready.map((t) => t.key)).toContain("VIB-4");
     expect(q.ready.find((t) => t.key === "VIB-4")!.blockReason).toBeNull();
   });
+
+  /**
+   * R16-3 (owner ruling 2026-08-04): a terminal GitHub fact outranks the
+   * process gates, and force-accept is withheld while the PR is closed. The row
+   * used to carry the verdict gate's "…or an admin can force-accept" beside a
+   * PR GitHub had already closed — the exact override the task page refuses.
+   */
+  it("a CLOSED PR on the same delivered task replaces the verdict gate, force-accept and all", () => {
+    const store = setupTestStore(ctx);
+    seedDelivered(store, "VIB-6", {
+      pr: { number: 66, state: "closed", title: "Delivered, unreviewed" },
+    });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = q.working.find((t) => t.key === "VIB-6")!;
+    expect(row.blockReason).toContain("closed on GitHub without merging");
+    expect(row.blockReason).not.toContain("force-accept");
+    expect(row.blockReason).not.toContain("approving verdict");
+    // Unchanged: it was never acceptance-ready (NEW-1 filters closed PRs out).
+    expect(q.ready.map((t) => t.key)).not.toContain("VIB-6");
+  });
+
+  it("the same task with its PR still OPEN keeps the process-gate sentence", () => {
+    const store = setupTestStore(ctx);
+    seedDelivered(store, "VIB-6");
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(q.working.find((t) => t.key === "VIB-6")!.blockReason).toMatch(
+      /no approving verdict yet — run a review for a verdict, or an admin can force-accept/,
+    );
+  });
+
+  it("a MERGED PR is not terminal — the verdict gate still names the real blocker", () => {
+    const store = setupTestStore(ctx);
+    seedDelivered(store, "VIB-6", {
+      pr: { number: 66, state: "merged", title: "Delivered, unreviewed" },
+    });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = q.working.find((t) => t.key === "VIB-6")!;
+    expect(row.pr).toMatchObject({ number: 66, state: "merged" });
+    expect(row.blockReason).toMatch(/no approving verdict yet/);
+  });
+});
+
+/**
+ * P14-LV-07 residual: `prStateSub` has described a conflicting PR since LV-07,
+ * but the row it reads never carried `mergeable` — so on every real queue that
+ * branch was unreachable and the one PR state that CANNOT be merged looked
+ * exactly like a healthy open one.
+ */
+describe("the row carries GitHub's mergeability", () => {
+  it("forwards `mergeable` from the projection", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-11", {
+        title: "Conflicting",
+        stage: "review",
+        waiting: "human",
+        pr: {
+          number: 55,
+          state: "review",
+          title: "Conflicting",
+          mergeable: "conflicting",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = [...q.ready, ...q.working].find((t) => t.key === "VIB-11")!;
+    expect(row.pr!.mergeable).toBe("conflicting");
+  });
+
+  it("an unread mergeability is ABSENT, never coerced to a value", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-12", {
+        title: "Never reconciled",
+        stage: "review",
+        waiting: "human",
+        pr: { number: 56, state: "review", title: "Never reconciled" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = [...q.ready, ...q.working].find((t) => t.key === "VIB-12")!;
+    // Not "clean": nobody asked GitHub. The subline must not claim mergeability
+    // it never read (prStateSub only speaks on an explicit "conflicting").
+    expect("mergeable" in row.pr!).toBe(false);
+  });
 });

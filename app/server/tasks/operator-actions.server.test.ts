@@ -1702,6 +1702,34 @@ describe("B3 — one open decision at a time", () => {
     ).toHaveLength(0);
   });
 
+  // The pre-read guard alone only orders SEQUENTIAL opens. Two turns that both
+  // read the task before either writes (the operator's own coalesce-queue makes
+  // this reachable: a queued trigger fires the moment the in-flight run's
+  // completion work lands) both saw "no packet" and both wrote — the second
+  // silently replacing a question a human might already be answering. The
+  // authoritative check has to be INSIDE the locked write, the way the
+  // acceptance head gate does it (`assertVerifiedHeadStillApplies`).
+  it("refuses the loser of a CONCURRENT open — both passed the pre-read", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+
+    // Do NOT await the first: it suspends inside `updateTaskFile` (the file
+    // mutex) with nothing written yet, so the second call's pre-read sees a
+    // packet-free task and gets past the guard the sequential test covers.
+    const first = open("Which endpoint should this target?");
+    const second = await open("Something else entirely");
+    const firstResult = await first;
+
+    expect(firstResult.outcome).toBe("done");
+    expect(second.outcome).toBe("noop");
+    expect(second.message).toContain("was opened on VIB-1 first");
+    expect(task().packet!.title).toBe("Which endpoint should this target?");
+    // …and the loser wrote no timeline event either — a noop is a NON-write.
+    expect(
+      task().timeline.filter((e) => e.text.includes("Something else entirely")),
+    ).toHaveLength(0);
+  });
+
   it("withdrawing the open packet first makes room for the next one", async () => {
     deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
     seedTask("impl");
