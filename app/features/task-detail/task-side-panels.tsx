@@ -453,7 +453,15 @@ export function CurrentStatePanel({
           <span className="k">Waiting on</span>
           <span className="v">
             {task.waiting === "human" ? (
-              <span className="by-human">Human decision</span>
+              // F17-2: name WHERE the decision lives without asserting WHICH one
+              // (that is state-dependent — a packet, a stage move, or acceptance).
+              // A wrong specific hint would mislead; this tooltip is always true.
+              <span
+                className="by-human"
+                title="A human decision is needed — see the decision packet, the stage control, or the acceptance action on this page."
+              >
+                Human decision
+              </span>
             ) : task.waiting === "agent" ? (
               <span className="by-agent">Agent work</span>
             ) : (

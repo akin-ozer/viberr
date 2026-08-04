@@ -490,6 +490,11 @@ describe("BranchesPanel", () => {
     expect(rows[0]!.querySelector(".pill.ready")!.textContent).toContain(
       "synced",
     );
+    // F17-L6: VIB-142's open PR conflicts — the branch row surfaces it too, so
+    // a rebase-needed branch is visible in the execution-branches table.
+    expect(rows[0]!.textContent).toContain("conflicts");
+    // A merged branch row shows no conflict pill.
+    expect(rows[2]!.textContent).not.toContain("conflicts");
 
     // VIB-151: no PR → em-dash placeholder; behind main risk pill.
     expect(rows[1]!.textContent).toContain("—");
