@@ -234,6 +234,39 @@ reflow (except F18-12).
   layout in [task-detail]. Test: a jsdom/CSS assertion or an e2e at 375px that
   the delivering + owner controls are in-viewport.
 
+## STATUS — Phase D complete (all committed on `pass18/product-fixes`, 2845 tests + tsc green)
+
+Every item above is IMPLEMENTED, tested (each fix canary-verified by neutering it and
+watching the test fail), and — where browser-observable — live-verified. Commit map:
+
+| Finding / ruling | Commit | Live-verified |
+|---|---|---|
+| F18-13 (Done task withdraws force-accept) | `7abb286` | ✓ VIB-3 Done: no force-accept / no "blocked" |
+| R18-1/F18-11 (reviewer inherits deliverer KBs) | `97131bd` | unit (organic repro in Phase B) |
+| F18-5 (writer lock fails closed) + F18-5b (Home strip) | `8d75181`, `23c9ce6` | ✓ Home strip "Writer: pid … on …" |
+| R18-3/F18-8 (strip repo `.claude` + strict MCP) | `e274134` | ✓ VIB-6 run init (below) |
+| R18-2/F18-10 (full-autonomy re-queue) | `e07abc0` | unit (LAB-1 strand repro in Phase B) |
+| F18-6 (ghost-admin removable) | `643ca81` | file-recovery repro in Phase B |
+| F18-4 (KB folder missing) | `7b8696c` | ✓ moved folder → "folder missing" |
+| F18-12 (profile-grid stacks on mobile) | `4147036` | ✓ 375px single column, controls reachable |
+| F18-7 (apply-rec 409 copy) | `4147036` | unit |
+| F18-3 (OAuth affordances by provider) | `20c2785` | ✓ profile quiet one-liner; modal defaults Local |
+| F18-1 (orphaned notifications) | `5e67127` | ✓ project-orphan excluded; task-404 in-shell |
+| Docs canon (R18-1..4 + F18-5 deployment) | `a9fd7ba` | — |
+
+**Deliberately NOT changed (recorded, not deferred):**
+- **F18-9** (agent-modal all-skills-on default) — left as an observation per its own
+  disposition; changing the create-time default needs an explicit owner ruling.
+- **R18-4/F17-L4** — a KEEP ruling (do NOT force-reset the branch); no code change is correct.
+- **F18-1b** (reconcile stamps the recovery packet `superseded` instantly) — explicitly
+  optional ("note if not done"); the reconciler withdraws moot *recommendations* but the
+  closed-PR *packet* still clears on the next operator tick. Low; left for a future pass.
+
+**Disposition audit (opus subagent, independent re-derivation from the tree):** all 13
+CONFIRMED with real passing tests; the two things it surfaced (F18-5 holder was only on
+`/resources/health`, and F18-12 had no responsive unit test) were addressed — the Home
+strip surface was added (`23c9ce6`, F18-5b) and F18-12 was live-verified at 375px.
+
 ## E. Docs-canon (R17-3 continued) — pass-18 additions
 
 - Promote R18-1..R18-4 into
