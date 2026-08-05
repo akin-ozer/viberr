@@ -211,7 +211,13 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
     expect(row.textContent).not.toContain("approving verdict");
     // The pill stays — it was the only honest signal before, and it still
     // carries the PR number the subline names.
-    expect(row.querySelector(".pill.neutral")!.textContent).toBe(
+    // UXA-2: it is now the CANONICAL `prStatePill` tone. This queue used to
+    // colour PR state with its own private map, so a closed-unmerged (rejected)
+    // PR read neutral grey here while ruling 12's map renders it `risk` on the
+    // board, task detail and the GitHub page — the same state wearing two
+    // colours one click apart. The neutral class was incidental to this test's
+    // point (the pill is present and names the PR); the rejection tone is not.
+    expect(row.querySelector(".pill.risk")!.textContent).toBe(
       "PR #124 · closed",
     );
   });

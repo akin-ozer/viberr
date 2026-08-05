@@ -526,6 +526,65 @@ function ListView({
 
 /* ---------- New task modal (board spec §4.6) ---------- */
 
+/**
+ * B1 — the board's acceptance confirm.
+ *
+ * A human moving a card into the FINAL stage is not a bare move: the server
+ * routes it through the full acceptance contract, which attempts a real **PR
+ * merge** (`reorderTask` → `acceptCompletion`, task-actions.server.ts). Task
+ * detail has always confirmed that ("Merging is one-way"), but the board's drag
+ * and its keyboard Move menu committed it straight from the gesture, so the
+ * most irreversible action in the product was also its most casual one. Ruling
+ * 20 / FR27 want the dialog on EVERY acceptance path.
+ *
+ * The board doesn't hold the PR/verdict detail the task-detail dialog shows, so
+ * this states what it can promise honestly and points at the task for the rest.
+ */
+function AcceptOnBoardConfirm({
+  taskKey,
+  stageName,
+  onCancel,
+  onConfirm,
+}: {
+  taskKey: string;
+  stageName: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { ref: panelRef, close } = useDialog(onCancel);
+  return (
+    <dialog className="modal-card modal-narrow" aria-label="Accept completion" ref={panelRef}>
+      <div className="modal-head">
+        <span className="agent-glyph lg">
+          <Icon name="check" />
+        </span>
+        <div className="mh-main">
+          <h2>Accept {taskKey}?</h2>
+          <div className="mh-sub">
+            Moving a task into {stageName} accepts its completion — Viberr
+            merges the review pull request when GitHub is reachable, and records
+            the acceptance on the timeline. Merging is one-way.
+          </div>
+        </div>
+        <button type="button" className="icon-btn modal-close" onClick={close} aria-label="Close">
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-foot">
+        <span className="fine xs dim">
+          Open {taskKey} to see the pull request, revision and verdict first.
+        </span>
+        <button type="button" className="btn ghost" onClick={close}>
+          Not yet
+        </button>
+        <button type="button" className="btn primary" onClick={onConfirm}>
+          Accept → {stageName}
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
 function NewTaskModal({
   stages,
   initialStage,
@@ -1027,6 +1086,14 @@ export function BoardPage({
   // The card the dropped card should land immediately BEFORE (null = column end).
   const [beforeKey, setBeforeKey] = useState<string | null>(null);
   const [arrivedKey, setArrivedKey] = useState<string | null>(null);
+  /** B1: a move into the final stage waits here for an explicit confirmation. */
+  const [pendingAccept, setPendingAccept] = useState<{
+    taskKey: string;
+    to: string;
+    beforeKey: string;
+  } | null>(null);
+  const finalStageId = columns[columns.length - 1]?.stage.id;
+  const finalStageName = columns[columns.length - 1]?.stage.name ?? "Done";
   const moveDone = useRef<unknown>(null);
 
   // dnd-kit event flow → the same drag state machine the visuals always used.
@@ -1094,6 +1161,16 @@ export function BoardPage({
       })),
     });
     if (!resolution) return;
+    // B1: landing in the FINAL stage is an acceptance (real merge attempt), not
+    // a move — confirm before committing it, like every other acceptance path.
+    if (resolution.to === finalStageId && active.fromStage !== finalStageId) {
+      setPendingAccept({
+        taskKey: active.key,
+        to: resolution.to,
+        beforeKey: resolution.beforeKey ?? "",
+      });
+      return;
+    }
     setArrivedKey(active.key);
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -1104,6 +1181,18 @@ export function BoardPage({
     transitionFetcher.submit(fd, { method: "post" });
   };
 
+  /** Commit a confirmed board acceptance (B1). */
+  const submitReorder = (taskKey: string, to: string, beforeKey: string) => {
+    setArrivedKey(taskKey);
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "reorder");
+    fd.set("taskKey", taskKey);
+    fd.set("to", to);
+    fd.set("beforeKey", beforeKey);
+    transitionFetcher.submit(fd, { method: "post" });
+  };
+
   // F10-25: keyboard-accessible move — the SAME governed transition the drop
   // uses, appending to the end of the target stage. A no-op when unchanged.
   const onMoveTask = (taskKey: string, toStageId: string) => {
@@ -1111,14 +1200,12 @@ export function BoardPage({
       c.tasks.some((t) => t.key === taskKey),
     )?.stage.id;
     if (fromStage === toStageId) return;
-    setArrivedKey(taskKey);
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "reorder");
-    fd.set("taskKey", taskKey);
-    fd.set("to", toStageId);
-    fd.set("beforeKey", "");
-    transitionFetcher.submit(fd, { method: "post" });
+    // B1: the keyboard path reaches the same acceptance the drag does.
+    if (toStageId === finalStageId) {
+      setPendingAccept({ taskKey, to: toStageId, beforeKey: "" });
+      return;
+    }
+    submitReorder(taskKey, toStageId, "");
   };
 
   // Toast on completion (and drop the pulse if the move was rejected).
@@ -1323,6 +1410,20 @@ export function BoardPage({
           stages={stages.filter((s) => s.id !== doneStageId)}
           initialStage={creating}
           onClose={() => setCreating(null)}
+        />
+      )}
+
+      {/* B1: the acceptance a board move really performs, confirmed. */}
+      {pendingAccept && (
+        <AcceptOnBoardConfirm
+          taskKey={pendingAccept.taskKey}
+          stageName={finalStageName}
+          onCancel={() => setPendingAccept(null)}
+          onConfirm={() => {
+            const p = pendingAccept;
+            setPendingAccept(null);
+            submitReorder(p.taskKey, p.to, p.beforeKey);
+          }}
         />
       )}
     </div>

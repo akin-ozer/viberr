@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
+import { prStatePill } from "~/features/github/github-pills";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 
 /**
@@ -52,19 +53,18 @@ function RQRow({
         <div className="sub">{sub}</div>
       </span>
       <span className="rq-meta">
+        {/* UXA-2: this queue carried its OWN pr-state colour map, so a
+            closed-unmerged (rejected) PR rendered neutral grey here while the
+            canonical `prStatePill` (ruling 12) renders it `risk` on the board,
+            task detail and the GitHub page — and `closed` is a first-class row
+            state in this very queue, with rose-toned rework/archive copy in its
+            subline. Same defect UI-36 fixed on task detail. Use the one map. */}
         {t.pr && (
-          <Pill
-            kind={
-              t.pr.state === "merged"
-                ? "done"
-                : t.pr.state === "closed"
-                  ? "neutral"
-                  : "info"
-            }
-            sm
-          >
+          <Pill kind={prStatePill(t.pr.state).kind} sm>
             PR #{t.pr.number}
-            {t.pr.state === "closed" ? " · closed" : ""}
+            {t.pr.state === "merged" || t.pr.state === "review"
+              ? ""
+              : ` · ${prStatePill(t.pr.state).label}`}
           </Pill>
         )}
         <ValidationPill value={t.validation} sm />

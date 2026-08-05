@@ -310,6 +310,9 @@ describe("P13-D-10: a rejected board action must not render the success tick", (
     );
     fireEvent.click(getByLabelText("Change stage (currently In Progress)"));
     fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
+    // B1: a move into the FINAL stage is an acceptance (a real merge attempt),
+    // so it now asks first — the request is only sent once confirmed.
+    fireEvent.click(getByRole("button", { name: /^Accept → Done$/ }));
     await waitFor(() =>
       expect(container.querySelector(".toast")).not.toBeNull(),
     );
@@ -348,12 +351,77 @@ describe("P13-D-10: a rejected board action must not render the success tick", (
     );
     fireEvent.click(getByLabelText("Change stage (currently In Progress)"));
     fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
+    fireEvent.click(getByRole("button", { name: /^Accept → Done$/ })); // B1
     await waitFor(() =>
       expect(container.querySelector(".toast")).not.toBeNull(),
     );
     expect(container.querySelector(".toast")!.getAttribute("data-kind")).toBe(
       "success",
     );
+  });
+});
+
+/**
+ * B1 — a board move into the final stage is an ACCEPTANCE: the server routes it
+ * through `acceptCompletion`, which attempts a real PR merge. Task detail has
+ * always confirmed that; the board committed it straight from the gesture, so
+ * the most irreversible action in the product was its most casual one.
+ */
+describe("B1: accepting from the board asks first", () => {
+  it("a move into Done opens a confirm and sends nothing until it is accepted", async () => {
+    const submitted: string[] = [];
+    const { getByLabelText, getByRole, getByText } = renderBoard(
+      [task({ key: "VIB-1", stage: "impl" })],
+      {
+        action: () => {
+          submitted.push("POST");
+          return { ok: true as const, toast: "VIB-1 moved to Done" };
+        },
+      },
+    );
+    fireEvent.click(getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
+
+    // The dialog states the consequence — and NOTHING has been posted yet.
+    expect(getByText(/Merging is one-way/)).toBeTruthy();
+    expect(submitted).toHaveLength(0);
+
+    fireEvent.click(getByRole("button", { name: /^Accept → Done$/ }));
+    await waitFor(() => expect(submitted.length).toBeGreaterThan(0));
+  });
+
+  it("cancelling the confirm never posts the acceptance", async () => {
+    const submitted: string[] = [];
+    const { getByLabelText, getByRole } = renderBoard(
+      [task({ key: "VIB-1", stage: "impl" })],
+      {
+        action: () => {
+          submitted.push("POST");
+          return { ok: true as const, toast: "moved" };
+        },
+      },
+    );
+    fireEvent.click(getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
+    fireEvent.click(getByRole("button", { name: "Not yet" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(submitted).toHaveLength(0);
+  });
+
+  it("a move to a NON-final stage still commits straight from the gesture", async () => {
+    const submitted: string[] = [];
+    const { getByLabelText, getByRole } = renderBoard(
+      [task({ key: "VIB-1", stage: "triage" })],
+      {
+        action: () => {
+          submitted.push("POST");
+          return { ok: true as const, toast: "moved" };
+        },
+      },
+    );
+    fireEvent.click(getByLabelText("Change stage (currently Triage)"));
+    fireEvent.click(getByRole("menuitemradio", { name: "In Progress" }));
+    await waitFor(() => expect(submitted.length).toBeGreaterThan(0));
   });
 });
 
