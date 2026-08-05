@@ -135,6 +135,24 @@ describe("ProjectPanel", () => {
     fireEvent.change(prefix, { target: { value: "corex" } });
     expect(prefix.value).toBe("CORE");
   });
+
+  // LV-F2: every field is disabled without the grant, but a disabled input
+  // cannot explain itself — a contributor met a page of dead fields in silence
+  // (the defect the Policy sheet already fixed under P14-LV-08).
+  it("explains the read-only state to a role without the grant", () => {
+    const { container } = render(
+      <ProjectPanel project={PROJECT} canManage={false} onSave={() => {}} />,
+    );
+    // Still inert…
+    expect(
+      Array.from(container.querySelectorAll("input, textarea")).every(
+        (f) => (f as HTMLInputElement).disabled,
+      ),
+    ).toBe(true);
+    // …and now it says why.
+    expect(container.textContent).toContain("Read-only");
+    expect(container.textContent).toContain("Change project settings");
+  });
 });
 
 describe("StagesPanel", () => {
@@ -232,6 +250,19 @@ describe("StagesPanel", () => {
     ).toBe(true);
     // No Move control either — reordering is a manage action.
     expect(container.querySelectorAll(".own-btn")).toHaveLength(0);
+  });
+
+  // LV-F2: disabling the controls is only half the job — the P14-LV-08 lesson
+  // from the Policy sheet is that a disabled control cannot explain itself
+  // (`title` never opens on one), so the page must SAY why it is inert.
+  it("tells a non-admin WHY the stages are inert, and stops giving drag/rename instructions", () => {
+    const { container } = render(
+      <StagesPanel {...base} canManage={false} onRename={() => {}} onRemove={() => {}} />,
+    );
+    expect(container.textContent).toContain("Read-only");
+    expect(container.textContent).toContain("Change project settings");
+    // The manage-only how-to must not be shown to someone who cannot do it.
+    expect(container.textContent).not.toContain("Drag a row to reorder");
   });
 
   // ONE drag language (pass 16): the board deliberately drags the whole card
@@ -477,6 +508,16 @@ describe("MembersPanel", () => {
     );
     expect(queryByPlaceholderText("Full name")).toBeNull();
     expect(container.querySelector(".stg-x")).toBeNull();
+  });
+
+  // LV-F2: an empty panel with the controls simply gone is as mute as a
+  // disabled one — say which grant is missing.
+  it("tells a non-admin why membership cannot be edited here", () => {
+    const { container } = render(
+      <MembersPanel {...base} canManage={false} onInvite={() => {}} onRemove={() => {}} />,
+    );
+    expect(container.textContent).toContain("Read-only");
+    expect(container.textContent).toContain("Manage members & roles");
   });
 });
 
