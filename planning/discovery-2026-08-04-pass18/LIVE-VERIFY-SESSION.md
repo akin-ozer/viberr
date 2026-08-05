@@ -102,6 +102,33 @@ Offered to the owner to go deeper on any of these.
 `fresh-verify.md`, `mcp-parity.md`) — candidate cleanup. Host data root preserved at
 `docker-data.hostdev-backup` (908M, restorable). Compose container running (single writer, pid 1).
 
+## LV-F1 (MED, owner-reported → live-reproduced → FIXED) — new local accounts could be permanently locked out
+
+**Owner report:** *"I created the user but couldn't log in since it asked for a password."*
+
+**Reproduced live** in the fresh env: Users & access → Allow access → Local →
+"Create account" creates the user and shows the generated temp password in an
+inline `.cred-ok` banner ("temp sign-in password: `kjz__gM9Z5Vd` — shown once").
+That banner is **client state only**: reload, navigate away, or dismiss it and the
+password is gone. The user row then reads "setup pending" with only Edit / Disable /
+Remove, and the Edit modal's Password field showed **"Reset pending — will be
+prompted to set a new password at next sign-in"** and *nothing else*.
+
+**Root cause** (`app/features/org-settings/users-panel.tsx:450`): the Password field was a
+ternary — `user.pwreset || user.status === "invited" || tempPassword ? <banner> : <Reset
+password button>`. A freshly created account ALWAYS has `pwreset: true`
+(`user-admin.server.ts`: `pwresetRequired: Boolean(tempPassword)`), so the branch that
+hides the button is exactly the new-account case. The backend could always re-issue
+(`user-reset-password` → `resetLocalPassword` returns a fresh `tempPassword`) — **only the
+UI hid the door**. Net effect: a lost temp password made the account permanently
+un-signin-able; the sole escape was Remove + recreate.
+
+**Fix:** the pending banner becomes CONTEXT above the action instead of replacing it. The
+button always renders for a local account, relabelled **"Generate a new temp password"**
+while a reset is pending, with a note that generating again replaces any password handed
+over earlier. 2 canaried tests (`LV-F1` describe block) — canary: restoring the old
+gating makes the recovery action disappear and the test fails.
+
 ## UX observations (running log)
 - **UXO-1** An **archived** task still shows its pre-archive status pills ("In Progress · ready · awaiting verdict") next to the "archived" pill on the task hero. Reads slightly noisy — a reader must infer these are the frozen last-state, not live. Minor; candidate for a muted "was: …" treatment. (LAB-1)
 - **UXO-2 — INVESTIGATED, NOT A BUG.** FV-2's Done hero shows "validation healthy" and I suspected a faked-healthy after force-accept. Checked the canonical `task.md`: it carries a REAL reviewer approve verdict (`result: approve`, `revisionId: rev_ESoWbwrOwiDU` == current rev `625773ae`, with concrete verification text — "local HEAD on fv-2 equals the pinned review revision; diff against main touches exactly one file"). `deriveValidation` → "healthy" is therefore correct. What happened: after the out-of-band merge + "Move to Review", the operator auto-engaged the reviewer (Balanced: summon=direct); it approved; my force-accept was redundant with a verdict landing ~concurrently. The only *light* residue: the force-accept DIALOG read "Verdict: awaiting verdict" a beat before the verdict propagated to the acceptability check — a timing snapshot, not a false state. Disposition: consistent.

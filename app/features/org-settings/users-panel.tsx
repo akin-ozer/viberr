@@ -447,7 +447,17 @@ function EditUserModal({
       {isLocal && (
         <div className="field">
           <span className="flabel">Password</span>
-          {user.pwreset || user.status === "invited" || tempPassword ? (
+          {/* LV-F1: the pending state is CONTEXT, never a replacement for the
+              action. This branch used to render the "Reset pending" banner
+              INSTEAD of the button whenever `pwreset`/`invited` was set — which
+              is true for EVERY freshly created account. So an admin who missed
+              or reloaded past the one-time temp password had no way to issue a
+              new one: the account was permanently un-signin-able and the only
+              escape was Remove + recreate (live-reproduced by the owner). The
+              button now always renders for a local account; the banner sits
+              above it and carries the freshly generated password when there is
+              one. */}
+          {(user.pwreset || user.status === "invited" || tempPassword) && (
             <div className="cred-ok">
               <Icon name="check" />
               <span>
@@ -463,28 +473,31 @@ function EditUserModal({
                 )}
               </span>
             </div>
-          ) : (
-            <div>
-              <button
-                type="button"
-                className="btn ghost sm"
-                onClick={() =>
-                  resetAction.submit({ intent: "user-reset-password", userId: user.id })
-                }
-                disabled={resetAction.busy}
-              >
-                <Icon name="lock" />
-                Reset password
-              </button>
-              <div className="def-note after">
-                <Icon name="lock" />
-                <span>
-                  No email is sent — a temp password is generated for you to hand over;
-                  they're prompted to set a new password at their next sign-in.
-                </span>
-              </div>
-            </div>
           )}
+          <div>
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={() =>
+                resetAction.submit({ intent: "user-reset-password", userId: user.id })
+              }
+              disabled={resetAction.busy}
+            >
+              <Icon name="lock" />
+              {user.pwreset || user.status === "invited"
+                ? "Generate a new temp password"
+                : "Reset password"}
+            </button>
+            <div className="def-note after">
+              <Icon name="lock" />
+              <span>
+                No email is sent — a temp password is generated for you to hand over;
+                they're prompted to set a new password at their next sign-in.
+                {(user.pwreset || user.status === "invited") &&
+                  " Generating again replaces any temp password you handed over earlier."}
+              </span>
+            </div>
+          </div>
         </div>
       )}
       {err && (

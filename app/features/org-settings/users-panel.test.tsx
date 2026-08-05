@@ -116,3 +116,71 @@ describe("F18-3: the Allow-access modal keys its method off configured providers
     expect(google!.disabled).toBe(true);
   });
 });
+
+/**
+ * LV-F1 — the new-account LOCKOUT (live-reproduced by the owner: "I created the
+ * user but couldn't log in since it asked for a password").
+ *
+ * A freshly created local account always carries `pwreset: true`. The Password
+ * field rendered the "Reset pending" banner INSTEAD of the "Reset password"
+ * button on exactly that condition, so the one-time temp password shown at
+ * creation was the account's ONLY credential — miss it, reload past it, or
+ * dismiss it and the account could never sign in again. The backend could
+ * always re-issue (`user-reset-password` returns a fresh tempPassword); only
+ * the UI hid the door. The action must therefore survive the pending state.
+ */
+describe("LV-F1: a pending reset never hides the re-issue action", () => {
+  const localUser = (over: Partial<OrgUserView> = {}): OrgUserView => ({
+    ...ME,
+    id: "u_new",
+    name: "Test Contributor",
+    email: "contributor@viberr.dev",
+    role: "member",
+    ...over,
+  });
+
+  function renderWith(user: OrgUserView) {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <UsersPanel
+              users={[ME, user]}
+              domains={DOMAINS}
+              meId="u_arda"
+              providers={{ github: false, google: false }}
+            />
+          </ToastProvider>
+        ),
+        action: async () => ({ ok: true, toast: "stub done" }),
+      },
+    ]);
+    return render(<Stub initialEntries={["/org/settings"]} />);
+  }
+
+  const openEdit = (getByLabelText: (t: string) => HTMLElement) =>
+    fireEvent.click(getByLabelText("Edit Test Contributor"));
+
+  it("a just-created account (pwreset pending) STILL offers a way to issue a new temp password", () => {
+    const { getByLabelText, getByText, container } = renderWith(
+      localUser({ pwreset: true, status: "invited" }),
+    );
+    openEdit(getByLabelText);
+    // The pending state is shown as CONTEXT…
+    expect(container.textContent).toContain("Reset pending");
+    // …and the recovery action is still reachable — this is the regression.
+    const btn = getByText("Generate a new temp password");
+    expect(btn).toBeTruthy();
+    expect((btn.closest("button") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("an established account (no pending reset) keeps the plain Reset password action", () => {
+    const { getByLabelText, getByText, container } = renderWith(
+      localUser({ pwreset: false, status: "active" }),
+    );
+    openEdit(getByLabelText);
+    expect(container.textContent).not.toContain("Reset pending");
+    expect(getByText("Reset password")).toBeTruthy();
+  });
+});
