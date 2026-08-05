@@ -185,14 +185,17 @@ members-only + ALWAYS_HUMAN + store-path rulings.
   two cases could read apart, or the message could hedge ("no longer
   available"). File: [task-actions.server.ts:5387](app/server/tasks/task-actions.server.ts).
 
-- **F18-9 (low, UX default — CONFIRM before changing) — new agent-profile modal
-  defaults ALL org skills to ON.** Creating a profile pre-selects every org
-  skill (incl. unrelated ones like `release-announcements`), contradicting the
-  deliberate-grant governance model. This may be an intentional "start broad,
-  narrow it" convenience. DISPOSITION: left as an observation — do NOT change
-  the create-time default without an explicit owner ruling; flagged for a
-  follow-up question. (MCP + KB chips also default on but there is usually ≤1 of
-  each, so the skill list is where it reads wrong.)
+- **F18-9 — CLOSED 2026-08-05 as NOT REPRODUCIBLE (owner ruling).** ~~new
+  agent-profile modal defaults ALL org skills to ON~~. The claim was that
+  creating a profile pre-selects every org skill, contradicting the
+  deliberate-grant model. The pass-18 gap analysis could not reproduce it: BOTH
+  profile modals initialise a new profile with **empty** grants and say so —
+  `create-profile-modal.tsx:806-812` and `agent-template-modal.tsx:123-131`.
+  Put to the owner with that contradicting evidence; ruling: **close it as not
+  reproducible.** No default was changed — the correct outcome, since acting on
+  the original note would have *introduced* the very over-granting it feared.
+  Kept as a record of the class: a finding recorded from a UI impression and
+  never re-verified in code can survive several passes as though it were fact.
 
 ## C. Verified-working this pass (do NOT re-open — evidence in NOTES §Phase B)
 

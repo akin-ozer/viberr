@@ -151,9 +151,12 @@ it is regenerated from the filesystem rather than restated here.
    failure state. **Amended 2026-08-04 (ruling 40 / R16-6)** — that is true only of a human
    acceptance; a full-autonomy operator acceptance records the PR `accepted` (merge pending)
    and a human completes the merge later, because `merge-pull-request` is `ALWAYS_HUMAN`.
-   **Extended** — the kind set is now eight: `accept_completion`, `request_edit`,
+   **Extended** — the kind set is now NINE: `accept_completion`, `request_edit`,
    `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`,
-   `custom`. The same ruling governs the capability catalog: agent policy is id-based
+   `archive_task`, `custom`. (`archive_task` arrived with R14-3 — the task archive — and
+   the count here was never updated; corrected 2026-08-05 against
+   `PACKET_OPTION_KINDS` in `app/schemas/task-file.schema.ts`, which is the source of
+   truth.) The same ruling governs the capability catalog: agent policy is id-based
    against the shared catalog, and advisory ids with no runtime consumer get no toggle.
 8. **`tweaks-panel.jsx` is not ported** (dev harness, dead code). Review-queue packet and
    acceptance mechanics ship before the queue surface; the queue lives in
@@ -237,6 +240,14 @@ it is regenerated from the filesystem rather than restated here.
     ask-human, no evidence.
 27. **R15-8 (2026-07-28): `design/prd.md` is re-synced** with the canon PRD and both are
     maintained; `planning/README.md`'s sync claim must stay true.
+    *(Re-affirmed 2026-08-05, pass 18 — owner ruling.)* The rule had failed a SECOND time:
+    pass-17's FR14/FR20/FR27 amendments landed only in `planning/planning-artifacts/prd.md`,
+    so the two files diverged again (`d3911299…` vs `783177bc…`) and a reader of
+    `design/prd.md` got the pre-generic-agents vocabulary as though it were current. The
+    owner chose re-sync over retiring the dual copy, so the requirement stands — but
+    "maintained" now means **byte-identical**, and the two files are pinned as such by
+    `prd-sync.test.ts` rather than by anyone's memory. The canon copy is the one to edit;
+    the design copy is a mirror.
 28. **R15-9 (2026-07-29): an absent `deliver-review-pr` grant resolves from the project's
     own governance, not from a constant.** The capability postdates R15-2, so "absent" is
     the normal state on every pre-existing project. Resolving it to a flat `direct` meant
