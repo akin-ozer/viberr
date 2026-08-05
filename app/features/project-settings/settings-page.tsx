@@ -1593,6 +1593,14 @@ export function SettingsPage({
             onOpenTask={onOpenTask}
           />
         </div>
+        {/* Owner ruling (pass 18, Q-V1): a READ-ONLY viewer must not see the
+            Danger zone at all. It used to render for every member with the
+            buttons disabled and a "you need the grant" note — honest, but it
+            showed a stakeholder a destructive surface they can never use, and
+            named archive/delete as if they were on the table. Anyone who CAN
+            act still sees it unchanged (the in-panel deny note stays for the
+            in-between roles that hold some but not all lifecycle grants). */}
+        {canEditPolicy && (
         <DangerZone
           projectName={data.project.name}
           myRole={myRole}
@@ -1611,6 +1619,7 @@ export function SettingsPage({
             )
           }
         />
+        )}
       </div>
     </div>
   );

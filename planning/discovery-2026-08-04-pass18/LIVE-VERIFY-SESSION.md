@@ -703,3 +703,32 @@ server-side earlier this pass), so this is about *disclosure and noise*, not pri
 should a read-only stakeholder see a Danger zone they can never use, and a credential
 fingerprint? Options: hide the Danger zone below maintainer, and/or mask the PAT suffix for
 non-admins. I did not change anything — this is a product call.
+
+### Q-V1 — OWNER RULED: a read-only Viewer must not see the Danger zone or the PAT
+
+**Ruling (2026-08-06):** *"a read-only Viewer shouldn't see the project-settings Danger zone
+and the PAT."*
+
+**Implemented — Danger zone.** `settings-page.tsx` now renders `<DangerZone>` only when
+`canEditPolicy`. Previously it rendered for every member with the buttons `disabled` plus a
+"you need the grant" note — honest, but it showed a read-only stakeholder a destructive
+surface they can never use and named archive/delete as if they were on the table. Anyone who
+CAN act sees it unchanged, and the in-panel deny note stays for the in-between roles that
+hold some but not all lifecycle grants. 2892 tests + tsc green.
+
+**NOT yet implemented — the PAT half.** I confirmed live that the viewer's settings HTML
+contains the connection's PAT tail (`…k3ui`), but I ran out of context before locating the
+component that renders it (`settings-page.tsx` only carries `credential.source === "pat"`
+booleans, so the tail comes from another surface — likely the GitHub panel or its loader
+payload). Deliberately NOT guessed at: masking the wrong field would either break the admin
+view or leave the disclosure in place while looking fixed.
+**Next step:** grep the project GitHub panel + its loader for the tail (`patTail`/`last4`/
+`maskedToken`), and gate that field on `roleCan(myRole, "edit-policy")` — mirroring the
+Danger-zone gate — then pin it with a viewer-role render test.
+
+### Also verified this pass (Viewer, legitimately seated)
+- `/resources/run-log?runId=…` → **200** for a project viewer. Correct per `rbac.ts` row
+  `view` ("board, tasks & timelines") — run logs are the timeline's evidence, and the route
+  gates on `requireProjectMember`.
+- `/resources/session-export` → **400 "Missing ?run=<runId>."** — the param is `run`, not
+  `runId`. Not a bug; recorded so the next person doesn't mis-read a 400 as a denial.
