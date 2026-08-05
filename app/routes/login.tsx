@@ -423,8 +423,15 @@ export default function Login({
       {/* F10-27: a desktop-only brand/value panel beside the card so the wide
           viewport reads as an intentional composition rather than a lone card
           in empty space. Hidden below the two-column breakpoint. */}
-      <aside className="login-aside" aria-hidden="true">
-        <span className="login-aside-mark">V</span>
+      {/* UXA-12: this panel used to be `aria-hidden="true"`. Its decorative
+          MARK is decorative; its heading and three product claims are not, and
+          they appear nowhere else — so an assistive-tech user got a bare
+          sign-in form where a sighted user got the product's whole value
+          statement. Hide the glyph, expose the prose. */}
+      <aside className="login-aside">
+        <span className="login-aside-mark" aria-hidden="true">
+          V
+        </span>
         <h2>Managed AI delivery for small teams</h2>
         <p>
           Humans set the policy and stay accountable. Claude and Codex agents do

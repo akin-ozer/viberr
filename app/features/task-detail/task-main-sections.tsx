@@ -205,6 +205,15 @@ export function TaskHero({
             >
               Save goal
             </button>
+            {/* UXA-14: the 3-character floor left a dead button and no reason —
+                and a disabled control cannot explain itself via `title`. The
+                board's New-task modal already states its own requirement; say
+                this one too, and only while it is actually unmet. */}
+            {draft.trim().length < 3 && (
+              <span className="fine xs dim">
+                A goal needs at least 3 characters.
+              </span>
+            )}
             <button
               type="button"
               className="btn"

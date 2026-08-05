@@ -7,7 +7,7 @@ import { Pill } from "~/ui/pill";
 import { TglP } from "~/ui/toggle";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
-import { formatDayBucket } from "~/shared/dates/format";
+import { formatCalendarDate } from "~/shared/dates/format";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
 import { RBAC_ROWS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
@@ -189,7 +189,11 @@ function ProfileIdentity({
         ) : (
           <div className="kv-row">
             <span className="k">Member of</span>
-            <span className="v">—</span>
+            {/* UXA-10: a bare em dash for the same fact the Your-access panel
+                further down states in words ("No project membership yet."). An
+                em dash reads as "unknown", not "none" — say the same thing the
+                same way on the same page. */}
+            <span className="v plain">No projects yet</span>
           </div>
         )}
         <div className="kv-row">
@@ -201,7 +205,11 @@ function ProfileIdentity({
         </div>
         <div className="kv-row">
           <span className="k">Joined</span>
-          <span className="v">{formatDayBucket(user.createdAt)}</span>
+          {/* UXA-10: `formatDayBucket` is the TIMELINE form — it yields
+              "Today"/"Yesterday" for a new account and a year-less "Mar 30"
+              forever after, so an account opened last year read as though it
+              were opened this one. A join date is a calendar fact. */}
+          <span className="v">{formatCalendarDate(user.createdAt)}</span>
         </div>
       </div>
     </div>
