@@ -611,3 +611,39 @@ allow/deny matrix**, and I am not reporting one — the only Viewer facts above 
 ones each proven by an individual request. The admin's browser session is stable across
 heavy use, so this is most likely a curl/jar artefact, but it is unproven either way and
 worth one clean browser-driven pass before anyone trusts a Viewer matrix.
+
+## 🔴 F18-17 (NEW, live) — the Viewer role contradicts its OWN published RBAC row
+
+The jar handling in my earlier loop was the bug (same file for `-b`/`-c`), not the app.
+With a clean read-jar/write-jar swap per request, Vera (project role **viewer**,
+`verify-fresh`) gives a real matrix:
+
+| Route | Viewer | Expected per `rbac.ts` |
+|---|---|---|
+| `/projects/verify-fresh/board` | **200** | 200 ✓ |
+| `/projects/verify-fresh/tasks/FV-1` | **404** | 200 — row `view` |
+| `/projects/verify-fresh/activity` | **403** | 200 — row `view` |
+| `/org/settings` | **403** | 403 ✓ |
+| `/projects/verify-fresh/settings` | **403** | 403 ✓ |
+
+`app/shared/rbac.ts` — the file whose docstring calls itself *"One source for enforcement
+and the Policy/Profile permission tables"* — defines:
+```ts
+{ id: "view", label: "View board, tasks & timelines", roles: [A, M, C, V] }
+```
+So a Viewer is granted board **tasks** and **timelines**. Live, they get the board but are
+**404'd off a task** and **403'd off activity**. The Policy page renders that same row as a
+four-check row, so the UI actively tells an admin the Viewer can do something they cannot.
+
+**Why it matters:** Viewer is the read-only stakeholder seat — the whole point is to hand a
+PM/observer a link to a task. Today that link 404s for them. And a 404 (not 403) reads as
+"this task does not exist", which is the wrong disclosure for a task they are entitled to see.
+
+**Honest caveat:** the two admin-only rows behaving correctly (403) shows the harness is
+sound, and I browsed both failing URLs successfully as admin earlier in this session — but I
+did not re-probe admin against these exact URLs in the same instant. Confirm that first; if
+admin is 200 on both, this is a straight bug in the task/activity route guards.
+
+**Fix direction:** the task and activity loaders should gate on the `view` action (which
+includes V) rather than a higher tier, and a member who lacks a right should get 403 with a
+"you can't see this" surface, not a 404 that denies the task's existence.
