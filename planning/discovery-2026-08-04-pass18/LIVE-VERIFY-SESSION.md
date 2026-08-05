@@ -612,7 +612,32 @@ ones each proven by an individual request. The admin's browser session is stable
 heavy use, so this is most likely a curl/jar artefact, but it is unproven either way and
 worth one clean browser-driven pass before anyone trusts a Viewer matrix.
 
-## 🔴 F18-17 (NEW, live) — the Viewer role contradicts its OWN published RBAC row
+## ❌ F18-17 — RETRACTED. My artifact, not a bug. (Original text kept below.)
+
+**Retraction.** Vera is **not** in the canonical `projects/verify-fresh/project.md`
+`members:` list — only the two admins are. I inserted her membership straight into the
+**`project_members` SQLite table**, which is a *projection* of the canonical file, not a
+source of truth. The app therefore correctly treats her as a **non-member**, and R15-4 is
+explicit that *"a signed-in non-member gets a 404 on every page of this project"* — exactly
+the 404 I "found". The activity 403 is the same non-membership.
+
+So the observed matrix does not contradict `rbac.ts`; it never exercised the Viewer role at
+all. The correct way to seat her was the project members UI (which writes `project.md`).
+
+**The one thing still worth a look:** the **board returned 200** for that same non-member
+while the task 404'd. If some read paths trust the `project_members` projection while others
+re-read canonical, an inconsistent projection could expose a board it shouldn't. That is a
+narrow, real question — but it was reached through a state the app never produces on its own,
+so it is a *hypothesis*, not a finding, and needs a legitimately-created non-member to test.
+
+**Method note (4th time today):** every false finding this session came from inferring state
+from indirect output — `init` envelopes twice, a clobbered cookie jar, and now a
+projection-only write. Direct invocation has never misled me. Provision fixtures **through
+the product**, never by writing derived tables.
+
+---
+
+### (retracted) original text — the Viewer role contradicts its OWN published RBAC row
 
 The jar handling in my earlier loop was the bug (same file for `-b`/`-c`), not the app.
 With a clean read-jar/write-jar swap per request, Vera (project role **viewer**,
