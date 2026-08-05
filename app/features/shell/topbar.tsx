@@ -142,10 +142,17 @@ export function Topbar({
           </span>
         )}
       </nav>
+      {/* UXA-13: the two visible words are not the message — the sentence that
+          matters lived only in a `title` on a non-focusable `<span>`, which
+          keyboard and screen-reader users never reach and touch users cannot
+          hover. This is the D2 authority surface: the reader must be able to
+          learn they are acting outside their membership, and that it is
+          audited. The full sentence is now the element's accessible name. */}
       {orgAdminOverride && (
         <span
           className="pill risk sm"
           title="You are not a member of this project — you're acting with org-admin emergency authority. Every override is recorded in the audit log."
+          aria-label="org-admin override — you are not a member of this project; you're acting with org-admin emergency authority, and every override is recorded in the audit log."
         >
           org-admin override
         </span>

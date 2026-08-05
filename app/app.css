@@ -3952,4 +3952,15 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .log-line { grid-template-columns: 54px 100px minmax(0, 1fr); }
   /* home project rows drop the least-load-bearing stat */
   .pj-row .pj-stats .pill { display: none; }
+  /* UXA-8: the two WIDE fr-grid tables — GitHub → Execution branches
+     (`.gh-table`, 4 columns) and Agents → Live roster (`.live-wrap`, 5) — were
+     the only grids with no rule here and no overflow container, so at 375px
+     four or five `fr` tracks shared ~340px and every cell crushed to a few
+     characters. Their sibling grids either collapse to one column or wrap; a
+     COLUMNAR table cannot do either without losing its row alignment, so it
+     keeps its proportions and scrolls inside its own box (the same treatment
+     `.profile-list` already gets two rules above). */
+  .gh-table, .live-wrap { overflow-x: auto; }
+  .gh-table .live-head, .gh-table .live-row { min-width: 34rem; }
+  .live-wrap .live-head, .live-wrap .live-row { min-width: 42rem; }
 }

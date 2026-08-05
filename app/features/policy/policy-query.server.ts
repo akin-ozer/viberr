@@ -6,7 +6,6 @@ import {
   type MembershipView,
 } from "~/features/project-settings/membership.server";
 import { getProject } from "~/server/projections/board-query.server";
-import { formatDayBucket } from "~/shared/dates/format";
 
 /**
  * Policy view read model (policy spec §3): members + roles from the
@@ -32,7 +31,12 @@ export interface PolicyViewData {
   profiles: AgentProfileView[];
   /** Null until a policy change has been audited (fresh seed) — the mock's
    * "Elif Demir · Mar 30" was fixture data; the chip hides when unknown. */
-  edited: { by: string; t: string } | null;
+  /** UXA-16: the raw timestamp — the DISPLAY form is the client's job. This
+   *  used to ship a pre-formatted `t` built with `formatDayBucket` on the
+   *  server, so in a UTC container the Policy header showed the SERVER's
+   *  calendar day while every other timestamp in the app is viewer-local (and
+   *  it carried no year, so "Mar 30" could be any year). */
+  edited: { by: string; at: string } | null;
 }
 
 /** Audit actions that count as "policy changes" for the last-change chip. */
@@ -47,7 +51,7 @@ export const POLICY_AUDIT_ACTIONS = [
 export function latestPolicyChange(
   db: DatabaseSync,
   projectSlug: string,
-): { by: string; t: string } | null {
+): { by: string; at: string } | null {
   const placeholders = POLICY_AUDIT_ACTIONS.map(() => "?").join(", ");
   const row = db
     .prepare(
@@ -64,12 +68,7 @@ export function latestPolicyChange(
         | { name: string }
         | undefined)
     : undefined;
-  return {
-    by: user?.name ?? row.actor_label,
-    t: formatDayBucket(row.occurred_at) === "Today"
-      ? "Today"
-      : formatDayBucket(row.occurred_at),
-  };
+  return { by: user?.name ?? row.actor_label, at: row.occurred_at };
 }
 
 export function getPolicyViewData(
