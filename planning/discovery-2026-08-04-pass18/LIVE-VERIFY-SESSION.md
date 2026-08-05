@@ -129,6 +129,37 @@ while a reset is pending, with a note that generating again replaces any passwor
 over earlier. 2 canaried tests (`LV-F1` describe block) — canary: restoring the old
 gating makes the recovery action disappear and the test fails.
 
+## RBAC — verified LIVE as a real non-admin member (owner signed in as contributor@viberr.dev)
+
+Enabled by the LV-F1 fix (the account was previously unusable). Findings:
+
+| Probe | Result | Verdict |
+|-------|--------|---------|
+| `/org/settings` (users / connections / resources) | **403** real Error-403 page | ✓ instance settings are admin-only |
+| `/projects/verify-fresh/*` **before** membership | **404** (not 403) | ✓ deliberate — a non-member never learns the project exists (no existence leak, R15-4) |
+| `/` , `/profile` | 200 | ✓ |
+| `/projects/verify-fresh/{board,tasks/FV-1,policy,agents,settings}` **after** adding as `contributor` | 200 (view) | ✓ a member may READ project surfaces |
+| `POST save-project` as contributor (CSRF-valid) | **403** | ✓ **server-enforced** — mutations refused regardless of UI |
+| Policy sheet controls for contributor | 8/8 role toggles disabled + "Read-only — … needs the Manage members & roles grant" | ✓ correct, explained |
+| Settings sheet controls for contributor | 0/4 inputs editable, 0/7 destructive enabled — but **no explanation** | ✗ → **LV-F2**, fixed |
+
+**No security hole found.** One UI-honesty gap (LV-F2) — fixed + canaried.
+
+*Method note:* my first probe regexed the body for "Forbidden" and reported Policy/Agents
+as forbidden for a contributor. That was a **false positive** — "forbidden" is a legitimate
+capability-mode label rendered on those pages. Re-probed on `Error 403` + real status. Recorded
+because it is the kind of mistake that silently inflates a findings list.
+
+## LV-F2 (LOW, live-found → FIXED) — project Settings never said why it was inert
+
+A Contributor's project Settings page correctly disables everything (server also 403s), but
+nothing explained the greyed-out state, and the Stages note still instructed them to *"Drag a
+row to reorder … click a name to rename"* — a how-to for an action the page refuses. A disabled
+control cannot explain itself (`title` never opens on one). This is the exact defect the Policy
+sheet fixed under **P14-LV-08**, never propagated to Settings. Fix: Project / Stages / Members
+panels carry the same lock-icon note naming the missing grant, and the manage-only how-to is
+shown only to a reader who can act on it. 3 canaried tests; suite 2860 green.
+
 ## UX observations (running log)
 - **UXO-1** An **archived** task still shows its pre-archive status pills ("In Progress · ready · awaiting verdict") next to the "archived" pill on the task hero. Reads slightly noisy — a reader must infer these are the frozen last-state, not live. Minor; candidate for a muted "was: …" treatment. (LAB-1)
 - **UXO-2 — INVESTIGATED, NOT A BUG.** FV-2's Done hero shows "validation healthy" and I suspected a faked-healthy after force-accept. Checked the canonical `task.md`: it carries a REAL reviewer approve verdict (`result: approve`, `revisionId: rev_ESoWbwrOwiDU` == current rev `625773ae`, with concrete verification text — "local HEAD on fv-2 equals the pinned review revision; diff against main touches exactly one file"). `deriveValidation` → "healthy" is therefore correct. What happened: after the out-of-band merge + "Move to Review", the operator auto-engaged the reviewer (Balanced: summon=direct); it approved; my force-accept was redundant with a verdict landing ~concurrently. The only *light* residue: the force-accept DIALOG read "Verdict: awaiting verdict" a beat before the verdict propagated to the acceptability check — a timing snapshot, not a false state. Disposition: consistent.
