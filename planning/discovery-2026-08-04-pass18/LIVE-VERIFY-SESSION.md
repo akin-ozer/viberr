@@ -290,6 +290,31 @@ I had accumulated product questions in docs without actually asking them. Asked 
 Also corrected in canon: ruling 7 said the packet-kind set is "eight" and omitted
 `archive_task` (added by R14-3) — there are NINE in `PACKET_OPTION_KINDS`.
 
+## KB grounding — LIVE, and separable from skill grounding (FV-4)
+
+Created a knowledge base **`fv-conventions`** by writing
+`<dataRoot>/kb/fv-conventions/CONVENTIONS.md` (KBs are disk-is-truth — the folder registers
+it), containing one rule with its own canary: every `qa/smoke/` file must carry the line
+`Project: ELDERFLOWER`. Granted it to the Codex Developer, which already had the
+`smoke-note-style` skill (canary `SPICEBERRY`) and the `release-announcements` decoy
+(`WATERMELON`). FV-4's goal named **none** of the three markers — it said only "Follow the
+project conventions for smoke notes".
+
+Delivered file:
+```
+# Knowledge-base grounding smoke
+2026-08-05
+Project: ELDERFLOWER      <- KNOWLEDGE BASE
+                          
+The fresh environment exercised knowledge-base grounding on 2026-08-05.
+
+SPICEBERRY                <- SKILL
+```
+✓ **KB grounding works** (`Project: ELDERFLOWER`), ✓ **skill grounding works** (`SPICEBERRY`,
+plus the H1/date house style), ✓ **the decoy stayed out** (`WATERMELON` absent). The two
+channels are independent and neither leaked into the other — a stronger result than the
+FV-3 decoy test alone, because one artifact carries evidence of both.
+
 ## UX observations (running log)
 - **UXO-1** An **archived** task still shows its pre-archive status pills ("In Progress · ready · awaiting verdict") next to the "archived" pill on the task hero. Reads slightly noisy — a reader must infer these are the frozen last-state, not live. Minor; candidate for a muted "was: …" treatment. (LAB-1)
 - **UXO-2 — INVESTIGATED, NOT A BUG.** FV-2's Done hero shows "validation healthy" and I suspected a faked-healthy after force-accept. Checked the canonical `task.md`: it carries a REAL reviewer approve verdict (`result: approve`, `revisionId: rev_ESoWbwrOwiDU` == current rev `625773ae`, with concrete verification text — "local HEAD on fv-2 equals the pinned review revision; diff against main touches exactly one file"). `deriveValidation` → "healthy" is therefore correct. What happened: after the out-of-band merge + "Move to Review", the operator auto-engaged the reviewer (Balanced: summon=direct); it approved; my force-accept was redundant with a verdict landing ~concurrently. The only *light* residue: the force-accept DIALOG read "Verdict: awaiting verdict" a beat before the verdict propagated to the acceptability check — a timing snapshot, not a false state. Disposition: consistent.
