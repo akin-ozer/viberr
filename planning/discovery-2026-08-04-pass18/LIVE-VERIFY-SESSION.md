@@ -672,3 +672,34 @@ admin is 200 on both, this is a straight bug in the task/activity route guards.
 **Fix direction:** the task and activity loaders should gate on the `view` action (which
 includes V) rather than a higher tier, and a member who lacks a right should get 403 with a
 "you can't see this" surface, not a 404 that denies the task's existence.
+
+## ✅ Viewer matrix — CLOSED, done properly this time
+
+Applied the lesson from the F18-17 retraction: seated Vera by writing the **canonical**
+`projects/verify-fresh/project.md` `members:` block (`role: viewer`) and letting the file
+watcher reproject — source of truth, not the derived table. Reprojection confirmed
+(`project_members` now carries her viewer row). Re-logged in as Vera; clean jar swap per
+request.
+
+| Route | Viewer | `rbac.ts` says | Verdict |
+|---|---|---|---|
+| `/board` | **200** | `view` = [A,M,C,V] | ✓ |
+| `/tasks/FV-1` | **200** | `view` (tasks) | ✓ |
+| `/activity` | **200** | `view` (timelines) | ✓ |
+| `/org/settings` | **403** | admin-only | ✓ |
+| `/projects/…/settings` | **200** | — | **owner question ↓** |
+
+**The Viewer role behaves exactly as `rbac.ts` documents** on all four board/task/timeline
+and org-settings rows. My earlier "contradiction" was entirely the projection-only write.
+
+### Q-V1 (owner question, NOT a bug claim) — what should a Viewer see on project settings?
+A viewer loads `/projects/verify-fresh/settings` with **200**. The page does self-label
+**"Read-only"**, so read access looks deliberate. Two things on it are worth your ruling:
+- it still renders a **"Danger zone" / "Delete project"** section, and
+- it shows the GitHub connection incl. the **PAT last-4 (`…k3ui`)**.
+
+Mutation is separately proven gated (a contributor's `POST save-project` returned **403**
+server-side earlier this pass), so this is about *disclosure and noise*, not privilege:
+should a read-only stakeholder see a Danger zone they can never use, and a credential
+fingerprint? Options: hide the Danger zone below maintainer, and/or mask the PAT suffix for
+non-admins. I did not change anything — this is a product call.
