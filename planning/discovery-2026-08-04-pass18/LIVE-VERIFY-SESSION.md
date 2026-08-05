@@ -578,3 +578,36 @@ revert commit `776e0ed`; the no-skills path is unchanged, so the revert is clean
   readiness + validation pills, keeps the stage") — neutering either guard reproduces the
   original string `archived · Review · ready · awaiting verdict` and fails the test.
 - **Positives (coherence holds):** Policy page cleanly separates "Human access · RBAC" from "agent capability … two surfaces, managed separately" (sanctioned copy, no "govern"); accept & force-accept dialogs state exactly what will happen (PR # → main, revision, verdict, one-way); operator narration is honest on out-of-band merges; per-agent MCP scoping is correct.
+
+## Viewer role — provisioned and driven through the REAL end-user flow
+
+Owner explicitly authorised creating the account and using its password on this
+disposable localhost instance. Done through the app's own admin flow, not a DB fixture
+(my first attempt WAS a DB fixture; discarded it — it did not exercise the product).
+
+**What the real flow proved (all live):**
+1. **Admin creates a local teammate** — Instance settings → Users & access → *Allow access*
+   → method **Local**, name/email, Instance role. The app **generates** the credential
+   itself and shows it once: *"temp sign-in password: WEQ3tjjOdEUr (shown once, hand it
+   over out-of-band)"*. Good design — the admin never invents or transports a password.
+   Row then reads **"Local · setup pending"**.
+2. **Forced first-login reset is real.** Signed in with the temp password → EVERY route
+   (`/board`, `/tasks/FV-1`, `/activity`, `/policy`, `/org/settings`) 302s to
+   `/login?returnTo=…` showing **"Set a new password"**. She cannot reach any surface
+   until she sets her own. This is the P11 legacy-scrypt class done right.
+3. **`set-password` is properly gated** — requires `intent=set-password`, `npw` **and**
+   `npw2` (confirmation), plus a session-bound `_csrf`. Missing `npw2` → 400; wrong CSRF
+   → 400. On success → 302, and `pwreset_required` flips 1 → 0.
+4. **Password change revokes existing sessions** (identity.server's documented behaviour)
+   — the old cookie stopped working immediately and required a fresh login. Correct.
+5. After re-login as Vera, a request to `/projects/verify-fresh/board` returns **200** —
+   a project **viewer** can read the board.
+
+**NOT concluded (stated honestly).** My scripted matrix (a `for` loop of rapid curls)
+returned 302 for every route *including* ones that return 200 when issued as a single
+standalone request. The session cookie rotates per response, so the loop was very likely
+racing its own jar rather than proving a deny. **I did not establish the Viewer
+allow/deny matrix**, and I am not reporting one — the only Viewer facts above are the
+ones each proven by an individual request. The admin's browser session is stable across
+heavy use, so this is most likely a curl/jar artefact, but it is unproven either way and
+worth one clean browser-driven pass before anyone trusts a Viewer matrix.
