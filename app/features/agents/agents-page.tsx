@@ -1223,6 +1223,20 @@ export function AgentsPage({
         </div>
       </div>
 
+      {/* UXA-15: Policy and project Settings both explain their read-only state
+          to a role without the grant; Agents — where the New profile, Add from
+          library, Edit and Delete affordances all simply vanish — said nothing,
+          so a contributor saw a roster they could not touch and no reason why. */}
+      {!canManage && (
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            Read-only — deploying, editing or removing agent profiles needs the{" "}
+            <strong>Manage agents</strong> grant (project admin or maintainer).
+            The capability matrix below is readable by every member.
+          </span>
+        </div>
+      )}
       <div className="ag-stats">
         <div className="ag-stat">
           <div className="n">{profiles.length}</div>

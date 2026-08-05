@@ -2,7 +2,13 @@ import { useState } from "react";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
-import { formatClock, formatDayBucket } from "~/shared/dates/format";
+import { useHydrated } from "~/ui/local-time";
+import {
+  formatClock,
+  formatClockUTC,
+  formatDayBucket,
+  formatDayBucketUTC,
+} from "~/shared/dates/format";
 import { ntfMeta, ntfPill } from "./notification-meta";
 import {
   needsYouTime,
@@ -118,8 +124,17 @@ function NtfStream({
   onRead: (id: string) => void;
   onOpen: (n: NotificationPageItem) => void;
 }) {
+  // UXA-5: this page is SSR'd and rendered viewer-LOCAL day buckets on the
+  // first pass — and used that value as the GROUPING key, the precise case
+  // `formatDayBucketUTC`'s docstring exists for ("an SSR/hydration render
+  // straddling UTC midnight would mismatch every header at once"). Activity,
+  // task detail and the run console all adopted the useHydrated + *UTC first
+  // pass; the notifications stream was never brought along.
+  const local = useHydrated();
   const now = new Date();
-  const days = [...new Set(items.map((n) => formatDayBucket(n.occurredAt, now)))];
+  const dayOf = (iso: string) =>
+    local ? formatDayBucket(iso, now) : formatDayBucketUTC(iso);
+  const days = [...new Set(items.map((n) => dayOf(n.occurredAt)))];
   return (
     <div className="panel">
       <div className="panel-head">
@@ -130,7 +145,7 @@ function NtfStream({
         <div key={day}>
           <div className="act-day">{day}</div>
           {items.flatMap((n) => {
-            if (formatDayBucket(n.occurredAt, now) !== day) return [];
+            if (dayOf(n.occurredAt) !== day) return [];
             const m = ntfMeta(n);
             return (
               // UI-54: every stream row used to be `role="button" tabIndex={0}`
@@ -182,7 +197,9 @@ function NtfStream({
                   </button>
                 )}
                 {n.unread && <span className="unread-dot" />}
-                <span className="pev-t">{formatClock(n.occurredAt)}</span>
+                <span className="pev-t">
+                  {(local ? formatClock : formatClockUTC)(n.occurredAt)}
+                </span>
               </div>
             );
           })}

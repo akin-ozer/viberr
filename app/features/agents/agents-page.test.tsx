@@ -1228,3 +1228,46 @@ describe("F16: the roster tells the truth about backend credentials", () => {
     expect(badge.textContent).toContain("no runtime");
   });
 });
+
+/**
+ * UXA-15 — Policy and project Settings both explain their read-only state to a
+ * role without the grant. Agents hides New profile / Add from library / Edit /
+ * Delete outright and said nothing, so a contributor saw a roster they could
+ * not touch and no reason why.
+ */
+describe("UXA-15: the Agents page explains its read-only state", () => {
+  const renderAs = (myRole: string) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[mkProfile({})]}
+              deployments={[]}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole={myRole as never}
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    return render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
+  };
+
+  it("a contributor is told which grant is missing", () => {
+    const { container } = renderAs("contributor");
+    expect(container.textContent).toContain("Read-only");
+    expect(container.textContent).toContain("Manage agents");
+    // The management affordances really are absent — the note explains that.
+    expect(container.textContent).not.toContain("Add from library");
+  });
+
+  it("an admin sees no read-only note", () => {
+    const { container } = renderAs("admin");
+    expect(container.textContent).not.toContain("Read-only —");
+  });
+});
