@@ -265,6 +265,31 @@ from them is now implemented on this branch, each with tests:
 
 Suite after the batch: **2871 tests + tsc green** (from 2845 at the start of pass 18).
 
+## Owner rulings — pass-18 question round (2026-08-05)
+
+I had accumulated product questions in docs without actually asking them. Asked and answered:
+
+- **R18-5 — skills use the SDK's NATIVE mechanism, not prompt-text injection.** The owner's
+  answer was concrete: `const options = { skills: ["pdf", "docx"] }`
+  (code.claude.com/docs/en/agent-sdk/skills). The SDK discovers skills as filesystem
+  artifacts under `.claude/skills/<name>/SKILL.md` via `settingSources`, and the `skills`
+  list is a **context filter with progressive disclosure** — metadata at startup, body only
+  when the model invokes the skill. This replaces "inject every granted skill's full body
+  every run" and, as a bonus, resolves the documented HONEST LIMIT that `skills: []` cannot
+  empty the SDK's ~16 built-in skills (an explicit allow-list makes them uninvokable, so the
+  blanket `Skill`-tool denial is no longer the only lever). Codex keeps injection — its CLI
+  has no native equivalent and its skills channel is deliberately severed (LV-13).
+- **R18-6 — re-sync `design/prd.md` to canon** (rather than retiring the mirror). Done; the
+  two files are byte-identical and now pinned by `prd-sync.test.ts`. Ruling 27 re-affirmed
+  with "maintained" = byte-identical.
+- **R18-7 — the board acceptance confirm stays** (B1 as built): the drag remains possible but
+  asks first and states that it merges the PR and is one-way.
+- **R18-8 — F18-9 is CLOSED as not reproducible.** Both profile modals initialise with empty
+  grants; acting on the original note would have introduced the over-granting it feared.
+
+Also corrected in canon: ruling 7 said the packet-kind set is "eight" and omitted
+`archive_task` (added by R14-3) — there are NINE in `PACKET_OPTION_KINDS`.
+
 ## UX observations (running log)
 - **UXO-1** An **archived** task still shows its pre-archive status pills ("In Progress · ready · awaiting verdict") next to the "archived" pill on the task hero. Reads slightly noisy — a reader must infer these are the frozen last-state, not live. Minor; candidate for a muted "was: …" treatment. (LAB-1)
 - **UXO-2 — INVESTIGATED, NOT A BUG.** FV-2's Done hero shows "validation healthy" and I suspected a faked-healthy after force-accept. Checked the canonical `task.md`: it carries a REAL reviewer approve verdict (`result: approve`, `revisionId: rev_ESoWbwrOwiDU` == current rev `625773ae`, with concrete verification text — "local HEAD on fv-2 equals the pinned review revision; diff against main touches exactly one file"). `deriveValidation` → "healthy" is therefore correct. What happened: after the out-of-band merge + "Move to Review", the operator auto-engaged the reviewer (Balanced: summon=direct); it approved; my force-accept was redundant with a verdict landing ~concurrently. The only *light* residue: the force-accept DIALOG read "Verdict: awaiting verdict" a beat before the verdict propagated to the acceptability check — a timing snapshot, not a false state. Disposition: consistent.

@@ -440,6 +440,42 @@ it is regenerated from the filesystem rather than restated here.
     an intentional safety checkpoint against clobbering unrelated remote history. (Resolves the
     carried F17-L4 behavior question; the pass-17 merged-vs-closed copy split stands.)
 
+51. **R18-5 (2026-08-05): granted skills reach a Claude run through the SDK's NATIVE skills
+    mechanism, not as injected prompt text.** Viberr used to read every granted skill's full
+    body and paste it into the system prompt on every run, and deny the `Skill` tool outright.
+    That worked, and a live decoy test proved the model still applied only the relevant skill —
+    but it has no progressive disclosure: context cost grows linearly with grants, and
+    relevance is left entirely to the model. The owner's ruling is to use the documented SDK
+    option instead — `skills: ["<granted>", …]` — which discovers skills as filesystem
+    artifacts (`.claude/skills/<name>/SKILL.md`) through `settingSources`, loads only NAME +
+    DESCRIPTION at startup, and pulls a body only when the model invokes that skill. The
+    allow-list is also what finally contains the SDK's ~16 compiled-in skills: they are
+    "hidden from the model and rejected by the Skill tool", which the old `skills: []` could
+    not achieve (the HONEST LIMIT recorded in `claude-runtime.server.ts`). Isolation is
+    preserved by mounting ONLY Viberr-granted skills into the workspace — after R18-3 has
+    stripped the clone's own `.claude` — with `plugins: []` and no `'user'` setting source, and
+    by excluding `.claude/` from git so delivery can never ship it. **Codex keeps prompt-text
+    injection**: its CLI has no equivalent and LV-13 deliberately severs its skills channel.
+    That asymmetry is disclosed, not silent.
+
+52. **R18-6 (2026-08-05): `design/prd.md` is re-synced to canon and pinned by a test.** See the
+    re-affirmation under ruling 27 — the dual-copy rule had failed a second time, and the owner
+    chose re-sync over retiring the mirror. "Maintained" now means byte-identical, enforced by
+    `app/shared/docs/prd-sync.test.ts`, which names the diverging lines.
+
+53. **R18-7 (2026-08-05): accepting from the BOARD asks first.** Dragging a card into the final
+    stage runs the full acceptance contract — a real PR merge — so the board drag and the
+    keyboard Move menu now raise a confirmation that states the consequence and that merging is
+    one-way, matching the task-detail dialog. The drag stays possible; only the silence goes.
+    (Ruling 20 / FR27 promise the dialog at every acceptance path; three of five lacked it.)
+
+54. **R18-8 (2026-08-05): F18-9 is closed as NOT REPRODUCIBLE.** The recorded claim that the
+    agent-profile modal defaults every org skill to ON could not be reproduced: both modals
+    initialise a new profile with empty grants (`create-profile-modal.tsx:806-812`,
+    `agent-template-modal.tsx:123-131`). No default was changed — acting on the note would have
+    introduced the over-granting it warned about. Recorded as a class: a finding taken from a UI
+    impression and never re-verified in code can survive several passes as fact.
+
 ## Route map
 
 ```
