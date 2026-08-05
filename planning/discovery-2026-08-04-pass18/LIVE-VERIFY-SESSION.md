@@ -315,6 +315,38 @@ plus the H1/date house style), ✓ **the decoy stayed out** (`WATERMELON` absent
 channels are independent and neither leaked into the other — a stronger result than the
 FV-3 decoy test alone, because one artifact carries evidence of both.
 
+## R18-5 native skills — what is verified, and what is NOT (read before merging #140)
+
+Implemented and committed: 2891 tests (+20), tsc clean, every guarantee canaried.
+
+**Verified:**
+- Option names + semantics against the SHIPPED `sdk.d.ts`, not just the web docs:
+  `skills?: string[] | 'all'` and `managedSettings?: Settings` with
+  `claudeMdExcludes?: string[]` — *"Glob patterns … to exclude from loading. Patterns are
+  matched against absolute file paths using picomatch. Only applies to User, Project and
+  Local memory types."* Our `**/CLAUDE.md` form matches absolute workspace paths, so the
+  mitigation is correctly specified.
+- `.claude` cannot reach a PR: `.git/info/exclude` + strip-first + clean `git status`,
+  proven against a real git fixture in the test suite.
+- The no-skills path is byte-identical to before (isolation unchanged for those runs).
+
+**NOT verified live — the honest gap:**
+1. **The `init` message's `skills` array** should list ONLY the granted names (proving the
+   SDK's ~16 built-ins are filtered). Not observed: verifying it needs a **Claude
+   specialist** run with a checkout, i.e. an engaged Reviewer — and this session's browser
+   is signed in as the **Contributor**, who (correctly) cannot engage or run agents. The
+   operator is Claude but has no checkout, so it is not a substitute.
+2. **`claudeMdExcludes` actually suppressing a repo `CLAUDE.md`.** `settingSources:
+   ["project"]` is a NEW prompt-injection ingress: any customer repo with a `CLAUDE.md`
+   would otherwise have it loaded as memory. viberr's own repo has none, so I planted a
+   canary (`BUTTERSCOTCH`, an instruction to append a marker to every file written) in
+   FV-4's workspace to catch it — but the probe needs the same Claude specialist run as (1).
+
+**Recommended before merging:** as an admin/maintainer, engage the Reviewer on any task in
+Verify Fresh and read its run init — expect `skills` to contain only `reviewer-expertise`
+(plus any other grant), and expect no `BUTTERSCOTCH` anywhere in the run. If either fails,
+revert commit `776e0ed`; the no-skills path is unchanged, so the revert is clean.
+
 ## UX observations (running log)
 - **UXO-1** An **archived** task still shows its pre-archive status pills ("In Progress · ready · awaiting verdict") next to the "archived" pill on the task hero. Reads slightly noisy — a reader must infer these are the frozen last-state, not live. Minor; candidate for a muted "was: …" treatment. (LAB-1)
 - **UXO-2 — INVESTIGATED, NOT A BUG.** FV-2's Done hero shows "validation healthy" and I suspected a faked-healthy after force-accept. Checked the canonical `task.md`: it carries a REAL reviewer approve verdict (`result: approve`, `revisionId: rev_ESoWbwrOwiDU` == current rev `625773ae`, with concrete verification text — "local HEAD on fv-2 equals the pinned review revision; diff against main touches exactly one file"). `deriveValidation` → "healthy" is therefore correct. What happened: after the out-of-band merge + "Move to Review", the operator auto-engaged the reviewer (Balanced: summon=direct); it approved; my force-accept was redundant with a verdict landing ~concurrently. The only *light* residue: the force-accept DIALOG read "Verdict: awaiting verdict" a beat before the verdict propagated to the acceptability check — a timing snapshot, not a false state. Disposition: consistent.
