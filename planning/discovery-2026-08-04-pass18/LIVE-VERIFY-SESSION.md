@@ -315,6 +315,83 @@ plus the H1/date house style), ✓ **the decoy stayed out** (`WATERMELON` absent
 channels are independent and neither leaked into the other — a stronger result than the
 FV-3 decoy test alone, because one artifact carries evidence of both.
 
+## F18-15 — the one R18-5 question that is still open (NOT a proven regression)
+
+> **Correction.** I first wrote this section up as a proven BLOCKING regression. That was
+> wrong and is retracted below — the SDK contract does not support it. What remains is a
+> real but *unproven* exposure question. Recording both so the record is honest.
+
+**The exposure delta is real.** Before R18-5, `"Skill"` sat in `BASE_DENIED_BUILTINS`
+(*"viberr injects each agent's declared skill as system-prompt text"*), so the Skill tool
+could not be used at all. R18-5 un-denies it so granted skills can be invoked.
+
+**The containment is documented, and the contradicting evidence is weak.** `sdk.d.ts` on
+`skills?: string[]`: *"enable only the listed skills … This is a **context filter, not a
+sandbox**: unlisted skills are **hidden from the model's listing and rejected by the Skill
+tool**, but their files remain on disk and are reachable via Read/Bash."* I observed
+`init.skills` listing all 17 (1 granted + 16 first-party), which looks alarming — but that
+array is most plausibly the CLI's **discovery** set, not the model-visible set, and the repo
+had already documented the 16 as pre-existing (`claude-runtime.server.ts`: *"a standalone
+deployment STILL lists all 16 in the run's init"*). So it is not evidence of a filter failure.
+
+**Still open (the honest gap):** invocation-time proof. Nobody has watched an agent call
+`Skill(dataviz)` and be refused. Two live attempts to drive that probe through the task
+composer failed on synthetic-keystroke handling in the contenteditable, not on the app.
+
+**How to close it in one action:** as admin, ask any Claude specialist to invoke `dataviz`
+and report the verbatim result. Expect a rejection naming the allow-list. If instead it
+loads, this becomes a genuine blocker and the fix is to re-deny `Skill` (revert `776e0ed`;
+the no-skills path is byte-identical, so the revert is clean).
+
+**Verified GOOD live in the same run (the mount half is sound):**
+- `<workspace>/.claude/skills/` contains **exactly** `reviewer-expertise` — nothing else.
+- `git status --porcelain` **clean** + `.git/info/exclude` carries the `.claude` entry →
+  the "`.claude` can never reach a PR" guarantee holds live, not just in the fixture.
+
+## (retracted first draft of F18-15 — kept for the record)
+
+Run `run_iHf1NDDHFJ8c` (FV-4, Reviewer, backend claude, prod image with the change).
+Read straight off the `system·init` envelope:
+
+```
+"skills": ["reviewer-expertise",            <- the ONE granted skill (mount works)
+           "deep-research","design-sync","dataviz","update-config","verify","debug",
+           "code-review","simplify","batch","fewer-permission-prompts","doctor","loop",
+           "schedule","claude-api","run","run-skill-generator"]   <- 16 UNRELATED
+```
+
+**My commit message for `776e0ed` is WRONG.** It claims the allow-list "is what finally
+contains the SDK ~16 compiled-in skills — the HONEST LIMIT `skills: []` could not fix."
+The init proves the opposite: `skills: ["reviewer-expertise"]` did **not** filter them; all
+16 are still discovered.
+
+**Why this is a REGRESSION, not just an unmet hope.** Before R18-5 those 16 were listed but
+**unusable**, because `Skill` sat in `BASE_DENIED_BUILTINS`. R18-5 **un-denies `Skill`** so
+granted skills can be invoked — which simultaneously makes all 16 unrelated ones invocable.
+A Viberr reviewer can now invoke `doctor`, `schedule`, `run`, `deep-research`, … none of
+which any human granted. This is the pass-13 "silent resource" class (an agent holding
+capability nobody granted), re-opened on the Claude leg.
+
+Directly contradicts the owner's stated test goal: *"if skills are correctly loaded by
+agents (not unrelated skills are loaded)"*.
+
+**Verified GOOD in the same run (the mount half is sound):**
+- `<workspace>/.claude/skills/` contains **exactly** `reviewer-expertise` — nothing else.
+- `git status --porcelain` **clean**, `.git/info/exclude` carries the `.claude` entry →
+  the "`.claude` can never reach a PR" guarantee holds live, not just in the fixture.
+
+**Options for the owner:**
+1. **Revert `776e0ed`** — restores the `Skill` deny (0 invocable skills, prompt-injection of
+   bodies as before). Safe, loses R18-5's benefit. The no-skills path is byte-identical, so
+   the revert is clean.
+2. **Keep the mount, re-deny `Skill`** — skills are discoverable/announced but not invocable;
+   pointless for the model, so effectively (1).
+3. **Find the real containment switch** and re-verify against a live `init` — the only option
+   that delivers R18-5 as intended. `skills` is evidently not an allow-list over built-ins;
+   the plugin/settings tiers are the next place to look.
+
+Recommendation: (1) or (3), and do **not** merge #140 with this as-is.
+
 ## R18-5 native skills — what is verified, and what is NOT (read before merging #140)
 
 Implemented and committed: 2891 tests (+20), tsc clean, every guarantee canaried.
