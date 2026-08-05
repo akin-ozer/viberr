@@ -315,7 +315,37 @@ plus the H1/date house style), ✓ **the decoy stayed out** (`WATERMELON` absent
 channels are independent and neither leaked into the other — a stronger result than the
 FV-3 decoy test alone, because one artifact carries evidence of both.
 
-## F18-15 — the one R18-5 question that is still open (NOT a proven regression)
+## ✅ F18-15 — CLOSED. Skill containment PROVEN at invocation time.
+
+Ran the probe by replicating Viberr's exact SDK options inside the container (same `cwd`,
+`settingSources: ["project"]`, `skills: ["reviewer-expertise"]`, `managedSettings`,
+`strictMcpConfig`) and instructing the agent to invoke an **ungranted** skill:
+
+```
+INIT.skills: ["reviewer-expertise","deep-research","design-sync","dataviz", … 17 total]
+TOOL_USE:    Skill {"skill":"dataviz"}
+TOOL_RESULT: <tool_use_error>Skill dataviz is not in this session's skills allowlist</tool_use_error>
+TEXT:        "The call was rejected with the error: `Skill dataviz is not in this session's
+              skills allowlist`."
+```
+
+**Conclusion: R18-5 is safe and the owner's requirement is met.** `init.skills` is the CLI's
+**discovery** set (all 17 on-disk skills); the model may only ever *invoke* the granted one —
+the Skill tool refuses everything else by name, with an explicit allowlist error. "Unrelated
+skills are not loaded" holds in the sense that matters: they are not usable.
+
+R18-5 verification is therefore complete on all four fronts:
+| Guarantee | Status |
+|---|---|
+| Granted skill mounts and is invocable | ✓ live (`reviewer-expertise` only in `.claude/skills`) |
+| Ungranted skills rejected at invocation | ✓ **proven** (allowlist error above) |
+| `.claude` can never reach a PR | ✓ live (`git status` clean + `.git/info/exclude`) |
+| Repo `CLAUDE.md` not loaded as memory | ✓ live (BUTTERSCOTCH canary never in a system message) |
+
+Retained below for the record: the earlier draft where I called this a proven regression, and
+the correction. Both are wrong-then-right steps on the way to the probe above.
+
+## (superseded) F18-15 — stated as an open question
 
 > **Correction.** I first wrote this section up as a proven BLOCKING regression. That was
 > wrong and is retracted below — the SDK contract does not support it. What remains is a
