@@ -315,7 +315,33 @@ plus the H1/date house style), ✓ **the decoy stayed out** (`WATERMELON` absent
 channels are independent and neither leaked into the other — a stronger result than the
 FV-3 decoy test alone, because one artifact carries evidence of both.
 
-## F18-16 (NEW, needs one more run) — Claude-leg MCP stayed `pending` while Codex's mounted
+## ✅ F18-16 — RESOLVED: NOT a bug. Claude-leg MCP works; the tools are DEFERRED.
+
+Ran the disambiguating probe (Viberr's exact Claude MCP shape:
+`mcpServers: {"everything-http": {type:"http", url:"http://host.docker.internal:3001/mcp"}}`,
+`strictMcpConfig: true`) with a prompt that *requires* an everything-http tool:
+
+```
+MCP_SERVERS: [{"name":"everything-http","status":"pending"}]   <- init still says pending
+MCP_TOOLS:   []                                                 <- init lists NO mcp__ tools
+TOOL_USE:    ToolSearch
+RESULT:      [{"tool_name":"mcp__everything-http__echo"}, {"…__get-env"}, …]
+TOOL_USE:    mcp__everything-http__echo
+RESULT:      [{"type":"text","text":"Echo: VIBERR_MCP_OK"}]     <- IT WORKS
+```
+The agent then enumerated all 16 `mcp__everything-http__*` tools.
+
+**Conclusion: Codex/Claude MCP parity HOLDS.** This SDK version loads MCP tools **lazily via
+`ToolSearch`**, so `status:"pending"` and an empty `mcp__` set in the init envelope are the
+*expected* steady state, not a failed mount. Catalogue gap #2 is closed.
+
+> **Lesson (I got this wrong twice).** The `system·init` envelope is an **eager-discovery
+> snapshot**, not the authority on what an agent can use. This SDK defers *both* channels:
+> skills (all 17 listed, only granted ones invocable — F18-15) and MCP tools (none listed,
+> all 16 reachable — here). Any future claim about agent capability must be proven by
+> **invocation**, never by reading `init`.
+
+## (superseded) F18-16 — first draft: "Claude-leg MCP stayed pending"
 
 Closing catalogue gap #2 ("Claude-side MCP mount on the fresh env") surfaced a parity
 discrepancy. Reviewer run `run_iHf1NDDHFJ8c` (FV-4, backend claude, fresh env), from its
