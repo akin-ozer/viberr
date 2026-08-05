@@ -1118,6 +1118,22 @@ export function RepoPanel({
         <Icon name="github" />
         <h2>Repository &amp; credentials</h2>
       </div>
+      {/* UXA-3: LV-F2's lock note reached the Project, Stages and Members
+          panels but not this one — yet its "delete the task branch on GitHub"
+          checkbox is `disabled` for a role without the grant, with the sibling
+          Repair control hidden entirely. Same silent-disabled defect; same
+          remedy, naming the grant this panel actually needs. */}
+      {!canRepair && (
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            Read-only — repairing the repository binding and changing the
+            after-merge branch policy need the{" "}
+            <strong>Change project settings</strong> grant (project admin or
+            maintainer).
+          </span>
+        </div>
+      )}
       <div className="kv">
         <div className="kv-row">
           <span className="k">Default repository</span>

@@ -874,6 +874,27 @@ describe("CreateProfileModal", () => {
         .value,
     ).toBe("max");
   });
+
+  /**
+   * UXA-4 — the capability control is the most consequential setting in the
+   * product (it decides what an agent may do on its own), and its state lived
+   * in a CSS class only. The IDENTICAL control on the Policy sheet (the
+   * workflow-boundary seg) has always been a proper radiogroup; this one was
+   * never brought along, so a screen-reader user could not read the policy
+   * they were setting.
+   */
+  it("the Direct/Recommend/Human/Off control is a real radiogroup with checked state", () => {
+    const { container } = renderModal({ initial: null });
+    const seg = container.querySelector('.cap-seg[role="radiogroup"]');
+    expect(seg).toBeTruthy();
+    expect(seg!.getAttribute("aria-label")).toMatch(/^Policy for /);
+    const radios = [...seg!.querySelectorAll('[role="radio"]')];
+    expect(radios.length).toBeGreaterThan(1);
+    // Exactly one option is checked, and it is the one wearing the `on` class.
+    const checked = radios.filter((r) => r.getAttribute("aria-checked") === "true");
+    expect(checked).toHaveLength(1);
+    expect(checked[0]!.className).toContain("on");
+  });
 });
 
 describe("P13-AP-07 — the edit modal states that saving FORKS a library profile", () => {

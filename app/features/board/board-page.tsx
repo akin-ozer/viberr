@@ -705,6 +705,7 @@ function NewTaskModal({
                 type="button"
                 key={s.id}
                 className={"pick-chip" + (stg === s.id ? " on" : "")}
+                aria-pressed={stg === s.id}
                 onClick={() => setStg(s.id)}
               >
                 <span

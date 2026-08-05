@@ -292,6 +292,7 @@ export function AgentModal({
               type="button"
               key={s.id}
               className={"pick-chip" + (selStageSet.has(s.id) ? " on" : "")}
+              aria-pressed={selStageSet.has(s.id)}
               onClick={() => toggle(selStages, setSelStages, s.id)}
             >
               <span className="sdot" style={{ background: s.color }}></span>
@@ -313,6 +314,7 @@ export function AgentModal({
                   type="button"
                   key={s.id}
                   className={"pick-chip mono" + (selSkillSet.has(s.name) ? " on" : "")}
+                  aria-pressed={selSkillSet.has(s.name)}
                   onClick={() => toggle(selSkills, setSelSkills, s.name)}
                 >
                   {s.name}
@@ -336,6 +338,7 @@ export function AgentModal({
                   type="button"
                   key={m.id}
                   className={"pick-chip mono" + (selMcpSet.has(m.name) ? " on" : "")}
+                  aria-pressed={selMcpSet.has(m.name)}
                   onClick={() => toggle(selMcps, setSelMcps, m.name)}
                 >
                   {m.name}
@@ -359,6 +362,7 @@ export function AgentModal({
                   type="button"
                   key={k.id}
                   className={"pick-chip" + (selKbSet.has(k.dir) ? " on" : "")}
+                  aria-pressed={selKbSet.has(k.dir)}
                   onClick={() => toggle(selKbs, setSelKbs, k.dir)}
                   title={k.uri + "/"}
                 >

@@ -130,6 +130,7 @@ function NewProjectConnectionField({
               type="button"
               key={owner}
               className={"pick-chip" + (connOwner === owner ? " on" : "")}
+              aria-pressed={connOwner === owner}
               title={
                 state === "failed"
                   ? "This connection's token failed validation — delivery will not be able to push."
@@ -280,6 +281,7 @@ function NewProjectPolicyField({
         <button
           type="button"
           className={"pick-chip" + (policy === "strict" ? " on" : "")}
+          aria-pressed={policy === "strict"}
           onClick={() => setPolicy("strict")}
         >
           <Icon name="lock" />
@@ -288,6 +290,7 @@ function NewProjectPolicyField({
         <button
           type="button"
           className={"pick-chip" + (policy === "balanced" ? " on" : "")}
+          aria-pressed={policy === "balanced"}
           onClick={() => setPolicy("balanced")}
         >
           <Icon name="shield" />
@@ -296,6 +299,7 @@ function NewProjectPolicyField({
         <button
           type="button"
           className={"pick-chip" + (policy === "auto" ? " on" : "")}
+          aria-pressed={policy === "auto"}
           onClick={() => setPolicy("auto")}
         >
           <Icon name="bolt" />
