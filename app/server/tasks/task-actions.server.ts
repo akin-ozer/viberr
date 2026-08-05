@@ -1215,7 +1215,7 @@ export async function commentToAgent(
     // MCP set, persona — that the fresh-run path applies. Without this a
     // resumed (@mention) specialist runs unconfined (XS-1).
     const { resolveResumeConfinement } = await import("./specialist-run.server");
-    const confinement = resolveResumeConfinement(db, ctx, {
+    const confinement = await resolveResumeConfinement(db, ctx, {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       profileId: target.profileId,
@@ -1229,6 +1229,9 @@ export async function commentToAgent(
       workdir,
       disallowedTools: confinement.disallowedTools,
       env: confinement.env,
+      // The workspace mount survives between runs, but the SDK options do not —
+      // re-arm the native skills filter or the resumed run enables none.
+      ...(confinement.skills ? { skills: confinement.skills } : {}),
       ...(confinement.mcpServers ? { mcpServers: confinement.mcpServers } : {}),
       ...(confinement.systemPrompt ? { systemPrompt: confinement.systemPrompt } : {}),
       // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a

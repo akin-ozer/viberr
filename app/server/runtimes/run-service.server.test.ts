@@ -506,8 +506,12 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
   });
 
   // XS-1: a resumed specialist must be re-confined by its denylist / git ceiling
-  // / MCP set / persona — the resume path used to drop all of them.
-  it("resumeRun forwards the run confinement onto the resumed RunSpec", async () => {
+  // / MCP set / persona — the resume path used to drop all of them. pass-18 adds
+  // the native `skills` filter to that list: the workspace mount survives
+  // between runs but the SDK options do not, and the persona built by the same
+  // call already leaves a mounted skill's body out — so dropping it here would
+  // strip the agent's granted craft mid-thread with nothing in its place.
+  it("resumeRun forwards the run confinement (skills included) onto the resumed RunSpec", async () => {
     const specs: RunSpec[] = [];
     const capture: RuntimeAdapter = {
       backend: "claude",
@@ -521,14 +525,20 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
 
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
-      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
+      backend: "claude", model: "m", prompt: "go", skills: ["conventional-commits"],
+      dataRoot: store.dataRoot,
     });
     await settle();
+    // The fresh run carries them too (the mount → SDK hand-off).
+    expect(specs.find((s) => s.runId === runId)!.skills).toEqual([
+      "conventional-commits",
+    ]);
 
     const resumed = await resumeRun(store.db, {
       runId,
       prompt: "follow up",
       disallowedTools: ["Bash(gh pr merge:*)", "Edit"],
+      skills: ["conventional-commits"],
       env: { GIT_CEILING_DIRECTORIES: "/data/projects/x/tasks/VIB-1" },
       mcpServers: { viberr: { type: "sdk" } },
       systemPrompt: "You are the Developer.",
@@ -538,6 +548,7 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
 
     const resumeSpec = specs.find((s) => s.runId === resumed.runId)!;
     expect(resumeSpec.disallowedTools).toEqual(["Bash(gh pr merge:*)", "Edit"]);
+    expect(resumeSpec.skills).toEqual(["conventional-commits"]);
     expect(resumeSpec.env?.GIT_CEILING_DIRECTORIES).toBe(
       "/data/projects/x/tasks/VIB-1",
     );

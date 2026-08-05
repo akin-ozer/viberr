@@ -7,6 +7,7 @@ import type {
   RuntimeAdapter,
 } from "./adapter.server";
 import { SESSION_MISSING_RE } from "./session-export.server";
+import { isSdkSkillName } from "./skill-mount.server";
 import { projectEnvelope } from "./wire-format.server";
 
 /**
@@ -59,11 +60,16 @@ export interface ClaudeQueryOptions {
    *  even under bypassPermissions. */
   disallowedTools?: string[];
   /** Which filesystem settings to load. `[]` = SDK isolation mode: none of the
-   *  host's `~/.claude` settings tiers leak in. */
+   *  host's `~/.claude` settings tiers leak in. `['project']` names the run's
+   *  own WORKSPACE (cwd = the task checkout, whose `.claude` Viberr strips and
+   *  rewrites) — the only project source a governed run may see. Never `'user'`
+   *  or `'local'`: those are the host machine's tiers (F13). */
   settingSources?: string[];
-  /** Skills to enable. `[]` = none listed → the model sees no skills and the
-   *  Skill tool rejects them (a context filter). Viberr injects its own skill
-   *  as system-prompt text, so a run needs no SDK-discovered skills. */
+  /** Skills to enable — a CONTEXT FILTER, not a sandbox. `[]` = none listed, so
+   *  the model sees no skill and the Skill tool rejects every one. A name list
+   *  enables exactly those (matched on the SKILL.md `name` / directory name) and
+   *  hides the rest, including the SDK's own bundled set. Setting this option
+   *  auto-adds the `Skill` tool to `allowedTools`. */
   skills?: string[];
   /** Local plugins to load for the session. `[]` = load NONE — closes the
    *  plugin-marketplace leak channel that `settingSources`/`skills` don't cover
@@ -74,6 +80,9 @@ export interface ClaudeQueryOptions {
    *  plugin MCP) — only the servers Viberr passes via `mcpServers` reach the run.
    *  Governance parity with `settingSources`, for the MCP catalog channel. */
   strictMcpConfig?: boolean;
+  /** Policy-tier settings enforced on the spawned process without writing
+   *  root-owned files. Viberr uses ONE key — see `MANAGED_SETTINGS` below. */
+  managedSettings?: { claudeMdExcludes?: string[] };
 }
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
@@ -218,8 +227,8 @@ const SUPPORTING_DENIED_BUILTINS = [
  * the "Codex and Claude work the same from viberr's eye" parity, since a Codex
  * specialist on the same task literally cannot do it — or (b) bypass a concern
  * viberr already OWNS (orchestration = the operator; notifications =
- * `notifyTaskWatchers`; the workspace clone = the runtime; skills = injected as
- * prompt TEXT). All are empirically UNUSED (0 invocations across every real run).
+ * `notifyTaskWatchers`; the workspace clone = the runtime). All are empirically
+ * UNUSED (0 invocations across every real run).
  *
  * DELIBERATELY NOT DENIED: `ToolSearch` (the operator loads its deferred
  * `mcp__viberr__*` governance tools through it — 137 real calls; denying it
@@ -231,7 +240,13 @@ const SUPPORTING_DENIED_BUILTINS = [
  * `mcp__viberr__schedule_*` tool + capability toggle, not the Claude Cron tool.
  */
 const BASE_DENIED_BUILTINS = [
-  "Skill", // viberr injects each agent's declared skill as system-prompt text
+  // Denied for a run that mounts NO skill of its own (see `nativeSkills` in
+  // `start`): the SDK compiles ~16 first-party skills into its binary, and with
+  // no `skills` filter of ours to hide them the only fence left is denying the
+  // tool. A run that DOES carry granted skills drops this entry and passes
+  // `skills: [<granted names>]` instead — the filter rejects every unlisted
+  // skill (bundled ones included) at the tool boundary.
+  "Skill",
   // The subagent-spawning family — a denied-tools run must not be able to spawn
   // an SDK subagent (`claude`/`general-purpose`/…) that would inherit an
   // UNRESTRICTED toolset (Bash/Write/Edit) and bypass this very denylist. Under
@@ -259,6 +274,42 @@ const BASE_DENIED_BUILTINS = [
   "EnterWorktree", // the runtime manages the task's workspace clone
   "ExitWorktree",
 ] as const;
+
+/**
+ * The exact skill names THIS run may enable — deduped, and filtered through the
+ * SDK's own naming rules.
+ *
+ * The mount already validates every name it writes ({@link isSdkSkillName}), so
+ * this is the belt to that braces: `query()` THROWS BEFORE STARTING on a value
+ * that cannot be an exact skill name, and a run must never die because a store
+ * folder was called `my skill (v2)`. Re-checking at the adapter boundary means
+ * no caller — present or future — can turn a bad name into a failed run. An
+ * empty result puts the run back on the fully-isolated defaults.
+ */
+export function nativeSkillNames(skills?: readonly string[]): string[] {
+  if (!skills?.length) return [];
+  return [...new Set(skills)].filter(isSdkSkillName);
+}
+
+/**
+ * Policy-tier settings for a run that opens `settingSources: ['project']`.
+ *
+ * HONEST NOTE — an ACCEPTED, UNVERIFIED mitigation. `'project'` is also the
+ * source that loads CLAUDE.md memory files, so enabling it to reach the skills
+ * Viberr mounted also lets the CHECKED-OUT REPOSITORY's `CLAUDE.md` become
+ * system-prompt-tier instruction. That is a real trust-boundary crossing: the
+ * codex leg deliberately closes the same door with `project_doc_max_bytes: 0`,
+ * and the Claude leg used to get it for free from `settingSources: []`.
+ * `claudeMdExcludes` is the SDK's documented switch for exactly this (it applies
+ * to the User/Project/Local memory tiers), so we pass it — but it has NOT been
+ * verified live against a real run, and it cannot be verified from a unit test.
+ * Treat the ingress as OPEN until someone reads a run's system prompt and
+ * confirms otherwise; the deterministic guarantees of this change are the
+ * stripped-and-rewritten `.claude` catalog and the `skills` filter, not this.
+ */
+const MANAGED_SETTINGS: { claudeMdExcludes: string[] } = {
+  claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
+};
 
 /** One streaming-input user message (enables Query.interrupt()). */
 async function* singlePrompt(prompt: string): AsyncGenerator<unknown> {
@@ -499,6 +550,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       const run = async () => {
         const queryFn = deps.queryFn ?? (await realQuery());
         const resolvedModel = resolveClaudeModel(spec.model);
+        // The granted skills Viberr MOUNTED into this run's workspace (empty for
+        // a run with no grants, no checkout, or a Codex profile — see below).
+        const nativeSkills = nativeSkillNames(spec.skills);
         const options: ClaudeQueryOptions = {
           cwd: spec.workdir,
           // Only set model when we have a real id/alias; otherwise let the SDK
@@ -522,24 +576,37 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // generous; override per deployment with VIBERR_CLAUDE_MAX_TURNS.
           maxTurns: resolveMaxTurns(),
           // SDK isolation: never load the host machine's ~/.claude settings
-          // tiers into a Viberr run — Viberr injects each agent's declared
-          // skill/KB as system-prompt text, so a run must see exactly the
-          // agent's declared resources, not the operator-user's personal Claude
-          // Code settings/plugins. `settingSources: []` drops the host settings
-          // tiers; `plugins: []` names ZERO local plugins (defense-in-depth for
-          // the plugin channel, F13).
+          // tiers into a Viberr run — a run must see exactly the resources its
+          // profile grants, not the operator-user's personal Claude Code
+          // settings/plugins/skills. `plugins: []` names ZERO local plugins
+          // (defense-in-depth for the plugin channel, F13) on EVERY run.
           //
-          // HONEST LIMIT (docker-verified 2026-07-18): `skills: []` does NOT give
-          // an empty skill set. The SDK compiles ~16 first-party skills into its
-          // binary, and a standalone deployment (pristine CLAUDE_CONFIG_DIR, no
-          // host ~/.claude) STILL lists all 16 in the run's init and exposes the
-          // `Skill` tool. It is NOT the once-assumed "server nested in a Claude
-          // Code session" dev artifact — it is present in production. We cannot
-          // strip them from the init list here, so isolation is enforced the only
-          // way we can: `BASE_DENIED_BUILTINS` denies the `Skill` TOOL for every
-          // run, making those bundled skills UNINVOKABLE (see that constant).
-          settingSources: [],
-          skills: [],
+          // Two shapes, decided by whether Viberr mounted any granted skill:
+          //
+          //  · NO granted skills (operator runs, Codex profiles, a run with no
+          //    checkout) — `settingSources: []` drops every filesystem settings
+          //    tier and `skills: []` lists none. HONEST LIMIT (docker-verified
+          //    2026-07-18): `skills: []` does NOT give an empty skill SET — the
+          //    SDK compiles ~16 first-party skills into its binary and a
+          //    standalone deployment (pristine CLAUDE_CONFIG_DIR, no host
+          //    ~/.claude) still lists all 16 in the run's init. That is why
+          //    `BASE_DENIED_BUILTINS` denies the `Skill` TOOL, making them
+          //    UNINVOKABLE.
+          //
+          //  · GRANTED skills mounted — `settingSources: ['project']` so the SDK
+          //    discovers `<cwd>/.claude/skills/<name>`, and `skills: [<names>]`
+          //    enables exactly those. The filter is what replaces the blanket
+          //    `Skill` deny: an unlisted skill (every bundled one included) is
+          //    hidden from the model and REJECTED by the Skill tool. The project
+          //    source is the run's own workspace checkout, whose `.claude` was
+          //    stripped and rewritten by `mountGrantedSkills` moments earlier —
+          //    and cwd is the repo root, so the SDK's parent walk stops there and
+          //    can never reach the data root or a host `.claude` above it. Still
+          //    NEVER `'user'`/`'local'`: those are the host tiers F13 closed.
+          //    See MANAGED_SETTINGS for the CLAUDE.md ingress this opens.
+          settingSources: nativeSkills.length ? ["project"] : [],
+          skills: nativeSkills,
+          ...(nativeSkills.length ? { managedSettings: MANAGED_SETTINGS } : {}),
           plugins: [],
           // R18-3 (governance parity with settingSources): only Viberr-granted
           // MCP servers reach a run — ignore a repo `.mcp.json`, user MCP config,
@@ -588,7 +655,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         //   - specialist: deny the git/gh commands for capabilities the profile
         //     withholds (push / PR / merge), computed upstream.
         const denied = [
-          ...BASE_DENIED_BUILTINS,
+          // `Skill` leaves the base list for a run that mounted granted skills:
+          // denying it would remove the tool from the model's context entirely
+          // (deny beats the `skills` option's auto-allow), so the mounted skills
+          // would be listed and uninvokable — a silent capability loss. The
+          // `skills` filter is the fence for that run instead.
+          ...BASE_DENIED_BUILTINS.filter(
+            (tool) => tool !== "Skill" || nativeSkills.length === 0,
+          ),
           ...(spec.kind === "operator" ? OPERATOR_DENIED_BUILTINS : []),
           // Supporting/reviewing runs are read-only for the repo (F10-12).
           ...(spec.kind === "reviewer" ? SUPPORTING_DENIED_BUILTINS : []),

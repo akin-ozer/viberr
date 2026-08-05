@@ -226,6 +226,9 @@ export interface StartRunInput {
   /** Tool denylist confining a specialist run to its granted capabilities.
    *  Claude only (Codex has no denylist channel — see codex-runtime). */
   disallowedTools?: string[];
+  /** Granted skills mounted into the run workspace (`mountGrantedSkills`).
+   *  Claude only — the SDK's native skills filter. See RunSpec.skills. */
+  skills?: string[];
   /** The run's `execute-code-or-write-repo` grant is withheld — Codex enforces
    *  it with a read-only sandbox (P13-RT-02). Omit to let `startRun` derive it
    *  from `disallowedTools` (see `repoWriteWithheldFromDenylist`). */
@@ -437,6 +440,7 @@ export async function startRun(
     ...(input.disallowedTools && input.disallowedTools.length
       ? { disallowedTools: input.disallowedTools }
       : {}),
+    ...(input.skills && input.skills.length ? { skills: input.skills } : {}),
     // Codex has no denylist channel; the withheld repo-write grant becomes a
     // read-only sandbox instead (P13-RT-02). Explicit caller value wins.
     ...((input.repoWriteWithheld ??
@@ -676,6 +680,13 @@ export async function resumeRun(
      *  this a resumed (e.g. @mention) specialist runs UNCONFINED — the exact
      *  confinement the fresh-run path establishes is silently dropped (XS-1). */
     disallowedTools?: string[];
+    /** Re-apply the granted skills mounted into the workspace on resume. The
+     *  workspace (and its mount) survives between runs, but the SDK options do
+     *  not: without this a resumed @mention run would enable NO skill while its
+     *  persona — built by the same `resolveResumeConfinement` — already left the
+     *  bodies out for native delivery, so the agent would silently lose its
+     *  granted craft mid-thread (the XS-1 fresh-vs-resume parity class). */
+    skills?: string[];
     /** Re-apply the run's tool APPROVAL list on resume. D4: the type used to
      *  omit this while accepting every other half of the run's tool policy, so
      *  a caller that curated an allowlist (the operator does) silently lost it
@@ -738,6 +749,7 @@ export async function resumeRun(
       ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
       ...(input.actor ? { actor: input.actor } : {}),
       ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+      ...(input.skills ? { skills: input.skills } : {}),
       ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
       ...(input.env ? { env: input.env } : {}),
       ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
@@ -772,6 +784,7 @@ export async function resumeRun(
     ...(input.actor ? { actor: input.actor } : {}),
     // Re-establish the run confinement the fresh-run path applies (XS-1).
     ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+    ...(input.skills ? { skills: input.skills } : {}),
     ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
     ...(input.env ? { env: input.env } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),

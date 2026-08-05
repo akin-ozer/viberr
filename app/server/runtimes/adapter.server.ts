@@ -47,6 +47,15 @@ export interface RunSpec {
    *  specialist without push rights cannot run `git push`). Deny rules bind
    *  even under bypassPermissions. Claude only. */
   disallowedTools?: string[];
+  /** The GRANTED skills Viberr mounted into this run's workspace
+   *  (`mountGrantedSkills`), by exact name. Claude only: the adapter turns these
+   *  into the SDK's native skills context filter, so the model gets each skill's
+   *  metadata up front and its full body only when it invokes the Skill tool.
+   *  Empty/absent ⇒ the run enables NO skill and the `Skill` tool stays denied.
+   *  Codex has no native equivalent (its skills channel is severed outright —
+   *  codex-runtime LV-13), so a Codex run's granted skills ride the system
+   *  prompt as text and this stays empty. */
+  skills?: string[];
   /** The run's `execute-code-or-write-repo` grant is WITHHELD (mode `off` or
    *  `human`). Codex enforces it with a read-only sandbox — a physical block,
    *  strictly stronger than Claude's tool denylist (P13-RT-02). Deliberately
