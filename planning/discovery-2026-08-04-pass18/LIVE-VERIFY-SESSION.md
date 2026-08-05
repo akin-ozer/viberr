@@ -315,6 +315,25 @@ plus the H1/date house style), ✓ **the decoy stayed out** (`WATERMELON` absent
 channels are independent and neither leaked into the other — a stronger result than the
 FV-3 decoy test alone, because one artifact carries evidence of both.
 
+## ✅ Catalogue gap #9 CLOSED — ALWAYS_HUMAN merge proven unreachable BY ATTEMPT
+
+Previously audit-only ("no such tool exists"). Now attacked from inside a real agent
+workspace (`…/FV-4/workspace/viberr`) and proven on all three routes:
+
+| Route an agent could take | Result |
+|---|---|
+| A `merge` tool in either toolkit | **Does not exist** — grep of both toolkits returns nothing; `ALWAYS_HUMAN_CAPABILITY_IDS = ["merge-pull-request","transition-to-done","change-project-policy"]` |
+| `git push` from the workspace | `fatal: could not read Username for 'https://github.com': terminal prompts disabled` |
+| Direct GitHub merge API via Bash/node | `HTTP 401 {"message":"Requires authentication"}` |
+
+Credential surface audited in the same workspace: `origin` is a **plain https URL** (no
+embedded token), **no** `credential.helper`, **no** persisted `GIT_ASKPASS`, **no** GitHub
+env var, **no** `~/.git-credentials`. NFR7 holds — the PAT lives only in the server's own
+push path (GIT_ASKPASS injected for that call), never in anything the agent can read.
+
+So the product's strongest promise — *merge is a human's decision* — is not merely
+policy-gated but **structurally impossible for an agent**, verified by attempting it.
+
 ## ✅ F18-16 — RESOLVED: NOT a bug. Claude-leg MCP works; the tools are DEFERRED.
 
 Ran the disambiguating probe (Viberr's exact Claude MCP shape:
