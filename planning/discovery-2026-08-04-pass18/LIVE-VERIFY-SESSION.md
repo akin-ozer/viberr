@@ -234,6 +234,37 @@ passes config as `--config` argv, so a literal secret would be visible in `ps au
 deliberately withheld (`codex-runtime.server.ts` comment). Codex connects unauthenticated. That is an
 honest, documented limitation, not a silent drop.
 
+## Implementation of the audit backlog — ALL items closed
+
+The three opus subagents produced `UX-AUDIT-PASS18.md` (0 HIGH / 6 MED / 10 LOW),
+`GAP-ANALYSIS.md` (57 requirements; nothing in the PRD unimplemented) and
+`USE-CASES-PASS18.md` (52 use cases + a regression-test map). Everything actionable
+from them is now implemented on this branch, each with tests:
+
+| id | what | status |
+|----|------|--------|
+| **B1** | *(gap analysis, verified by me in code)* a human dragging a card into the final stage runs `acceptCompletion` — a **real PR merge** — and the board drag AND keyboard Move committed it with no dialog, while task detail has always said "Merging is one-way". Both paths now confirm. | ✓ 3 canaried tests |
+| UXA-1 | comment composer claimed "Open to every registered user"; the Permissions panel on the same page had already removed that exact false sentence (E1). Membership is the gate (R15-4, re-proven live). | ✓ |
+| UXA-2 | review queue had a private PR-state colour map → a rejected PR was neutral grey there, `risk` everywhere else. Uses canonical `prStatePill` (ruling 12). | ✓ test updated |
+| UXA-3 | LV-F2's read-only note reached 3 of 4 Settings panels; RepoPanel added. | ✓ |
+| UXA-4 | `pick-chip`/`cap-seg` families never swept by G3/G5 — 13 groups signalled by CSS alone, incl. the **capability** control whose twin on Policy is a proper radiogroup. | ✓ test |
+| UXA-5 | `/notifications` SSR'd viewer-local day buckets **as the grouping key** — the exact case `formatDayBucketUTC` documents. | ✓ |
+| UXA-6 | same actor was "Primary specialist" and "Delivering agent" one viewport apart. | ✓ |
+| UXA-7 | Policy's two radiogroups promised arrow-key traversal and never wired it → new reusable `rovingRadioKeyDown`. | ✓ 5 tests |
+| UXA-8 | the 2 wide fr-grid tables had no mobile rule and no overflow container. | ✓ CSS gate green |
+| UXA-9 | `MiniModal`'s disabled Save never named the unmet requirement (7 callers). | ✓ |
+| UXA-10 | profile said "no memberships" two ways; `Joined` used the TIMELINE formatter (year-less). | ✓ |
+| UXA-11 | connection modal locks the owner field silently. | ✓ |
+| UXA-12 | the whole login value panel was `aria-hidden` — unique content, invisible to AT. | ✓ |
+| UXA-13 | org-admin override pill hid its sentence in a `title` on a non-focusable span. | ✓ |
+| UXA-14 | "Save goal" dead below 3 chars with no hint. | ✓ |
+| UXA-15 | Agents page never said it was read-only. | ✓ 2 tests |
+| UXA-16 | Policy's "last change" was formatted in the SERVER's timezone, year-less. | ✓ test updated |
+| UXO-1 | archived task kept asserting live obligations ("ready · awaiting verdict"). | ✓ |
+| UXO-3 | board header counts a Done task while visible columns read "No tasks". | **not a defect** — inherent to a horizontally scrolling kanban; the count names its scope ("in this project") and Done is one scroll away. No change. |
+
+Suite after the batch: **2871 tests + tsc green** (from 2845 at the start of pass 18).
+
 ## UX observations (running log)
 - **UXO-1** An **archived** task still shows its pre-archive status pills ("In Progress · ready · awaiting verdict") next to the "archived" pill on the task hero. Reads slightly noisy — a reader must infer these are the frozen last-state, not live. Minor; candidate for a muted "was: …" treatment. (LAB-1)
 - **UXO-2 — INVESTIGATED, NOT A BUG.** FV-2's Done hero shows "validation healthy" and I suspected a faked-healthy after force-accept. Checked the canonical `task.md`: it carries a REAL reviewer approve verdict (`result: approve`, `revisionId: rev_ESoWbwrOwiDU` == current rev `625773ae`, with concrete verification text — "local HEAD on fv-2 equals the pinned review revision; diff against main touches exactly one file"). `deriveValidation` → "healthy" is therefore correct. What happened: after the out-of-band merge + "Move to Review", the operator auto-engaged the reviewer (Balanced: summon=direct); it approved; my force-accept was redundant with a verdict landing ~concurrently. The only *light* residue: the force-accept DIALOG read "Verdict: awaiting verdict" a beat before the verdict propagated to the acceptability check — a timing snapshot, not a false state. Disposition: consistent.
