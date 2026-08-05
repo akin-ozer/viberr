@@ -1500,6 +1500,41 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     expect(save.className).not.toBe(cancel.className);
   });
 
+  // UXO-1 (live-caught, pass 18): a task archived MID-REVIEW kept rendering its
+  // readiness + validation pills, so the hero read "archived · ready · awaiting
+  // verdict" — asserting that someone still owes a verdict when the task is out
+  // of the flow and nobody does. The STAGE pill stays (it answers "how far did
+  // this get?"); the two ACTIONABLE signals must drop.
+  it("UXO-1: an archived task drops the readiness + validation pills, keeps the stage", () => {
+    const live = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "ready", validation: "changed" })}
+        stage={{ id: "review", name: "Review", color: "#5b76fe" }}
+        canEditGoal
+      />,
+    );
+    const liveText = live.container.querySelector(".hero-meta")!.textContent!;
+    expect(liveText).toContain("Review");
+    expect(liveText).toContain("ready");
+    expect(liveText).toContain("awaiting verdict"); // the live obligation
+    live.unmount();
+
+    const archived = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "ready", validation: "changed" })}
+        stage={{ id: "review", name: "Review", color: "#5b76fe" }}
+        canEditGoal
+        archived
+      />,
+    );
+    const meta = archived.container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("archived");
+    expect(meta).toContain("Review"); // how far it got — still true
+    // No live obligation is asserted for a task nobody owes anything on.
+    expect(meta).not.toContain("awaiting verdict");
+    expect(meta).not.toMatch(/\bready\b/);
+  });
+
   // A wrapper that bumps editGoalSignal on click, mimicking a confirmed
   // edit_goal decision — keeps the router/toast context stable across the bump.
   function EditGoalHarness({ draft }: { draft: string | null }) {

@@ -545,5 +545,17 @@ revert commit `776e0ed`; the no-skills path is unchanged, so the revert is clean
 ## UX observations (running log)
 - **UXO-1** An **archived** task still shows its pre-archive status pills ("In Progress · ready · awaiting verdict") next to the "archived" pill on the task hero. Reads slightly noisy — a reader must infer these are the frozen last-state, not live. Minor; candidate for a muted "was: …" treatment. (LAB-1)
 - **UXO-2 — INVESTIGATED, NOT A BUG.** FV-2's Done hero shows "validation healthy" and I suspected a faked-healthy after force-accept. Checked the canonical `task.md`: it carries a REAL reviewer approve verdict (`result: approve`, `revisionId: rev_ESoWbwrOwiDU` == current rev `625773ae`, with concrete verification text — "local HEAD on fv-2 equals the pinned review revision; diff against main touches exactly one file"). `deriveValidation` → "healthy" is therefore correct. What happened: after the out-of-band merge + "Move to Review", the operator auto-engaged the reviewer (Balanced: summon=direct); it approved; my force-accept was redundant with a verdict landing ~concurrently. The only *light* residue: the force-accept DIALOG read "Verdict: awaiting verdict" a beat before the verdict propagated to the acceptability check — a timing snapshot, not a false state. Disposition: consistent.
-- **UXO-3** Board with a single Done task shows "1 task" in the header while the three visible columns (Triage/Ready/In Progress) all read "No tasks" — Done/Review are off-screen right (horizontal scroll). Momentary "where's my task?" for a narrow viewport. Minor.
+- **UXO-3 — DISPOSITIONED: not a defect, no fix.** Board with a single Done task shows "1 task"
+  in the header while the three visible columns read "No tasks" (Done/Review off-screen right).
+  Judged rather than patched: the header count is accurate, each column's empty state is
+  accurate, and the board already carries a **deliberate** cut-edge affordance — `app.css`
+  `overflow-x: auto` + `scroll-snap-type: x proximity`, with the standing comment *"horizontal
+  scrollbar and `scroll-snap-type` still mark the cut edge."* A horizontally scrolling kanban
+  is the convention, and inventing a header hint would add copy for a non-problem. Recorded so
+  the next pass doesn't re-litigate it.
+- **UXO-1 — FIXED + PINNED.** The `!archived` guards drop the readiness and validation pills on
+  an archived task (stage stays: it answers "how far did this get?"). Now covered by a canaried
+  regression test (`task-detail-components.test.tsx` "UXO-1: an archived task drops the
+  readiness + validation pills, keeps the stage") — neutering either guard reproduces the
+  original string `archived · Review · ready · awaiting verdict` and fails the test.
 - **Positives (coherence holds):** Policy page cleanly separates "Human access · RBAC" from "agent capability … two surfaces, managed separately" (sanctioned copy, no "govern"); accept & force-accept dialogs state exactly what will happen (PR # → main, revision, verdict, one-way); operator narration is honest on out-of-band merges; per-agent MCP scoping is correct.

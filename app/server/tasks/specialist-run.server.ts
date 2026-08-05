@@ -259,33 +259,34 @@ export function resolveDeployedSpecialist(
 }
 
 /**
- * R18-1: the KB grants the task's DELIVERING engagement used, so a reviewer can
- * judge the work against the same conventions. Returns [] when there is no
- * deliverer, when the deliverer IS this profile (its own run already carries
- * them), or when the deliverer is undeployed since delivery (its live grants
- * cannot be confirmed — the reviewer keeps its own KBs). `resolveKb` throwing
- * (undeployed profile) is treated as "no extras".
+ * R18-1 (widened to SKILLS by LV-F3): the context grants the task's DELIVERING
+ * engagement used, so a reviewer can judge the work against the same
+ * conventions. Returns [] when there is no deliverer, when the deliverer IS
+ * this profile (its own run already carries them), or when the deliverer is
+ * undeployed since delivery (its live grants cannot be confirmed — the reviewer
+ * keeps its own). `resolve` throwing (undeployed profile) is treated as "no
+ * extras".
  */
-function deliveringKbGrants(
+function deliveringContextGrants(
   frontmatter: Parameters<typeof deliveringEngagement>[0],
   reviewerProfileId: string,
-  resolveKb: (profileId: string) => string[],
+  resolve: (profileId: string) => string[],
 ): string[] {
   const deliverer = deliveringEngagement(frontmatter);
   if (!deliverer || deliverer.profileId === reviewerProfileId) return [];
   try {
-    return resolveKb(deliverer.profileId);
+    return resolve(deliverer.profileId);
   } catch {
     return [];
   }
 }
 
 /**
- * Append the delivering engagement's KBs (lazily resolved) onto the reviewer's
- * own KB list, reviewer's first, deduped so a KB both grant never injects — or
- * double-charges the shared injection budget — twice.
+ * Append the delivering engagement's grants (lazily resolved) onto the
+ * reviewer's own list, reviewer's first, deduped so a resource both grant never
+ * injects — or double-charges the shared injection budget — twice.
  */
-function withDeliveringKb(own: string[], resolveExtras: () => string[]): string[] {
+function withDeliveringGrants(own: string[], resolveExtras: () => string[]): string[] {
   const seen = new Set(own);
   const merged = [...own];
   for (const name of resolveExtras()) {
@@ -784,8 +785,8 @@ export async function startAgentRun(
   // undeployed deliverer (resolve throws → skip), like the reviewer's own
   // resolve above.
   if (!delivers) {
-    kb = withDeliveringKb(kb, () =>
-      deliveringKbGrants(
+    kb = withDeliveringGrants(kb, () =>
+      deliveringContextGrants(
         existing.parsed.frontmatter,
         engagement.profileId,
         (profileId) =>
@@ -1672,8 +1673,8 @@ export async function resolveResumeConfinement(
     );
     const kb =
       !input.delivers && resumeTask
-        ? withDeliveringKb(resolved.kb, () =>
-            deliveringKbGrants(
+        ? withDeliveringGrants(resolved.kb, () =>
+            deliveringContextGrants(
               resumeTask.parsed.frontmatter,
               input.profileId,
               (profileId) =>
