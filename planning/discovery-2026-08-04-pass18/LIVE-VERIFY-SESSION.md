@@ -315,6 +315,37 @@ plus the H1/date house style), ✓ **the decoy stayed out** (`WATERMELON` absent
 channels are independent and neither leaked into the other — a stronger result than the
 FV-3 decoy test alone, because one artifact carries evidence of both.
 
+## F18-16 (NEW, needs one more run) — Claude-leg MCP stayed `pending` while Codex's mounted
+
+Closing catalogue gap #2 ("Claude-side MCP mount on the fresh env") surfaced a parity
+discrepancy. Reviewer run `run_iHf1NDDHFJ8c` (FV-4, backend claude, fresh env), from its
+`system·init`:
+
+```
+"mcp_servers":[{"name":"everything-http","status":"pending"},
+               {"name":"viberr_agent","status":"connected"}]
+"tools":["Bash","Read","ReportFindings","Skill","ToolSearch",
+         "mcp__viberr_agent__ask_human","mcp__viberr_agent__post_comment",
+         "mcp__viberr_agent__report_outcome"]        <- NO mcp__everything-http__*
+```
+Across the whole run: **zero** `mcp__everything-http__*` tool calls, and `everything-http`
+never reported any status other than `pending`.
+
+**Not explained by a dead server:** I probed `host.docker.internal:3001/mcp` from inside the
+container immediately after — **HTTP 200**. The Codex leg mounted the same MCP in this same
+env (FV-2c), and a pass-18-prior Claude run *did* expose `mcp__everything-http__*` (16 tools,
+hyphenated). So the wiring can work; it did not here.
+
+**Honest limits before calling this a bug:** `pending` is the status *at the init envelope*
+and some clients connect lazily; this reviewer had no reason to call those tools, so it may
+never have forced a connection. What is unambiguous is that the tools were **not offered** to
+the model in `tools`, whereas `viberr_agent`'s were.
+
+**One run disambiguates it:** grant `everything-http` to a Claude specialist and give it a
+task that *requires* an everything-http tool (e.g. "call the echo tool"). If the tools are
+absent or the call fails while the server answers 200, it is a real Claude-leg MCP-mount bug
+and a genuine Codex/Claude parity break — one of the owner's named test areas.
+
 ## ✅ F18-15 — CLOSED. Skill containment PROVEN at invocation time.
 
 Ran the probe by replicating Viberr's exact SDK options inside the container (same `cwd`,
