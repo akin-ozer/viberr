@@ -411,6 +411,15 @@ describe("F13: the home footer says what it is", () => {
     expect(strip.textContent).toContain("Neither action edits a task file");
   });
 
+  it("F18-5: names the data-root writer for an admin so one writer is visible", () => {
+    const { container } = renderHome({
+      ...baseData([card()]),
+      lockHolder: { pid: 4242, hostname: "viberr-app-1", startedAt: "2026-08-05T00:00:00.000Z" },
+    });
+    const strip = container.querySelector(".store-strip")!;
+    expect(strip.textContent).toContain("Writer: pid 4242 on viberr-app-1");
+  });
+
   it("routes the projection rebuild through a confirmation", () => {
     const { container, getByText } = renderHome(baseData([card()]));
     expect(container.querySelector("dialog.confirm-card")).toBeNull();

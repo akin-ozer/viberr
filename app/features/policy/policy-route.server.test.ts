@@ -179,7 +179,12 @@ describe("set-role", () => {
     });
     // …and the last-change chip now derives from it.
     const { view } = await runLoader(ids.arda);
-    expect(view.edited).toEqual({ by: "Arda Kaya", t: "Today" });
+    // UXA-16: the loader ships the RAW timestamp; the display form is the
+    // client's job. It used to pre-format with `formatDayBucket` on the server,
+    // so a UTC container showed the SERVER's calendar day (and no year) while
+    // every other timestamp in the app is viewer-local.
+    expect(view.edited!.by).toBe("Arda Kaya");
+    expect(view.edited!.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
     // Restore.
     await postAction(ids.arda, {

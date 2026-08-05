@@ -156,6 +156,20 @@ describe("NotificationsPage", () => {
     expect(getByText("Mark all read")).toBeTruthy();
   });
 
+  it("the All/Unread filter is a role=group with aria-pressed state, not a broken radiogroup (G3/UI-58)", () => {
+    const { container, getByText } = renderPage();
+    const seg = container.querySelector(".mini-seg")!;
+    // Not the broken contract — a plain group, and the state is on the buttons.
+    expect(seg.getAttribute("role")).toBe("group");
+    const all = getByText("All").closest("button")!;
+    const unread = getByText("Unread").closest("button")!;
+    expect(all.getAttribute("aria-pressed")).toBe("true"); // default filter
+    expect(unread.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(unread);
+    expect(all.getAttribute("aria-pressed")).toBe("false");
+    expect(unread.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("all-caught-up subtitle hides the Mark all read button", () => {
     const read = ITEMS.map((n) => ({ ...n, unread: false }));
     const { getByText, queryByText } = renderPage(read, 0);

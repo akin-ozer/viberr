@@ -689,8 +689,8 @@ export async function autoInvokeOperator(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  trigger: "create" | "transition" | "goal-updated" | "pr-diverged",
-  /** Transition-chain depth to thread into the run (transition trigger only —
+  trigger: "create" | "transition" | "goal-updated" | "pr-diverged" | "delivered",
+  /** Transition-chain depth to thread into the run (transition + delivered triggers —
    *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
   transitionDepth?: number,
   /** Owner ruling 2026-07-26 — the transition trigger carries WHAT moved and
@@ -1215,7 +1215,7 @@ export async function commentToAgent(
     // MCP set, persona — that the fresh-run path applies. Without this a
     // resumed (@mention) specialist runs unconfined (XS-1).
     const { resolveResumeConfinement } = await import("./specialist-run.server");
-    const confinement = resolveResumeConfinement(db, ctx, {
+    const confinement = await resolveResumeConfinement(db, ctx, {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       profileId: target.profileId,
@@ -1229,6 +1229,9 @@ export async function commentToAgent(
       workdir,
       disallowedTools: confinement.disallowedTools,
       env: confinement.env,
+      // The workspace mount survives between runs, but the SDK options do not —
+      // re-arm the native skills filter or the resumed run enables none.
+      ...(confinement.skills ? { skills: confinement.skills } : {}),
       ...(confinement.mcpServers ? { mcpServers: confinement.mcpServers } : {}),
       ...(confinement.systemPrompt ? { systemPrompt: confinement.systemPrompt } : {}),
       // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
@@ -1538,11 +1541,35 @@ export async function postAgentReplyComment(
     recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, true);
     return;
   }
+  // G7/B-FD9: the compression-threshold guardrail must fire on a pure
+  // agent-reply flood too — the exact case the anti-noise guardrail was built
+  // for. It ran only on operator and human comment writes, so a run of agent
+  // replies accreted with no compaction pass even though B-FD9 made those
+  // replies foldable. Same threshold/keepRecent shape as the other two paths.
+  const { guardrailOn, guardrailValue } = await import(
+    "./comment-guardrails.server"
+  );
+  const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
+  const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
   // Returns the write promise so a caller (the operator react loop) can await
   // the reply landing before it re-reads the task. Errors are logged, never
   // propagated — the run finished and the transcript is in the logs.
   return updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift(prepared.event);
+    if (compactOn) {
+      parsed.timeline = compactTimelineEvents(
+        parsed.timeline,
+        compactAt != null
+          ? {
+              threshold: compactAt,
+              keepRecent: Math.min(
+                DEFAULT_COMPACTION.keepRecent,
+                Math.max(4, Math.floor(compactAt / 2)),
+              ),
+            }
+          : DEFAULT_COMPACTION,
+      );
+    }
   })
     .then(() => {
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
@@ -3519,6 +3546,33 @@ export async function performDelivery(
         });
         reprojectTask(db, ctx, projectSlug, taskKey);
       }
+      // R18-2 (F18-10): opening the review PR is delivery, NOT a stage transition, so
+      // the P11-70 every-transition re-trigger (and the auto-boundary stranded backstop)
+      // never fires here — an autonomous task would sit `waiting:human` with no packet,
+      // recommendation, or card. Under FULL autonomy the operator must proceed on its own
+      // (engage the reviewer / recommend the next step): re-queue it with a `delivered`
+      // trigger. SUPERVISED keeps the human in the loop — the "Opened PR" event is on the
+      // timeline (writePrToTask) and the human drives the next move, so we do NOT
+      // re-trigger. Only a NEWLY opened PR counts (`result.created`); a reuse changed
+      // nothing, and the operator's own deliver tool already no-ops on a live PR, so this
+      // never loops. Fire-and-forget and depth-capped, exactly like the transition
+      // re-trigger; `autoInvokeOperator` is itself a no-op when no operator is deployed.
+      if (result.created) {
+        const { resolveOperatorAuthority } = await import("./operator-actions.server");
+        const autonomy =
+          ctx.operatorRun?.autonomy ??
+          resolveOperatorAuthority(ctx, projectSlug).autonomy;
+        if (autonomy === "full") {
+          void autoInvokeOperator(
+            db,
+            ctx,
+            projectSlug,
+            taskKey,
+            "delivered",
+            nextTransitionChainDepth(ctx),
+          );
+        }
+      }
       return {
         status: "delivered",
         prNumber: result.prNumber,
@@ -5384,7 +5438,13 @@ export async function applyRecommendation(
   const rec = existing.parsed.frontmatter.recommendations.find(
     (r) => r.id === input.recId,
   );
-  if (!rec) throw AppError.conflict("That recommendation was already resolved.");
+  // F18-7: a missing id means the card is GONE — resolved, dismissed, or
+  // superseded by a newer operator run — not specifically "already resolved"
+  // (which mis-describes an unknown/stale id). Hedge to what is actually known.
+  if (!rec)
+    throw AppError.conflict(
+      "That recommendation is no longer available — it may have been resolved, dismissed, or replaced by a newer one. Refresh to see the current recommendations.",
+    );
 
   // R15-3 (owner ruling 2026-07-28): the task OWNER may apply ANY operator
   // recommendation on their own task — the Apply click IS the authorization

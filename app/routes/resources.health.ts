@@ -1,4 +1,5 @@
 import { data } from "react-router";
+import { heldDataRootLock } from "~/server/db/data-root-lock.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isFileWatcherAlive } from "~/server/files/file-watch.service.server";
 import { isKbWatcherAlive } from "~/server/files/kb-watch.service.server";
@@ -10,7 +11,7 @@ import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
  * Unauthenticated by design (readiness checks run without a session);
  * exposes only aggregate counts, never data.
  *
- * 200 `{ ok, projections: { projects, tasks }, watcher, backends }` when the
+ * 200 `{ ok, projections: { projects, tasks }, watcher, lock, backends }` when the
  * database answers; `watcher` is true while the in-process store watcher is
  * running — a watcher error clears the handle, so false here
  * is REAL (dead watcher), not just "never started". `backends.{claude,codex}`
@@ -33,11 +34,22 @@ export async function loader() {
         c: number;
       }
     ).c;
+    const lock = heldDataRootLock();
     return data({
       ok: true as const,
       projections: { projects, tasks },
       watcher: isFileWatcherAlive(),
       kbWatcher: isKbWatcherAlive(),
+      // B-FD1/F18-5: which process owns the single-writer lock on this data root.
+      // pid/hostname/startedAt only (bootId is internal) — enough for a human to
+      // confirm exactly one writer and to see WHO it is over a shared mount.
+      lock: lock
+        ? {
+            pid: lock.holder.pid,
+            hostname: lock.holder.hostname,
+            startedAt: lock.holder.startedAt,
+          }
+        : null,
       backends: {
         // Env-presence only — never probes token validity (see docblock).
         claude: isBackendAvailable("claude") ? "real" : "unavailable",

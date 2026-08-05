@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   DATA_ROOT_LOCK_FILENAME,
@@ -10,7 +10,12 @@ import {
   forceDataRootTakeover,
   heldDataRootLock,
   releaseDataRootLock,
+  startDataRootLockGuard,
+  stopDataRootLockGuard,
+  verifyLockOwnership,
+  type DataRootLock,
   type LockHolder,
+  type LockOwnership,
 } from "./data-root-lock.server";
 
 /**
@@ -193,5 +198,162 @@ describe("forceDataRootTakeover", () => {
     expect(forceDataRootTakeover({ VIBERR_FORCE_DATA_ROOT_LOCK: " yes " })).toBe(true);
     expect(forceDataRootTakeover({ VIBERR_FORCE_DATA_ROOT_LOCK: "0" })).toBe(false);
     expect(forceDataRootTakeover({ VIBERR_FORCE_DATA_ROOT_LOCK: undefined })).toBe(false);
+  });
+});
+
+/* ------------------------------------------------ F18-5: fail-closed ownership */
+
+const BOOT_A: LockHolder = { ...HOST_A, bootId: "boot-1" };
+
+describe("verifyLockOwnership (F18-5 fail-closed)", () => {
+  it("reports 'held' for a lock this process genuinely owns", () => {
+    const dataRoot = ctx.makeTempDir();
+    const lock = acquire(dataRoot, BOOT_A);
+    expect(lock.verifyOwnership()).toBe("held");
+    expect(verifyLockOwnership(lock)).toBe("held");
+    lock.release();
+  });
+
+  it("reports 'stolen' when the lock file is deleted out from under the holder", () => {
+    const dataRoot = ctx.makeTempDir();
+    const lock = acquire(dataRoot, BOOT_A);
+    rmSync(lock.path, { force: true }); // the store reset that started F18-5
+    expect(lock.verifyOwnership()).toBe("stolen");
+    lock.release();
+  });
+
+  it("reports 'stolen' when another process replaces the lock file, and abandon() keeps their file", () => {
+    const dataRoot = ctx.makeTempDir();
+    const lock = acquire(dataRoot, BOOT_A);
+    // Process B boots into the freed path and writes a fresh lock (new inode):
+    rmSync(lock.path, { force: true });
+    writeFileSync(lock.path, JSON.stringify({ ...HOST_A_OTHER, bootId: "boot-2" }));
+    expect(lock.verifyOwnership()).toBe("stolen");
+    lock.abandon(); // fail-closed teardown must NOT delete B's file
+    expect(existsSync(lock.path)).toBe(true);
+    rmSync(lock.path, { force: true });
+  });
+});
+
+describe("verifyLockOwnership (injected probes)", () => {
+  const owned = { fd: 7, path: "/x/writer.lock", holder: BOOT_A };
+
+  it("'stolen' on an inode mismatch, before reading content", () => {
+    expect(
+      verifyLockOwnership(owned, {
+        fstat: () => ({ ino: 100n, dev: 1n }),
+        stat: () => ({ ino: 999n, dev: 1n }),
+        readHolder: () => owned.holder,
+      }),
+    ).toBe("stolen");
+  });
+
+  it("'stolen' when our held descriptor is unusable (fstat throws)", () => {
+    expect(
+      verifyLockOwnership(owned, {
+        fstat: () => {
+          throw new Error("EBADF");
+        },
+        stat: () => ({ ino: 1n, dev: 1n }),
+        readHolder: () => owned.holder,
+      }),
+    ).toBe("stolen");
+  });
+
+  it("'stolen' when inode matches but the content names another boot (VirtioFS ino-reuse guard)", () => {
+    expect(
+      verifyLockOwnership(owned, {
+        fstat: () => ({ ino: 100n, dev: 1n }),
+        stat: () => ({ ino: 100n, dev: 1n }),
+        readHolder: () => ({ ...HOST_A_OTHER, bootId: "boot-2" }),
+      }),
+    ).toBe("stolen");
+  });
+
+  it("'unverifiable' on a torn read (inode matches, content unreadable)", () => {
+    expect(
+      verifyLockOwnership(owned, {
+        fstat: () => ({ ino: 100n, dev: 1n }),
+        stat: () => ({ ino: 100n, dev: 1n }),
+        readHolder: () => null,
+      }),
+    ).toBe("unverifiable");
+  });
+
+  it("'held' when inode + boot identity both agree (normal run does not false-positive)", () => {
+    expect(
+      verifyLockOwnership(owned, {
+        fstat: () => ({ ino: 100n, dev: 1n }),
+        stat: () => ({ ino: 100n, dev: 1n }),
+        readHolder: () => owned.holder,
+      }),
+    ).toBe("held");
+  });
+});
+
+describe("startDataRootLockGuard (F18-5)", () => {
+  afterEach(() => stopDataRootLockGuard());
+
+  const fakeLock = (path = "/x/writer.lock") =>
+    ({ path, holder: HOST_A }) as unknown as DataRootLock;
+
+  it("loudly shuts down and stops itself when a tick sees a stolen lock", () => {
+    vi.useFakeTimers();
+    const stolen: Array<[string, LockOwnership]> = [];
+    startDataRootLockGuard({
+      intervalMs: 1000,
+      lock: fakeLock(),
+      verify: () => "stolen",
+      onStolen: (l, v) => stolen.push([l.path, v]),
+    });
+    vi.advanceTimersByTime(1000);
+    expect(stolen).toEqual([["/x/writer.lock", "stolen"]]);
+    // guard stopped itself → later ticks do not re-fire onStolen:
+    vi.advanceTimersByTime(5000);
+    expect(stolen).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it("does not shut down on healthy or unverifiable ticks", () => {
+    vi.useFakeTimers();
+    const stolen: string[] = [];
+    let verdict: LockOwnership = "held";
+    startDataRootLockGuard({
+      intervalMs: 1000,
+      lock: fakeLock(),
+      verify: () => verdict,
+      onStolen: () => stolen.push("x"),
+    });
+    vi.advanceTimersByTime(1000);
+    verdict = "unverifiable";
+    vi.advanceTimersByTime(1000);
+    expect(stolen).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it("is idempotent — a second start does not stack a second interval", () => {
+    vi.useFakeTimers();
+    const ticks: number[] = [];
+    startDataRootLockGuard({
+      intervalMs: 1000,
+      lock: fakeLock(),
+      verify: () => {
+        ticks.push(1);
+        return "held";
+      },
+      onStolen: () => {},
+    });
+    startDataRootLockGuard({
+      intervalMs: 1000,
+      lock: fakeLock(),
+      verify: () => {
+        ticks.push(2);
+        return "held";
+      },
+      onStolen: () => {},
+    });
+    vi.advanceTimersByTime(1000);
+    expect(ticks).toEqual([1]); // only the first guard's verify ran
+    vi.useRealTimers();
   });
 });

@@ -10,7 +10,8 @@ import { MemoryRouter, createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { DecisionPacket, observationLabel } from "./decision-packet";
 import { GithubTrace } from "./task-side-panels";
-import { ScheduledActions, TaskHero } from "./task-main-sections";
+import { DiagnosticsPanel, ScheduledActions, TaskHero } from "./task-main-sections";
+import type { DiagnosticRecord } from "~/server/projections/task-query.server";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
 import {
@@ -302,7 +303,7 @@ describe("TimelineItem", () => {
     );
   });
 
-  it("all 10 types map to their node class + pill label (contracts §1.3)", () => {
+  it("all 11 types map to their node class + pill label (contracts §1.3)", () => {
     const table: [string, string, string | null][] = [
       ["comment", "", null],
       ["completion", "completion", "Completion report"],
@@ -312,6 +313,9 @@ describe("TimelineItem", () => {
       // no longer borrow the coral "Policy violation" shield.
       ["note", "note", "Note"],
       ["quality", "quality", "Quality flag"],
+      // G8: continuity reset — amber warning tone, its own label; borrows the
+      // quality node styling (both are the amber/attention family).
+      ["continuity", "quality", "Continuity reset"],
       ["transition", "transition", "Transition request"],
       ["blocked", "blocked", "Blocked decision"],
       ["agent", "agent", "Operator"],
@@ -337,6 +341,66 @@ describe("TimelineItem", () => {
     const { container } = render(<TimelineItem ev={ev({ type: "mystery" })} />);
     expect(container.querySelector(".comment-card")).toBeNull(); // not a comment…
     expect(container.querySelector(".tl-meta .pill")!.textContent).toBe("mystery");
+  });
+});
+
+/* --------------------------------------------------- DiagnosticsPanel (G2) */
+
+describe("DiagnosticsPanel state semantics (G2)", () => {
+  const diag = (over: Partial<DiagnosticRecord>): DiagnosticRecord => ({
+    id: 1,
+    severity: "error",
+    code: "frontmatter.invalid",
+    path: null,
+    message: "Something is off.",
+    hardStop: false,
+    readinessEffect: "inconsistency_risk_detected",
+    observedAt: "2026-08-04T00:00:00.000Z",
+    ...over,
+  });
+
+  /** The finding's pill: the `.k` cell holds exactly one status pill. */
+  function pill(container: HTMLElement): HTMLElement {
+    return container.querySelector(".obs .k .pill") as HTMLElement;
+  }
+
+  it("a SOFT error paints amber 'inconsistency risk' (like the hero), NOT crimson 'blocked'", () => {
+    const { container } = render(
+      <DiagnosticsPanel
+        diagnostics={[diag({ hardStop: false, severity: "error", readinessEffect: "inconsistency_risk_detected" })]}
+      />,
+    );
+    const p = pill(container);
+    expect(p.classList.contains("risk")).toBe(true);
+    expect(p.classList.contains("blocked")).toBe(false);
+    expect(p.textContent).toContain("inconsistency risk");
+  });
+
+  it("a hardStop finding paints crimson 'blocked' even when its severity is only a warning", () => {
+    const { container } = render(
+      <DiagnosticsPanel
+        diagnostics={[diag({ hardStop: true, severity: "warning", readinessEffect: "blocked" })]}
+      />,
+    );
+    const p = pill(container);
+    expect(p.classList.contains("blocked")).toBe(true);
+    expect(p.textContent).toContain("blocked");
+  });
+
+  it("a warning shows 'input required'; an info finding is a neutral heads-up", () => {
+    const { container } = render(
+      <DiagnosticsPanel
+        diagnostics={[
+          diag({ id: 1, severity: "warning", readinessEffect: "input_required" }),
+          diag({ id: 2, severity: "info", readinessEffect: null }),
+        ]}
+      />,
+    );
+    const pills = container.querySelectorAll(".obs .k .pill");
+    expect(pills[0].classList.contains("input")).toBe(true);
+    expect(pills[0].textContent).toContain("input required");
+    expect(pills[1].classList.contains("neutral")).toBe(true);
+    expect(pills[1].textContent).toContain("heads-up");
   });
 });
 
@@ -962,6 +1026,32 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     );
     expect(btn).toBeUndefined();
   });
+
+  it("F18-13: renders NO force-accept + no 'Acceptance is blocked' on a terminal (accepted/merged) task, even for an admin whose blockReason still lingers", () => {
+    // Force-accept BYPASSES the verdict gate rather than satisfying it, so a
+    // task force-accepted into Done keeps a non-null blockReason. The card used
+    // to keep offering "Force accept" on a task with nothing left to accept.
+    for (const terminal of ["accepted", "merged"] as const) {
+      const onForceAccept = vi.fn();
+      const { container, queryByText } = render(
+        <MemoryRouter>
+          <GithubTrace
+            githubHost={GH_HOST}
+            task={traceTask({
+              displayReadiness: terminal,
+              blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+            })}
+            onForceAccept={onForceAccept}
+          />
+        </MemoryRouter>,
+      );
+      const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Force accept"),
+      );
+      expect(btn).toBeUndefined();
+      expect(queryByText(/Acceptance is blocked/)).toBeNull();
+    }
+  });
 })
 
 /* ------------------------------------------------ pass-13 honesty fixes */
@@ -1408,6 +1498,41 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     expect(save.classList.contains("primary")).toBe(true);
     // The defect: both resolved to identical rules and rendered the same.
     expect(save.className).not.toBe(cancel.className);
+  });
+
+  // UXO-1 (live-caught, pass 18): a task archived MID-REVIEW kept rendering its
+  // readiness + validation pills, so the hero read "archived · ready · awaiting
+  // verdict" — asserting that someone still owes a verdict when the task is out
+  // of the flow and nobody does. The STAGE pill stays (it answers "how far did
+  // this get?"); the two ACTIONABLE signals must drop.
+  it("UXO-1: an archived task drops the readiness + validation pills, keeps the stage", () => {
+    const live = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "ready", validation: "changed" })}
+        stage={{ id: "review", name: "Review", color: "#5b76fe" }}
+        canEditGoal
+      />,
+    );
+    const liveText = live.container.querySelector(".hero-meta")!.textContent!;
+    expect(liveText).toContain("Review");
+    expect(liveText).toContain("ready");
+    expect(liveText).toContain("awaiting verdict"); // the live obligation
+    live.unmount();
+
+    const archived = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "ready", validation: "changed" })}
+        stage={{ id: "review", name: "Review", color: "#5b76fe" }}
+        canEditGoal
+        archived
+      />,
+    );
+    const meta = archived.container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("archived");
+    expect(meta).toContain("Review"); // how far it got — still true
+    // No live obligation is asserted for a task nobody owes anything on.
+    expect(meta).not.toContain("awaiting verdict");
+    expect(meta).not.toMatch(/\bready\b/);
   });
 
   // A wrapper that bumps editGoalSignal on click, mimicking a confirmed

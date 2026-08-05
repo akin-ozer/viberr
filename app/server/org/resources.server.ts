@@ -173,6 +173,13 @@ export interface KbView {
    * injected nothing. Both numbers ship so the row can say which is which.
    */
   injectableCount: number;
+  /**
+   * F18-4: whether the KB's store folder exists on disk. A folder that was
+   * wiped/renamed under the row reads as `0 docs` — identical to a healthy empty
+   * KB — while a granted agent silently gets nothing. `false` lets the row say
+   * "folder missing" instead of pretending it is a normal empty KB.
+   */
+  folderExists: boolean;
   /** "store://kb/<dir>" (no trailing slash — mock root prop contract). */
   uri: string;
 }
@@ -204,6 +211,7 @@ function buildKb(
     tree,
     fileCount: countKbFiles(tree),
     injectableCount: countInjectableDocs(tree),
+    folderExists: existsSync(kbDirPath(dir, ctx.dataRoot)),
     uri: `store://kb/${dir}`,
   };
 }

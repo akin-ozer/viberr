@@ -18,11 +18,13 @@ import {
   DEFAULT_COMPACTION,
 } from "./timeline-compaction.server";
 import {
-  enforceOperatorBrevity,
+  applyCommentGuardrails,
+  COMMENT_DROPPED_AUDIT_ACTION,
+  commentOutcomeMessage,
+  type CommentGuardrailResult,
   guardrailOn,
   guardrailValue,
-  isMeaninglessComment,
-  separateEvidence,
+  OPERATOR_BREVITY_MAX_CHARS,
 } from "./comment-guardrails.server";
 import { absentDeliverReviewPrMode } from "~/shared/capabilities";
 import {
@@ -356,10 +358,18 @@ function opCtx(ctx: TaskMutationContext): TaskMutationContext {
 
 
 /**
- * Append an operator-authored `comment` timeline event, reproject, audit.
- * `variant` distinguishes a plain narration comment from a recommendation
- * (kept as literal audit actions so the static audit-coverage sweep can parse
- * every call site).
+ * Append an operator-authored `comment` timeline event, reproject, audit —
+ * and REPORT what the anti-noise guardrails actually did (G1/B-FD8). `variant`
+ * distinguishes a plain narration comment from a recommendation (kept as
+ * literal audit actions so the static audit-coverage sweep can parse every
+ * call site).
+ *
+ * Returns the {@link CommentGuardrailResult} so the caller can hand the model
+ * the truth. This function used to be `Promise<void>` and silently early-return
+ * on a meaningful/duplicate drop, so `operatorPostComment` reported
+ * "Comment posted to the timeline." for a comment nobody would ever see — the
+ * model then built on narration that did not exist and, on Codex, settled the
+ * task to `waiting:human` with no packet or note (a silent strand).
  */
 async function writeOperatorComment(
   db: DatabaseSync,
@@ -368,7 +378,7 @@ async function writeOperatorComment(
   taskKey: string,
   text: string,
   variant: "comment" | "recommend",
-): Promise<void> {
+): Promise<CommentGuardrailResult> {
   // Anti-noise guardrails — ALL enforced for real (owner ruling Q3):
   //  · meaningful-comment: trivial chatter never reaches the canonical record;
   //  · evidence-separation: raw output dumps are trimmed to a head + reference;
@@ -376,32 +386,37 @@ async function writeOperatorComment(
   //  · no-duplicate-summary: an exact restatement of the last operator comment
   //    is dropped;
   //  · compression-threshold: long timelines compact at the CONFIGURED value.
-  if (
-    guardrailOn(ctx, projectSlug, "meaningful-comment") &&
-    isMeaninglessComment(text)
-  ) {
+  //
+  // The meaningful/evidence/brevity trio runs through the shared
+  // `applyCommentGuardrails` so the outcome is a value, not a void early-return.
+  // The no-duplicate check stays timeline-based (compares against the LAST
+  // operator comment inside the write transaction) rather than a passed-in
+  // previous text, so it is handled below instead of by the shared helper.
+  const guardrail = applyCommentGuardrails({
+    text,
+    meaningful: guardrailOn(ctx, projectSlug, "meaningful-comment"),
+    evidence: guardrailOn(ctx, projectSlug, "evidence-separation"),
+    brevity: guardrailOn(ctx, projectSlug, "operator-brevity"),
+    brevityMax: OPERATOR_BREVITY_MAX_CHARS,
+  });
+  if (guardrail.dropped === "meaningless") {
     logger.info("operator comment dropped by the meaningful-comment guardrail", {
       taskKey,
     });
-    return;
-  }
-  if (guardrailOn(ctx, projectSlug, "evidence-separation")) {
-    text = separateEvidence(text);
-  }
-  if (guardrailOn(ctx, projectSlug, "operator-brevity")) {
-    text = enforceOperatorBrevity(text);
+    recordCommentDrop(db, projectSlug, taskKey, variant, "meaningless");
+    return guardrail;
   }
   // S5-G3: the operator is instructed to tag the human it answers, so a handle
   // that matches two people is a NEW-4 failure the operator cannot fix on its
   // own — the comment discloses the non-delivery instead of dropping it in
   // silence. Applied after brevity so the disclosure is never trimmed away.
-  text = withAmbiguityDisclosure(db, text);
+  const text2 = withAmbiguityDisclosure(db, guardrail.text ?? text);
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
     actor: { kind: "operator" },
     title: null,
-    text,
+    text: text2,
     toAgent: false,
     evidence: null,
   };
@@ -414,7 +429,7 @@ async function writeOperatorComment(
       const lastOperator = parsed.timeline.find(
         (e) => e.type === "comment" && e.actor.kind === "operator",
       );
-      if (lastOperator && lastOperator.text.trim() === text.trim()) {
+      if (lastOperator && lastOperator.text.trim() === text2.trim()) {
         suppressed = true;
         return;
       }
@@ -441,12 +456,15 @@ async function writeOperatorComment(
       );
     }
   });
-  if (suppressed) return;
+  if (suppressed) {
+    recordCommentDrop(db, projectSlug, taskKey, variant, "duplicate");
+    return { text: null, dropped: "duplicate", trimmedBy: guardrail.trimmedBy };
+  }
   reproject(db, ctx, projectSlug, taskKey);
   // NEW-4: the operator is instructed to tag the person it answers ("@Arda …");
   // the tag must actually notify them — same fan-out as every other comment.
   notifyMentionedUsers(db, {
-    text,
+    text: text2,
     projectSlug,
     taskKey,
     from: { kind: "agent", name: "Operator" },
@@ -473,6 +491,31 @@ async function writeOperatorComment(
       details: {},
     });
   }
+  return { text: text2, dropped: null, trimmedBy: guardrail.trimmedBy };
+}
+
+/**
+ * Record the audit row for a guardrail-dropped operator comment (G1/B-FD8).
+ * The operator path used to leave NO trace on a drop — a maintainer asking
+ * "why is there no narration for this turn?" had nothing to read. Same action
+ * for every silent drop, with the reason in the details.
+ */
+function recordCommentDrop(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+  variant: "comment" | "recommend",
+  reason: "meaningless" | "duplicate",
+): void {
+  recordAudit(db, {
+    action: COMMENT_DROPPED_AUDIT_ACTION,
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: taskKey,
+    projectSlug,
+    taskKey,
+    details: { reason, variant },
+  });
 }
 
 /**
@@ -1118,7 +1161,7 @@ export async function operatorPostComment(
   if (gate(authority, "append-typed-events") === "deny") {
     return { outcome: "denied", message: "The operator cannot post events in this project." };
   }
-  await writeOperatorComment(
+  const result = await writeOperatorComment(
     db,
     ctx,
     input.projectSlug,
@@ -1126,7 +1169,15 @@ export async function operatorPostComment(
     text,
     "comment",
   );
-  return { outcome: "done", message: "Comment posted to the timeline." };
+  // G1/B-FD8: report the REAL outcome. A guardrail drop returns `noop` (a
+  // task-state refusal, not an authority one) so the Codex plan executor's
+  // `record()` — which captures denied/noop — narrates it instead of the run
+  // settling to `waiting:human` with no trace; the SDK path gets the honest
+  // message so the model can rephrase rather than build on narration nobody saw.
+  if (result.dropped) {
+    return { outcome: "noop", message: commentOutcomeMessage(result) };
+  }
+  return { outcome: "done", message: commentOutcomeMessage(result) };
 }
 
 /** Fill only an unspecified goal; established scope remains human-controlled. */

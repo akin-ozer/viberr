@@ -88,6 +88,21 @@ export function ProjectPanel({
         <Icon name="board" />
         <h2>Project</h2>
       </div>
+      {/* LV-F2: the same silent-disabled defect the Policy sheet fixed under
+          P14-LV-08 — every field here is `disabled` for a role without the
+          grant, but nothing said so, and `title` cannot open on a disabled
+          control, so a contributor met a whole page of dead inputs with no
+          explanation. State the reason where the reader can see it. */}
+      {!canManage && (
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            Read-only — editing project settings needs the{" "}
+            <strong>Change project settings</strong> grant (project admin or
+            maintainer).
+          </span>
+        </div>
+      )}
       <div className="set-fields">
         <div className="field-row name-key">
           <div className="field">
@@ -740,16 +755,33 @@ export function StagesPanel({
           stages" as if transitions were authored there — Policy only flips the
           boundary ON an existing rule. The chain itself is maintained HERE, by
           these controls, so the note says what each surface actually does. */}
+      {/* LV-F2: this note used to give drag/rename/add INSTRUCTIONS to every
+          reader, including a role whose controls are all disabled — telling a
+          contributor to do something the page will not let them do. Speak to
+          the reader's actual authority. */}
       <div className="pol-note" style={POL_NOTE_STYLE}>
-        <Icon name="shield" />
+        <Icon name={canManage ? "shield" : "lock"} />
         <span>
-          Drag a row to reorder, or use its Move menu · click a name to rename.
-          Adding or removing a stage re-wires the transition chain around it —
-          the new hop inherits the boundary it replaced. Loosen or tighten a
-          boundary in{" "}
-          <button type="button" className="keybtn" onClick={onNavPolicy}>
-            Policy → Workflow rules
-          </button>
+          {canManage ? (
+            <>
+              Drag a row to reorder, or use its Move menu · click a name to rename.
+              Adding or removing a stage re-wires the transition chain around it —
+              the new hop inherits the boundary it replaced. Loosen or tighten a
+              boundary in{" "}
+              <button type="button" className="keybtn" onClick={onNavPolicy}>
+                Policy → Workflow rules
+              </button>
+            </>
+          ) : (
+            <>
+              Read-only — editing the workflow stages needs the{" "}
+              <strong>Change project settings</strong> grant (project admin or
+              maintainer). Boundaries are shown in{" "}
+              <button type="button" className="keybtn" onClick={onNavPolicy}>
+                Policy → Workflow rules
+              </button>
+            </>
+          )}
         </span>
       </div>
     </div>
@@ -833,6 +865,16 @@ export function MembersPanel({
             : ""}
         </span>
       </div>
+      {/* LV-F2: same silent-disabled class as the Project + Stages panels. */}
+      {!canManage && (
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            Read-only — adding or removing project members needs the{" "}
+            <strong>Manage members &amp; roles</strong> grant (project admin).
+          </span>
+        </div>
+      )}
       <div className="member-list last">
         {members.map((m) => (
           <div className="member-row" key={m.userId}>
@@ -1076,6 +1118,22 @@ export function RepoPanel({
         <Icon name="github" />
         <h2>Repository &amp; credentials</h2>
       </div>
+      {/* UXA-3: LV-F2's lock note reached the Project, Stages and Members
+          panels but not this one — yet its "delete the task branch on GitHub"
+          checkbox is `disabled` for a role without the grant, with the sibling
+          Repair control hidden entirely. Same silent-disabled defect; same
+          remedy, naming the grant this panel actually needs. */}
+      {!canRepair && (
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            Read-only — repairing the repository binding and changing the
+            after-merge branch policy need the{" "}
+            <strong>Change project settings</strong> grant (project admin or
+            maintainer).
+          </span>
+        </div>
+      )}
       <div className="kv">
         <div className="kv-row">
           <span className="k">Default repository</span>
@@ -1535,6 +1593,14 @@ export function SettingsPage({
             onOpenTask={onOpenTask}
           />
         </div>
+        {/* Owner ruling (pass 18, Q-V1): a READ-ONLY viewer must not see the
+            Danger zone at all. It used to render for every member with the
+            buttons disabled and a "you need the grant" note — honest, but it
+            showed a stakeholder a destructive surface they can never use, and
+            named archive/delete as if they were on the table. Anyone who CAN
+            act still sees it unchanged (the in-panel deny note stays for the
+            in-between roles that hold some but not all lifecycle grants). */}
+        {canEditPolicy && (
         <DangerZone
           projectName={data.project.name}
           myRole={myRole}
@@ -1553,6 +1619,7 @@ export function SettingsPage({
             )
           }
         />
+        )}
       </div>
     </div>
   );

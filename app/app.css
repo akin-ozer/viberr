@@ -1118,7 +1118,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .packet-actions .btn { flex: 1; min-width: 130px; }
 
 /* execution profile */
-.profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+/* F18-12: `1fr 1fr` tracks can't shrink below their content's min-content, so on
+   a narrow viewport the DELIVERING/HUMAN-OWNER column (with its Run / Manage /
+   Assign controls) rendered off the right edge with no scroll — a governance
+   action unreachable at that width (violates the responsive ruling). `minmax(0,
+   1fr)` lets the tracks shrink; the mobile block below drops it to one column. */
+.profile-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .7rem; }
 .profile-cell {
   border: 1px solid var(--hairline);
   border-radius: 14px;
@@ -2199,6 +2204,8 @@ dialog[data-closing]::backdrop {
 .pev-ico.act-note { background: color-mix(in srgb, var(--fg), transparent 96%); color: var(--muted); }
 .pev-ico.act-assign { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-quality { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
+/* G8: continuity reset — amber warning tone (context lost + recovered). */
+.pev-ico.act-continuity { background: var(--orange-light); color: var(--yellow-dark); border-color: color-mix(in srgb, var(--yellow-dark), transparent 72%); }
 .pev-ico.act-transition { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-blocked { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .pev-ico.act-agent { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
@@ -2554,6 +2561,10 @@ dialog[data-closing]::backdrop {
 .ntf-item-main .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .76rem; color: var(--faint); line-height: 1.45; margin-top: .15rem; }
 .ntf-item-main .mt { display: block; font-family: var(--font-mono); font-size: .66rem; color: var(--placeholder); margin-top: .3rem; }
 .ntf-item .unread-dot { margin-top: .45rem; flex: none; }
+/* F18-1: an orphan (its project was deleted) is not navigable — dim it and drop
+   the pointer cursor so it reads as a dead record, not a live link. */
+.ntf-item.orphaned { opacity: .6; cursor: default; }
+.ntf-item.orphaned:hover { background: none; }
 .ntf-pop-foot { border-top: 1px solid var(--hairline); padding: .45rem .55rem; display: flex; justify-content: flex-end; }
 .ntf-pop-foot .btn { text-decoration: none; }
 
@@ -2895,6 +2906,10 @@ dialog[data-closing]::backdrop {
   .top-search-label { display: none; }
   .filter-bar, .board { padding-left: .8rem; padding-right: .8rem; }
   .board-filter-input { flex-basis: 100%; }
+  /* F18-12: the execution-profile 2-up cells (operator/delivering/reviewing/owner)
+     hold real controls — stack them one-per-row on a phone so every action stays
+     in the viewport instead of being clipped off the right edge. */
+  .profile-grid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   .rail { transition: none; }
@@ -3937,4 +3952,15 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .log-line { grid-template-columns: 54px 100px minmax(0, 1fr); }
   /* home project rows drop the least-load-bearing stat */
   .pj-row .pj-stats .pill { display: none; }
+  /* UXA-8: the two WIDE fr-grid tables — GitHub → Execution branches
+     (`.gh-table`, 4 columns) and Agents → Live roster (`.live-wrap`, 5) — were
+     the only grids with no rule here and no overflow container, so at 375px
+     four or five `fr` tracks shared ~340px and every cell crushed to a few
+     characters. Their sibling grids either collapse to one column or wrap; a
+     COLUMNAR table cannot do either without losing its row alignment, so it
+     keeps its proportions and scrolls inside its own box (the same treatment
+     `.profile-list` already gets two rules above). */
+  .gh-table, .live-wrap { overflow-x: auto; }
+  .gh-table .live-head, .gh-table .live-row { min-width: 34rem; }
+  .live-wrap .live-head, .live-wrap .live-row { min-width: 42rem; }
 }

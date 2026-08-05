@@ -200,8 +200,17 @@ function shellExportedEnv(spec: RunSpec): Record<string, string> {
  * `codex debug prompt-input` on a pristine home: `imagegen`, `openai-docs`,
  * `plugin-creator`, `skill-creator`, `skill-installer` were still advertised),
  * and because the repo's own `AGENTS.md` is read from the WORKSPACE, not the
- * home. Viberr injects every declared skill/KB doc as prompt text, so a run
- * needs none of the CLI's own instruction sources.
+ * home. On THIS backend Viberr injects every granted skill/KB doc as prompt
+ * text, so a run needs none of the CLI's own instruction sources.
+ *
+ * That injection is now backend-ASYMMETRIC, deliberately. Claude gained a native
+ * skills mechanism this pass (`mountGrantedSkills` + the SDK's `skills` filter),
+ * so a Claude run receives each granted skill's metadata and loads the body only
+ * when it invokes one. The Codex CLI has no equivalent to switch on — its whole
+ * skills channel is severed right below, precisely because it cannot be governed
+ * per-skill — so Codex keeps the prompt-text injection. Same grants, same craft,
+ * two carriers; the alternative would be re-opening this channel to a CLI that
+ * re-installs its own bundled skills into any home.
  */
 function codexConfigForRun(
   spec: RunSpec,

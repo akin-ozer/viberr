@@ -1,5 +1,8 @@
 import type { SseEvent } from "~/schemas/sse-event.schema";
-import { releaseDataRootLock } from "~/server/db/data-root-lock.server";
+import {
+  releaseDataRootLock,
+  stopDataRootLockGuard,
+} from "~/server/db/data-root-lock.server";
 import { shutdownDatabase } from "~/server/db/sqlite.server";
 import { stopFileWatcher } from "~/server/files/file-watch.service.server";
 import { stopKbWatcher } from "~/server/files/kb-watch.service.server";
@@ -361,6 +364,9 @@ export function runProcessShutdown(): void {
   // database closes, so no debounced rebuild can fire into a shut-down DB.
   stopFileWatcher();
   stopKbWatcher();
+  // Stop the F18-5 ownership guard before we deliberately release the lock — a
+  // clean shutdown must not be mistaken for a steal.
+  stopDataRootLockGuard();
   shutdownDatabase();
   releaseDataRootLock();
 }

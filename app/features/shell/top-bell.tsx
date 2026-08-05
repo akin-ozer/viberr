@@ -97,7 +97,9 @@ export function TopBell({
   const openItem = (n: NotificationView) => {
     if (n.unread) markRead([n.id]);
     setOpen(false);
-    if (n.projectSlug && n.taskKey) {
+    // F18-1: an orphan's project is gone — navigating there 404s on a
+    // shell-less error page. The click only clears it (mark-read above).
+    if (!n.targetMissing && n.projectSlug && n.taskKey) {
       navigate(`/projects/${n.projectSlug}/tasks/${n.taskKey}`);
     }
   };

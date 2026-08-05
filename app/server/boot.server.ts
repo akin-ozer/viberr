@@ -7,6 +7,7 @@ import {
   acquireDataRootLock,
   DataRootLockedError,
   forceDataRootTakeover,
+  startDataRootLockGuard,
 } from "./db/data-root-lock.server";
 import { getDb } from "./db/sqlite.server";
 import { applyRetention } from "./db/retention.server";
@@ -207,6 +208,12 @@ export async function bootServer(): Promise<void> {
   // shut down without ever running it — leaving the lock behind for the next
   // container to refuse.
   armProcessShutdown();
+  // F18-5: the lock keeps an fd open for the process lifetime but nothing
+  // re-checked the FILE still exists. A store reset that deleted state/ left this
+  // process writing lock-less while a second one booted into the freed path — two
+  // writers, silent SQLite loss. The guard re-verifies ownership on a timer and
+  // fails CLOSED (loud shutdown) the moment the file is gone or replaced.
+  startDataRootLockGuard();
   // Ship the default agent assets (each agent's expertise skill + its detailed
   // definition + the base profile templates) into the store when a store lacks
   // them — before anything reads them. Idempotent and best-effort (never blocks

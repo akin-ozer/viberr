@@ -4,6 +4,8 @@ import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
+import { LocalDayDotTime } from "~/ui/local-time";
+import { rovingRadioKeyDown } from "~/ui/roving-radio";
 import { useToast } from "~/ui/toast";
 import { useActionToast } from "~/ui/use-action-toast";
 import {
@@ -147,13 +149,21 @@ export function HumanAccess({
                   : m.email}
               </div>
             </span>
-            <div className="mini-seg" role="radiogroup" aria-label={"Role for " + m.name}>
+            {/* UXA-7: a radiogroup promises arrow-key traversal; this one
+                declared the role and never wired the keys. */}
+            <div
+              className="mini-seg"
+              role="radiogroup"
+              aria-label={"Role for " + m.name}
+              onKeyDown={rovingRadioKeyDown}
+            >
               {ROLE_IDS.map((r) => (
                 <button
                   type="button"
                   key={r}
                   role="radio"
                   aria-checked={m.role === r}
+                  tabIndex={m.role === r ? 0 : -1}
                   className={m.role === r ? "on" : ""}
                   // A deleted account cannot hold a role: the control is dead,
                   // so it no longer pretends to be live (UI-29).
@@ -417,7 +427,10 @@ export function WorkflowRules({
         <div className="pol-note before">
           <Icon name="alert" />
           <span>
-            Off the governed path:{" "}
+            {/* F18-14: the "govern/governance/governed" copy ban applies to
+                rendered UI (design/CONVERSATION-SUMMARY line 81 calls it out for
+                THIS page specifically) — say "workflow path". */}
+            Off the workflow path:{" "}
             <strong>{offChain.map((id) => S(id).name).join(", ")}</strong>. No
             transition rule reaches{" "}
             {offChain.length === 1 ? "that stage" : "those stages"}, so no agent
@@ -458,6 +471,7 @@ export function WorkflowRules({
                 className={"cap-seg" + (t.locked ? " locked" : "")}
                 role="radiogroup"
                 aria-label={`Boundary for ${f.name} → ${o.name}`}
+                onKeyDown={rovingRadioKeyDown}
                 title={
                   t.locked
                     ? "Completion is human-authorized in V1 — this boundary can't be delegated"
@@ -470,6 +484,7 @@ export function WorkflowRules({
                     key={b.id}
                     role="radio"
                     aria-checked={t.boundary === b.id}
+                    tabIndex={t.boundary === b.id ? 0 : -1}
                     className={BCLS[b.id] + (t.boundary === b.id ? " on" : "")}
                     disabled={t.locked || !canManage || busy}
                     onClick={() => {
@@ -501,7 +516,7 @@ export function WorkflowRules({
           <em>Direct</em> — an explicit, audited opt-in that lets that operator
           close a task itself (it still refuses a failing-validation task). The
           per-transition <strong>Human approval / Human only</strong> boundaries
-          below govern <strong>human</strong> actors; an operator granted{" "}
+          below apply to <strong>human</strong> actors; an operator granted{" "}
           <em>Direct</em> stage transitions crosses them itself, so treat those
           settings as the rule for people, not for a direct-capability operator.
         </span>
@@ -570,7 +585,8 @@ export function PolicyPage({
           {data.edited && (
             <span className="hero-file">
               <Icon name="clock" />
-              last change · {data.edited.by} · {data.edited.t}
+              last change · {data.edited.by} ·{" "}
+              <LocalDayDotTime iso={data.edited.at} />
             </span>
           )}
           <button type="button" className="btn ghost sm" onClick={() => setMatrixOpen(true)}>

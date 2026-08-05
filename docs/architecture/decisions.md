@@ -151,9 +151,12 @@ it is regenerated from the filesystem rather than restated here.
    failure state. **Amended 2026-08-04 (ruling 40 / R16-6)** — that is true only of a human
    acceptance; a full-autonomy operator acceptance records the PR `accepted` (merge pending)
    and a human completes the merge later, because `merge-pull-request` is `ALWAYS_HUMAN`.
-   **Extended** — the kind set is now eight: `accept_completion`, `request_edit`,
+   **Extended** — the kind set is now NINE: `accept_completion`, `request_edit`,
    `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`,
-   `custom`. The same ruling governs the capability catalog: agent policy is id-based
+   `archive_task`, `custom`. (`archive_task` arrived with R14-3 — the task archive — and
+   the count here was never updated; corrected 2026-08-05 against
+   `PACKET_OPTION_KINDS` in `app/schemas/task-file.schema.ts`, which is the source of
+   truth.) The same ruling governs the capability catalog: agent policy is id-based
    against the shared catalog, and advisory ids with no runtime consumer get no toggle.
 8. **`tweaks-panel.jsx` is not ported** (dev harness, dead code). Review-queue packet and
    acceptance mechanics ship before the queue surface; the queue lives in
@@ -237,6 +240,14 @@ it is regenerated from the filesystem rather than restated here.
     ask-human, no evidence.
 27. **R15-8 (2026-07-28): `design/prd.md` is re-synced** with the canon PRD and both are
     maintained; `planning/README.md`'s sync claim must stay true.
+    *(Re-affirmed 2026-08-05, pass 18 — owner ruling.)* The rule had failed a SECOND time:
+    pass-17's FR14/FR20/FR27 amendments landed only in `planning/planning-artifacts/prd.md`,
+    so the two files diverged again (`d3911299…` vs `783177bc…`) and a reader of
+    `design/prd.md` got the pre-generic-agents vocabulary as though it were current. The
+    owner chose re-sync over retiring the dual copy, so the requirement stands — but
+    "maintained" now means **byte-identical**, and the two files are pinned as such by
+    `prd-sync.test.ts` rather than by anyone's memory. The canon copy is the one to edit;
+    the design copy is a mirror.
 28. **R15-9 (2026-07-29): an absent `deliver-review-pr` grant resolves from the project's
     own governance, not from a constant.** The capability postdates R15-2, so "absent" is
     the normal state on every pre-existing project. Resolving it to a flat `direct` meant
@@ -387,6 +398,83 @@ it is regenerated from the filesystem rather than restated here.
     sync), and only `stale && at !== null` keeps the alert icon + `.stale` tone. This matches
     the MCP-health precedent, where "never checked" was already "unknown", not "stale"
     (`isMcpHealthStale`). (`app/features/github/github-view.tsx`)
+
+47. **R18-1 (2026-08-05): a reviewer inherits the delivering engagement's KBs.** When a
+    specialist is engaged as a REVIEWER on a task, its knowledge-base context is the UNION of
+    its own profile grants and the KB grants the DELIVERING engagement used for that task —
+    so the deliverer and the reviewer judge against the same conventions. Grants are otherwise
+    strictly per-profile, and that produced a false `request_changes` live: a Developer with a
+    "conventions" KB wrote the required footer, and a Reviewer with `kb: []` flagged that footer
+    as unsubstantiated because it never saw the KB. The union is deduped (a KB both grant never
+    double-charges the shared injection budget), applies only to non-delivering runs, and is
+    tolerant of an undeployed deliverer. Same on the resumed/@mention review path.
+    (`app/server/tasks/specialist-run.server.ts` — `deliveringKbGrants`/`withDeliveringKb`)
+
+48. **R18-2 (2026-08-05): a full-autonomy delivery re-queues the operator.** Opening the review
+    PR is delivery, NOT a stage transition, so the P11-70 every-transition re-trigger (and the
+    auto-boundary stranded backstop) never fired after it — an AUTONOMOUS task sat `waiting:human`
+    with no packet, recommendation, or card (an invisible dead-end). Under FULL autonomy the
+    server now re-queues the operator with a `delivered` trigger so it proceeds on its own (engage
+    the reviewer / recommend the next step). SUPERVISED deliberately does NOT re-trigger — the
+    human is the driver and the "Opened PR" event on the timeline is the cue. Only a NEWLY opened
+    PR fires it; the re-triggered run can never re-deliver (the deliver tool no-ops on a live PR),
+    and the chain shares `OPERATOR_TRANSITION_CHAIN_CAP`. (`performDelivery` in
+    `app/server/tasks/task-actions.server.ts`; the `delivered` trigger in `operator-run.server.ts`)
+
+49. **R18-3 (2026-08-05): the SDK-native skill/command catalog is governed OUT of runs.** A
+    spawned agent run loads ONLY Viberr's granted skills. The per-task workspace clone's own
+    `.claude` catalog is stripped before the run (git-invisibly, via `--skip-worktree` so the
+    delivery's `git add -A` never ships a `.claude` deletion into the review PR), and the Claude
+    launch carries `strictMcpConfig: true` so only Viberr-passed MCP servers reach the run. The
+    user-level catalog is already isolated in production by the app-owned `CLAUDE_CONFIG_DIR`;
+    Codex was already governed by `CODEX_HOME` + its skills/plugins/AGENTS.md flags. Known,
+    accepted limitation: a run whose task is to edit the repo's OWN `.claude` cannot deliver those
+    edits — that is the governance posture, not a bug.
+    (`stripUngovernedRepoCatalog` in `app/server/tasks/specialist-run.server.ts`;
+    `app/server/runtimes/claude-runtime.server.ts`)
+
+50. **R18-4 (2026-08-05): branch-collision stays a human-gated packet — do NOT auto-reset.** A
+    stale remote task branch (a reused task key whose old branch still exists on GitHub) forces
+    a collision packet before delivery. The rejected fix was "always force-reset the remote task
+    branch to base at execution start"; the ruling KEEPS the collision packet + human resolve as
+    an intentional safety checkpoint against clobbering unrelated remote history. (Resolves the
+    carried F17-L4 behavior question; the pass-17 merged-vs-closed copy split stands.)
+
+51. **R18-5 (2026-08-05): granted skills reach a Claude run through the SDK's NATIVE skills
+    mechanism, not as injected prompt text.** Viberr used to read every granted skill's full
+    body and paste it into the system prompt on every run, and deny the `Skill` tool outright.
+    That worked, and a live decoy test proved the model still applied only the relevant skill —
+    but it has no progressive disclosure: context cost grows linearly with grants, and
+    relevance is left entirely to the model. The owner's ruling is to use the documented SDK
+    option instead — `skills: ["<granted>", …]` — which discovers skills as filesystem
+    artifacts (`.claude/skills/<name>/SKILL.md`) through `settingSources`, loads only NAME +
+    DESCRIPTION at startup, and pulls a body only when the model invokes that skill. The
+    allow-list is also what finally contains the SDK's ~16 compiled-in skills: they are
+    "hidden from the model and rejected by the Skill tool", which the old `skills: []` could
+    not achieve (the HONEST LIMIT recorded in `claude-runtime.server.ts`). Isolation is
+    preserved by mounting ONLY Viberr-granted skills into the workspace — after R18-3 has
+    stripped the clone's own `.claude` — with `plugins: []` and no `'user'` setting source, and
+    by excluding `.claude/` from git so delivery can never ship it. **Codex keeps prompt-text
+    injection**: its CLI has no equivalent and LV-13 deliberately severs its skills channel.
+    That asymmetry is disclosed, not silent.
+
+52. **R18-6 (2026-08-05): `design/prd.md` is re-synced to canon and pinned by a test.** See the
+    re-affirmation under ruling 27 — the dual-copy rule had failed a second time, and the owner
+    chose re-sync over retiring the mirror. "Maintained" now means byte-identical, enforced by
+    `app/shared/docs/prd-sync.test.ts`, which names the diverging lines.
+
+53. **R18-7 (2026-08-05): accepting from the BOARD asks first.** Dragging a card into the final
+    stage runs the full acceptance contract — a real PR merge — so the board drag and the
+    keyboard Move menu now raise a confirmation that states the consequence and that merging is
+    one-way, matching the task-detail dialog. The drag stays possible; only the silence goes.
+    (Ruling 20 / FR27 promise the dialog at every acceptance path; three of five lacked it.)
+
+54. **R18-8 (2026-08-05): F18-9 is closed as NOT REPRODUCIBLE.** The recorded claim that the
+    agent-profile modal defaults every org skill to ON could not be reproduced: both modals
+    initialise a new profile with empty grants (`create-profile-modal.tsx:806-812`,
+    `agent-template-modal.tsx:123-131`). No default was changed — acting on the note would have
+    introduced the over-granting it warned about. Recorded as a class: a finding taken from a UI
+    impression and never re-verified in code can survive several passes as fact.
 
 ## Route map
 

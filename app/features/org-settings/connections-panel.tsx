@@ -117,6 +117,16 @@ function ConnectionModal({
             autoFocus={!initial}
           />
         </div>
+        {/* UXA-11: on the update path this field is `disabled` and nothing said
+            why — the title says "Update token" and the sub says the token is
+            never shown, but neither states that the OWNER is fixed. A disabled
+            input cannot explain itself; say it where the reader is looking. */}
+        {initial && (
+          <div className="fhint">
+            The owner can&apos;t be changed — add a separate connection for a
+            different account or organisation.
+          </div>
+        )}
       </div>
       <div className="field">
         <label className="flabel" htmlFor="cn-token">

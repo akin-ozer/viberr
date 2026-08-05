@@ -44,6 +44,16 @@ function fakeQuery(messages: unknown[], opts: { throwAfter?: number } = {}) {
   return { q, wasInterrupted: () => interrupted };
 }
 
+/** The subset of SDK options these tests inspect. */
+interface CapturedOptions {
+  settingSources?: string[];
+  skills?: string[];
+  plugins?: unknown[];
+  strictMcpConfig?: boolean;
+  disallowedTools?: string[];
+  managedSettings?: { claudeMdExcludes?: string[] };
+}
+
 const SPEC: RunSpec = {
   runId: "r1",
   projectSlug: "viberr-core",
@@ -292,20 +302,90 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured?.effort).toBeUndefined();
   });
 
-  it("isolates every run from the host ~/.claude (settingSources + skills empty)", async () => {
+  /** Capture the options one run was started with. */
+  async function optionsFor(spec: RunSpec): Promise<CapturedOptions> {
     const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
-    let captured: { settingSources?: string[]; skills?: string[] } | undefined;
-    const queryFn = (params: { options?: { settingSources?: string[]; skills?: string[] } }) => {
+    let captured: CapturedOptions | undefined;
+    const queryFn = (params: { options?: CapturedOptions }) => {
       captured = params.options;
       const { q } = fakeQuery(result);
       return q;
     };
-    createClaudeAdapter({ queryFn: queryFn as never }).start(SPEC, { onLine: () => {}, onExit: () => {} });
+    createClaudeAdapter({ queryFn: queryFn as never }).start(spec, {
+      onLine: () => {},
+      onExit: () => {},
+    });
     await drain();
-    // Empty settingSources = no host settings tiers; empty skills = the model
-    // sees NONE of the operator-user's personal Claude Code skills/plugins.
-    expect(captured?.settingSources).toEqual([]);
-    expect(captured?.skills).toEqual([]);
+    return captured ?? {};
+  }
+
+  it("isolates a run with NO granted skills from the host ~/.claude (settingSources + skills empty, strict MCP)", async () => {
+    const captured = await optionsFor(SPEC);
+    // Empty settingSources = no host settings tiers AND no project source at
+    // all; empty skills = the model sees NONE of the operator-user's personal
+    // Claude Code skills, and none of the ~16 the SDK compiles into its binary.
+    expect(captured.settingSources).toEqual([]);
+    expect(captured.skills).toEqual([]);
+    expect(captured.plugins).toEqual([]);
+    // …so the `Skill` tool stays denied — the only fence left when we list no
+    // skills of our own (the bundled set loads regardless: docker-verified).
+    expect(captured.disallowedTools).toContain("Skill");
+    // R18-3: only Viberr-granted MCP servers reach a run (ignore ambient MCP).
+    expect(captured.strictMcpConfig).toBe(true);
+  });
+
+  it("enables the SDK's NATIVE skills for a run whose granted skills Viberr mounted", async () => {
+    // The pass-18 change: granted skills arrive as real
+    // `<workspace>/.claude/skills/<name>` folders (mountGrantedSkills) instead
+    // of as system-prompt text, so the model gets metadata up front and the full
+    // body only when it invokes one. Three things must move together, or the
+    // skills are listed and uninvokable / invokable and unlisted:
+    //
+    // Canary: drop any one of the three lines in the adapter (settingSources,
+    // skills, the `Skill` filter on BASE_DENIED_BUILTINS) and one assertion
+    // below fails.
+    const captured = await optionsFor({
+      ...SPEC,
+      skills: ["conventional-commits", "terraform-review"],
+    });
+
+    // 'project' = the run's own workspace checkout, whose `.claude` Viberr
+    // stripped and rewrote moments earlier. NEVER 'user'/'local' (F13).
+    expect(captured.settingSources).toEqual(["project"]);
+    expect(captured.skills).toEqual(["conventional-commits", "terraform-review"]);
+    // The context filter REPLACES the blanket deny: an unlisted skill (every
+    // bundled one included) is hidden from the model and rejected by the tool.
+    expect(captured.disallowedTools).not.toContain("Skill");
+    // Everything else about the fence is unchanged.
+    expect(captured.plugins).toEqual([]);
+    expect(captured.strictMcpConfig).toBe(true);
+    expect(captured.disallowedTools).toEqual(expect.arrayContaining(["Task", "Workflow"]));
+    // The CLAUDE.md ingress `settingSources: ['project']` opens — see
+    // MANAGED_SETTINGS. Asserted so the mitigation cannot be dropped silently;
+    // it is NOT proof the ingress is closed (that needs a live run).
+    expect(captured.managedSettings?.claudeMdExcludes).toContain("**/CLAUDE.md");
+  });
+
+  it("never lets a skill name the SDK would throw on reach query()", async () => {
+    // The TS SDK throws BEFORE STARTING on a name that cannot be an exact skill
+    // name. The mount already filters, so this is the adapter-boundary belt:
+    // no caller can turn a bad store folder name into a dead run.
+    //
+    // Canary: drop the `nativeSkillNames` call and the first expectation gets
+    // the raw list back, wildcard included.
+    const mixed = await optionsFor({
+      ...SPEC,
+      skills: ["good-skill", "my skill (v2)", "*", "good-skill"],
+    });
+    expect(mixed.skills).toEqual(["good-skill"]);
+    expect(mixed.settingSources).toEqual(["project"]);
+
+    // ALL unsafe ⇒ nothing to enable ⇒ the run falls back to the fully isolated
+    // shape rather than opening a project source for zero skills.
+    const none = await optionsFor({ ...SPEC, skills: ["a,b", ""] });
+    expect(none.skills).toEqual([]);
+    expect(none.settingSources).toEqual([]);
+    expect(none.disallowedTools).toContain("Skill");
   });
 
   it("denies the SDK bundled parity/governance tools on every run (keeps ToolSearch + coding tools), plus repo-mutation for operators", async () => {
@@ -325,8 +405,11 @@ describe("claude adapter (SDK, injected fake query)", () => {
 
     // EVERY run denies the SDK-bundled tools that break Codex/Claude parity or
     // bypass viberr governance (docker-verified they load despite skills:[]):
-    // Skill, Task (subagents), Workflow, Cron*, ScheduleWakeup, RemoteTrigger,
-    // Monitor, Push/SendMessage, DesignSync, Enter/ExitWorktree.
+    // Task (subagents), Workflow, Cron*, ScheduleWakeup, RemoteTrigger,
+    // Monitor, Push/SendMessage, DesignSync, Enter/ExitWorktree — plus `Skill`
+    // for every run that mounts no granted skill of its own (a run that DOES
+    // trades the deny for the `skills` context filter; see the native-skills
+    // test above). These specs carry no `skills`, so `Skill` is denied here.
     const primaryDenied = (await run({ ...SPEC, kind: "primary" }))?.disallowedTools ?? [];
     expect(primaryDenied).toEqual(
       expect.arrayContaining([

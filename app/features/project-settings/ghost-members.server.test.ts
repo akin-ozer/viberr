@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore } from "../../../test-support/test-store";
+import { setupTestStore, writeProject } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
@@ -165,6 +165,39 @@ describe("UI-29: the last-admin guard counts LIVE accounts only", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow();
+  });
+
+  it("F18-6: a GHOST admin that is the project's ONLY admin IS removable by a live org admin (no deadlock)", async () => {
+    const store = setupTestStore(ctx);
+    // The exact F18-6 shape: the project's sole admin is a DELETED org account
+    // (a ghost id with no users row); the live org admin (arda) is only a viewer
+    // member. Before the fix, Settings→Members 409'd ("only admin — assign
+    // another in Policy first") while Policy pointed back to Members — a loop
+    // with no exit but hand-editing project.md.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      members: [
+        { userId: "u_ghost_admin", role: "admin" }, // no users row → ghost
+        { userId: store.users.arda.id, role: "viewer" }, // live org admin, viewer here
+      ],
+    } as never);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // countLiveAdmins sees ZERO live admins (the only admin is a ghost).
+    expect(
+      countLiveAdmins(store.db, [{ userId: "u_ghost_admin", role: "admin" }]),
+    ).toBe(0);
+
+    // arda (org admin → D2 override) removes the ghost — this must SUCCEED.
+    await removeMember(
+      store.db,
+      { projectSlug: store.slug, targetUserId: "u_ghost_admin" },
+      { userId: store.users.arda.id, label: "arda@viberr.dev" },
+      { dataRoot: store.dataRoot },
+    );
+    const after = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    expect(after.parsed.frontmatter.members.some((m) => m.userId === "u_ghost_admin")).toBe(false);
   });
 });
 

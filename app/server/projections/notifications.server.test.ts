@@ -67,6 +67,30 @@ describe("notifications", () => {
     expect(list.find((n) => n.id === "x")?.projectName).toBe("Deploy Pipeline");
     // Unresolvable soft ref falls back to the slug — never a crash.
     expect(list.find((n) => n.id === "y")?.projectName).toBe("billing-service");
+    // F18-1: `y`'s project no longer exists → it is an orphan: not navigable
+    // (href nulled) and flagged so the renderer shows a "no longer exists" note.
+    // `x`'s project resolves, so it stays a live, clickable row.
+    const y = list.find((n) => n.id === "y")!;
+    const x = list.find((n) => n.id === "x")!;
+    expect(y.targetMissing).toBe(true);
+    expect(y.href).toBeNull();
+    expect(x.targetMissing).toBe(false);
+    expect(x.href).toBe("/projects/deploy-pipeline/tasks/DEP-31");
+  });
+
+  it("F18-1: the unread badge excludes notifications whose project was deleted", () => {
+    const db = ctx.makeDb();
+    mkUser(db, "u_1");
+    db.prepare(
+      `INSERT INTO projects (slug, name, task_prefix, stages_json, workflow_json, source_path, content_hash, parsed_at)
+       VALUES ('live-proj', 'Live', 'LIV', '[]', '[]', 'projects/live-proj/project.md', 'h', '2026-07-04T00:00:00Z')`,
+    ).run();
+    // One unread org-wide, one unread in a live project, one unread in a GONE project.
+    createNotification(db, { id: "org", userId: "u_1", kind: "policy", text: "t" });
+    createNotification(db, { id: "live", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: "live-proj", taskKey: "LIV-1" });
+    createNotification(db, { id: "gone", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: "wiped-proj", taskKey: "WIP-9" });
+    // The orphan ("gone") does not inflate the badge — only org + live count.
+    expect(countUnreadNotifications(db, "u_1")).toBe(2);
   });
 
   it("read-marking is idempotent and monotonic", () => {
@@ -370,6 +394,10 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
 describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () => {
   it("B-FD6: rows resolve to a task, a project, or NOTHING (never a dead click)", () => {
     const store = setupTestStore(ctx);
+    // F18-1: the project must exist in the PROJECTION for its rows to stay
+    // clickable (a deleted project → orphan, href null). Boot always rescans, so
+    // rebuild here to reflect the real "project exists" state this test asserts.
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const uid = store.users.murat.id;
     createNotification(store.db, { id: "n_task", userId: uid, kind: "quality", text: "t", projectSlug: store.slug, taskKey: "VIB-1", occurredAt: "2026-07-01T03:00:00.000Z" });
     createNotification(store.db, { id: "n_proj", userId: uid, kind: "policy", text: "t", projectSlug: store.slug, occurredAt: "2026-07-01T02:00:00.000Z" });

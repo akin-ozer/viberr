@@ -7,7 +7,7 @@ import { Pill } from "~/ui/pill";
 import { TglP } from "~/ui/toggle";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
-import { formatDayBucket } from "~/shared/dates/format";
+import { formatCalendarDate } from "~/shared/dates/format";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
 import { RBAC_ROWS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
@@ -42,6 +42,8 @@ export interface ProfileData {
   };
   memberships: { slug: string; name: string; role: ProjectRole }[];
   accessRole: ProjectRole | null;
+  /** F18-3: whether GitHub OAuth is configured on this deployment. */
+  githubConfigured: boolean;
   prefs: {
     notifs: NotifPrefs;
     motion: "full" | "reduce";
@@ -187,7 +189,11 @@ function ProfileIdentity({
         ) : (
           <div className="kv-row">
             <span className="k">Member of</span>
-            <span className="v">—</span>
+            {/* UXA-10: a bare em dash for the same fact the Your-access panel
+                further down states in words ("No project membership yet."). An
+                em dash reads as "unknown", not "none" — say the same thing the
+                same way on the same page. */}
+            <span className="v plain">No projects yet</span>
           </div>
         )}
         <div className="kv-row">
@@ -199,7 +205,11 @@ function ProfileIdentity({
         </div>
         <div className="kv-row">
           <span className="k">Joined</span>
-          <span className="v">{formatDayBucket(user.createdAt)}</span>
+          {/* UXA-10: `formatDayBucket` is the TIMELINE form — it yields
+              "Today"/"Yesterday" for a new account and a year-less "Mar 30"
+              forever after, so an account opened last year read as though it
+              were opened this one. A join date is a calendar fact. */}
+          <span className="v">{formatCalendarDate(user.createdAt)}</span>
         </div>
       </div>
     </div>
@@ -387,12 +397,13 @@ function ProfileAppearance({
               account — it follows you to every browser you sign in from.
             </div>
           </span>
-          <span className="mini-seg">
+          <span className="mini-seg" role="group" aria-label="Theme">
             {THEMES.map(([v, l]) => (
               <button
                 type="button"
                 key={v}
                 className={theme === v ? "on" : ""}
+                aria-pressed={theme === v}
                 onClick={() => onTheme(v, l)}
               >
                 {l}
@@ -415,12 +426,13 @@ function ProfileAppearance({
               kept either way.
             </div>
           </span>
-          <span className="mini-seg">
+          <span className="mini-seg" role="group" aria-label="Timeline opens showing">
             {TLS.map(([v, l]) => (
               <button
                 type="button"
                 key={v}
                 className={tl === v ? "on" : ""}
+                aria-pressed={tl === v}
                 onClick={() => pickTl(v, l)}
               >
                 {l}
@@ -516,6 +528,11 @@ function ProfileGithub({
 }) {
   const { user } = data;
   const gh = user.githubConnected;
+  // F18-3: on a deployment with no GitHub OAuth, a Connect can only fail — so an
+  // UNconfigured + UNconnected card reads as a quiet fact, not warn chips + a
+  // doomed button. A CONNECTED card always keeps its full state (rare, but real
+  // if OAuth was configured, used, then removed). Mirrors R17-4.
+  const showConnectAffordance = gh || data.githubConfigured;
   useServerToast(fetcher);
   const error = actionError(fetcher);
   const [connectBusy, setConnectBusy] = useState(false);
@@ -579,6 +596,18 @@ function ProfileGithub({
           </span>
         </div>
       </div>
+      {!showConnectAffordance ? (
+        // Unconfigured + unconnected: a quiet, honest one-liner — no warn chips,
+        // no Connect that could only produce "GitHub sign-in couldn't start".
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            GitHub sign-in isn't configured on this deployment, so there's no
+            personal GitHub identity to connect. Your actions record under your
+            workspace identity above.
+          </span>
+        </div>
+      ) : (
       <div className="cred-card">
         <div className="cred-top">
           <Icon name="github" />
@@ -636,6 +665,7 @@ function ProfileGithub({
           </div>
         )}
       </div>
+      )}
       {(error || connectErr) && (
         <div className="login-err spaced" role="alert">
           <Icon name="alert" />

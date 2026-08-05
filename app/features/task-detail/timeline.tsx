@@ -359,8 +359,15 @@ export function Timeline({
             />
           </div>
           <div className="composer-foot">
+            {/* UXA-1: this read "Open to every registered user" — the same false
+                sentence the Permissions panel on THIS page already had removed
+                under E1 ("false, and false on a surface whose whole job is
+                stating what the server enforces"). Membership is the gate:
+                R15-4 members-only was re-proven live this pass — a signed-in
+                non-member 404s on the page and on the comment POST. Say what
+                the server actually enforces, in the panel's own words. */}
             <span className="fine xs dim">
-              Open to every registered user · @mentions route to agents
+              Every project member can comment · @mentions route to agents
             </span>
             {commentError && (
               <span className="composer-err" role="alert">
@@ -398,7 +405,9 @@ export function Timeline({
               ? "No activity yet — this task hasn't started its operator loop."
               : f === "comment"
                 ? "No comments in the loaded history — switch to All, or load older events."
-                : "No governance events in the loaded history — switch to All, or load older events."}
+                : // F18-14: "governance" is a banned UI word (design/CONVERSATION-SUMMARY
+                  // line 22); this is the "Important" filter's empty state, so name that tab.
+                  "No important events in the loaded history — switch to All, or load older events."}
           </div>
         ) : (
           items.map((ev) => (

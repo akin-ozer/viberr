@@ -89,6 +89,10 @@ export interface RunOperatorInput {
    *     (closed without merge / merged uncelebrated / reopened) — assess it and
    *     open the recovery decision, withdraw a moot packet, or recommend
    *     acceptance, per the turn instruction.
+   *   delivered → PROCEED: the server just opened the review PR (a full-autonomy
+   *     delivery). Not a transition, so this is the seam that keeps an autonomous
+   *     task moving — engage the reviewer / recommend the next step from the live
+   *     snapshot (R18-2).
    */
   trigger?:
     | "create"
@@ -96,6 +100,7 @@ export interface RunOperatorInput {
     | "agent-reply"
     | "goal-updated"
     | "pr-diverged"
+    | "delivered"
     | "scheduled"
     | "manual";
   /** `scheduled` trigger: the note the human wrote when they set the re-run
@@ -1313,7 +1318,7 @@ async function executeCodexPlan(
       runId,
       hadText: !!text,
     });
-    await operatorOpenPacket(
+    const escalation = await operatorOpenPacket(
       db,
       ctx,
       {
@@ -1332,7 +1337,17 @@ async function executeCodexPlan(
         taskKey: input.taskKey,
         err: error instanceof Error ? error : new Error(String(error)),
       });
+      return null;
     });
+    // G6: `operatorOpenPacket` returns `{outcome:"denied"}` WITHOUT throwing
+    // when `generate-packets` is withheld — and `.catch` only catches throws.
+    // So an operator deployed with packet-generation off/human would emit an
+    // unparseable turn and STRAND with no packet, no note, only a server-side
+    // warn. Fall back to a direct `note` (as narrateRefusedActions does) so the
+    // human sees why the operator went quiet even when it cannot open a packet.
+    if (!escalation || escalation.outcome !== "done") {
+      await writeOperatorNoPlanNote(db, ctx, input, !!text);
+    }
     return;
   }
   // The plan's prose fields persist to the timeline / packets — repair
@@ -1617,6 +1632,47 @@ async function narrateRefusedActions(
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   } catch (error) {
     logger.error("codex operator refusal narration failed", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * G6: last-resort note when the operator produced no usable plan AND could not
+ * open the blocked recovery packet (its `generate-packets` capability is
+ * withheld). Without this the task strands `waiting:human` with nothing on the
+ * timeline. A plain `note` (not `policy`) — this is a coordination stall, not a
+ * governance refusal — that tells the human to re-engage or redirect.
+ */
+async function writeOperatorNoPlanNote(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: RunOperatorInput,
+  hadText: boolean,
+): Promise<void> {
+  const text =
+    "**The operator produced no actionable plan and could not open a recovery packet** " +
+    "(packet generation is not available to it here). " +
+    (hadText
+      ? "Its run replied, but the output was not a valid decision plan. "
+      : "Its run finished without producing any output. ") +
+    "Coordination is paused — re-engage the operator or redirect the task.";
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "operator" },
+        title: null,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.error("codex no-plan note fallback failed", {
       taskKey: input.taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
@@ -2168,6 +2224,21 @@ function operatorTurnInstruction(
     return (
       `GitHub reports PR ${prNo} is live again — a closed PR was reopened or replaced (see the newest policy-engine note). ` +
       "If your open decision packet was about the closed PR, withdraw it with `resolve_decision_packet` — it is moot now. Then continue the current stage from the live snapshot (an already-approved review can move to `accept_completion` per policy). Do not duplicate work that is already in flight."
+    );
+  }
+
+  if (trigger === "delivered") {
+    // R18-2: the server just opened the review PR for a full-autonomy delivery.
+    // Delivery is done — proceed ONE coordination step, never re-deliver.
+    const prNo = snapshot.pr ? `#${snapshot.pr.number}` : "the review PR";
+    return (
+      `The review pull request ${prNo} was just opened for this task's delivered work — ` +
+      "delivery is DONE, do not deliver again. Take the ONE next coordination step from the " +
+      "live snapshot: if no reviewer is engaged and the stage calls for review, engage a " +
+      "verdict-capable profile with `prompt_agent` (`delivers: false`); if a review has " +
+      "already passed, `accept_completion` per policy; if a stage move is needed to reach " +
+      "review, `transition_stage`. If the reviewer's run is already IN FLIGHT (`liveRuns`), " +
+      "do nothing and stop — you are re-invoked when it reports."
     );
   }
 

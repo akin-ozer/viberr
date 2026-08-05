@@ -103,7 +103,9 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   };
 
   const openItem = (n: NotificationPageItem) => {
-    if (n.projectSlug && n.taskKey) {
+    // F18-1: an orphan's project was deleted — navigating there lands on a
+    // shell-less 404. Do not navigate; the row already carries the note.
+    if (!n.targetMissing && n.projectSlug && n.taskKey) {
       navigate(`/projects/${n.projectSlug}/tasks/${n.taskKey}`);
     }
   };

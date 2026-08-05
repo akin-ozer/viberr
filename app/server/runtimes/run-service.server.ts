@@ -226,6 +226,9 @@ export interface StartRunInput {
   /** Tool denylist confining a specialist run to its granted capabilities.
    *  Claude only (Codex has no denylist channel — see codex-runtime). */
   disallowedTools?: string[];
+  /** Granted skills mounted into the run workspace (`mountGrantedSkills`).
+   *  Claude only — the SDK's native skills filter. See RunSpec.skills. */
+  skills?: string[];
   /** The run's `execute-code-or-write-repo` grant is withheld — Codex enforces
    *  it with a read-only sandbox (P13-RT-02). Omit to let `startRun` derive it
    *  from `disallowedTools` (see `repoWriteWithheldFromDenylist`). */
@@ -437,6 +440,7 @@ export async function startRun(
     ...(input.disallowedTools && input.disallowedTools.length
       ? { disallowedTools: input.disallowedTools }
       : {}),
+    ...(input.skills && input.skills.length ? { skills: input.skills } : {}),
     // Codex has no denylist channel; the withheld repo-write grant becomes a
     // read-only sandbox instead (P13-RT-02). Explicit caller value wins.
     ...((input.repoWriteWithheld ??
@@ -590,9 +594,12 @@ function continuityResetPreamble(backend: RealBackend): string {
 }
 
 /**
- * Note the continuity break on the task timeline. `note` (not `policy` or
- * `blocked`): nothing was violated and nothing is stuck — the turn ran, on a
- * fresh session. Best-effort: a task file we cannot write must never block the
+ * Note the continuity break on the task timeline. G8: a `continuity` typed
+ * event (amber warning tone), NOT a neutral `note` — nothing was violated (not
+ * `policy`) and nothing is stuck (not `blocked`), but context WAS lost and a
+ * supervisor scanning the timeline/stream must get a cue, which a neutral note
+ * buried mid-timeline never gave (PRD Journey 4: "a continuity warning appears
+ * on the task"). Best-effort: a task file we cannot write must never block the
  * run that is the actual recovery.
  */
 async function noteContinuityReset(
@@ -610,7 +617,7 @@ async function noteContinuityReset(
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
-        type: "note",
+        type: "continuity",
         actor: { kind: "system", systemId: "runtime-continuity" },
         title: null,
         text: `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
@@ -673,6 +680,13 @@ export async function resumeRun(
      *  this a resumed (e.g. @mention) specialist runs UNCONFINED — the exact
      *  confinement the fresh-run path establishes is silently dropped (XS-1). */
     disallowedTools?: string[];
+    /** Re-apply the granted skills mounted into the workspace on resume. The
+     *  workspace (and its mount) survives between runs, but the SDK options do
+     *  not: without this a resumed @mention run would enable NO skill while its
+     *  persona — built by the same `resolveResumeConfinement` — already left the
+     *  bodies out for native delivery, so the agent would silently lose its
+     *  granted craft mid-thread (the XS-1 fresh-vs-resume parity class). */
+    skills?: string[];
     /** Re-apply the run's tool APPROVAL list on resume. D4: the type used to
      *  omit this while accepting every other half of the run's tool policy, so
      *  a caller that curated an allowlist (the operator does) silently lost it
@@ -735,6 +749,7 @@ export async function resumeRun(
       ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
       ...(input.actor ? { actor: input.actor } : {}),
       ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+      ...(input.skills ? { skills: input.skills } : {}),
       ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
       ...(input.env ? { env: input.env } : {}),
       ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
@@ -769,6 +784,7 @@ export async function resumeRun(
     ...(input.actor ? { actor: input.actor } : {}),
     // Re-establish the run confinement the fresh-run path applies (XS-1).
     ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+    ...(input.skills ? { skills: input.skills } : {}),
     ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
     ...(input.env ? { env: input.env } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),

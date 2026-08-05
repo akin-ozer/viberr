@@ -19,6 +19,10 @@ export interface NotificationView {
   taskKey: string | null;
   occurredAt: string;
   unread: boolean;
+  /** F18-1: the project this row named no longer exists — render it as a
+   *  non-navigable orphan (clicking it would 404) with a "no longer exists"
+   *  note, instead of a live-looking link. */
+  targetMissing?: boolean;
 }
 
 export function NotificationItem({
@@ -29,14 +33,26 @@ export function NotificationItem({
   onOpen: (n: NotificationView) => void;
 }) {
   const m = ntfMeta(n);
-  const metaLine = [n.projectName, n.taskKey, formatDayTime(n.occurredAt)]
+  const metaLine = [
+    n.projectName,
+    n.taskKey,
+    formatDayTime(n.occurredAt),
+    n.targetMissing ? "project no longer exists" : null,
+  ]
     .filter(Boolean)
     .join(" · ");
   return (
     <button
       type="button"
-      className={"ntf-item" + (n.unread ? "" : " read")}
+      className={
+        "ntf-item" + (n.unread ? "" : " read") + (n.targetMissing ? " orphaned" : "")
+      }
       onClick={() => onOpen(n)}
+      // F18-1: an orphan (its project was deleted) has nowhere to open — the
+      // click only marks it read. `aria-disabled` (not `disabled`) keeps it
+      // focusable so a keyboard user can still dismiss it.
+      aria-disabled={n.targetMissing || undefined}
+      title={n.targetMissing ? "The project this refers to no longer exists" : undefined}
     >
       <span className={"pev-ico " + m.cls}>
         <Icon name={m.icon} />

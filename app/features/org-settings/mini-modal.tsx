@@ -19,6 +19,7 @@ export function MiniModal({
   saveLabel,
   onSave,
   footHint,
+  unmetHint,
   children,
   screen,
 }: {
@@ -30,6 +31,8 @@ export function MiniModal({
   saveLabel: string;
   onSave: () => void;
   footHint?: string;
+  /** UXA-9: what is still missing while `canSave` is false. */
+  unmetHint?: string;
   children: ReactNode;
   screen?: string;
 }) {
@@ -56,6 +59,16 @@ export function MiniModal({
       <div className="modal-body">{children}</div>
       <div className="modal-foot">
         {footHint && <span className="foot-hint mono">{footHint}</span>}
+        {/* UXA-9: the disabled Save dimmed to .55 and said nothing — and a
+            disabled control cannot explain itself through `title`, so the
+            reader was left hunting for the unmet requirement. Every caller
+            marks its required inputs with `*`, so this names the rule they all
+            share; `unmetHint` lets a caller be more specific. */}
+        {!canSave && (
+          <span className="fine xs dim">
+            {unmetHint ?? "Fill the required fields (*) to continue."}
+          </span>
+        )}
         <span className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>
             Cancel

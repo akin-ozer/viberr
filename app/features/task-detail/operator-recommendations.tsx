@@ -39,7 +39,11 @@ const KIND_ICON: Record<RecommendationView["kind"], IconName> = {
 };
 
 const KIND_LABEL: Record<RecommendationView["kind"], string> = {
-  assign_specialist: "Primary specialist",
+  // UXA-6: this slot is "Delivering agent" everywhere else on THIS page — the
+  // execution profile's section header, the "Assign delivering agent" menu and
+  // its aria-label, and the GitHub panel's deliver button — so the same actor
+  // wore two names one viewport apart. The generic-agents vocabulary won.
+  assign_specialist: "Delivering agent",
   assign_reviewer: "Reviewer",
   run_specialist: "Run specialist",
   run_reviewer: "Run reviewer",

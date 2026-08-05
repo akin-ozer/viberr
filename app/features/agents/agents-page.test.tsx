@@ -874,6 +874,27 @@ describe("CreateProfileModal", () => {
         .value,
     ).toBe("max");
   });
+
+  /**
+   * UXA-4 — the capability control is the most consequential setting in the
+   * product (it decides what an agent may do on its own), and its state lived
+   * in a CSS class only. The IDENTICAL control on the Policy sheet (the
+   * workflow-boundary seg) has always been a proper radiogroup; this one was
+   * never brought along, so a screen-reader user could not read the policy
+   * they were setting.
+   */
+  it("the Direct/Recommend/Human/Off control is a real radiogroup with checked state", () => {
+    const { container } = renderModal({ initial: null });
+    const seg = container.querySelector('.cap-seg[role="radiogroup"]');
+    expect(seg).toBeTruthy();
+    expect(seg!.getAttribute("aria-label")).toMatch(/^Policy for /);
+    const radios = [...seg!.querySelectorAll('[role="radio"]')];
+    expect(radios.length).toBeGreaterThan(1);
+    // Exactly one option is checked, and it is the one wearing the `on` class.
+    const checked = radios.filter((r) => r.getAttribute("aria-checked") === "true");
+    expect(checked).toHaveLength(1);
+    expect(checked[0]!.className).toContain("on");
+  });
 });
 
 describe("P13-AP-07 — the edit modal states that saving FORKS a library profile", () => {
@@ -1205,5 +1226,48 @@ describe("F16: the roster tells the truth about backend credentials", () => {
     const badge = container.querySelector(".profile-list .model-sub")!;
     expect(badge.getAttribute("title")).toContain("auth.json");
     expect(badge.textContent).toContain("no runtime");
+  });
+});
+
+/**
+ * UXA-15 — Policy and project Settings both explain their read-only state to a
+ * role without the grant. Agents hides New profile / Add from library / Edit /
+ * Delete outright and said nothing, so a contributor saw a roster they could
+ * not touch and no reason why.
+ */
+describe("UXA-15: the Agents page explains its read-only state", () => {
+  const renderAs = (myRole: string) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[mkProfile({})]}
+              deployments={[]}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole={myRole as never}
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    return render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
+  };
+
+  it("a contributor is told which grant is missing", () => {
+    const { container } = renderAs("contributor");
+    expect(container.textContent).toContain("Read-only");
+    expect(container.textContent).toContain("Manage agents");
+    // The management affordances really are absent — the note explains that.
+    expect(container.textContent).not.toContain("Add from library");
+  });
+
+  it("an admin sees no read-only note", () => {
+    const { container } = renderAs("admin");
+    expect(container.textContent).not.toContain("Read-only —");
   });
 });

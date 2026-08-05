@@ -24,7 +24,8 @@ import type { Guardrail, StageDef, WorkflowBoundary } from "~/schemas/project-fi
 
 export interface WorkflowTemplate {
   id: string;
-  /** Display label, e.g. "Governed · 5 stages". */
+  /** Display label, e.g. "Standard · 5 stages". F18-14: NOT the banned word
+   *  "Governed" — matches the New Project modal's rendered "Standard · 5 stages". */
   label: string;
   stages: StageDef[];
   workflow: WorkflowBoundary[];
@@ -32,7 +33,7 @@ export interface WorkflowTemplate {
 
 export const GOVERNED_TEMPLATE: WorkflowTemplate = {
   id: "governed-5",
-  label: "Governed · 5 stages",
+  label: "Standard · 5 stages",
   stages: [
     { id: "triage", name: "Triage", color: "#a5a8b5" },
     { id: "ready", name: "Ready", color: "#187574" },

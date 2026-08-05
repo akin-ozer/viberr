@@ -49,6 +49,8 @@ import {
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
 import { commentToAgent } from "./task-actions.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 /**
  * Agent-mention resolution + comment→resume→reply flow.
@@ -805,14 +807,14 @@ describe("runFailureReason (F7-RUN1)", () => {
 });
 
 describe("resumeWorkdir", () => {
-  it("falls back inside the workspace so the Git ceiling is a strict ancestor", () => {
+  it("falls back inside the workspace so the Git ceiling is a strict ancestor", async () => {
     const fallback = resumeWorkdir(
       store.slug,
       "VIB-1",
       null,
       store.dataRoot,
     );
-    const confinement = resolveResumeConfinement(
+    const confinement = await resolveResumeConfinement(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
@@ -825,8 +827,8 @@ describe("resumeWorkdir", () => {
     expect(existsSync(fallback)).toBe(true);
   });
 
-  it("stamps the unified delivery git identity into the resume env (F24)", () => {
-    const confinement = resolveResumeConfinement(
+  it("stamps the unified delivery git identity into the resume env (F24)", async () => {
+    const confinement = await resolveResumeConfinement(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
@@ -1288,4 +1290,74 @@ describe("mention routing keeps each agent on its OWN session (regression)", () 
       supportingEngagements(file.parsed.frontmatter).map((r) => r.profileId),
     ).toContain("analyst");
   });
+});
+
+describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)", () => {
+  const exec = promisify(execFile);
+
+  it("re-arms the SDK skills filter on the resumed RunSpec", async () => {
+    // The glue between `resolveResumeConfinement` (which re-mounts) and
+    // `resumeRun` (which forwards): without it a resumed agent enables NO skill
+    // while its persona — built by that same call — already left the body out
+    // for native delivery, so its granted craft vanishes mid-thread.
+    //
+    // Canary: drop the `skills: confinement.skills` spread from
+    // `commentToAgent`'s resume branch (task-actions.server) and this fails.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: "acme/widgets",
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "developer",
+            backends: ["claude"], model: "claude-sonnet",
+            resources: { skills: ["conventional-commits"], mcps: [], kb: [] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    mkdirSync(path.join(store.dataRoot, "skills", "conventional-commits"), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(store.dataRoot, "skills", "conventional-commits", "SKILL.md"),
+      "# Commits\n\nSENTINEL-SKILL-BODY",
+    );
+    // The workspace the earlier run left behind — the mount target on resume.
+    const ws = path.join(
+      store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "widgets",
+    );
+    mkdirSync(ws, { recursive: true });
+    await exec("git", ["-C", ws, "init", "-q"]);
+    // A finished run with a live transcript ⇒ the @mention RESUMES it.
+    upsertRun(store.db, {
+      id: "run_prior", projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary",
+      role: "developer", kind: "primary", backend: "claude", model: "sonnet",
+      sdk: "claude", sessionId: "claude-session-skills", agentName: "dev",
+      agentProfileId: "dev", state: "finished",
+    });
+    writeTranscript("claude-session-skills");
+
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev one more thing please" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
+
+    const specs = startedRunSpecs();
+    const resumed = specs[specs.length - 1]!;
+    expect(resumed.skills).toEqual(["conventional-commits"]);
+    expect(resumed.systemPrompt ?? "").not.toContain("SENTINEL-SKILL-BODY");
+    expect(existsSync(path.join(ws, ".claude", "skills", "conventional-commits"))).toBe(
+      true,
+    );
+  }, 20_000);
 });

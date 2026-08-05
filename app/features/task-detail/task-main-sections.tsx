@@ -29,13 +29,16 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
  * pure structural refactor — no behaviour or copy change).
  */
 
-/** Diagnostic severity → pill kind (pure; module scope so it isn't rebuilt per render). */
-const kind = (severity: string) =>
-  severity === "error" ? "blocked" : severity === "warning" ? "input" : "neutral";
-
 /** Parse/inconsistency findings from the projection (tolerant-parsing
  * contract) — compact list, only when the projection carries any. The full
- * diagnostics console arrives in Phase 10. */
+ * diagnostics console arrives in Phase 10.
+ *
+ * G2: each finding's pill is its READINESS EFFECT (the same `ReadinessPill`
+ * the hero shows), computed server-side from the canonical policy — NOT the
+ * raw `severity` word painted with an ad-hoc color. That kept a soft `error`
+ * crimson ("blocked") while the hero showed amber "inconsistency risk" for the
+ * same finding, and ignored `hardStop` entirely. A finding with no readiness
+ * effect (info) is a neutral "heads-up". */
 export function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) {
   if (diagnostics.length === 0) return null;
   return (
@@ -53,9 +56,13 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecor
         {diagnostics.map((d) => (
           <div className="obs" key={d.id}>
             <span className="k">
-              <Pill kind={kind(d.severity)} sm>
-                {d.severity}
-              </Pill>
+              {d.readinessEffect ? (
+                <ReadinessPill value={d.readinessEffect} sm />
+              ) : (
+                <Pill kind="neutral" sm>
+                  heads-up
+                </Pill>
+              )}
             </span>
             <span>
               <code className="mono">{d.code}</code> — {d.message}
@@ -150,14 +157,21 @@ export function TaskHero({
           />
           {stage?.name ?? ""}
         </Pill>
-        {agentWorking && task.displayReadiness === "input_required" ? (
-          <Pill kind="agent" dot>
-            agent working
-          </Pill>
-        ) : (
-          <ReadinessPill value={task.displayReadiness} />
-        )}
-        <ValidationPill value={task.validation} />
+        {/* UXO-1: an ARCHIVED task is out of the flow — the archive confirm and
+            the acceptance panel both already say so. Its readiness and
+            validation pills, though, kept asserting live obligations: a task
+            archived mid-review still read "ready · awaiting verdict", i.e. that
+            someone still owes a verdict, when nobody does. The stage stays (it
+            answers "how far did this get?"); the two ACTIONABLE signals drop. */}
+        {!archived &&
+          (agentWorking && task.displayReadiness === "input_required" ? (
+            <Pill kind="agent" dot>
+              agent working
+            </Pill>
+          ) : (
+            <ReadinessPill value={task.displayReadiness} />
+          ))}
+        {!archived && <ValidationPill value={task.validation} />}
         <span className="hero-file">
           <Icon name="file" />
           <span>{task.filePath}</span>
@@ -191,6 +205,15 @@ export function TaskHero({
             >
               Save goal
             </button>
+            {/* UXA-14: the 3-character floor left a dead button and no reason —
+                and a disabled control cannot explain itself via `title`. The
+                board's New-task modal already states its own requirement; say
+                this one too, and only while it is actually unmet. */}
+            {draft.trim().length < 3 && (
+              <span className="fine xs dim">
+                A goal needs at least 3 characters.
+              </span>
+            )}
             <button
               type="button"
               className="btn"

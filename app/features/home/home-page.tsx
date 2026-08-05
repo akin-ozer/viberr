@@ -45,6 +45,8 @@ export interface HomePageData {
   unread: number;
   /** B-FD4: the host data root, org admins only (null otherwise). */
   storeRoot: string | null;
+  /** F18-5: the single-writer lock holder, org admins only (null otherwise). */
+  lockHolder?: { pid: number; hostname: string; startedAt: string } | null;
 }
 
 export function HomePage({
@@ -272,6 +274,7 @@ export function HomePage({
           isAdmin={user.role === "admin"}
           rebuilding={rebuilding}
           onRebuild={() => setRebuildConfirm(true)}
+          lockHolder={data.lockHolder ?? null}
         />
       </main>
 

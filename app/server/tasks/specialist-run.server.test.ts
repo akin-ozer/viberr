@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -29,7 +36,7 @@ import type {
 } from "~/server/runtimes/adapter.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
-import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { installFakeRuntime, lastRunSpec } from "../../../test-support/fake-runtime";
 import {
   assignReviewer,
   assignSpecialist,
@@ -40,7 +47,10 @@ import {
   resolveDeployedSpecialist,
   startAgentRun,
   buildSpecialistPersona,
+  resolveResumeConfinement,
 } from "./specialist-run.server";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 /**
  * Assign a deployed specialist + start a specialist run — the "deploy a
@@ -1501,5 +1511,318 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).not.toContain("SENTINEL-SKILL-UNRELATED");
     expect(persona).not.toContain("reviewer-expertise");
     expect(persona).not.toContain("terraform-review");
+  });
+
+  /**
+   * pass-18: a skill Viberr MOUNTED for the SDK's native mechanism must not ALSO
+   * ride the prompt as text — that is the double feed the whole change exists to
+   * remove (the body arrives on invocation instead, which is what progressive
+   * disclosure buys). But `nativeSkills` is a subset, never a switch: a grant
+   * that did NOT mount (Codex, no checkout, an SDK-unsafe folder name) still has
+   * to be injected, or the change trades a double feed for a silent loss.
+   *
+   * Canary: pass `input.skills` to `readSkillBodies` instead of `injectable` and
+   * the first `not.toContain` fails; drop the `injectable` filter's negation and
+   * the second `toContain` fails.
+   */
+  it("does NOT inject a natively-mounted skill's body, but still injects the ones that did not mount", () => {
+    const dataRoot = tempRoot();
+    for (const [name, sentinel] of [
+      ["mounted-craft", "SENTINEL-MOUNTED-BODY"],
+      ["text-craft", "SENTINEL-INJECTED-BODY"],
+    ] as const) {
+      mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
+      writeFileSync(
+        path.join(dataRoot, "skills", name, "SKILL.md"),
+        `# ${name}\n\n${sentinel}`,
+      );
+    }
+
+    const persona = buildSpecialistPersona({
+      profileId: "dev",
+      skills: ["mounted-craft", "text-craft"],
+      nativeSkills: ["mounted-craft"],
+      dataRoot,
+    });
+
+    // Mounted: announced (with its provenance, so the agent does not read its
+    // own workspace files as an injection attempt) but NOT inlined.
+    expect(persona).toContain("Attached skills (trusted — installed in your workspace)");
+    expect(persona).toContain("mounted-craft");
+    expect(persona).not.toContain("SENTINEL-MOUNTED-BODY");
+    expect(persona).not.toContain("mounted-craft (skill)");
+    // Not mounted: injected exactly as before.
+    expect(persona).toContain("text-craft (skill)");
+    expect(persona).toContain("SENTINEL-INJECTED-BODY");
+  });
+
+  it("ignores a mounted name the profile no longer grants", () => {
+    // `nativeSkills` comes from the workspace, which outlives a grant edit. It
+    // is intersected with the declared grants so a stale mount can neither
+    // announce craft the profile withdrew nor suppress a body it still grants.
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "skills", "granted"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "skills", "granted", "SKILL.md"),
+      "# granted\n\nSENTINEL-STILL-GRANTED",
+    );
+
+    const persona = buildSpecialistPersona({
+      profileId: "dev",
+      skills: ["granted"],
+      nativeSkills: ["revoked"],
+      dataRoot,
+    });
+
+    expect(persona).not.toContain("revoked");
+    expect(persona).toContain("SENTINEL-STILL-GRANTED");
+  });
+});
+
+// `stripUngovernedRepoCatalog` moved to ~/server/runtimes/skill-mount.server
+// (it and the skill mount are two halves of "Viberr owns the workspace's
+// `.claude`"); its tests moved with it, to skill-mount.server.test.ts.
+
+describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => {
+  /** Deploy a `dev` deliverer granting KB `deliverKb` and a `critic` reviewer
+   *  granting KB `reviewKb` (may be []). */
+  function deployKbPair(deliverKb: string[], reviewKb: string[]): void {
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "developer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: [], mcps: [], kb: deliverKb },
+          },
+        } as never,
+        {
+          profileId: "critic",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "critic", role: "reviewer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: [], mcps: [], kb: reviewKb },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function writeKb(name: string, body: string): void {
+    mkdirSync(path.join(store.dataRoot, "kb", name), { recursive: true });
+    writeFileSync(path.join(store.dataRoot, "kb", name, "conventions.md"), body);
+  }
+
+  async function engageAndRunCritic(): Promise<string> {
+    await assignSpecialist(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const result = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    expect(result.role).toBe("reviewer");
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      actor(store.users.arda));
+    return lastRunSpec()?.systemPrompt ?? "";
+  }
+
+  it("a reviewer with kb:[] resolves the delivering engagement's KB bodies", async () => {
+    deployKbPair(["foo"], []);
+    writeKb("foo", "# Conventions\n\nSENTINEL-DELIVERER-KB");
+    const sys = await engageAndRunCritic();
+    expect(sys).toContain("foo (knowledge base)");
+    expect(sys).toContain("SENTINEL-DELIVERER-KB");
+  });
+
+  it("does not double-inject a KB both the reviewer and deliverer grant", async () => {
+    deployKbPair(["shared"], ["shared"]);
+    writeKb("shared", "# Shared\n\nSENTINEL-SHARED-KB");
+    const sys = await engageAndRunCritic();
+    expect(sys.split("shared (knowledge base)").length - 1).toBe(1);
+  });
+
+  it("does NOT leak the reviewer's own KB back onto the delivering run", async () => {
+    // critic grants "bar"; dev grants nothing. Running dev (the deliverer) must
+    // not gain the reviewer's KB — inheritance is one-directional.
+    deployKbPair([], ["bar"]);
+    writeKb("bar", "# Bar\n\nSENTINEL-REVIEWER-ONLY-KB");
+    await assignSpecialist(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const devRun = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId },
+      actor(store.users.arda));
+    expect(lastRunSpec()?.systemPrompt ?? "").not.toContain("SENTINEL-REVIEWER-ONLY-KB");
+  });
+});
+
+describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
+  const exec = promisify(execFile);
+
+  /** Deploy `dev` on `backends`, granting `skills`, on a project with a repo. */
+  function deployWithSkills(skills: string[], backends = ["claude"]): void {
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: "acme/widgets",
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "developer",
+            backends, model: backends[0] === "codex" ? "gpt-5-codex" : "sonnet",
+            resources: { skills, mcps: [], kb: [] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function writeSkill(name: string, body: string): void {
+    mkdirSync(path.join(store.dataRoot, "skills", name), { recursive: true });
+    writeFileSync(path.join(store.dataRoot, "skills", name, "SKILL.md"), body);
+  }
+
+  /**
+   * Pre-create the task's checkout so `cloneRepo` takes its "already cloned for
+   * this task" branch — the run exercises the real workspace path with no
+   * network. (`git config --replace-all remote.origin.url` needs no remote.)
+   */
+  async function workspaceCheckout(): Promise<string> {
+    const dir = path.join(
+      store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "widgets",
+    );
+    mkdirSync(dir, { recursive: true });
+    await exec("git", ["-C", dir, "init", "-q"]);
+    await exec("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
+    await exec("git", ["-C", dir, "config", "user.name", "T"]);
+    writeFileSync(path.join(dir, "README.md"), "# widgets\n");
+    await exec("git", ["-C", dir, "add", "-A"]);
+    await exec("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+    return dir;
+  }
+
+  async function runDev(): Promise<void> {
+    await assignSpecialist(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const run = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda));
+  }
+
+  it("mounts the grant into the workspace, passes it to the SDK, and stops injecting the body", async () => {
+    // End to end on the fresh-run path: store grant → workspace mount → RunSpec.
+    // Canary: drop `skills: skillMount.mounted` from the startRun call and the
+    // spec assertion fails; drop `nativeSkills` from buildSpecialistPersona and
+    // the body reappears in the system prompt.
+    const ws = await workspaceCheckout();
+    deployWithSkills(["conventional-commits"]);
+    writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
+
+    await runDev();
+
+    expect(lastRunSpec()?.skills).toEqual(["conventional-commits"]);
+    const mounted = path.join(ws, ".claude", "skills", "conventional-commits", "SKILL.md");
+    expect(existsSync(mounted)).toBe(true);
+    expect(readFileSync(mounted, "utf8")).toContain("SENTINEL-SKILL-BODY");
+    // The body is NOT in the prompt any more — the SDK loads it on invocation.
+    const sys = lastRunSpec()?.systemPrompt ?? "";
+    expect(sys).not.toContain("SENTINEL-SKILL-BODY");
+    expect(sys).toContain("installed in your workspace");
+    expect(sys).toContain("conventional-commits");
+  });
+
+  it("keeps the prompt-text injection on CODEX — its skills channel is severed (LV-13)", async () => {
+    // The asymmetry, asserted so it stays deliberate: the Codex CLI has no
+    // native skills mechanism (viberr switches its whole skills channel off),
+    // so its granted craft must still ride `developer_instructions`.
+    //
+    // Canary: mount for both backends and this run's spec grows a `skills`
+    // array the Codex adapter would silently ignore, while the body vanishes
+    // from the only channel Codex has.
+    await workspaceCheckout();
+    deployWithSkills(["conventional-commits"], ["codex"]);
+    writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
+
+    await runDev();
+
+    expect(lastRunSpec()?.backend).toBe("codex");
+    expect(lastRunSpec()?.skills).toBeUndefined();
+    expect(lastRunSpec()?.systemPrompt ?? "").toContain("SENTINEL-SKILL-BODY");
+  });
+
+  it("falls back to injection when the run has no checkout to mount into", async () => {
+    // No workspace ⇒ no project source Viberr controls ⇒ no native skills (the
+    // adapter keeps `settingSources: []`). The grant must still reach the run.
+    deployWithSkills(["conventional-commits"]);
+    writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
+
+    await runDev();
+
+    expect(lastRunSpec()?.skills).toBeUndefined();
+    expect(lastRunSpec()?.systemPrompt ?? "").toContain("SENTINEL-SKILL-BODY");
+  });
+
+  it("a RESUMED run re-mounts and re-arms the same skills (fresh/resume parity)", async () => {
+    // XS-1 class: the workspace survives between runs but the SDK options do
+    // not. Without the re-mount an @mention resume would enable no skill while
+    // its persona (same call) already left the body out for native delivery —
+    // the agent would silently lose its craft mid-thread.
+    //
+    // Canary: drop the `mountGrantedSkills` call from resolveResumeConfinement
+    // and `skills` comes back undefined while the body is still absent.
+    const ws = await workspaceCheckout();
+    deployWithSkills(["conventional-commits"]);
+    writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
+
+    const confinement = await resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "dev",
+        backend: "claude",
+        delivers: true,
+      },
+    );
+
+    expect(confinement.skills).toEqual(["conventional-commits"]);
+    expect(confinement.systemPrompt ?? "").not.toContain("SENTINEL-SKILL-BODY");
+    expect(confinement.systemPrompt ?? "").toContain("installed in your workspace");
+    expect(
+      existsSync(path.join(ws, ".claude", "skills", "conventional-commits")),
+    ).toBe(true);
   });
 });

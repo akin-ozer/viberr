@@ -240,6 +240,7 @@ function BackendField({
               type="button"
               key={b.id}
               className={"pick-chip" + (backend === b.id ? " on" : "")}
+              aria-pressed={backend === b.id}
               onClick={() => setBackend(b.id)}
               disabled={!usable}
               title={
@@ -300,6 +301,7 @@ function AutonomyField({
             type="button"
             key={a.id}
             className={"pick-chip" + (autonomy === a.id ? " on" : "")}
+            aria-pressed={autonomy === a.id}
             onClick={() => setAutonomy(a.id)}
           >
             <Icon name={a.id === "full" ? "bolt" : "shield"} />
@@ -425,6 +427,7 @@ function StagesField({
             type="button"
             key={s.id}
             className={"pick-chip" + (stg.includes(s.id) ? " on" : "")}
+            aria-pressed={stg.includes(s.id)}
             onClick={() => toggleStage(s.id)}
           >
             <span
@@ -570,11 +573,24 @@ function CapabilityGrants({
                   {g.caps.map((capDef) => (
                     <div className="cap-mrow" key={capDef.id}>
                       <span className="cap-mname">{capDef.label}</span>
-                      <div className="cap-seg">
+                      {/* UXA-4: the Direct/Recommend/Human/Off control is a
+                          single-select whose state was carried by CSS alone.
+                          The SAME control on the Policy sheet (the workflow
+                          boundary seg) is a proper radiogroup — this one was
+                          simply never brought along, so the capability policy,
+                          the most consequential setting in the product, was the
+                          one a screen reader could not read. */}
+                      <div
+                        className="cap-seg"
+                        role="radiogroup"
+                        aria-label={`Policy for ${capDef.label}`}
+                      >
                         {capModes.map((m) => (
                           <button
                             type="button"
                             key={m.id}
+                            role="radio"
+                            aria-checked={caps[capDef.id] === m.id}
                             className={
                               m.id + (caps[capDef.id] === m.id ? " on" : "")
                             }

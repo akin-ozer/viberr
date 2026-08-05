@@ -423,16 +423,23 @@ export default function Login({
       {/* F10-27: a desktop-only brand/value panel beside the card so the wide
           viewport reads as an intentional composition rather than a lone card
           in empty space. Hidden below the two-column breakpoint. */}
-      <aside className="login-aside" aria-hidden="true">
-        <span className="login-aside-mark">V</span>
-        <h2>Governed AI delivery for small teams</h2>
+      {/* UXA-12: this panel used to be `aria-hidden="true"`. Its decorative
+          MARK is decorative; its heading and three product claims are not, and
+          they appear nowhere else — so an assistive-tech user got a bare
+          sign-in form where a sighted user got the product's whole value
+          statement. Hide the glyph, expose the prose. */}
+      <aside className="login-aside">
+        <span className="login-aside-mark" aria-hidden="true">
+          V
+        </span>
+        <h2>Managed AI delivery for small teams</h2>
         <p>
           Humans set the policy and stay accountable. Claude and Codex agents do
           first-class work on real repository branches — inspectable,
           recoverable, and reviewed before anything ships.
         </p>
         <ul className="login-aside-points">
-          <li>Task-centered board with a governed operator</li>
+          <li>Task-centered board with a managed operator</li>
           <li>Every agent run is real, attributed, and auditable</li>
           <li>Server-owned delivery: branches, pull requests, merges</li>
         </ul>
