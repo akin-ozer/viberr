@@ -157,14 +157,21 @@ export function TaskHero({
           />
           {stage?.name ?? ""}
         </Pill>
-        {agentWorking && task.displayReadiness === "input_required" ? (
-          <Pill kind="agent" dot>
-            agent working
-          </Pill>
-        ) : (
-          <ReadinessPill value={task.displayReadiness} />
-        )}
-        <ValidationPill value={task.validation} />
+        {/* UXO-1: an ARCHIVED task is out of the flow — the archive confirm and
+            the acceptance panel both already say so. Its readiness and
+            validation pills, though, kept asserting live obligations: a task
+            archived mid-review still read "ready · awaiting verdict", i.e. that
+            someone still owes a verdict, when nobody does. The stage stays (it
+            answers "how far did this get?"); the two ACTIONABLE signals drop. */}
+        {!archived &&
+          (agentWorking && task.displayReadiness === "input_required" ? (
+            <Pill kind="agent" dot>
+              agent working
+            </Pill>
+          ) : (
+            <ReadinessPill value={task.displayReadiness} />
+          ))}
+        {!archived && <ValidationPill value={task.validation} />}
         <span className="hero-file">
           <Icon name="file" />
           <span>{task.filePath}</span>

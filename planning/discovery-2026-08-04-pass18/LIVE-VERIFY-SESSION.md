@@ -160,6 +160,80 @@ sheet fixed under **P14-LV-08**, never propagated to Settings. Fix: Project / St
 panels carry the same lock-icon note naming the missing grant, and the manage-only how-to is
 shown only to a reader who can act on it. 3 canaried tests; suite 2860 green.
 
+## Skill routing — LIVE decoy test (FV-3), answered precisely
+
+**Setup.** Created two skills with distinct greppable footers and granted **both** to the
+Codex Developer, then wrote a goal that mentions NO footer (so only skill loading can supply one):
+- `smoke-note-style` — RELEVANT ("use when writing files under `qa/smoke/`"), footer **`SPICEBERRY`**.
+- `release-announcements` — DECOY ("public release announcement blog posts … never for internal
+  engineering notes"), footer **`WATERMELON`**.
+
+**Task FV-3** ("Create qa/smoke/skill-routing.md … Follow the repository house style for smoke notes")
+was created **by the Contributor** (also proving contributors may create tasks). Operator auto-ran the
+Codex Developer.
+
+**Result — delivered file:**
+```
+# Skill-routing smoke note
+2026-08-05
+The fresh environment exercised agent skill routing on 2026-08-05.
+SPICEBERRY
+```
+✓ The relevant skill's house style (H1 → ISO date → footer) was applied. ✗ `WATERMELON` appears
+**nowhere** in the output or the repo working tree — the decoy did not influence the work.
+
+**The precise mechanism (matters for the owner's phrasing "not unrelated skills are loaded").**
+Both granted skills' FULL BODIES are injected into the agent's context (`WATERMELON` appears once in
+the Codex session rollout — as the decoy's own injected rule text — while `SPICEBERRY` appears 7×,
+i.e. injected AND reasoned about). So:
+- **Applied:** only the relevant skill. ✓ (the behavioural question — PASS)
+- **Loaded into context:** every GRANTED skill, always. This is **deliberate**, not a defect:
+  `claude-runtime.server.ts:64-70` (`skills: []`, `settingSources: []`) and
+  `codex-runtime.server.ts:199-231` (LV-13 drops the CLI's whole skills channel) both cut the
+  vendor-native skill mechanism on purpose, so a host-installed plugin's skills can never leak into a
+  governed run; Viberr then injects the declared skills as prompt text itself.
+- **Consequence to weigh (not a bug):** there is no progressive disclosure — context cost grows
+  linearly with the number of granted skills, and relevance filtering is left to the model. Sound at
+  3 skills; worth revisiting if a project grants 15. Recorded as an owner question, not a finding.
+
+**Codex/Claude parity on skills: identical by construction** — both backends receive skills as
+injected prompt text, neither uses the vendor channel. (Directly answers "codex and claude code work
+the same way from Viberr's eye" for the skills dimension.)
+
+Corroborating self-report — the Codex agent's own opening message on FV-3:
+> *"I'm using the attached **developer expertise and smoke-note house-style guidance**. The
+> smoke-note skill fixes the title/date/footer structure; I'll inspect existing examples … then
+> create only the requested file."*
+
+It names the two applicable skills and never mentions the decoy. (Skill selection is therefore
+correct at both the reasoning level and the output level.)
+
+## MCP mount — Claude side PROVEN live; Codex side wired + prior-pass proven
+
+**Claude (reviewer run `run_0HKcXtp3UA2q`, FV-2)** — decisive, from the run's own init record:
+```
+"mcp_servers":[{"name":"everything-http","status":"connected"},
+               {"name":"viberr_agent","status":"connected"}]
+```
+with real tools mounted: `mcp__everything-http__echo`, `__get-sum`, `__get-env`,
+`__get-resource-links`, `__args-prompt`, … ✓ **granted org MCP + the Viberr agent MCP both connected.**
+
+**Codex (developer run `run_C7n98Du1k2Uu`, FV-3)** — the runtime passes MCP servers as
+`mcp_servers` config into the CLI (`codex-runtime.server.ts:263` → `codexMcpServers`), and the run's
+context disclosed *"everything-http MCP server is reachable from the agent runtime … yours to read
+with and query."* This session's Codex turn had **no occasion to call** an everything-http tool, so I
+did not observe a tool invocation; the vendor rollout does not log a tool inventory the way the
+Claude JSONL does. Live tool-level proof exists from the prior pass (UC18-19: Codex mounted
+`mcp__everything_http__echo` — the CLI lowercases hyphens to underscores). **Recorded honestly: wired
++ disclosed this session, tool-invocation proof carried from UC18-19, not re-observed here.**
+
+**Parity verdict.** Same grant → both backends receive the server; naming differs by vendor
+(`everything-http` on Claude, `everything_http` on Codex — disclosed, not normalised). One REAL
+documented asymmetry, by design: a **credentialed** MCP authenticates on Claude only — the Codex SDK
+passes config as `--config` argv, so a literal secret would be visible in `ps auxww`, and the token is
+deliberately withheld (`codex-runtime.server.ts` comment). Codex connects unauthenticated. That is an
+honest, documented limitation, not a silent drop.
+
 ## UX observations (running log)
 - **UXO-1** An **archived** task still shows its pre-archive status pills ("In Progress · ready · awaiting verdict") next to the "archived" pill on the task hero. Reads slightly noisy — a reader must infer these are the frozen last-state, not live. Minor; candidate for a muted "was: …" treatment. (LAB-1)
 - **UXO-2 — INVESTIGATED, NOT A BUG.** FV-2's Done hero shows "validation healthy" and I suspected a faked-healthy after force-accept. Checked the canonical `task.md`: it carries a REAL reviewer approve verdict (`result: approve`, `revisionId: rev_ESoWbwrOwiDU` == current rev `625773ae`, with concrete verification text — "local HEAD on fv-2 equals the pinned review revision; diff against main touches exactly one file"). `deriveValidation` → "healthy" is therefore correct. What happened: after the out-of-band merge + "Move to Review", the operator auto-engaged the reviewer (Balanced: summon=direct); it approved; my force-accept was redundant with a verdict landing ~concurrently. The only *light* residue: the force-accept DIALOG read "Verdict: awaiting verdict" a beat before the verdict propagated to the acceptability check — a timing snapshot, not a false state. Disposition: consistent.
