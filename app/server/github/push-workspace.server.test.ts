@@ -251,12 +251,55 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
 
   it("returns push_failed when git push errors", async () => {
     bindPat();
-    const git = fakeGit({ branch: "vib-1-work", ahead: 1, pushOk: false });
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      pushOk: false,
+      pushStderr: "remote: error: GH006: Protected branch update failed",
+    });
     const res = await pushWorkspaceBranch({
       db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
       dataRoot: store.dataRoot, exec: git.exec,
     });
     expect(res.status).toBe("push_failed");
+    expect(res.status === "push_failed" && res.detail).toContain("GH006");
+  });
+
+  it("F19-18: a rejected push carries git's own reason, scrubbed, instead of 'returned non-zero'", async () => {
+    // A failed delivery push recorded its reason NOWHERE — not the timeline,
+    // not the log. The human got the fixed words "git push returned non-zero"
+    // and had to reproduce the push outside the product to learn that a branch
+    // ruleset had declined it.
+    // Canary: delete the `...(detail ? { detail } : {})` spread from the
+    // push_failed return → the GH006 assertion fails.
+    bindPat(); // stores ghp_faketoken123 as the project credential
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      pushOk: false,
+      pushStderr:
+        "remote: error: GH006: Protected branch update failed for refs/heads/vib-1-work.\n" +
+        "remote: error: At least 1 approving review is required.\n" +
+        "To https://x-access-token:ghp_faketoken123@github.com/akin-ozer/viberr.git\n" +
+        " ! [remote rejected] vib-1-work -> vib-1-work (protected branch hook declined)\n" +
+        "error: failed to push some refs",
+    });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    // NOT push_conflict — isNonFastForwardStderr must not claim this one.
+    expect(res.status).toBe("push_failed");
+    const detail = res.status === "push_failed" ? (res.detail ?? "") : "";
+    expect(detail).toContain("GH006");
+    expect(detail).toContain("protected branch hook declined");
+    // Layered redaction: the by-value layer catches the project PAT, and the
+    // URL-userinfo layer removes the credential mechanism it was wearing.
+    // Second canary: pass `{}` instead of `{ token }` to redactGitOutput and
+    // this still passes (userinfo layer) — drop the userinfo rule too and it
+    // fails. That independence is the point of the layering.
+    expect(detail).not.toContain("ghp_faketoken123");
+    expect(detail).not.toContain("x-access-token:");
   });
 
   it("a push KILLED by its timeout says so, instead of claiming git returned non-zero", async () => {

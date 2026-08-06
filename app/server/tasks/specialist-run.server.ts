@@ -1840,6 +1840,10 @@ async function cloneRepo(
   },
 ): Promise<CloneOutcome> {
   let hadCredential = false;
+  // Hoisted so the catch below can scrub git's own output BY VALUE (F19-6).
+  // The token is fetched inside the try; the failure it explains is caught
+  // outside it.
+  let cloneToken: string | null = null;
   const setIdentity = async (dir: string) => {
     if (!input.identity) return;
     try {
@@ -1874,6 +1878,7 @@ async function cloneRepo(
     const cred = getProjectCredential(db, input.projectSlug);
     const token = cred ? getPatToken(db, cred.id) : null;
     hadCredential = !!token;
+    cloneToken = token;
     const clone = createGitHubClonePlan({
       repo: input.repo,
       destination: dir,
@@ -1904,7 +1909,13 @@ async function cloneRepo(
     // report means. This used to be an info line nobody read, and the only
     // downstream signal was an empty directory — from which the agent inferred
     // a credential problem that did not exist.
-    const details = cloneFailureLogDetails(error);
+    //
+    // F19-6: the token is handed to the classifier so git's own words can be
+    // scrubbed by VALUE and then carried on `details.detail`. A live clone
+    // failure on VC-3 left `{"reason":"clone_failed","exitCode":128}` as the
+    // only artifact in the entire product; the run continues either way, but a
+    // human now has something to act on.
+    const details = cloneFailureLogDetails(error, { token: cloneToken });
     logger.warn("specialist run clone failed — running WITHOUT a checkout", {
       taskKey: input.taskKey,
       repo: input.repo,

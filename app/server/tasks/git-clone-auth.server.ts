@@ -1,6 +1,10 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import {
+  gitErrorText,
+  redactGitOutput,
+} from "~/server/secrets/git-output-redact.server";
 
 const ASKPASS_USERNAME_ENV = "VIBERR_GIT_ASKPASS_USERNAME";
 const ASKPASS_PASSWORD_ENV = "VIBERR_GIT_ASKPASS_PASSWORD";
@@ -184,6 +188,17 @@ export interface CloneFailureLogDetails {
   reason: "git_unavailable" | "clone_failed" | "clone_terminated";
   exitCode?: number;
   signal?: string;
+  /**
+   * Git's OWN failure text, scrubbed (`redactGitOutput`). Absent when git
+   * printed nothing.
+   *
+   * F19-6: this is the only channel that can tell a human WHY a transient
+   * `git exit 128` happened. Without it a live clone failure produced one log
+   * line — `{"reason":"clone_failed","exitCode":128}` — and the operator's
+   * blocked packet could recommend nothing better than "hold for infra to
+   * investigate", with nothing for infra to investigate.
+   */
+  detail?: string;
 }
 
 /**
@@ -221,11 +236,22 @@ export function cloneFailureSentence(
 }
 
 /**
- * Return an intentionally small, credential-safe description for logs.
- * `Error.message`, `stderr`, and `cmd` are deliberately ignored because child
- * process errors may echo command arguments or authentication diagnostics.
+ * Classify a failed clone — and carry git's own words along, SCRUBBED.
+ *
+ * This used to drop `Error.message`, `stderr` and `cmd` outright because "child
+ * process errors may echo command arguments or authentication diagnostics".
+ * That bought less than it cost (F19-6). The PAT reaches git only through
+ * `GIT_ASKPASS` — never argv, never the remote URL, never a persisted config
+ * entry — so git's stderr is token-free by construction here; what the
+ * suppression actually threw away was the one sentence that says whether a
+ * `git exit 128` was a DNS failure, a 403, or a repository that moved.
+ * `redactGitOutput` scrubs the known token value, URL userinfo and token shapes
+ * on top of that, so pass the token whenever the caller holds it.
  */
-export function cloneFailureLogDetails(error: unknown): CloneFailureLogDetails {
+export function cloneFailureLogDetails(
+  error: unknown,
+  opts: { token?: string | null } = {},
+): CloneFailureLogDetails {
   const value =
     typeof error === "object" && error !== null
       ? (error as { code?: unknown; signal?: unknown; killed?: unknown })
@@ -238,10 +264,12 @@ export function cloneFailureLogDetails(error: unknown): CloneFailureLogDetails {
       : value.killed === true || signal
         ? "clone_terminated"
         : "clone_failed";
+  const detail = redactGitOutput(gitErrorText(error), opts);
 
   return {
     reason,
     ...(typeof code === "number" ? { exitCode: code } : {}),
     ...(signal ? { signal } : {}),
+    ...(detail ? { detail } : {}),
   };
 }

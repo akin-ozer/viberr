@@ -154,11 +154,64 @@ const POLICY_ENGINE_NOTIFY_FROM = {
 };
 
 /**
- * Reconciles ONE task with GitHub. Idempotent: unchanged facts produce no
- * file write and no reprojection (`changed: false`), but always record a
- * provenance row for the observation.
+ * F19-19: ONE reconcile pass per task at a time.
+ *
+ * `reconcileTask` reads task.md, then awaits two to four GitHub round trips
+ * before it writes. Every out-of-band transition guard below —
+ * `prJustMerged`, `prJustClosed`, `prJustReopened`, `acceptedClosedExternally`
+ * — compares the LIVE PR against that PRE-AWAIT snapshot, and nothing
+ * serialized two passes: the poller runs a boot pass plus a 5-minute interval,
+ * `runReconcile` takes no lock, and the "Update status" button's disabled state
+ * is per-fetcher, so two tabs (or a maintainer clicking during the boot pass)
+ * race. Both passes then read `pr.state: review`, both learn GitHub says
+ * merged, and one merge produces two divergence notes and two identical inbox
+ * alerts for every supervisor — which is exactly the chatter NFR16 forbids.
+ *
+ * A QUEUE, not a coalescer. The second pass runs its own read AFTER the first
+ * has written, so it sees the new `fm.pr` and correctly reports nothing new.
+ * Coalescing would hand whoever pressed "Update status" the answer computed
+ * before they pressed it — a freshness lie on the one surface whose entire job
+ * is freshness.
+ *
+ * Not `runSingleFlight`: that is a synchronous per-key COOLDOWN whose stated
+ * contract is "a skipped run is acceptable", and a reconcile dropped right
+ * after a real merge is precisely the one that must not be skipped.
+ *
+ * In-process, matching the single-node deployment (the same scope as the
+ * operator lease). Keyed per task, so `reconcileProject`'s fan-out is
+ * unaffected: different tasks never wait on each other.
  */
-export async function reconcileTask(
+const taskReconcileChain = new Map<string, Promise<void>>();
+
+function withTaskReconcileLock<T>(
+  key: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  // Whatever is in the map is a `tail` (below), which by construction NEVER
+  // rejects — so waiting on it needs no rejection handler.
+  const previous = taskReconcileChain.get(key) ?? Promise.resolve();
+  const run = previous.then(work);
+  // The failure is absorbed HERE, in the link the successor waits on. One
+  // task's failed reconcile — the network drops mid-pass — must not strand
+  // every later pass on that task, which is exactly what a rejected chain link
+  // would do: the poller and the "Update status" button would both go quiet
+  // forever, with nothing but an unhandled rejection to say why. The caller
+  // still gets `run`, so the failure itself is never swallowed.
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  taskReconcileChain.set(key, tail);
+  void tail.then(() => {
+    // Only the CURRENT tail may clear the entry; a later pass that already
+    // replaced it owns the key now.
+    if (taskReconcileChain.get(key) === tail) taskReconcileChain.delete(key);
+  });
+  return run;
+}
+
+/** Body of `reconcileTask` — only ever entered through the per-task lock. */
+async function reconcileTaskUnlocked(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: AuditActor,
@@ -621,6 +674,26 @@ export async function reconcileTask(
     pr,
     commits: branchCommits?.length ?? 0,
   };
+}
+
+/**
+ * Reconciles ONE task with GitHub. Idempotent: unchanged facts produce no
+ * file write and no reprojection (`changed: false`), but always record a
+ * provenance row for the observation. Serialized per task — see
+ * `withTaskReconcileLock` (F19-19).
+ */
+export function reconcileTask(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: AuditActor,
+  ctx: GithubActionContext = {},
+): Promise<TaskReconcileResult> {
+  return withTaskReconcileLock(
+    // The data root is part of the key so two test stores that happen to share
+    // a project slug do not serialize against each other.
+    `${ctx.dataRoot ?? ""}::${input.projectSlug}/${input.taskKey}`,
+    () => reconcileTaskUnlocked(db, input, actor, ctx),
+  );
 }
 
 export interface ProjectReconcileSummary {

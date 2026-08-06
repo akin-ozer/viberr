@@ -622,6 +622,83 @@ describe("reconcileTask", () => {
     expect(events2.filter((e) => /\*\*Divergence:\*\*/.test(e.text))).toHaveLength(1);
   });
 
+  /** The merged-out-of-band routes, shared by the concurrency tests below. */
+  function mergedOutOfBandRoutes(): Record<string, FakeResponder> {
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318, title: "Attach execution workspace", state: "closed",
+        merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
+        additions: 1, deletions: 0, changed_files: 1,
+      },
+    };
+    return routes;
+  }
+
+  it("F19-19: two OVERLAPPING passes announce an out-of-band merge exactly once", async () => {
+    // The test above fires the two passes SEQUENTIALLY, which is the one
+    // ordering the defect cannot reach. Two OVERLAPPING passes — the poller's
+    // boot pass while a maintainer presses "Update status", or two tabs — both
+    // read `pr.state: review` before either writes, both learn GitHub says
+    // merged, and one merge produces two divergence notes and two identical
+    // inbox alerts per supervisor. NFR16 calls that chatter.
+    // Canary: replace withTaskReconcileLock's body with `return work()` → both
+    // counts below become 2.
+    const { store, actor } = setup();
+    const gh = fakeGithubFetch(mergedOutOfBandRoutes());
+    const results = await Promise.all([
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+    ]);
+
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    expect(
+      events.filter((e) => /\*\*Divergence:\*\* PR #318 was merged on GitHub/.test(e.text)),
+    ).toHaveLength(1);
+    const notifs = listNotifications(store.db, store.users.arda.id);
+    expect(notifs.filter((n) => n.kind === "policy" && /merged on GitHub/.test(n.text)))
+      .toHaveLength(1);
+    // The mutex must not change the no-auto-advance rule.
+    expect(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
+        .parsed.frontmatter.stage,
+    ).toBe("review");
+    // A QUEUE, not a coalescer: the second pass ran its own read AFTER the
+    // first wrote, so it saw the merged cache and found nothing new — rather
+    // than being handed the answer computed before it was called.
+    expect(results[0]).toMatchObject({ status: "reconciled", changed: true });
+    expect(results[1]).toMatchObject({ status: "reconciled", changed: false });
+  });
+
+  it("F19-19: a REJECTED pass never strands the next one on the same task", async () => {
+    // The chain link stored in the map absorbs the failure. Without that, one
+    // thrown reconcile would leave the task's chain permanently rejected and
+    // every later pass — poller and button alike — would silently never run.
+    // Canary: drop the rejection handler from `tail` (`run.then(() => undefined)`)
+    // → passes 2 and 3 never run and the test times out.
+    const { store, actor } = setup();
+    // Fault injection: a transport that hands back a malformed response, which
+    // throws PAST the client's network-error handling (that only wraps the
+    // fetch call itself).
+    const explodingFetch = (async () => ({ status: 200 })) as unknown as typeof fetch;
+    const gh = fakeGithubFetch(happyRoutes());
+    const settled = await Promise.allSettled([
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: explodingFetch }),
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+    ]);
+    expect(settled[0]!.status).toBe("rejected");
+    expect(settled[1]).toMatchObject({ status: "fulfilled", value: { status: "reconciled" } });
+    expect(settled[2]).toMatchObject({ status: "fulfilled", value: { status: "reconciled" } });
+  });
+
   function seedWithRecs(store: TestStore) {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-301", {

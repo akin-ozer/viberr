@@ -8,6 +8,7 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import { createGitHubAskpassEnv } from "~/server/tasks/git-clone-auth.server";
+import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import {
   getPatToken,
   getProjectCredential,
@@ -40,6 +41,12 @@ export type PushWorkspaceResult =
    *  (non-fast-forward) — a HISTORY divergence, never a credential problem. The
    *  branch is carried so recovery copy can name what diverged. */
   | { status: "push_conflict"; branch: string; reason: string }
+  /** F19-18: the residual failure bucket. `reason` is Viberr's own sentence;
+   *  `detail` is git's text, scrubbed (`redactGitOutput`). Without the latter a
+   *  protected-branch, pre-receive-hook or permission rejection reached the
+   *  human as the literal words "git push returned non-zero", and the only way
+   *  to learn the cause was to reproduce the push outside the product. */
+  | { status: "push_failed"; reason: string; detail?: string }
   | {
       status:
         | "no_pat"
@@ -47,7 +54,6 @@ export type PushWorkspaceResult =
         | "no_workspace"
         | "no_branch"
         | "no_commits"
-        | "push_failed"
         | "grant_withheld"
         | "task_not_found";
       reason: string;
@@ -388,17 +394,28 @@ export async function pushWorkspaceBranch(
               `the local delivery (non-fast-forward)`,
           };
         }
-        // Redact stderr — a git push failure can echo the remote URL/token.
-        logger.info("workspace branch push failed", {
+        // F19-18: git's stderr is SCRUBBED, not dropped. `createGitHubAskpassEnv`
+        // keeps the PAT out of argv and out of the remote URL, so what is left
+        // is git's diagnosis — the only text that can name a protected branch, a
+        // push ruleset or a pre-receive hook. A failed delivery push used to
+        // record its reason NOWHERE: not the timeline, not the log, just the
+        // fixed words "git push returned non-zero".
+        //
+        // WARN, not info, for the same reason the clone path is: a delivery that
+        // did not happen changes what the review PR would have contained.
+        const detail = redactGitOutput(pushRes.stderr, { token });
+        logger.warn("workspace branch push failed", {
           taskKey,
           branch,
           ...(pushRes.timedOut ? { timedOut: true } : {}),
+          ...(detail ? { detail } : {}),
         });
         return {
           status: "push_failed",
           reason: pushRes.timedOut
             ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
             : "git push returned non-zero",
+          ...(detail ? { detail } : {}),
         };
       }
     } finally {
