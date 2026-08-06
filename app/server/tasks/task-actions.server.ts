@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   acceptanceBlockedReason,
   archivedTaskBlockedReason,
+  archivedTaskMoveBlockedReason,
   closedPrBlockedReason,
   conflictingPrBlockedReason,
   deliveringEngagement,
@@ -3042,6 +3043,20 @@ export async function transitionStage(
     );
   }
 
+  // F19-8: an archived task is out of the flow, and every stage move is a claim
+  // that it is back in one. Acceptance has refused archived tasks since R14-3,
+  // but nothing refused the move itself — so a card the board called abandoned
+  // could still be dragged between columns, and a drop on the terminal stage
+  // only met the refusal AFTER the move had been animated. Refuse it here, for
+  // every actor: a human drag, the keyboard menu, the operator, and the API.
+  const archivedMove = archivedTaskMoveBlockedReason(
+    existing.parsed.frontmatter,
+    input.taskKey,
+  );
+  // 409, not 400: the same status the acceptance refusal has used since R14-3.
+  // A refusal because of the task's STATE is a conflict, not a malformed request.
+  if (archivedMove) throw AppError.conflict(archivedMove);
+
   const boundary = project.workflow.find(
     (w) => w.from === fromStageId && w.to === input.toStageId,
   );
@@ -3901,6 +3916,13 @@ export async function reorderTask(
   if (!project.stages.some((s) => s.id === input.toStageId)) {
     throw AppError.validation(`Unknown stage ${input.toStageId} for this project.`);
   }
+  // F19-8: the board's drag path — same refusal as `transitionStage`, or the
+  // guard would only cover the keyboard menu and leave the pointer route open.
+  const archivedDrag = archivedTaskMoveBlockedReason(
+    existing.parsed.frontmatter,
+    input.taskKey,
+  );
+  if (archivedDrag) throw AppError.conflict(archivedDrag);
 
   const movedStage = existing.parsed.frontmatter.stage !== input.toStageId;
   // A stage change goes through the governed manual transition (comment +

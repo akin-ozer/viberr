@@ -662,6 +662,25 @@ export function archivedTaskBlockedReason(
   return `${taskKey} is archived — restore it before accepting the completion.`;
 }
 
+/**
+ * F19-8 — why an ARCHIVED task can't be MOVED between stages, or null.
+ *
+ * The same reasoning as `archivedTaskBlockedReason` one step earlier in the
+ * flow. Acceptance was guarded from the start, but nothing guarded a plain
+ * transition, so an archived task could be dragged (or keyboard-moved, or
+ * transitioned through the API) from column to column while every surface
+ * called it abandoned — and dropping it on the terminal stage walked it into
+ * the acceptance path that DOES refuse, producing a refusal for a move the
+ * board had already animated. Restore it first; then it moves like any task.
+ */
+export function archivedTaskMoveBlockedReason(
+  fm: { archived: boolean },
+  taskKey: string,
+): string | null {
+  if (!fm.archived) return null;
+  return `${taskKey} is archived — restore it before moving it between stages.`;
+}
+
 /** Compute the next work revision for a freshly delivered head. A head with the
  *  SAME tree (or same head when the tree is unavailable) as the current revision
  *  is the SAME review subject — no new revision, so prior verdicts are NOT

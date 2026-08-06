@@ -107,20 +107,26 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     orphanTasks: raw.orphanTasks.map(annotate),
   };
   const tasks = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks];
+  // F19-9: the rail badges counted ARCHIVED tasks while both destinations
+  // exclude them — the board header counts live tasks and the review queue drops
+  // archived rows. So the rail promised "Board 5 / Review 1", the board said
+  // "4 tasks", and the review queue was empty. R14-3 puts archived work out of
+  // every view but its own chip; a badge is a view.
+  const liveTasks = tasks.filter((t) => t.archived !== true);
   const myRole = memberRole ?? (orgAdminOverride ? ("admin" as const) : null);
   return {
     user,
     board,
     myRole,
     orgAdminOverride,
-    taskCount: tasks.length,
+    taskCount: liveTasks.length,
     reviewCount: (() => {
       const reviewId = resolveStageRoles(
         board.project.stages,
         board.project.workflow,
       ).reviewId;
       return reviewId
-        ? tasks.filter((t) => t.stage === reviewId).length
+        ? liveTasks.filter((t) => t.stage === reviewId).length
         : 0;
     })(),
     violations: countOpenPolicyViolations(db, params.slug),

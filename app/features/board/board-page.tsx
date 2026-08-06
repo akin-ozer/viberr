@@ -215,6 +215,15 @@ function TaskCard({
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
+  // F19-8: an archived task is abandoned work kept for the record — it owes
+  // nobody a verdict and nobody is waiting on it. UXO-1 removed the live
+  // readiness/validation pills from the task hero for exactly that reason, but
+  // the board kept drawing them, so a task archived mid-review still read
+  // "ready · awaiting verdict · waiting on a human" directly beneath the banner
+  // calling it abandoned. It also kept a working Move control. Archived cards
+  // now say only that they are archived, and they do not move.
+  const archived = task.archived === true;
+  const movable = canTransition && !archived;
   // The card is both drag source and drop target (insert-before-this-card).
   // Clone feedback keeps today's model: the original stays as a faded ghost
   // (`.dragging`) while a visual clone follows the pointer. Optimistic
@@ -225,17 +234,17 @@ function TaskCard({
     group: task.stage,
     index,
     data: { nextKey },
-    disabled: !canTransition,
+    disabled: !movable,
     plugins: (defaults) => [
       ...defaults.filter((plugin) => plugin !== OptimisticSortingPlugin),
       Feedback.configure({ feedback: "clone" }),
     ],
   });
   const cls = ["card"];
-  if (task.waiting === "human") cls.push("wait-human");
-  if (task.urgent) cls.push("urgent");
+  if (task.waiting === "human" && !archived) cls.push("wait-human");
+  if (task.urgent && !archived) cls.push("urgent");
   const wrapCls = ["card-wrap"];
-  if (canTransition) wrapCls.push("draggable");
+  if (movable) wrapCls.push("draggable");
   if (isDragSource) wrapCls.push("dragging");
   if (arrived) wrapCls.push("just-arrived");
   return (
@@ -254,7 +263,13 @@ function TaskCard({
               whenever the card's foot was ALREADY drawing one via WaitTag —
               the same claim twice, at the cost of the readiness the slot
               exists for. Readiness here, wait state in the foot, once each. */}
-          <ReadinessPill value={task.displayReadiness} sm />
+          {archived ? (
+            <Pill kind="neutral" sm>
+              archived
+            </Pill>
+          ) : (
+            <ReadinessPill value={task.displayReadiness} sm />
+          )}
         </div>
         <h3>{task.title}</h3>
         <div className="owner-row">
@@ -328,16 +343,16 @@ function TaskCard({
               HTML mock (design/html-app/app/board.jsx), which omits it too.
               "none" stays silent so the card keeps its density; placement
               mirrors the review queue's `.rq-meta` (PR → validation → wait). */}
-          {task.validation !== "none" && (
+          {task.validation !== "none" && !archived && (
             <ValidationPill value={task.validation} sm />
           )}
-          <WaitTag task={task} />
+          {!archived && <WaitTag task={task} />}
         </div>
       </Link>
       {/* F10-25: keyboard-accessible stage move (drag is pointer-only). Sibling
           of the Link so it never triggers navigation; opens the same
           keyboard-navigable StageMenu the task-detail panel uses. */}
-      {canTransition && (
+      {movable && (
         <div className="card-move">
           <StageMenu
             stages={allStages}
@@ -478,7 +493,12 @@ function ListView({
     <div className="board list">
       <div className="board-list">
         {tasks.length === 0 && <div className="empty">{emptyCopy}</div>}
-        {tasks.map((t) => (
+        {tasks.map((t) => {
+          // F19-8: same archived contract as the card — an archived row states
+          // that it is archived and nothing else, and it does not move.
+          const archived = t.archived === true;
+          const movable = canTransition && !archived;
+          return (
           <div
             key={t.key}
             className="card list-row"
@@ -496,7 +516,7 @@ function ListView({
             </h3>
             {/* UI-58: the same StageMenu the cards use — the list view's
                 keyboard equivalent for drag-and-drop. */}
-            {canTransition ? (
+            {movable ? (
               <StageMenu
                 stages={stages}
                 currentStageId={t.stage}
@@ -507,18 +527,37 @@ function ListView({
             )}
             <OwnerLine task={t} />
             <ReviewerStack task={t} label />
-            {/* F15-09: same duplicate as the card — the row's own WaitTag below
-                already says "agent working". */}
-            <ReadinessPill value={t.displayReadiness} sm />
-            {/* P13-D-6: same omission in the list row — readiness cannot stand
-                in for validation (deriveReadiness folds only parse
-                diagnostics). Ordered readiness → validation, as task detail. */}
-            {t.validation !== "none" && (
-              <ValidationPill value={t.validation} sm />
+            {archived ? (
+              <Pill kind="neutral" sm>
+                archived
+              </Pill>
+            ) : (
+              <>
+                {/* F15-09: same duplicate as the card — the row's own WaitTag
+                    below already says "agent working". */}
+                <ReadinessPill value={t.displayReadiness} sm />
+                {/* F19-13: the row dropped the merge-pending / closed-PR pills
+                    the card carries, so the SAME task read "needs a human to
+                    merge" on the board and said nothing in the list. One board,
+                    two views, one vocabulary — `prStatePill` again. */}
+                {(t.pr?.state === "accepted" || t.pr?.state === "closed") && (
+                  <Pill kind={prStatePill(t.pr.state).kind} sm>
+                    {prStatePill(t.pr.state).label}
+                  </Pill>
+                )}
+                {/* P13-D-6: same omission in the list row — readiness cannot
+                    stand in for validation (deriveReadiness folds only parse
+                    diagnostics). Ordered readiness → validation, as task
+                    detail. */}
+                {t.validation !== "none" && (
+                  <ValidationPill value={t.validation} sm />
+                )}
+                <WaitTag task={t} />
+              </>
             )}
-            <WaitTag task={t} />
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

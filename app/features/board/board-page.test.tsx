@@ -585,3 +585,83 @@ describe("R16-6: the card says when Done still needs a human", () => {
     }
   });
 });
+
+/**
+ * F19-8 / F19-13 — the board's archived contract, and one vocabulary across both
+ * views.
+ *
+ * Under the "Archived" filter the board rendered archived tasks through the
+ * ordinary card: live readiness, live validation, "waiting on a human", a drag
+ * handle and a working Move menu — directly beneath a banner calling the work
+ * abandoned and out of the review queue. UXO-1 had removed exactly those pills
+ * from the task hero one commit earlier, for exactly this reason: an archived
+ * task owes nobody a verdict. The list row carried the same defect and, on top
+ * of it, silently dropped the PR-state pills the card draws (H10 re-opened in
+ * one of two views).
+ */
+describe("F19-8: an archived task states that it is archived, and nothing else", () => {
+  const archived = () =>
+    task({
+      archived: true,
+      displayReadiness: "ready",
+      validation: "healthy",
+      waiting: "human",
+    });
+
+  it("replaces the live readiness/validation/wait signals on the card", () => {
+    const { container } = renderBoard([archived()], {
+      search: "filter=archived",
+    });
+    // Scope to the card: the board SUBTITLE legitimately says "0 ready", and a
+    // page-wide text query would match that instead of the card's pills.
+    const card = container.querySelector(".card")!;
+    expect(card).toBeTruthy();
+    expect(card.textContent).toContain("archived");
+    expect(card.textContent).not.toContain("ready");
+    expect(card.textContent).not.toContain("healthy");
+    expect(card.textContent).not.toMatch(/waiting on a human/i);
+  });
+
+  it("offers no Move control on an archived card, even to a viewer who can move tasks", () => {
+    const { queryByLabelText } = renderBoard([archived()], {
+      search: "filter=archived",
+      canTransition: true,
+    });
+    expect(queryByLabelText(/change stage/i)).toBeNull();
+  });
+
+  it("keeps the Move control on a LIVE card — the gate is `archived`, not the filter", () => {
+    const { getByLabelText } = renderBoard([task()], { canTransition: true });
+    expect(getByLabelText(/change stage/i)).toBeTruthy();
+  });
+
+  it("applies the same contract to the list row", () => {
+    const { container } = renderBoard([archived()], {
+      view: "list",
+      search: "filter=archived",
+    });
+    const row = container.querySelector(".list-row")!;
+    expect(row).toBeTruthy();
+    expect(row.textContent).toContain("archived");
+    expect(row.textContent).not.toContain("ready");
+    expect(row.textContent).not.toContain("healthy");
+  });
+});
+
+describe("F19-13: the list row draws the PR-state pills the card draws", () => {
+  it("names a merge-pending PR in the list view too", () => {
+    const { getByText } = renderBoard(
+      [task({ pr: { number: 124, state: "accepted", title: "Attach a credential" } })],
+      { view: "list" },
+    );
+    expect(getByText("merge pending")).toBeTruthy();
+  });
+
+  it("names a closed PR in the list view too", () => {
+    const { getByText } = renderBoard(
+      [task({ pr: { number: 124, state: "closed", title: "Attach a credential" } })],
+      { view: "list" },
+    );
+    expect(getByText("closed")).toBeTruthy();
+  });
+});
