@@ -909,6 +909,26 @@ describe("SettingsPage — each panel gates on the action its own server guard c
     };
   }
 
+  /**
+   * Q-V1 (owner ruling, pass 18) shipped with no test — the one gap pass 19's
+   * doc verification called out. A read-only member must not see the Danger
+   * zone AT ALL: it used to render for every member with the buttons disabled,
+   * which showed a stakeholder a destructive surface they can never use and
+   * named archive/delete as if they were on the table. The gate is
+   * `edit-policy` — the same id the archive/delete server guards check — so
+   * drive it with `grantOnly` like every other panel gate here.
+   */
+  it("Q-V1: the Danger zone renders only under edit-policy — any other grant hides it entirely", () => {
+    grantOnly.action = "manage-members";
+    const withoutGrant = renderPage();
+    expect(withoutGrant.container.textContent).not.toContain("Danger zone");
+    cleanup();
+
+    grantOnly.action = "edit-policy";
+    const withGrant = renderPage();
+    expect(withGrant.container.textContent).toContain("Danger zone");
+  });
+
   it("grants ONLY edit-policy → identity, stages and repo repair; members and credentials stay shut", () => {
     grantOnly.action = "edit-policy";
     const { container } = renderPage();
