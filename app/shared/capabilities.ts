@@ -32,7 +32,11 @@ const cap = (
 
 export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // Operator coordination (operator editor toggles)
-  cap("assign-primary-specialist", "Assign the primary specialist", ["operator"], "Assignment"),
+  // F19-12: the ID is a stable identifier stored in every project.md agent
+  // policy and stays as written; the LABEL is rendered copy and follows the
+  // shipped engagement vocabulary (D9/Q17-5) — the task carries one delivering
+  // engagement, not a "primary specialist".
+  cap("assign-primary-specialist", "Assign the delivering agent", ["operator"], "Assignment"),
   cap("summon-reviewers", "Summon reviewer specialists", ["operator"], "Assignment"),
   cap("generate-packets", "Generate decision & blocking packets", ["operator"], "Coordination"),
   cap("append-typed-events", "Append typed important events", ["operator"], "Coordination"),

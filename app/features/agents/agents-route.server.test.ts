@@ -154,7 +154,7 @@ describe("loader", () => {
     expect(operator.actions.direct).toHaveLength(5);
     expect(operator.actions.recommend).toHaveLength(2);
     expect(operator.actions.forbidden).toHaveLength(3);
-    expect(operator.actions.direct).toContain("Assign the primary specialist");
+    expect(operator.actions.direct).toContain("Assign the delivering agent");
     expect(operator.actions.direct).toContain("Deliver the branch & open the review PR");
     expect(operator.actions.direct).not.toContain("Compress long-running timelines");
 

@@ -323,10 +323,14 @@ export function PolicyPanel({
         <h2>Permissions</h2>
         <span className="right sub fine xs">V1 rules</span>
       </div>
+      {/* UX19-1: this line used to cite the internal ruling id "R6-2" — a number
+       *  that means nothing outside this repo's decision log. Name the rule
+       *  itself instead; the ruling stays cited in the code comments above. */}
       <p className="fine xs perm-intro">
-        Platform rules as they apply to <b>you on this task</b> — role grants,
-        plus the owner authority R6-2 adds. This task's live stage, owner and
-        waiting-on are in <b>Current state</b> above.
+        Platform rules as they apply to <b>you on this task</b> — what your role
+        grants, plus the authority a task's owner holds over their own task.
+        This task's live stage, owner and waiting-on are in{" "}
+        <b>Current state</b> above.
       </p>
       {rows.map((r) => (
         <div className="policy-line" key={r.k}>

@@ -1253,7 +1253,8 @@ export async function operatorSetGoal(
   return { outcome: "done", message: "Task goal drafted." };
 }
 
-/** Assign the primary specialist (governed by assign-primary-specialist). */
+/** Assign the delivering agent (governed by assign-primary-specialist — the
+ *  capability ID is a stable identifier; the rendered vocabulary is F19-12). */
 export async function operatorAssignSpecialist(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -1264,7 +1265,7 @@ export async function operatorAssignSpecialist(
   if (g === "deny") {
     return {
       outcome: "denied",
-      message: "Assigning the primary specialist is not permitted for the operator here.",
+      message: "Assigning the delivering agent is not permitted for the operator here.",
     };
   }
   if (g === "recommend") {
@@ -1277,11 +1278,11 @@ export async function operatorAssignSpecialist(
       {
         kind: "assign_specialist",
         profileId: input.profileId,
-        label: `Assign ${name} as the primary specialist`,
+        label: `Assign ${name} as the delivering agent`,
       },
       input.reason ?? `${name} fits the current stage of work.`,
     );
-    return { outcome: "recommended", message: `Recommended assigning ${name} as the primary specialist.` };
+    return { outcome: "recommended", message: `Recommended assigning ${name} as the delivering agent.` };
   }
   const result = await assignSpecialist(
     db,
@@ -1289,10 +1290,10 @@ export async function operatorAssignSpecialist(
     OPERATOR_TASK_ACTOR,
     opCtx(ctx),
   );
-  return { outcome: "done", message: `Assigned ${result.name} as the primary specialist.` };
+  return { outcome: "done", message: `Assigned ${result.name} as the delivering agent.` };
 }
 
-/** Start the primary specialist's run (governed by assign-primary-specialist). */
+/** Start the delivering agent's run (governed by assign-primary-specialist). */
 export async function operatorRunSpecialist(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -1309,10 +1310,10 @@ export async function operatorRunSpecialist(
       ctx,
       input.projectSlug,
       input.taskKey,
-      { kind: "run_specialist", label: "Start the primary specialist's run" },
+      { kind: "run_specialist", label: "Start the delivering agent's run" },
       "The specialist is ready to work this task; a maintainer starts the run.",
     );
-    return { outcome: "recommended", message: "Recommended starting the primary specialist's run." };
+    return { outcome: "recommended", message: "Recommended starting the delivering agent's run." };
   }
   const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
@@ -1462,7 +1463,7 @@ export async function operatorPromptSpecialist(
   if (g === "deny") {
     return {
       outcome: "denied",
-      message: "Prompting the primary specialist is not permitted for the operator here.",
+      message: "Prompting the delivering agent is not permitted for the operator here.",
     };
   }
   const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
@@ -1479,11 +1480,11 @@ export async function operatorPromptSpecialist(
       {
         kind: "assign_specialist",
         profileId: input.profileId,
-        label: `Assign ${agent.name} as the primary specialist`,
+        label: `Assign ${agent.name} as the delivering agent`,
       },
       input.reason ?? input.directive ?? `${agent.name} fits the current stage of work.`,
     );
-    return { outcome: "recommended", message: `Recommended assigning ${agent.name} as the primary specialist.` };
+    return { outcome: "recommended", message: `Recommended assigning ${agent.name} as the delivering agent.` };
   }
 
   // direct: assign as primary if it isn't already, then prompt + run.

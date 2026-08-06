@@ -103,7 +103,7 @@ describe("getMentionables", () => {
   it("returns the reserved role handles, and names the profile each backend handle reaches", () => {
     expect(call().reserved).toEqual([
       { handle: "operator", label: "Operator" },
-      { handle: "agent", label: "Primary specialist" },
+      { handle: "agent", label: "Delivering agent" },
       { handle: "claude", label: "Claude specialist — dev" },
       { handle: "codex", label: "Codex specialist — qa" },
     ]);

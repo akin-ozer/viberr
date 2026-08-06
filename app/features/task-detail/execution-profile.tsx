@@ -798,8 +798,13 @@ export function ExecutionProfile({
                   </span>
                 </span>
               )}
+              {/* F19-11: said "open to any project member" beside a Permissions
+               *  row reading "contributor+ to own" — a viewer read one line as
+               *  an invitation and the other as a refusal. Name the real tier. */}
               {!o && (
-                <span className="sub">Unowned — open to any project member</span>
+                <span className="sub">
+                  Unowned — any contributor or above can take it
+                </span>
               )}
               <OwnerControl
                 task={task}

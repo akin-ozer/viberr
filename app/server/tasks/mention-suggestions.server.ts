@@ -61,7 +61,8 @@ export interface Mentionables {
  *  per project by `backendHandles` below. */
 const RESERVED_ROLES: MentionableReserved[] = [
   { handle: "operator", label: "Operator" },
-  { handle: "agent", label: "Primary specialist" },
+  // F19-12: retired vocabulary — the task's one delivering engagement.
+  { handle: "agent", label: "Delivering agent" },
 ];
 
 const BACKEND_LABEL: Record<RealBackend, string> = {

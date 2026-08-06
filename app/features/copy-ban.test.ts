@@ -90,3 +90,56 @@ describe("F18-14: the govern/governance copy ban holds in the render layer", () 
     expect(offenders, `banned "govern*" word in rendered copy:\n${offenders.join("\n")}`).toEqual([]);
   });
 });
+
+/**
+ * F19-12 — the retired "primary specialist" vocabulary.
+ *
+ * Since the generic-agents work (2026-07-19) a task carries one `engagements[]`
+ * list in which exactly one engagement has `delivers: true` — the DELIVERING
+ * agent. FR14 was re-synced to that model in pass 17 (D9 / Q17-5), and the task
+ * page has said "Delivering agent" ever since. But the retired words survived in
+ * places a user still reads: the capability label on the Policy page and the
+ * capability matrix, the @-mention picker, the "Deployed X as the primary
+ * specialist" timeline event, and every assign/run recommendation label the
+ * operator writes. One vocabulary, two names, is exactly the drift the state-
+ * semantics rule exists to prevent — so pin it.
+ *
+ * Scope is wider than the ban above because these strings are BUILT server-side
+ * and rendered verbatim (timeline events, recommendation labels, capability
+ * labels). Comments are stripped, so the history may still be explained in prose.
+ *
+ * The capability **id** `assign-primary-specialist` is deliberately untouched: it
+ * is a stable identifier stored in every project.md agent policy, never rendered.
+ */
+const RETIRED_VOCAB = /primary specialists?\b/i;
+
+/** The capability id is an identifier, not copy — it may appear anywhere. */
+const VOCAB_ALLOW = ["assign-primary-specialist"];
+
+describe("F19-12: the retired 'primary specialist' vocabulary is gone from copy", () => {
+  it("no rendered or server-built copy calls the delivering agent a 'primary specialist'", () => {
+    const offenders: string[] = [];
+    const roots = [
+      path.join(APP, "features"),
+      path.join(APP, "routes"),
+      path.join(APP, "server"),
+      path.join(APP, "shared"),
+    ];
+    for (const root of roots) {
+      for (const file of walk(root)) {
+        const src = stripComments(readFileSync(file, "utf8"));
+        src.split("\n").forEach((line, i) => {
+          if (!RETIRED_VOCAB.test(line)) return;
+          if (VOCAB_ALLOW.some((a) => line.includes(a))) return;
+          offenders.push(
+            `${path.relative(APP, file)}:${i + 1} → ${line.trim().slice(0, 100)}`,
+          );
+        });
+      }
+    }
+    expect(
+      offenders,
+      `retired "primary specialist" vocabulary — say "delivering agent":\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+});

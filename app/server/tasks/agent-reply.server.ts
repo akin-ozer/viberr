@@ -212,7 +212,7 @@ export function ambiguousBackendHandleNote(
   return (
     `No agent was engaged: **@${ambiguous.backend}** names a runtime, and ` +
     `${ambiguous.candidates.length} profiles run on it here — ${names}. ` +
-    `Tag the profile you want (or @agent for this task's primary specialist).`
+    `Tag the profile you want (or @agent for this task's delivering agent).`
   );
 }
 

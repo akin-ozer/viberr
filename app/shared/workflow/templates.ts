@@ -53,7 +53,7 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
       from: "ready",
       to: "impl",
       boundary: "auto",
-      by: "Operator, when a primary specialist is assigned",
+      by: "Operator, when a delivering agent is assigned",
       locked: false,
     },
     {

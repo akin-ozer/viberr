@@ -689,6 +689,11 @@ function ResourcePicker({
                             ? "No longer in the store — click to remove this grant"
                             : undefined
                         }
+                        // F19-5: these grant chips are toggles like the backend,
+                        // autonomy and stage chips above, but were the one family
+                        // left carrying their state in CSS only — a screen reader
+                        // could not tell a granted resource from a withheld one.
+                        aria-pressed={selSet.has(it.id)}
                         onClick={() => toggleRes(g.key, it.id)}
                       >
                         {selSet.has(it.id) && <Icon name="check" />}

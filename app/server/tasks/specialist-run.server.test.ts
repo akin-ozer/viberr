@@ -233,7 +233,9 @@ describe("assignSpecialist", () => {
     const event = file.parsed.timeline[0]!;
     expect(event.type).toBe("agent");
     expect(event.text).toContain("Deployed **dev**");
-    expect(event.text).toContain("primary specialist");
+    // F19-12: the shipped vocabulary is the DELIVERING agent, not a "primary
+    // specialist" — this event is one of the surfaces that had drifted.
+    expect(event.text).toContain("delivering agent");
 
     const audit = listAuditEvents(store.db, { action: "task.specialist.assigned" });
     expect(audit[0]?.taskKey).toBe("VIB-1");
