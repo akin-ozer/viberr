@@ -1,4 +1,5 @@
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import { prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -77,12 +78,18 @@ export function ArchiveConfirm({
             <span className="k">Now</span>
             <span>
               At <strong>{stageName}</strong>
+              {/* F19-14: `prStatePill` is the one PR-state vocabulary (ruling
+                  12). This printed the raw enum member in a neutral pill, so
+                  the state that matters most to an archive decision — a PR
+                  CLOSED without merging, which is why most archives happen —
+                  read as grey chrome saying "closed" in the app's inside
+                  voice. */}
               {task.pr ? (
                 <>
                   {" "}
                   ·{" "}
-                  <Pill kind="neutral" sm>
-                    PR #{task.pr.number} {task.pr.state}
+                  <Pill kind={prStatePill(task.pr.state).kind} sm>
+                    PR #{task.pr.number} · {prStatePill(task.pr.state).label}
                   </Pill>
                 </>
               ) : null}

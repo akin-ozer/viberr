@@ -1,7 +1,94 @@
+import { createContext, useContext, type ReactNode } from "react";
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import { prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
+
+/**
+ * The facts EVERY acceptance confirm states, assembled ONCE by the task page
+ * and handed unchanged to each entry point (F19-3 / F19-7). One object, so no
+ * acceptance surface can drift into disclosing a different set of facts than
+ * the surface beside it — which is exactly how the recommendation card ended up
+ * disclosing nothing at all.
+ */
+export interface AcceptDisclosure {
+  task: TaskDetail;
+  /** The delivered revision's head sha (task file), or null before delivery. */
+  workRevisionSha: string | null;
+  /** R17-2: a verified no-change completion — the branch is empty, no PR. */
+  noChanges: boolean;
+  /** The merge target — the project's default branch. */
+  defaultBranch: string;
+}
+
+/** Which control the human actually pressed. Named in the dialog, because the
+ *  merge is the same irreversible act whether it arrives as a recommendation
+ *  the operator wrote or as a decision option on its packet (R15-1 / ruling
+ *  53) — and the human needs to recognise the thing they just clicked. */
+export type AcceptVia =
+  | { kind: "recommendation"; title: string }
+  | { kind: "decision"; title: string }
+  /** F19-22: the Current-state Stage dropdown, moved to the terminal stage. The
+   *  server has always routed a human's manual move into the terminal stage
+   *  through the FULL acceptance contract (`transitionStage` calls
+   *  `acceptCompletion`), so this menu item has always merged the PR — while
+   *  reading like the plain stage change the same menu performs everywhere
+   *  else. Ruling 53 fixed exactly this on the board's Move menu; the task
+   *  page's own dropdown was the one left. */
+  | { kind: "stage" };
+
+interface AcceptDisclosureValue {
+  disclosure: AcceptDisclosure;
+  /** The refusal a DIRECT `acceptCompletion` would carry past — the loader's
+   *  `acceptance.blockedReason`. Every acceptance writer reachable from inside
+   *  this subtree (today: applying an `accept_completion` recommendation) runs
+   *  that same call with that same `blockedPacket` derivation. */
+  blockedReason: string | null;
+}
+
+const AcceptDisclosureContext = createContext<AcceptDisclosureValue | null>(
+  null,
+);
+
+/**
+ * Publishes the page's ONE acceptance disclosure to every acceptance surface
+ * below it. The recommendation panel sits three components under the page and
+ * owns its own fetcher (the pass-16 split), so threading these facts down as
+ * props would give each layer the chance to assemble its own version of them —
+ * the drift F19-3 is made of. A surface that can reach an acceptance writer
+ * reads the facts from here or it does not confirm at all.
+ */
+export function AcceptDisclosureProvider({
+  disclosure,
+  blockedReason,
+  children,
+}: {
+  disclosure: AcceptDisclosure;
+  blockedReason: string | null;
+  children: ReactNode;
+}) {
+  return (
+    <AcceptDisclosureContext.Provider value={{ disclosure, blockedReason }}>
+      {children}
+    </AcceptDisclosureContext.Provider>
+  );
+}
+
+/** Read the published disclosure. Throws rather than degrading: a surface that
+ *  can merge a PR and has no facts to state must fail loudly at render, never
+ *  fall through to an unconfirmed writer (F19-3). */
+export function useAcceptDisclosure(): AcceptDisclosureValue {
+  const value = useContext(AcceptDisclosureContext);
+  if (!value) {
+    throw new Error(
+      "An acceptance surface must render inside <AcceptDisclosureProvider> — " +
+        "accepting a completion merges the pull request, and the confirm has " +
+        "nothing to state without the page's disclosure.",
+    );
+  }
+  return value;
+}
 
 /**
  * R15-1/F15-10 — accept-completion confirm.
@@ -13,33 +100,34 @@ import { useDialog } from "~/ui/use-dialog";
  * the verdict state, and the target branch — plus any missing signal the
  * acceptance would carry past (force-accept). Same useDialog contract as
  * ArchiveConfirm / ReleaseConfirm.
+ *
+ * F19-3/F19-7: this is the ONLY acceptance confirm on the task page. The
+ * Accept button, the admin force-accept, an `accept_completion` recommendation
+ * and an `accept_completion` packet option all open this one component with
+ * the one `disclosure`, so the five sentences a human reads before a merge are
+ * byte-identical whichever control they pressed.
  */
 export function AcceptConfirm({
-  task,
-  workRevisionSha,
-  noChanges = false,
-  defaultBranch,
+  disclosure,
   /** True when this confirms the audited admin FORCE-accept (DG-2). */
   force = false,
-  /** The refusal a force-accept bypasses (null for a clean accept). */
+  /** The entry point, when it is not the Current-state Accept button. */
+  via,
+  /** The refusal this acceptance would carry past (null for a clean accept). */
   blockedReason,
   busy,
   onCancel,
   onConfirm,
 }: {
-  task: TaskDetail;
-  /** The delivered revision's head sha (task file), or null before delivery. */
-  workRevisionSha: string | null;
-  /** R17-2: a verified no-change completion — the branch is empty, no PR. */
-  noChanges?: boolean;
-  /** The merge target — the project's default branch. */
-  defaultBranch: string;
+  disclosure: AcceptDisclosure;
   force?: boolean;
+  via?: AcceptVia;
   blockedReason: string | null;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { task, workRevisionSha, noChanges, defaultBranch } = disclosure;
   const { ref: panelRef, close } = useDialog(onCancel);
   const terminalName =
     task.stages.length > 0 ? task.stages[task.stages.length - 1]!.name : "Done";
@@ -75,10 +163,16 @@ export function AcceptConfirm({
           <div className="obs">
             <span className="k">Merges</span>
             <span>
+              {/* F19-14: the canonical PR-state mapping (ruling 12), the same
+                  one the GitHub bar behind this dialog uses. The raw enum
+                  member printed "review" where every other surface in the
+                  product says "in review", and the hardcoded neutral tone drew
+                  a CLOSED, unmerged PR as grey chrome inside the dialog whose
+                  button merges it. */}
               {task.pr ? (
                 <>
-                  <Pill kind="neutral" sm>
-                    PR #{task.pr.number} · {task.pr.state}
+                  <Pill kind={prStatePill(task.pr.state).kind} sm>
+                    PR #{task.pr.number} · {prStatePill(task.pr.state).label}
                   </Pill>{" "}
                   into <span className="mono">{defaultBranch}</span>
                 </>
@@ -92,6 +186,31 @@ export function AcceptConfirm({
               )}
             </span>
           </div>
+          {/* The human clicked "Apply" on a card, or "Confirm decision" on a
+              packet — neither word says "merge". Name what they pressed here so
+              the dialog is recognisably about THAT control and not a stray
+              modal (F19-3 / F19-7). */}
+          {via && (
+            <div className="obs">
+              <span className="k">
+                {via.kind === "recommendation"
+                  ? "Recommendation"
+                  : via.kind === "decision"
+                    ? "Decision"
+                    : "Stage move"}
+              </span>
+              <span>
+                {via.kind === "stage" ? (
+                  <>
+                    Moving this task into <strong>{terminalName}</strong> is an
+                    acceptance, not a plain stage change.
+                  </>
+                ) : (
+                  <>“{via.title}” — confirming it accepts the completion.</>
+                )}
+              </span>
+            </div>
+          )}
           <div className="obs">
             <span className="k">Revision</span>
             <span>

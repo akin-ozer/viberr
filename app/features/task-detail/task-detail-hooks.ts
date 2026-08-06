@@ -58,6 +58,7 @@ export function useRunControls({
   myRole,
   canRunAgents,
   acceptanceTerminallyBlocked,
+  mergeAuthority,
 }: {
   csrf: string;
   runtime: RunView[];
@@ -65,6 +66,11 @@ export function useRunControls({
   canRunAgents: boolean;
   /** R16-3: a closed, unmerged PR blocks acceptance terminally — no override. */
   acceptanceTerminallyBlocked: boolean;
+  /** F19-10: `acceptance.hasAuthority` — the SAME predicate the server runs for
+   *  `completeTaskMerge` (`requireAcceptCompletion` → the R6-2 owner
+   *  exception), resolved once server-side and shipped to this page. Never a
+   *  client re-derivation of the role matrix (E3). */
+  mergeAuthority: boolean;
 }) {
   const runFetcher = useFetcher<ActionResult>();
   useActionFeedback(runFetcher);
@@ -112,9 +118,14 @@ export function useRunControls({
         }
       : undefined;
   // Complete the real merge of an accepted (merge-pending) PR (S2).
-  // admin|maintainer only; server re-checks.
-  const canMerge = roleCan(myRole as ProjectRole | null, "accept-completion");
-  const onCompleteMerge = canMerge
+  //
+  // F19-10: this asked `accept-completion` (admin|maintainer) while the writer
+  // behind it, `completeTaskMerge`, runs `requireAcceptCompletion` — which
+  // carries the R6-2 owner exception. So a contributor who OWNS the task and
+  // had just accepted it was shown "accepted · merge pending" with no way to
+  // finish the merge, and the PR sat there until a maintainer happened to open
+  // the task. The affordance now asks for exactly what the server enforces (E3).
+  const onCompleteMerge = mergeAuthority
     ? () => {
         if (runBusy) return;
         const fd = new FormData();

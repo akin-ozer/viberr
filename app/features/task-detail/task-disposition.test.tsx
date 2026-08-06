@@ -5,6 +5,8 @@ import { createRoutesStub } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { ToastProvider } from "~/ui/toast";
+import { AcceptConfirm } from "./accept-confirm";
+import type { RecommendationView } from "./operator-recommendations";
 import { TaskDetailPage } from "./task-detail-page";
 
 afterEach(cleanup);
@@ -71,6 +73,7 @@ const ACCEPTANCE: AcceptanceAffordance = {
   hasAuthority: true,
   atBoundary: true,
   blockedReason: null,
+  blockedReasonViaPacket: null,
   canAccept: true,
   terminallyBlocked: false,
 };
@@ -82,6 +85,8 @@ function renderPage(props: {
   meId?: string;
   task?: Partial<TaskDetail>;
   canDeliver?: boolean;
+  recommendations?: RecommendationView[];
+  workRevisionSha?: string | null;
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -108,11 +113,12 @@ function renderPage(props: {
             me={{ id: props.meId ?? "u-arda", name: "Arda Kaya" }}
             myRole={props.myRole ?? "admin"}
             mentionables={{ agents: [], users: [], reserved: [] }}
-            recommendations={[]}
+            recommendations={props.recommendations ?? []}
             schedules={[]}
             archived={props.archived ?? false}
             acceptance={{ ...ACCEPTANCE, ...(props.acceptance ?? {}) }}
             githubHost="https://github.com"
+            workRevisionSha={props.workRevisionSha ?? null}
             canDeliver={props.canDeliver ?? false}
           />
         </ToastProvider>
@@ -156,13 +162,17 @@ describe("P14-LV-06: the acceptance affordance", () => {
       task: {
         pr: { number: 117, state: "review", title: "[VIB-151] x" } as TaskDetail["pr"],
       },
+      workRevisionSha: "abcdef1234567890",
     });
     fireEvent.click(findButton(container, "Accept completion → Done")!);
     const dialog = container.ownerDocument.querySelector(
       'dialog[data-screen-label="Accept completion dialog"]',
     );
-    expect(dialog?.textContent).toContain("PR #117");
+    // F19-14: the canonical PR vocabulary, not the raw `pr.state` enum member —
+    // this said "PR #117 · review" while the panel behind it said "in review".
+    expect(dialog?.textContent).toContain("PR #117 · in review");
     expect(dialog?.textContent).toContain("main");
+    expect(dialog?.textContent).toContain("abcdef123456");
     expect(getByText("Accept this completion?")).toBeTruthy();
     // The confirm button is explicit that accepting merges.
     expect(findButton(container, "Accept → Done & merge")).toBeDefined();
@@ -409,5 +419,356 @@ describe("P14-GV-04: the Permissions panel tells the owner the truth", () => {
       ...asMaintainer.container.querySelectorAll(".policy-line"),
     ].find((r) => r.textContent?.startsWith("Task ownership"))!;
     expect(maintRow.textContent).toContain("your own seat");
+  });
+});
+
+const ACCEPT_DIALOG = 'dialog[data-screen-label="Accept completion dialog"]';
+const acceptDialog = (container: HTMLElement) =>
+  container.ownerDocument.querySelector(ACCEPT_DIALOG);
+
+/** Let any submission a click STARTED land before asserting that none did.
+ *  Without this the "nothing was written" assertions pass on an unguarded
+ *  click too, because the fetcher POST has not resolved yet when the next
+ *  statement runs — the assertion would read green while the PR merged. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+const PR_147 = {
+  number: 147,
+  state: "review",
+  title: "[VIB-151] Compress long-running task timelines",
+} as TaskDetail["pr"];
+
+/**
+ * F19-3 — live-reproduced on VC-1: applying the operator's `accept_completion`
+ * recommendation merged PR #147 and moved the task to Done from ONE click on
+ * "Apply", with no dialog anywhere in the path. Ruling 20 (R15-1) requires
+ * EVERY acceptance to state what merges first; ruling 53 extended it to the
+ * board drag and the keyboard Move menu. The recommendation card was the entry
+ * point nobody counted.
+ */
+describe("F19-3: applying an accept_completion recommendation asks first", () => {
+  const ACCEPT_REC: RecommendationView = {
+    id: "r1",
+    kind: "accept_completion",
+    label: "Accept the completion and close it",
+    detail: "The delivering agent's revision is approved.",
+  };
+
+  it("opens the shared confirm naming the PR, revision and target — nothing submits until it is confirmed", async () => {
+    const { container, submitted } = renderPage({
+      task: { pr: PR_147 },
+      workRevisionSha: "abcdef1234567890",
+      recommendations: [ACCEPT_REC],
+    });
+    fireEvent.click(findButton(container, "Apply")!);
+    // Canary: call `onApply(rec.id)` unconditionally in `onApplyClick` and this
+    // is where it fails — the merge posts on the first click, as it did live.
+    await settle();
+    expect(submitted).toHaveLength(0);
+    const dialog = acceptDialog(container);
+    expect(dialog).toBeTruthy();
+    // The SAME facts the Accept button's confirm states — one component, one
+    // disclosure object.
+    expect(dialog!.textContent).toContain("PR #147 · in review");
+    expect(dialog!.textContent).toContain("main");
+    expect(dialog!.textContent).toContain("abcdef123456");
+    // …plus the control the human actually pressed, which said only "Apply".
+    expect(dialog!.textContent).toContain("Accept the completion and close it");
+    fireEvent.click(findButton(container, "Accept → Done & merge")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("apply-recommendation");
+    expect(submitted[0]!.recId).toBe("r1");
+  });
+
+  it("a non-acceptance recommendation still applies in one click", async () => {
+    // The dialog belongs to the writer that merges, not to the panel: an
+    // assign/transition recommendation must not grow a merge confirm.
+    const { container, submitted } = renderPage({
+      recommendations: [
+        {
+          id: "r2",
+          kind: "transition",
+          toStageId: "review",
+          label: "Move to Review",
+          detail: "",
+        },
+      ],
+    });
+    fireEvent.click(findButton(container, "Apply")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("apply-recommendation");
+    expect(acceptDialog(container)).toBeNull();
+  });
+});
+
+/**
+ * F19-7 — resolving a packet option whose kind is `accept_completion` merges
+ * the review PR from the card's generic "Confirm decision" button. There IS a
+ * select-then-confirm step, but it discloses nothing: no PR number, no
+ * delivered revision, no verdict, no merge target, no "merging is one-way",
+ * and no "Not yet".
+ */
+describe("F19-7: a packet accept_completion option discloses the merge", () => {
+  const acceptPacket = (
+    options: Array<{ kind: string; t: string; d: string; rec?: boolean }>,
+  ) =>
+    ({
+      type: "input",
+      kind: "input required",
+      from: "Operator",
+      title: "VIB-151 is ready to accept",
+      body: "The delivered revision carries an approving verdict.",
+      observations: [],
+      options,
+    }) as unknown as TaskDetail["packet"];
+
+  it("Confirm decision opens the acceptance dialog, then resolves the packet", async () => {
+    const { container, submitted } = renderPage({
+      task: {
+        pr: PR_147,
+        packet: acceptPacket([
+          {
+            kind: "accept_completion",
+            t: "Accept the completion and close it",
+            d: "Merge the PR and move to Done.",
+            rec: true,
+          },
+        ]),
+      },
+      workRevisionSha: "abcdef1234567890",
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    // Canary: point `onResolve` straight at `submitResolve` and this fails —
+    // the PR merges from a button that promised only "Confirm decision".
+    await settle();
+    expect(submitted).toHaveLength(0);
+    const dialog = acceptDialog(container);
+    expect(dialog).toBeTruthy();
+    expect(dialog!.textContent).toContain("PR #147 · in review");
+    expect(dialog!.textContent).toContain("main");
+    expect(dialog!.textContent).toContain("abcdef123456");
+    expect(dialog!.textContent).toContain("Merging is one-way");
+    expect(findButton(container, "Not yet")).toBeDefined();
+    fireEvent.click(findButton(container, "Accept → Done & merge")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("resolve-packet");
+    expect(submitted[0]!.option).toBe("0");
+  });
+
+  it("a non-acceptance option still resolves from the card in one step", async () => {
+    const { container, submitted } = renderPage({
+      task: {
+        packet: acceptPacket([
+          {
+            kind: "request_edit",
+            t: "Send it back for edits",
+            d: "The operator reopens the work.",
+            rec: true,
+          },
+        ]),
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("resolve-packet");
+    expect(acceptDialog(container)).toBeNull();
+  });
+
+  it("names the refusal the PACKET path would hit, not the open-packet one", async () => {
+    // `resolvePacket` evaluates the contract with `blockedPacket: false` — the
+    // open packet is what this resolution clears. Printing `blockedReason` here
+    // would report a bypass the server never performs, and bury the real
+    // missing signal underneath it.
+    const { container } = renderPage({
+      task: {
+        pr: PR_147,
+        packet: acceptPacket([
+          {
+            kind: "accept_completion",
+            t: "Accept the completion and close it",
+            d: "Merge the PR and move to Done.",
+            rec: true,
+          },
+        ]),
+      },
+      acceptance: {
+        canAccept: false,
+        blockedReason:
+          "This task has an open blocked decision — resolve the operator's packet before accepting it.",
+        blockedReasonViaPacket:
+          "VIB-151's delivered revision has no approving verdict yet.",
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const dialog = acceptDialog(container);
+    expect(dialog!.textContent).toContain("no approving verdict yet");
+    expect(dialog!.textContent).not.toContain("open blocked decision");
+  });
+});
+
+/**
+ * F19-10 — "Complete merge" fronts `completeTaskMerge`, whose
+ * `requireAcceptCompletion` carries the R6-2 owner exception, but the UI gate
+ * asked for `accept-completion` (admin|maintainer). A contributor-owner who had
+ * just accepted their own task was shown "accepted · merge pending" with no way
+ * to finish it.
+ */
+describe("F19-10: Complete merge follows the server's authority", () => {
+  const MERGE_PENDING = {
+    pr: { number: 147, state: "accepted", title: "[VIB-151] x" } as TaskDetail["pr"],
+  };
+
+  it("renders for the contributor-owner the server authorizes, and submits complete-merge", async () => {
+    const { container, submitted } = renderPage({
+      myRole: "contributor",
+      meId: "u-selin",
+      task: MERGE_PENDING,
+      // The task is already at the terminal stage, so `hasAuthority` is all the
+      // affordance resolves to — exactly what the server re-checks.
+      acceptance: { hasAuthority: true, atBoundary: false, canAccept: false },
+    });
+    const btn = findButton(container, "Complete merge");
+    // Canary: restore `roleCan(myRole, "accept-completion")` as the gate and
+    // this is undefined — contributor holds no such row in ACTION_ROLES.
+    expect(btn).toBeDefined();
+    fireEvent.click(btn!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("complete-merge");
+  });
+
+  it("stays hidden when the viewer holds no acceptance authority", () => {
+    const { container } = renderPage({
+      myRole: "viewer",
+      meId: "u-elif",
+      task: MERGE_PENDING,
+      acceptance: { hasAuthority: false, atBoundary: false, canAccept: false },
+    });
+    expect(findButton(container, "Complete merge")).toBeUndefined();
+  });
+});
+
+/**
+ * F19-14 — the accept dialog printed the raw `pr.state` enum member in a
+ * hardcoded neutral pill, so it said "review" where every sibling surface says
+ * "in review", and drew a CLOSED, unmerged PR as grey chrome inside the dialog
+ * whose button merges it.
+ */
+describe("F19-14: the accept dialog speaks the product's PR vocabulary", () => {
+  const renderConfirm = (state: string) =>
+    render(
+      <AcceptConfirm
+        disclosure={{
+          task: detail({
+            pr: { number: 147, state, title: "[VIB-151] x" } as TaskDetail["pr"],
+          }),
+          workRevisionSha: "abcdef1234567890",
+          noChanges: false,
+          defaultBranch: "main",
+        }}
+        blockedReason={null}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+
+  it("renders the canonical prStatePill label and tone, not the raw enum member", () => {
+    const inReview = renderConfirm("review");
+    const reviewPill = [
+      ...inReview.container.querySelectorAll(".pill"),
+    ].find((p) => p.textContent?.includes("PR #147"))!;
+    expect(reviewPill.textContent).toBe("PR #147 · in review");
+    expect(reviewPill.className).toContain("info");
+    expect(reviewPill.className).not.toContain("neutral");
+    cleanup();
+    const closed = renderConfirm("closed");
+    const closedPill = [...closed.container.querySelectorAll(".pill")].find((p) =>
+      p.textContent?.includes("PR #147"),
+    )!;
+    expect(closedPill.textContent).toBe("PR #147 · closed");
+    // A PR GitHub closed without merging is a risk, not chrome.
+    expect(closedPill.className).toContain("risk");
+  });
+
+  it("so does the archive confirm — the closed PR that usually causes the archive", () => {
+    const { container } = renderPage({
+      myRole: "maintainer",
+      task: {
+        pr: { number: 124, state: "closed", title: "[VIB-151] x" } as TaskDetail["pr"],
+      },
+    });
+    fireEvent.click(findButton(container, "Archive task")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Archive task dialog"]',
+    )!;
+    const pill = [...dialog.querySelectorAll(".pill")].find((p) =>
+      p.textContent?.includes("PR #124"),
+    )!;
+    expect(pill.textContent).toBe("PR #124 · closed");
+    expect(pill.className).toContain("risk");
+  });
+});
+
+/**
+ * F19-22 — the Current-state Stage dropdown, moved to the terminal stage.
+ *
+ * On the server a human's manual move into the terminal stage IS an acceptance:
+ * `transitionStage` hands it straight to `acceptCompletion`, which merges the
+ * PR. So this menu item has always merged — from the same control that performs
+ * an ordinary stage change for every other row, with no dialog and no mention
+ * of a merge. Ruling 53 fixed precisely this on the board's Move menu; the task
+ * page's own dropdown was the one left, and it is the closest control to the
+ * acceptance the dialog exists to disclose.
+ */
+describe("F19-22: moving to the terminal stage from the dropdown asks first", () => {
+  const openStageMenu = (container: HTMLElement) => {
+    const trigger = container.querySelector(
+      "button.stage-menu-btn",
+    ) as HTMLButtonElement | null;
+    expect(trigger).toBeTruthy();
+    fireEvent.click(trigger!);
+  };
+  /** The menu is portaled to document.body, so it is not under `container`. */
+  const stageItem = (container: HTMLElement, name: string) =>
+    Array.from(
+      container.ownerDocument.querySelectorAll(".stage-menu-pop .sm-item"),
+    ).find((b) => b.textContent?.trim().startsWith(name)) as
+      | HTMLButtonElement
+      | undefined;
+
+  it("opens the acceptance confirm instead of posting a bare transition", async () => {
+    const { container, submitted } = renderPage({
+      task: { pr: PR_147, stage: "review" },
+      workRevisionSha: "abcdef1234567890",
+    });
+    openStageMenu(container);
+    fireEvent.click(stageItem(container, "Done")!);
+    // Canary: drop the terminal branch in `onTransition` and this fails — the
+    // move posts `intent: "transition"`, which merges server-side.
+    await settle();
+    expect(submitted).toHaveLength(0);
+    const dialog = acceptDialog(container);
+    expect(dialog).toBeTruthy();
+    expect(dialog!.textContent).toContain("PR #147 · in review");
+    expect(dialog!.textContent).toContain("abcdef123456");
+    // It names itself as the stage move it is, not as a stray modal.
+    expect(dialog!.textContent).toContain("acceptance, not a plain stage change");
+    fireEvent.click(findButton(container, "Accept → Done & merge")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("accept-completion");
+  });
+
+  it("a NON-terminal stage still moves in one click", async () => {
+    // The confirm belongs to the acceptance, not to the menu: every other row
+    // must keep posting a plain transition.
+    const { container, submitted } = renderPage({
+      task: { pr: PR_147, stage: "triage" },
+    });
+    openStageMenu(container);
+    fireEvent.click(stageItem(container, "Review")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("transition");
+    expect(submitted[0]!.to).toBe("review");
+    expect(acceptDialog(container)).toBeNull();
   });
 });

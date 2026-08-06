@@ -367,6 +367,7 @@ export function CurrentStatePanel({
   onRelease,
   onArchive,
   onAccept,
+  onAcceptViaStage,
   acceptBusy: acceptSubmitting,
   dispositionBusy,
 }: {
@@ -387,6 +388,12 @@ export function CurrentStatePanel({
   /** F15-10: opens the accept CONFIRM dialog (the page owns the submission —
    *  accepting merges the PR, so it never fires on a bare click any more). */
   onAccept: () => void;
+  /** F19-22: opens the SAME confirm, labelled as a stage move. Picking the
+   *  terminal stage from the dropdown below is an acceptance — the server
+   *  routes it through `acceptCompletion` — so it must disclose the merge like
+   *  every other acceptance entry point (R15-1, and ruling 53 for the board's
+   *  equivalent menu). */
+  onAcceptViaStage: () => void;
   /** The accept submission is in flight (page-owned fetcher). */
   acceptBusy: boolean;
   /** An accept / archive / restore submission is in flight. */
@@ -410,8 +417,20 @@ export function CurrentStatePanel({
     "release-any-ownership",
   );
   const transitionBusy = transitionFetcher.state !== "idle";
+  // F19-22: the terminal stage is not a stage this menu may simply post. On the
+  // server a human's manual move into it IS an acceptance — `transitionStage`
+  // hands it to `acceptCompletion`, which merges the PR — so picking it here
+  // has always merged, silently, from a control that reads like the ordinary
+  // stage change it performs for every other row. Route it into the page's
+  // acceptance confirm instead; every other stage keeps the direct post.
+  const terminalStageId =
+    task.stages.length > 0 ? task.stages[task.stages.length - 1]!.id : null;
   const onTransition = (toStageId: string) => {
     if (transitionBusy) return;
+    if (terminalStageId !== null && toStageId === terminalStageId) {
+      onAcceptViaStage();
+      return;
+    }
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "transition");

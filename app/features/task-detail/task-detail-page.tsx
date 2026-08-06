@@ -5,7 +5,11 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import { AcceptConfirm } from "./accept-confirm";
+import {
+  AcceptConfirm,
+  AcceptDisclosureProvider,
+  type AcceptDisclosure,
+} from "./accept-confirm";
 import { ArchiveConfirm } from "./archive-confirm";
 import { DecisionPacket } from "./decision-packet";
 import type {
@@ -234,9 +238,32 @@ export function TaskDetailPage({
   // F15-10/R15-1: accepting merges the PR — it fires only through the confirm
   // dialog (which states PR, revision, verdict state and target branch), for
   // BOTH plain accept and the admin force-accept.
-  const [confirmAccept, setConfirmAccept] = useState<null | "accept" | "force">(
-    null,
-  );
+  //
+  // F19-7: and for a packet's `accept_completion` option, which reached the same
+  // merge through the card's generic "Confirm decision". That IS a selection
+  // step, but it discloses nothing — no PR number, no delivered revision, no
+  // verdict, no merge target, no "Not yet". The union says which control was
+  // pressed and carries what that control needs to commit afterwards.
+  //
+  // F19-22: and for the Current-state Stage dropdown moved to the terminal
+  // stage — on the server that IS an acceptance (`transitionStage` hands a
+  // human's manual terminal move to `acceptCompletion`, which merges), from a
+  // control that reads like the plain stage change it performs for every other
+  // row. It commits through the same `accept-completion` intent.
+  type PendingAccept =
+    | { kind: "accept" }
+    | { kind: "force" }
+    | { kind: "stage" }
+    | { kind: "packet"; optionIndex: number; note: string; title: string };
+  const [pendingAccept, setPendingAccept] = useState<PendingAccept | null>(null);
+  /** The ONE place acceptance disclosure is assembled (F19-3/F19-7); every
+   *  entry point on this page states these same facts, never its own set. */
+  const acceptDisclosure: AcceptDisclosure = {
+    task,
+    workRevisionSha,
+    noChanges,
+    defaultBranch,
+  };
   const acceptFetcher = useFetcher<ActionResult>();
   useActionFeedback(acceptFetcher);
   const acceptBusy = acceptFetcher.state !== "idle";
@@ -295,6 +322,10 @@ export function TaskDetailPage({
     myRole,
     canRunAgents,
     acceptanceTerminallyBlocked: acceptance.terminallyBlocked,
+    // F19-10: the merge-completion affordance follows the server's authority,
+    // which includes this task's contributor-owner — not a second reading of
+    // the role matrix that quietly disagrees with it.
+    mergeAuthority: acceptance.hasAuthority,
   });
   const { shownLogSel, selectLog, onViewLogs, onAgentLog } =
     useLogSelection(runtime);
@@ -324,7 +355,9 @@ export function TaskDetailPage({
     archiveFetcher.submit(fd, { method: "post" });
   };
 
-  const onResolve = (optionIndex: number, note = "") => {
+  /** Post a packet resolution. Split out of `onResolve` so the confirmed
+   *  acceptance path can reach it from the dialog (F19-7). */
+  const submitResolve = (optionIndex: number, note: string) => {
     if (resolveBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -332,6 +365,24 @@ export function TaskDetailPage({
     fd.set("option", String(optionIndex));
     if (note.trim()) fd.set("note", note);
     resolveFetcher.submit(fd, { method: "post" });
+  };
+  const onResolve = (optionIndex: number, note = "") => {
+    // F19-7: resolving an `accept_completion` option MERGES the review PR — the
+    // same one-way write the Accept button performs, from a button whose whole
+    // promise is "Confirm decision". Route it through the one dialog so the
+    // human reads the PR, the delivered revision, the verdict and the merge
+    // target first (ruling 20), whichever control they arrived from.
+    const option = task.packet?.options[optionIndex];
+    if (option?.kind === "accept_completion") {
+      setPendingAccept({
+        kind: "packet",
+        optionIndex,
+        note,
+        title: option.t,
+      });
+      return;
+    }
+    submitResolve(optionIndex, note);
   };
 
   return (
@@ -380,10 +431,19 @@ export function TaskDetailPage({
           />
         )}
 
-        <RecommendationsSection
-          recommendations={recommendations}
-          canApply={canDecideOwned}
-        />
+        {/* F19-3: the recommendation panel can reach `acceptCompletion` (an
+            `accept_completion` card's Apply), so it confirms with the page's
+            disclosure — the same facts, from the same component, as every other
+            acceptance entry point here. */}
+        <AcceptDisclosureProvider
+          disclosure={acceptDisclosure}
+          blockedReason={acceptance.blockedReason}
+        >
+          <RecommendationsSection
+            recommendations={recommendations}
+            canApply={canDecideOwned}
+          />
+        </AcceptDisclosureProvider>
 
         <ScheduledActions
           schedules={schedules}
@@ -459,7 +519,7 @@ export function TaskDetailPage({
           reconciledAt={githubReconciledAt}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
           {...(onForceAccept
-            ? { onForceAccept: () => setConfirmAccept("force") }
+            ? { onForceAccept: () => setPendingAccept({ kind: "force" }) }
             : {})}
           {...(canDeliver && !taskClosed ? { onDeliver } : {})}
           delivering={deliverBusy}
@@ -476,7 +536,8 @@ export function TaskDetailPage({
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
           onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
-          onAccept={() => setConfirmAccept("accept")}
+          onAccept={() => setPendingAccept({ kind: "accept" })}
+          onAcceptViaStage={() => setPendingAccept({ kind: "stage" })}
           acceptBusy={acceptBusy}
           dispositionBusy={archiveBusy}
         />
@@ -488,28 +549,40 @@ export function TaskDetailPage({
         />
       </div>
 
-      {confirmAccept && (
+      {pendingAccept && (
         <AcceptConfirm
-          task={task}
-          workRevisionSha={workRevisionSha}
-          noChanges={noChanges}
-          defaultBranch={defaultBranch}
-          force={confirmAccept === "force"}
+          disclosure={acceptDisclosure}
+          force={pendingAccept.kind === "force"}
+          {...(pendingAccept.kind === "packet"
+            ? { via: { kind: "decision" as const, title: pendingAccept.title } }
+            : pendingAccept.kind === "stage"
+              ? { via: { kind: "stage" as const } }
+              : {})}
           blockedReason={
-            confirmAccept === "force"
+            pendingAccept.kind === "force"
               ? (task.blockReason ??
                 acceptance.blockedReason ??
                 (task.packet?.type === "blocked"
                   ? "An open blocked decision is holding this task."
                   : null))
-              : acceptance.blockedReason
+              : pendingAccept.kind === "packet"
+                ? // F19-7: `resolvePacket` evaluates the acceptance contract with
+                  // `blockedPacket: false` — the open packet is what this
+                  // resolution CLEARS, so it cannot also be the reason to refuse
+                  // it. Naming `blockedReason` here would report a bypass the
+                  // server is not going to perform, while a real missing signal
+                  // (no approving verdict, a conflicting PR) went unsaid.
+                  acceptance.blockedReasonViaPacket
+                : acceptance.blockedReason
           }
-          busy={acceptBusy || runBusy}
-          onCancel={() => setConfirmAccept(null)}
+          busy={acceptBusy || runBusy || resolveBusy}
+          onCancel={() => setPendingAccept(null)}
           onConfirm={() => {
-            const mode = confirmAccept;
-            setConfirmAccept(null);
-            if (mode === "force") onForceAccept?.();
+            const pending = pendingAccept;
+            setPendingAccept(null);
+            if (pending.kind === "force") onForceAccept?.();
+            else if (pending.kind === "packet")
+              submitResolve(pending.optionIndex, pending.note);
             else submitAccept();
           }}
         />
