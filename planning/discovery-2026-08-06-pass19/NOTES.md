@@ -107,6 +107,20 @@ means "prove a runtime fact" is a task shape Viberr cannot currently close throu
 owner decision: either such tasks are out of scope for agent review, or the run's own tool-call
 evidence needs to become citable evidence a reviewer can read.
 
+## Phase C round 3: the remaining use cases
+
+| UC | Scenario | Result |
+|----|----------|--------|
+| UC-07 | **External merge → reconcile.** Merged PR #153 with `gh` behind Viberr's back, then reconciled. Viberr wrote a typed divergence note ("PR #153 was merged on GitHub, but VC-8 hasn't been accepted through Viberr — its stage is unchanged"), **withdrew the now-moot recommendation**, and the operator recorded an accurate replacement. | ✓ |
+| UC-18 | **Scheduled re-run (FR39).** Created a +60m operator re-run: written canonically into `task.md` (survives a rebuild), carrying backend, autonomy, creator and note. Cancelled it: `status: cancelled` with the record RETAINED for audit, not deleted. | ✓ |
+| UC-19 | **Force-accept past a missing verdict.** VC-8 at Review with no verdict → force-accept closed it to Done AND wrote `task.acceptance.forced` naming the exact gate bypassed in `details_json`. (My first audit query found nothing because I used a `created_at` column that does not exist — the column is `occurred_at`. Not a defect; recorded because I nearly filed it as one.) | ✓ |
+| UC-22 | **Archive + the new guard.** Archived VC-5 → `waiting: none`; then attempted a transition on the archived task → **409**, stage unchanged. The pass-19 archived-move guard holds server-side. | ✓ |
+| UC-23 | **Hand-edit the store (FR10).** Edited `task.md`'s title outside the app; the chokidar watcher reconciled the projection within seconds with no manual re-scan, and the board rendered the new title. Explicit re-scan also 200s. | ✓ |
+| UC-24 | **⌘K search.** Returns task hits for admin and member; returns **zero** hits for a non-member (see below). | ✓ |
+| UC-09 | **@mention → notification.** "@Elif …" from Arda landed in Elif's inbox as "Arda · mentioned you" with the quoted text, project·task context, and a Mark read action. | ✓ |
+| UC-06 | **Reject path.** Closed PR #149 unmerged on GitHub → divergence note + recovery packet in Viberr. | ✓ |
+| — | **R15-4 secrecy, exhaustively.** Provisioned a genuine NON-member (Murat) through the real admin flow. All 8 project routes → **404**; ⌘K search → **0 hits**; home never names the project; a comment POST → **404**. The project is invisible, not merely refused. | ✓ |
+
 ## Finding ledger
 
 IDs: F19-nn (defects), UX19-nn (UX/coherence), Q19-nn (owner questions), N19-nn (notes/ideas).
