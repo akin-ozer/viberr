@@ -5,9 +5,17 @@ from the repo root (or `docker compose exec app …` inside the container).
 
 ## Health & liveness
 
-- `GET /resources/health` → `{ ok, projections: { projects, tasks }, watcher }`.
-  `ok:false` / HTTP 503 means the SQLite projection DB is unreachable. `watcher` reports
-  whether the file-watch service is alive.
+- `GET /resources/health` →
+  `{ ok, projections: { projects, tasks }, watcher, kbWatcher, lock, backends }`
+  (unauthenticated by design; aggregate counts only, never data).
+  `ok:false` / HTTP 503 means the SQLite projection DB is unreachable. `watcher` /
+  `kbWatcher` report whether the store and knowledge-base watchers are alive — a watcher
+  error clears the handle, so `false` is a REAL dead watcher, not "never started".
+  `lock: { pid, hostname, startedAt }` names the process holding the single-writer lock on
+  this data root (null if none) — this is how you confirm exactly one writer. `backends`
+  reads `real | unavailable` per backend from env presence only; it is not a token-validity
+  check. *(Field list corrected 2026-08-06, pass 19, against `app/routes/resources.health.ts`
+  — `kbWatcher`, `lock` and `backends` all ship and were not listed.)*
 - Boot log (structured JSON to stdout) prints a startup integrity line: data-root dirs,
   applied migrations, and projection counts. Grep it after a deploy.
 
@@ -67,14 +75,29 @@ readiness downgrade (tolerant parsing):
 - A backend with **no** credential is **unavailable**: a run started on it fails fast with
   an honest "backend unavailable" error and a blocked recovery packet. Detection is
   presence-only (no paid call) and happens at process start, so set the variable and
-  restart. Six credential paths count, and the triage is "which of these is set?":
+  restart. Seven credential paths count, and the triage is "which of these is set?":
 
   | backend | any one of these makes it available |
   |---|---|
-  | Claude | `ANTHROPIC_API_KEY` · `CLAUDE_CODE_OAUTH_TOKEN` · `VIBERR_CLAUDE_USE_CLI_AUTH=1` (the host `claude` CLI is already logged in) |
+  | Claude | `ANTHROPIC_API_KEY` · `CLAUDE_CODE_OAUTH_TOKEN` · `VIBERR_CLAUDE_USE_CLI_AUTH=1` **and** a Claude config dir that a logged-in CLI could have written |
   | Codex | `CODEX_ACCESS_TOKEN` · `CODEX_API_KEY` · `OPENAI_API_KEY` · `VIBERR_CODEX_USE_CLI_AUTH=1` **and** `$CODEX_HOME/auth.json` present on disk |
 
-- **Codex's CLI-auth path has a second condition, and it is the recurring docker trap.**
+  *(Corrected 2026-08-06, pass 19 — the count said "Six" against a table of seven, and the
+  Claude CLI-auth row implied the flag alone was enough. It is not: see below.)*
+
+- **BOTH CLI-auth paths have a second condition; a real key or token never does.**
+  `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY` and
+  `OPENAI_API_KEY` are authoritative on their own. The two `*_USE_CLI_AUTH` flags are not —
+  each is verified against the filesystem (`hasCredential` in
+  `app/server/runtimes/runtime-registry.server.ts`), because the flag alone was how a
+  deployment used to report a backend "available" and then die on auth inside every run.
+  On the Claude side (D2): a config dir that does not exist at all **refutes** the flag and
+  the backend reads unavailable; `<configDir>/.credentials.json` is a proven file-backed
+  login; on **darwin** an existing dir with no credentials file is the normal logged-in
+  state (the credential is in the Keychain, unreadable without an interactive prompt), so
+  the flag is honoured and the weaker verification is reported rather than hidden. On every
+  other platform a missing credentials file means "not logged in".
+- **Codex's second condition is the recurring docker trap.**
   The flag alone is not enough — the file must exist. `CODEX_HOME` defaults to
   `/data/runtimes/codex-home` under Compose, which lives on the `./docker-data` volume,
   so recreating that directory silently drops `auth.json` while `VIBERR_CODEX_USE_CLI_AUTH=1`
@@ -89,7 +112,17 @@ readiness downgrade (tolerant parsing):
 
 ## Auth / access
 
-- Sessions live in SQLite (`sessions`); expired sessions are swept at boot and daily.
+- Sessions live in SQLite, in better-auth's `session` table (singular). They are 30-day
+  rolling with a once-a-day slide (`expiresIn` / `updateAge` in `app/lib/auth.server.ts`),
+  and expiry is enforced at READ time by better-auth — an expired row simply stops
+  authenticating. *(Corrected 2026-08-06, pass 19 — this line used to name a `sessions`
+  table and claim expired sessions were "swept at boot and daily". Neither exists: the
+  table is `session`, and `applyRetention` covers only `run_log_lines`, `audit_events` and
+  `notifications`.)* Rows are deleted only by an explicit act: signing out, "sign out other
+  sessions" in Profile, disabling or deleting the user (the next request from a disabled
+  user's session deletes it). **Consequence for ops:** expired session rows accumulate —
+  inert and small, but nothing removes them, so do not expect the table to shrink on its
+  own.
 - Locked out / forgotten password: an admin resets it in Org settings → Users
   (`resetPassword` sets a one-time temp password + forces a reset at next sign-in). The
   bootstrap admin comes from `VIBERR_SEED_ADMIN_*` on first boot of an empty DB.

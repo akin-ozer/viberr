@@ -45,6 +45,15 @@ import {
   buildAgentQuestionPacket,
   type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
+import {
+  acceptanceNoChangeCheck,
+  assertVerifiedNoChangeStillApplies,
+  noChangeCompletionEvent,
+  probeNothingToDeliver,
+  type AcceptanceNoChangeCheck,
+  type NoChangeVerification,
+} from "./no-change-completion.server";
+import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
   resolveTaskFilePath,
@@ -1934,9 +1943,70 @@ export async function recordAgentCompletion(
   // noted, rework still needed", NOT a pass.
   let title = "";
   let summary = "";
+  // R19-1 (F19-21, live VC-5): a verdict-capable reviewer approving a task that
+  // has NOTHING to deliver had nothing to bind to — the verdict was dropped, the
+  // event read "there is no delivered revision to bind the verdict to yet", and
+  // acceptance dead-ended forever on "No reviewed revision yet". Mint a
+  // VERIFICATION revision pinned to the default-branch head so the verdict binds
+  // to a real subject and names the base sha it judged; every existing verdict
+  // mechanism (requiredReviewers, deriveValidation, staleness) then works
+  // unchanged rather than growing a second review model.
+  //
+  // The preconditions are deliberately narrow. A reviewer approving while a
+  // developer is still mid-run must NOT mark the task "no changes" — the branch
+  // does not exist YET, which is not the same as never — so nobody may be
+  // engaged to deliver and no branch/PR/revision may ever have been linked. The
+  // basis is proved by the same live, fail-closed probe acceptance uses.
+  let noChangeMint: NoChangeVerification | null = null;
+  if (verdict === "approve" && actorRef.kind === "agent") {
+    const pre = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed
+      .frontmatter;
+    if (
+      pre &&
+      !pre.workRevision &&
+      !pre.pr &&
+      pre.branch === null &&
+      deliveringEngagement(pre) === null &&
+      pre.engagements.some(
+        (e) =>
+          e.profileId === actorRef.profileId && !e.delivers && e.verdictCapable,
+      )
+    ) {
+      const probe = await probeNothingToDeliver(db, ctx, projectSlug, taskKey);
+      // `no_repo` verifies but carries no sha, and a revision needs a real head
+      // to name — synthesizing one would fabricate a fact. A repo-less project
+      // keeps its existing path (no revision, and `acceptanceBlockedReason` only
+      // holds it when a required reviewer is engaged).
+      if (probe.status === "verified" && probe.verification.baseSha !== null) {
+        noChangeMint = probe.verification;
+      }
+    }
+  }
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       if (verdict) {
+        // In-lock re-check: a delivery could have landed during the probe above.
+        if (
+          noChangeMint &&
+          !parsed.frontmatter.workRevision &&
+          !parsed.frontmatter.pr &&
+          parsed.frontmatter.branch === null &&
+          deliveringEngagement(parsed.frontmatter) === null
+        ) {
+          parsed.frontmatter.workRevision = {
+            id: newId("rev"),
+            headSha: noChangeMint.baseSha!,
+            treeSha: null,
+            branch: null,
+            createdAt: new Date().toISOString(),
+            sourceProfileId: null,
+            kind: "verified",
+          };
+          parsed.frontmatter.noChanges = true;
+        } else {
+          // Nothing was minted — keep the copy below honest about it.
+          noChangeMint = null;
+        }
         // F10-15: bind the verdict to the CURRENT work revision, last-write-wins
         // per (profileId, revisionId). A NEW revision (delivered head/tree
         // change) makes it stale automatically — no comment/stage-bounce
@@ -1973,7 +2043,17 @@ export async function recordAgentCompletion(
           summary = `${roleDisplay} approved, but there is no delivered revision to bind the verdict to yet.`;
         } else if (validation === "healthy") {
           title = "Review passed";
-          summary = `${roleDisplay} approved the work.`;
+          // R19-1: when the subject is a VERIFICATION revision, say what was
+          // actually judged — there is no "work" to have approved. The two
+          // bases are different facts (no branch at all vs. a branch carrying
+          // nothing), so the sentence must not state one for the other.
+          summary = noChangeMint
+            ? `${roleDisplay} approved: there is nothing to deliver — ` +
+              (noChangeMint.basis === "no_branch"
+                ? `no \`${noChangeMint.branch}\` branch exists on the remote`
+                : `\`${noChangeMint.branch}\` carries no commits ahead of \`${noChangeMint.baseBranch}\``) +
+              `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. Accepting completes this task with no changes.`
+            : `${roleDisplay} approved the work.`;
         } else {
           // Approved, but not yet cleared: another required reviewer is
           // outstanding or has requested changes on the current revision.
@@ -4230,6 +4310,18 @@ export async function resolvePacket(
         input.taskKey,
       );
       if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+      // R19-1: the packet path is a writer to Done like the other two, so the
+      // no-change basis is re-proved live HERE as well — otherwise the
+      // operator's own acceptance packet becomes the one door a stale
+      // `noChanges` flag closes a now-non-empty branch through. No `force` on
+      // this path.
+      const noChange = await acceptanceNoChangeCheck(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+      );
+      if (noChange.refusal) throw AppError.conflict(noChange.refusal);
       // F15-13: a PR already merged out of band needs no merge attempt, and the
       // completion event must not claim the merge as this human's act.
       const alreadyMerged = existing.parsed.frontmatter.pr?.state === "merged";
@@ -4283,31 +4375,40 @@ export async function resolvePacket(
       const hasPr = !!existing.parsed.frontmatter.pr;
       // R17-1: name any reviewed-revision drift on the completion record.
       const driftNote = revisionDriftNote(existing.parsed.frontmatter);
-      event = {
-        occurredAt: now,
-        type: "completion",
-        actor: human,
-        title: "Completion accepted",
-        text:
-          (!hasPr
-            ? existing.parsed.frontmatter.noChanges
-              ? "Human acceptance recorded — **completed with no changes required**. Task transitioned to **Done**; the goal was already satisfied, so nothing was delivered or merged."
-              : "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
-            : alreadyMerged
-              ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
-              : reallyMerged
-                ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
-                : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
-          driftNote,
-        toAgent: false,
-        evidence: null,
-      };
+      // R19-1: the ONE shared no-change completion event, same as the other two
+      // writers to Done.
+      event = noChange.applies
+        ? noChangeCompletionEvent({
+            taskKey: input.taskKey,
+            actor: human,
+            occurredAt: now,
+            by: "human",
+            verification: noChange.verification,
+          })
+        : {
+            occurredAt: now,
+            type: "completion",
+            actor: human,
+            title: "Completion accepted",
+            text:
+              (!hasPr
+                ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
+                : alreadyMerged
+                  ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
+                  : reallyMerged
+                    ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
+                    : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+              driftNote,
+            toAgent: false,
+            evidence: null,
+          };
       mutate = (fm) => {
         // In-lock re-check (B-WF1): the generic resolution write below holds the
         // file lock — this is the last word before Done is recorded. A2: the
         // head verification above is bound to one (PR, revision) pair, so the
         // pair itself is re-asserted here too.
         assertVerifiedHeadStillApplies(fm, headCheck, input.taskKey);
+        assertVerifiedNoChangeStillApplies(fm, noChange, input.taskKey);
         const refusal = acceptanceRefusalReason(project, fm, input.taskKey, {
           blockedPacket: false,
         });
@@ -4731,10 +4832,12 @@ function verdictGateReason(fm: TaskFrontmatter, taskKey: string): string | null 
   // Delivered work with no PR: nothing stands for review, so acceptance would
   // close the task on work no PR ever carried (R15-1 gate 1).
   if (!fm.pr) {
-    // R17-2 (F17-L9): unless the branch is verified empty — a "Completed, no
-    // changes" outcome. The goal was already satisfied, so there is nothing to
-    // deliver or open a PR for; acceptance closes it to Done without a merge.
-    if (fm.noChanges) return null;
+    // R17-2 (F17-L9) / R19-1: unless the branch is verified empty, or the
+    // revision IS a verification revision (a reviewer judged the base sha
+    // because there was nothing to deliver) — a "Completed — no changes"
+    // outcome. There is nothing to open a PR for; acceptance closes it to Done
+    // without a merge, after re-proving the basis live.
+    if (fm.noChanges || fm.workRevision.kind === "verified") return null;
     return `${taskKey} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
   }
   const validation = deriveValidation(fm);
@@ -4959,6 +5062,16 @@ export interface AcceptanceAffordance {
   atBoundary: boolean;
   /** null when acceptance would succeed right now; else the exact refusal. */
   blockedReason: string | null;
+  /**
+   * F19-7: the refusal a PACKET `accept_completion` resolution would hit.
+   *
+   * `resolvePacket` evaluates the same contract with `blockedPacket: false` —
+   * the open packet IS what the resolution clears, so it cannot also be the
+   * reason to refuse it. A packet's confirm must therefore name THIS refusal,
+   * never `blockedReason`, or it would warn about a block the server is not
+   * going to apply (or, worse, stay silent about one it will).
+   */
+  blockedReasonViaPacket: string | null;
   /** Render an acceptance control iff true. */
   canAccept: boolean;
   /** R16-3: the blocker is a terminal GitHub fact (a closed, unmerged PR), not a
@@ -4990,6 +5103,7 @@ export function resolveAcceptanceAffordance(
     hasAuthority: false,
     atBoundary: false,
     blockedReason: null,
+    blockedReasonViaPacket: null,
     canAccept: false,
     terminallyBlocked: false,
   };
@@ -5027,6 +5141,10 @@ export function resolveAcceptanceAffordance(
     hasAuthority,
     atBoundary,
     blockedReason,
+    // F19-7: what a packet resolution would hit — see the field's docstring.
+    blockedReasonViaPacket: acceptanceRefusalReason(project, fm, input.taskKey, {
+      blockedPacket: false,
+    }),
     canAccept: hasAuthority && atBoundary && blockedReason === null,
     terminallyBlocked: acceptanceTerminallyBlocked(fm),
   };
@@ -5086,6 +5204,10 @@ export async function applyAcceptanceWrite(
     skipInLockRecheck?: boolean;
     /** A verification already performed by the caller; re-read when absent. */
     headCheck?: AcceptancePrHeadCheck;
+    /** R19-1: the live no-change verification (re-read when absent). Bypassed by
+     *  `skipInLockRecheck` — the audited force override — because this path
+     *  merges nothing; the head gate above is never bypassed. */
+    noChangeCheck?: AcceptanceNoChangeCheck;
   },
 ): Promise<void> {
   const project = loadProjectContext(ctx, input.projectSlug);
@@ -5093,8 +5215,18 @@ export async function applyAcceptanceWrite(
     input.headCheck ??
     (await acceptancePrHeadCheck(db, ctx, input.projectSlug, input.taskKey));
   if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+  // R19-1: the SECOND layer of the no-change gate. Every writer to Done funnels
+  // through here, so a caller that forgets the check still cannot close a task
+  // on a stale `noChanges` flag (F19-21).
+  const noChange =
+    input.noChangeCheck ??
+    (await acceptanceNoChangeCheck(db, ctx, input.projectSlug, input.taskKey));
+  if (noChange.refusal && !input.skipInLockRecheck) {
+    throw AppError.conflict(noChange.refusal);
+  }
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     assertVerifiedHeadStillApplies(parsed.frontmatter, headCheck, input.taskKey);
+    assertVerifiedNoChangeStillApplies(parsed.frontmatter, noChange, input.taskKey);
     if (!input.skipInLockRecheck) {
       const refusal = acceptanceRefusalReason(
         project,
@@ -5192,6 +5324,21 @@ async function acceptCompletion(
   );
   if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
 
+  // R19-1: a `noChanges` task closes WITHOUT a merge, so its basis must be
+  // re-proved LIVE at the moment of acceptance — a flag set at some past
+  // delivery attempt must never close a task whose branch has since gained
+  // commits (F19-21). Fails closed: an unreachable or uncredentialed remote
+  // refuses. `force` MAY bypass it (unlike the head gate, which guards an
+  // irreversible merge — this path merges nothing), and the completion event
+  // then says the check did not pass instead of claiming a verification.
+  const noChange = await acceptanceNoChangeCheck(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+  );
+  if (noChange.refusal && !input.force) throw AppError.conflict(noChange.refusal);
+
   // F15-13: a PR already merged on GitHub (out of band, reconciled into the
   // cache) needs no merge attempt — and the completion event must not claim the
   // merge as this human's act.
@@ -5247,25 +5394,34 @@ async function acceptCompletion(
 
   // R17-1: name any reviewed-revision drift on the completion record.
   const driftNote = revisionDriftNote(existing.parsed.frontmatter);
-  const event: TaskFileEvent = {
-    occurredAt: new Date().toISOString(),
-    type: "completion",
-    actor: humanActorRef(db, actor),
-    title: "Completion accepted",
-    text:
-      (!hasPr
-        ? existing.parsed.frontmatter.noChanges
-          ? `Human acceptance recorded — **completed with no changes required**. ${input.taskKey} transitioned to **Done**; the goal was already satisfied, so nothing was delivered or merged.`
-          : `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
-        : alreadyMerged
-          ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
-          : reallyMerged
-            ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
-            : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
-      driftNote,
-    toAgent: false,
-    evidence: null,
-  };
+  // R19-1: the no-change outcome has its OWN completion event, from the one
+  // shared builder — it must never borrow the merge path's title or wording.
+  const event: TaskFileEvent = noChange.applies
+    ? noChangeCompletionEvent({
+        taskKey: input.taskKey,
+        actor: humanActorRef(db, actor),
+        occurredAt: new Date().toISOString(),
+        by: "human",
+        verification: noChange.verification,
+        forcedRefusal: noChange.refusal,
+      })
+    : {
+        occurredAt: new Date().toISOString(),
+        type: "completion",
+        actor: humanActorRef(db, actor),
+        title: "Completion accepted",
+        text:
+          (!hasPr
+            ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
+            : alreadyMerged
+              ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
+              : reallyMerged
+                ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
+                : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+          driftNote,
+        toAgent: false,
+        evidence: null,
+      };
   await applyAcceptanceWrite(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -5273,6 +5429,7 @@ async function acceptCompletion(
     prState: reallyMerged ? "merged" : "accepted",
     event,
     headCheck,
+    noChangeCheck: noChange,
     ...(input.force ? { skipInLockRecheck: true } : {}),
   });
 

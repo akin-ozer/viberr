@@ -151,9 +151,11 @@ docker compose logs -f app  # watch the boot integrity log (dirs, migrations, co
 - `docker compose exec app npm run seed` seeds the product baseline — the built-in agent
   catalog, knowledge bases, skills — and nothing else: no demo/mock board data. The board
   always starts as a clean sheet.
-- Health: `GET /resources/health` → `{ ok, projections: { projects, tasks }, watcher }`.
+- Health: `GET /resources/health` →
+  `{ ok, projections: { projects, tasks }, watcher, kbWatcher, lock, backends }`.
   Compose has a healthcheck hitting it; container platforms should use it as the readiness
-  probe.
+  probe. *(Field list corrected 2026-08-06, pass 19 — `kbWatcher`, `lock` and `backends`
+  ship and were missing here, though `lock` and `backends` are both documented below.)*
 
 ## Persistence, backup & restore
 

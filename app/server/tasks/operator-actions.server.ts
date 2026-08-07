@@ -69,6 +69,11 @@ import {
   type TaskMutationContext,
 } from "./task-actions.server";
 import {
+  acceptanceNoChangeCheck,
+  noChangeApplies,
+  noChangeCompletionEvent,
+} from "./no-change-completion.server";
+import {
   assignReviewer,
   assignSpecialist,
   listDeployedSpecialists,
@@ -1006,6 +1011,16 @@ export interface OperatorTaskSnapshot {
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
+  /** R19-1: this task is a no-change completion — nothing was delivered and
+   *  there is nothing to merge. Accept it with `accept_completion`; do NOT call
+   *  `deliver_for_review` and do NOT open a decision packet asking a human how
+   *  to close it out. The operator used to be structurally blind to the shape,
+   *  which is how VC-5 became a "how do we close this out?" packet whose
+   *  recommended option was "Manually mark Done" (F19-21).
+   *
+   *  Optional only so hand-built test fixtures need not restate it; the real
+   *  producer (`operatorSnapshot`) always sets it. */
+  noChanges?: boolean;
   /** Queued/running agent runs on THIS task — the ONLY truth for "a run is
    *  in flight". Live-caught: the operator inferred an in-flight deliverer
    *  from `waiting: "agent"` (a board display flag) plus its own directive
@@ -1124,6 +1139,8 @@ export function operatorSnapshot(
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".
     branch: fm.branch ?? null,
+    // R19-1: the "nothing to deliver" shape, stated outright.
+    noChanges: noChangeApplies(fm),
     liveRuns: (
       db
         .prepare(
@@ -2062,6 +2079,10 @@ export async function operatorAcceptCompletion(
   // maintainer applies it to accept completion into Done.
   if (authority.autonomy !== "full" || gate(authority, "completion-for-acceptance") !== "direct") {
     const doneName = stageNameOf(ctx, input.projectSlug, doneStageId);
+    // R19-1: a task with nothing to deliver merges nothing, so the card must not
+    // promise a merge — the old single sentence told a human that applying it
+    // "merges the review PR", for a task that has no PR and never will.
+    const noChange = noChangeApplies(file.parsed.frontmatter);
     await addRecommendation(
       db,
       ctx,
@@ -2070,9 +2091,13 @@ export async function operatorAcceptCompletion(
       {
         kind: "accept_completion",
         toStageId: doneStageId,
-        label: `Accept completion — move ${input.taskKey} to ${doneName}`,
+        label: noChange
+          ? `Complete ${input.taskKey} with no changes — move it to ${doneName}`
+          : `Accept completion — move ${input.taskKey} to ${doneName}`,
       },
-      `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable — otherwise it records the PR as accepted (merge pending).`,
+      noChange
+        ? `The review is clean and there is nothing to deliver — no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
+        : `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable — otherwise it records the PR as accepted (merge pending).`,
     );
     recordAudit(db, {
       action: "task.operator.recommended_completion",
@@ -2098,6 +2123,16 @@ export async function operatorAcceptCompletion(
   // human path gate by gate and shipped with a subset more than once. The core
   // also re-checks the refusal gates inside the write lock (B-WF1).
   const hasPr = !!file.parsed.frontmatter.pr;
+  // R19-1: the operator closes a no-change task through the SAME live, fail-
+  // closed re-check the humans do — it has no force override, so an unverifiable
+  // remote (or a branch that gained commits) is a plain noop with the reason.
+  const noChange = await acceptanceNoChangeCheck(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+  );
+  if (noChange.refusal) return { outcome: "noop", message: noChange.refusal };
   // R17-1 (F17-L12): name any reviewed-revision drift on the completion record.
   const driftNote = revisionDriftNote(file.parsed.frontmatter);
   await applyAcceptanceWrite(db, ctx, {
@@ -2105,21 +2140,28 @@ export async function operatorAcceptCompletion(
     taskKey: input.taskKey,
     doneStageId,
     prState: "accepted",
-    event: {
-      occurredAt: new Date().toISOString(),
-      type: "completion",
-      actor: { kind: "operator" },
-      title: "Completion accepted",
-      text:
-        (hasPr
-          ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
-          : file.parsed.frontmatter.noChanges
-            ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done, **completed with no changes required** (nothing to deliver or merge).`
-            : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`) +
-        driftNote,
-      toAgent: false,
-      evidence: null,
-    },
+    noChangeCheck: noChange,
+    event: noChange.applies
+      ? noChangeCompletionEvent({
+          taskKey: input.taskKey,
+          actor: { kind: "operator" },
+          occurredAt: new Date().toISOString(),
+          by: "operator",
+          verification: noChange.verification,
+        })
+      : {
+          occurredAt: new Date().toISOString(),
+          type: "completion",
+          actor: { kind: "operator" },
+          title: "Completion accepted",
+          text:
+            (hasPr
+              ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
+              : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`) +
+            driftNote,
+          toAgent: false,
+          evidence: null,
+        },
   });
   recordAudit(db, {
     action: "task.operator.accepted_completion",

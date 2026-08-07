@@ -48,10 +48,16 @@ it is regenerated from the filesystem rather than restated here.
 
 ## Data & naming
 
-- **SQLite:** plural snake_case tables (`users`, `sessions`, `task_projections`,
-  `audit_events`), snake_case columns, `<entity>_id` FKs, `idx_<table>__<cols>` indexes. DB
+- **SQLite:** plural snake_case tables (`users`, `task_projections`, `audit_events`,
+  `notifications`), snake_case columns, `<entity>_id` FKs, `idx_<table>__<cols>` indexes. DB
   rows map to camelCase through the centralized mapping modules in `app/shared/mapping/` —
   never ad hoc at a call site.
+  **Exception, and it is not ours to rename:** better-auth owns four tables and names them
+  in the SINGULAR with camelCase columns — `user`, `session`, `account`, `verification`
+  (`db/migrations/0001_baseline.sql`). Its adapter generates the SQL, so the convention
+  above applies to Viberr's own tables only. *(Corrected 2026-08-06, pass 19 — the example
+  list here said `sessions`, a table that does not exist. That invented name had already
+  propagated into `docs/operations/runbook.md`, which described a sweep of it; F19-17.)*
 - **TS/JSON:** camelCase. Timestamps are UTC ISO 8601 strings at all boundaries and in
   files. Booleans stay booleans; null stays null.
 - **Readiness values** are exactly `ready` | `input_required` |
@@ -104,6 +110,13 @@ it is regenerated from the filesystem rather than restated here.
 - Keep `viberr.css` classes and CSS variables exactly; add new CSS only in clearly-marked
   appended sections of `app/app.css`. No Tailwind, no inline hex colors — use the existing
   tokens. A `var(--x)` that is not defined in `:root` is a bug, not a style choice.
+  *(Clarified 2026-08-06, pass 19 — N19-4.)* "Exactly" bound the class names and the naming
+  convention (flat, unprefixed), and those held. It does **not** make the mock's VALUES
+  authoritative, and several have deliberately diverged: shipped `--radius-card` is 16px and
+  `--radius-panel` 22px against the mock's 18/28, there is no canvas/large radius token, the
+  display face is Manrope not Roobert PRO, and `--pink` / `--dark-red` / `--radius-large`
+  exist in `design/*.html` and nowhere in the app. `app/app.css`'s `:root` is the ONLY token
+  source; read a value there, never out of the mock.
 - Icons: one ported `Icon` component in `app/ui/icon.tsx`, reused everywhere.
 - Theme: light/dark/system, persisted per user (profile) plus a cookie for SSR-safe first
   paint.
@@ -408,7 +421,9 @@ it is regenerated from the filesystem rather than restated here.
     as unsubstantiated because it never saw the KB. The union is deduped (a KB both grant never
     double-charges the shared injection budget), applies only to non-delivering runs, and is
     tolerant of an undeployed deliverer. Same on the resumed/@mention review path.
-    (`app/server/tasks/specialist-run.server.ts` — `deliveringKbGrants`/`withDeliveringKb`)
+    (`app/server/tasks/specialist-run.server.ts` — `deliveringContextGrants`/`withDeliveringGrants`;
+    the pair was renamed from `deliveringKbGrants`/`withDeliveringKb` after this ruling, and the
+    inherited set is still KBs only — ruling 57 / R19-3. Names corrected 2026-08-06, pass 19.)
 
 48. **R18-2 (2026-08-05): a full-autonomy delivery re-queues the operator.** Opening the review
     PR is delivery, NOT a stage transition, so the P11-70 every-transition re-trigger (and the
@@ -476,16 +491,71 @@ it is regenerated from the filesystem rather than restated here.
     introduced the over-granting it warned about. Recorded as a class: a finding taken from a UI
     impression and never re-verified in code can survive several passes as fact.
 
+55. **R19-1 (2026-08-06): a task with verifiably nothing to deliver reaches "Completed — no
+    changes" WITHOUT faking a delivery.** Ruling 43 (R17-2) named the outcome but only
+    `performDelivery` ever set it, so the flag existed solely on the far side of a delivery
+    ATTEMPT — and a verification-only task, which never needs a branch at all, could not reach
+    it. Live (VC-5): the reviewer approved on `main`, no branch was ever created,
+    `accept_completion` returned `[noop] No reviewed revision yet — nothing for the required
+    reviewers to approve`, and the operator had to open a packet asking a human "how do I close
+    this out?" whose only real option was "Manually mark Done" — the one exit that bypasses the
+    acceptance ceremony R17-2 exists to preserve. The ruling: when a reviewer approves and there
+    is verifiably nothing to deliver, ACCEPTANCE closes the task to Done through the no-change
+    completion event, with its own confirm dialog (ruling 20 / R15-1 applies to this path too —
+    it merges nothing, and the dialog says so). This extends ruling 43 to the shape it was named
+    for; it does not widen the gate — "verifiably nothing to deliver" stays a verified fact, not
+    an absent one. (Closes F19-21; `app/server/tasks/no-change-completion.server.ts`.)
+
+56. **R19-2 (2026-08-06): the repository wins; a knowledge base is context.** When an org
+    knowledge base and the repo's OWN documented conventions disagree about how the repo's files
+    should look, the REPOSITORY is authoritative. A KB supplies background the repo cannot give
+    (org policy, domain knowledge, cross-repo standards); it does not overrule a convention the
+    repo documents about itself. Agents are told this in the run prompt rather than left to
+    infer it, and a KB-vs-repo conflict an agent notices surfaces as a TYPED EVENT — never
+    silently resolved in either direction. Live: `qa/smoke/README.md` documented one pass-note
+    format and a granted KB documented another; the Codex Developer (KB granted) followed the
+    KB, the Claude Doc Writer (KB not granted) followed the README and flagged the KB-shaped
+    files as non-conforming. Both agents behaved reasonably — the product had no precedence
+    rule, so two agents on one repo produced two house styles. Precedence is the fix; suppressing
+    one source is not. (Owner ruling gathered pass 19, closing Q19-2; on this pass's
+    implementation backlog.)
+
+57. **R19-3 (2026-08-06): reviewer inheritance stays KBs only — the code is right, the comment
+    is wrong.** Ruling 47 (R18-1) inherits the delivering engagement's grants so deliverer and
+    reviewer judge against the same CONVENTIONS, and conventions are what a KB carries. A skill
+    is role instruction — what an agent is told to *do* — so a reviewer inheriting the
+    deliverer's skill blurs the two roles instead of aligning their evidence. The union stays
+    `kb` and only `kb`. The `deliveringContextGrants` / `withDeliveringGrants` docstring claiming
+    the grants were "widened to SKILLS by LV-F3" describes a widening that never reached either
+    call site; the honest fix is to correct the prose, not to implement it. (Closes F19-2;
+    `app/server/tasks/specialist-run.server.ts`.)
+
+58. **R19-4 (2026-08-06): the operator gets a read-only repository view at triage.** Scoping has
+    to be grounded in the real repository. At triage the operator's workspace holds only
+    `task.md`, and with nothing else to look at it described that workspace AS the repository —
+    writing "Repo contents visible to operator: only task.md — no docs/ or README found" into a
+    human-facing packet about a repo that has both, then offering to write a README that already
+    existed. The operator may list and read the default branch READ-ONLY while triaging, and the
+    persona must never describe the task workspace as the repository. The cost is a shallow fetch
+    per task; the return is packets whose options name files that exist instead of inventing
+    them. (Owner ruling gathered pass 19, closing Q19-1 + F19-4; on this pass's implementation
+    backlog.)
+
 ## Route map
 
 ```
 /login  /logout  /api/auth/*            (better-auth, incl. OAuth callbacks)
 /                                       → home (project list)
+/projects                               → home (bare /projects is not a 404 — N5)
 /projects/:slug                         → redirect to board
 /projects/:slug/board  /review  /agents  /policy  /github  /activity  /settings
 /projects/:slug/tasks/:key
 /org/settings                           (org admin, tabbed)
-/profile   /notifications
+/profile   /notifications   /notifications/read   /prefs/theme
 /resources/events  (SSE)   /resources/health   /resources/run-log
-/resources/session-export   /resources/model-catalog
+/resources/search   /resources/session-export   /resources/model-catalog
 ```
+
+*(Corrected 2026-08-06, pass 19, against `app/routes.ts`: `/projects`, `/notifications/read`,
+`/prefs/theme` and `/resources/search` — the ⌘K palette query from ruling 23 / R15-5 — ship but
+were never added here.)*

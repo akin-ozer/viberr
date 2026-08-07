@@ -446,6 +446,92 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
     )!;
     expect(task.blockReason).toContain("closed on GitHub without merging");
   });
+
+  it("R19-1: a VERIFICATION revision projects no block reason — it is not undelivered work", () => {
+    // The projected sentence is the mirror of `verdictGateReason`, so it has to
+    // learn the same thing: a revision a reviewer minted on a task with nothing
+    // to deliver is not "delivered work with no PR". Left unmirrored, the review
+    // queue and decisions inbox would keep telling a human to "deliver the
+    // branch & open the PR" for a task that has no branch (F19-21).
+    // CANARY: drop `fm.noChanges || fm.workRevision.kind === "verified"` from
+    // acceptanceBlockReason — this reads the deliver-the-branch sentence.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-4", {
+        stage: "review",
+        waiting: "human",
+        validation: "healthy",
+        noChanges: true,
+        branch: null,
+        pr: null,
+        engagements: [
+          {
+            profileId: "reviewer",
+            backend: "claude",
+            role: "Review & validation",
+            delivers: false,
+            verdictCapable: true,
+          },
+        ],
+        workRevision: {
+          id: "rev_v1",
+          headSha: "e".repeat(40),
+          treeSha: null,
+          branch: null,
+          createdAt: "2026-08-06T09:00:00.000Z",
+          sourceProfileId: null,
+          kind: "verified",
+        },
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_v1",
+            headSha: "e".repeat(40),
+            result: "approve",
+            reason: "Nothing to change.",
+            at: "2026-08-06T09:01:00.000Z",
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const task = listProjectTasks(store.db, store.slug).find(
+      (t) => t.key === "VIB-4",
+    )!;
+    expect(task.blockReason).toBeNull();
+
+    // The revision KIND clears the gate on its own. `noChanges` and
+    // `kind: "verified"` are two separate facts and the mint writes both, so
+    // without this case the kind arm would be permanently shadowed by the flag
+    // and could be deleted with every test still green.
+    // CANARY: remove `|| fm.workRevision.kind === "verified"` — only this
+    // assertion fails.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...baseTaskFrontmatter("VIB-5", {
+          stage: "review",
+          waiting: "human",
+          validation: "healthy",
+          branch: null,
+          pr: null,
+          workRevision: {
+            id: "rev_v2",
+            headSha: "f".repeat(40),
+            treeSha: null,
+            branch: null,
+            createdAt: "2026-08-06T09:00:00.000Z",
+            sourceProfileId: null,
+            kind: "verified",
+          },
+        }),
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(
+      listProjectTasks(store.db, store.slug).find((t) => t.key === "VIB-5")!
+        .blockReason,
+    ).toBeNull();
+  });
 });
 
 describe("scoped project rescan (F20)", () => {

@@ -246,6 +246,15 @@ A token-driven system built on low-opinion primitives gives Viberr the right mid
 
 The design system should begin with a small, disciplined foundation rather than an ambitious UI catalog. Start with semantic tokens for color, typography, spacing, radius, elevation, border treatment, motion, and workflow-state semantics. Then build a compact first-party component layer for Viberr’s core supervision workflow.
 
+> **Amended 2026-08-06 (pass 19, N19-4) — `app/app.css`'s `:root` is the ONLY token source, and it has drifted from the design-system mock in both directions.** The token *naming convention* held (flat, unprefixed: `--bg`, `--fg`, `--blue`), but the values did not, and `design/design-system.html` is a build input that was never updated to match. What actually ships:
+>
+> - **Radius scale is smaller.** Shipped: `--radius-button: 8px`, `--radius-chip: 999px`, `--radius-card: **16px**`, `--radius-panel: **22px**`. The mock documents card **18** / panel **28** and a **44px** canvas radius; there is no canvas or large radius token in the app at all.
+> - **Documented-but-undefined tokens.** `--pink`, `--dark-red` and `--radius-large` appear in the mock and in nothing else. Using one in app code yields an empty value, not a colour — they are not part of the system.
+> - **Tokens the app added that no spec records:** `--agent` / `--agent-dark` / `--agent-soft` (the violet agent-identity tint), `--cta-*`, `--faint`, `--hairline`, `--shadow-ring` / `--shadow-card` / `--shadow-pop`, `--ease-out`, `--rail-w`, `--topbar-h`, `--radius-chip`.
+> - **No spacing scale and no elevation scale.** The "start with tokens for spacing … elevation" instruction above was only partly taken: spacing is per-component rem values (see the Spacing note below), and elevation is three named shadow tokens rather than a scale.
+>
+> The app is deliberately right here and the documents are the ones being corrected (`planning/README.md`'s canon rule). The integrity gate is `app/app.css.test.ts`, which checks token integrity and contrast against the real stylesheet. Never copy a value out of `design/*.html`; read the `:root` block.
+
 The initial component inventory should be intentionally narrow and tied directly to real product surfaces: buttons, inputs, filters, command surfaces, badges, cards, panels, tabs, tables, drawers, dialogs, timeline blocks, decision packets, task-health indicators, and execution-profile displays. The system should avoid rebuilding a full generic component library before those core surfaces are proven.
 
 Because Viberr is a browser-based web application optimized for desktop workflows and screen sizes, the system should support compact layouts, strong keyboard behavior, clear focus handling, and progressive disclosure. These interaction rules are part of the design-system foundation, not implementation detail.
@@ -370,7 +379,9 @@ A practical type strategy:
 - moderate body line-height
 - tighter spacing for labels, metadata, and compact operational blocks
 
-> **Superseded — the named typefaces are advisory and the build did not take them.** The shipped stack comes from `design/design-system.html`: Roobert PRO Medium for display, Noto Sans for body, JetBrains Mono for the technical/reference role. The mono-used-intentionally rule and the scan-first hierarchy above are honoured; only the family names changed.
+> **Superseded — the named typefaces are advisory and the build did not take them.** The shipped stack is declared in `app/app.css`'s `:root`: **Manrope** for display (bundled `@fontsource/manrope` 500/600/700/800), Noto Sans for body, JetBrains Mono for the technical/reference role. The mono-used-intentionally rule and the scan-first hierarchy above are honoured; only the family names changed.
+>
+> *(Corrected 2026-08-06, pass 19 — N19-2.)* This note previously named **Roobert PRO Medium** as the shipped display face, because that is what `design/design-system.html` and every HTML mock declare. Roobert PRO is not web-available; Manrope was chosen as the geometric-humanist stand-in and is what actually ships. `app.css` even carried both for a while — a Roobert-first token block silently overridden by a later `--font-display: "Manrope", …` — which P16-UI-04 collapsed to the single Manrope declaration. Read `app/app.css` for the real value; the mock's HTML is a build input, not the shipped token source.
 
 ### Spacing & Layout Foundation
 

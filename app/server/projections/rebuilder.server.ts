@@ -312,9 +312,11 @@ function acceptanceBlockReason(fm: TaskFrontmatter): string | null {
   // non-repo work, which stays acceptable.
   if (!fm.workRevision) return null;
   if (!fm.pr) {
-    // R17-2 (F17-L9): a verified empty branch is a "Completed, no changes"
-    // completion — acceptable without a PR (mirror of verdictGateReason).
-    if (fm.noChanges) return null;
+    // R17-2 (F17-L9) / R19-1: a verified empty branch — or a VERIFICATION
+    // revision, the base sha a reviewer judged on a task with nothing to
+    // deliver — is a "Completed — no changes" completion, acceptable without a
+    // PR (mirror of verdictGateReason).
+    if (fm.noChanges || fm.workRevision.kind === "verified") return null;
     return `${fm.key} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
   }
   const validation = deriveValidation(fm);

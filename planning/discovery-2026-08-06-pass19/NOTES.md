@@ -27,6 +27,23 @@ against main @65063b8). Intent distillation: INTENT.md.
   repo, so the operator can list/read the default branch during triage. Costs a shallow fetch per
   task; makes packets concrete instead of invented. Closes Q19-1 + F19-4.
 
+## Implementation status (branch `pass19/product-fixes`)
+
+| Cluster | Findings | Owner | State |
+|---------|----------|-------|-------|
+| Copy / a11y / vocabulary | UX19-1, F19-11, F19-5, F19-12 | me | ✅ committed `1836f00` (+ vocabulary lint, canaried) |
+| Archived-task honesty | F19-8, F19-9, F19-13 | me | ✅ committed `57b04e9` (server guard + UI, canaried) |
+| Acceptance confirm parity | F19-3, F19-7, F19-14, F19-10 | agent A | ▶ in flight (spec-acceptance-confirm-parity.md) |
+| No-change acceptance (R19-1) | F19-21 | agent B | ▶ in flight (spec-no-change-acceptance.md) |
+| Failure diagnostics + reliability | F19-6, F19-18, F19-19, F19-20 | agent D | ▶ in flight (spec-failure-diagnostics.md) |
+| Docs canon + rulings promotion | F19-17, N19-2/3/4, R19-1..4 | agent E | ▶ in flight |
+| Skill-mount race + runtime disclosure | F19-15, F19-16, R19-3 | — | ⏸ queued (spec-skill-mount-race.md; shares specialist-run.server.ts with D) |
+| Operator repo view (R19-4) + KB precedence (R19-2) | F19-4, Q19-1, Q19-2 | — | ⏸ queued (spec-operator-repo-view.md; shares operator-actions with B) |
+| Delivery leaves an actionable step | F19-1 | — | ⏸ queued |
+| Reviewer-KB docstring (R19-3) | F19-2 | — | ⏸ folded into skill-mount cluster |
+| Two-surface acceptance contradictions | UX19-2, UX19-3 | — | ⏸ queued (re-check after A lands) |
+| Q-V1 test gap | N19-5 | — | ⏸ queued |
+
 ## Finding ledger
 
 IDs: F19-nn (defects), UX19-nn (UX/coherence), Q19-nn (owner questions), N19-nn (notes/ideas).
@@ -123,26 +140,26 @@ Status: ▶ running · ✓ pass · ✗ finding filed · ○ pending
 | UC-03 | Codex developer implements on task branch; operator delivers + opens PR | ✓ (PR #147) |
 | UC-04 | Reviewer engagement at review boundary; verdict-gated acceptance | ✓ (pinned-revision approve) |
 | UC-05 | Human acceptance → real merge + after-merge branch delete | ✓ via rec-Apply; ✗ F19-3 no confirm dialog |
-| UC-06 | Reject path: close PR externally → recovery packet surfaces in viberr | ○ |
-| UC-07 | Merge PR externally via gh → adoption/reconcile behavior (DG-1 guard) | ○ |
-| UC-08 | Underspecified task → triage quality gate flags, input_required + packet | ○ |
-| UC-09 | @operator / @Developer comments; agent @tags human back + notification | ○ |
-| UC-10 | Ownership: assign me; contributor-owner accepts own task (R6-2); admin release | ○ |
-| UC-11 | Second/third user; RBAC per role; members-only invisibility | ○ |
-| UC-12 | Operator recommends impl→review; human applies rec (R15-3) | ○ |
-| UC-13 | KB: create, grant to developer; reviewer KB inheritance (R18-1) | ○ |
-| UC-14 | MCP: add server, grant; tools reach Claude run; Codex naming/no-auth delta | ○ |
-| UC-15 | Skills: granted skill loads (R18-5); decoy skill NOT loaded | ○ |
-| UC-16 | Backend parity: same work Claude vs Codex developer | ○ |
-| UC-17 | Full autonomy + completion grant → done (merge pending), human merges (R16-6) | ○ |
-| UC-18 | Scheduled operator re-run fires (FR39); cancellable; terminal guard | ○ |
-| UC-19 | Force-accept past missing verdict; divergence surfaced (R17-1) | ○ |
-| UC-20 | "Completed — no changes" outcome (R17-2) | ○ |
-| UC-21 | Blocker → decision packet; resolve via UI options | ○ |
-| UC-22 | Archive task (+deleteBranch); archived drops live pills | ○ |
-| UC-23 | Hand-edit task.md in store → Re-scan reconciles (FR10) | ○ |
-| UC-24 | Search/⌘K + notifications drawer + unread badge | ○ |
-| UC-25 | Push commit after review → revision drift surfaced on accept (R17-1) | ○ |
-| UC-26 | Org-admin override on non-member project (audit trail) | ○ |
-| UC-27 | Interrupt operator mid-run; manual re-run | ○ |
-| UC-28 | Branch collision with foreign remote branch → human-gated packet (R18-4) | ○ |
+| UC-06 | Reject path: close PR externally → recovery packet surfaces in viberr | ✓ (VC-4/PR149: divergence note, moot rec withdrawn, packet; self-withdrew on external reopen) |
+| UC-07 | Merge PR externally via gh → adoption/reconcile behavior (DG-1 guard) | ○ phase-3 validation |
+| UC-08 | Underspecified task → triage quality gate flags, input_required + packet | ✓ (VC-2, 4-option packet w/ operator pick + edit_goal) |
+| UC-09 | @operator / @Developer comments; agent @tags human back + notification | ✓ partial (operator↔agent mentions + notify observed; human-initiated @operator question pending) |
+| UC-10 | Ownership: assign me; contributor-owner accepts own task (R6-2); admin release | ✓ partial (Elif contributor self-take VC-4; admin release + owner-accept pending) |
+| UC-11 | Second/third user; RBAC per role; members-only invisibility | ✓ (non-member 404 all routes; viewer 403-except-comment; contributor take-ownership) |
+| UC-12 | Operator recommends impl→review; human applies rec (R15-3) | ✓ (VC-5) |
+| UC-13 | KB: create, grant to developer; reviewer KB inheritance (R18-1) | ✓ (Marker-Convention v3 emitted by dev, verified byte-level by reviewer) |
+| UC-14 | MCP: add server, grant; tools reach Claude run; Codex naming/no-auth delta | ○ phase-3 validation |
+| UC-15 | Skills: granted skill loads (R18-5); decoy skill NOT loaded | ✓ (kubernetes-rollback decoy never surfaced; dev named only its grants) |
+| UC-16 | Backend parity: same work Claude vs Codex developer | ✓ (Doc Writer/Claude delivered VC-4 same envelope as Codex VC-1/3; operator picked it for a docs task) |
+| UC-17 | Full autonomy + completion grant → done (merge pending), human merges (R16-6) | ○ phase-3 validation |
+| UC-18 | Scheduled operator re-run fires (FR39); cancellable; terminal guard | ○ phase-3 validation (also validates F19-20 fix) |
+| UC-19 | Force-accept past missing verdict; divergence surfaced (R17-1) | ○ phase-3 validation (also validates F19-3/7 dialogs) |
+| UC-20 | "Completed — no changes" outcome (R17-2→R19-1) | ✗ F19-21 filed; re-run after R19-1 lands |
+| UC-21 | Blocker → decision packet; resolve via UI options | ✓ (VC-3 blocked packet resolved via retry option; VC-2 edit_goal resolve pending) |
+| UC-22 | Archive task (+deleteBranch); archived drops live pills | ○ phase-3 validation (also validates F19-8) |
+| UC-23 | Hand-edit task.md in store → Re-scan reconciles (FR10) | ○ phase-3 validation |
+| UC-24 | Search/⌘K + notifications drawer + unread badge | ○ phase-3 validation |
+| UC-25 | Push commit after review → revision drift surfaced on accept (R17-1) | ○ phase-3 validation |
+| UC-26 | Org-admin override on non-member project (audit trail) | ○ phase-3 validation |
+| UC-27 | Interrupt operator mid-run; manual re-run | ○ phase-3 validation |
+| UC-28 | Branch collision with foreign remote branch → human-gated packet (R18-4) | ○ phase-3 validation |
