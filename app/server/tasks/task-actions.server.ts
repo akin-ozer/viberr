@@ -12,6 +12,7 @@ import {
   type EvidenceRow,
   type PacketOption,
   type ParsedTaskFile,
+  type Recommendation,
   type TaskFileEvent,
   type TaskFrontmatter,
   type TaskPacket,
@@ -3652,12 +3653,14 @@ export async function performDelivery(
       // nothing, and the operator's own deliver tool already no-ops on a live PR, so this
       // never loops. Fire-and-forget and depth-capped, exactly like the transition
       // re-trigger; `autoInvokeOperator` is itself a no-op when no operator is deployed.
+      let requeuedOperator = false;
       if (result.created) {
         const { resolveOperatorAuthority } = await import("./operator-actions.server");
         const autonomy =
           ctx.operatorRun?.autonomy ??
           resolveOperatorAuthority(ctx, projectSlug).autonomy;
         if (autonomy === "full") {
+          requeuedOperator = true;
           void autoInvokeOperator(
             db,
             ctx,
@@ -3667,6 +3670,24 @@ export async function performDelivery(
             nextTransitionChainDepth(ctx),
           );
         }
+      }
+      // F19-1: R18-2 (above) deliberately leaves a SUPERVISED delivery to the
+      // human — but it assumed something made the task actionable, and nothing
+      // did. Live on VC-1: the operator pushed the branch, opened PR #147 and
+      // narrated "the task will move to Review; no further action needed", which
+      // was false (impl → review is an `approval` boundary and its
+      // stage-transitions capability is `recommend`, so nothing moved). It
+      // recorded no recommendation and no packet, so the task sat `waiting:human`
+      // with an open PR and NOTHING on any surface pointing at it. VC-4/VC-5, the
+      // same operator under the same policy, DID volunteer the recommendation —
+      // whether a delivered task is actionable was left to the model.
+      // `recordDeliveredNextStep` makes it structural. Exactly ONE of the two
+      // mechanisms runs after a successful delivery: the R18-2 re-queue (full
+      // autonomy, newly opened PR — the operator itself is the next step) or this
+      // server-recorded card. That keeps R18-2's full-autonomy behaviour byte-for-
+      // byte unchanged and covers every other successful delivery.
+      if (!requeuedOperator) {
+        await recordDeliveredNextStep(db, ctx, projectSlug, taskKey, result.prNumber);
       }
       return {
         status: "delivered",
@@ -3854,6 +3875,144 @@ async function surfaceDeliveryEvent(
       err: surfaceErr instanceof Error ? surfaceErr : new Error(String(surfaceErr)),
     });
   }
+}
+
+/** Audit fact for the F19-1 server-recorded next step (same `github.delivery.*`
+ *  family as the manual/operator delivery rows). */
+export const DELIVERY_NEXT_STEP_AUDIT_ACTION = "github.delivery.next_step";
+
+/**
+ * F19-1 — after a SUCCESSFUL delivery, guarantee the task carries an actionable
+ * next step instead of depending on the operator model volunteering one.
+ *
+ * Shape: the same `transition` recommendation card the operator writes when its
+ * `stage-transitions` capability is `recommend` — the one VC-4/VC-5 produced and
+ * VC-1 did not. A recommendation (not a packet) because a packet is the task's
+ * ONE open decision and would collide with the operator's next real question,
+ * and because `decisionsRequiring` already counts a pending recommendation, so
+ * one write lights up the bell, "Waiting on you", the board chip and the card in
+ * a single stroke. A typed timeline event alone was rejected: the delivery
+ * already writes those and VC-1 proves they leave no affordance to act on.
+ *
+ * The guarantee is structural and never fabricates operator reasoning — the
+ * timeline event is attributed to the `delivery` SYSTEM actor and the card's own
+ * detail says outright that Viberr recorded it, not the agent.
+ *
+ * It stays quiet whenever the task is already actionable or the move is not the
+ * honest next step:
+ *  - an open packet IS the actionable surface;
+ *  - any pending recommendation already is one — including the operator's own
+ *    equivalent "Move the task to <review>" (so the two never double up).
+ *    The `delivery` kind is the one exception: that card is the step this call
+ *    just carried out and `applyRecommendation` clears it moments later, so
+ *    counting it would strand the task exactly as before;
+ *  - a task already AT or PAST the review stage needs no move — B-FD5's
+ *    acceptance predicate is what surfaces it there;
+ *  - an archived task or archived (read-only, R6-3) project takes no new cards.
+ *
+ * Idempotent (NFR16): the suppression re-runs INSIDE the file lock, so a retry,
+ * a second delivery, or a concurrent operator recommendation can never leave two
+ * cards. Best-effort — a failure here only logs; it never fails the delivery
+ * that already succeeded.
+ */
+async function recordDeliveredNextStep(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  prNumber: number,
+): Promise<void> {
+  try {
+    const project = loadProjectContext(ctx, projectSlug);
+    if (project.archived) return;
+    const reviewStageId = reviewStageIdOf(project);
+    if (!reviewStageId) return;
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (!existing) return;
+    const fm = existing.parsed.frontmatter;
+    if (fm.archived) return;
+    // Strictly BEFORE the review stage: at review (or beyond) the move is done.
+    // An off-list stage id resolves to -1 and is left alone rather than guessed at.
+    const stageIdx = project.stages.findIndex((s) => s.id === fm.stage);
+    const reviewIdx = project.stages.findIndex((s) => s.id === reviewStageId);
+    if (stageIdx < 0 || reviewIdx < 0 || stageIdx >= reviewIdx) return;
+    if (alreadyActionable(existing.parsed)) return;
+
+    const reviewName = stageName(project, reviewStageId);
+    const label = `Move the task to ${reviewName}`;
+    const detail =
+      `Recorded by Viberr when the delivery landed — this is not the operator agent's ` +
+      `judgement. Review pull request #${prNumber} is open while ${taskKey} is still on ` +
+      `${stageName(project, fm.stage)}, and nothing had proposed a next step. Apply it to ` +
+      `move the task to ${reviewName}, or dismiss it if the work is not ready for review.`;
+    const recommendation: Recommendation = {
+      id: newId("rec"),
+      kind: "transition",
+      toStageId: reviewStageId,
+      label,
+      detail,
+    };
+
+    let recorded = false;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      // Re-checked under the lock — the read above is not the decision.
+      if (alreadyActionable(parsed)) return;
+      parsed.frontmatter.recommendations.push(recommendation);
+      parsed.frontmatter.waiting = "human";
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "delivery" },
+        title: null,
+        text: `Next step recorded: **${label}**. ${detail}`,
+        toAgent: false,
+        evidence: null,
+      });
+      recorded = true;
+    });
+    if (!recorded) return;
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: DELIVERY_NEXT_STEP_AUDIT_ACTION,
+      actor: { userId: null, label: "delivery" },
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: { kind: "transition", toStageId: reviewStageId, prNumber },
+    });
+    // Without this the card only appears to someone who happens to open the
+    // task — the exact silence VC-1 sat in. `from` is passed EXPLICITLY: the
+    // default sender is the Operator, and letting that stand would put the
+    // agent's name on a notice the agent did not write.
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug,
+        taskKey,
+        kind: "approval",
+        ptype: "input",
+        title: `Next step recorded: ${label}`,
+        text: detail,
+        from: { kind: "system", name: "Delivery" },
+      },
+      ctx,
+    );
+  } catch (error) {
+    logger.warn("failed to record the delivered task's next step", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/** True when the task already carries a human-actionable decision surface — an
+ *  open packet or a pending recommendation. The `delivery` recommendation kind
+ *  does NOT count: it is the step a successful delivery has just performed, and
+ *  `applyRecommendation` clears it right after `performDelivery` returns. */
+function alreadyActionable(parsed: ParsedTaskFile): boolean {
+  if (parsed.packet) return true;
+  return parsed.frontmatter.recommendations.some((r) => r.kind !== "delivery");
 }
 
 /**

@@ -200,6 +200,24 @@ export function CapabilityMatrixModal({
                 its persona; a Codex specialist gets the persona alone.
               </li>
               <li>
+                {/* F19-16 / R18-5 ("the asymmetry is disclosed, not silent") —
+                    nothing rendered said so. The real discriminator is MOUNTED
+                    vs INJECTED: a Claude run with no workspace checkout falls
+                    back to the same prompt-text path every Codex run takes, so
+                    "Claude gets skills whole" would itself be a half-truth. The
+                    24,000 figure is SKILL_INJECTION_BUDGET
+                    (app/server/files/skill-body.server.ts). */}
+                <b>Attached skills arrive differently.</b> On a Claude run with a
+                workspace checkout, each attached skill is installed as a real file
+                the agent opens only when it uses that skill — whole, however long
+                it is. Everywhere else — every Codex run, and a Claude run with no
+                checkout — the skill is pasted into the agent's instructions under
+                one shared 24,000-character budget: a long skill is cut off at that
+                limit, and a second skill can be left out entirely once the budget
+                is spent. Keep a skill short if agents on both backends must follow
+                it.
+              </li>
+              <li>
                 <b>Post mid-run comments</b> has no Codex channel — granting it does
                 nothing there; a Codex agent's report always posts when the run ends.
               </li>

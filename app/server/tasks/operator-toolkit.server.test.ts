@@ -146,7 +146,24 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
       taskKey: "P-1",
       authority: undeployed(),
     });
-    expect(toolkit.allowedTools).toEqual(["mcp__viberr__get_task"]);
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
+    // R19-4: the read-only repository view is part of the READ-ONLY floor — an
+    // operator with no deployment may still look at the repo it is asked to
+    // reason about. What "read-only" excludes is every WRITE, and that is what
+    // this asserts: the floor is exactly the three reads, and nothing that
+    // changes state is reachable.
+    expect(toolkit.allowedTools).toEqual([
+      "mcp__viberr__get_task",
+      "mcp__viberr__list_repo_files",
+      "mcp__viberr__read_repo_file",
+    ]);
+    for (const write of [
+      "mcp__viberr__deliver_for_review",
+      "mcp__viberr__transition_stage",
+      "mcp__viberr__open_decision_packet",
+      "mcp__viberr__prompt_agent",
+      "mcp__viberr__post_comment",
+    ]) {
+      expect(toolkit.allowedTools).not.toContain(write);
+    }
   });
 });

@@ -34,6 +34,11 @@ import {
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { encodeRefPath } from "~/server/github/github-client.server";
+import {
+  getProjectGithubContext,
+  type GithubContextOptions,
+} from "~/server/github/github-context.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   readTaskFile,
@@ -961,6 +966,399 @@ function specialistName(
   return found?.name ?? profileId;
 }
 
+// --------------------------------------------------- read-only repository view
+
+/**
+ * R19-4 (ruling 58) — the operator's ONLY view of the project repository.
+ *
+ * Live (F19-4): at triage the operator's working directory is Viberr's own task
+ * folder, which holds `task.md` and nothing else. With nothing else to look at,
+ * the operator described that folder AS the repository — it wrote
+ * `Repo contents visible to operator: "only task.md — no docs/ or README found"`
+ * into a human-facing decision packet about a repo that HAS both, and then
+ * offered "Add/rewrite README with quickstart" as its recommended option for a
+ * repo that already had one.
+ *
+ * READ-ONLY BY CONSTRUCTION. Every request below is a hard-coded `GET` on the
+ * project's own credential, pinned to the project's DEFAULT branch; nothing in
+ * this section accepts an HTTP method, a body, or a ref. There is no clone: a
+ * `--depth 1` clone of Viberr's own repo measures ~71s
+ * (`git-clone-auth.server.ts`), it would land before the operator's first useful
+ * turn on every task including the ones that never need scoping, and a failed
+ * clone leaves an EMPTY directory — precisely the ambiguity that produced the
+ * lie in the first place.
+ *
+ * Unreachable is NEVER rendered as empty. Every failure returns a typed
+ * `unavailable` carrying one plain sentence naming the real cause, and
+ * {@link renderRepoViewBlock} turns that into an explicit "could not read the
+ * repository" gap. An empty listing means the repository really is empty.
+ */
+
+/** Paths one listing may return — a bounded view, never a recursive dump. */
+export const REPO_VIEW_LIST_CAP = 400;
+/** Characters one file read may return before it is clipped (and says so). */
+export const REPO_VIEW_FILE_BUDGET = 24_000;
+/** Listings one operator run may make. */
+export const REPO_VIEW_MAX_LISTS = 4;
+/** File reads one operator run may make. */
+export const REPO_VIEW_MAX_READS = 20;
+
+export type RepoViewUnavailableReason =
+  | "no_repo"
+  | "no_credential"
+  | "not_found"
+  | "forbidden"
+  | "invalid_path"
+  | "is_directory"
+  | "too_large"
+  | "not_text"
+  | "network";
+
+export interface RepoViewUnavailable {
+  status: "unavailable";
+  repo: string | null;
+  reason: RepoViewUnavailableReason;
+  /** ONE plain sentence, safe to put in a prompt AND in front of a human. */
+  sentence: string;
+}
+
+export interface RepoFileList {
+  status: "ok";
+  repo: string;
+  ref: string;
+  paths: string[];
+  /** How many files the default branch actually has (before the cap). */
+  total: number;
+  /** True when this listing is PARTIAL — capped here or truncated by GitHub. */
+  truncated: boolean;
+}
+
+export interface RepoFileContent {
+  status: "ok";
+  repo: string;
+  ref: string;
+  path: string;
+  text: string;
+  clipped: boolean;
+}
+
+interface GitTreeEntry {
+  path: string;
+  type: string;
+}
+
+function repoUnavailable(
+  repo: string | null,
+  reason: RepoViewUnavailableReason,
+  sentence: string,
+): RepoViewUnavailable {
+  return { status: "unavailable", repo, reason, sentence };
+}
+
+/**
+ * List the files on the project repository's DEFAULT branch (one recursive tree
+ * call, blobs only, sorted, capped). `subPath` narrows to one subtree.
+ */
+export async function listRepoFiles(
+  db: DatabaseSync,
+  projectSlug: string,
+  options: GithubContextOptions & { subPath?: string; limit?: number } = {},
+): Promise<RepoFileList | RepoViewUnavailable> {
+  const gh = getProjectGithubContext(db, projectSlug, options);
+  if (gh.status === "no_repo_configured") {
+    return repoUnavailable(
+      null,
+      "no_repo",
+      "This project has no repository attached, so there is nothing to read — the task is planning or advisory work.",
+    );
+  }
+  if (gh.status === "no_pat_configured") {
+    return repoUnavailable(
+      gh.repo,
+      "no_credential",
+      `No GitHub credential is attached to this project, so Viberr cannot read ${gh.repo}.`,
+    );
+  }
+
+  const res = await gh.client.request<{
+    tree?: GitTreeEntry[];
+    truncated?: boolean;
+  }>("GET", `/repos/${gh.repo}/git/trees/${encodeRefPath(gh.defaultBranch)}`, {
+    searchParams: { recursive: "1" },
+  });
+  if (!res.ok) {
+    if (res.kind === "network") {
+      return repoUnavailable(
+        gh.repo,
+        "network",
+        `GitHub was unreachable, so Viberr could not read ${gh.repo} (${res.message}).`,
+      );
+    }
+    if (res.kind === "not_modified") {
+      return repoUnavailable(
+        gh.repo,
+        "network",
+        `GitHub returned no content for ${gh.repo}, so Viberr could not read it.`,
+      );
+    }
+    if (res.status === 404) {
+      return repoUnavailable(
+        gh.repo,
+        "not_found",
+        `GitHub says ${gh.repo} (branch ${gh.defaultBranch}) does not exist or is not visible to this project's credential.`,
+      );
+    }
+    return repoUnavailable(
+      gh.repo,
+      res.status === 403 ? "forbidden" : "network",
+      `GitHub refused to list ${gh.repo}: ${res.message}.`,
+    );
+  }
+
+  const subPath = (options.subPath ?? "").replace(/^\/+|\/+$/g, "");
+  const prefix = subPath ? `${subPath}/` : "";
+  const all = (res.data.tree ?? [])
+    .filter((e) => e.type === "blob")
+    .filter(
+      (e) => !subPath || e.path === subPath || e.path.startsWith(prefix),
+    )
+    .map((e) => e.path)
+    .sort();
+  const limit = Math.max(1, options.limit ?? REPO_VIEW_LIST_CAP);
+  return {
+    status: "ok",
+    repo: gh.repo,
+    ref: gh.defaultBranch,
+    paths: all.slice(0, limit),
+    total: all.length,
+    // A GitHub-truncated tree is disclosed too: a partial listing must never
+    // read as a complete one (that is the F19-4 failure in another costume).
+    truncated: Boolean(res.data.truncated) || all.length > limit,
+  };
+}
+
+/** Reject a path before any HTTP call is made. */
+function invalidRepoPath(filePath: string): string | null {
+  const trimmed = filePath.trim();
+  if (!trimmed) return "an empty path";
+  if (trimmed.startsWith("/")) return "an absolute path";
+  if (trimmed.includes("\\")) return "a backslash";
+  if (trimmed.split("/").includes("..")) return "a `..` segment";
+  return null;
+}
+
+/** Read ONE file from the repository's default branch. Read-only, GET only. */
+export async function readRepoFile(
+  db: DatabaseSync,
+  projectSlug: string,
+  filePath: string,
+  options: GithubContextOptions = {},
+): Promise<RepoFileContent | RepoViewUnavailable> {
+  // Path validation runs BEFORE the credential is even resolved, so a traversal
+  // attempt never becomes an authenticated request.
+  const bad = invalidRepoPath(filePath);
+  if (bad !== null) {
+    return repoUnavailable(
+      null,
+      "invalid_path",
+      `\`${filePath}\` is not a repository path (it contains ${bad}) — give a path relative to the repository root, e.g. \`docs/README.md\`.`,
+    );
+  }
+  const gh = getProjectGithubContext(db, projectSlug, options);
+  if (gh.status === "no_repo_configured") {
+    return repoUnavailable(
+      null,
+      "no_repo",
+      "This project has no repository attached, so there is nothing to read — the task is planning or advisory work.",
+    );
+  }
+  if (gh.status === "no_pat_configured") {
+    return repoUnavailable(
+      gh.repo,
+      "no_credential",
+      `No GitHub credential is attached to this project, so Viberr cannot read ${gh.repo}.`,
+    );
+  }
+
+  const path = filePath.trim().replace(/^\/+/, "");
+  const res = await gh.client.request<
+    { content?: string; encoding?: string } | unknown[]
+  >("GET", `/repos/${gh.repo}/contents/${encodeRefPath(path)}`, {
+    searchParams: { ref: gh.defaultBranch },
+  });
+  if (!res.ok) {
+    if (res.kind === "network") {
+      return repoUnavailable(
+        gh.repo,
+        "network",
+        `GitHub was unreachable, so Viberr could not read ${path} from ${gh.repo} (${res.message}).`,
+      );
+    }
+    if (res.kind === "not_modified") {
+      return repoUnavailable(
+        gh.repo,
+        "network",
+        `GitHub returned no content for ${path} in ${gh.repo}.`,
+      );
+    }
+    // GitHub answers a >1 MB blob on this endpoint with an error, not a body.
+    if (/too large|use the .*blob/i.test(res.message)) {
+      return repoUnavailable(
+        gh.repo,
+        "too_large",
+        `${path} is too large for GitHub's contents API, so Viberr could not read it.`,
+      );
+    }
+    if (res.status === 404) {
+      return repoUnavailable(
+        gh.repo,
+        "not_found",
+        `${path} does not exist on ${gh.repo}@${gh.defaultBranch}.`,
+      );
+    }
+    return repoUnavailable(
+      gh.repo,
+      res.status === 403 ? "forbidden" : "network",
+      `GitHub refused to read ${path} from ${gh.repo}: ${res.message}.`,
+    );
+  }
+  if (Array.isArray(res.data)) {
+    return repoUnavailable(
+      gh.repo,
+      "is_directory",
+      `${path} is a directory, not a file — list it with list_repo_files instead.`,
+    );
+  }
+
+  const body = res.data as { content?: string; encoding?: string };
+  const raw = body.content ?? "";
+  const decoded =
+    body.encoding === "base64"
+      ? Buffer.from(raw.replace(/\n/g, ""), "base64").toString("utf8")
+      : raw;
+  if (decoded.includes("\u0000")) {
+    return repoUnavailable(
+      gh.repo,
+      "not_text",
+      `${path} is a binary file, so there is nothing to read as text.`,
+    );
+  }
+  const clipped = decoded.length > REPO_VIEW_FILE_BUDGET;
+  return {
+    status: "ok",
+    repo: gh.repo,
+    ref: gh.defaultBranch,
+    path,
+    text: clipped
+      ? decoded.slice(0, REPO_VIEW_FILE_BUDGET) +
+        `\n\n… [clipped by Viberr at ${REPO_VIEW_FILE_BUDGET.toLocaleString("en-US")} characters]`
+      : decoded,
+    clipped,
+  };
+}
+
+/**
+ * Per-RUN call ceiling for the repository view. A browsing operator must not be
+ * able to spend its whole turn (or the project's rate limit) reading files; the
+ * refusal is honest rather than silent.
+ */
+export function createRepoViewBudget(limits?: {
+  lists?: number;
+  reads?: number;
+}): { takeList(): boolean; takeRead(): boolean } {
+  let lists = limits?.lists ?? REPO_VIEW_MAX_LISTS;
+  let reads = limits?.reads ?? REPO_VIEW_MAX_READS;
+  return {
+    takeList() {
+      if (lists <= 0) return false;
+      lists -= 1;
+      return true;
+    },
+    takeRead() {
+      if (reads <= 0) return false;
+      reads -= 1;
+      return true;
+    },
+  };
+}
+
+/**
+ * Render a repository view for a model. The unavailable case is deliberately
+ * LOUDER than the ok case: the one thing the operator must never do is fall
+ * back to describing its own working directory (F19-4).
+ */
+export function renderRepoViewBlock(
+  view: RepoFileList | RepoViewUnavailable,
+): string {
+  if (view.status === "unavailable") {
+    return (
+      `# Repository — NOT readable on this run\n\n` +
+      `Viberr could not read ${view.repo ?? "a repository"}: ${view.sentence}\n` +
+      `You have NO view of the repository this turn. If scope depends on it, say exactly that. ` +
+      `Do not describe your own working directory as the repository, and do not conclude that a file is missing from the repository.`
+    );
+  }
+  const shown = view.paths.length;
+  const header = `# Repository — read-only view of ${view.repo} @ ${view.ref}`;
+  if (shown === 0) {
+    return (
+      `${header}\n\n` +
+      `Viberr read the default branch and it contains no files. This is what the repository IS, not a failure to read it.`
+    );
+  }
+  const footer = view.truncated
+    ? `\n\n(showing ${shown} of ${view.total} files — call list_repo_files with a \`path\` prefix for a subtree)`
+    : `\n\n(${view.total} file${view.total === 1 ? "" : "s"} — this is the whole default branch)`;
+  return (
+    `${header}\n\nThese paths are REAL; scope against them.\n\n` +
+    view.paths.map((p) => `- ${p}`).join("\n") +
+    footer
+  );
+}
+
+// ------------------------------------------------- KB-vs-repository conflict
+
+/** R19-2 — the timeline title a context conflict always carries. */
+export const CONTEXT_CONFLICT_TITLE =
+  "Knowledge base disagrees with the repository";
+
+export interface ContextConflict {
+  /** The knowledge-base document that disagrees. */
+  kbSource: string;
+  /** The repository file that is authoritative. */
+  repoSource: string;
+  /** One or two sentences: what each says, and what was followed. */
+  detail: string;
+}
+
+/**
+ * R19-2 (ruling 56) — a KB-vs-repo disagreement is a `quality` flag on the
+ * timeline. The existing type carries exactly this meaning: nothing was
+ * violated (`policy`) and nothing is stuck (`blocked`), but a human must see
+ * that two sources of convention disagree about the same repository. It already
+ * renders as "Quality flag" and is already a notification kind, so no new
+ * timeline type is added — `TIMELINE_EVENT_TYPES` is untouched.
+ *
+ * The event states the RULING as its first words, because the record is also
+ * what the next agent re-anchors on: the repository won, and here is what lost.
+ */
+export function contextConflictEvent(
+  actor: TaskFileEvent["actor"],
+  conflict: ContextConflict,
+): TaskFileEvent {
+  return {
+    occurredAt: new Date().toISOString(),
+    type: "quality",
+    actor,
+    title: CONTEXT_CONFLICT_TITLE,
+    text:
+      `**The repository wins:** \`${conflict.repoSource}\` is authoritative; the knowledge base ` +
+      `\`${conflict.kbSource}\` says otherwise. ${conflict.detail}`,
+    toAgent: false,
+    evidence: null,
+  };
+}
+
 // ------------------------------------------------------------- snapshot
 
 export interface OperatorTaskSnapshot {
@@ -1011,6 +1409,14 @@ export interface OperatorTaskSnapshot {
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
+  /** R19-4: the project's repository ("owner/name"), or null when none is
+   *  attached. The coordinator used to be blind to it — it could not even NAME
+   *  the thing its `list_repo_files` / `read_repo_file` tools read, which is
+   *  part of how it came to call its own task folder "the repo" (F19-4).
+   *
+   *  Optional only so hand-built test fixtures need not restate it (same
+   *  reason as `noChanges`); `operatorSnapshot` always sets it. */
+  repo?: string | null;
   /** R19-1: this task is a no-change completion — nothing was delivered and
    *  there is nothing to merge. Accept it with `accept_completion`; do NOT call
    *  `deliver_for_review` and do NOT open a decision packet asking a human how
@@ -1139,6 +1545,8 @@ export function operatorSnapshot(
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".
     branch: fm.branch ?? null,
+    // R19-4: name the repository the read-only view reads.
+    repo: project.parsed.frontmatter.repo ?? null,
     // R19-1: the "nothing to deliver" shape, stated outright.
     noChanges: noChangeApplies(fm),
     liveRuns: (
@@ -1195,6 +1603,82 @@ export async function operatorPostComment(
     return { outcome: "noop", message: commentOutcomeMessage(result) };
   }
   return { outcome: "done", message: commentOutcomeMessage(result) };
+}
+
+/**
+ * R19-2 — record a KB-vs-repository conflict as a typed `quality` event.
+ *
+ * The ruling has two halves and this is the second: the repository wins, AND
+ * the disagreement is never settled quietly. Live (Q19-2) a KB-granted Codex
+ * developer followed the knowledge base's pass-note format while a KB-less
+ * Claude writer followed `qa/smoke/README.md` and flagged the KB-shaped files
+ * as non-conforming — two agents, one repo, two house styles, and nothing on
+ * the timeline said why. A precedence rule with no visible record just moves
+ * the silence.
+ *
+ * Gated on `append-typed-events` — this writes to the canonical record, so it
+ * answers to the same capability as every other operator-authored event.
+ */
+export async function operatorFlagContextConflict(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string } & ContextConflict,
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const kbSource = input.kbSource.trim();
+  const repoSource = input.repoSource.trim();
+  const detail = input.detail.trim();
+  if (!kbSource || !repoSource) {
+    return {
+      outcome: "noop",
+      message:
+        "A conflict needs BOTH sources named — the knowledge-base document and the repository file it disagrees with.",
+    };
+  }
+  if (gate(authority, "append-typed-events") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot post events in this project.",
+    };
+  }
+  const event = contextConflictEvent(
+    { kind: "operator" },
+    { kbSource, repoSource, detail },
+  );
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift(event);
+    },
+  );
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.operator.context_conflict",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { kbSource, repoSource },
+  });
+  // A convention conflict is a judgement call a human owns; the flag is worth
+  // nothing if it only exists on a page nobody opens.
+  notifyTaskWatchers(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      kind: "quality",
+      title: CONTEXT_CONFLICT_TITLE,
+      text: event.text,
+      occurredAt: event.occurredAt,
+    },
+    ctx,
+  );
+  return {
+    outcome: "done",
+    message: `Recorded — \`${repoSource}\` wins; a human will settle it.`,
+  };
 }
 
 /** Fill only an unspecified goal; established scope remains human-controlled. */

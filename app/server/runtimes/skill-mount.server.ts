@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -38,9 +40,62 @@ import { logger } from "~/server/logging/logger.server";
  * calls the strip itself: after {@link mountGrantedSkills} returns, the
  * workspace's `.claude` holds Viberr content or nothing, unconditionally — the
  * guarantee no longer depends on the caller's ordering.
+ *
+ * ONE workspace, MANY runs (F19-15). The checkout is per TASK, not per run, and
+ * every engagement on that task shares it. See {@link MOUNT_MARK} for why the
+ * strip is surgical rather than a `rm -rf`.
  */
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * F19-15 — the proof that VIBERR mounted a skill folder, in THIS process.
+ *
+ * The bug this closes: the workspace checkout belongs to the TASK, so a second
+ * run starting while the first is still executing re-ran the strip over a live
+ * run's `.claude` and deleted the skills it had just mounted. The first run kept
+ * going with its granted craft silently gone — no error, no event, nothing a
+ * human could see. Skills only WERE mounted natively from R18-5 onward, which is
+ * what turned R18-3's strip from harmless into destructive.
+ *
+ * Why preservation and not a lock. Serializing strip+mount per workspace would
+ * only shrink the window: run A holds its skills for its whole RUN (minutes),
+ * not for the duration of its mount (milliseconds), and no mutex around the
+ * mount can span that. The unmount has to become impossible, so the strip must
+ * be able to tell Viberr's own mounts from everything else and keep them.
+ *
+ * Why a per-process random mark and not a fixed filename. `.claude` arrives from
+ * an UNTRUSTED clone — a repository that shipped `.claude/skills/x/<marker>`
+ * with a guessable value would survive the strip and re-open exactly the R18-3
+ * leak. The mark is minted once per process and never leaves it, so no repo (and
+ * no leftover from a previous process, whose runs are dead anyway) can forge it.
+ *
+ * What preservation does NOT weaken: only `.claude/skills/<name>/` folders this
+ * process wrote survive. Everything else — `settings.json` and its hooks,
+ * `commands/`, `agents/`, repo-authored skills — is still deleted on every run.
+ * And a preserved folder is not usable by a run that did not mount it: the
+ * adapter passes the SDK `skills: [<exactly this run's mounted names>]`, which
+ * rejects every unlisted skill, and a run that mounted nothing gets
+ * `settingSources: []` with the `Skill` tool denied outright
+ * (claude-runtime.server:596-665). The allow-list is the fence — never the
+ * directory listing.
+ *
+ * ACCEPTED RESIDUAL, stated rather than hidden: this module cannot tell a
+ * FINISHED run's mount from a live one, so a mount is never collected — a
+ * profile's skill folders stay readable in a co-engaged agent's cwd for the life
+ * of the workspace. Not invokable (see above), and supporting runs already share
+ * the delivering run's entire working tree, but not nothing. Collecting them
+ * needs run liveness, which lives in `agent_runs` and would have to be passed in
+ * by the caller (a mount ledger under `.git/` keyed by profile id, reconciled
+ * against `running|queued` rows — the design in
+ * `planning/discovery-2026-08-06-pass19/spec-skill-mount-race.md`). That is a
+ * signature change through `mountGrantedSkills` and `cloneRepo`; this fix stays
+ * inside the module. Losing a live run's craft is the harm that had to stop.
+ */
+const MOUNT_MARK = `viberr-skill-mount ${randomUUID()}`;
+const MOUNT_MARK_FILE = ".viberr-mount";
+/** A forged mark can only ever be as long as ours; never read more than that. */
+const MOUNT_MARK_MAX_BYTES = 256;
 
 /**
  * R18-3 / F18-8 — remove the cloned repo's own `.claude` catalog from the run's
@@ -57,6 +112,10 @@ const execFileAsync = promisify(execFile);
  * never stages the deletion, and the committed tree keeps `.claude` from the
  * index. (A run whose task is to edit the repo's own `.claude` cannot deliver
  * those edits — the intended governance posture, not a bug.)
+ *
+ * F19-15: the ONE thing it does not delete is a skill folder THIS process
+ * mounted ({@link MOUNT_MARK}) — those belong to a run that may still be using
+ * them. Everything else in the catalog goes, on every call.
  */
 export async function stripUngovernedRepoCatalog(repoDir: string): Promise<void> {
   const catalog = path.join(repoDir, ".claude");
@@ -84,7 +143,58 @@ export async function stripUngovernedRepoCatalog(repoDir: string): Promise<void>
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
-  rmSync(catalog, { recursive: true, force: true });
+  const ours = ownMountedSkillNames(catalog);
+  if (ours.length === 0) {
+    // Nothing of ours is in there — the R18-3 behaviour, unchanged.
+    rmSync(catalog, { recursive: true, force: true });
+    return;
+  }
+  // A live run's skills are in here. Take out everything else BY NAME rather
+  // than deleting and re-creating: another run is reading these files right now,
+  // so there must be no window in which they are absent.
+  for (const entry of readdirSync(catalog)) {
+    if (entry !== "skills") {
+      rmSync(path.join(catalog, entry), { recursive: true, force: true });
+    }
+  }
+  const skillsRoot = path.join(catalog, "skills");
+  for (const entry of readdirSync(skillsRoot)) {
+    if (!ours.includes(entry)) {
+      rmSync(path.join(skillsRoot, entry), { recursive: true, force: true });
+    }
+  }
+}
+
+/**
+ * The `.claude/skills` entries THIS process mounted — the only survivors of a
+ * strip (F19-15). Anything unreadable, symlinked, or carrying a mark we did not
+ * write is NOT ours and is reported as such, so the caller deletes it.
+ */
+function ownMountedSkillNames(catalogDir: string): string[] {
+  const skillsRoot = path.join(catalogDir, "skills");
+  try {
+    // `lstat`, so a `.claude/skills` SYMLINK (a repo pointing the catalog at
+    // some other tree) is never walked — it reads as "nothing of ours", and the
+    // whole catalog is removed.
+    if (!lstatSync(skillsRoot).isDirectory()) return [];
+    return readdirSync(skillsRoot).filter((name) =>
+      isOwnMountedSkill(path.join(skillsRoot, name)),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function isOwnMountedSkill(skillDir: string): boolean {
+  try {
+    if (!lstatSync(skillDir).isDirectory()) return false;
+    const mark = path.join(skillDir, MOUNT_MARK_FILE);
+    const stat = lstatSync(mark);
+    if (!stat.isFile() || stat.size > MOUNT_MARK_MAX_BYTES) return false;
+    return readFileSync(mark, "utf8").trim() === MOUNT_MARK;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -175,8 +285,11 @@ export async function mountGrantedSkills(input: {
     else mounted.push(name);
   }
   if (mounted.length === 0) {
-    // Leave the workspace exactly as a skill-less run would find it.
-    rmSync(path.join(dir, ".claude"), { recursive: true, force: true });
+    // Leave the workspace exactly as a skill-less run would find it — but go
+    // back through the strip rather than `rm -rf`ing the catalog, so a
+    // CONCURRENT run's mounts survive our failure to mount anything (F19-15).
+    // With no live mounts present this deletes the whole `.claude`, as before.
+    await stripUngovernedRepoCatalog(dir);
   }
   if (skipped.length > 0) {
     logger.warn("granted skills did not mount natively — injected as prompt text", {
@@ -258,6 +371,11 @@ function mountOneSkill(
 
   const src = path.dirname(resolved.file);
   const dest = path.join(skillsRoot, name);
+  // Is another run of this process already using a mount under this name? Same
+  // process ⇒ same store ⇒ `name` resolves to the same folder, so re-copying
+  // over it is a no-op in content. What must NOT happen is the failure path
+  // below deleting a mount that is not ours to delete (F19-15).
+  const liveMount = isOwnMountedSkill(dest);
   try {
     mkdirSync(skillsRoot, { recursive: true });
     // The WHOLE folder: skills are multi-file (checklists/, examples.md, scripts)
@@ -289,8 +407,17 @@ function mountOneSkill(
         body,
       ),
     );
+    // LAST — the mark is what makes this folder survive the next run's strip
+    // (F19-15), so it is only written once the mount is complete. A half-copied
+    // folder stays unmarked and is cleaned up like repo content.
+    writeFileSync(path.join(dest, MOUNT_MARK_FILE), `${MOUNT_MARK}\n`);
   } catch (error) {
-    rmSync(dest, { recursive: true, force: true });
+    // Only clean up a mount we were CREATING. If this name was already mounted
+    // for another live run, removing it would be the very silent unmount F19-15
+    // closes — and a partial re-copy of the identical store folder is strictly
+    // better than no folder at all. This run falls back to prompt-text
+    // injection either way, because we return a reason below.
+    if (!liveMount) rmSync(dest, { recursive: true, force: true });
     logger.warn("granted skill could not be mounted into the run workspace", {
       skill: name,
       err: error instanceof Error ? error : new Error(String(error)),

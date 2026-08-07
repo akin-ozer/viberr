@@ -259,13 +259,25 @@ export function resolveDeployedSpecialist(
 }
 
 /**
- * R18-1 (widened to SKILLS by LV-F3): the context grants the task's DELIVERING
- * engagement used, so a reviewer can judge the work against the same
- * conventions. Returns [] when there is no deliverer, when the deliverer IS
- * this profile (its own run already carries them), or when the deliverer is
- * undeployed since delivery (its live grants cannot be confirmed — the reviewer
- * keeps its own). `resolve` throwing (undeployed profile) is treated as "no
- * extras".
+ * R18-1: the context grants the task's DELIVERING engagement used, so a reviewer
+ * can judge the work against the same conventions.
+ *
+ * KNOWLEDGE BASES ONLY — and deliberately so. Ruling 57 (R19-3,
+ * docs/architecture/decisions.md) settled the scope this helper's generic name
+ * leaves open: a KB is shared CONVENTION, which deliverer and reviewer must both
+ * be held to or the review is a disagreement about the rules rather than about
+ * the work. A skill is ROLE INSTRUCTION — how one agent does its own job — and
+ * handing the reviewer the deliverer's skills would make it re-run the
+ * deliverer's method instead of judging its result. So both call sites union
+ * `kb` and nothing else; a wider union is a change of ruling, not a fix.
+ * (An earlier version of this comment credited a widening to skills to a marker
+ * that appears nowhere else in the tree. It never happened, on any call site —
+ * the comment described code that was never written.)
+ *
+ * Returns [] when there is no deliverer, when the deliverer IS this profile (its
+ * own run already carries them), or when the deliverer is undeployed since
+ * delivery (its live grants cannot be confirmed — the reviewer keeps its own).
+ * `resolve` throwing (undeployed profile) is treated as "no extras".
  */
 function deliveringContextGrants(
   frontmatter: Parameters<typeof deliveringEngagement>[0],
@@ -282,9 +294,13 @@ function deliveringContextGrants(
 }
 
 /**
- * Append the delivering engagement's grants (lazily resolved) onto the
- * reviewer's own list, reviewer's first, deduped so a resource both grant never
- * injects — or double-charges the shared injection budget — twice.
+ * Append the delivering engagement's KBs (lazily resolved) onto the reviewer's
+ * own list, reviewer's first, deduped so a KB both profiles grant never injects
+ * — or double-charges the shared injection budget — twice.
+ *
+ * The parameter names are generic, the contract is not: KBs only, ruling 57 /
+ * R19-3 (see {@link deliveringContextGrants}). Passing a skill list here would
+ * be a silent change of ruling.
  */
 function withDeliveringGrants(own: string[], resolveExtras: () => string[]): string[] {
   const seen = new Set(own);
@@ -1870,6 +1886,9 @@ async function cloneRepo(
         { timeout: 10_000 },
       );
       await setIdentity(dir);
+      // F19-15: this is the reuse path, so a run may ALREADY be executing in
+      // this workspace — the strip preserves the skill folders Viberr mounted
+      // for it (and only those) rather than pulling them out from under it.
       await stripUngovernedRepoCatalog(dir);
       return { dir };
     }

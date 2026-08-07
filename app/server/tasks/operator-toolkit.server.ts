@@ -7,11 +7,14 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { TaskMutationContext } from "./task-actions.server";
 import {
+  createRepoViewBudget,
   deliverGate,
   gate,
+  listRepoFiles,
   operatorAcceptCompletion,
   operatorDeliverForReview,
   operatorEngageAgent,
+  operatorFlagContextConflict,
   operatorOpenPacket,
   operatorResolvePacket,
   operatorPostComment,
@@ -20,9 +23,12 @@ import {
   operatorSetGoal,
   operatorSnapshot,
   operatorTransitionStage,
+  readRepoFile,
+  renderRepoViewBlock,
   type OperatorActionResult,
   type OperatorAuthority,
 } from "./operator-actions.server";
+import type { GithubContextOptions } from "~/server/github/github-context.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
@@ -58,6 +64,9 @@ interface ToolkitDeps {
   projectSlug: string;
   taskKey: string;
   authority: OperatorAuthority;
+  /** Test seam for the GitHub transport behind the read-only repository view
+   *  (R19-4). Production passes nothing and the real client is used. */
+  github?: GithubContextOptions;
 }
 
 function textResult(payload: unknown) {
@@ -79,6 +88,7 @@ function resultText(r: OperatorActionResult) {
 export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   const { db, ctx, projectSlug, taskKey, authority } = deps;
   const base = { projectSlug, taskKey };
+  const github = deps.github ?? {};
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: SdkMcpToolDefinition<any>[] = [];
@@ -100,6 +110,71 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         textResult(operatorSnapshot(db, ctx, projectSlug, taskKey, authority)),
     ),
     "get_task",
+  );
+
+  // R19-4: the operator's ONLY view of the repository — read-only by
+  // construction (GET on the project's own credential, pinned to the default
+  // branch). Offered on EVERY run and behind no capability gate: reading is not
+  // a new power, it is the coordinator's existing read surface extended to the
+  // one fact it was blind to. Nothing is fetched unless the model calls a tool,
+  // so an operator that never scopes costs nothing.
+  //
+  // Deliberately NOT stage-scoped: a coordinator at review legitimately needs
+  // to check whether the file a reviewer named exists, and a tool that vanishes
+  // by stage is a capability that flickers.
+  const repoBudget = createRepoViewBudget();
+  add(
+    tool(
+      "list_repo_files",
+      "List the files on the project repository's DEFAULT branch — your ONLY view of the real repository. Your working directory is Viberr's folder for this task (task.md, run logs, and any scratch checkout an agent left behind); it is NOT the repository, and its contents are never evidence about what the repository does or does not contain. Call this BEFORE you scope anything, so your options name real paths and you never offer to add something the repository already has. Pass `path` to list one subtree. If it reports the repository is unavailable, say exactly that and never substitute what you can see locally.",
+      {
+        path: z
+          .string()
+          .optional()
+          .describe("Optional subtree prefix, e.g. 'docs'."),
+      },
+      async (args) => {
+        if (!repoBudget.takeList()) {
+          return textResult(
+            "[budget] You have used this run's repository listings. Work from what you already read, or ask a human.",
+          );
+        }
+        return textResult(
+          renderRepoViewBlock(
+            await listRepoFiles(db, projectSlug, {
+              ...(args.path ? { subPath: args.path } : {}),
+              ...github,
+            }),
+          ),
+        );
+      },
+    ),
+    "list_repo_files",
+  );
+  add(
+    tool(
+      "read_repo_file",
+      "Read ONE file from the project repository's default branch (read-only — you can never change it). Use it to check what a file actually SAYS before you propose a scope, quote it to a human, or claim it is missing. Long files are clipped and say so.",
+      {
+        path: z
+          .string()
+          .describe("Repository-relative path, e.g. 'docs/README.md'."),
+      },
+      async (args) => {
+        if (!repoBudget.takeRead()) {
+          return textResult(
+            "[budget] You have used this run's repository reads. Work from what you already read.",
+          );
+        }
+        const file = await readRepoFile(db, projectSlug, args.path, github);
+        return textResult(
+          file.status === "ok"
+            ? `# ${file.repo}@${file.ref}:${file.path}\n\n${file.text}`
+            : `[unavailable] ${file.sentence}`,
+        );
+      },
+    ),
+    "read_repo_file",
   );
 
   if (gate(authority, "append-typed-events") !== "deny") {
@@ -134,6 +209,44 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "set_goal",
+    );
+    // R19-2: the repository wins over a knowledge base for how the repository's
+    // own files should look — but the disagreement is never settled quietly.
+    add(
+      tool(
+        "flag_context_conflict",
+        "Flag that a knowledge base attached to this task's agents contradicts the repository's OWN documented conventions for how its files should look. The REPOSITORY wins — follow it, and say so — but never settle the disagreement silently: this records a flag the humans see. Name both sides.",
+        {
+          kbSource: z
+            .string()
+            .describe("The knowledge-base document that disagrees."),
+          repoSource: z
+            .string()
+            .describe(
+              "The repository file that is authoritative, e.g. 'qa/smoke/README.md'.",
+            ),
+          detail: z
+            .string()
+            .describe(
+              "One or two sentences: what each says, and what was followed.",
+            ),
+        },
+        async (args) =>
+          resultText(
+            await operatorFlagContextConflict(
+              db,
+              ctx,
+              {
+                ...base,
+                kbSource: prose(args.kbSource),
+                repoSource: prose(args.repoSource),
+                detail: prose(args.detail),
+              },
+              authority,
+            ),
+          ),
+      ),
+      "flag_context_conflict",
     );
   }
 

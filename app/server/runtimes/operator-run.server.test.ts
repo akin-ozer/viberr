@@ -1675,7 +1675,13 @@ describe("runOperator — authority, ordering, orphans", () => {
     const started = await drive({ trigger: "manual" });
     expect(started.queued).toBe(false);
     const spec = adapter5.pending!.spec;
-    expect(spec.allowedTools).toEqual(["mcp__viberr__get_task"]);
+    // R19-4: the read-only repo view rides along on the read-only floor — an
+    // undeployed operator may LOOK at the repository, and still change nothing.
+    expect(spec.allowedTools).toEqual([
+      "mcp__viberr__get_task",
+      "mcp__viberr__list_repo_files",
+      "mcp__viberr__read_repo_file",
+    ]);
     expect(spec.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
   });
 

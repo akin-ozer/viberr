@@ -684,6 +684,31 @@ describe("CapabilityMatrixModal", () => {
     expect(codes).toContain("mcp__everything-http__get-annotated-message");
     expect(codes).toContain("mcp__everything_http__get_annotated_message");
   });
+
+  // F19-16: R18-5 says the Claude/Codex skills asymmetry "is disclosed, not
+  // silent" — but nothing rendered disclosed it. The identical grant is a whole
+  // installed skill on one backend and prompt text against a byte budget on the
+  // other, where it can be clipped or dropped entirely, and the only trace was a
+  // server log line no user reads.
+  it("discloses that an attached skill is installed on Claude but pasted under a budget elsewhere (R18-5 / F19-16)", () => {
+    const { getByText } = render(
+      <CapabilityMatrixModal
+        profiles={[mkProfile({})]}
+        projectName="Viberr Core"
+        onClose={() => {}}
+      />,
+    );
+    // Canary: delete the new <li> from capability-matrix-modal and this throws.
+    const lead = getByText("Attached skills arrive differently.");
+    const bullet = lead.closest("li")!.textContent ?? "";
+    // The budget is the actionable half — a large skill granted to a Codex
+    // profile may not arrive at all.
+    expect(bullet).toContain("24,000-character budget");
+    expect(bullet).toContain("left out entirely");
+    // …and the honest half: this is MOUNTED vs INJECTED, not simply Claude vs
+    // Codex. A Claude run with no checkout takes the prompt-text path too.
+    expect(bullet).toContain("no checkout");
+  });
 });
 
 describe("CreateProfileModal", () => {
