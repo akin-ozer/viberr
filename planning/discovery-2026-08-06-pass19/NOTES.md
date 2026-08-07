@@ -81,6 +81,32 @@ just in tests:
 Also verified live this round: the stale writer-lock was taken over cleanly on restart (F18-5 machinery),
 and the chokidar watcher reconciled a hand-edit to `task.md` within seconds with no manual re-scan (FR10).
 
+## Phase C round 2: the rejection loop, end to end (live, unassisted)
+
+VC-7 produced the pass's best evidence that the model works as designed — none of it scripted by me:
+
+1. Doc Writer delivered `qa/smoke/pass19-mcp-probe.md` and opened PR #152.
+2. I applied the delivery recommendation → Review.
+3. The **Reviewer returned `request_changes`** — and its reasoning is the point: it refused to approve
+   a claim it could not independently verify. "The canary's and skill-list's authenticity cannot be
+   verified from anything available to me… I have no access to that MCP server myself, the commit
+   carries no transcript or tool-call log… plausibility isn't proof." It even grepped the repo to
+   confirm no Kubernetes material exists, and called that "mildly reassuring" but insufficient.
+4. **The operator then re-engaged the deliverer on its own**, which re-called the MCP tool and
+   committed strengthened evidence (03b0193, now naming the tool and the argument used), and the
+   operator recorded a fresh recommendation asking the Reviewer to re-check.
+
+The verdict gate held throughout: the task returned to `awaiting verdict`, and acceptance stayed shut.
+
+**N19-7 (observation, not filed as a defect).** A reviewer engaged at the review boundary reviews the
+DIFF. A task whose acceptance criterion is about *what happened during a run* (a tool was really
+called, a skill was really absent) is therefore not reviewable from the reviewer's evidence surface —
+the delivering agent's self-report is in the timeline, but the reviewer correctly declined to treat a
+self-report as proof. This is arguably right (an agent vouching for itself is not evidence), but it
+means "prove a runtime fact" is a task shape Viberr cannot currently close through review. Worth an
+owner decision: either such tasks are out of scope for agent review, or the run's own tool-call
+evidence needs to become citable evidence a reviewer can read.
+
 ## Finding ledger
 
 IDs: F19-nn (defects), UX19-nn (UX/coherence), Q19-nn (owner questions), N19-nn (notes/ideas).
