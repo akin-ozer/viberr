@@ -128,3 +128,56 @@ The archive confirm renders the raw internal PR state token — `PR #{task.pr.nu
 | G19-g | NFR1–5 perf targets (D17) | Asserted, never measured — needs a harness or an explicit "won't measure" ruling |
 | G19-h | Ruling 33 (resolved question resumes the ASKING agent via `askedBy`) | No runbook pins the resume |
 | G19-i | FR5 canon drift: self-serve project creation vs "Admin users can create" | Needs a dated ruling-44 amendment (F19-29) |
+
+## Live-observed additions (session 2)
+
+### UX19-5 — MED · activity/audit noise · `app/features/activity/activity-page.tsx` (audit column)
+
+The Audit logs column ("policy & access · all actors") is flooded by one repeating event:
+8 of the 9 rows visible on a 1440px viewport read "operator opened the <role> runtime session —
+recorded per audit policy on VC-4". Genuine policy/access events (credential assigned, scopes
+re-checked, project created, role changes) are pushed below the fold by routine agent-session
+bookkeeping. Violates the "calm over chatter / suppress noise" experience principle and defeats
+the column's stated purpose. Options: (a) collapse consecutive runtime-session rows into one
+"N runtime sessions opened" row (the compaction pattern already exists for timelines), (b) demote
+runtime-session-open out of the policy & access column into the agent stream, (c) filter chip.
+Needs an owner call on which — the event itself is required by audit policy, so it must not be
+dropped, only re-homed or compacted.
+
+### F19-23 — LIVE-CONFIRMED (was LOW, unverified)
+
+"1 commit **were** added to the PR head (`a4c790ce63ef`) after the review" renders in BOTH the
+task timeline and the Activity stream. Singular/plural is not switched in the completion event
+text (task-actions.server.ts completion writer).
+
+### UC-25 — PASS (live, this session)
+
+The full revision-drift path ran end to end on VC-4: re-delivery opened PR #150, the Claude
+Reviewer approved revision `81894e7`, an out-of-band commit `a4c790c` landed on the branch after
+the verdict, and the human accept dialog disclosed the divergence before merging. Merge + branch
+delete both recorded with the real merge head. **R17-1 works.** The only defect on the path is
+F19-23's grammar.
+
+## Session-2 owner rulings (binding)
+
+| # | Ruling |
+|---|--------|
+| R19-5 | **Force-accept MAY skip remaining stages AND the review gate — but must say so.** The affordance is labeled honestly ("skips the remaining stages and the review gate") and its confirm dialog ENUMERATES the stages being skipped. The server does NOT refuse off-boundary (an implementer's 409 was reverted). The F19-25 closed-PR terminal guard stays: force-accept still refuses over a PR GitHub has closed unmerged. |
+| R19-6 | **A capability set to `off` is a hard refuse by every route** — no recommendation card, no audit row. The operator refuses out loud (and narrates it) rather than silently rerouting. Closes the leak where `completion-for-acceptance: off` still produced an `accept_completion` card + `task.operator.recommended_completion` audit row via the terminal-transition reroute. |
+| R19-7 | **The Activity audit column compacts consecutive runtime-session-open rows** into one expandable "N runtime sessions opened" row, reusing the existing timeline compaction pattern. The event stays recorded; it just stops burying credential/role/policy events. Closes UX19-5. |
+
+### F19-37 — HIGH · acceptance · `app/features/task-detail/task-side-panels.tsx:448` · CONFIRMED (empirically, by cluster A's verifier)
+
+**The SIXTH un-ceremonied acceptance writer, found inside the file the acceptance-ceremony fix
+was landing in.** The Current-state panel's `StageMenu` submits `intent: "transition"` for ANY
+stage with no confirm; the server treats a human transition into the last stage as acceptance —
+`task-actions.server.ts:3070-3084` calls `acceptCompletion(...)` (the real merge) with the in-code
+comment *"A HUMAN manually moving a task INTO the final stage IS accepting completion"*. The
+BOARD's identical StageMenu was already wrapped by ruling 53/R18-7, so after wave 1 the task page
+was the **only** surface left where moving a card to Done merges silently. Proven with a throwaway
+test through the existing render harness (task at Review, admin → no accept dialog, `submitted[0]
+=== {intent:"transition", to:"done"}`).
+
+**Method note:** the acceptance-writer matrix in this file listed five writers; the sixth was found
+only because the verifier probed a path the finding list did not name. A ledger is a floor, not a
+ceiling.
