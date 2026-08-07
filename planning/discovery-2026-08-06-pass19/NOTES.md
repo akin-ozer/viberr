@@ -29,20 +29,27 @@ against main @65063b8). Intent distillation: INTENT.md.
 
 ## Implementation status (branch `pass19/product-fixes`)
 
-| Cluster | Findings | Owner | State |
-|---------|----------|-------|-------|
-| Copy / a11y / vocabulary | UX19-1, F19-11, F19-5, F19-12 | me | ✅ committed `1836f00` (+ vocabulary lint, canaried) |
-| Archived-task honesty | F19-8, F19-9, F19-13 | me | ✅ committed `57b04e9` (server guard + UI, canaried) |
-| Acceptance confirm parity | F19-3, F19-7, F19-14, F19-10 | agent A | ▶ in flight (spec-acceptance-confirm-parity.md) |
-| No-change acceptance (R19-1) | F19-21 | agent B | ▶ in flight (spec-no-change-acceptance.md) |
-| Failure diagnostics + reliability | F19-6, F19-18, F19-19, F19-20 | agent D | ▶ in flight (spec-failure-diagnostics.md) |
-| Docs canon + rulings promotion | F19-17, N19-2/3/4, R19-1..4 | agent E | ▶ in flight |
-| Skill-mount race + runtime disclosure | F19-15, F19-16, R19-3 | — | ⏸ queued (spec-skill-mount-race.md; shares specialist-run.server.ts with D) |
-| Operator repo view (R19-4) + KB precedence (R19-2) | F19-4, Q19-1, Q19-2 | — | ⏸ queued (spec-operator-repo-view.md; shares operator-actions with B) |
-| Delivery leaves an actionable step | F19-1 | — | ⏸ queued |
-| Reviewer-KB docstring (R19-3) | F19-2 | — | ⏸ folded into skill-mount cluster |
-| Two-surface acceptance contradictions | UX19-2, UX19-3 | — | ⏸ queued (re-check after A lands) |
-| Q-V1 test gap | N19-5 | — | ⏸ queued |
+| Cluster | Findings | Commit | State |
+|---------|----------|--------|-------|
+| Copy / a11y / vocabulary | UX19-1, F19-11, F19-5, F19-12 | `1836f00` | ✅ committed, canaried (+ vocabulary lint) |
+| Archived-task honesty | F19-8, F19-9, F19-13 | `57b04e9` | ✅ committed, canaried (server guard + UI) |
+| Q-V1 test gap | N19-5 | `17472d5` | ✅ committed, canaried |
+| Acceptance confirm parity | F19-3, F19-7, F19-14, F19-10, **F19-22** | `e8bed15` | ✅ committed, canaried. F19-22 (Stage dropdown → terminal stage) was found DURING this cluster: a third undisclosed acceptance path. |
+| Failure diagnostics + reliability | F19-6, F19-18, F19-19, F19-20 | `f668b07` | ✅ committed, 18 canaries. Live-confirmed: the run log now carries `fatal: could not read Username…` where it used to carry nothing. |
+| Docs canon + rulings promotion | F19-17, N19-2/3/4, R19-1..4 | `f668b07`+ | ✅ committed. Rulings 55–58 promoted; 9 further false doc claims found and fixed in the sweep. |
+| No-change acceptance (R19-1) | F19-21 | `2891044` | ✅ committed, canaried |
+| Skill-mount race + runtime disclosure | F19-15, F19-16, F19-2/R19-3 | `5ef217e` | ✅ committed, canaried |
+| Delivery leaves an actionable step | F19-1 | `5ef217e` | ✅ committed, canaried (9 tests) |
+| Test hermeticity | **N19-6** | `ed6a6c5` | ✅ committed. Found during verification: the suite made real network clones and flaked under load. |
+| Two-surface acceptance | UX19-2 (UX19-3 retracted) | `2044e02` | ✅ committed, canaried. Fixed a third latent defect: force-accept was offered on a terminally blocked (closed-PR) task, which R16-3 forbids in prose. |
+| Operator repo view + KB precedence | F19-4, Q19-1, Q19-2 (R19-4, R19-2) | `e990eb0` | ✅ committed, canaried |
+
+**Suite: 2984 tests / 223 files green, `tsc --noEmit` clean.**
+
+Findings that CHANGED under scrutiny (recorded because the correction is the point):
+- **F19-1 narrowed** — first filed as "the operator never recommends after delivery". Three live runs showed VC-4/VC-5 *did* recommend and VC-1 did not: the real defect was that the guarantee rested on the model, so the fix is server-side.
+- **UX19-3 retracted** — my two screenshots were taken at different instants, not the same one. Verified in code that the divergence I claimed cannot occur.
+- **KB-grant "bug" retracted mid-session** — the Doc Writer profile lost its KB because I double-clicked the chip (React state is async; the second read was stale), not because the modal drops grants.
 
 ## Finding ledger
 
