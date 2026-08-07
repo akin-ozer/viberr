@@ -516,6 +516,7 @@ export function TaskDetailPage({
         <GithubTrace
           task={task}
           githubHost={githubHost}
+          acceptance={acceptance}
           reconciledAt={githubReconciledAt}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
           {...(onForceAccept

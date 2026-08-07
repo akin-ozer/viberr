@@ -21,6 +21,7 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 export function GithubTrace({
   task,
   githubHost,
+  acceptance,
   reconciledAt = null,
   onCompleteMerge,
   onForceAccept,
@@ -29,6 +30,20 @@ export function GithubTrace({
   merging,
 }: {
   task: TaskDetail;
+  /** UX19-2: the SAME acceptance affordance the Current-state panel renders.
+   *  These two panels sit one above the other and used to read different
+   *  fields: this one showed `task.blockReason`, which by design carries only
+   *  the REVISION dimension of the gate (see `acceptanceBlockReason` in the
+   *  rebuilder — the stage boundary is deliberately left out for consumers to
+   *  filter), and this panel never filtered. Live on VC-1 at In Progress the
+   *  result was two adjacent sentences about one task: "Acceptance is blocked:
+   *  no approving verdict yet — run a review for a verdict, or an admin can
+   *  force-accept" beside "Not acceptable yet. VC-1 is at In Progress, not
+   *  Review". Both came from the server; they just answered different
+   *  questions. The affordance's `blockedReason` is the operative one — the
+   *  first gate `acceptanceRefusalReason` matches — so both panels now name
+   *  the gate that is actually holding the task. */
+  acceptance: AcceptanceAffordance;
   /** GitHub web host for browse links — always the loader's `githubWebHost()`
    *  (P14-UI-11: no client-side default, so the literal lives in one place). */
   githubHost: string;
@@ -58,14 +73,33 @@ export function GithubTrace({
   // task withdraws the affordance, same as R16-3 hides it while the PR is closed.
   const isTerminal =
     task.displayReadiness === "accepted" || task.displayReadiness === "merged";
-  const forceAcceptReason = isTerminal
-    ? null
-    : (task.blockReason ??
-      (task.packet?.type === "blocked"
-        ? "An open blocked decision is holding this task."
-        : null));
+  // UX19-2: the operative gate, not the revision one. `acceptance.blockedReason`
+  // is `acceptanceRefusalReason`'s first match, so it names the archived /
+  // closed-PR / stage-boundary gates that outrank the verdict — the reasons the
+  // Current-state panel beside this one has always shown.
+  const blockedReason =
+    acceptance.blockedReason ??
+    (task.packet?.type === "blocked"
+      ? "An open blocked decision is holding this task."
+      : null);
+  const forceAcceptReason = isTerminal ? null : blockedReason;
+  // DG-2's override is for a WEDGED acceptance — a verdict that can no longer
+  // be recorded, a stale blocked packet. `acceptanceStageBlockedReason` says so
+  // in as many words ("the task page only offers it for those") and declines to
+  // even mention force-accept in its sentence, because a task that has stages
+  // left to cross is not wedged. This panel offered the button there anyway,
+  // making that comment false; the server would have honoured the click and
+  // bypassed the graph gate. Offer it only at the boundary.
+  //
+  // …and never on a TERMINALLY blocked one. R16-3 says a closed, unmerged PR is
+  // not something an override can fix — "offering it here would move the task
+  // to Done over a rejection and stamp `pr.state: accepted` on a PR GitHub has
+  // already closed" — and `acceptanceTerminallyBlocked` is the server-side
+  // predicate written for exactly that, "so the rail cannot re-derive it
+  // differently". This panel had never consulted it.
+  const offerForceAccept = acceptance.atBoundary && !acceptance.terminallyBlocked;
   const forceAcceptRow =
-    forceAcceptReason && onForceAccept ? (
+    forceAcceptReason && onForceAccept && offerForceAccept ? (
       <div className="force-accept">
         {/* P13-D-19: `.hint` used to exist only as `.pj-new .hint`, so this line
             rendered as an unstyled <p>; it is a global utility now. */}

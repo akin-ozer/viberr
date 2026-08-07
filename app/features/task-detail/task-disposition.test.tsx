@@ -206,6 +206,12 @@ describe("P14-LV-06: the acceptance affordance", () => {
         canAccept: false,
         blockedReason:
           "PR #103 was closed on GitHub without merging — VIB-151 cannot be accepted.",
+        // A closed PR is R16-3's TERMINAL block, and the server always sets both
+        // together (`acceptanceTerminallyBlocked`). The fixture used to name the
+        // closed-PR reason while leaving this false — a state no server response
+        // can produce — which since UX19-2 would render the DG-2 override on a
+        // rejected PR, the one place ruling R16-3 forbids it.
+        terminallyBlocked: true,
       },
     });
     const btn = findButton(container, "Accept completion → Done")!;
@@ -770,5 +776,70 @@ describe("F19-22: moving to the terminal stage from the dropdown asks first", ()
     expect(submitted[0]!.intent).toBe("transition");
     expect(submitted[0]!.to).toBe("review");
     expect(acceptDialog(container)).toBeNull();
+  });
+});
+
+/**
+ * UX19-2 — live on VC-1 at In Progress, two panels one above the other said
+ * opposite things about the same task. The GitHub trace read `task.blockReason`
+ * ("no approving verdict yet — run a review for a verdict, or an admin can
+ * force-accept") and offered the override; the Current-state panel beside it
+ * read the acceptance affordance ("VC-1 is at In Progress, not Review …").
+ * Both came from the server — `blockReason` carries only the REVISION dimension
+ * of the gate by design, and this panel never applied the stage filter its
+ * producer assumed consumers would. Running a review would not have unblocked
+ * anything: the task had stages left to cross.
+ */
+describe("UX19-2: the two acceptance panels name one gate", () => {
+  const OFF_BOUNDARY =
+    "VIB-151 is at In Progress, not Review — a completion can only be accepted from the boundary the workflow puts before Done. Move the task through the workflow first.";
+
+  it("off the boundary, the GitHub panel offers no override and states no second reason", () => {
+    const { container } = renderPage({
+      task: { pr: PR_147, blockReason: "No approving verdict yet." },
+      acceptance: {
+        atBoundary: false,
+        canAccept: false,
+        blockedReason: OFF_BOUNDARY,
+      },
+    });
+    // Canary: restore `task.blockReason` as the panel's source and this fails —
+    // the verdict sentence reappears beside the stage one.
+    expect(container.textContent).not.toContain("No approving verdict yet.");
+    expect(
+      findButton(container, "Force accept (override review gate)"),
+    ).toBeUndefined();
+    // …and the refusal is still SAID, once, by the panel that owns it (F15-19).
+    expect(container.textContent).toContain("not Review");
+  });
+
+  it("at the boundary, a genuine wedge still gets the DG-2 override", () => {
+    const { container } = renderPage({
+      task: { pr: PR_147 },
+      acceptance: {
+        atBoundary: true,
+        canAccept: false,
+        blockedReason: "No approving verdict yet.",
+      },
+    });
+    expect(
+      findButton(container, "Force accept (override review gate)"),
+    ).toBeDefined();
+  });
+
+  it("R16-3: a closed PR is terminal, so the override is withheld at the boundary too", () => {
+    const { container } = renderPage({
+      task: { pr: { ...PR_147, state: "closed" } as TaskDetail["pr"] },
+      acceptance: {
+        atBoundary: true,
+        canAccept: false,
+        terminallyBlocked: true,
+        blockedReason:
+          "PR #147 was closed on GitHub without merging — VIB-151 cannot be accepted.",
+      },
+    });
+    expect(
+      findButton(container, "Force accept (override review gate)"),
+    ).toBeUndefined();
   });
 });

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { useState, type ReactNode } from "react";
+import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
@@ -962,6 +963,26 @@ function traceTask(patch: Record<string, unknown> = {}): TaskDetail {
   } as unknown as TaskDetail;
 }
 
+/**
+ * UX19-2: `GithubTrace` renders the operative acceptance gate from the SAME
+ * affordance the Current-state panel gets, instead of `task.blockReason` (which
+ * by design carries only the revision dimension). These fixtures say where the
+ * task stands: `atBoundary` is what makes the DG-2 override appropriate.
+ */
+function affordance(
+  patch: Partial<AcceptanceAffordance> = {},
+): AcceptanceAffordance {
+  return {
+    hasAuthority: true,
+    atBoundary: true,
+    blockedReason: null,
+    blockedReasonViaPacket: null,
+    canAccept: false,
+    terminallyBlocked: false,
+    ...patch,
+  };
+}
+
 describe("GithubTrace — admin force-accept (DG-2)", () => {
   it("renders the block reason + Force-accept button when blocked AND onForceAccept is provided", () => {
     const onForceAccept = vi.fn();
@@ -971,6 +992,10 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
           githubHost={GH_HOST}
           task={traceTask({
             blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+          })}
+          acceptance={affordance({
+            blockedReason:
+              "Waiting on 1 required reviewer approval of the current revision.",
           })}
           onForceAccept={onForceAccept}
         />
@@ -997,6 +1022,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
             blockReason: null,
             packet: { type: "blocked" },
           })}
+          acceptance={affordance()}
           onForceAccept={onForceAccept}
         />
       </MemoryRouter>,
@@ -1018,6 +1044,9 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
         <GithubTrace
           githubHost={GH_HOST}
           task={traceTask({ blockReason: "Waiting on 1 required reviewer approval." })}
+          acceptance={affordance({
+            blockedReason: "Waiting on 1 required reviewer approval.",
+          })}
         />
       </MemoryRouter>,
     );
@@ -1040,6 +1069,10 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
             task={traceTask({
               displayReadiness: terminal,
               blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+            })}
+            acceptance={affordance({
+              blockedReason:
+                "Waiting on 1 required reviewer approval of the current revision.",
             })}
             onForceAccept={onForceAccept}
           />
@@ -1068,7 +1101,7 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
     }) as unknown as TaskDetail;
 
   it("renders a CLOSED (rejected) PR distinctly from one in review", () => {
-    const closed = render(<GithubTrace githubHost={GH_HOST} task={withPr("closed")} />);
+    const closed = render(<GithubTrace githubHost={GH_HOST} acceptance={affordance()} task={withPr("closed")} />);
     const closedPill = closed.container.querySelector(".gh-bar .pill")!;
     // Before the fix this branch didn't exist: a rejected PR rendered as the
     // blue `info` "PR #14", identical to a PR still under review.
@@ -1076,19 +1109,19 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
     expect(closedPill.className).toContain("risk");
     cleanup();
 
-    const review = render(<GithubTrace githubHost={GH_HOST} task={withPr("review")} />);
+    const review = render(<GithubTrace githubHost={GH_HOST} acceptance={affordance()} task={withPr("review")} />);
     const reviewPill = review.container.querySelector(".gh-bar .pill")!;
     expect(reviewPill.textContent).toContain("PR #14");
     expect(reviewPill.className).toContain("info");
   });
 
   it("keeps merged and merge-pending distinct", () => {
-    const merged = render(<GithubTrace githubHost={GH_HOST} task={withPr("merged")} />);
+    const merged = render(<GithubTrace githubHost={GH_HOST} acceptance={affordance()} task={withPr("merged")} />);
     expect(merged.container.querySelector(".gh-bar .pill")!.textContent).toBe(
       "merged",
     );
     cleanup();
-    const accepted = render(<GithubTrace githubHost={GH_HOST} task={withPr("accepted")} />);
+    const accepted = render(<GithubTrace githubHost={GH_HOST} acceptance={affordance()} task={withPr("accepted")} />);
     expect(
       accepted.container.querySelector(".gh-bar .pill")!.textContent,
     ).toContain("merge pending");
@@ -1105,7 +1138,7 @@ describe("LV-09: pluralization + null-ish packet observations", () => {
       pr: null,
       changed: { files: 1, add: 3, del: 1 },
     } as unknown as TaskDetail;
-    const { container } = render(<GithubTrace githubHost={GH_HOST} task={task} />);
+    const { container } = render(<GithubTrace githubHost={GH_HOST} acceptance={affordance()} task={task} />);
     const diff = [...container.querySelectorAll(".kv-row")].find((r) =>
       r.textContent?.startsWith("Diff"),
     )!;
