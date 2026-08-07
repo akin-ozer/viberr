@@ -1074,8 +1074,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .packet-body { padding: 1rem 1.1rem 1.15rem; }
 .packet-body h2 { font-size: 1.25rem; line-height: 1.12; margin-bottom: .5rem; }
 .packet-obs { display: grid; gap: .5rem; margin: .85rem 0; }
+/* The label column holds a fixed 92px so every row's value starts on the same
+   line — until a label is wider than that and its text spills across the gap
+   into the value (live: "RECOMMENDATION" in the acceptance dialog, added with
+   F19-3). `minmax` keeps the shared alignment and lets the widest label decide
+   the column, which is what the fixed value was approximating. */
 .obs {
-  display: grid; grid-template-columns: 92px 1fr; gap: .7rem;
+  display: grid; grid-template-columns: minmax(92px, max-content) 1fr; gap: .7rem;
   align-items: start;
   font-size: .86rem; color: var(--fg); line-height: 1.4;
   padding: .55rem .7rem;

@@ -957,6 +957,27 @@ describe("app.css draws a task key the same way everywhere (P16-F3 follow-on)", 
   });
 });
 
+/**
+ * The acceptance dialog's fact rows (`.obs`) put a label and a value in one
+ * grid. The label column was a fixed 92px, which held until F19-3 added a
+ * label wider than it — "RECOMMENDATION" — whose text then spilled across the
+ * gap and printed over the value beside it (seen live in the acceptance
+ * dialog on VC-6). A fixed column silently assumes every future label is
+ * short; `minmax` keeps the shared alignment the fixed value was there for
+ * and lets the widest label decide the width.
+ */
+describe("app.css .obs label column fits its longest label (F19-3 follow-on)", () => {
+  it("sizes the label column with minmax, not a bare fixed width", () => {
+    const rule = /^\.obs \{([^}]*)\}/m.exec(CODE)?.[1];
+    expect(rule).toBeTruthy();
+    const cols = /grid-template-columns:\s*([^;]+);/.exec(rule!)?.[1]?.trim();
+    expect(cols).toBeTruthy();
+    // Canary: restore `92px 1fr` and this fails.
+    expect(cols).toMatch(/minmax\(/);
+    expect(cols).not.toMatch(/^92px\s/);
+  });
+});
+
 describe("app.css owns static styling, not the JSX (P16-F3)", () => {
   const sites = inlineStyleSites();
 

@@ -40,6 +40,7 @@ against main @65063b8). Intent distillation: INTENT.md.
 | No-change acceptance (R19-1) | F19-21 | `2891044` | ✅ committed, canaried |
 | Skill-mount race + runtime disclosure | F19-15, F19-16, F19-2/R19-3 | `5ef217e` | ✅ committed, canaried |
 | Delivery leaves an actionable step | F19-1 | `5ef217e` | ✅ committed, canaried (9 tests) |
+| Acceptance dialog layout | **F19-23** | `(this commit)` | ✅ Found during LIVE verification of F19-3: the `.obs` label column was a fixed 92px and the new "RECOMMENDATION" label — the first one wider than it — printed over the value beside it. `minmax(92px, max-content)` keeps the shared alignment and lets the widest label size the column. Canaried. |
 | Test hermeticity | **N19-6** | `ed6a6c5` | ✅ committed. Found during verification: the suite made real network clones and flaked under load. |
 | Two-surface acceptance | UX19-2 (UX19-3 retracted) | `2044e02` | ✅ committed, canaried. Fixed a third latent defect: force-accept was offered on a terminally blocked (closed-PR) task, which R16-3 forbids in prose. |
 | Operator repo view + KB precedence | F19-4, Q19-1, Q19-2 (R19-4, R19-2) | `e990eb0` | ✅ committed, canaried |
