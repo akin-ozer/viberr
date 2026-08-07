@@ -46,3 +46,48 @@ describe("operator profile parity: asset template vs seed catalog (seed #4)", ()
     expect(sortCaps(asset.capabilities)).toEqual(sortCaps(catalog.capabilities));
   });
 });
+
+const operatorDefinitionMd = readFileSync(
+  path.join(import.meta.dirname, "assets/operator.definition.md"),
+  "utf8",
+);
+
+/**
+ * R19-4 (ruling 58) — the operator's persona must forbid the one false claim it
+ * actually made. Live (F19-4): at triage its working directory held only
+ * `task.md`, and with nothing else to look at it described that directory AS
+ * the repository — writing `Repo contents visible to operator: "only task.md —
+ * no docs/ or README found"` into a human-facing decision packet about a repo
+ * that has both, then offering to write a README that already existed.
+ *
+ * The tool descriptions say this too, but a tool the operator does not call
+ * teaches it nothing; the persona is read on every turn.
+ */
+describe("R19-4: the persona separates the task workspace from the repository", () => {
+  it("says the working directory is NOT the repository", () => {
+    expect(operatorDefinitionMd).toMatch(/It is NOT the repository/);
+    expect(operatorDefinitionMd).toMatch(
+      /never evidence about what the repository contains/i,
+    );
+  });
+
+  it("names the read-only tools as the ONLY view of the real repository", () => {
+    expect(operatorDefinitionMd).toContain("`list_repo_files`");
+    expect(operatorDefinitionMd).toContain("`read_repo_file`");
+    expect(operatorDefinitionMd).toMatch(/ONLY view of the real repository/);
+  });
+
+  it("forbids reporting a file missing on the strength of the workspace", () => {
+    expect(operatorDefinitionMd).toMatch(
+      /never report a file as missing, or a repository as empty/i,
+    );
+  });
+
+  it("makes the triage gate look at the repository before proposing scope", () => {
+    // The exact failure: options invented without reading the repo.
+    expect(operatorDefinitionMd).toMatch(/LOOK AT THE REPOSITORY FIRST/);
+    expect(operatorDefinitionMd).toMatch(
+      /never offer to add something the repository already has/i,
+    );
+  });
+});

@@ -1585,6 +1585,62 @@ describe("buildSpecialistPersona — attached resources", () => {
 // (it and the skill mount are two halves of "Viberr owns the workspace's
 // `.claude`"); its tests moved with it, to skill-mount.server.test.ts.
 
+/**
+ * R19-2 (ruling 56) — precedence between an attached KB and the repository's own
+ * documented conventions. Live: `qa/smoke/README.md` documented one pass-note
+ * format and a granted KB documented another; the deliverer (KB granted)
+ * followed the KB and a reviewer (no KB) followed the README, so one repository
+ * grew two house styles from the same facts. Nothing in the product had ever
+ * said which source wins.
+ */
+describe("R19-2 — the repository wins; a knowledge base is context", () => {
+  const tempRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-precedence-"));
+
+  function personaWithKb(): string {
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "house-style"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "house-style", "style.md"),
+      "# Style\n\nMarker files end with `Marker-Convention: v3`.",
+    );
+    return buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["house-style"],
+      dataRoot,
+    });
+  }
+
+  it("states the precedence rule whenever a KB is attached", () => {
+    const persona = personaWithKb();
+    // Canary: delete the `kbSet.parts.length > 0` block and this fails.
+    expect(persona).toContain(
+      "When a knowledge base and the repository disagree",
+    );
+    expect(persona).toContain("The REPOSITORY wins");
+  });
+
+  it("requires a noticed conflict to be REPORTED, never silently resolved", () => {
+    const persona = personaWithKb();
+    expect(persona).toMatch(/say so plainly in your report/i);
+    expect(persona).toMatch(/never resolve it silently/i);
+  });
+
+  it("says nothing about precedence when no KB is attached", () => {
+    // The rule is about a conflict that cannot arise without a KB; stating it
+    // anyway would spend prompt budget on every run that has no second source.
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: [],
+      dataRoot: tempRoot(),
+    });
+    expect(persona).not.toContain(
+      "When a knowledge base and the repository disagree",
+    );
+  });
+});
+
 describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => {
   /** Deploy a `dev` deliverer granting KB `deliverKb` and a `critic` reviewer
    *  granting KB `reviewKb` (may be []). */
