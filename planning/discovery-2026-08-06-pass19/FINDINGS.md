@@ -181,3 +181,36 @@ test through the existing render harness (task at Review, admin → no accept di
 **Method note:** the acceptance-writer matrix in this file listed five writers; the sixth was found
 only because the verifier probed a path the finding list did not name. A ledger is a floor, not a
 ceiling.
+
+### F19-38 — HIGH · lifecycle · `app/server/tasks/task-actions.server.ts:2998` + `:3915` · CONFIRMED (live-reproduced)
+
+**An archived task is still movable by a crafted POST.** With an archived task at `impl`, the
+board verifier ran the writers directly: `transitionStage({toStageId:"review", manual:true})` →
+`{ok:true,stage:"review"}` and `reorderTask({toStageId:"review"})` → `{ok:true,moved:true}`. Only
+the TERMINAL target 409s (`acceptanceRefusalReason` → `archivedTaskBlockedReason`). `transitionStage`
+and `reorderTask` carry only the project-level freeze, no archived guard. F19-8 made the archived
+CARD inert in the UI; this is the server half — without it the UI guard is decoration.
+
+### F19-39 — MED · copy · `app/server/tasks/task-actions.server.ts:3061` · CONFIRMED
+
+A user-facing `AppError` renders **"No governed boundary from X to Y."** — the banned word, in copy
+a human reads. The class matters more than the instance: `app/features/copy-ban.test.ts` scans only
+`app/features/**` and `app/routes/**`, so **every user-facing string thrown from `app/server/**` is
+unguarded** by the lint that exists precisely to prevent this. Widening the scan is the fix; the
+string is the symptom.
+
+### F19-40 — MED · audit/a11y · `app/features/activity/activity-page.tsx:162` · CONFIRMED
+
+**R19-7's compaction recognizer is spoofable via display name.** `entry.text` begins with the actor's
+display name, which any member can set on their own profile, and the `RUNTIME_SESSION_OPENED` matcher
+is unanchored. A member who renames themselves `Mallory (opened the dev runtime session)` makes their
+own `task.acceptance.forced` and `project.org_admin.override` rows match the recognizer — two
+consecutive rows then fold behind "N runtime sessions opened", hiding exactly what the audit column
+exists to show. Nothing is deleted (expanding reveals them), so the severity is legibility, not loss —
+but it defeats the ruling that created it. Fix: anchor the pattern to the projection's full sentence.
+
+**Class note:** this is the second time in one pass that a *fix* introduced a defect of its own
+(the first: an implementer shipping an un-restored canary that made every "Complete merge" dialog
+claim a merge-pending task "goes straight to Done"). Both were caught by an independent verifier
+re-deriving the work from the tree rather than reading the implementer's report. Verification is not
+ceremony here; it is where two of this pass's real defects came from.
