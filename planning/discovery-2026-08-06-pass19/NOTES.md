@@ -52,6 +52,19 @@ Findings that CHANGED under scrutiny (recorded because the correction is the poi
 - **UX19-3 retracted** — my two screenshots were taken at different instants, not the same one. Verified in code that the divergence I claimed cannot occur.
 - **KB-grant "bug" retracted mid-session** — the Doc Writer profile lost its KB because I double-clicked the chip (React state is async; the second read was stale), not because the modal drops grants.
 
+## Phase A–D: live verification round 2 (post-implementation)
+
+The first sweep under-executed the use-case phase. This round closed it.
+
+| UC | Scenario | Result |
+|----|----------|--------|
+| UC-14 | **MCP end-to-end** — registered a real stdio MCP server (`pass19-probe`) through the UI; the save ran a real handshake ("1 tools · checked just now"); granted it to the Claude Doc Writer; VC-7's run called `mcp__pass19-probe__viberr-pass19-probe` and returned the exact canary `MCP-CANARY-PASS19-4417`. | ✓ works end-to-end |
+| UC-15 | **Skill routing / decoy** — an ungranted decoy skill (`kubernetes-rollback`, canary `SECRET-CANARY-KUBE-7788`) was in the store the whole time. VC-7's agent reported it can see ONLY `developer-expertise` and explicitly no Kubernetes skill; the decoy canary appears nowhere in the run. | ✓ only granted skills load |
+| UC-11 | **RBAC contributor tier** — provisioned Elif through the real admin flow (incl. the forced set-a-new-password gate), then probed writes as a contributor member: comment 200, owner-take 200; transition / accept-completion / update-goal / assign-specialist / run-specialist / archive-task / schedule-action / force-accept / run-operator ALL **403**, and the task file was unchanged after. | ✓ boundary holds server-side |
+| UC-11b | **Non-admin org settings** — `/org/settings` → 403 for a member. | ✓ |
+| — | **LV-F1 re-verified** — a pending password reset still exposes "Generate a new temp password". | ✓ |
+| — | **R19-2 conflict surfacing in the wild** — unprompted, VC-7's agent flagged that `qa/smoke/pass19-kb-marker.md` (written by the KB-driven VC-3 run) does not conform to the repo's own README format. Exactly the behaviour ruling 56 asks for. | ✓ |
+
 ## Finding ledger
 
 IDs: F19-nn (defects), UX19-nn (UX/coherence), Q19-nn (owner questions), N19-nn (notes/ideas).
