@@ -65,6 +65,22 @@ The first sweep under-executed the use-case phase. This round closed it.
 | — | **LV-F1 re-verified** — a pending password reset still exposes "Generate a new temp password". | ✓ |
 | — | **R19-2 conflict surfacing in the wild** — unprompted, VC-7's agent flagged that `qa/smoke/pass19-kb-marker.md` (written by the KB-driven VC-3 run) does not conform to the repo's own README format. Exactly the behaviour ruling 56 asks for. | ✓ |
 
+## Phase D: visual coherence sweep (1440x900, live app, post-fix)
+
+Screenshots taken of every principal surface. Each pass-19 fix re-confirmed in the running UI, not
+just in tests:
+
+| Surface | What the screenshot shows |
+|---------|---------------------------|
+| Home | Greeting + honest status line ("All quiet — no agent runs right now. **3 decisions** waiting on you"), project card with stage-distribution bar + member avatars, Settings hub whose counts match the store exactly (1 KB · 1 MCP server · 4 skills), admin store strip naming the live writer pid. |
+| Board | 8 tasks across 5 columns. **"waiting on you" vs "waiting on a human" is a real distinction, not drift** — header reads "4 waiting on a human decision", chip reads "Waiting on me · 3"; the 4th (VC-5) is unowned and shows "awaiting owner". Merged tasks carry `merged` + `validation healthy`; PR numbers and branches on every card. |
+| Task detail (VC-7) | **F19-1 fix live**: the recommendation reads "Move the task to Review — *Recorded by Viberr when the delivery landed — this is not the operator agent's judgement.* Review pull request #152 is open while VC-7 is still on In Progress, and nothing had proposed a next step." Honest attribution, evidence, and both Apply/Dismiss. **UX19-2 fix live**: the GitHub panel no longer offers Force accept at In Progress while Current state says "Not acceptable yet". |
+| Review queue | **UX19-3 fix live**: VC-5 sits under **Still in review** (not "Waiting on your acceptance"), subline "No reviewed revision yet — nothing for the required reviewers to approve", chip `no validation`, tag "waiting on a human"; header "0 waiting on your acceptance". Previously it sat under "Waiting on your acceptance · 1 of 1" wearing a green "validation healthy" chip while the task page said acceptance was blocked. |
+| Agents · Live | "Live · 6" counts ENGAGEMENTS (persistent threads), disambiguated by the Status column ("packet open", "anchored · on call") and the tile "0 specialists in a working state". Coherent with the product's persistent-thread model — not a defect. |
+
+Also verified live this round: the stale writer-lock was taken over cleanly on restart (F18-5 machinery),
+and the chokidar watcher reconciled a hand-edit to `task.md` within seconds with no manual re-scan (FR10).
+
 ## Finding ledger
 
 IDs: F19-nn (defects), UX19-nn (UX/coherence), Q19-nn (owner questions), N19-nn (notes/ideas).
