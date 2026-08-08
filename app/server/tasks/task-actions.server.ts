@@ -3576,6 +3576,12 @@ export async function performDelivery(
         push.status === "no_commits"
           ? (fm) => {
               fm.noChanges = true;
+              // F19-27: `validation` is a CACHE and the projection reads the
+              // stored value, not a fresh derivation — so setting the flag
+              // without recomputing left the pre-delivery `changed` in place,
+              // and `changed` renders as "awaiting verdict". A task whose
+              // branch is empty owes nobody a review.
+              fm.validation = deriveValidation(fm);
             }
           : undefined,
       );
@@ -3735,6 +3741,8 @@ export async function performDelivery(
         message,
         (fm) => {
           fm.noChanges = true;
+          // F19-27: recompute the cache alongside the flag — see above.
+          fm.validation = deriveValidation(fm);
         },
       );
       return { status: "nothing_to_review", message };

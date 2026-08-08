@@ -551,6 +551,9 @@ type ReviewState = {
   engagements: Engagement[];
   workRevision: WorkRevision | null;
   verdicts: ReviewVerdict[];
+  /** R19-1: this task was verified to have nothing to deliver. Optional so the
+   *  existing call sites (which all pass whole frontmatter) need no change. */
+  noChanges?: boolean;
 };
 
 /** Supporting engagements that are REQUIRED reviewers (verdict-capable). Their
@@ -590,6 +593,18 @@ export function deriveValidation(
   ) {
     return "healthy";
   }
+  // F19-27 / R19-1: a verified no-change completion has a work revision but
+  // nothing inside it to review — no diff, no pull request, and nobody owing a
+  // verdict. Falling through to `changed` made an accepted task sit in Done
+  // wearing "awaiting verdict", the same false claim UXO-1 removed from
+  // archived tasks.
+  //
+  // Placed LAST on purpose. Both real outcomes still win: a recorded
+  // request-changes stays `failing`, and a reviewer who DID approve a
+  // nothing-to-deliver task stays `healthy` — an approval is evidence and must
+  // not be erased into "nothing to see". Only the genuinely empty case —
+  // no verdict owed, none given — becomes `none`.
+  if (fm.noChanges) return "none";
   return "changed";
 }
 
