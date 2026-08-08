@@ -114,6 +114,22 @@ describe("matchesBoardFilter", () => {
     expect(isBoardFilterId("archived")).toBe(true);
     expect(isBoardFilterId("nonsense")).toBe(false);
   });
+
+  /** Gap-10: the board had no way to ask for the tasks that stopped moving. */
+  it('"quiet" ("Gone quiet") selects on the server-derived flag, and only that', () => {
+    const quiet: FilterableTask = { ...base, quiet: true };
+    expect(matchesBoardFilter(quiet, "quiet")).toBe(true);
+    expect(matchesBoardFilter(base, "quiet")).toBe(false);
+    // An ARCHIVED task never reaches the predicate — the same exclusion every
+    // non-"archived" filter has (R14-3). Belt and braces: `isQuiet` refuses
+    // archived tasks server-side too.
+    expect(matchesBoardFilter({ ...quiet, archived: true }, "quiet")).toBe(false);
+    // And going quiet is NOT folded into "Blocked or waiting": that filter
+    // selects states the system asserted, this one an inference from an absence.
+    expect(matchesBoardFilter(quiet, "risk")).toBe(false);
+    expect(matchesBoardFilter(quiet, "all")).toBe(true);
+    expect(isBoardFilterId("quiet")).toBe(true);
+  });
 });
 
 const task: SearchableTask = {

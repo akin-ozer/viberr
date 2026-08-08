@@ -5931,6 +5931,21 @@ export async function applyRecommendation(
 }
 
 /**
+ * The stable timeline title every DECLINED operator recommendation carries.
+ * Exported because the record is READ BACK: `operatorSnapshot` shows a
+ * re-invoked coordinator what a human already refused, and the task file is
+ * what every future agent and reviewer re-anchors on.
+ */
+export const RECOMMENDATION_DECLINED_TITLE = "Recommendation declined";
+
+/**
+ * The audit action a dismissal records. Exported so the snapshot's
+ * "already declined" reader (operator-actions.server.ts) cannot drift from the
+ * writer here.
+ */
+export const RECOMMENDATION_DISMISSED_AUDIT_ACTION = "task.recommendation.dismissed";
+
+/**
  * Dismiss a pending operator recommendation without acting on it (admin|
  * maintainer, or the task's own owner per R14-2 — symmetric with resolvePacket).
  * Idempotent — a missing id is a no-op.
@@ -5968,13 +5983,48 @@ export async function dismissRecommendation(
     parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
       (r) => r.id !== input.recId,
     );
+    // [1] The human's "no" goes on the CANONICAL record, not only into the
+    // 90-day audit table. Dismissal used to write nothing here, so task.md read
+    // "**Recommendation:** move to Review" (addRecommendation posts that) and
+    // then the card silently vanished — the one answer a supervisor gives that
+    // left no trace for the next agent, a later reviewer, or anyone reading the
+    // task after the audit window closes. INTENT.md justifies that 90-day bound
+    // on the premise that task-scoped history survives in task.md; this path was
+    // the counter-example.
+    //
+    // Type `transition` — no new TIMELINE_EVENT_TYPES entry. It is the type
+    // resolvePacket already stamps on EVERY human decision that routes a task,
+    // including the ones that move no stage (edit_goal, retry_other_backend,
+    // archive_task, redirect). A dismissal is the non-packet twin of resolving a
+    // packet, so it speaks the same `**Decision:** …` vocabulary and renders in
+    // the same "a human decided" row. The `title` distinguishes it, exactly as
+    // CONTEXT_CONFLICT_TITLE distinguishes a KB-vs-repo `quality` flag (R19-2).
+    //
+    // The text names the RECOMMENDATION, not "a recommendation" — and it is
+    // self-describing without the title, because the operator's own
+    // `recentTimeline` window drops titles.
+    //
+    // DELIBERATELY NOT BUILT: a free-text human REASON on the dismissal. Whether
+    // a supervisor must (or may) say why is a product choice the owner has not
+    // made; the trace itself is unambiguous and ships without it.
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "transition",
+      actor: humanActorRef(db, actor),
+      title: RECOMMENDATION_DECLINED_TITLE,
+      text:
+        `**Decision:** declined — ${rec.label}. The operator's recommendation was not applied; ` +
+        `do not re-propose it unless something material about the task changes.`,
+      toAgent: false,
+      evidence: null,
+    });
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   // Resolving the recommendation (either way) clears its "Waiting on you" bell.
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
 
   recordAudit(db, {
-    action: "task.recommendation.dismissed",
+    action: RECOMMENDATION_DISMISSED_AUDIT_ACTION,
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "task",
     subjectId: input.taskKey,

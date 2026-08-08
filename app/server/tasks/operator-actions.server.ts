@@ -64,6 +64,7 @@ import {
   DEFAULT_GOAL,
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
+  RECOMMENDATION_DISMISSED_AUDIT_ACTION,
   acceptanceRefusalFor,
   applyAcceptanceWrite,
   notifyTaskWatchers,
@@ -1400,6 +1401,42 @@ export interface OperatorTaskSnapshot {
     options: string[];
   } | null;
   recentTimeline: { type: string; actor: string; text: string }[];
+  /** [1] The coordinator's OWN proposals — what it already asked for, and what a
+   *  human already refused. Without this the supervised loop spins: a supervisor
+   *  declines "move to Review", the next drive cannot see the refusal (the
+   *  dismissal clears the card, and `addRecommendation`'s duplicate guard
+   *  compares only against still-PENDING cards), so it proposes the identical
+   *  thing and re-pings the same supervisors.
+   *
+   *  BOUNDED on purpose — the whole snapshot is JSON-embedded in the operator
+   *  prompt (buildCodexOperatorPrompt) and returned verbatim by `get_task`: at
+   *  most MAX_SNAPSHOT_RECOMMENDATIONS entries per list, each label capped at
+   *  RECOMMENDATION_LABEL_CAP characters.
+   *
+   *  `declined` reads the `task.recommendation.dismissed` audit rows — which had
+   *  no reader anywhere in the product before this — so this list is bounded by
+   *  the 90-day audit retention. The DURABLE trace of a refusal is the typed
+   *  timeline event `dismissRecommendation` writes
+   *  (RECOMMENDATION_DECLINED_TITLE); that one lives in task.md for good and is
+   *  what the operator re-reads through `recentTimeline`.
+   *
+   *  Optional only so hand-built test fixtures need not restate it (same reason
+   *  as `repo`/`noChanges`); `operatorSnapshot` always sets it. */
+  recommendations?: {
+    /** Still awaiting a human — do NOT re-propose these. */
+    pending: {
+      id: string;
+      kind: string;
+      label: string;
+      /** Target profile id (assign/run recommendations), when the kind has one. */
+      profileId: string | null;
+      /** transition target stage id, when the kind carries one. */
+      toStageId: string | null;
+    }[];
+    /** Already REFUSED by a human, newest first. Re-proposing one of these is
+     *  the loop this field exists to stop. */
+    declined: { kind: string; label: string; at: string }[];
+  };
   /** P13-D-4: the review PR, or null. The operator used to be structurally
    *  blind to it — no `pr` field anywhere in the snapshot — so it could neither
    *  see that a human had CLOSED the PR on GitHub (an out-of-band rejection)
@@ -1441,6 +1478,69 @@ export interface OperatorTaskSnapshot {
   autonomy: OperatorAutonomy;
   /** capabilityId → mode the operator holds (the RBAC the tools honor). */
   policy: Record<string, string>;
+}
+
+/** [1] Hard bound on `snapshot.recommendations`: the whole snapshot is
+ *  JSON-embedded in the operator prompt, so neither list may grow with the
+ *  task's age. Five is enough to stop a re-proposal loop — the operator only
+ *  needs to recognise the card it is about to raise. */
+const MAX_SNAPSHOT_RECOMMENDATIONS = 5;
+/** Labels are model-authored prose; cap them so five entries stay small. */
+const RECOMMENDATION_LABEL_CAP = 160;
+
+function capRecommendationLabel(label: string): string {
+  return label.length > RECOMMENDATION_LABEL_CAP
+    ? label.slice(0, RECOMMENDATION_LABEL_CAP - 1) + "…"
+    : label;
+}
+
+/**
+ * [1] The recommendations a human already REFUSED on this task, newest first.
+ *
+ * Reads the audit rows `dismissRecommendation` writes — the structured
+ * kind+label pair, rather than re-parsing the prose of the timeline event. This
+ * also gives `task.recommendation.dismissed` its first reader anywhere in the
+ * product. Bounded by the 90-day audit retention; the durable refusal record is
+ * the timeline event (RECOMMENDATION_DECLINED_TITLE), not this list.
+ */
+function declinedRecommendations(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+): { kind: string; label: string; at: string }[] {
+  const rows = db
+    .prepare(
+      `SELECT occurred_at, details_json FROM audit_events
+        WHERE project_slug = ? AND task_key = ? AND action = ?
+        ORDER BY occurred_at DESC, rowid DESC
+        LIMIT ?`,
+    )
+    .all(
+      projectSlug,
+      taskKey,
+      RECOMMENDATION_DISMISSED_AUDIT_ACTION,
+      MAX_SNAPSHOT_RECOMMENDATIONS,
+    ) as { occurred_at: string; details_json: string | null }[];
+  return rows.flatMap((row) => {
+    let details: { kind?: unknown; label?: unknown };
+    try {
+      details = row.details_json
+        ? (JSON.parse(row.details_json) as { kind?: unknown; label?: unknown })
+        : {};
+    } catch {
+      return [];
+    }
+    // A row whose details cannot name WHAT was declined is worse than silent —
+    // it would tell the model "something was refused" with nothing to match on.
+    if (typeof details.label !== "string" || details.label.length === 0) return [];
+    return [
+      {
+        kind: typeof details.kind === "string" ? details.kind : "unknown",
+        label: capRecommendationLabel(details.label),
+        at: row.occurred_at,
+      },
+    ];
+  });
 }
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
@@ -1535,6 +1635,20 @@ export function operatorSnapshot(
       text:
         e.text.length > 1500 ? e.text.slice(0, 1497) + "…" : e.text,
     })),
+    // [1] What this coordinator already proposed, and what a human already
+    // refused — the two facts it needed to stop re-proposing a declined move.
+    recommendations: {
+      pending: fm.recommendations
+        .slice(0, MAX_SNAPSHOT_RECOMMENDATIONS)
+        .map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          label: capRecommendationLabel(r.label),
+          profileId: r.profileId ?? null,
+          toStageId: r.toStageId ?? null,
+        })),
+      declined: declinedRecommendations(db, projectSlug, taskKey),
+    },
     // P13-D-4: expose the review PR. `state: "closed"` means a human closed it
     // on GitHub WITHOUT merging — an out-of-band rejection the operator must
     // not paper over by recommending or accepting completion.

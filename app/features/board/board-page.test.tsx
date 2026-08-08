@@ -3,9 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import type { TaskSummary } from "~/shared/mapping/task.server";
-import type { BoardColumn } from "~/server/projections/board-query.server";
-import { BoardPage } from "./board-page";
+import { BoardPage, type BoardColumnData, type BoardTask } from "./board-page";
 
 /**
  * UI-26: `board-page.tsx` (1000+ lines) had no component test at all — only the
@@ -21,7 +19,7 @@ const STAGES = [
   { id: "done", name: "Done", color: "#00b473" },
 ];
 
-function task(patch: Partial<TaskSummary> = {}): TaskSummary {
+function task(patch: Partial<BoardTask> = {}): BoardTask {
   return {
     projectSlug: "viberr-core",
     key: "VIB-142",
@@ -53,11 +51,14 @@ function task(patch: Partial<TaskSummary> = {}): TaskSummary {
     updatedAt: "2026-07-01T09:00:00.000Z",
     boardRank: null,
     filePath: "projects/viberr-core/tasks/VIB-142/task.md",
+    // Gap-10: `listProjectTasks` annotates every summary with these two.
+    lastActivityAt: null,
+    quiet: false,
     ...patch,
-  } as TaskSummary;
+  } as BoardTask;
 }
 
-function columns(tasks: TaskSummary[]): BoardColumn[] {
+function columns(tasks: BoardTask[]): BoardColumnData[] {
   return STAGES.map((stage) => ({
     stage,
     tasks: tasks.filter((t) => t.stage === stage.id),
@@ -65,7 +66,7 @@ function columns(tasks: TaskSummary[]): BoardColumn[] {
 }
 
 function renderBoard(
-  tasks: TaskSummary[],
+  tasks: BoardTask[],
   opts: {
     view?: "list";
     canTransition?: boolean;
@@ -725,5 +726,87 @@ describe("UXV19-6: the list row draws the ACTIONABLE PR-check/review pills the c
     expect(row.textContent).toContain("archived");
     expect(row.textContent).not.toContain("checks failing");
     expect(row.textContent).not.toContain("changes requested");
+  });
+});
+
+/**
+ * Pass-19 gap 10 — a task that quietly stopped moving looked exactly like one
+ * being worked, right down to the pulsing "agent working" dot.
+ *
+ * `quiet` arrives resolved from the server (board-query.server.ts): it is what
+ * the chip selects on and what three surfaces draw, so it must be the SAME value
+ * in the SSR pass and in hydration. The relative TEXT beside it is the
+ * time-dependent part, and that goes through `LocalRelative`.
+ */
+describe("gap-10: the board says when a task has gone quiet", () => {
+  const quietTask = (patch: Partial<BoardTask> = {}) =>
+    task({
+      waiting: "agent",
+      lastActivityAt: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
+      quiet: true,
+      ...patch,
+    });
+
+  it("draws the cue on the card, and nothing at all on a moving task", () => {
+    const { container } = renderBoard([quietTask()]);
+    const foot = container.querySelector(".card-foot")!;
+    expect(foot.textContent).toContain("no activity");
+    // The neutral pill, not one of the loud state colours (risk/blocked/input).
+    expect(container.querySelector(".card-foot .pill.neutral")).toBeTruthy();
+    // The wait tag stays — "agent working" and "no activity 4h" together are the
+    // whole point: the badge alone was the lie.
+    expect(foot.textContent).toContain("agent working");
+    cleanup();
+
+    const moving = renderBoard([task({ waiting: "agent" })]);
+    expect(
+      moving.container.querySelector(".card-foot")!.textContent,
+    ).not.toContain("no activity");
+  });
+
+  it("draws the same cue on the list row — one board, two views, one vocabulary", () => {
+    const { container } = renderBoard([quietTask()], { view: "list" });
+    expect(container.querySelector(".list-row")!.textContent).toContain(
+      "no activity",
+    );
+  });
+
+  it("never draws it on an archived card", () => {
+    // R14-3 / F19-8: archived work is out of the flow and owes nobody anything.
+    // The server's `isQuiet` refuses archived tasks outright; this pins the
+    // second belt, so a stale annotation can never light up an archived card.
+    const { container } = renderBoard(
+      [quietTask({ archived: true })],
+      { search: "filter=archived" },
+    );
+    const card = container.querySelector(".card")!;
+    expect(card.textContent).toContain("archived");
+    expect(card.textContent).not.toContain("no activity");
+  });
+
+  it("gives the board a 'Gone quiet' chip that selects exactly those tasks", () => {
+    const tasks = [
+      quietTask({ key: "VIB-142" }),
+      task({ key: "VIB-143", waiting: "agent" }),
+      task({ key: "VIB-144", waiting: "human" }),
+    ];
+    const chipOff = renderBoard(tasks);
+    const chip = chipOff.getByRole("button", { name: /Gone quiet/ });
+    // The tally discloses the count before anyone clicks it.
+    expect(chip.textContent).toContain("· 1");
+    expect(chipOff.container.textContent).toContain("VIB-143");
+    cleanup();
+
+    const { container } = renderBoard(tasks, { search: "filter=quiet" });
+    expect(container.textContent).toContain("VIB-142");
+    expect(container.textContent).not.toContain("VIB-143");
+    expect(container.textContent).not.toContain("VIB-144");
+  });
+
+  it("hides the chip's tally when nothing is quiet", () => {
+    const { getByRole } = renderBoard([task({ waiting: "agent" })]);
+    expect(
+      getByRole("button", { name: /Gone quiet/ }).textContent,
+    ).not.toContain("·");
   });
 });

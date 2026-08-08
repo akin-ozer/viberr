@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
+import { LocalRelative } from "~/ui/local-time";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { capabilityById } from "~/shared/capabilities";
 import { prStatePill } from "~/features/github/github-pills";
@@ -84,6 +85,22 @@ function RQRow({
           </Pill>
         )}
         <ValidationPill value={t.validation} sm />
+        {/* Gap-10: the acceptance boundary is where a forgotten task costs the
+            most — a completion report nobody answered blocks the merge and the
+            branch behind it. The queue carried no time at all, so a row that
+            landed five minutes ago and one that has waited since Tuesday were
+            pixel-identical. Same neutral pill and same copy as the board card
+            (one vocabulary); the row has room for the tooltip the dense card
+            cannot carry. */}
+        {t.quiet && t.lastActivityAt && (
+          <span
+            title="Nothing has been recorded on this task since then, and no run is in flight."
+          >
+            <Pill kind="neutral" sm>
+              no activity · <LocalRelative iso={t.lastActivityAt} />
+            </Pill>
+          </span>
+        )}
         {ready ? (
           <span className="wait-tag human">
             <Icon name="hand" />

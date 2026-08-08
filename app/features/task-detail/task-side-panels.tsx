@@ -535,6 +535,31 @@ export function CurrentStatePanel({
             )}
           </span>
         </div>
+        {/* Gap-10 — last activity, ALWAYS on, unlike the board's threshold-gated
+            cue. This is the detail surface; a supervisor who has opened the task
+            is asking history questions, and "when did anything last happen here"
+            had no answer anywhere in the app.
+            The stamp is `task.lastActivityAt` — the newest TIMELINE event
+            (`occurred_at`), not `task.updatedAt`. `updatedAt` is a file-write
+            stamp bumped by bookkeeping nobody performed (the 5-minute GitHub
+            reconcile poller re-stamps every branched task), so a dead task with
+            an open PR would read "4m ago" forever. The full argument is on
+            app/server/projections/task-activity.server.ts. */}
+        <div className="kv-row">
+          <span className="k">Last activity</span>
+          <span
+            className="v sub"
+            title="The newest event on this task's timeline. Not the last time the task file changed — a background GitHub sync rewrites that without anything happening."
+          >
+            {task.lastActivityAt ? (
+              <time dateTime={task.lastActivityAt}>
+                <LocalRelative iso={task.lastActivityAt} />
+              </time>
+            ) : (
+              "Nothing on the timeline yet"
+            )}
+          </span>
+        </div>
         <div className="kv-row">
           <span className="k">Owner</span>
           <span className="v">
@@ -587,6 +612,18 @@ export function CurrentStatePanel({
           <span className="v mono">{task.repo}</span>
         </div>
       </div>
+      {/* Gap-10: the cue, once the stamp above has crossed its threshold. Stated
+          as the two facts the detector actually has — an empty timeline and an
+          empty run registry — and then the two real ways forward, because a
+          quiet task is not broken, it is unattended. Archived and terminal tasks
+          never reach here: `isQuiet` refuses them outright (R14-3 / UXO-1). */}
+      {task.quiet && (
+        <p className="hint">
+          Gone quiet — nothing has been recorded on this task since then, and no
+          run is in flight. It stays here until someone engages an agent or
+          schedules an operator re-run.
+        </p>
+      )}
       {/* P14-LV-06: the acceptance the review queue promises. It renders for a
           viewer who HOLDS acceptance authority here (maintainer+, or this task's
           own owner per R6-2/R14-2) once the task stands at the boundary a

@@ -1,0 +1,151 @@
+import { statfsSync } from "node:fs";
+import { getDataRoot } from "~/server/files/file-store-root.server";
+
+/**
+ * Free-space awareness for the data root (gap 16).
+ *
+ * Canonical state in this product is FILES. `writeFileAtomic` stages a task.md
+ * to a tmp path and renames it, and SQLite commits through a WAL on the same
+ * volume — so a full disk does not present as "the disk is full", it presents
+ * as scattered 500s, failed agent runs and a watcher that retries forever
+ * (file-watch.service.server.ts treats ENOSPC as a transient watch error, which
+ * is inode exhaustion semantics, not "the volume is full"). Nothing in the app
+ * had ever asked how much room was left: no statfs, no threshold, no field on
+ * the health payload. Growth was unbounded (gap 15) and unobserved at once.
+ *
+ * ## Why absolute byte thresholds, not percentages
+ *
+ * The quantities that consume this volume are absolute and known: a task
+ * workspace clone is 11-16 MB, a run transcript is single-digit MB, a WAL
+ * checkpoint is bounded by the DB size. A percentage threshold is wrong at both
+ * ends — 10% of a 1 TB volume is 100 GB (permanently "low", so the signal is
+ * ignored), and 10% of a 20 GB volume is 2 GB, which is roughly right by
+ * accident. So the thresholds are byte counts sized against the writes this app
+ * actually makes, and both are configurable:
+ *
+ *  - LOW (2 GiB free) — degraded, but the deployment still works. Enough room
+ *    for many clone+run cycles; the operator has time to act. Surfaces on
+ *    /resources/health and triggers an out-of-band maintenance pass.
+ *  - CRITICAL (512 MiB free) — one clone-heavy run plus a WAL checkpoint can
+ *    plausibly exhaust the volume from here. Logged at error level.
+ *
+ * `VIBERR_DISK_LOW_FREE_MB` / `VIBERR_DISK_CRITICAL_FREE_MB` override them
+ * (raw process.env with numeric coercion + fallback, the same shape as
+ * `VIBERR_GIT_CLONE_TIMEOUT_MS`).
+ *
+ * An unmeasurable volume returns `null`, NEVER a fabricated zero: "we could not
+ * measure" and "there is no space" must not render the same (R17-5 — a
+ * never-checked thing is not a failed thing).
+ */
+
+const MB = 1024 * 1024;
+const GB = 1024 * MB;
+
+/** Default: below this the deployment is degraded but still working. */
+export const DEFAULT_DISK_LOW_FREE_BYTES = 2 * GB;
+/** Default: below this a single run can plausibly fill the volume. */
+export const DEFAULT_DISK_CRITICAL_FREE_BYTES = 512 * MB;
+
+export type DiskStatus = "ok" | "low" | "critical";
+
+export interface DiskSpace {
+  /** Bytes available to this (non-root) process on the data root's filesystem. */
+  freeBytes: number;
+  /** Total size of that filesystem. */
+  totalBytes: number;
+  /** 0-100, rounded to one decimal. */
+  usedPercent: number;
+  status: DiskStatus;
+  /** The thresholds in force, so a reader never has to guess why it is "low". */
+  lowThresholdBytes: number;
+  criticalThresholdBytes: number;
+}
+
+function envBytes(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const mb = Number(raw);
+  return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * MB) : fallback;
+}
+
+export function diskThresholds(): { low: number; critical: number } {
+  const low = envBytes("VIBERR_DISK_LOW_FREE_MB", DEFAULT_DISK_LOW_FREE_BYTES);
+  const critical = envBytes(
+    "VIBERR_DISK_CRITICAL_FREE_MB",
+    DEFAULT_DISK_CRITICAL_FREE_BYTES,
+  );
+  // A critical threshold above the low one would make "low" unreachable; the
+  // configured pair is clamped rather than trusted blindly.
+  return { low: Math.max(low, critical), critical };
+}
+
+export function classifyFreeBytes(
+  freeBytes: number,
+  thresholds = diskThresholds(),
+): DiskStatus {
+  if (freeBytes < thresholds.critical) return "critical";
+  if (freeBytes < thresholds.low) return "low";
+  return "ok";
+}
+
+/**
+ * One `statfs` on the data root. Returns null when the filesystem cannot be
+ * measured (path gone, platform without statfs) — the caller reports "not
+ * measured", never "0 bytes free".
+ */
+export function measureDataRootSpace(dataRoot?: string): DiskSpace | null {
+  let stats;
+  try {
+    stats = statfsSync(getDataRoot(dataRoot));
+  } catch {
+    return null;
+  }
+  const blockSize = Number(stats.bsize);
+  const totalBytes = Number(stats.blocks) * blockSize;
+  const freeBytes = Number(stats.bavail) * blockSize;
+  if (!Number.isFinite(totalBytes) || !Number.isFinite(freeBytes)) return null;
+  const thresholds = diskThresholds();
+  return {
+    freeBytes,
+    totalBytes,
+    usedPercent:
+      totalBytes > 0
+        ? Math.round(((totalBytes - freeBytes) / totalBytes) * 1000) / 10
+        : 0,
+    status: classifyFreeBytes(freeBytes, thresholds),
+    lowThresholdBytes: thresholds.low,
+    criticalThresholdBytes: thresholds.critical,
+  };
+}
+
+/** How long a measurement is reused (the health probe is unauthenticated). */
+export const DISK_MEASUREMENT_TTL_MS = 5_000;
+
+let snapshot: { at: number; value: DiskSpace | null } | null = null;
+
+/**
+ * Cached measurement for request paths. `/resources/health` is unauthenticated
+ * and container platforms poll it every few seconds; one syscall per probe is
+ * cheap but not free, and nothing needs sub-5s resolution on a disk that fills
+ * over days.
+ */
+export function cachedDataRootSpace(now: number = Date.now()): DiskSpace | null {
+  if (snapshot && now - snapshot.at < DISK_MEASUREMENT_TTL_MS) {
+    return snapshot.value;
+  }
+  const value = measureDataRootSpace();
+  snapshot = { at: now, value };
+  return value;
+}
+
+/** Test-only: drop the cached measurement. */
+export function resetDiskSpaceCacheForTests(): void {
+  snapshot = null;
+}
+
+/** Human-sized bytes for log lines ("1.4 GB"). */
+export function formatBytes(bytes: number): string {
+  if (bytes >= GB) return `${Math.round((bytes / GB) * 10) / 10} GB`;
+  if (bytes >= MB) return `${Math.round((bytes / MB) * 10) / 10} MB`;
+  return `${bytes} B`;
+}

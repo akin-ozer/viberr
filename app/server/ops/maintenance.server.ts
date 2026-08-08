@@ -1,0 +1,404 @@
+import type { DatabaseSync } from "node:sqlite";
+import { applyRetention, type RetentionResult } from "~/server/db/retention.server";
+import { logger } from "~/server/logging/logger.server";
+import {
+  reclaimTerminalTaskWorkspaces,
+  type WorkspaceReclamation,
+} from "~/server/tasks/workspace-retention.server";
+import {
+  formatBytes,
+  measureDataRootSpace,
+  type DiskSpace,
+  type DiskStatus,
+} from "./disk-space.server";
+import {
+  pruneRuntimeTranscripts,
+  type TranscriptReclamation,
+} from "./transcript-retention.server";
+
+/**
+ * Periodic store maintenance (gaps 15, 20, 16).
+ *
+ * Retention was real but ran ONCE, at boot: `applyRetention` from
+ * `bootServer`, `reclaimTerminalTaskWorkspaces` from `reconcileRestartedWork`.
+ * The runbook sells retention as the thing that stops "a long-lived deployment"
+ * growing without bound, and it was coupled to restarts — the one event a
+ * stable deployment avoids (`compose.yml` sets `restart: unless-stopped`, so a
+ * healthy container is only ever restarted by a human). The behaviour was
+ * backwards: the more stable the deployment, the more it grew, and the
+ * documented remedy for disk pressure was `rm -rf` by hand plus a restart.
+ *
+ * This applies the periodic-task pattern the codebase already uses five times
+ * over (schedule runner, GitHub reconcile poller, SSE heartbeat, lock guard,
+ * rate-limit prune): one interval, non-overlapping, unref'd, idempotent start.
+ *
+ * ## Single-writer safety
+ *
+ * This introduces NO new writer. The scheduler runs inside the app process that
+ * already holds the data-root lock (boot refuses to start otherwise, B-FD1),
+ * on the same `getDb()` handle boot passes in, and it deletes only things this
+ * process owns. It is a timer in the existing writer, not a second process — the
+ * hazard that ate the WAL twice on this project stays closed.
+ *
+ * ## The one genuinely unsafe step, and its guard
+ *
+ * Workspace reclaim is the step boot could take for free and a timer cannot.
+ * `workspace-retention.server.ts` relies on being sequenced AFTER run recovery,
+ * "at that moment no run of this process can be holding a working tree open"
+ * (P14-RT-09 records the real race that ordering fixed). Mid-flight there is no
+ * such moment, so a periodic reclaim first asks whether ANY run is queued or
+ * running and skips the whole step if one is. That is deliberately coarser than
+ * per-task exclusion: the reclaim is not urgent (it runs on the next tick, and
+ * a busy instance is one that will be idle later), and a coarse guard cannot be
+ * wrong about a task whose run row is written by another code path. The
+ * retention and transcript passes need no such guard — both are age-windowed
+ * (30/90 days), and `IDEMPOTENCY_AUDIT_ACTIONS` already protects the two audit
+ * rows boot recovery reads, so neither can touch anything in flight.
+ */
+
+const HOUR_MS = 3_600_000;
+
+/** Full pass cadence. Six hours: retention windows are 30-90 days, so a pass is
+ *  cheap and rarely finds anything; the point is that a 90-day uptime gets ~360
+ *  passes instead of zero. `VIBERR_MAINTENANCE_INTERVAL_MS` overrides it. */
+export const DEFAULT_MAINTENANCE_INTERVAL_MS = 6 * HOUR_MS;
+/** Free-space check cadence. Five minutes: disks fill over hours, and this is
+ *  the signal that must arrive BEFORE the volume is full, not after. */
+export const DEFAULT_DISK_CHECK_INTERVAL_MS = 5 * 60_000;
+/** Floor between disk-pressure-triggered passes, so a wedged low-space
+ *  condition cannot turn the disk check into a busy loop of sweeps. */
+export const MIN_PRESSURE_PASS_GAP_MS = 30 * 60_000;
+
+export type MaintenanceReason = "boot" | "interval" | "disk-pressure";
+
+export interface MaintenancePassResult {
+  reason: MaintenanceReason;
+  retention: RetentionResult;
+  transcripts: TranscriptReclamation;
+  /** null when the reclaim did not run — `workspacesSkipped` says why. */
+  workspaces: WorkspaceReclamation | null;
+  workspacesSkipped: "active-runs" | "not-requested" | null;
+  /** Free space AFTER the pass; null when it could not be measured. */
+  disk: DiskSpace | null;
+  /** Bytes freed on disk by this pass (transcripts + workspaces). */
+  freedBytes: number;
+}
+
+export interface MaintenancePassOptions {
+  reason: MaintenanceReason;
+  /** Default true. Boot passes false: `reconcileRestartedWork` owns the reclaim
+   *  there, sequenced after run recovery. */
+  reclaimWorkspaces?: boolean;
+  dataRoot?: string;
+  now?: Date;
+}
+
+const EMPTY_RETENTION: RetentionResult = {
+  runLogLines: 0,
+  auditEvents: 0,
+  notifications: 0,
+};
+
+/** Runs that could be holding a working tree open right now. */
+export function activeRunCount(db: DatabaseSync): number {
+  try {
+    return (
+      db
+        .prepare(
+          `SELECT count(*) AS c FROM agent_runs WHERE state IN ('queued', 'running')`,
+        )
+        .get() as { c: number }
+    ).c;
+  } catch {
+    // Unreadable table → assume busy. Skipping a reclaim costs disk; doing one
+    // over a live working tree costs a run.
+    return 1;
+  }
+}
+
+/**
+ * One maintenance pass. Every step is independently caught: a failure in one
+ * never stops the next, and none of them can throw at the caller (a timer tick
+ * and a boot step both want that).
+ */
+export function runMaintenancePass(
+  db: DatabaseSync,
+  options: MaintenancePassOptions,
+): MaintenancePassResult {
+  const wantWorkspaces = options.reclaimWorkspaces !== false;
+
+  let retention = EMPTY_RETENTION;
+  try {
+    retention = applyRetention(db, options.now);
+  } catch (error) {
+    logger.error("retention pass failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
+  let transcripts: TranscriptReclamation = {
+    transcripts: 0,
+    sessions: 0,
+    bytes: 0,
+  };
+  try {
+    transcripts = pruneRuntimeTranscripts({
+      ...(options.dataRoot ? { dataRoot: options.dataRoot } : {}),
+      ...(options.now ? { now: options.now } : {}),
+    });
+  } catch (error) {
+    logger.error("runtime transcript retention failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
+  let workspaces: WorkspaceReclamation | null = null;
+  let workspacesSkipped: MaintenancePassResult["workspacesSkipped"] = null;
+  if (!wantWorkspaces) {
+    workspacesSkipped = "not-requested";
+  } else if (activeRunCount(db) > 0) {
+    workspacesSkipped = "active-runs";
+  } else {
+    try {
+      workspaces = reclaimTerminalTaskWorkspaces(
+        db,
+        options.dataRoot ? { dataRoot: options.dataRoot } : {},
+      );
+    } catch (error) {
+      logger.error("task workspace reclamation failed", {
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+
+  const disk = measureDataRootSpace(options.dataRoot);
+  const freedBytes = transcripts.bytes + (workspaces?.bytes ?? 0);
+
+  const summary = {
+    reason: options.reason,
+    runLogLines: retention.runLogLines,
+    auditEvents: retention.auditEvents,
+    notifications: retention.notifications,
+    transcripts: transcripts.transcripts,
+    sessionFiles: transcripts.sessions,
+    workspaces: workspaces?.removed ?? 0,
+    ...(workspacesSkipped ? { workspacesSkipped } : {}),
+    freed: formatBytes(freedBytes),
+    ...(disk
+      ? { diskFree: formatBytes(disk.freeBytes), diskStatus: disk.status }
+      : {}),
+  };
+  // Every pass logs what it removed — including a pass that removed nothing,
+  // which is how an operator confirms the scheduler is alive at all.
+  logger.info("store maintenance pass", summary);
+
+  recordPass(options.reason, freedBytes);
+  return {
+    reason: options.reason,
+    retention,
+    transcripts,
+    workspaces,
+    workspacesSkipped,
+    disk,
+    freedBytes,
+  };
+}
+
+// -------------------------------------------------- observable state
+
+export interface MaintenanceState {
+  intervalMs: number;
+  diskCheckIntervalMs: number;
+  /** null until the first pass — a never-run scheduler is neutral, not alarming. */
+  lastPassAt: string | null;
+  lastPassReason: MaintenanceReason | null;
+  lastFreedBytes: number;
+  scheduled: boolean;
+}
+
+let lastPassAt: string | null = null;
+let lastPassReason: MaintenanceReason | null = null;
+let lastFreedBytes = 0;
+let lastPassMs = 0;
+
+function recordPass(reason: MaintenanceReason, freedBytes: number): void {
+  lastPassMs = Date.now();
+  lastPassAt = new Date(lastPassMs).toISOString();
+  lastPassReason = reason;
+  lastFreedBytes = freedBytes;
+}
+
+export function maintenanceIntervalMs(): number {
+  const raw = Number(process.env.VIBERR_MAINTENANCE_INTERVAL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAINTENANCE_INTERVAL_MS;
+}
+
+export function diskCheckIntervalMs(): number {
+  const raw = Number(process.env.VIBERR_DISK_CHECK_INTERVAL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DISK_CHECK_INTERVAL_MS;
+}
+
+/** What /resources/health reports about maintenance — proof the timer is live. */
+export function maintenanceState(): MaintenanceState {
+  return {
+    intervalMs: maintenanceIntervalMs(),
+    diskCheckIntervalMs: diskCheckIntervalMs(),
+    lastPassAt,
+    lastPassReason,
+    lastFreedBytes,
+    scheduled: timers().length > 0,
+  };
+}
+
+// -------------------------------------------------- the scheduler
+
+const TIMER_KEY = Symbol.for("viberr.maintenanceTimers");
+const DISK_STATUS_KEY = Symbol.for("viberr.lastDiskStatus");
+
+type TimerSlot = Record<symbol, ReturnType<typeof setInterval>[] | undefined>;
+
+function timers(): ReturnType<typeof setInterval>[] {
+  const slot = globalThis as unknown as TimerSlot;
+  return slot[TIMER_KEY] ?? [];
+}
+
+function setTimers(handles: ReturnType<typeof setInterval>[]): void {
+  const slot = globalThis as unknown as TimerSlot;
+  slot[TIMER_KEY] = handles;
+}
+
+function lastDiskStatus(): DiskStatus | null {
+  const slot = globalThis as unknown as Record<symbol, DiskStatus | undefined>;
+  return slot[DISK_STATUS_KEY] ?? null;
+}
+
+function setLastDiskStatus(status: DiskStatus | null): void {
+  const slot = globalThis as unknown as Record<
+    symbol,
+    DiskStatus | null | undefined
+  >;
+  slot[DISK_STATUS_KEY] = status;
+}
+
+/**
+ * The free-space watch. Logs every TRANSITION (not every sample, which would be
+ * 288 identical lines a day) and, on entering a low/critical state, triggers an
+ * out-of-band maintenance pass — the app's one real defence, since the biggest
+ * reclaimable item on the volume is exactly what that pass removes (11-16 MB
+ * per finished task's clone). Rate-limited by MIN_PRESSURE_PASS_GAP_MS.
+ */
+export function checkDiskPressure(
+  db: DatabaseSync,
+  dataRoot?: string,
+): DiskSpace | null {
+  const disk = measureDataRootSpace(dataRoot);
+  if (!disk) return null;
+  const previous = lastDiskStatus();
+  setLastDiskStatus(disk.status);
+
+  if (disk.status !== previous) {
+    const detail = {
+      free: formatBytes(disk.freeBytes),
+      total: formatBytes(disk.totalBytes),
+      usedPercent: disk.usedPercent,
+      lowThreshold: formatBytes(disk.lowThresholdBytes),
+      criticalThreshold: formatBytes(disk.criticalThresholdBytes),
+    };
+    if (disk.status === "critical") {
+      logger.error(
+        "data root is critically low on free space — writes (task files, SQLite WAL) can start failing",
+        detail,
+      );
+    } else if (disk.status === "low") {
+      logger.warn("data root is low on free space", detail);
+    } else {
+      logger.info("data root free space recovered", detail);
+    }
+  }
+
+  if (
+    disk.status !== "ok" &&
+    Date.now() - lastPassMs >= MIN_PRESSURE_PASS_GAP_MS
+  ) {
+    runMaintenancePass(db, {
+      reason: "disk-pressure",
+      ...(dataRoot ? { dataRoot } : {}),
+    });
+  }
+  return disk;
+}
+
+/**
+ * Start the periodic maintenance timers. Idempotent (a second call is a no-op),
+ * unref'd (never keeps the process alive), non-overlapping.
+ *
+ * NO immediate pass: boot runs its own ordered one (retention + transcripts
+ * before the first request, workspace reclaim after run recovery), and an
+ * immediate reclaim here would race the recovery that boot has just scheduled —
+ * the exact P14-RT-09 hazard. The first timer tick is the first periodic pass.
+ */
+export function startMaintenanceScheduler(
+  db: DatabaseSync,
+  options: {
+    intervalMs?: number;
+    diskCheckIntervalMs?: number;
+    /** Production takes the configured data root; tests pass their own. */
+    dataRoot?: string;
+  } = {},
+): void {
+  if (timers().length > 0) return;
+
+  const intervalMs = options.intervalMs ?? maintenanceIntervalMs();
+  const diskMs = options.diskCheckIntervalMs ?? diskCheckIntervalMs();
+  const rootOption = options.dataRoot ? { dataRoot: options.dataRoot } : {};
+
+  let passRunning = false;
+  const passTimer = setInterval(() => {
+    if (passRunning) return;
+    passRunning = true;
+    try {
+      runMaintenancePass(db, { reason: "interval", ...rootOption });
+    } catch (error) {
+      logger.warn("maintenance tick failed", {
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    } finally {
+      passRunning = false;
+    }
+  }, intervalMs);
+
+  const diskTimer = setInterval(() => {
+    try {
+      checkDiskPressure(db, options.dataRoot);
+    } catch (error) {
+      logger.warn("disk-space check failed", {
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }, diskMs);
+
+  for (const handle of [passTimer, diskTimer]) {
+    if (typeof handle.unref === "function") handle.unref();
+  }
+  setTimers([passTimer, diskTimer]);
+  logger.info("store maintenance scheduled", {
+    everyMinutes: Math.round(intervalMs / 60_000),
+    diskCheckMinutes: Math.round(diskMs / 60_000),
+  });
+}
+
+/** Stop the timers (tests + graceful shutdown). */
+export function stopMaintenanceScheduler(): void {
+  for (const handle of timers()) clearInterval(handle);
+  setTimers([]);
+}
+
+/** Test-only: forget the recorded pass + disk transition state. */
+export function resetMaintenanceStateForTests(): void {
+  stopMaintenanceScheduler();
+  lastPassAt = null;
+  lastPassReason = null;
+  lastFreedBytes = 0;
+  lastPassMs = 0;
+  setLastDiskStatus(null);
+}

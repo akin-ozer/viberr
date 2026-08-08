@@ -26,6 +26,7 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
+  RECOMMENDATION_DECLINED_TITLE,
   applyRecommendation,
   createTask,
   dismissRecommendation,
@@ -49,6 +50,7 @@ import {
   operatorRunAgent,
   operatorRunReviewer,
   operatorRunSpecialist,
+  operatorSnapshot,
   operatorTransitionStage,
   operatorBackendFor,
   resolveOperatorAuthority,
@@ -1397,6 +1399,110 @@ describe("applyRecommendation / dismissRecommendation", () => {
       (n) => n.kind === "approval",
     ).length;
     expect(after).toBe(before);
+  });
+
+  // ---------------------------------------------------------------- gap [1]
+  // A declined recommendation used to leave NO trace on task.md (only a 90-day
+  // audit row nothing reads), and the operator's snapshot carried no
+  // recommendations at all — so the supervised loop could spin: propose,
+  // decline, re-propose, decline.
+
+  function snapshot() {
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("supervised"),
+    );
+  }
+
+  it("dismissing a recommendation writes a typed timeline event NAMING what was declined", async () => {
+    const recId = await seedRecommendation();
+    const label = task().frontmatter.recommendations[0]!.label;
+    await dismissRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    // The refusal is on the CANONICAL record, newest-first, attributed to the
+    // human who said no — not only in the audit table.
+    const event = task().timeline[0]!;
+    expect(event.title).toBe(RECOMMENDATION_DECLINED_TITLE);
+    expect(event.type).toBe("transition");
+    expect(event.actor.kind).toBe("human");
+    // It names the recommendation, not "a recommendation".
+    expect(event.text).toContain(label);
+    expect(event.text).toContain("declined");
+    // …and it stays readable without its title, because the operator's own
+    // recentTimeline window drops titles.
+    expect(snapshot().recentTimeline[0]!.text).toContain(label);
+  });
+
+  it("the operator snapshot carries its own PENDING recommendations", async () => {
+    await seedRecommendation();
+    const pending = snapshot().recommendations!.pending;
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.kind).toBe("assign_specialist");
+    expect(pending[0]!.profileId).toBe("developer");
+    expect(pending[0]!.label).toContain("Dev");
+    expect(snapshot().recommendations!.declined).toHaveLength(0);
+  });
+
+  it("the operator snapshot carries recently-DECLINED recommendations", async () => {
+    const recId = await seedRecommendation();
+    const label = task().frontmatter.recommendations[0]!.label;
+    await dismissRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    const recs = snapshot().recommendations!;
+    expect(recs.pending).toHaveLength(0);
+    expect(recs.declined).toHaveLength(1);
+    expect(recs.declined[0]!.kind).toBe("assign_specialist");
+    expect(recs.declined[0]!.label).toBe(label);
+    expect(recs.declined[0]!.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("the declined list is BOUNDED (the snapshot is embedded in a prompt)", async () => {
+    // Seven proposals, each declined — the loop this field exists to stop. The
+    // snapshot must not grow with the task's age.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "Operator drive",
+        recommendations: Array.from({ length: 7 }, (_, i) => ({
+          id: `rec-${i}`,
+          kind: "transition" as const,
+          toStageId: "review",
+          label: `Move to Review (proposal ${i})`,
+          detail: "",
+        })),
+      }),
+      goal: "Prove the operator drives the task.",
+    });
+    deployRoster(DEFAULT_POLICY);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapshot().recommendations!.pending).toHaveLength(5);
+    for (let i = 0; i < 7; i++) {
+      await dismissRecommendation(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", recId: `rec-${i}` },
+        { userId: store.users.arda.id, label: store.users.arda.email },
+        { dataRoot: store.dataRoot },
+      );
+    }
+    const recs = snapshot().recommendations!;
+    expect(recs.pending).toHaveLength(0);
+    expect(recs.declined).toHaveLength(5);
+    // …while every one of the seven refusals is on the durable record.
+    expect(
+      task().timeline.filter((e) => e.title === RECOMMENDATION_DECLINED_TITLE),
+    ).toHaveLength(7);
   });
 
   it("only admin|maintainer may dismiss a recommendation", async () => {

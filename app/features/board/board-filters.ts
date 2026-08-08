@@ -4,7 +4,13 @@
  * in pill CSS via app/ui/pill.tsx.
  */
 
-export type BoardFilterId = "all" | "human" | "agent" | "risk" | "archived";
+export type BoardFilterId =
+  | "all"
+  | "human"
+  | "agent"
+  | "risk"
+  | "quiet"
+  | "archived";
 
 export interface FilterableTask {
   waiting: string;
@@ -19,6 +25,11 @@ export interface FilterableTask {
   /** R14-3: archived tasks are a terminal disposition, not a stage — they leave
    *  every default view and are reachable only through the Archived filter. */
   archived?: boolean;
+  /** Gap-10: nothing has been recorded on this task past its threshold and no
+   *  run is in flight. Server-derived (`isQuiet`, task-activity.server.ts) — the
+   *  board must not re-derive a time-dependent verdict client-side, or the SSR
+   *  pass and hydration would disagree about which cards the chip selects. */
+  quiet?: boolean;
 }
 
 /** "Blocked or waiting" = work that CANNOT PROCEED: readiness blocked /
@@ -37,6 +48,14 @@ export function matchesBoardFilter(
   if (task.archived === true) return false;
   if (filter === "human") return task.waitingOnMe === true;
   if (filter === "agent") return task.waiting === "agent";
+  // Gap-10. Deliberately its OWN chip rather than a new clause inside "Blocked
+  // or waiting": that filter selects work the system KNOWS cannot proceed
+  // (blocked, input required, failing validation, a rejected PR) — every member
+  // is a state something asserted. Going quiet is an INFERENCE from an absence,
+  // and folding it in would have made the one filter people trust for real
+  // failures start returning guesses. R16-2's rule — name the chip for what it
+  // selects — applies to both.
+  if (filter === "quiet") return task.quiet === true;
   if (filter === "risk") {
     return (
       task.readiness === "inconsistency_risk_detected" ||
@@ -128,6 +147,7 @@ export function isBoardFilterId(value: string | null): value is BoardFilterId {
     value === "human" ||
     value === "agent" ||
     value === "risk" ||
+    value === "quiet" ||
     value === "archived"
   );
 }

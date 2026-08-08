@@ -21,7 +21,13 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   deliveringEngagement,
   supportingEngagements,
+  type TaskFileEvent,
+  type TaskPacket,
 } from "~/schemas/task-file.schema";
+import {
+  RUN_INPUTS_TAG,
+  type RunInputs,
+} from "~/features/runtime/runtime-types";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -1882,5 +1888,325 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(
       existsSync(path.join(ws, ".claude", "skills", "conventional-commits")),
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------- P19-G0/G11
+
+/**
+ * P19-G0 — "Any reactivated agent re-anchors on the canonical task artifact
+ * before acting" (PRD Runtime continuity), and FR22's continuation promise
+ * holds "even when prior runtime history is unavailable".
+ *
+ * Exactly ONE path honoured that: the @mention RESUME, whose whole prompt is
+ * `specialistReplyDirective` with `canonicalTaskAnchor` prepended. Every FRESH
+ * run — the UI Run button, the operator's run_agent/prompt_agent, and a FIRST
+ * @mention of an agent with no prior session — got `buildAnalyzePrompt`: role,
+ * title, goal, repo/branch contract, directive, trust boundary, and nothing
+ * about what had already happened on the task. So the rework loop's own
+ * re-runs were stateless: a re-run reviewer could not tell whether the change
+ * it asked for last revision had been made, and the deliverer re-prompted for
+ * that rework had no record of why its own branch looks the way it does. There
+ * is no pull-side substitute either — the specialist MCP surface has no
+ * task-read tool and the run cwd is never the task dir.
+ */
+describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () => {
+  const packet: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "SENTINEL-PACKET: ship the mount behind a flag?",
+    body: "Two viable options.",
+    observations: [],
+    options: [
+      { kind: "custom", t: "Behind a flag", d: "", rec: true },
+      { kind: "custom", t: "Unconditionally", d: "", rec: false },
+    ],
+  };
+
+  const event = (text: string, n: number): TaskFileEvent => ({
+    occurredAt: `2026-08-0${n}T10:00:00.000Z`,
+    type: "comment",
+    actor: { kind: "human", userId: "u_1", nameHint: "Deniz" },
+    title: null,
+    text,
+    toAgent: false,
+    evidence: null,
+  });
+
+  /** VIB-1 with real history: a prior reviewer request, an open decision. */
+  function taskWithHistory(): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "Attach execution workspace",
+        readiness: "ready",
+        waiting: "agent",
+        validation: "changed",
+        branch: "vib-1-attach-execution-workspace",
+        engagements: [
+          {
+            profileId: "dev",
+            backend: "claude",
+            role: "developer",
+            delivers: true,
+            verdictCapable: false,
+          },
+        ],
+      }),
+      goal: "Ship the CURRENT goal, not the one the agent remembers.",
+      packet,
+      timeline: [
+        event("SENTINEL-REVIEWER-REQUEST: extract the mount into its own module.", 6),
+        event("Older note nobody needs.", 5),
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("puts the canonical task state — timeline, open decision, stage — into the fresh-run prompt", async () => {
+    // The headline: a run started with NO directive at all still knows what has
+    // happened on this task. Canary: drop `...(anchor ? { anchor } : {})` from
+    // the buildAnalyzePrompt call in startAgentRun and every assertion below
+    // except the goal fails — the goal is the ONE fact the old prompt carried.
+    taskWithHistory();
+    const run = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const prompt = lastRunSpec()?.prompt ?? "";
+
+    expect(prompt).toContain("## Canonical task state");
+    // What the reviewer asked for last time — the fact a stateless re-run of
+    // the deliverer could not possibly have.
+    expect(prompt).toContain("SENTINEL-REVIEWER-REQUEST");
+    // The open decision, WITH its options, so the agent does not re-answer it
+    // itself (the anchor also says a human resolves it).
+    expect(prompt).toContain("SENTINEL-PACKET");
+    expect(prompt).toContain("Behind a flag");
+    // Current position: the stage's DISPLAY name, not the raw `impl` id.
+    expect(prompt).toContain("stage: In Progress");
+    expect(prompt).toContain("readiness: ready");
+    expect(prompt).toContain("validation: changed");
+    // And it must claim precedence over the model's own memory.
+    expect(prompt).toMatch(/not the source of truth/i);
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda),
+    );
+  });
+
+  it("covers a FIRST @mention, which has no session to resume and falls through to a fresh run", async () => {
+    // The hole inside the hole: the @mention path was the ONE path that
+    // anchored — but only on its RESUME branch. With no prior session
+    // `commentToAgent` engages the agent and calls `startAgentRun`, and the
+    // anchor rode `specialistReplyDirective` only, so the very first time a
+    // human addressed an agent it answered with no idea what had happened on
+    // the task. Canary: same as the fresh-run canary above — this test fails
+    // with it, because it IS the fresh-run path.
+    taskWithHistory();
+    const { commentToAgent } = await import("./task-actions.server");
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev what is left here?" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("started");
+    const prompt = lastRunSpec()?.prompt ?? "";
+    expect(prompt).toContain("## Canonical task state");
+    expect(prompt).toContain("SENTINEL-REVIEWER-REQUEST");
+    // The human's own words still arrive as the turn's directive.
+    expect(prompt).toContain("what is left here?");
+  });
+
+  it("orders the prompt contract → canonical state → directive, and names the state in the trust boundary", () => {
+    // Placement is load-bearing: the delivery contract is what the agent MAY
+    // do and must not be reframed by task content, and the anchor's timeline is
+    // human/agent text — so the trust boundary has to cover it explicitly.
+    const anchor = "## Canonical task state (task.md — read this before you act)\nSENTINEL-ANCHOR";
+    const prompt = buildAnalyzePrompt({
+      role: "Implementation",
+      taskKey: "VIB-42",
+      title: "t",
+      goal: "g",
+      repo: "acme/app",
+      branch: "vib-42",
+      cloned: true,
+      delivers: true,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      anchor,
+      directive: "SENTINEL-DIRECTIVE",
+      directiveFrom: "Deniz",
+    });
+    expect(prompt).toContain("SENTINEL-ANCHOR");
+    expect(prompt.indexOf("Workspace contract")).toBeLessThan(prompt.indexOf("SENTINEL-ANCHOR"));
+    expect(prompt.indexOf("SENTINEL-ANCHOR")).toBeLessThan(prompt.indexOf("SENTINEL-DIRECTIVE"));
+    expect(prompt).toContain("the canonical task state, comments");
+  });
+
+  it("still runs — without an anchor block — when the task file cannot be anchored", () => {
+    // The anchor is best-effort by construction: a run must never fail because
+    // its canonical block could not be built.
+    const prompt = buildAnalyzePrompt({
+      role: "Implementation",
+      taskKey: "VIB-42",
+      title: "t",
+      goal: "g",
+      repo: null,
+      branch: "vib-42",
+      cloned: false,
+      delivers: true,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+    });
+    expect(prompt).not.toContain("## Canonical task state");
+    expect(prompt).toContain("Trust boundary");
+  });
+});
+
+/**
+ * P19-G8/G11 — what a run was GIVEN is inspectable.
+ *
+ * The console was output-only by construction: no prompt kind in the LogLine
+ * union, no resolved-resource column on `agent_runs`, and the persona and
+ * anchor were built, sent and dropped. So the product's own claims about a run
+ * — which knowledge bases it carried, which granted skills actually mounted,
+ * which MCP grants resolved to nothing, what canonical state it re-anchored on
+ * — could not be checked by the human the disclosures exist for. The
+ * "Attached resources that did NOT reach this run" honesty in particular
+ * reached the AGENT only: a human learned about a KB grant that resolved to
+ * nothing solely if the agent chose to repeat it.
+ */
+describe("P19-G11 — the run records what it was given", () => {
+  function inputsLine(runId: string): RunInputs | undefined {
+    return listRunLines(store.db, runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    )?.display.inputs;
+  }
+
+  async function assignAndRun(): Promise<string> {
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const run = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda),
+    );
+    return run.runId;
+  }
+
+  it("writes a run·inputs line carrying the anchor, the confinement and the workspace", async () => {
+    // Canary: delete the `recordRunInputs(...)` call in startAgentRun and this
+    // whole block fails — there is no other record of a run's inputs anywhere.
+    const runId = await assignAndRun();
+    const inputs = inputsLine(runId);
+    expect(inputs).toBeTruthy();
+    expect(inputs!.anchor).toContain("## Canonical task state");
+    expect(inputs!.delivers).toBe(true);
+    expect(inputs!.promptChars).toBeGreaterThan(0);
+    // The confinement a human could not see before: `dev` is deployed with NO
+    // capability grants, so every delivery tool is withheld.
+    expect(inputs!.tools.denied.length).toBeGreaterThan(0);
+    // And the line is human-readable without expanding anything.
+    const display = listRunLines(store.db, runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    )!.display;
+    expect(display.ev).toBe("meta");
+    expect(display.text).toContain("Run inputs");
+    expect(display.text).toContain("canonical anchor");
+    // The stored envelope carries the same payload for the `{ } raw` toggle.
+    const raw = listRunLines(store.db, runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    )!.raw;
+    expect(JSON.parse(raw)).toMatchObject({ type: "run_inputs", source: "viberr" });
+  });
+
+  it("names a knowledge-base grant whose content never reached the run", async () => {
+    // The silent-resource class, told to a HUMAN for the first time. The
+    // prompt has said this to the agent since P14; nothing said it to anyone
+    // who could fix the configuration.
+    //
+    // Canary: drop the `unresolvedOut` push in buildSpecialistPersona and
+    // `unresolvedResources` comes back empty while the persona still warns the
+    // agent — the exact asymmetry this closes.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            resources: { skills: [], mcps: [], kb: ["house-style"] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const runId = await assignAndRun();
+    const inputs = inputsLine(runId);
+    expect(inputs!.knowledge).toEqual(["house-style"]);
+    expect(inputs!.unresolvedResources.map((r) => r.name)).toContain("house-style");
+    // The persona still tells the agent too — both audiences, one resolution.
+    expect(lastRunSpec()?.systemPrompt ?? "").toContain("did NOT reach this run");
+  });
+
+  it("records which granted skills MOUNTED natively and which rode the prompt", async () => {
+    // R18-5's disclosure promise, per run: the same grant reaches Claude as a
+    // native mount and Codex as prompt text, and until now neither surface
+    // said which had happened. A run with no checkout cannot mount anything —
+    // this project has no repo, so the grant is carried as text.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            resources: { skills: ["conventional-commits"], mcps: [], kb: [] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const runId = await assignAndRun();
+    const inputs = inputsLine(runId);
+    expect(inputs!.skills.granted).toEqual(["conventional-commits"]);
+    expect(inputs!.skills.native).toEqual([]);
+    expect(inputs!.skills.injected).toEqual(["conventional-commits"]);
   });
 });

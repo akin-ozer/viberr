@@ -21,6 +21,11 @@ export interface ReviewRowView {
    *  Only ever populated on "Still in review" rows — the acceptance panel holds
    *  only rows with a null block reason. */
   blockReason: string | null;
+  /** Gap-10: ISO of the newest timeline event (`occurred_at`); null when the
+   *  timeline is empty. */
+  lastActivityAt: string | null;
+  /** Gap-10: nothing recorded past this row's threshold and no run in flight. */
+  quiet: boolean;
 }
 
 /**

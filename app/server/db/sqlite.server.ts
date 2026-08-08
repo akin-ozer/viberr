@@ -18,6 +18,18 @@ export function openDatabase(dbPath: string): DatabaseSync {
   return db;
 }
 
+/**
+ * Opens the database READ-ONLY: a reader, never the second writer B-FD1
+ * refuses. Used by the read-only maintenance CLIs (`npm run backup`,
+ * `npm run keys -- status`), which must work against a LIVE instance and
+ * therefore cannot take the writer lock. No migrations are run — a read-only
+ * handle could not apply them, and a reporting command has no business
+ * changing a schema.
+ */
+export function openDatabaseReadOnly(dbPath: string): DatabaseSync {
+  return new DatabaseSync(dbPath, { readOnly: true });
+}
+
 /** Resolves the projection database path under the configured data root. */
 export function getProjectionDbPath(): string {
   const env = getEnv();

@@ -80,33 +80,75 @@ function rememberWrite(absPath: string, content: string): void {
 }
 
 /** The freshest content for a locked read: disk, unless it is provably a
- *  stale cache of our own earlier write. */
+ *  stale cache of our own earlier write. Carries the diagnostics of whichever
+ *  content won, because the write guard below judges THAT content. */
 function repairStaleRead(
   absPath: string,
   current: TaskFileReadResult,
   ref: TaskFileRef,
-): ParsedTaskFile {
+): { parsed: ParsedTaskFile; diagnostics: FileDiagnostic[] } {
+  const disk = { parsed: current.parsed, diagnostics: current.diagnostics };
   const remembered = lastWritten.get(absPath);
-  if (!remembered || current.content === remembered.content) {
-    return current.parsed;
-  }
+  if (!remembered || current.content === remembered.content) return disk;
   let mtimeMs: number;
   try {
     mtimeMs = statSync(absPath).mtimeMs;
   } catch {
-    return current.parsed;
+    return disk;
   }
   // 100 ms slack for mtime granularity/clock skew between the write and the
   // rename's recorded time. An external writer lands AFTER our write, so its
   // mtime exceeds wroteAtMs + slack and disk wins.
-  if (mtimeMs > remembered.wroteAtMs + 100) return current.parsed;
+  if (mtimeMs > remembered.wroteAtMs + 100) return disk;
   logger.warn("stale task-file read repaired from the in-process write cache", {
     taskKey: ref.taskKey,
     absPath,
   });
-  return parseTaskFileContent(remembered.content, {
+  const reparsed = parseTaskFileContent(remembered.content, {
     fallbackKey: ref.taskKey,
-  }).parsed;
+  });
+  return { parsed: reparsed.parsed, diagnostics: reparsed.diagnostics };
+}
+
+/**
+ * Refuse to write over a file the parser could only read with FALLBACK
+ * DEFAULTS (gap 22).
+ *
+ * Tolerant parsing is right for READING — a broken file must never crash the
+ * app or drop a task. It is catastrophic for WRITING: every mutation here is a
+ * read-modify-write, so appending one comment to a task whose frontmatter YAML
+ * is unparseable serialized the DEFAULTS over it — owner, stage, engagements,
+ * PR link, all gone — and an unterminated `---` fence parses with an empty
+ * body, so the same write erased the goal and the entire timeline too. A
+ * truncated editor write is precisely the case FR10's hand-editable store must
+ * survive, and it was the case that destroyed the file.
+ *
+ * `hardStop` is exactly the right line: it is set only when the file's own
+ * fields could not be read at all (no frontmatter, unterminated fence,
+ * unparseable YAML, frontmatter that is not a map). Everything the parser
+ * genuinely round-trips — unknown fields, unknown sections, skipped timeline
+ * entries — is not hardStop and still writes.
+ */
+export function taskFileWriteBlockers(
+  diagnostics: FileDiagnostic[],
+): FileDiagnostic[] {
+  return diagnostics.filter((d) => d.hardStop === true);
+}
+
+function assertTaskFileTrusted(
+  ref: TaskFileRef,
+  absPath: string,
+  diagnostics: FileDiagnostic[],
+): void {
+  const blockers = taskFileWriteBlockers(diagnostics);
+  if (blockers.length === 0) return;
+  const why = blockers.map((d) => d.message).join(" ");
+  throw new AppError({
+    code: ERROR_CODES.FILE_NOT_TRUSTED,
+    status: 409,
+    message: `refusing to write ${absPath}: ${why}`,
+    userMessage: `${ref.taskKey}'s file can't be read as a task file, so saving would replace what is in it. ${why} Fix the file, or put back the last good copy of it — \`npm run store:check\` names the line.`,
+  });
 }
 
 /**
@@ -126,7 +168,9 @@ export async function updateTaskFile(
         `Task file not found: ${ref.projectSlug}/${ref.taskKey}`,
       );
     }
-    const base = repairStaleRead(absPath, current, ref);
+    const fresh = repairStaleRead(absPath, current, ref);
+    assertTaskFileTrusted(ref, absPath, fresh.diagnostics);
+    const base = fresh.parsed;
     const next = mutate(base) ?? base;
     next.frontmatter.updatedAt = new Date().toISOString();
     const serialized = serializeTaskFile(next);

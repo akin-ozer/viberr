@@ -114,6 +114,8 @@ describe("/projects/:slug/review", () => {
       pr: null,
       validation: "none",
       blockReason: null,
+      lastActivityAt: null,
+      quiet: false,
     };
     expect(reviewRowSub(bare)).toBe(
       "Agent working — the packet arrives at the boundary.",

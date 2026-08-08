@@ -10,6 +10,8 @@ const base: ReviewRowView = {
   pr: null,
   validation: "none",
   blockReason: null,
+  lastActivityAt: null,
+  quiet: false,
 };
 
 describe("reviewRowSub", () => {

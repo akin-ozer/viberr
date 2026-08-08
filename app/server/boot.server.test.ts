@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { createTestDbContext } from "../../test-support/test-db";
+import { logger } from "./logging/logger.server";
 
 /**
  * P14-RT-09: the boot reconcile chain is ORDERED.
@@ -45,9 +46,29 @@ vi.mock("./tasks/workspace-retention.server", async () => {
   return { ...actual, reclaimTerminalTaskWorkspaces };
 });
 
-const { reconcileRestartedWork, takeDataRootWriterLock } = await import(
-  "./boot.server"
+/**
+ * Gap 15: boot's retention step used to be the ONLY one in the process
+ * lifetime. These two stand in for the periodic scheduler so the boot WIRING
+ * (which cannot be exercised without booting a real server) is testable.
+ */
+const runMaintenancePass = vi.fn(
+  (_db: unknown, _options: { reason: string; reclaimWorkspaces?: boolean }) =>
+    ({}) as never,
 );
+const startMaintenanceScheduler = vi.fn();
+vi.mock("./ops/maintenance.server", async () => {
+  const actual = await vi.importActual<
+    typeof import("./ops/maintenance.server")
+  >("./ops/maintenance.server");
+  return { ...actual, runMaintenancePass, startMaintenanceScheduler };
+});
+
+const {
+  logBootIntegrity,
+  reconcileRestartedWork,
+  startStoreMaintenance,
+  takeDataRootWriterLock,
+} = await import("./boot.server");
 
 /** The chain only passes the handle through — no query runs in these tests. */
 const db = {} as DatabaseSync;
@@ -57,6 +78,9 @@ beforeEach(() => {
   recoverUnreactedAgentRuns.mockClear();
   recoverStrandedOperatorPlans.mockClear();
   reclaimTerminalTaskWorkspaces.mockClear();
+  runMaintenancePass.mockClear();
+  runMaintenancePass.mockImplementation(() => ({}) as never);
+  startMaintenanceScheduler.mockClear();
 });
 
 /**
@@ -147,5 +171,72 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
 
     expect(recoverStrandedOperatorPlans).toHaveBeenCalledTimes(1);
     expect(reclaimTerminalTaskWorkspaces).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Gap 15: retention was a one-shot boot step, so the more stable the
+ * deployment the more it grew — and `compose.yml` sets `restart: unless-stopped`,
+ * meaning a healthy container is only ever restarted by a human. Boot keeps its
+ * pass AND now arms the timer that makes it recur.
+ */
+describe("startStoreMaintenance (gap 15)", () => {
+  it("runs a boot pass and ARMS the periodic scheduler", () => {
+    startStoreMaintenance(db);
+
+    expect(runMaintenancePass).toHaveBeenCalledTimes(1);
+    expect(runMaintenancePass.mock.calls[0]![1]).toMatchObject({
+      reason: "boot",
+      // reconcileRestartedWork owns the reclaim at boot, sequenced AFTER run
+      // recovery (P14-RT-09) — doing it here too would reintroduce that race.
+      reclaimWorkspaces: false,
+    });
+    expect(startMaintenanceScheduler).toHaveBeenCalledTimes(1);
+    expect(startMaintenanceScheduler.mock.calls[0]![0]).toBe(db);
+  });
+
+  it("still arms the scheduler when the boot pass throws", () => {
+    runMaintenancePass.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+
+    expect(() => startStoreMaintenance(db)).not.toThrow();
+    expect(startMaintenanceScheduler).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Gap 18: the boot integrity line was the doc's answer to "which build is
+ * running" (deployment.md §First run) while carrying no build identity at all —
+ * `latestMigration` is the constant `0001_baseline.sql` for every build.
+ */
+describe("logBootIntegrity (gaps 16 + 18)", () => {
+  const bootCtx = createTestDbContext();
+  afterEach(bootCtx.cleanup);
+
+  function integrityFields(): Record<string, unknown> {
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      logBootIntegrity(bootCtx.makeDb());
+      const line = info.mock.calls.find(
+        ([msg]) => msg === "boot integrity check",
+      );
+      expect(line).toBeDefined();
+      return line![1] as Record<string, unknown>;
+    } finally {
+      info.mockRestore();
+    }
+  }
+
+  it("names the running build", () => {
+    const fields = integrityFields();
+    expect(fields.build).toBeDefined();
+    expect(fields.build).toHaveProperty("version");
+    expect(fields.build).toHaveProperty("revision");
+    expect(fields.build).toHaveProperty("revisionSource");
+  });
+
+  it("reports free space at the one moment an operator is reading this log", () => {
+    expect(integrityFields()).toHaveProperty("disk");
   });
 });

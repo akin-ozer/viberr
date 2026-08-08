@@ -13,8 +13,15 @@ import { logger } from "~/server/logging/logger.server";
  * the source of truth — are NEVER touched here; this only compacts the
  * rebuildable SQLite projection/log tables.
  *
- * Called best-effort at boot; safe to call repeatedly (idempotent — each pass
- * only deletes rows already past the window).
+ * Called best-effort at boot AND on the periodic maintenance interval
+ * (`app/server/ops/maintenance.server.ts`); safe to call repeatedly (idempotent
+ * — each pass only deletes rows already past the window). Gap 15: it used to
+ * run at boot ONLY, which coupled the policy to the restart a stable
+ * deployment avoids — the longer the uptime, the more it grew. Nothing here
+ * needs an in-flight guard: every delete is age-windowed at 30/90 days, and the
+ * two rows boot recovery reads as idempotency keys are exempt outright
+ * (IDEMPOTENCY_AUDIT_ACTIONS below), so a mid-flight pass is safe by
+ * construction.
  */
 
 /** Raw run log lines: high-volume, low durability value — kept 30 days. */

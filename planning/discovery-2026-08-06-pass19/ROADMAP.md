@@ -177,3 +177,22 @@ approving verdict · **[25]** whether per-run autonomy should be clamped to proj
 
 Each of these changes what the product *means*, not just what it does. Guessing would be worse than
 asking — several are one-sentence answers.
+
+
+---
+
+## Owner rulings, 2026-08-08 — four forks decided
+
+Asked mid-build, answered, and now being implemented. Recorded here because each changes what the
+product *means*, and the rationale should outlive this branch.
+
+| Fork | Ruling | What it means |
+|------|--------|---------------|
+| **[24]** who may produce the approving verdict | **Admit the PR's own GitHub approval.** | A project member's GitHub approval satisfies R15-1's gate — no new in-app review action, no force-accept masquerade. It must bind to the *delivered revision* (an approval on an older commit does not count) and the GitHub reviewer must map confidently to a Viberr member, or it fails closed. |
+| **[25]** per-run autonomy | **Clamp to project policy.** | A run may never exceed the project's configured autonomy; raising it goes through project policy, which is already an audited admin act. Lowering for one run stays allowed — it is a ceiling, not a pin. |
+| **[9]** stale task branches | **Operator-decided.** | The operator updates the branch when it judges it needed and opens a decision packet when it conflicts — mirroring R15-2 (delivery is an operator decision) and R18-4 (a branch collision stays human-gated; never force-reset a remote). |
+| **[13]** schema baseline | **Not deployed yet — keep squashing.** | The re-squashed `0001_baseline.sql` stays for now. The content-hash guard is still worth adding so that the day a real deployment exists, a changed baseline refuses to boot instead of drifting silently. |
+
+Still open: **[2] [3] [4]** guardrail configuration · **[5] [6]** how a continuity break reaches a human ·
+**[7]** changed-file list · **[12]** whether a human may correct a recorded claim · **[23]** a
+System/Operations page · **[26]** agent spend visibility and ceilings.
