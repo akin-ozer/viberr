@@ -5279,8 +5279,11 @@ export interface AcceptanceAffordance {
    * cannot just go green, or the human who accepts has no idea whose judgement
    * they are standing on — the same "a chip is evidence, never a pseudo-check"
    * rule (ruling 19) that this pass has been applying everywhere else.
+   *
+   * Optional on the interface only so hand-built affordance literals in the
+   * component tests keep compiling; every server path sets it explicitly.
    */
-  verdictSatisfiedBy: string | null;
+  verdictSatisfiedBy?: string | null;
 }
 
 /**
@@ -5310,6 +5313,7 @@ export function resolveAcceptanceAffordance(
     blockedReasonViaPacket: null,
     canAccept: false,
     terminallyBlocked: false,
+    verdictSatisfiedBy: null,
   };
   let project: ProjectContext;
   try {
@@ -5351,7 +5355,18 @@ export function resolveAcceptanceAffordance(
     }),
     canAccept: hasAuthority && atBoundary && blockedReason === null,
     terminallyBlocked: acceptanceTerminallyBlocked(fm),
+    // R19-B: name the human whose GitHub approval cleared the verdict gate.
+    verdictSatisfiedBy: humanVerdictSentence(fm),
   };
+}
+
+/** R19-B — "Approved on GitHub by Arda (@arda) on the delivered revision
+ *  `abc1234`", or null when no human approval is carrying the gate. Exported
+ *  shape lives in `pr-human-approval.server.ts`; this is the one adapter every
+ *  acceptance surface reads. */
+function humanVerdictSentence(fm: TaskFrontmatter): string | null {
+  const approval = humanVerdictApproval(fm);
+  return approval ? humanVerdictNote(approval) : null;
 }
 
 /** The parenthetical after "accepted, merge pending" — the honest cause

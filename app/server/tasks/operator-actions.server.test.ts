@@ -244,7 +244,7 @@ describe("R19-A — per-run autonomy is clamped to project policy", () => {
       taskKey: "VIB-1",
       actor,
     });
-    const rows = listAuditEvents(store.db, AUTONOMY_CLAMPED_AUDIT_ACTION);
+    const rows = listAuditEvents(store.db, { action: AUTONOMY_CLAMPED_AUDIT_ACTION });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.actorLabel).toBe("arda@viberr.dev");
     expect(rows[0]!.projectSlug).toBe(store.slug);
@@ -259,12 +259,12 @@ describe("R19-A — per-run autonomy is clamped to project policy", () => {
       db: store.db,
       taskKey: "VIB-1",
     });
-    expect(listAuditEvents(store.db, AUTONOMY_CLAMPED_AUDIT_ACTION)).toHaveLength(0);
+    expect(listAuditEvents(store.db, { action: AUTONOMY_CLAMPED_AUDIT_ACTION })).toHaveLength(0);
     // A pure READ (loader paths resolve authority too) must never write audit
     // rows, even when the requested autonomy is above the ceiling.
     deployRoster(DEFAULT_POLICY, "supervised");
     authority("full");
-    expect(listAuditEvents(store.db, AUTONOMY_CLAMPED_AUDIT_ACTION)).toHaveLength(0);
+    expect(listAuditEvents(store.db, { action: AUTONOMY_CLAMPED_AUDIT_ACTION })).toHaveLength(0);
   });
 
   it("an UNDEPLOYED operator reports the supervised ceiling rather than a phantom full", () => {
