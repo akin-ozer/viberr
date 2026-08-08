@@ -196,3 +196,32 @@ product *means*, and the rationale should outlive this branch.
 Still open: **[2] [3] [4]** guardrail configuration · **[5] [6]** how a continuity break reaches a human ·
 **[7]** changed-file list · **[12]** whether a human may correct a recorded claim · **[23]** a
 System/Operations page · **[26]** agent spend visibility and ceilings.
+
+
+---
+
+## Delivered in this branch
+
+The 14 unambiguous gaps are built, tested, canaried and — where the app can show it — verified live.
+Suite: **3242 tests / 239 files green, `tsc` clean.**
+
+| Gap | Shipped |
+|-----|---------|
+| **[0]** anchor | Every fresh run carries the canonical task state; anchor hard-bounded at ~3.5 KB regardless of task size. Covers a first @mention, which cold-starts. |
+| **[1]** dismissal | Declining a recommendation writes a typed timeline event naming what was declined, and the operator's snapshot carries its own pending + recently-declined cards so it stops re-proposing. Gave the `task.recommendation.dismissed` audit row its first reader anywhere. |
+| **[8] [11]** run inputs | The Agent logs disclose what a run was actually given — anchor, resolved skills/KBs/MCP, and the grants whose content never arrived. One builder serves the fresh and resume paths so the two disclosures cannot drift. |
+| **[9]** stale branch | Operator-decided `update_branch_from_base`, both backends. Merge never rebase (a rebase reaches the remote only by force-push, which R18-4 refused); conflict aborts and opens a packet; failed push resets to the pre-merge sha. |
+| **[10]** stall | `MAX(occurred_at)`, *not* `updated_at` — the reconcile poller re-stamps `updatedAt` every 5 minutes, so a task dead a week read "updated 4m ago". 1h agent-waiting / 3 days human-waiting (clears a weekend), neutral tone, new "Gone quiet" chip. |
+| **[14]** backup | `npm run backup` — `VACUUM INTO` from a read-only connection, so it folds in WAL content as ONE file and needs no downtime. Verified live: `integrity_check ok`, rows readable out of the artefact. |
+| **[15] [20]** maintenance | Runs on a timer, not only at boot. Workspace reclaim skipped while runs are active; transcripts and session homes pruned, never outside the data root. |
+| **[16]** disk | Absolute thresholds, transitions logged once, pressure triggers a pass. A failed atomic write no longer leaks its `*.tmp`, and ENOSPC says so in a sentence. |
+| **[17]** health | `status`/`degraded` + `?probe=readiness` → 503. A never-checked backend is not degraded; unmeasurable disk is `null`, never a fabricated 0. |
+| **[18]** identity | env → package.json → the checkout's git, file reads only. Absent identity is `null`, never "unknown". |
+| **[19]** CLI lock | `rescan`, `seed`, `seed-demo` take the single-writer lock and fail closed naming the holder. **The one guard against the dual-writer corruption this project already suffered once.** |
+| **[21]** key rotation | `npm run keys -- status\|reseal` — the count that tells you when dropping the previous key is safe. |
+| **[22]** repair | `npm run store:check` names any untrusted file with its parse error and offending line — and `updateTaskFile` now REFUSES to write to one. Verified live: a tab-indented frontmatter made a comment 409 instead of resetting every field and destroying the goal and timeline. |
+| **[24] [25]** rulings | A project member's GitHub approval satisfies the verdict gate, bound to the delivered revision and failing closed on an unmappable approver; per-run autonomy clamped to project policy, audited when it bites, with a selector that offers only what will run. |
+
+**Still open for you:** [2] [3] [4] guardrail configuration · [5] [6] how a continuity break reaches a
+human · [7] changed-file list · [12] whether a human may correct a recorded claim · [23] a
+System/Operations page · [26] agent spend. Each changes what the product *means*; the questions are above.
