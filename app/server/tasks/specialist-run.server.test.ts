@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -23,6 +24,7 @@ import {
   supportingEngagements,
 } from "~/schemas/task-file.schema";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
+import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -1538,6 +1540,53 @@ describe("buildSpecialistPersona — attached resources", () => {
   });
 
   /**
+   * R19-2 (owner ruling) — the repo-wins note ships ONCE, before the bodies it
+   * ranks, and as the ONE exported constant both runtimes push.
+   *
+   * The end-to-end test in the R18-1 block asserts the count with a SINGLE KB,
+   * where "once per prompt" and "once per KB" are the same number. With two
+   * KBs they diverge, which is the shape the ruling actually forbids (the rule
+   * restated between every pair of bodies reads as if it ranked only the one
+   * that follows it).
+   */
+  it("R19-2: with MANY KBs the precedence note is still pushed once, before them all", () => {
+    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the `for (const part of
+    // kbSet.parts)` loop and the count assertion fails; fork its text into a
+    // local string literal and the exported-constant assertion fails.
+    const dataRoot = tempRoot();
+    for (const [name, sentinel] of [
+      ["house-style", "SENTINEL-KB-HOUSE"],
+      ["team-facts", "SENTINEL-KB-TEAM"],
+    ] as const) {
+      mkdirSync(path.join(dataRoot, "kb", name), { recursive: true });
+      writeFileSync(
+        path.join(dataRoot, "kb", name, "conventions.md"),
+        `# ${name}\n\n${sentinel}`,
+      );
+    }
+
+    const persona = buildSpecialistPersona({
+      profileId: "dev",
+      skills: [],
+      kb: ["house-style", "team-facts"],
+      dataRoot,
+    });
+
+    // The exact constant the operator runtime pushes — not a paraphrase of it.
+    expect(persona).toContain(KB_PRECEDENCE_NOTE);
+    expect(
+      persona.split("Which source wins (knowledge bases vs the repository)").length - 1,
+    ).toBe(1);
+    // Both bodies arrived, and BOTH sit after the rule that ranks them.
+    expect(persona.indexOf("Which source wins")).toBeLessThan(
+      persona.indexOf("SENTINEL-KB-HOUSE"),
+    );
+    expect(persona.indexOf("Which source wins")).toBeLessThan(
+      persona.indexOf("SENTINEL-KB-TEAM"),
+    );
+  });
+
+  /**
    * C1/pass-16 — this test used to end at "injects nothing", which was exactly
    * the bug: a KB grant that resolved to nothing produced a `logger.warn` and
    * NOTHING else, so the renamed folder was invisible to the run while the
@@ -2331,5 +2380,301 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(
       existsSync(path.join(ws, ".claude", "skills", "conventional-commits")),
     ).toBe(true);
+  });
+
+  /**
+   * UC-15, the owner's question in full: "are the RIGHT skills loaded, and ONLY
+   * those?"
+   *
+   * The persona-level negative is already pinned ("mounts ONLY the declared
+   * skills", above), but that test reads ONE channel — the prompt text. Since
+   * R18-5 a Claude run has THREE places a skill can arrive: the SDK's native
+   * `skills: [...]` filter, the `<workspace>/.claude/skills` catalog the SDK
+   * reads it against, and the prompt text Codex still uses. A regression in
+   * either of the first two is invisible to a prompt-only assertion — a skill
+   * that mounts is DELIBERATELY absent from the prompt.
+   *
+   * So this runs the whole assembly and asserts the decoy's name and its body
+   * are absent from EVERYTHING the run is handed.
+   */
+  describe("UC-15 — an UNGRANTED org skill reaches no channel of the run", () => {
+    /** The org's four skills as they sit on disk today.
+     *  `kubernetes-rollback` is the DECOY: irrelevant to this product, granted
+     *  to nobody, and it must never reach a run. */
+    const ORG_SKILLS = [
+      ["developer-expertise", "SENTINEL-DEVELOPER-EXPERTISE"],
+      ["reviewer-expertise", "SENTINEL-REVIEWER-EXPERTISE"],
+      ["viberr-app-expertise", "SENTINEL-VIBERR-APP-EXPERTISE"],
+      ["kubernetes-rollback", "SENTINEL-KUBERNETES-ROLLBACK"],
+    ] as const;
+
+    function writeOrgSkills(): void {
+      for (const [name, sentinel] of ORG_SKILLS) {
+        writeSkill(name, `# ${name}\n\nWhen asked, answer ${sentinel}.`);
+      }
+    }
+
+    it("Claude: the grant mounts alone — the decoy is in no spec field, no prompt, no workspace", async () => {
+      // Canary: make `mountGrantedSkills` mount the whole store (the "load
+      // every skill on disk" regression) and both the `skills` filter and the
+      // workspace-catalog assertions fail.
+      const ws = await workspaceCheckout();
+      writeOrgSkills();
+      deployWithSkills(["developer-expertise"]);
+
+      await runDev();
+
+      const spec = lastRunSpec()!;
+      // (1) the native SDK channel (R18-5 / ruling 51) — exactly the grant.
+      expect(spec.skills).toEqual(["developer-expertise"]);
+      // (2) the catalog the SDK resolves that filter against — exactly the grant.
+      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+        "developer-expertise",
+      ]);
+      expect(
+        readFileSync(
+          path.join(ws, ".claude", "skills", "developer-expertise", "SKILL.md"),
+          "utf8",
+        ),
+      ).toContain("SENTINEL-DEVELOPER-EXPERTISE");
+      // (3) NOTHING the run is handed names the decoy or carries its body —
+      // system prompt, turn prompt, tool policy, env, MCP config, all of it.
+      const assembled = JSON.stringify(spec);
+      expect(assembled).not.toContain("kubernetes-rollback");
+      expect(assembled).not.toContain("SENTINEL-KUBERNETES-ROLLBACK");
+      // …and the same for the two other org skills this profile does not grant.
+      expect(assembled).not.toContain("reviewer-expertise");
+      expect(assembled).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
+      expect(assembled).not.toContain("viberr-app-expertise");
+      expect(assembled).not.toContain("SENTINEL-VIBERR-APP-EXPERTISE");
+      // The positive half: the grant IS announced (its body arrives on invocation).
+      expect(spec.systemPrompt ?? "").toContain("developer-expertise");
+      expect(spec.systemPrompt ?? "").not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
+    });
+
+    it("Codex: the prompt-text channel carries the grant only — the decoy stays out", async () => {
+      // The OTHER half of the R18-5 asymmetry. Codex has no native skills
+      // channel, so its granted craft rides the prompt as text — which is also
+      // the only channel a decoy could leak into on that backend.
+      //
+      // Canary: pass the store listing instead of `injectable` to
+      // `readSkillBodies` in buildSpecialistPersona and the decoy body appears.
+      await workspaceCheckout();
+      writeOrgSkills();
+      deployWithSkills(["developer-expertise"], ["codex"]);
+
+      await runDev();
+
+      const spec = lastRunSpec()!;
+      expect(spec.backend).toBe("codex");
+      // Nothing mounted natively — the Codex adapter would ignore it anyway.
+      expect(spec.skills).toBeUndefined();
+      const sys = spec.systemPrompt ?? "";
+      expect(sys).toContain("developer-expertise (skill)");
+      expect(sys).toContain("SENTINEL-DEVELOPER-EXPERTISE");
+      expect(sys).not.toContain("kubernetes-rollback");
+      expect(sys).not.toContain("SENTINEL-KUBERNETES-ROLLBACK");
+      expect(sys).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
+      expect(sys).not.toContain("SENTINEL-VIBERR-APP-EXPERTISE");
+    });
+  });
+
+  /**
+   * R18-3 / ruling 49, read through the RUN seam rather than through
+   * `stripUngovernedRepoCatalog` on its own (which skill-mount.server.test.ts
+   * already covers). What matters to a human is the end state of a real run:
+   * the cloned repository's own `.claude` — its slash-commands, sub-agents,
+   * skills and `settings.json` HOOKS, none of them granted by any profile — is
+   * not discoverable by the agent, and stripping it ships no diff.
+   */
+  describe("R18-3 — the repo's own catalog never survives into a run", () => {
+    /** A checkout that COMMITS its own `.claude` (as viberr's own repo does). */
+    async function checkoutWithRepoCatalog(): Promise<string> {
+      const dir = await workspaceCheckout();
+      mkdirSync(path.join(dir, ".claude", "skills", "repo-rogue"), {
+        recursive: true,
+      });
+      writeFileSync(
+        path.join(dir, ".claude", "skills", "repo-rogue", "SKILL.md"),
+        "---\nname: repo-rogue\nallowed-tools: Bash\n---\n\nSENTINEL-REPO-ROGUE-SKILL",
+      );
+      writeFileSync(
+        path.join(dir, ".claude", "settings.json"),
+        '{"hooks":{"PreToolUse":[{"command":"SENTINEL-REPO-HOOK"}]}}',
+      );
+      await exec("git", ["-C", dir, "add", "-A"]);
+      await exec("git", ["-C", dir, "commit", "-q", "-m", "repo ships a catalog"]);
+      return dir;
+    }
+
+    it("the repo's catalog is gone, the grant is mounted, and the delivery carries no catalog change", async () => {
+      // Canary: this is a belt-and-braces guarantee — `cloneRepo`'s reuse arm
+      // strips AND `mountGrantedSkills` strips before it writes — so removing
+      // either alone keeps it green (that redundancy is the point; the two
+      // isolating canaries are the two tests below). Remove BOTH strip calls
+      // and every assertion in the first half fails.
+      const ws = await checkoutWithRepoCatalog();
+      writeSkill("granted-craft", "# Craft\n\nSENTINEL-GRANTED-CRAFT");
+      deployWithSkills(["granted-craft"]);
+
+      await runDev();
+
+      // The repo's own catalog is gone from the working tree…
+      expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+      expect(existsSync(path.join(ws, ".claude", "skills", "repo-rogue"))).toBe(false);
+      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+        "granted-craft",
+      ]);
+      // …and nothing of it reached the run.
+      const assembled = JSON.stringify(lastRunSpec());
+      expect(assembled).not.toContain("repo-rogue");
+      expect(assembled).not.toContain("SENTINEL-REPO-ROGUE-SKILL");
+      expect(assembled).not.toContain("SENTINEL-REPO-HOOK");
+      // R18-3's delivery half: git sees no change (skip-worktree) and the mount
+      // is excluded, so delivering from this workspace ships no catalog edit.
+      const status = await exec("git", ["-C", ws, "status", "--porcelain"]);
+      expect(status.stdout).not.toContain(".claude");
+      expect(
+        readFileSync(path.join(ws, ".git", "info", "exclude"), "utf8"),
+      ).toContain(".claude/");
+    });
+
+    it("strips it even when the profile grants NO skills (the mount never runs)", async () => {
+      // The isolating canary for the CLONE leg: `mountGrantedSkills` returns
+      // early on an empty grant list without stripping anything, so the reuse
+      // arm's strip is the only thing standing between this agent and the
+      // repo's hooks. Canary: delete `await stripUngovernedRepoCatalog(dir)`
+      // from cloneRepo's reuse arm and `.claude` survives here.
+      const ws = await checkoutWithRepoCatalog();
+      deployWithSkills([]);
+
+      await runDev();
+
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      expect(lastRunSpec()?.skills).toBeUndefined();
+    });
+
+    it("a RESUMED run re-strips a catalog written since the last run", async () => {
+      // The isolating canary for the MOUNT leg: the resume path never clones,
+      // so `mountGrantedSkills`'s own strip is the only one that runs. This is
+      // the case that matters most — the agent itself can write
+      // `.claude/settings.json` into its workspace during a turn, and the
+      // project setting source EXECUTES hooks. Canary: delete the
+      // `stripUngovernedRepoCatalog` call inside `mountGrantedSkills` and the
+      // agent-written settings.json survives into the resumed run.
+      const ws = await workspaceCheckout();
+      writeSkill("granted-craft", "# Craft\n\nSENTINEL-GRANTED-CRAFT");
+      deployWithSkills(["granted-craft"]);
+      mkdirSync(path.join(ws, ".claude", "skills", "self-written"), {
+        recursive: true,
+      });
+      writeFileSync(
+        path.join(ws, ".claude", "settings.json"),
+        '{"hooks":{"PreToolUse":[{"command":"SENTINEL-AGENT-HOOK"}]}}',
+      );
+      writeFileSync(
+        path.join(ws, ".claude", "skills", "self-written", "SKILL.md"),
+        "# self\n\nSENTINEL-SELF-WRITTEN",
+      );
+
+      const confinement = await resolveResumeConfinement(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          profileId: "dev",
+          backend: "claude",
+          delivers: true,
+        },
+      );
+
+      expect(confinement.skills).toEqual(["granted-craft"]);
+      expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+        "granted-craft",
+      ]);
+      expect(confinement.systemPrompt ?? "").not.toContain("SENTINEL-SELF-WRITTEN");
+    });
+  });
+
+  /**
+   * R18-1 + R19-3, in the channel the existing pair of tests cannot see.
+   *
+   * "R19-3/F19-2: SKILLS are NOT inherited" runs on a repo-LESS project, where
+   * every skill rides the prompt as text — so it can assert the deliverer's
+   * skill body is absent. On a real checkout that assertion is vacuous: a
+   * mounted skill's body is deliberately NOT in the prompt (R18-5), so an
+   * inheritance widened to skills would leave it green while the reviewer
+   * really held the deliverer's craft, mounted and invocable.
+   */
+  describe("R18-1 / R19-3 — the boundary holds in the NATIVE channel too", () => {
+    it("the reviewer inherits the deliverer's KB and mounts ONLY its own skills", async () => {
+      // Canary: union the deliverer's SKILLS alongside its KBs at the fresh-run
+      // call site (`kb = withDeliveringGrants(...)`, specialist-run.server.ts)
+      // and the `skills` filter, the workspace catalog and the whole-spec
+      // assertion all fail — while the prompt-body assertion the repo-less test
+      // relies on would still pass.
+      const ws = await workspaceCheckout();
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "dev", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "dev", role: "developer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: ["deliverer-craft"], mcps: [], kb: ["house-kb"] },
+            },
+          } as never,
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: ["critic-craft"], mcps: [], kb: [] },
+            },
+          } as never,
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      writeSkill("deliverer-craft", "# Deliverer\n\nSENTINEL-DELIVERER-SKILL");
+      writeSkill("critic-craft", "# Critic\n\nSENTINEL-CRITIC-SKILL");
+      mkdirSync(path.join(store.dataRoot, "kb", "house-kb"), { recursive: true });
+      writeFileSync(
+        path.join(store.dataRoot, "kb", "house-kb", "conventions.md"),
+        "# House\n\nSENTINEL-DELIVERER-KB",
+      );
+
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+        actor(store.users.arda));
+
+      const spec = lastRunSpec()!;
+      // R18-1: the deliverer's KB crosses to the reviewer…
+      expect(spec.systemPrompt ?? "").toContain("SENTINEL-DELIVERER-KB");
+      expect(spec.systemPrompt ?? "").toContain("house-kb (knowledge base)");
+      // …R19-3: its SKILL does not, on either channel.
+      expect(spec.skills).toEqual(["critic-craft"]);
+      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+        "critic-craft",
+      ]);
+      const assembled = JSON.stringify(spec);
+      expect(assembled).not.toContain("deliverer-craft");
+      expect(assembled).not.toContain("SENTINEL-DELIVERER-SKILL");
+    });
   });
 });

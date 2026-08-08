@@ -4634,11 +4634,6 @@ export async function resolvePacket(
   // different option is the un-hold path), so consuming the approval left a
   // blocked task with an open decision and nothing in anyone's inbox pointing
   // at it. `edit_goal` is the same shape and clears when the edit lands.
-  // B-WF2: only a decision that is actually SETTLED stops waiting on a human.
-  // The hold options keep their packet open on purpose (re-resolving it with a
-  // different option is the un-hold path), so consuming the approval left a
-  // blocked task with an open decision and nothing in anyone's inbox pointing
-  // at it. `edit_goal` is the same shape and clears when the edit lands.
   const stillAwaitingHuman =
     !clearPacket && option.kind !== "edit_goal";
   if (!stillAwaitingHuman) {

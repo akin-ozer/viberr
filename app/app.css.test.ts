@@ -1135,6 +1135,30 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
  * density pass reaches none of them. Ruling 14 — one shared implementation, no
  * per-surface forks.
  */
+describe("app.css lets a container-sized button wrap (F19-42)", () => {
+  const btn = CODE.match(/(?:^|[};])\s*\.btn\s*\{([^}]*)\}/);
+  const full = CODE.match(/(?:^|[};])\s*\.btn\.full\s*\{([^}]*)\}/);
+
+  it("keeps nowrap on ordinary buttons", () => {
+    // Content-sized buttons should never break mid-label; that is what the
+    // base rule protects and it stays.
+    expect(btn![1]).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it("releases it for `.full`, whose width comes from the container", () => {
+    // Live defect: R19-5's honest force-accept label
+    // ("Force accept (skips the remaining stages and the review gate)")
+    // measured scrollWidth 351 against clientWidth 299 and painted 52px
+    // outside the GitHub card. A governance affordance is exactly the kind
+    // whose label must state the whole consequence, so the button wraps.
+    expect(full, ".btn.full must exist to override the base nowrap").not.toBeNull();
+    expect(full![1]).toMatch(/white-space:\s*normal/);
+    expect(full![1], "a wrapped label needs a readable line-height").toMatch(
+      /line-height:\s*[\d.]+/,
+    );
+  });
+});
+
 describe("app.css owns the shared idioms — hoisting is not an escape hatch (F19-33)", () => {
   const utilities = utilityRules(CODE);
   const objects = [

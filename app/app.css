@@ -235,6 +235,15 @@ div.top-search:focus-within,
 .fine.dim { color: var(--placeholder); }
 /* A control that spans its container (side-panel actions, modal footers). */
 .full { width: 100%; }
+/* A full-width button is sized by its CONTAINER, not its content, so the
+   `white-space: nowrap` that keeps ordinary inline buttons on one line has
+   nothing left to protect here — it just makes a long label paint outside the
+   button and its panel. Live: R19-5's honest "Force accept (skips the remaining
+   stages and the review gate)" measured scrollWidth 351 against clientWidth 299
+   and spilled 52px past the GitHub card's right edge. Governance affordances
+   are exactly the ones whose labels must say the whole truth, so the label
+   wraps and the button grows instead. */
+.btn.full { white-space: normal; text-align: center; line-height: 1.25; }
 /* Shove this child to the end of its flex row (`.pull`: to the start of the
    trailing group). `.panel-head .right` is the same idiom scoped to one
    container; these are the unscoped ones. */
