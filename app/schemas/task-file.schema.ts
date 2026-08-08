@@ -581,8 +581,16 @@ export function deriveValidation(
 export function acceptanceBlockedReason(fm: ReviewState): string | null {
   const required = requiredReviewers(fm);
   if (!fm.workRevision) {
+    // F19-21 (spec change 3) — the refusal used to stop at the first sentence,
+    // and on a VERIFICATION-only task that reads as a dead end: nothing this
+    // task will ever do produces a revision, so "nothing to approve" looks
+    // permanent and the live exits were force-accept or "manually mark Done".
+    // Running delivery once IS the path — it inspects the workspace and records
+    // the verified no-change outcome (minting the base revision these reviewers
+    // then approve), so the refusal names it.
     return required.length > 0
-      ? "No reviewed revision yet — nothing for the required reviewers to approve."
+      ? "No reviewed revision yet — nothing for the required reviewers to approve. " +
+          "If this task requires no changes, run delivery once to verify and record that."
       : null;
   }
   const cur = currentVerdicts(fm);

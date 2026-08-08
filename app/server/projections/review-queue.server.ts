@@ -1,8 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
-import type {
-  PrMergeable,
-  Validation,
-  Waiting,
+import {
+  conflictingPrBlockedReason,
+  type PrMergeable,
+  type PrState,
+  type Validation,
+  type Waiting,
 } from "~/schemas/task-file.schema";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
@@ -50,7 +52,16 @@ export interface ReviewQueueRow {
   latestEventText: string | null;
   pr: {
     number: number;
-    state: "review" | "merged" | "closed";
+    /** F19-32: the CANONICAL four-value PR state (`PrState`), never a private
+     *  copy of the union. This row used to narrow it to review|merged|closed
+     *  and coerce everything else to "review", which silently swallowed
+     *  `accepted` — R16-6's first-class "merge pending" — so `prStatePill`'s
+     *  amber branch was structurally unreachable here even though the page
+     *  calls the one canonical map (ruling 12). Ruling 40 requires that
+     *  difference to be visible on the board card AND this queue; a maintainer
+     *  moving a task back out of the terminal stage reaches the state with no
+     *  workflow re-wiring at all. */
+    state: PrState;
     /** P14-LV-07: GitHub's last-read mergeability. The subline builder has
      *  named a conflicting PR since LV-07 (review-helpers.ts `prStateSub`) and
      *  this row never carried the field, so that branch could not fire on any
@@ -122,14 +133,14 @@ export function getReviewQueue(
     pr: t.pr
       ? {
           number: t.pr.number,
-          // Preserve a CLOSED (rejected) PR so the acceptance filter can exclude
-          // it — coercing it to "review" hid that the work was rejected (NEW-1).
-          state:
-            t.pr.state === "merged"
-              ? ("merged" as const)
-              : t.pr.state === "closed"
-                ? ("closed" as const)
-                : ("review" as const),
+          // F19-32: pass the parsed state THROUGH. The old ladder preserved
+          // `merged`/`closed` (NEW-1: a coerced closed PR hid that the work was
+          // rejected) and folded everything else into "review" — which made
+          // `accepted` (merge pending) indistinguishable from an open PR on the
+          // one surface ruling 40 names alongside the board. The schema's own
+          // `.catch("review")` is what handles an unknown token, so there is
+          // nothing left for a second coercion here to defend against.
+          state: t.pr.state,
           // Omitted rather than nulled when GitHub was never asked — the key's
           // absence is the "never read" signal the file format itself uses.
           ...(t.pr.mergeable ? { mergeable: t.pr.mergeable } : {}),
@@ -173,15 +184,41 @@ export function getReviewQueue(
     const owner = ownerByKey.get(key) ?? null;
     return owner !== null && owner === opts.viewerUserId;
   };
+  // UX19-3: the projected `blockReason` column carries only PART of the
+  // acceptance gate. `acceptanceBlockReason` (rebuilder.server.ts) deliberately
+  // omits two refusals `acceptanceRefusalReason` enforces on every writer
+  // (task-actions.server.ts) — an OPEN blocked decision, and a CONFLICTING PR —
+  // and this filter re-checked neither. Live shape: a row sat under "Waiting on
+  // your acceptance" wearing the "your acceptance" tag while the task page one
+  // click away read "Acceptance is blocked". Both facts are on the task summary
+  // this queue already reads, so the panel split now asks the same questions the
+  // writer does. R15-11 keeps the ROW a triage link ("Review", never "Accept"),
+  // but the PANEL is still a promise — it must not name an acceptance the server
+  // refuses. (When the projected column grows these gates too, `blockReason`
+  // catches them first and this stays harmless belt-and-braces.)
+  const gateBlockedByKey = new Map<string, boolean>(
+    inReview.map((t) => [
+      t.key,
+      // Same predicate the acceptance writers pass as `blockedPacket`
+      // (task-actions.server.ts): an operator-raised blocked decision is still
+      // open, and accepting would bury it.
+      (t.readiness === "blocked" && t.packet?.type === "blocked") ||
+        // P14-LV-07, via the SAME helper the server gate calls — a PR GitHub
+        // cannot merge cannot be accepted.
+        conflictingPrBlockedReason(t, t.key) !== null,
+    ]),
+  );
   // Ready-for-acceptance requires acceptance authority, an acceptable current
-  // revision (F10-11: no failing/awaiting/no-revision block), AND that the review
-  // PR was not REJECTED (closed unmerged) — a rejected-PR task can't be accepted
-  // (its work was declined); it needs a rework/reopen/archive decision, so it
-  // belongs in "Still in review", not the acceptance panel (NEW-1).
+  // revision (F10-11: no failing/awaiting/no-revision block), the rest of the
+  // server's refusal set (UX19-3), AND that the review PR was not REJECTED
+  // (closed unmerged) — a rejected-PR task can't be accepted (its work was
+  // declined); it needs a rework/reopen/archive decision, so it belongs in
+  // "Still in review", not the acceptance panel (NEW-1).
   const isReady = (r: ReviewQueueRow): boolean =>
     r.waiting === "human" &&
     canAccept(r.key) &&
     r.blockReason === null &&
+    !gateBlockedByKey.get(r.key) &&
     r.pr?.state !== "closed";
   return {
     ready: rows.filter(isReady),

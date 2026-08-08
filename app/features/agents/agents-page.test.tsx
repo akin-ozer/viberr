@@ -684,6 +684,38 @@ describe("CapabilityMatrixModal", () => {
     expect(codes).toContain("mcp__everything-http__get-annotated-message");
     expect(codes).toContain("mcp__everything_http__get_annotated_message");
   });
+
+  /**
+   * F19-16 / ruling 51 (R18-5) — the Claude-native vs Codex-injected skills
+   * asymmetry is canon *because it is disclosed*: "Codex keeps prompt-text
+   * injection — the asymmetry is disclosed, not silent". It was disclosed in
+   * code comments and in this ledger only; the runtime-differences section this
+   * modal ships for exactly that purpose never named it, so an admin granting a
+   * long skill could learn about the Codex clipping only by comparing two runs.
+   */
+  it("discloses that granted skills are SDK-native on Claude and prompt-injected on Codex", () => {
+    const { getByText, container } = render(
+      <CapabilityMatrixModal
+        profiles={[mkProfile({})]}
+        projectName="Viberr Core"
+        onClose={() => {}}
+      />,
+    );
+    expect(getByText("Granted skills arrive differently.")).toBeTruthy();
+    const notes = container.querySelector(".mx-notes")!.textContent!;
+    // The Claude leg: installed for the SDK, loaded on invoke, uncapped.
+    expect(notes).toContain("loads the full");
+    expect(notes).toContain("no length cap");
+    // The Codex leg named as prompt text, with the real shared budget
+    // (SKILL_INJECTION_BUDGET = 24_000) and the clipping consequence.
+    expect(notes).toContain("pasted into the prompt");
+    expect(notes).toContain("24,000-character budget");
+    expect(notes).toContain("clipped");
+    // And the honest exception: a Claude run that can't mount them (no
+    // checkout, or another live run holding the workspace catalog) gets the
+    // Codex treatment — so the Claude leg is not read as a guarantee.
+    expect(notes).toContain("falls back to the same prompt text");
+  });
 });
 
 describe("CreateProfileModal", () => {
@@ -894,6 +926,113 @@ describe("CreateProfileModal", () => {
     const checked = radios.filter((r) => r.getAttribute("aria-checked") === "true");
     expect(checked).toHaveLength(1);
     expect(checked[0]!.className).toContain("on");
+  });
+
+  /**
+   * F19-5 — the context-resource chips (skills / MCP servers / KBs) are the one
+   * chip group in this file that never reported its pressed state: the grant
+   * lived in the `on` class and a check glyph, so a screen reader announced a
+   * granted KB exactly like an ungranted one. Backend (:243), autonomy (:304)
+   * and stage (:430) chips have carried `aria-pressed` since G5/UXA-4.
+   */
+  it("resource grant chips report their granted state (aria-pressed), missing grants included", () => {
+    const { container, getByText } = renderModal({
+      initial: mkProfile({
+        resources: { skills: ["repo-write"], mcps: [], kb: ["retired-kb"] },
+      }),
+      resourceCatalog: [
+        {
+          group: "Skills",
+          key: "skills",
+          mono: true,
+          items: [
+            { id: "repo-write", def: false },
+            { id: "release-notes", def: false },
+          ],
+        },
+        { group: "MCP servers", key: "mcps", mono: true, items: [] },
+        // `retired-kb` is granted but no longer in the store → a dangling chip.
+        { group: "Knowledge bases", key: "kb", mono: false, items: [] },
+      ],
+    });
+
+    // The first resource group ("Skills") is expanded on mount.
+    const chips = [...container.querySelectorAll(".cap-mbody .pick-chip")];
+    const chipFor = (id: string) =>
+      chips.find((c) => c.textContent === id) as HTMLButtonElement;
+    // The granted skill reports pressed; the ungranted one reports the
+    // attribute with "false" — present, not absent, so the toggle is readable.
+    expect(chipFor("repo-write").getAttribute("aria-pressed")).toBe("true");
+    expect(chipFor("release-notes").getAttribute("aria-pressed")).toBe("false");
+    expect(chipFor("repo-write").className).toContain("on");
+
+    // A dangling grant IS a grant (clicking it removes one) — it reports pressed.
+    fireEvent.click(getByText("Knowledge bases"));
+    const ghost = container.querySelector(
+      ".pick-chip.missing",
+    ) as HTMLButtonElement;
+    expect(ghost.textContent).toBe("retired-kb");
+    expect(ghost.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /**
+   * F19-35 — the collapsible group headers (`cap-mghead`) carried expanded vs
+   * collapsed in the `open` CSS class alone: the chevron rotates and a screen
+   * reader learns nothing. Both matrices use the same header, so both are
+   * pinned here.
+   */
+  it("capability + resource group headers report expanded/collapsed (aria-expanded)", () => {
+    const { container, getByText } = renderModal({
+      initial: null,
+      resourceCatalog: [
+        {
+          group: "Skills",
+          key: "skills",
+          mono: true,
+          items: [{ id: "repo-write", def: false }],
+        },
+      ],
+    });
+    const heads = () => [...container.querySelectorAll(".cap-mghead")];
+    expect(heads().length).toBeGreaterThan(2);
+    // Every header reports its state — none may be missing the attribute, and
+    // it always agrees with the `open` class the CSS used to carry alone.
+    const agrees = () =>
+      heads().every(
+        (h) =>
+          h.getAttribute("aria-expanded") ===
+          String(h.classList.contains("open")),
+      );
+    expect(agrees()).toBe(true);
+    // Mount state: the first capability group and the first resource group are
+    // the expanded ones, so both values are actually exercised.
+    expect(
+      heads().map((h) => h.getAttribute("aria-expanded")),
+    ).toContain("true");
+    expect(
+      heads().map((h) => h.getAttribute("aria-expanded")),
+    ).toContain("false");
+
+    // A collapsed capability group flips to expanded on click.
+    const collapsed = heads().find(
+      (h) => h.getAttribute("aria-expanded") === "false",
+    ) as HTMLButtonElement;
+    const label = collapsed.querySelector(".cap-mglabel")!.textContent!;
+    fireEvent.click(collapsed);
+    const reFind = () =>
+      heads().find(
+        (h) => h.querySelector(".cap-mglabel")!.textContent === label,
+      )!;
+    expect(reFind().getAttribute("aria-expanded")).toBe("true");
+    expect(agrees()).toBe(true);
+
+    // The resource-group header is the same control and collapses the same way.
+    const resHead = () =>
+      getByText("Skills").closest(".cap-mghead") as HTMLButtonElement;
+    expect(resHead().getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(resHead());
+    expect(resHead().getAttribute("aria-expanded")).toBe("false");
+    expect(agrees()).toBe(true);
   });
 });
 

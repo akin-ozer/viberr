@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isAtAcceptanceBoundary,
   mapOperatorRef,
   mapPrChecks,
   mapPrReview,
@@ -52,8 +53,24 @@ const STAGES = [
   { id: "done", name: "Done" },
 ];
 
-function summarize(r: TaskProjectionRow, accepted: boolean) {
-  return mapTaskProjectionRow(r, { stages: STAGES, owner: null, accepted });
+/** The template graph: triage → ready → review → done. */
+const WORKFLOW = [
+  { from: "triage", to: "ready" },
+  { from: "ready", to: "review" },
+  { from: "review", to: "done" },
+];
+
+function summarize(
+  r: TaskProjectionRow,
+  accepted: boolean,
+  workflow: { from: string; to: string }[] = WORKFLOW,
+) {
+  return mapTaskProjectionRow(r, {
+    stages: STAGES,
+    workflow,
+    owner: null,
+    accepted,
+  });
 }
 
 describe("displayReadiness derivation (F7-UI3)", () => {
@@ -145,6 +162,57 @@ describe("mapPrChecks / mapPrReview (P13-D-28)", () => {
     );
     expect(summary.prChecks).toMatchObject({ state: "failing", failing: 2, total: 3 });
     expect(summary.prReview).toBe("changes_requested");
+  });
+});
+
+/**
+ * F19-27 — the STAGE gate the task file cannot answer. `blockReason` covers the
+ * closed-PR / revision / verdict / packet / conflicting-PR refusals; the one it
+ * deliberately leaves out is `acceptanceStageBlockedReason`, which turns on the
+ * PROJECT's workflow graph. Projected here so the board's accept dialog can
+ * name it instead of letting the click reach a 409.
+ */
+describe("isAtAcceptanceBoundary mirrors the server's stage gate", () => {
+  it("accepts from the stage with a declared edge into the terminal one", () => {
+    expect(isAtAcceptanceBoundary("review", STAGES, WORKFLOW)).toBe(true);
+  });
+
+  it("refuses every stage the workflow puts before that boundary", () => {
+    expect(isAtAcceptanceBoundary("triage", STAGES, WORKFLOW)).toBe(false);
+    expect(isAtAcceptanceBoundary("ready", STAGES, WORKFLOW)).toBe(false);
+  });
+
+  it("honors a custom graph with a SECOND edge into the terminal stage", () => {
+    // The server allows any declared edge into terminal, not just the resolved
+    // review stage — refusing this would be the forked mapping rulings 12/14 ban.
+    expect(
+      isAtAcceptanceBoundary("ready", STAGES, [
+        ...WORKFLOW,
+        { from: "ready", to: "done" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("falls back positionally when the project declares no edges at all", () => {
+    // resolveStageRoles' own fallback: review = the stage before terminal.
+    expect(isAtAcceptanceBoundary("review", STAGES, [])).toBe(true);
+    expect(isAtAcceptanceBoundary("ready", STAGES, [])).toBe(false);
+  });
+
+  it("refuses nothing when the task is already terminal, or there are no stages", () => {
+    // The writers' idempotent "already Done" return owns the first; a projected
+    // `false` would put a refusal on a click the server accepts.
+    expect(isAtAcceptanceBoundary("done", STAGES, WORKFLOW)).toBe(true);
+    expect(isAtAcceptanceBoundary("review", [], [])).toBe(true);
+  });
+
+  it("threads onto the summary the board renders", () => {
+    expect(summarize(row({ stage: "review" }), false).atAcceptanceBoundary).toBe(
+      true,
+    );
+    expect(summarize(row({ stage: "triage" }), false).atAcceptanceBoundary).toBe(
+      false,
+    );
   });
 });
 

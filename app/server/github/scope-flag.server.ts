@@ -14,7 +14,7 @@ import {
   type ScopeViolationRecord,
 } from "~/server/projections/policy-violations.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { notifyTaskWatchers } from "~/server/tasks/task-actions.server";
+import { notifyTaskWatchers } from "~/server/tasks/task-mutation.server";
 
 /**
  * Policy-engine side effects around scope violations (ruling 5 + github

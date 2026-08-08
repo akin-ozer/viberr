@@ -44,6 +44,7 @@ import {
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
 import { latestTaskReconcileAt } from "~/server/provenance/provenance-query.server";
+import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
 import {
@@ -262,6 +263,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // architecture.md. It now goes through app/server/provenance/, which owns
     // the table.
     githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
+    // F19-22: the line above is the last pass that CHANGED something — DG-3
+    // deliberately withholds the provenance row when a poller tick finds
+    // nothing new (github-reconciler.server.ts), so it drifts to "1h ago" on a
+    // task the poller is verifying every five minutes, and the panel rendering
+    // it as "Synced" contradicted its own tooltip. The last CHECK is a
+    // different fact with a different writer: `github.reconcile.task` is
+    // recorded after every early return in `reconcileTaskExclusive`, so a row
+    // exists iff a pass completed — changed or not — and audit retention (90d)
+    // bounds it. Both ship; the panel renders them as two rows, because one
+    // number cannot answer both questions.
+    githubCheckedAt: latestTaskReconcileCheckAt(db, params.slug, params.key),
     // R15-1 accept confirm + R15-2 manual-delivery affordance.
     workRevisionSha,
     noChanges,
@@ -862,6 +874,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
+      githubCheckedAt={loaderData.githubCheckedAt}
       workRevisionSha={loaderData.workRevisionSha}
       noChanges={loaderData.noChanges}
       defaultBranch={loaderData.defaultBranch}

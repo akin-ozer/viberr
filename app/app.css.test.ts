@@ -901,33 +901,166 @@ describe("app.css palette reachability on touch (P16-G3)", () => {
 
 /* ------------------------------------------------ W5: F3, inline styles */
 
+/** Markup files only: this file and the component tests quote the attribute as
+ *  prose. */
+function markupFiles(): string[] {
+  return sourceFiles(APP_DIR).filter(
+    (f) => f.endsWith(".tsx") && !f.includes(".test."),
+  );
+}
+
+/** Is this offset inside a `/* … *\/` comment? A fix note that NAMES the idiom
+ *  it removed ("`PANEL_COUNT_STYLE` was a copy of `.fine`") is documentation,
+ *  not a site — F19-33's own comments pushed the ceiling below from 20 to 22
+ *  without a pixel changing. */
+function inBlockComment(src: string, index: number): boolean {
+  const open = src.lastIndexOf("/*", index);
+  return open !== -1 && src.lastIndexOf("*/", index) < open;
+}
+
+/** The balanced `{…}` body starting at `open` (the index OF the brace). */
+function balanced(src: string, open: number): { body: string; end: number } {
+  let depth = 0;
+  let i = open;
+  for (; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}" && --depth === 0) break;
+  }
+  return { body: src.slice(open + 1, i), end: i };
+}
+
+const lineAt = (src: string, index: number) =>
+  src.slice(0, index).split("\n").length;
+
 /** Every `style={{ … }}` expression in `app/`, as `file:line` → object body. */
 function inlineStyleSites(): { at: string; body: string }[] {
   const out: { at: string; body: string }[] = [];
-  // Markup only: this file and the component tests quote `style={{` as prose.
-  const markup = sourceFiles(APP_DIR).filter(
-    (f) => f.endsWith(".tsx") && !f.includes(".test."),
-  );
-  for (const file of markup) {
+  for (const file of markupFiles()) {
     const src = readFileSync(file, "utf8");
     const rel = path.relative(path.dirname(APP_DIR), file);
     const re = /style\s*=\s*\{\{/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(src))) {
-      let depth = 1;
-      let i = m.index + m[0].length;
-      for (; i < src.length && depth > 0; i++) {
-        if (src[i] === "{") depth++;
-        else if (src[i] === "}") depth--;
-      }
-      out.push({
-        at: `${rel}:${src.slice(0, m.index).split("\n").length}`,
-        body: src.slice(m.index + m[0].length, i - 1),
-      });
+      if (inBlockComment(src, m.index)) continue;
+      const { body } = balanced(src, m.index + m[0].length - 1);
+      out.push({ at: `${rel}:${lineAt(src, m.index)}`, body });
     }
   }
   return out;
 }
+
+/** Every `style={NAME}` whose NAME is a module const bound to an object literal
+ *  — the HOISTED twin of `style={{…}}`. Same declarations, same distance from
+ *  the sheet; the only difference is that P16-F3's scan above cannot see it,
+ *  which is how three surfaces kept a private copy of `.fine` (F19-33). */
+function hoistedStyleSites(): { at: string; body: string; name: string }[] {
+  const out: { at: string; body: string; name: string }[] = [];
+  for (const file of markupFiles()) {
+    const src = readFileSync(file, "utf8");
+    const rel = path.relative(path.dirname(APP_DIR), file);
+    const re = /style\s*=\s*\{([A-Za-z_$][\w$]*)\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      if (inBlockComment(src, m.index)) continue;
+      const name = m[1];
+      const decl = new RegExp(
+        `\\bconst\\s+${name}\\b[^=;]*=\\s*\\{`,
+      ).exec(src);
+      if (!decl) continue; // a prop, a hook result — nothing static to move.
+      const { body } = balanced(src, decl.index + decl[0].length - 1);
+      out.push({ at: `${rel}:${lineAt(src, m.index)}`, body, name });
+    }
+  }
+  return out;
+}
+
+/** A style object's declarations spelled the way CSS spells them, or null when
+ *  any value is one the sheet could not hold: an identifier, a template, a
+ *  ternary, or a bare non-zero number (React appends `px` — comparing those to
+ *  a rem rule would be noise). */
+function styleObjectDecls(body: string): Map<string, string> | null {
+  const code = body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  if (!code.trim()) return null;
+  const decls = new Map<string, string>();
+  const re = /(?:^|,)\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z][\w-]*))\s*:\s*([^,]+)/g;
+  let m: RegExpExecArray | null;
+  let seen = 0;
+  while ((m = re.exec(code))) {
+    seen++;
+    const prop = (m[1] ?? m[2] ?? m[3]!).replace(
+      /[A-Z]/g,
+      (c) => `-${c.toLowerCase()}`,
+    );
+    const raw = m[4].trim().replace(/\s*as const\s*$/, "");
+    const literal = /^(["'])(.*)\1$/.exec(raw);
+    if (literal) decls.set(prop, literal[2].trim().replace(/^0\./, "."));
+    else if (/^0$/.test(raw)) decls.set(prop, "0");
+    else return null;
+  }
+  return seen > 0 && decls.size === seen ? decls : null;
+}
+
+/** A rule body with any NESTED block removed, its selector with it. Walking
+ *  top-level blocks means a body can now contain CSS nesting, and a nested
+ *  block's declarations belong to the nested selector — splitting them in with
+ *  the rest would both invent properties (`&:hover { color`) and let a hover
+ *  value overwrite the base one. Runs to a fixpoint, so nesting can be deep. */
+function flatBody(body: string): string {
+  let out = body;
+  for (let prev = ""; out !== prev; ) {
+    prev = out;
+    out = out.replace(/(?:^|;)[^;{}]*\{[^{}]*\}/g, ";");
+  }
+  return out;
+}
+
+/** Every TOP-LEVEL rule whose selector is a SINGLE bare class — the sheet's
+ *  shared idioms, the ones any surface opts into by name (`.fine`, `.push`,
+ *  `.full`). Chains and descendant selectors are component rules, not
+ *  utilities: a style object that happens to match `.field.packet-note-field`
+ *  is a coincidence, not a fork.
+ *
+ *  Top-level is the other half of "utility". An innermost-brace scan
+ *  (`/([^{}]*)\{([^{}]*)\}/g`) cannot see the `@media` wrapper, so it handed
+ *  back all 40 of this sheet's breakpoint-scoped single-class rules as if they
+ *  were unconditional — three of them (`.login-wrap-2col`, `.login-aside-mark`,
+ *  `.login-aside-points`) exist ONLY inside `@media (min-width: 900px)`, and
+ *  the other 37 are overrides of a name that also has a global rule, so the
+ *  same selector came back twice with different declarations. Both are wrong
+ *  for the fork check below: a style object cannot "restate" a rule that only
+ *  applies inside a query — swapping the object for that class would change
+ *  how the surface renders everywhere ELSE, which is the opposite of the fix
+ *  the failure asks for. And with a selector appearing twice, "the rule named
+ *  `.x`" stops being a question `.find` can answer — today the global rule
+ *  happens to come first in every one of the 37, which is source order, not a
+ *  guarantee. Walking blocks with `balanced()` steps over a nested rule along
+ *  with its wrapper, so `@media` / `@supports` / `@container` bodies are out of
+ *  scope by construction. */
+function utilityRules(css: string): { selector: string; decls: Map<string, string> }[] {
+  const out: { selector: string; decls: Map<string, string> }[] = [];
+  for (let at = 0; ; ) {
+    const open = css.indexOf("{", at);
+    if (open < 0) break;
+    const selector = css.slice(at, open).trim();
+    const { body, end } = balanced(css, open);
+    at = end + 1;
+    if (!/^\.[-\w]+$/.test(selector)) continue;
+    const decls = new Map<string, string>();
+    for (const decl of flatBody(body).split(";")) {
+      const colon = decl.indexOf(":");
+      if (colon < 0) continue;
+      decls.set(
+        decl.slice(0, colon).trim(),
+        decl.slice(colon + 1).trim().replace(/^0\./, "."),
+      );
+    }
+    if (decls.size > 0) out.push({ selector, decls });
+  }
+  return out;
+}
+
+const sameDecls = (a: Map<string, string>, b: Map<string, string>) =>
+  a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
 
 /** A property value the stylesheet could have held: a bare literal. Anything
  *  else — an identifier, a template literal, a ternary, a concatenation — reads
@@ -986,6 +1119,109 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     // `<select>` half of this finding and left the inline-style half, and
     // nothing noticed the count climbing back for three passes.
     expect(sites.length).toBeLessThanOrEqual(20);
+  });
+});
+
+/* --------------------------------------------- F19-33: hoisting is no escape */
+
+/**
+ * P16-F3 moved literal `style={{…}}` objects into the sheet. Three surfaces
+ * kept theirs by lifting them one scope — `const PANEL_COUNT_STYLE = { fontSize:
+ * ".76rem", color: "var(--faint)" }` in github-view.tsx, policy-page.tsx and
+ * settings-page.tsx, a byte copy of `.fine` that seven other panel heads already
+ * write as `className="right sub fine"`. Nothing rendered differently, which is
+ * the point: the copies drifted instead (the sibling note const sat at .8rem in
+ * settings, .9rem in github-view and .85rem in the sheet), and a theme or
+ * density pass reaches none of them. Ruling 14 — one shared implementation, no
+ * per-surface forks.
+ */
+describe("app.css owns the shared idioms — hoisting is not an escape hatch (F19-33)", () => {
+  const utilities = utilityRules(CODE);
+  const objects = [
+    ...inlineStyleSites().map((s) => ({ ...s, name: "inline" })),
+    ...hoistedStyleSites(),
+  ];
+
+  it("scanned real utilities and real style objects", () => {
+    // A scanner that silently matches nothing turns every assertion green.
+    const named = new Set(utilities.map((u) => u.selector));
+    for (const selector of [".fine", ".push", ".full", ".tally"]) {
+      expect(named.has(selector), `${selector} must be scanned`).toBe(true);
+    }
+    expect(objects.length).toBeGreaterThan(10);
+    expect(objects.some((o) => o.name !== "inline")).toBe(true);
+  });
+
+  it("scans UNCONDITIONAL rules only — an @media override is not a utility", () => {
+    // A conditional rule cannot be the shared implementation a style object
+    // forks: swapping the object for the class would change how the surface
+    // renders OUTSIDE the query. `.login-wrap-2col` exists only inside
+    // `@media (min-width: 900px)`, and `.rail-toggle` has a global rule plus a
+    // `max-width: 720px` override that takes it from one property to nine.
+    const named = utilities.filter((u) => u.selector === ".login-wrap-2col");
+    expect(named, "media-only rules are not utilities").toEqual([]);
+    expect(CODE).toContain(".login-wrap-2col");
+
+    const toggles = utilities.filter((u) => u.selector === ".rail-toggle");
+    expect(toggles).toHaveLength(1);
+    expect([...toggles[0]!.decls]).toEqual([["display", "none"]]);
+    // The nested body is genuinely skipped, not merged into the global rule.
+    expect(toggles[0]!.decls.has("place-items")).toBe(false);
+  });
+
+  it("keeps the declarations the three surfaces now depend on", () => {
+    // Delete these and the counts/notes lose their type scale and spacing with
+    // nothing in the markup to fall back on.
+    const fine = utilities.find((u) => u.selector === ".fine")!.decls;
+    expect(fine.get("font-size")).toBe(".76rem");
+    expect(fine.get("color")).toBe("var(--faint)");
+    expect(CODE).toMatch(/\.pol-note\.after\s*\{[^}]*margin-top:\s*\.85rem/);
+    expect(CODE).toMatch(/\.pol-note\.last\s*\{[^}]*margin-bottom:\s*0/);
+  });
+
+  it("no style object restates a utility class's declarations", () => {
+    const forks: string[] = [];
+    for (const site of objects) {
+      const decls = styleObjectDecls(site.body);
+      if (!decls) continue; // dynamic, or a value the sheet cannot hold.
+      for (const util of utilities) {
+        if (sameDecls(decls, util.decls)) {
+          forks.push(
+            `${site.at} — ${site.name} restates ${util.selector} { ${[...decls]
+              .map(([k, v]) => `${k}: ${v}`)
+              .join("; ")} }`,
+          );
+        }
+      }
+    }
+    expect(forks.sort()).toEqual([]);
+  });
+
+  it("every panel note takes its spacing from the sheet", () => {
+    // `.pol-note` ships `before` / `after` / `last` spacing modifiers, so an
+    // inline margin on one is always a fork — that is how the same note ended up
+    // three different distances from the panel above it on three surfaces.
+    const styled: string[] = [];
+    for (const file of markupFiles()) {
+      const src = readFileSync(file, "utf8");
+      const rel = path.relative(path.dirname(APP_DIR), file);
+      for (const m of src.matchAll(/pol-note/g)) {
+        if (inBlockComment(src, m.index)) continue;
+        const open = src.lastIndexOf("<", m.index);
+        if (open < 0) continue;
+        let depth = 0;
+        let end = open;
+        for (; end < src.length; end++) {
+          if (src[end] === "{") depth++;
+          else if (src[end] === "}") depth--;
+          else if (src[end] === ">" && depth === 0) break;
+        }
+        if (/\sstyle\s*=/.test(src.slice(open, end))) {
+          styled.push(`${rel}:${lineAt(src, m.index)}`);
+        }
+      }
+    }
+    expect(styled.sort()).toEqual([]);
   });
 });
 

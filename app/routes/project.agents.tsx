@@ -37,6 +37,12 @@ import { AgentsPage } from "~/features/agents/agents-page";
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
+  // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a
+  // client-supplied `?_routes=` filter, so
+  // `GET /projects/<slug>/agents.data?_routes=routes/project.agents` runs this
+  // loader ALONE and the layout's membership refusal never executes. The guard
+  // answers a non-member with the byte-identical unknown-slug 404 — a 403 here
+  // would confirm the project exists (WI-13).
   await requireProjectMember(request, params.slug, "view this project's agents");
   const db = getDb();
   const project = getProject(db, params.slug);

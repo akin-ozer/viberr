@@ -18,6 +18,31 @@ import {
 } from "./git-clone-auth.server";
 
 describe("createGitHubClonePlan", () => {
+/**
+ * Run the generated askpass program, retrying only the transient exec failures
+ * that come from EXECUTING A FILE THIS TEST JUST WROTE while the suite runs
+ * many workers in parallel: the kernel can still hold the image busy (ETXTBSY)
+ * or refuse a fork under load (EAGAIN). Those say nothing about the program's
+ * behavior — but they turned this security assertion red about once per full
+ * suite, and a security gate that cries wolf is a security gate someone deletes.
+ * Every other failure, including a WRONG answer, propagates on the first try.
+ */
+function runAskpass(
+  askpassPath: string,
+  prompt: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const TRANSIENT = new Set(["ETXTBSY", "EAGAIN", "EBUSY"]);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return execFileSync(askpassPath, [prompt], { encoding: "utf8", env }).trim();
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (attempt >= 3 || !TRANSIENT.has(code)) throw error;
+    }
+  }
+}
+
   it("keeps a GitHub PAT out of argv, the remote URL, and the askpass file", () => {
     const token = "github_pat_DO_NOT_LEAK_123";
     const plan = createGitHubClonePlan({
@@ -45,18 +70,12 @@ describe("createGitHubClonePlan", () => {
       expect(plan.env.VIBERR_GIT_ASKPASS_PASSWORD).toBe(token);
       expect(plan.env.GIT_CONFIG_KEY_0).toBe("credential.helper");
       expect(plan.env.GIT_CONFIG_VALUE_0).toBe("");
-      expect(
-        execFileSync(askpassPath, ["Username for 'https://github.com':"], {
-          encoding: "utf8",
-          env: plan.env,
-        }).trim(),
-      ).toBe("x-access-token");
-      expect(
-        execFileSync(askpassPath, ["Password for 'https://github.com':"], {
-          encoding: "utf8",
-          env: plan.env,
-        }).trim(),
-      ).toBe(token);
+      expect(runAskpass(askpassPath, "Username for 'https://github.com':", plan.env)).toBe(
+        "x-access-token",
+      );
+      expect(runAskpass(askpassPath, "Password for 'https://github.com':", plan.env)).toBe(
+        token,
+      );
     } finally {
       plan.dispose();
     }

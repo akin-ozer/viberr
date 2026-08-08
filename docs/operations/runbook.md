@@ -89,7 +89,37 @@ readiness downgrade (tolerant parsing):
 
 ## Auth / access
 
-- Sessions live in SQLite (`sessions`); expired sessions are swept at boot and daily.
+- Sessions live in SQLite in better-auth's own `session` table — singular, and owned by
+  better-auth rather than by Viberr's schema. *(Corrected 2026-08-06, pass 19 — F19-17. This
+  line previously named a `sessions` table and a sweep of expired rows "at boot and daily";
+  neither has ever existed, and nothing anywhere sweeps sessions on a timer. `applyRetention`,
+  the only automatic row cleanup in the process, runs once per **boot** over `run_log_lines`,
+  `audit_events` and `notifications`, and touches nothing else; see
+  [Retention & growth](#retention--growth).)*
+  - **Expiry is 30-day rolling**, slid at most once a day on an active session
+    (`expiresIn` / `updateAge` in `app/lib/auth.server.ts`); the refreshed cookie better-auth
+    emits is forwarded to the browser by the root loader, so an active user is not signed out
+    at login + 30 days.
+  - **Nothing prunes expired rows on a schedule.** An expired row is simply never honoured —
+    better-auth rejects it on every request, so it grants no access; it just sits there.
+  - Rows are deleted only by an explicit act. There is no standalone "sign out other
+    sessions" button; the four paths are:
+    1. **Sign-out** — `app/routes/logout.tsx` (better-auth's own `signOut`), which drops the
+       one session making the request.
+    2. **A self-serve password change** — `changeOwnPassword`
+       (`app/features/profile/profile-actions.server.ts`) keeps the current session and
+       deletes every OTHER one (`WHERE userId = ? AND id != ?`).
+    3. **The auth guard** — `authenticateWithHeaders`
+       (`app/server/auth/require-user.server.ts`) deletes the session the moment it resolves
+       to a user who is disabled or no longer exists.
+    4. **Admin revocation** — `revokeUserSessions` (`app/server/auth/identity.server.ts`),
+       called on admin *disable* and on an admin *password reset*
+       (`app/server/auth/user-admin.server.ts`); deleting the user cascades the rows away.
+  - So expired rows accumulate (one per sign-in). They are tiny and inert, and there is no
+    supported prune. If a long-lived deployment ever wants them gone, stop the app and delete
+    by `expiresAt` — check the stored form first (`SELECT expiresAt FROM session LIMIT 1`) and
+    compare against a value in that same textual form, because the column's format is
+    better-auth's to define, not Viberr's.
 - Locked out / forgotten password: an admin resets it in Org settings → Users
   (`resetPassword` sets a one-time temp password + forces a reset at next sign-in). The
   bootstrap admin comes from `VIBERR_SEED_ADMIN_*` on first boot of an empty DB.

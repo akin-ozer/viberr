@@ -59,6 +59,13 @@ function RQRow({
             task detail and the GitHub page — and `closed` is a first-class row
             state in this very queue, with rose-toned rework/archive copy in its
             subline. Same defect UI-36 fixed on task detail. Use the one map. */}
+        {/* F19-32: the label rides along for every state the pill's colour
+            alone cannot carry — `closed` (rejected) and `accepted`
+            ("merge pending", R16-6/ruling 40, which the projection used to
+            coerce to "review" before it ever reached this map). `merged` and
+            `review` stay bare: the subline says both in words one line above,
+            and the queue's density rule is the board card's (only ACTIONABLE
+            state earns a second label). */}
         {t.pr && (
           <Pill kind={prStatePill(t.pr.state).kind} sm>
             PR #{t.pr.number}
@@ -80,12 +87,20 @@ function RQRow({
             <Icon name="hand" />
             waiting on a human
           </span>
-        ) : (
+        ) : t.waiting === "agent" ? (
           <span className="wait-tag agent">
             <span className="working" />
             agent working
           </span>
-        )}
+        ) : null}
+        {/* F19-31: the branch above used to be a bare `else`, which collapsed
+            "agent" and "none". `review + none` is a LEGAL stored combination
+            (review-queue.server.ts lists it in "Still in review"), and for it
+            the board's WaitTag renders nothing at all (board-page.tsx) while
+            this row rendered the pulsing "agent working" — one stored value
+            making opposite claims one click apart, the exact defect R8-3 fixed
+            for "human". Silence is the board's answer, so it is this row's too;
+            the subline carries the fact in words (review-helpers.ts). */}
         <span className="rq-go" aria-hidden="true">
           Review
           <Icon name="chevron" />

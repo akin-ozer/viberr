@@ -532,9 +532,15 @@ function CapabilityGrants({
           });
           return (
             <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
+              {/* F19-35: the disclosure state lived in the `open` CSS class
+                  alone — the chevron rotates, and a screen reader learns
+                  nothing. `aria-expanded` is the house pattern for every other
+                  collapsible trigger in the app (settings-page.tsx:450,
+                  runs-panels.tsx:98, timeline.tsx:93). */}
               <button
                 type="button"
                 className={"cap-mghead" + (open ? " open" : "")}
+                aria-expanded={open}
                 onClick={() =>
                   setOpenGroups((p) => ({ ...p, [g.group]: !p[g.group] }))
                 }
@@ -655,9 +661,11 @@ function ResourcePicker({
           ];
           return (
             <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
+              {/* F19-35: same disclosure gap as the capability groups above. */}
               <button
                 type="button"
                 className={"cap-mghead" + (open ? " open" : "")}
+                aria-expanded={open}
                 onClick={() =>
                   setOpenRes((p) => ({ ...p, [g.group]: !p[g.group] }))
                 }
@@ -675,6 +683,14 @@ function ResourcePicker({
                 <div className="cap-mbody">
                   <div className="pick-chips">
                     {displayItems.map((it) => (
+                      /* F19-5: a grant chip is a toggle, and its granted state
+                         was carried by the `on` class + a check glyph only —
+                         so a screen reader announced a granted skill/MCP/KB
+                         exactly like an ungranted one. Every sibling chip group
+                         in this file already reports it (backend :243, autonomy
+                         :304, stages :430). A `missing` chip is a GRANT too (it
+                         comes from `sel`), so it reports pressed and clicking
+                         it removes the grant. */
                       <button
                         type="button"
                         key={it.id}
@@ -684,6 +700,7 @@ function ResourcePicker({
                           (selSet.has(it.id) ? " on" : "") +
                           (it.missing ? " missing" : "")
                         }
+                        aria-pressed={selSet.has(it.id)}
                         title={
                           it.missing
                             ? "No longer in the store — click to remove this grant"

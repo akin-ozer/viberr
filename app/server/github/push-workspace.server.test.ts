@@ -60,12 +60,31 @@ function fakeGit(opts: {
   shallow?: boolean;
   /** Whether the deepen fetch succeeds (default: true). */
   deepenOk?: boolean;
+  /** `git rev-parse --verify <rev>` answers (F19-21's local zero-ahead proof).
+   *  An absent rev fails, exactly as git does. */
+  revs?: Record<string, string>;
+  /** What `for-each-ref refs/heads/` lists (F19-21: an abandoned task branch
+   *  means the run DID branch, so HEAD sitting on main is a failure). */
+  refs?: string[];
+  /** The delivery auto-commit FAILS. The real block only logs and falls
+   *  through, so the tree stays dirty and 0-ahead — the shape that used to be
+   *  read as a verified zero-diff. */
+  commitFails?: boolean;
 }) {
   const calls: string[][] = [];
   let committed = false;
   const exec = vi.fn(async (_file: string, args: string[]) => {
     calls.push(args);
     if (args.includes("--abbrev-ref")) return { ok: true, stdout: opts.branch, stderr: "" };
+    if (args.includes("--verify")) {
+      const sha = opts.revs?.[args[args.length - 1]!];
+      return sha
+        ? { ok: true, stdout: sha, stderr: "" }
+        : { ok: false, stdout: "", stderr: "" };
+    }
+    if (args.includes("for-each-ref")) {
+      return { ok: true, stdout: (opts.refs ?? ["main"]).join("\n"), stderr: "" };
+    }
     if (args.includes("--is-shallow-repository")) {
       return { ok: true, stdout: opts.shallow ? "true" : "false", stderr: "" };
     }
@@ -82,6 +101,7 @@ function fakeGit(opts: {
       };
     }
     if (args.includes("commit")) {
+      if (opts.commitFails) return { ok: false, stdout: "", stderr: "nothing added to commit" };
       committed = true;
       return { ok: true, stdout: "", stderr: "" };
     }
@@ -126,9 +146,31 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       dataRoot: store.dataRoot, exec: git.exec,
     });
     expect(res.status).toBe("no_commits");
+    // F19-21: a clean tree at this point is the EVIDENCE that there was genuinely
+    // nothing to deliver — the only shape a no-change completion may be read from.
+    expect(res).toMatchObject({ defaultBranchEvidence: { verified: true } });
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
     // A clean tree → no auto-commit.
     expect(git.calls.some((c) => c.includes("commit"))).toBe(false);
+  });
+
+  it("F19-21: a FAILED auto-commit leaves `no_commits` UNVERIFIED — uncommitted work is not 'no changes'", async () => {
+    // The auto-commit block only LOGS its failures and falls through, so an
+    // agent whose deliverable never made it into a commit still lands on
+    // 0-ahead. Status alone therefore cannot mean "nothing to deliver": without
+    // this evidence the caller closed genuine, uncommitted work as
+    // "completed with no changes required".
+    bindPat();
+    const git = fakeGit({ branch: "vib-1-work", ahead: 0, dirty: true, commitFails: true });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("no_commits");
+    expect(res).toMatchObject({ defaultBranchEvidence: { verified: false } });
+    expect(
+      (res as { defaultBranchEvidence?: { why?: string } }).defaultBranchEvidence?.why,
+    ).toContain("uncommitted");
   });
 
   it("A3: a FAILED rev-list is UNKNOWN, not `no_commits` — it still pushes", async () => {
@@ -249,6 +291,130 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     expect(res.status).toBe("no_branch");
   });
 
+  /**
+   * F19-21 — `no_branch` is TWO situations wearing one status: a verify-only run
+   * that correctly changed nothing, and a developer who edited files and forgot
+   * `git checkout -B`. `performDelivery` closes the first as "completed with no
+   * changes", so this module has to tell them apart from the workspace itself —
+   * the task file cannot (it holds no branch, no PR and no revision in either
+   * case). Read-only throughout: a workspace on the default branch is never
+   * staged or committed, whatever it holds.
+   */
+  describe("F19-21: default-branch evidence", () => {
+    const push = (git: ReturnType<typeof fakeGit>) =>
+      pushWorkspaceBranch({
+        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+        dataRoot: store.dataRoot, exec: git.exec,
+      });
+
+    it("verifies a CLEAN default-branch workspace — the shape a no-change completion is read from", async () => {
+      bindPat();
+      const git = fakeGit({ branch: "main", ahead: 0 });
+      const res = await push(git);
+      expect(res).toEqual({
+        status: "no_branch",
+        reason:
+          "HEAD is on the default branch (main) with a clean working tree, no local commits and no task branch",
+        defaultBranchEvidence: { verified: true },
+      });
+      // Read-only: it looked, it never wrote.
+      expect(git.calls.some((c) => c.includes("add"))).toBe(false);
+      expect(git.calls.some((c) => c.includes("commit"))).toBe(false);
+      expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+    });
+
+    it("a DIRTY tree is NOT verified — the developer who forgot to branch is a real failure", async () => {
+      // The finding: this was the case a disclaimer sentence stood in for, so
+      // uncommitted work was recorded as a verified no-change completion.
+      bindPat();
+      const git = fakeGit({ branch: "main", ahead: 0, dirty: true });
+      const res = await push(git);
+      expect(res.status).toBe("no_branch");
+      expect(res).toMatchObject({
+        defaultBranchEvidence: {
+          verified: false,
+          why: "its working tree holds uncommitted changes (2 paths) that never reached a task branch",
+        },
+      });
+      expect(res.status === "no_branch" && res.reason).toContain("uncommitted changes");
+      expect(git.calls.some((c) => c.includes("commit"))).toBe(false);
+    });
+
+    it("LOCAL COMMITS on the default branch are not a verified no-change", async () => {
+      bindPat();
+      const git = fakeGit({ branch: "main", ahead: 2 });
+      const res = await push(git);
+      expect(res).toMatchObject({
+        defaultBranchEvidence: {
+          verified: false,
+          why: "it carries 2 local commits that origin/main does not",
+        },
+      });
+    });
+
+    it("an ABANDONED task branch is not a verified no-change — the run did branch", async () => {
+      bindPat();
+      const git = fakeGit({ branch: "main", ahead: 0, refs: ["main", "vib-1-work"] });
+      const res = await push(git);
+      expect(res).toMatchObject({
+        defaultBranchEvidence: {
+          verified: false,
+          why: "the task branch `vib-1-work` exists in the workspace but HEAD is not on it",
+        },
+      });
+      // Answered locally — no history walk, no deepen.
+      expect(git.calls.some((c) => c.includes("--count"))).toBe(false);
+    });
+
+    it("a branch belonging to ANOTHER task does not count as this task's", async () => {
+      bindPat();
+      const git = fakeGit({ branch: "main", ahead: 0, refs: ["main", "vib-10", "spike"] });
+      const res = await push(git);
+      expect(res).toMatchObject({ defaultBranchEvidence: { verified: true } });
+    });
+
+    it("an UNREADABLE history is unknown, never clean", async () => {
+      // Same rule as A3 one function over: `null` is not zero.
+      bindPat();
+      const git = fakeGit({ branch: "main", ahead: 0, countFails: true });
+      const res = await push(git);
+      expect(res).toMatchObject({
+        defaultBranchEvidence: {
+          verified: false,
+          why: "its history could not be compared with origin/main",
+        },
+      });
+    });
+
+    it("proves zero-ahead LOCALLY when HEAD is origin/<default> — no deepen, no network", async () => {
+      // Clones are `--depth 1` over a credential-free origin, so the deepen the
+      // count needs can simply fail on a private repo. The shape this exists for
+      // needs no history walk: HEAD identical to origin/main IS the proof.
+      bindPat();
+      const sha = "c".repeat(40);
+      const git = fakeGit({
+        branch: "main", ahead: 0, shallow: true, deepenOk: false,
+        revs: { HEAD: sha, "origin/main": sha },
+      });
+      const res = await push(git);
+      expect(res).toMatchObject({ defaultBranchEvidence: { verified: true } });
+      expect(git.calls.some((c) => c.includes("fetch"))).toBe(false);
+      expect(git.calls.some((c) => c.includes("--count"))).toBe(false);
+    });
+
+    it("a DETACHED HEAD carries no evidence at all — nothing was proven either way", async () => {
+      bindPat();
+      const git = fakeGit({ branch: "HEAD", ahead: 0 });
+      const res = await push(git);
+      expect(res).toEqual({
+        status: "no_branch",
+        reason: "HEAD is detached, so there is no branch to push",
+      });
+      // Not even probed: a detached HEAD is not the default branch.
+      expect(git.calls.some((c) => c.includes("for-each-ref"))).toBe(false);
+    });
+  });
+
   it("returns push_failed when git push errors", async () => {
     bindPat();
     const git = fakeGit({ branch: "vib-1-work", ahead: 1, pushOk: false });
@@ -257,6 +423,79 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       dataRoot: store.dataRoot, exec: git.exec,
     });
     expect(res.status).toBe("push_failed");
+  });
+
+  it("F19-18: a rejected push NAMES git's reason (redacted), instead of 'returned non-zero'", async () => {
+    // The residual bucket — protected branch, push ruleset, pre-receive hook,
+    // 403, DNS — collapsed to the fixed string "git push returned non-zero",
+    // and stderr was kept NOWHERE: not on the timeline event performDelivery
+    // builds from this reason, not in the log line, not in any run log. A
+    // maintainer with a probe-verified credential had to reproduce the push
+    // outside Viberr to learn the word "protected".
+    //
+    // Canary: drop the `stderrExcerpt` arm from the reason and this fails on
+    // the GH006 assertion.
+    bindPat();
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      pushOk: false,
+      pushStderr:
+        "remote: error: GH006: Protected branch update failed for refs/heads/vib-1-work.\n" +
+        "remote: error: Required status check \"ci\" is expected.\n" +
+        "To https://github.com/acme/app.git\n" +
+        " ! [remote rejected] vib-1-work -> vib-1-work (protected branch hook declined)\n",
+    });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("push_failed");
+    const reason = res.status === "push_failed" ? res.reason : "";
+    expect(reason).toContain("GH006: Protected branch update failed");
+    expect(reason).not.toContain("returned non-zero");
+    // The reason is interpolated INSIDE a prose sentence by performDelivery, so
+    // it must stay one line; the full excerpt rides the structured field.
+    expect(reason).not.toContain("\n");
+    expect(res.status === "push_failed" ? res.stderrExcerpt : "").toContain(
+      "protected branch hook declined",
+    );
+  });
+
+  it("F19-18: the project PAT never reaches the surfaced reason", async () => {
+    // The old comment ("Redact stderr — a git push failure can echo the remote
+    // URL/token") named a real rule. Keeping git's words means proving the
+    // secret is scrubbed BY VALUE, not hoping stderr is clean.
+    // Canary: pass `[]` instead of `[token]` to redactGitStderr and this fails.
+    bindPat(); // the fixture's PAT is `ghp_faketoken123`
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      pushOk: false,
+      pushStderr:
+        "fatal: Authentication failed using ghp_faketoken123 for " +
+        "'https://x-access-token:ghp_faketoken123@github.com/acme/app.git/'\n",
+    });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("push_failed");
+    const serialized = JSON.stringify(res);
+    expect(serialized).not.toContain("ghp_faketoken123");
+    expect(serialized).toContain("Authentication failed");
+  });
+
+  it("F19-18: a push that printed nothing says so, rather than inventing a cause", async () => {
+    bindPat();
+    const git = fakeGit({ branch: "vib-1-work", ahead: 1, pushOk: false, pushStderr: "" });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    const reason = res.status === "push_failed" ? res.reason : "";
+    expect(reason).toContain("git printed nothing");
+    expect(res.status === "push_failed" ? res.stderrExcerpt : "x").toBeUndefined();
   });
 
   it("a push KILLED by its timeout says so, instead of claiming git returned non-zero", async () => {

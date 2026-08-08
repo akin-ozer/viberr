@@ -371,7 +371,9 @@ it is regenerated from the filesystem rather than restated here.
     Force-accept and Archive are no longer the only exits for a zero-diff task, and refusal
     copy stops claiming "delivered work" for a 0-diff. Gated on: task at the review boundary,
     verified empty diff, reviewer verdict optional; it merges nothing. (Owner ruling gathered
-    pass 17; on this pass's implementation backlog.)
+    pass 17; on this pass's implementation backlog.) **Amended 2026-08-08 by ruling 62 — the
+    "reviewer verdict optional" clause is SUPERSEDED: a no-change completion now passes the
+    same verdict gate as every other acceptance.** Implemented pass 19 (F19-21).
 44. **R17-3 (2026-08-04): rulings live in `decisions.md`; a docs-canon re-read is a required
     closing step of every pass.** A ruling a code comment cites but no canon file records is a
     ruling that gets reversed — D-17's failure mode, and pass-15's unanswered Q9. Every owner
@@ -409,6 +411,9 @@ it is regenerated from the filesystem rather than restated here.
     double-charges the shared injection budget), applies only to non-delivering runs, and is
     tolerant of an undeployed deliverer. Same on the resumed/@mention review path.
     (`app/server/tasks/specialist-run.server.ts` — `deliveringKbGrants`/`withDeliveringKb`)
+    *(Re-affirmed 2026-08-06, pass 19 — owner ruling; see ruling 57 / R19-3. The
+    inheritance is KBs and ONLY KBs: the docstring claiming it had been "widened to
+    skills by LV-F3" described a widening that never shipped.)*
 
 48. **R18-2 (2026-08-05): a full-autonomy delivery re-queues the operator.** Opening the review
     PR is delivery, NOT a stage transition, so the P11-70 every-transition re-trigger (and the
@@ -475,6 +480,138 @@ it is regenerated from the filesystem rather than restated here.
     `agent-template-modal.tsx:123-131`). No default was changed — acting on the note would have
     introduced the over-granting it warned about. Recorded as a class: a finding taken from a UI
     impression and never re-verified in code can survive several passes as fact.
+
+55. **R19-1 (2026-08-06): the operator gets a FULL read-only clone of the project repo
+    before it triages.** Live (F19-4): at triage the operator's cwd is the task's canonical
+    folder, which holds exactly `task.md` — and the model wrote a decision packet reporting
+    "Repo contents visible to operator: only task.md — no docs/ or README found" about a
+    repository that has both, then invented scoping options from that emptiness ("add a
+    README" for a repo that has one). A packet must be grounded in the REAL repository. The
+    owner ruled for a full clone over the two cheaper fixes that were offered and rejected: a
+    summary-only view (a file listing the model would still have to guess from) and a
+    persona-only fix (telling the model not to claim things it cannot see, which leaves it
+    blind and merely quieter). The clone is the SAME per-task checkout a specialist run uses,
+    so the delivering agent that runs later reuses it rather than paying for a second one, and
+    an EXISTING checkout is returned untouched (re-sanitizing or re-stripping it mid-run is
+    the F19-15 hazard). Read-only is the operator's posture, not a filesystem mode: the
+    operator has no delivery capability, and R18-3's `.claude` strip still applies to the
+    clone. A clone failure is a FIRST-CLASS `unavailable` arm carrying git's own redacted
+    complaint — never an error that strands the drive, and never silence, because a run that
+    does not KNOW it is blind falls straight back into describing the task folder. Closes
+    Q19-1, extends F19-4. (`operatorWorkspaceView` in
+    `app/server/runtimes/operator-run.server.ts`)
+
+56. **R19-2 (2026-08-06): repo-documented conventions OUTRANK knowledge bases; the KB
+    supplements.** Live (Q19-2): a KB-granted Codex developer followed its KB's pass-note
+    format while a KB-less Claude doc writer followed the repo's own `qa/smoke/README.md` and
+    flagged the KB-shaped files as non-conforming. Both behaved reasonably — nothing had ever
+    told either run which source wins, so one repo grew two house styles. The rule: where a
+    repo file states a convention (README, CONTRIBUTING, `docs/`, a linter/formatter config,
+    or the established pattern of the files being edited) the repository wins; KB guidance
+    applies where the repo is silent; a genuine conflict is followed *repo-first and reported
+    by name* so a human can reconcile it; and an existing file family is never rewritten into
+    a KB's style just because the KB describes one. It ships as ONE constant emitted
+    immediately before the KB bodies it ranks, imported by both runtimes so it cannot drift
+    between them, and emitted only when real KB text is present — a run with no knowledge base
+    never carries a rule about a resource it does not have. Closes Q19-2.
+    (`KB_PRECEDENCE_NOTE` in `app/server/files/kb-injection.server.ts`)
+
+57. **R19-3 (2026-08-06): reviewer inheritance stays KBs only — ruling 47 (R18-1) stands.**
+    F19-2 found `specialist-run.server.ts` documenting that the inheritance had been "widened
+    to SKILLS by LV-F3". It never was: both call sites union `kb` only, the fresh and resume
+    paths each mount the reviewer's OWN skills, and the string "LV-F3" existed nowhere in the
+    repo except that one sentence. Offered the widening as a real option, the owner declined
+    it — a reviewer's craft is its own profile's grant; what deliverer and reviewer must share
+    is the CONVENTIONS they judge against, which is exactly what R18-1's KB union gives them.
+    So skills are DELIBERATELY not inherited, the absence is pinned by a test, and the false
+    docstring is corrected. Recorded as the same class as ruling 54: a claim that lives only
+    in a comment is a claim nobody re-derives. Closes F19-2.
+    (`deliveringContextGrants` in `app/server/tasks/specialist-run.server.ts`)
+
+58. **R19-4 (2026-08-06): a SUPERVISED delivery must leave an actionable next step, and the
+    SERVER guarantees it.** Live (F19-1, VC-1): a supervised operator delivered, narrated "the
+    task will move to Review; no further action needed", and recorded nothing — the task
+    settled `waiting: human` with no recommendation, no packet and no chip, so the human had
+    nothing to act on anywhere in the product. Delivery is not a stage transition (R15-2), so
+    neither the every-transition operator re-trigger nor the auto-boundary stranded backstop
+    covers this moment, and ruling 48 (R18-2) deliberately skips the re-queue at supervised
+    autonomy because the human is the driver. The invariant therefore rested entirely on the
+    model remembering. `performDelivery` now ensures a "Move to \<review\>" recommendation (or
+    equivalent packet) exists whenever an operator-authorized supervised delivery recorded
+    none. Deliberately conservative — it adds nothing when an open packet already IS the next
+    step, when the task is already at or past the review stage, or when the workflow declares
+    no edge from here to review — and idempotent: `addRecommendation` dedupes per
+    (kind, profileId, target), any stage move prunes pending transition cards, and acceptance
+    consumes every card, so the synthesized card can neither double up with the operator's own
+    nor outlive its moment. Ruling 48's full-autonomy re-queue is unchanged. Closes F19-1.
+    (`ensureDeliveredNextStep` in `app/server/tasks/operator-actions.server.ts`, called from
+    `performDelivery` in `app/server/tasks/task-actions.server.ts`)
+
+59. **R19-5 (2026-08-06): force-accept MAY skip the remaining stages AND the review gate — but
+    it must SAY so.** A pass-19 implementer read F19-25 as "force-accept must not jump the
+    workflow graph" and added a server 409 refusing an off-boundary force ("move the task to
+    the boundary first"); the owner REVERTED it. Force-accept exists precisely to get a wedged
+    board unstuck, and a server refusal would have turned the one escape hatch into another
+    wall. The burden the override carries is HONESTY, not refusal: the affordance is labeled
+    with what it does ("skips the remaining stages and the review gate") and its confirm dialog
+    ENUMERATES the stages being skipped, alongside ruling 42's merge-head/divergence
+    disclosure. What force does NOT bypass is unchanged and non-negotiable: the ruling-37
+    terminal GitHub fact (F19-25's real defect — a closed, unmerged PR still refuses, now
+    server-side and not only by hiding the button client-side) and ruling 20's PR-head
+    containment check. Narrows ruling 20, extends rulings 37 and 42.
+    (`forceIrreducibleRefusal` in `app/server/tasks/task-actions.server.ts`;
+    `app/features/task-detail/accept-confirm.tsx`)
+
+60. **R19-6 (2026-08-06): a capability set to `off` is a HARD REFUSE by every route — no card,
+    no audit row.** The leak: with `completion-for-acceptance: off`, an operator that could not
+    recommend accepting a completion still produced an `accept_completion` card and a
+    `task.operator.recommended_completion` audit row by rerouting through a plain terminal-stage
+    transition (F19-26's target-not-kind hole). `off` is a withheld capability, not a routing
+    hint — so the gate is checked FIRST, before any read, card or audit row, on every path that
+    reaches the action including the terminal-target reroute, and `human` refuses the same way
+    while saying the decision is reserved for a human. The operator refuses OUT LOUD and
+    narrates the refusal rather than silently finding another door: a silent reroute is worse
+    than a refusal because the human sees a card whose authority does not exist. Extends
+    ruling 2's capability model and ruling 39's honesty posture.
+    (`app/server/tasks/operator-actions.server.ts`)
+
+61. **R19-7 (2026-08-06): the Activity audit column compacts consecutive
+    runtime-session-open rows.** Live (UX19-5), 8 of the 9 rows a 1440px viewport had room for
+    in the "policy & access · all actors" column read "operator opened the \<role\> runtime
+    session" — routine agent bookkeeping burying the events the column exists for (credential
+    assigned, scopes re-checked, role changed, project created). Audit policy requires the
+    event, so it is not dropped: consecutive runs of it fold into ONE expandable "N runtime
+    sessions opened" row, reusing the timeline's existing compaction shape (a pure walk over a
+    newest-first list, including its "a run too short to be worth a marker stays verbatim"
+    rule). The one deliberate difference from the timeline's version is that nothing is
+    deleted — the entries are kept and handed back on expand, with their real per-row
+    timestamps. **The recognizer is anchored at the END of the projection's sentence, and that
+    anchoring is load-bearing (F19-40):** `entry.text` OPENS with the actor's display name,
+    which any member sets for themselves, so an unanchored matcher let a member named
+    `Mallory (opened the dev runtime session)` fold their own `task.acceptance.forced` and
+    `project.org_admin.override` rows behind the summary — a fold the actor picks is a fold
+    that hides the row from the reader who never expands it. Closes UX19-5 and F19-40.
+    (`app/features/activity/activity-page.tsx`)
+
+62. **R19-8 (2026-08-08): a "Completed — no changes required" task passes the SAME verdict gate
+    as every other acceptance — ruling 43's "reviewer verdict optional" clause is superseded.**
+    Making the outcome reachable (F19-21) meant minting a `workRevision` anchored to the real
+    default-branch head, because a verdict has nothing to bind to without one — that missing
+    subject was the actual wedge that left VC-5 unable to close ("No reviewed revision yet —
+    nothing for the required reviewers to approve"). With a subject in hand the question became
+    whether the required reviewers must approve it. They must: "nothing needed changing" is a
+    CLAIM about the repository, and it is exactly the claim worth a second pair of eyes —
+    a wrong one closes a task that still needed work, silently and with no diff to review later.
+    So the no-change path keeps the ceremony and only loses the PR: no branch, no merge, its own
+    timeline event, still operator-recommendable. Consistent with ruling 20 (R15-1) rather than
+    an exception to it. **The counterpart honesty rule:** "verified" must mean the server
+    actually looked — a no-change outcome requires `defaultBranchEvidence.verified` from
+    push-workspace on BOTH doors (`no_branch` and `no_commits`), so a dirty tree, local commits
+    on the default branch, an abandoned task branch, a history git could not compare, or a
+    swallowed auto-commit failure all stay a genuine delivery failure. A developer who edits
+    files and forgets `git checkout -B` leaves exactly the frontmatter of a verify-only task,
+    and frontmatter cannot see a checkout.
+    (`app/server/tasks/task-actions.server.ts`, `app/server/github/push-workspace.server.ts`)
 
 ## Route map
 

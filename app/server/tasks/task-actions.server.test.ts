@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -14,6 +14,7 @@ import type {
   Engagement,
   FileActorRef,
   TaskFileEvent,
+  TaskFrontmatter,
   WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -36,10 +37,39 @@ import {
   releaseOwner,
   setOwner,
   clearWaitingToHuman,
+  performDelivery,
+  revisionDriftNote,
   specialistReplyDirective,
   transitionStage,
 } from "./task-actions.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
+
+/**
+ * `performDelivery` reaches the push through a dynamic import, and nothing else
+ * in this file touches that module — so the mock is inert for every other test
+ * here and lets the push-failure branch run without git or a remote.
+ */
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+vi.mock("~/server/github/push-workspace.server", () => ({
+  pushWorkspaceBranch: pushMock,
+}));
+
+/**
+ * F19-21 needs GitHub to answer with the default-branch head (the base the
+ * no-change revision anchors to). The default is the DEGRADED answer — the same
+ * one the real resolver returns for a project with no stored credential — so
+ * every other test in this file behaves exactly as it did before the mock
+ * existed; the no-change tests opt in to the `ok` context explicitly.
+ */
+const { ghCtxMock } = vi.hoisted(() => ({
+  ghCtxMock: vi.fn((): unknown => ({
+    status: "no_pat_configured" as const,
+    repo: null,
+  })),
+}));
+vi.mock("~/server/github/github-context.server", () => ({
+  getProjectGithubContext: ghCtxMock,
+}));
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -780,8 +810,12 @@ describe("ownership", () => {
     );
     expect(task.owner).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    // F19-11 (third instance): this used to pin "open to any project member",
+    // which `app/shared/rbac.ts` contradicts — `own-task` is
+    // admin|maintainer|contributor, and a VIEWER is a project member who can
+    // never take the seat. The test pinned the wrong copy; both are corrected.
     expect(detail?.timeline[0]?.text).toBe(
-      `Released **${store.users.selin.name}** from task ownership (admin) — the seat is open to any project member.`,
+      `Released **${store.users.selin.name}** from task ownership (admin) — the seat is open to any contributor or above.`,
     );
     const audit = listAuditEvents(store.db, {
       action: "task.ownership.admin_released",
@@ -1199,5 +1233,563 @@ describe("clearWaitingToHuman", () => {
         dataRoot: store.dataRoot,
       })!.parsed.frontmatter.waiting,
     ).toBe("human");
+  });
+});
+
+/**
+ * F19-18 residual — a failed delivery push must carry GIT'S OWN WORDS onto the
+ * task page, not only into the server log.
+ *
+ * `pushWorkspaceBranch` now redacts and returns git's stderr, but the sentence
+ * `performDelivery` builds interpolates only the ≤240-char one-liner `reason`
+ * (it has to stay one sentence), so the full excerpt reached nobody the
+ * maintainer can actually read. A protected branch, a push ruleset or a
+ * pre-receive hook is diagnosable only from those lines. Same shape the clone
+ * failure already uses (`specialist-run.server.ts:1004`): a fenced block under
+ * a "What the … reported" heading, appended to the timeline event ONLY — the
+ * notification body stays the one-sentence summary.
+ */
+describe("F19-18: the delivery push failure surfaces git's redacted stderr", () => {
+  const EXCERPT =
+    "remote: error: GH006: Protected branch update failed for refs/heads/vib-1.\n" +
+    "remote: error: Required status check \"ci/build\" is expected.\n" +
+    "! [remote rejected] vib-1 -> vib-1 (protected branch hook declined)";
+
+  function seedDeliverable(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("appends the FULL excerpt as a fenced block to the timeline event", async () => {
+    const store = prepared();
+    seedDeliverable(store);
+    pushMock.mockResolvedValueOnce({
+      status: "push_failed",
+      reason: "git push failed — git said: remote: error: GH006: Protected branch update failed…",
+      stderrExcerpt: EXCERPT,
+    });
+
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    expect(outcome.status).toBe("push_failed");
+
+    const text = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text;
+    expect(text).toContain("What the push reported:");
+    expect(text).toContain(`\`\`\`\n${EXCERPT}\n\`\`\``);
+    // Not merely truncated into the sentence: the LAST line of git's complaint
+    // — the one that names the declining hook — survives in full.
+    expect(text).toContain("(protected branch hook declined)");
+    // The summary sentence is still there, above the block.
+    expect(text).toContain("No review PR was opened");
+  });
+
+  it("keeps the NOTIFICATION body the one-sentence summary (no fenced block)", async () => {
+    const store = prepared();
+    seedDeliverable(store);
+    pushMock.mockResolvedValueOnce({
+      status: "push_failed",
+      reason: "git push failed",
+      stderrExcerpt: EXCERPT,
+    });
+
+    await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    const rows = store.db
+      .prepare(`SELECT text FROM notifications WHERE kind = 'policy'`)
+      .all() as { text: string }[];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.text).toContain("could not be pushed");
+      expect(row.text).not.toContain("```");
+    }
+  });
+
+  it("adds nothing when git printed nothing — no empty fence", async () => {
+    const store = prepared();
+    seedDeliverable(store);
+    pushMock.mockResolvedValueOnce({
+      status: "no_pat",
+      reason: "no project credential",
+    });
+
+    await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    const text = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text;
+    expect(text).toContain("no project credential");
+    expect(text).not.toContain("```");
+    expect(text).not.toContain("What the push reported");
+  });
+});
+
+/**
+ * F19-21 — R17-2's "Completed — no changes required" outcome, for the task
+ * shape ruling 43 was actually written for.
+ *
+ * `noChanges` had two writers, both of them inside a delivery that got far
+ * enough to see an EMPTY BRANCH. A verification-only task never has one:
+ * push-workspace classifies a workspace sitting on the default branch as
+ * `no_branch` BEFORE it counts commits, so the delivery read "Delivery could not
+ * run", no flag was set, no work revision was ever minted — and acceptance then
+ * refused forever with `acceptanceBlockedReason`'s "No reviewed revision yet —
+ * nothing for the required reviewers to approve" (the verbatim `[noop]` VC-5
+ * hit live). The only exits left were force-accept, archive, or an operator
+ * packet whose recommended option was "Manually mark Done" — the ceremony
+ * bypass ruling 43 exists to prevent.
+ *
+ * The fix keeps the ceremony whole: the delivery records the verified
+ * zero-diff AND mints a base-anchored work revision, so the required reviewers
+ * approve "the repository as it stands" through the ORDINARY verdict path and
+ * every gate downstream runs unmodified.
+ */
+describe("F19-21: a verification-only task reaches the no-change completion", () => {
+  const BASE_SHA = "1f0c9d2b7a4e5f60718293a4b5c6d7e8f9012345";
+  const BASE_TREE = "9a8b7c6d5e4f30211203a4b5c6d7e8f901234567";
+
+  /**
+   * push-workspace's VERIFIED answer for this shape — HEAD on the default
+   * branch, clean tree, nothing ahead of origin, no abandoned task branch.
+   *
+   * The evidence is load-bearing, not decoration: `no_branch` alone cannot tell
+   * a verify-only run from a developer that edited files and forgot to branch,
+   * and the frontmatter conditions (`neverDelivered`) are identical for both.
+   */
+  const CLEAN_DEFAULT = {
+    status: "no_branch" as const,
+    reason:
+      "HEAD is on the default branch (main) with a clean working tree, no local commits and no task branch",
+    defaultBranchEvidence: { verified: true as const },
+  };
+
+  /** GitHub answering with the project's default-branch head. */
+  function okGithub(sha: string = BASE_SHA): void {
+    ghCtxMock.mockReturnValue({
+      status: "ok",
+      repo: "akin-ozer/viberr",
+      owner: "akin-ozer",
+      defaultBranch: "main",
+      patId: "pat_test",
+      client: {
+        request: async (_method: string, path: string) =>
+          path === "/repos/akin-ozer/viberr/commits/main"
+            ? {
+                ok: true,
+                status: 200,
+                data: { sha, commit: { tree: { sha: BASE_TREE } } },
+                etag: null,
+                rateLimit: { limit: null, remaining: null, reset: null },
+                scopesHeader: null,
+                tokenExpiration: null,
+              }
+            : { ok: false, kind: "http", status: 404, message: "not found" },
+      },
+    });
+  }
+
+  /** VC-5's shape: a task at Review with a required reviewer engaged, whose
+   *  workspace never carried a branch, a commit, a revision or a PR. */
+  function seedVerifyOnly(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      }),
+      goal: "Confirm the smoke suite still passes — change nothing unless it fails.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function fm(store: TestStore) {
+    return readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+  }
+
+  async function deliver(store: TestStore) {
+    return performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+  }
+
+  afterEach(() => {
+    ghCtxMock.mockReturnValue({ status: "no_pat_configured", repo: null });
+  });
+
+  it("records the verified zero-diff and mints the base-anchored revision", async () => {
+    const store = prepared();
+    seedVerifyOnly(store);
+    okGithub();
+    pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
+
+    const outcome = await deliver(store);
+
+    // Pre-fix this was `failed` / "Delivery could not run".
+    expect(outcome.status).toBe("nothing_to_review");
+    const f = fm(store);
+    expect(f.noChanges).toBe(true);
+    // The review SUBJECT: the real default-branch head, never an invented sha.
+    expect(f.workRevision?.headSha).toBe(BASE_SHA);
+    expect(f.workRevision?.treeSha).toBe(BASE_TREE);
+    expect(f.workRevision?.branch).toBe("main");
+    expect(f.workRevision?.sourceProfileId).toBe("developer");
+    // The required reviewer has not approved that revision yet.
+    expect(f.validation).toBe("changed");
+
+    const text = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text;
+    expect(text).toContain("completed with no changes");
+    expect(text).toContain(BASE_SHA.slice(0, 12));
+    // The record says what was actually INSPECTED. This sentence used to be a
+    // disclaimer instead ("UNCOMMITTED working-tree changes are not part of
+    // this outcome") — prose standing in for the check that now runs.
+    expect(text).toContain("inspected its workspace before recording this");
+    expect(text).toContain("clean working tree");
+  });
+
+  it("closes to Done with no PR and no merge once the required reviewer approves", async () => {
+    const store = prepared();
+    seedVerifyOnly(store);
+    okGithub();
+    pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
+    await deliver(store);
+
+    // The ORDINARY verdict path — the approve binds to the minted revision
+    // instead of landing as prose ("Approval noted").
+    await recordReviewerReply(store, "Verdict: approve — the suite passes, nothing to change.");
+    const reviewed = fm(store);
+    expect(reviewed.verdicts).toHaveLength(1);
+    expect(reviewed.verdicts[0]?.revisionId).toBe(reviewed.workRevision?.id);
+    expect(reviewed.validation).toBe("healthy");
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const done = fm(store);
+    expect(done.stage).toBe("done");
+    expect(done.pr).toBeNull();
+    const event = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!;
+    expect(event.type).toBe("completion");
+    expect(event.text).toContain("completed with no changes required");
+    expect(event.text).toContain("nothing was delivered or merged");
+  });
+
+  it("still refuses acceptance while the required reviewer has not approved", async () => {
+    const store = prepared();
+    seedVerifyOnly(store);
+    okGithub();
+    pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
+    await deliver(store);
+
+    // The gate MOVED, it did not open: the refusal is now about the missing
+    // approval (recoverable by running the reviewer), not about a missing
+    // revision (which nothing on this task shape could ever produce).
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow("Waiting on 1 required reviewer approval of the current revision.");
+    expect(fm(store).stage).toBe("review");
+  });
+
+  it("mints nothing when GitHub cannot be read — an unverifiable base is not a revision", async () => {
+    const store = prepared();
+    seedVerifyOnly(store);
+    // Default mock: no credential → no default-branch head.
+    pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
+
+    const outcome = await deliver(store);
+    expect(outcome.status).toBe("nothing_to_review");
+    expect(fm(store).workRevision).toBeNull();
+    const text = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text;
+    expect(text).toContain("could not be read from GitHub");
+  });
+
+  it("a task that DID produce work keeps the old refusal — the verdict gate is untouched", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        branch: "vib-1-work",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    okGithub();
+    pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
+
+    const outcome = await deliver(store);
+    expect(outcome.status).toBe("failed");
+    const f = fm(store);
+    expect(f.noChanges).toBeFalsy();
+    expect(f.workRevision).toBeNull();
+    expect(
+      getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text,
+    ).toContain("not on a task branch");
+  });
+
+  it("a MISSING workspace is never a verified no-change — nothing was inspected", async () => {
+    const store = prepared();
+    seedVerifyOnly(store);
+    okGithub();
+    pushMock.mockResolvedValueOnce({
+      status: "no_workspace",
+      reason: "no workspace git repo",
+    });
+
+    const outcome = await deliver(store);
+    expect(outcome.status).toBe("failed");
+    const f = fm(store);
+    expect(f.noChanges).toBeFalsy();
+    expect(f.workRevision).toBeNull();
+    expect(
+      getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text,
+    ).toContain("no workspace clone");
+  });
+
+  /**
+   * The honesty half of F19-21, dropped on the way to shipping: the first cut
+   * required the workspace to be verifiably clean, the shipped cut required only
+   * the ref plus a disclaimer sentence in the copy.
+   *
+   * That gap is the whole finding. A developer that edits files and forgets
+   * `git checkout -B` leaves EXACTLY the frontmatter of a verify-only task —
+   * no branch, no PR, no revision, no commits — because frontmatter cannot see
+   * a checkout. So the tests below drive the same `neverDelivered` shape and
+   * change ONLY push-workspace's evidence.
+   */
+  describe("only a workspace the server verified counts as a no-change", () => {
+    const cases = [
+      {
+        name: "a DIRTY tree — the developer that forgot to branch",
+        why: "its working tree holds uncommitted changes (2 paths) that never reached a task branch",
+        says: "uncommitted changes",
+      },
+      {
+        name: "LOCAL COMMITS sitting on the default branch",
+        why: "it carries 2 local commits that origin/main does not",
+        says: "2 local commits",
+      },
+      {
+        name: "an abandoned task branch HEAD wandered off",
+        why: "the task branch `vib-1` exists in the workspace but HEAD is not on it",
+        says: "`vib-1` exists in the workspace",
+      },
+      {
+        name: "a history git could not compare — unknown is not clean",
+        why: "its history could not be compared with origin/main",
+        says: "could not be compared",
+      },
+    ];
+    for (const c of cases) {
+      it(`${c.name} stays a genuine delivery failure`, async () => {
+        const store = prepared();
+        seedVerifyOnly(store);
+        okGithub();
+        pushMock.mockResolvedValueOnce({
+          status: "no_branch",
+          reason: `HEAD is on the default branch (main) and ${c.why}`,
+          defaultBranchEvidence: { verified: false, why: c.why },
+        });
+
+        const outcome = await deliver(store);
+        expect(outcome.status).toBe("failed");
+        const f = fm(store);
+        // The two writes a false "verified" would have made.
+        expect(f.noChanges).toBeFalsy();
+        expect(f.workRevision).toBeNull();
+        const text = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text;
+        expect(text).toContain("not on a task branch");
+        // And git's actual reason reaches the human, not a generic refusal.
+        expect(text).toContain(c.says);
+        expect(text).not.toContain("completed with no changes");
+      });
+    }
+
+    /**
+     * The SECOND door into the same outcome. `no_commits` qualified on its
+     * status alone, but it is decided AFTER the delivery auto-commit — a block
+     * that logs its failures and falls through. So an agent whose deliverable
+     * never reached a commit (failed `git add`/`commit`) also lands on
+     * 0-ahead, and the outcome read "completed with no changes required" over
+     * work still sitting in the working tree. Both doors now need the evidence.
+     */
+    it("a `no_commits` push whose tree stayed DIRTY is not a verified no-change", async () => {
+      const store = prepared();
+      seedVerifyOnly(store);
+      okGithub();
+      pushMock.mockResolvedValueOnce({
+        status: "no_commits",
+        reason: "no local commits ahead of the default branch",
+        defaultBranchEvidence: {
+          verified: false,
+          why: "the workspace still has uncommitted changes after the delivery commit attempt",
+        },
+      });
+
+      const outcome = await deliver(store);
+      expect(outcome.status).toBe("failed");
+      const f = fm(store);
+      expect(f.noChanges).toBeFalsy();
+      expect(f.workRevision).toBeNull();
+      const text = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text;
+      expect(text).not.toContain("completed with no changes");
+    });
+
+    it("MISSING evidence is not verified evidence — an older/other caller cannot opt in by omission", async () => {
+      const store = prepared();
+      seedVerifyOnly(store);
+      okGithub();
+      pushMock.mockResolvedValueOnce({
+        status: "no_branch",
+        reason: "HEAD is detached, so there is no branch to push",
+      });
+
+      const outcome = await deliver(store);
+      expect(outcome.status).toBe("failed");
+      expect(fm(store).noChanges).toBeFalsy();
+      expect(fm(store).workRevision).toBeNull();
+    });
+  });
+});
+
+/**
+ * The pin F19-21 left un-held (its verifier proved the behavior with a canary,
+ * and nothing in the suite fails if it regresses).
+ *
+ * `noChanges` is a bypass inside `verdictGateReason`, and F19-21 gave it a
+ * SECOND writer that fires on tasks the flag was never designed for. The bypass
+ * is legal only in the no-PR arm — "there is nothing to review, so there is no
+ * verdict to wait for". The moment a pull request exists, the flag says nothing
+ * about whether anyone approved what that PR merges; hoisting the check one
+ * line up (or dropping the `!fm.pr` guard) turns a no-change annotation into a
+ * silent merge of unreviewed work. Both directions are pinned below.
+ */
+describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR", () => {
+  function seedNoChange(store: TestStore, pr: TaskFrontmatter["pr"]): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        // No verdict-capable engagement: the F10-15 required-reviewer gate is
+        // out of the way, so the refusal below can only come from the verdict
+        // gate itself.
+        engagements: [DEV_ENGAGEMENT],
+        branch: "vib-1-work",
+        noChanges: true,
+        workRevision: workRev(),
+        pr,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  const accept = (store: TestStore) =>
+    transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+  it("refuses a task with an OPEN PR that no verdict approved", async () => {
+    const store = prepared();
+    seedNoChange(store, {
+      number: 42,
+      state: "review",
+      title: "[VIB-1] work",
+    });
+
+    await expect(accept(store)).rejects.toThrow("no approving verdict yet");
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.stage,
+    ).toBe("review");
+  });
+
+  it("still closes the no-PR shape the flag was written for (R17-2)", async () => {
+    const store = prepared();
+    seedNoChange(store, null);
+
+    await accept(store);
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.stage,
+    ).toBe("done");
+  });
+});
+
+/**
+ * F19-23 — the drift note's verb was never switched with its noun, so a
+ * single-commit drift rendered "1 commit **were** added to the PR head" — live
+ * on VC-4's completion event and, through the same string, in the Activity
+ * stream. This note is the one sentence a Done task's record leans on to
+ * disclose that the merged head was not the reviewed one (R17-1).
+ */
+describe("F19-23: the revision-drift note agrees with its own number", () => {
+  const HEAD = "a4c790ce63ef0011223344556677889900aabbcc";
+  const withDrift = (aheadBy: number) =>
+    baseTaskFrontmatter("VIB-4", {
+      pr: {
+        number: 150,
+        state: "review",
+        title: "[VIB-4] work",
+        revisionDrift: { aheadBy, headSha: HEAD },
+      },
+    });
+
+  it("uses the singular for exactly one commit", () => {
+    expect(revisionDriftNote(withDrift(1))).toContain("1 commit was added");
+    expect(revisionDriftNote(withDrift(1))).not.toContain("commit were");
+  });
+
+  it("keeps the plural for more than one", () => {
+    expect(revisionDriftNote(withDrift(3))).toContain("3 commits were added");
+  });
+
+  it("says nothing at all when the merged head IS the reviewed one", () => {
+    expect(revisionDriftNote(baseTaskFrontmatter("VIB-4"))).toBe("");
   });
 });

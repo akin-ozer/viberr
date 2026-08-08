@@ -502,13 +502,15 @@ describe("D2 org-admin emergency override (R7-1)", () => {
     }
   });
 
-  it("the any-member route READ gate admits an org-admin non-member (override flag) but does NOT audit", () => {
-    // The `any-member` gate is the config-surface route READ (Policy/Settings/
-    // Agents/GitHub loaders); an org-admin non-member opens those constantly, so
-    // auditing an override there would write a row per page load (the F7 audit-
-    // noise fix). The override flag is still set so the UI shows the honest
-    // override pill — only the audit is suppressed for reads. Every genuine
-    // governed MUTATION names a concrete RbacAction and IS audited (below).
+  it("the any-member gate admits an org-admin non-member AND audits it (F19-30)", () => {
+    // This used to assert `toHaveLength(0)` — the `any-member` gate was exempt
+    // from the override row, justified as "config-surface route READs only;
+    // every real mutation names a concrete RbacAction and IS audited". False:
+    // COMMENTING is a real, role-free mutation whose ONLY authority is this
+    // gate, so an org-admin non-member could write into a members-only project
+    // leaving no trace — contradicting D2's "EVERY such grant leaves a row".
+    // The F7 audit-noise complaint (a row per page load) is answered by the
+    // 60s per-`what` collapse below, not by silence.
     const grant = assertProjectAction(
       store.db,
       "any-member",
@@ -519,7 +521,34 @@ describe("D2 org-admin emergency override (R7-1)", () => {
     );
     expect(grant.role).toBe("admin");
     expect(grant.isOrgAdminOverride).toBe(true);
-    expect(overrideRows()).toHaveLength(0);
+    const rows = overrideRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.details?.action).toBe("any-member");
+    expect(rows[0]?.details?.what).toBe("view this project's policy");
+
+    // A second page load inside the window collapses into that one row…
+    assertProjectAction(
+      store.db,
+      "any-member",
+      store.slug,
+      actorOf(orgAdmin),
+      "view this project's policy",
+      { dataRoot: store.dataRoot, allowArchived: true },
+    );
+    expect(overrideRows()).toHaveLength(1);
+    // …but the WRITE gate (`act on this project` — the comment path) is keyed
+    // separately, so a read can never mask it.
+    assertProjectAction(
+      store.db,
+      "any-member",
+      store.slug,
+      actorOf(orgAdmin),
+      "act on this project",
+      { dataRoot: store.dataRoot, allowArchived: true },
+    );
+    expect(overrideRows().map((r) => r.details?.what)).toContain(
+      "act on this project",
+    );
   });
 
   it("an org admin acting within their OWN sufficient membership is NOT an override (no row)", async () => {

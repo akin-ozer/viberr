@@ -49,7 +49,13 @@ const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
   set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
 /** Grants pointing at a resource this org no longer has, rendered removable —
- *  the same red `missing` chip the project profile modal uses (P14-KM-10). */
+ *  the same red `missing` chip the project profile modal uses (P14-KM-10).
+ *
+ *  F19-5: a missing chip only renders BECAUSE the id is still in the grant list,
+ *  so it is by construction a granted toggle — `aria-pressed` is hardcoded true.
+ *  Without it a screen reader announced a dangling grant identically to an
+ *  ungranted resource, while its six sibling chip groups in this file all
+ *  reported their state. */
 function MissingChips({
   ids,
   mono,
@@ -66,6 +72,7 @@ function MissingChips({
           type="button"
           key={id}
           className={"pick-chip missing on" + (mono ? " mono" : "")}
+          aria-pressed={true}
           title="No longer in the store — click to remove this grant"
           onClick={() => onDrop(id)}
         >

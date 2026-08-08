@@ -21,10 +21,12 @@ export function meta({ params }: Route.MetaArgs) {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const db = getDb();
-  // Members only (R4): the review queue exposes task detail + owner assignments;
-  // unlike the app-wide board/task read surfaces it's project-scoped, like
-  // policy/agents/settings/github. Guard membership FIRST (matching those
-  // siblings), then the 404 — a non-member must not learn a project exists (WI-13).
+  // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a
+  // client-supplied `?_routes=` filter, so
+  // `GET /projects/<slug>/review.data?_routes=routes/project.review` runs this
+  // loader ALONE and the layout's membership refusal never executes. The guard
+  // answers a non-member with the byte-identical unknown-slug 404 — a 403 here
+  // would confirm the project exists (WI-13).
   const ctx = await requireProjectMember(request, params.slug, "view the review queue");
   const project = getProject(db, params.slug);
   if (!project) {

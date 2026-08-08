@@ -1,26 +1,90 @@
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import { prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
 
 /**
- * R15-1/F15-10 — accept-completion confirm.
+ * R15-1/F15-10 — the ONE acceptance ceremony.
  *
  * Accepting a completion MERGES the review PR into the default branch — a
  * one-way write to the shared repository that used to fire on a bare click
  * (removing a credential asked first; merging to main did not). The dialog
  * states exactly what merges — PR number, the delivered revision (head sha),
- * the verdict state, and the target branch — plus any missing signal the
- * acceptance would carry past (force-accept). Same useDialog contract as
+ * the actual merge head when it has drifted ahead of the reviewed revision
+ * (R17-1), the verdict state, and the target branch — plus any missing signal
+ * the acceptance would carry past (force-accept). Same useDialog contract as
  * ArchiveConfirm / ReleaseConfirm.
+ *
+ * Pass 19: ruling 20 says EVERY accept confirms, and the acceptance-writer
+ * matrix found three writers that never did — then a fourth (`stage-move`) that
+ * the matrix itself had missed. They are modes of this dialog rather than four
+ * new ones — one ceremony, one disclosure, one place to keep honest (rulings
+ * 12/14: never fork a mapping per surface):
+ *
+ * - `complete-merge` (F19-24) — the mandatory human half of every full-autonomy
+ *   operator acceptance (R16-6); it performs the real, irreversible merge.
+ * - `apply-recommendation` (F19-3/F19-26) — applying an operator recommendation
+ *   whose TARGET is the terminal stage, whatever its `kind` says.
+ * - `packet` (F19-7) — resolving a decision packet's `accept_completion`
+ *   option, whose "Confirm decision" button names no merge at all.
+ * - `stage-move` (F19-37) — the Current-state stage menu picking the LAST
+ *   stage, which the server reads as an acceptance ("A HUMAN manually moving a
+ *   task INTO the final stage IS accepting completion" → acceptCompletion). The
+ *   sixth writer, and the last surface where a card reaching Done merged
+ *   silently — the board's identical menu has confirmed since R18-7.
  */
+
+export type AcceptCeremonyMode =
+  | "accept"
+  | "force"
+  | "complete-merge"
+  | "apply-recommendation"
+  | "packet"
+  | "stage-move";
+
+export interface AcceptCeremony {
+  mode: AcceptCeremonyMode;
+  /** What the human actually clicked on the indirect paths: the operator's
+   *  recommendation label, the packet option's title, or the stage move they
+   *  picked. Rendered first, so the dialog answers "why am I being asked this?"
+   *  before it answers "what merges?". */
+  label?: string;
+}
+
+function headingFor(mode: AcceptCeremonyMode, terminalName: string): string {
+  switch (mode) {
+    case "force":
+      return "Force-accept this completion?";
+    // The task is already accepted here (merge pending, R16-6) — what is left,
+    // and what this button does, is the merge itself.
+    case "complete-merge":
+      return "Run the merge now?";
+    case "apply-recommendation":
+      return "Apply this recommendation?";
+    // F19-37: the human asked for a stage move; the heading has to name what a
+    // move to the LAST stage actually is, in the project's own stage name.
+    case "stage-move":
+      return `Moving to ${terminalName} accepts this completion`;
+    default:
+      return "Accept this completion?";
+  }
+}
+
+/** Row key for the clicked affordance, per indirect path. */
+const SUBJECT_KEY: Partial<Record<AcceptCeremonyMode, string>> = {
+  "apply-recommendation": "Applying",
+  packet: "Decision",
+  "stage-move": "Moving",
+};
+
 export function AcceptConfirm({
   task,
   workRevisionSha,
   noChanges = false,
   defaultBranch,
-  /** True when this confirms the audited admin FORCE-accept (DG-2). */
-  force = false,
+  atBoundary = true,
+  ceremony,
   /** The refusal a force-accept bypasses (null for a clean accept). */
   blockedReason,
   busy,
@@ -30,33 +94,100 @@ export function AcceptConfirm({
   task: TaskDetail;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
-  /** R17-2: a verified no-change completion — the branch is empty, no PR. */
+  /** R17-2: a verified no-change completion. TWO shapes reach this, and the
+   *  row below distinguishes them — a delivered branch that turned out empty
+   *  (F17-L9), and a verification-only task that never branched at all
+   *  (F19-21). Neither has a PR. */
   noChanges?: boolean;
   /** The merge target — the project's default branch. */
   defaultBranch: string;
-  force?: boolean;
+  /** `acceptance.atBoundary` — the task stands at the stage a completion is
+   *  normally accepted from. False means a force-accept from here jumps the
+   *  stages in between (R19-5); the dialog then names them. */
+  atBoundary?: boolean;
+  /** Which acceptance writer is asking (plus what the human clicked). */
+  ceremony: AcceptCeremony;
   blockedReason: string | null;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { ref: panelRef, close } = useDialog(onCancel);
+  const mode = ceremony.mode;
+  const force = mode === "force";
+  const mergeOnly = mode === "complete-merge";
   const terminalName =
     task.stages.length > 0 ? task.stages[task.stages.length - 1]!.name : "Done";
+  const subjectKey = SUBJECT_KEY[mode];
+  // R19-5: force-accept MAY skip the remaining stages AND the review gate — the
+  // owner ruled the skip legal and the SILENCE about it the defect. So enumerate
+  // exactly what is being jumped: every stage between where the task stands and
+  // the terminal one, by name, in order.
+  //
+  // `force && !atBoundary` — and the `force` half is not decoration. FORCE is
+  // the ONLY mode that jumps, so it is the only one that may say so: it is the
+  // one path where the server skips the gate stack outright (`acceptCompletion`
+  // runs `acceptanceRefusalReason` under `if (!input.force)`, and only
+  // `forceAcceptCompletion` ever passes `force: true`). On every OTHER mode an
+  // off-boundary task is REFUSED, not jumped — the "Blocked" row below is what
+  // actually happens — so claiming a skip would promise a power the click does
+  // not have. Two earlier rounds got this wrong in two different ways, both of
+  // them false in 100% of the cases they fired:
+  // - `mode === "stage-move" && !atBoundary`: a stage move READS like a jump and
+  //   is not one. `transitionStage` routes a manual move into the LAST stage to
+  //   `acceptCompletion` WITHOUT `force`, so `acceptanceStageBlockedReason`
+  //   refuses any off-boundary stage with a 409 and the task stays where it was
+  //   (proven by the standing server test `acceptance-graph.server.test.ts` →
+  //   "refuses a manual board move from Triage straight to Done"). `atBoundary`
+  //   is literally that same predicate (`resolveAcceptanceAffordance` sets it
+  //   from `acceptanceStageBlockedReason === null`), so the disjunct rendered
+  //   "goes straight to Done" directly beside the "Blocked" row quoting the
+  //   refusal that contradicts it.
+  // - a bare `!atBoundary`: `complete-merge` is the sharpest case, because
+  //   `resolveAcceptanceAffordance` returns its `denied` shape (`atBoundary:
+  //   false`) for a task ALREADY at the terminal stage — which every
+  //   merge-pending task is (accepted, merge pending, R16-6). So it announced
+  //   "goes straight to Done" about a task already at Done, on the dialog that
+  //   authorizes the irreversible merge. `packet` / `apply-recommendation` carry
+  //   no override either — both run the same refusal helper unforced.
+  const stageIndex = task.stages.findIndex((s) => s.id === task.stage);
+  const skipsStages = force && !atBoundary;
+  // stageIndex < 0 = the task sits on a stage this workflow no longer has; the
+  // gate is still skipped, but naming stages it never passes would be a guess.
+  const skippedStages =
+    skipsStages && stageIndex >= 0
+      ? task.stages
+          .slice(stageIndex + 1, Math.max(task.stages.length - 1, 0))
+          .map((s) => s.name)
+      : [];
+  const pr = task.pr;
+  // F19-14: the raw internal token ("accepted", "review") leaked into this
+  // dialog while every other surface renders the canonical label through the one
+  // PR-state map (ruling 12). "PR #12 accepted" and "PR #12 merge pending" are
+  // the same fact under two vocabularies, on the screen that decides the merge.
+  const prPill = pr ? prStatePill(pr.state) : null;
   return (
     <dialog
       className="modal-card release-card"
       role="alertdialog"
-      aria-label={(force ? "Force-accept " : "Accept ") + task.key}
+      aria-label={
+        (force
+          ? "Force-accept "
+          : mergeOnly
+            ? "Complete the merge for "
+            : mode === "stage-move"
+              ? `Accept by moving to ${terminalName}: `
+              : "Accept ") + task.key
+      }
       data-screen-label="Accept completion dialog"
       ref={panelRef}
     >
       <div className="modal-head">
         <span className={"agent-glyph lg" + (force ? " warn" : "")}>
-          <Icon name={force ? "shield" : "check"} />
+          <Icon name={force ? "shield" : mergeOnly ? "github" : "check"} />
         </span>
         <div className="mh-main">
-          <h2>{force ? "Force-accept this completion?" : "Accept this completion?"}</h2>
+          <h2>{headingFor(mode, terminalName)}</h2>
           <div className="mh-sub">
             <span className="mono">{task.key}</span> · {task.title}
           </div>
@@ -72,20 +203,42 @@ export function AcceptConfirm({
       </div>
       <div className="modal-body tight">
         <div className="packet-obs flush">
+          {subjectKey && ceremony.label && (
+            <div className="obs">
+              <span className="k">{subjectKey}</span>
+              <span>{ceremony.label}</span>
+            </div>
+          )}
           <div className="obs">
             <span className="k">Merges</span>
             <span>
-              {task.pr ? (
+              {pr && prPill ? (
                 <>
-                  <Pill kind="neutral" sm>
-                    PR #{task.pr.number} · {task.pr.state}
+                  <Pill kind={prPill.kind} sm>
+                    PR #{pr.number} · {prPill.label}
                   </Pill>{" "}
                   into <span className="mono">{defaultBranch}</span>
                 </>
               ) : noChanges ? (
+                // F19-21 opened a SECOND no-change shape and this row asserted
+                // the first one's cause at both: a verification-only task never
+                // had a branch to be empty, so "the branch is empty" was simply
+                // false on the dialog that authorizes the close. Say what is
+                // true of the task in hand — the branch when there is one, its
+                // absence when there is not.
                 <>
-                  Nothing — <strong>completed with no changes</strong>. The
-                  branch is empty, so there is no pull request to merge.
+                  Nothing — <strong>completed with no changes</strong>.{" "}
+                  {task.branch ? (
+                    <>
+                      <span className="mono">{task.branch}</span> carries no
+                      commits, so no pull request was opened.
+                    </>
+                  ) : (
+                    <>
+                      {task.key} never opened a branch or a pull request —
+                      nothing merges.
+                    </>
+                  )}
                 </>
               ) : (
                 <>No linked pull request — the task closes without a merge.</>
@@ -105,17 +258,24 @@ export function AcceptConfirm({
           {/* R17-1 (F17-L12): the PR head moved AHEAD of the reviewed revision
               since the review — accepting still merges an ahead head, but the
               human must see that those extra commits ship unreviewed and that
-              the merge head is NOT the revision pinned above. */}
-          {task.pr?.revisionDrift && (
+              the merge head is NOT the revision pinned above. F19-24: this is
+              the disclosure the bare "Complete merge" click never made, on the
+              path that merges LAST — the one most likely to have drifted. */}
+          {pr?.revisionDrift && (
             <div className="obs warn">
               <span className="k">Merge head</span>
               <span>
                 <span className="mono">
-                  {task.pr.revisionDrift.headSha.slice(0, 12)}
+                  {pr.revisionDrift.headSha.slice(0, 12)}
                 </span>{" "}
-                — {task.pr.revisionDrift.aheadBy} commit
-                {task.pr.revisionDrift.aheadBy === 1 ? "" : "s"} added since
-                review; they merge unreviewed.
+                {/* F19-23: the noun was switched with the count and the verb
+                    was not — `aheadBy: 1` rendered "1 commit added since
+                    review; THEY MERGE unreviewed", on the row whose whole job
+                    is disclosing what ships unreviewed. */}
+                — {pr.revisionDrift.aheadBy} commit
+                {pr.revisionDrift.aheadBy === 1 ? "" : "s"} added since review;{" "}
+                {pr.revisionDrift.aheadBy === 1 ? "it merges" : "they merge"}{" "}
+                unreviewed.
               </span>
             </div>
           )}
@@ -125,9 +285,33 @@ export function AcceptConfirm({
               <ValidationPill value={task.validation} />
             </span>
           </div>
+          {/* R19-5: the skip is allowed — being quiet about it is not. Name the
+              stages this jump goes past, in order, plus the review gate; the
+              Force accept button that opened this dialog says the same thing in
+              short form ("skips the remaining stages and the review gate").
+              Force-only by construction (see `skipsStages` above): no other mode
+              can jump, so no other mode may print this row. */}
+          {skipsStages && (
+            <div className="obs warn">
+              <span className="k">Skips</span>
+              <span>
+                {skippedStages.length > 0 && (
+                  <>
+                    <strong>{skippedStages.join(" → ")}</strong>, and{" "}
+                  </>
+                )}
+                {skippedStages.length > 0 ? "the" : "The"} review gate —{" "}
+                {task.key} goes straight to {terminalName}
+                {pr ? " and the pull request merges" : ""}.
+              </span>
+            </div>
+          )}
           {blockedReason && (
             <div className="obs">
-              <span className="k">Bypassing</span>
+              {/* Only force-accept BYPASSES a refusal. On every other path a
+                  standing refusal means the server will refuse this click —
+                  saying "Bypassing" there would promise an override nobody has. */}
+              <span className="k">{force ? "Bypassing" : "Blocked"}</span>
               <span>{blockedReason}</span>
             </div>
           )}
@@ -137,9 +321,11 @@ export function AcceptConfirm({
         <span className="foot-hint">
           {force
             ? "Admin override — the bypassed gate is recorded to the audit log."
-            : task.pr
-              ? "Merging is one-way. The completion event and the merge are recorded on the timeline."
-              : "The completion event is recorded on the timeline. Nothing is merged — this task has no pull request."}
+            : mergeOnly
+              ? "Merging is one-way. The merge and its result are recorded on the timeline."
+              : pr
+                ? "Merging is one-way. The completion event and the merge are recorded on the timeline."
+                : "The completion event is recorded on the timeline. Nothing is merged — this task has no pull request."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>
@@ -151,10 +337,20 @@ export function AcceptConfirm({
             disabled={busy}
             onClick={onConfirm}
           >
-            <Icon name={force ? "shield" : "check"} />
+            <Icon name={force ? "shield" : mergeOnly ? "github" : "check"} />
             {force
               ? `Force-accept ${task.key}`
-              : `Accept → ${terminalName}${task.pr ? " & merge" : ""}`}
+              : mergeOnly
+                ? pr
+                  ? `Merge PR #${pr.number} into ${defaultBranch}`
+                  : "Run the merge"
+                : `${
+                    mode === "apply-recommendation"
+                      ? "Apply"
+                      : mode === "stage-move"
+                        ? "Move"
+                        : "Accept"
+                  } → ${terminalName}${pr ? " & merge" : ""}`}
           </button>
         </div>
       </div>

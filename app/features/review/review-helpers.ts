@@ -1,3 +1,4 @@
+import type { PrState } from "~/schemas/task-file.schema";
 import type { ValidationValue } from "~/ui/pill";
 import { plainText } from "~/features/notifications/notification-meta";
 
@@ -9,7 +10,12 @@ export interface ReviewRowView {
   latestEventText: string | null;
   pr: {
     number: number;
-    state: "review" | "merged" | "closed";
+    /** F19-32: the canonical `PrState`, shared with the projection row and with
+     *  `prStatePill` (ruling 12). The hand-copied review|merged|closed union
+     *  dropped `accepted` (merge pending, R16-6/ruling 40) at the type level, so
+     *  the pill's amber branch could not be reached from this surface however
+     *  the row was rendered. One vocabulary, one union. */
+    state: PrState;
     /** P14-LV-07: GitHub's live mergeability for an open PR; absent = never read. */
     mergeable?: "clean" | "conflicting" | "unknown" | null;
     /** R17-1 (F17-L12): the PR head is ahead of the reviewed revision by
@@ -43,6 +49,15 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   }
   if (pr.mergeable === "conflicting") {
     return `PR #${pr.number} conflicts with the base branch — GitHub can't merge it until the branch is rebased.`;
+  }
+  // F19-32 / ruling 40 (R16-6): "accepted" means a human (or a direct-grant
+  // operator) accepted the completion and the REAL merge is still outstanding.
+  // It read "open for review on GitHub" here — the one sentence that hides the
+  // second meaning of Done on the surface the ruling names. The conflict check
+  // above stays first: a conflicting accepted PR is stuck for a reason a rebase
+  // fixes, which is the more actionable half of the same fact.
+  if (pr.state === "accepted") {
+    return `PR #${pr.number} is accepted — the merge is still pending; a human completes it on the task.`;
   }
   // R17-1 (F17-L12): commits landed on the PR head after the review — accepting
   // still merges them, but they ship unreviewed, so the boundary says so.
@@ -80,7 +95,16 @@ export function reviewRowSub(t: ReviewRowView): string {
   // No packet, no PR, no timeline event yet. Don't claim "agent working" on a
   // task that is waiting on a HUMAN (R8-3, same fix as the wait-tag) — a human-
   // waiting row needs a person, not an agent.
-  return t.waiting === "human"
-    ? "Waiting at the review boundary — needs a human decision."
-    : "Agent working — the packet arrives at the boundary.";
+  if (t.waiting === "human") {
+    return "Waiting at the review boundary — needs a human decision.";
+  }
+  // F19-31: `none` used to fall through to the agent sentence, so the legal
+  // `review + none` combination (nothing is waiting on either side) claimed a
+  // live agent run on this surface while the board's WaitTag rendered NOTHING
+  // for the same stored value. One value, two claims. It gets its own honest
+  // line: the row is at the boundary with no run and no decision behind it.
+  if (t.waiting === "none") {
+    return "At the review boundary — no agent is running and no decision is pending.";
+  }
+  return "Agent working — the packet arrives at the boundary.";
 }

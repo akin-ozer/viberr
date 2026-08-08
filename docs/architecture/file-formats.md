@@ -191,6 +191,12 @@ One-paragraph goal statement (prose).
 
 ## Packet
 
+`PACKET_OPTION_KINDS` in `app/schemas/task-file.schema.ts` is the source of truth for the
+option kinds; the list below mirrors it. *(Corrected 2026-08-06, pass 19 — N19-3. This block
+said "The 8 kinds" and omitted `archive_task`, which arrived with R14-3 (the task archive).
+`decisions.md` ruling 7 was corrected to nine on 2026-08-05; this sibling enumeration was the
+straggler. Nine is the count today — re-derive it from the schema rather than from here.)*
+
 ```yaml
 type: input                       # input | blocked (card tint)
 kind: Completion report           # pill label
@@ -202,11 +208,11 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 8 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 9 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
-    accept: true                  #   edit_goal | custom
+    accept: true                  #   edit_goal | archive_task | custom
                                   # (acceptance path marker — human-only)
   - kind: request_edit
     t: Request one edit

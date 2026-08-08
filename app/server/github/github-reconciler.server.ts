@@ -154,11 +154,66 @@ const POLICY_ENGINE_NOTIFY_FROM = {
 };
 
 /**
+ * F19-19 — one reconcile per task at a time.
+ *
+ * `reconcileTask` reads the task file, then awaits 2-4 GitHub round trips
+ * before writing. Every out-of-band transition guard (`prJustMerged` /
+ * `prJustClosed` / `prJustReopened` / `acceptedClosedExternally`) compares the
+ * LIVE PR state against the `fm.pr` snapshot taken BEFORE those awaits — so two
+ * passes that overlap that window both see `pr.state: "review"`, both compute
+ * "just merged", and both append the divergence note and fan out watcher
+ * notifications (which dedupe nowhere). Nothing serialized them: neither
+ * `reconcileProject` nor `runReconcile` takes a lock, the always-on poller runs
+ * independently of the "Update status" button, and the button's `disabled`
+ * guard is per-fetcher — two maintainers, or one in two tabs, race by hand.
+ *
+ * Sequential retries were already idempotent and tested; the gap was purely
+ * concurrent overlap. So this serializes per TASK rather than coalescing: the
+ * second caller waits, then runs against the file the first one just wrote —
+ * which is exactly the state the existing "unchanged facts produce no write"
+ * contract is built on, and it keeps every caller its own honest result. Passes
+ * over DIFFERENT tasks still run at `RECONCILE_TASK_CONCURRENCY`.
+ *
+ * In-process, matching the single-writer data-root rule.
+ */
+const taskReconcileChains = new Map<string, Promise<unknown>>();
+
+function serializePerTask<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const prior = taskReconcileChains.get(key) ?? Promise.resolve();
+  // Run after the prior pass SETTLES — a failed pass must not strand the queue.
+  const next = prior.then(work, work);
+  const tail = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  taskReconcileChains.set(key, tail);
+  void tail.then(() => {
+    // Only the last link clears the map, so a queue forming behind us survives.
+    if (taskReconcileChains.get(key) === tail) taskReconcileChains.delete(key);
+  });
+  return next;
+}
+
+/**
  * Reconciles ONE task with GitHub. Idempotent: unchanged facts produce no
  * file write and no reprojection (`changed: false`), but always record a
- * provenance row for the observation.
+ * provenance row for the observation. Concurrent calls for the SAME task are
+ * serialized (F19-19) so an overlapping pass cannot re-announce a divergence
+ * the pass ahead of it already recorded.
  */
-export async function reconcileTask(
+export function reconcileTask(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: AuditActor,
+  ctx: GithubActionContext = {},
+): Promise<TaskReconcileResult> {
+  return serializePerTask(
+    `${ctx.dataRoot ?? ""}::${input.projectSlug}/${input.taskKey}`,
+    () => reconcileTaskExclusive(db, input, actor, ctx),
+  );
+}
+
+async function reconcileTaskExclusive(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: AuditActor,
@@ -663,6 +718,10 @@ const reconcileCursors = new Map<string, string>();
  *  would otherwise inherit the first one's resume point. */
 export function resetReconcileCursorsForTests(): void {
   reconcileCursors.clear();
+  // F19-19: the per-task serializer keys off the data root, which is unique per
+  // test store — but a leaked chain would still hold a settled promise, so drop
+  // them with the cursors.
+  taskReconcileChains.clear();
 }
 
 /**

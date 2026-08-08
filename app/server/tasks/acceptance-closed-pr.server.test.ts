@@ -465,9 +465,70 @@ describe("R16-3: a terminal GitHub fact outranks the process gates in the refusa
   });
 });
 
-describe("the admin override still works, and NAMES the gate it bypassed", () => {
-  it("forceAcceptCompletion accepts a closed-PR task and audits the closed-PR reason", async () => {
+describe("F19-25 — the admin override is WITHDRAWN on the server too, not only in the UI", () => {
+  /**
+   * INVERTED from pass 13 ("the admin override still works, and NAMES the gate
+   * it bypassed", which asserted `stage === "done"` on a closed-PR task).
+   *
+   * That test was written before R16-3 (ruling 37, 2026-08-04) and pinned the
+   * exact write the ruling names as the harm: "moves the task to Done over a
+   * rejection and stamps `pr.state: accepted` on a PR GitHub has already
+   * closed". Pass 19 found the withdrawal had shipped CLIENT-side only
+   * (task-detail-hooks.ts hides the button), so every non-UI caller — and any
+   * stale client — still wrote it. The rule is now server-side, and this suite
+   * asserts the refusal instead of the write.
+   */
+  it("forceAcceptCompletion REFUSES a closed-PR task — no Done, no `accepted` stamp, no forced audit", async () => {
     seedClosedPrTask();
+    await expect(
+      forceAcceptCompletion(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        arda(),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(/closed on GitHub without merging/i),
+    });
+    // The task did not move and the closed PR was NOT overwritten.
+    expect(task().frontmatter.stage).toBe("review");
+    expect(task().frontmatter.pr?.state).toBe("closed");
+    // No audit row either: a `task.acceptance.forced` record for an override
+    // that was refused would read as a completed bypass in the log.
+    expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
+  });
+
+  it("the refusal says WHY the override does not apply here", async () => {
+    seedClosedPrTask();
+    await expect(
+      forceAcceptCompletion(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        arda(),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Force-accept cannot override that"),
+    });
+  });
+
+  it("the override STILL works for the wedged process gate it exists for (DG-2)", async () => {
+    // Same task, PR open, no approving verdict on the delivered revision — the
+    // WEDGED case force-accept was granted for. It accepts, and the audit names
+    // the verdict gate it bypassed.
+    seedClosedPrTask({
+      pr: { number: 318, state: "review", title: "[VIB-1] Attach execution workspace" },
+      validation: "changed",
+      workRevision: {
+        id: "rev_1",
+        headSha: "b".repeat(40),
+        treeSha: "t".repeat(40),
+        branch: "vib-1-attach-execution-workspace",
+        createdAt: "2026-08-01T09:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+    });
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
@@ -477,8 +538,6 @@ describe("the admin override still works, and NAMES the gate it bypassed", () =>
     expect(task().frontmatter.stage).toBe("done");
     const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
     expect(forced).toHaveLength(1);
-    expect(JSON.stringify(forced[0]?.details)).toMatch(
-      /closed on GitHub without merging/i,
-    );
+    expect(JSON.stringify(forced[0]?.details)).toMatch(/approving verdict/i);
   });
 });

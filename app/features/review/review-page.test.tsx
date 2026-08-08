@@ -162,6 +162,63 @@ describe("ReviewQueuePage", () => {
     expect(row.querySelector(".wait-tag.agent")).toBeNull();
   });
 
+  it("F19-31: a `waiting: none` row shows NO wait tag — the board's answer for the same value", () => {
+    // `review + none` is legal and listed (review-queue.server.ts puts it in
+    // "Still in review"). The wait-tag ladder used to end in a bare `else`, so
+    // this row rendered the pulsing "agent working" while the board's WaitTag
+    // renders nothing at all for the identical stored value — the same defect
+    // R8-3 fixed for "human", one branch further down.
+    const noneRow: ReviewRowView = {
+      ...rowAgent,
+      key: "VIB-160",
+      waiting: "none",
+      latestEventText: null,
+      pr: null,
+    };
+    const { container } = renderQueue([], [noneRow]);
+    const row = container.querySelector(".rq-row")!;
+    expect(row.querySelector(".wait-tag")).toBeNull();
+    expect(row.textContent).not.toContain("agent working");
+    // The row is not silent about itself — the subline says what "none" means.
+    expect(row.querySelector(".sub")!.textContent).toBe(
+      "At the review boundary — no agent is running and no decision is pending.",
+    );
+    // Still a triage row: it keeps its named action.
+    expect(row.querySelector(".rq-go")!.textContent).toContain("Review");
+  });
+
+  it("F19-32: an ACCEPTED PR renders the amber 'merge pending' pill, not a bare in-review one", () => {
+    // Ruling 40/R16-6: acceptance and the real GitHub merge are two facts, and
+    // the difference must be visible on the board card AND here. The row type
+    // hard-coded review|merged|closed and the projection coerced everything
+    // else to "review", so prStatePill's `accepted` branch was unreachable from
+    // this surface however the queue was rendered.
+    const mergePending: ReviewRowView = {
+      ...rowAgent,
+      key: "VIB-170",
+      waiting: "human",
+      latestEventText: null,
+      pr: { number: 420, state: "accepted" },
+    };
+    const { container } = renderQueue([], [mergePending]);
+    const row = container.querySelector(".rq-row")!;
+    // First pill in the meta cluster is the PR pill (validation follows).
+    const pill = row.querySelectorAll(".pill")[0]!;
+    expect(pill.className).toContain("input"); // amber, same tone as task detail
+    expect(pill.textContent).toBe("PR #420 · merge pending");
+    expect(row.querySelector(".sub")!.textContent).toBe(
+      "PR #420 is accepted — the merge is still pending; a human completes it on the task.",
+    );
+    // The colour alone must not be the whole signal (F19-14's rule), but the
+    // states the subline already spells out stay bare — density is the board's.
+    const openRow = renderQueue([], [
+      { ...mergePending, pr: { number: 420, state: "review" } },
+    ]);
+    expect(
+      openRow.container.querySelectorAll(".rq-row .pill")[0]!.textContent,
+    ).toBe("PR #420");
+  });
+
   it("renders both empty states with exact copy (no all-empty hero)", () => {
     const { getByText } = renderQueue([], []);
     expect(

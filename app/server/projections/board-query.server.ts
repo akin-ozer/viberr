@@ -168,6 +168,11 @@ export function listProjectTasks(
   return rows.map((row) =>
     mapTaskProjectionRow(row, {
       stages,
+      // F19-27: the acceptance-boundary fact is derived from the graph, not the
+      // column order — a project whose workflow really allows the edge must not
+      // be refused. No project row → no edges, and the mapping resolves the
+      // roles positionally, same as the server.
+      workflow: project?.workflow ?? [],
       owner: row.owner_user_id
         ? labelUnresolvedHuman(
             resolveActor({

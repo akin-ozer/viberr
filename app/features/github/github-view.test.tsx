@@ -10,6 +10,7 @@ import {
   GithubViewPage,
   PullRequestsPanel,
   RepositoryPanel,
+  type ReconcileCheckView,
 } from "./github-view";
 import type { BranchRowView, PrRowView } from "./github-query.server";
 
@@ -446,9 +447,33 @@ describe("PullRequestsPanel", () => {
     fireEvent.click(rows[0]!);
     expect(onOpenTask).toHaveBeenCalledWith("VIB-142");
     // Footer note is verbatim contract (B10: honest about the offline path).
+    // F19-34: it used to say "in the review queue". The queue is a read-only
+    // triage list — it performs no mutation at all, which is exactly why ruling
+    // 30 (R15-11) labels its row "Review" and not "Accept". Naming it as the
+    // surface that merges pointed a reader at a page with no such control.
     expect(container.querySelector(".pol-note")!.textContent).toContain(
-      "Merging stays reserved for humans — accepting a completion in the review queue merges its PR when GitHub is reachable; otherwise it records accepted (merge pending).",
+      "Merging stays reserved for humans — accepting a completion on its task page merges its PR when GitHub is reachable; otherwise it records accepted (merge pending).",
     );
+    expect(container.querySelector(".pol-note")!.textContent).not.toContain(
+      "review queue",
+    );
+  });
+
+  /* F19-33: the count and the note took their type scale and spacing from two
+     private inline-style consts (`PANEL_COUNT_STYLE`, `POL_NOTE_STYLE`) that
+     copied `.fine` and `.pol-note.after`/`.last` — and had drifted from them.
+     app.css.test.ts holds the structural gate; these assert what the surface
+     actually renders. */
+  it("takes the count's type scale and the note's spacing from the sheet", () => {
+    const { container } = render(
+      <PullRequestsPanel prs={prs} defaultBranch="main" onOpenTask={() => {}} />,
+    );
+    const count = container.querySelector(".panel-head .right")!;
+    expect(count.className.split(/\s+/)).toEqual(["right", "sub", "fine"]);
+    expect(count.getAttribute("style")).toBeNull();
+    const note = container.querySelector(".pol-note")!;
+    expect(note.className.split(/\s+/)).toEqual(["pol-note", "after", "last"]);
+    expect(note.getAttribute("style")).toBeNull();
   });
 
   it("zero PRs → quiet empty line (spec §7.9a addition)", () => {
@@ -507,6 +532,18 @@ describe("BranchesPanel", () => {
 
     fireEvent.click(rows[1]!);
     expect(onOpenTask).toHaveBeenCalledWith("VIB-151");
+  });
+
+  it("takes the count's type scale and the note's spacing from the sheet (F19-33)", () => {
+    const { container } = render(
+      <BranchesPanel branches={branches} onOpenTask={() => {}} />,
+    );
+    const count = container.querySelector(".panel-head .right")!;
+    expect(count.className.split(/\s+/)).toEqual(["right", "sub", "fine"]);
+    expect(count.getAttribute("style")).toBeNull();
+    const note = container.querySelector(".pol-note")!;
+    expect(note.className.split(/\s+/)).toEqual(["pol-note", "after", "last"]);
+    expect(note.getAttribute("style")).toBeNull();
   });
 
   it("zero branches → quiet empty state (spec §7.9b addition)", () => {
@@ -578,7 +615,11 @@ describe("UI-37: 'Update status' is gated like the action it calls", () => {
         path: "/projects/:slug/github",
         Component: () => (
           <ToastProvider>
-            <GithubViewPage data={data} myRole={myRole} />
+            <GithubViewPage
+              data={data}
+              reconcileCheck={NO_CHECK_ON_RECORD}
+              myRole={myRole}
+            />
           </ToastProvider>
         ),
       },
@@ -596,6 +637,18 @@ describe("UI-37: 'Update status' is gated like the action it calls", () => {
     expect(getByText("Update status")).toBeTruthy();
   });
 });
+
+/**
+ * The pre-F19-22 world in one value: no completed reconcile pass on record, so
+ * the chip has nothing but the CHANGE timestamp to reason from and the R17-5
+ * rules below decide the tone. Every block that predates the audit read keeps
+ * asserting against exactly that fallback.
+ */
+const NO_CHECK_ON_RECORD: ReconcileCheckView = {
+  at: null,
+  label: null,
+  stale: true,
+};
 
 describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
   const pageData = (reconcile: {
@@ -628,7 +681,11 @@ describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
         path: "/projects/:slug/github",
         Component: () => (
           <ToastProvider>
-            <GithubViewPage data={pageData(reconcile)} myRole="maintainer" />
+            <GithubViewPage
+              data={pageData(reconcile)}
+              reconcileCheck={NO_CHECK_ON_RECORD}
+              myRole="maintainer"
+            />
           </ToastProvider>
         ),
       },
@@ -639,13 +696,18 @@ describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
     return container.querySelector(".gh-freshness")!;
   };
 
-  it("renders a never-reconciled surface neutral with a first-sync nudge", () => {
+  it("renders an empty-provenance surface neutral with a nudge to check now", () => {
     // A brand-new project's first look at this page used to be a coral alert
     // ("Not yet synced") though nothing was wrong — no sync had simply run.
     const chip = renderChip({ at: null, label: null, stale: true });
     expect(chip.classList.contains("stale")).toBe(false);
-    expect(chip.textContent).toContain("Not synced yet");
-    expect(chip.getAttribute("title")).toContain("runs the first sync");
+    // F19-22: the copy used to be "Not synced yet" / "runs the first sync" — a
+    // claim `at: null` cannot support, because DG-3 skips the provenance row on
+    // every unchanged poller tick. A project with one branched task and a quiet
+    // repo lands here after a hundred successful passes.
+    expect(chip.textContent).toContain("No changes recorded");
+    expect(chip.textContent).not.toContain("Not synced yet");
+    expect(chip.getAttribute("title")).toContain("Update status checks GitHub now");
   });
 
   it("keeps the warn tone for a cache older than the staleness threshold", () => {
@@ -655,7 +717,7 @@ describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
       stale: true,
     });
     expect(chip.classList.contains("stale")).toBe(true);
-    expect(chip.textContent).toContain("Updated 2h ago");
+    expect(chip.textContent).toContain("Last change 2h ago");
   });
 
   it("renders a fresh cache neutral", () => {
@@ -665,6 +727,217 @@ describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
       stale: false,
     });
     expect(chip.classList.contains("stale")).toBe(false);
-    expect(chip.textContent).toContain("Updated 3m ago");
+    expect(chip.textContent).toContain("Last change 3m ago");
+  });
+});
+
+/**
+ * F19-22 — the freshness cue reported the last CHANGING reconcile as though it
+ * were the last successful one.
+ *
+ * `data.reconcile.at` is `MAX(observed_at)` over `github.reconcile` provenance,
+ * and the reconciler deliberately skips that row on an unchanged poller tick
+ * (DG-3, `github-reconciler.server.ts`: `if (changed ||
+ * !ctx.skipUnchangedProvenance)`), so a repository nothing is happening in has
+ * no fresh row however many passes succeed. Labelled "Updated 2h ago" over a
+ * tooltip promising a refresh "every 5 minutes", the chip contradicted itself —
+ * live-proven on the task panel ("Synced 1h ago" at 12:42Z with successful
+ * `github.reconcile.task` audit rows at 12:07/12:12/…/12:42).
+ *
+ * DG-3 stays. What this file owns is the NAME of the number it renders.
+ */
+describe("F19-22: the freshness chip names the last CHANGE, not the last check", () => {
+  const chip = (reconcile: {
+    at: string | null;
+    label: string | null;
+    stale: boolean;
+  }) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage
+              data={
+                {
+                  project: {
+                    slug: "viberr-core",
+                    name: "Viberr Core",
+                    repo: "akin-ozer/viberr",
+                    defaultBranch: "main",
+                  },
+                  githubHost: "https://github.com",
+                  connection: { status: "connected" as const },
+                  credential: noneCredential,
+                  prs: [],
+                  branches: [],
+                  reconcile,
+                } as unknown as Parameters<typeof GithubViewPage>[0]["data"]
+              }
+              reconcileCheck={NO_CHECK_ON_RECORD}
+              myRole="maintainer"
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/viberr-core/github"]} />,
+    );
+    return container.querySelector(".gh-freshness")!;
+  };
+
+  it("never says 'Updated' of a timestamp that only moves when something changed", () => {
+    const fresh = chip({
+      at: "2026-08-06T12:01:55.000Z",
+      label: "40m ago",
+      stale: false,
+    });
+    expect(fresh.textContent).toContain("Last change 40m ago");
+    expect(fresh.textContent).not.toContain("Updated");
+  });
+
+  it("tells the reader that a pass finding nothing new records nothing", () => {
+    // The old tooltip asserted the opposite of the code ("auto-refreshes every
+    // 5 minutes" next to an hours-old number), which is exactly how a healthy
+    // task looked broken.
+    for (const stale of [false, true]) {
+      const title =
+        chip({
+          at: "2026-08-06T12:01:55.000Z",
+          label: stale ? "3h ago" : "4m ago",
+          stale,
+        }).getAttribute("title") ?? "";
+      expect(title).toContain("every 5 minutes");
+      expect(title).toContain("records nothing on a pass that finds nothing new");
+      expect(title).not.toContain("auto-refreshes every 5 minutes — click");
+      cleanup();
+    }
+  });
+});
+
+/**
+ * F19-22, second half — the chip can finally say the poller is alive.
+ *
+ * `reconcileCheck` is the newest COMPLETED pass (`github.reconcile.task` audit
+ * rows, unioned with the human sweep's project row — see
+ * `server/audit/audit-query.server.ts`, whose test proves the two clocks
+ * diverge against the real reconciler). Rendering it beside the change makes
+ * the healthy-but-quiet case ("Checked 2m ago · last change 40m ago")
+ * distinguishable from the case that actually needs attention — a poller or a
+ * credential that stopped working — which the single-number chip could not
+ * express at all.
+ */
+describe("F19-22: the chip renders the last CHECK beside the last change", () => {
+  const chip = (
+    reconcile: { at: string | null; label: string | null; stale: boolean },
+    reconcileCheck: ReconcileCheckView,
+  ) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage
+              data={
+                {
+                  project: {
+                    slug: "viberr-core",
+                    name: "Viberr Core",
+                    repo: "akin-ozer/viberr",
+                    defaultBranch: "main",
+                  },
+                  githubHost: "https://github.com",
+                  connection: { status: "connected" as const },
+                  credential: noneCredential,
+                  prs: [],
+                  branches: [],
+                  reconcile,
+                } as unknown as Parameters<typeof GithubViewPage>[0]["data"]
+              }
+              reconcileCheck={reconcileCheck}
+              myRole="maintainer"
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/viberr-core/github"]} />,
+    );
+    return container.querySelector(".gh-freshness")!;
+  };
+
+  it("names both facts, and never lets the older one look like the check", () => {
+    // The live case: seven successful passes in the hour, one change at the
+    // start of it. The chip used to render only "40m ago".
+    const c = chip(
+      { at: "2026-08-06T12:01:55.000Z", label: "40m ago", stale: false },
+      { at: "2026-08-06T12:42:00.000Z", label: "2m ago", stale: false },
+    );
+    expect(c.textContent).toContain("Checked 2m ago");
+    expect(c.textContent).toContain("last change 40m ago");
+    expect(c.classList.contains("stale")).toBe(false);
+  });
+
+  it("stays neutral on a fresh check whose last change is HOURS old", () => {
+    // The whole finding: a quiet repository is not a broken one. `stale: true`
+    // on the change must no longer paint the coral alert once a completed pass
+    // 2 minutes ago proves the poller is working.
+    const c = chip(
+      { at: "2026-08-05T09:00:00.000Z", label: "yesterday", stale: true },
+      { at: "2026-08-06T12:42:00.000Z", label: "2m ago", stale: false },
+    );
+    expect(c.classList.contains("stale")).toBe(false);
+    expect(c.textContent).toContain("Checked 2m ago");
+    expect(c.textContent).toContain("last change yesterday");
+    expect(c.getAttribute("title")).toContain("a quiet repository");
+  });
+
+  it("warns when no pass has COMPLETED for over an hour, however fresh the change", () => {
+    // The case the old chip could not see at all: the poller (or the PAT) is
+    // down. A change recorded 4 minutes ago by the last pass before it died
+    // used to render neutral "Updated 4m ago".
+    const c = chip(
+      { at: "2026-08-06T12:38:00.000Z", label: "4m ago", stale: false },
+      { at: "2026-08-06T09:10:00.000Z", label: "3h ago", stale: true },
+    );
+    expect(c.classList.contains("stale")).toBe(true);
+    expect(c.textContent).toContain("Checked 3h ago");
+    expect(c.getAttribute("title")).toContain(
+      "No reconcile pass has completed for over an hour",
+    );
+  });
+
+  it("is honest about a checked project that has never recorded a change", () => {
+    const c = chip(
+      { at: null, label: null, stale: true },
+      { at: "2026-08-06T12:42:00.000Z", label: "2m ago", stale: false },
+    );
+    expect(c.textContent).toContain("Checked 2m ago");
+    expect(c.textContent).toContain("no changes recorded");
+    // Nothing is wrong here — a checked project with a quiet repo (ruling 46).
+    expect(c.classList.contains("stale")).toBe(false);
+  });
+
+  it("falls back to the change cue when no pass is on record, and never warns about a never-checked project", () => {
+    const neither = chip(
+      { at: null, label: null, stale: true },
+      NO_CHECK_ON_RECORD,
+    );
+    expect(neither.textContent).toContain("No changes recorded");
+    expect(neither.textContent).not.toContain("Checked");
+    expect(neither.classList.contains("stale")).toBe(false);
+    cleanup();
+
+    // A change with no audit row behind it (rows aged past the 90-day audit
+    // window, or a heartbeat pass over a board with no branched task): the
+    // change is the only evidence a pass ran, so it decides the tone.
+    const changeOnly = chip(
+      { at: "2026-08-06T12:38:00.000Z", label: "4m ago", stale: false },
+      NO_CHECK_ON_RECORD,
+    );
+    expect(changeOnly.textContent).toContain("Last change 4m ago");
+    expect(changeOnly.classList.contains("stale")).toBe(false);
   });
 });

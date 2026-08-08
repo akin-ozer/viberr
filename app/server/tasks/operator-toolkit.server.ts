@@ -75,6 +75,33 @@ function resultText(r: OperatorActionResult) {
   return textResult(`[${r.outcome}] ${r.message}`);
 }
 
+/**
+ * The MCP instructions block the model reads alongside these tools.
+ *
+ * R19-1 changed what is true here. The old sentence — "never write code or
+ * touch the repository" — was written when the operator had no working tree at
+ * all, and it now contradicts the run's own system prompt, which hands it a
+ * READ-ONLY checkout and requires every packet that reasons about repository
+ * contents to be grounded in it. A model told by one channel to read the repo
+ * and by another never to touch it can resolve that either way, and the way
+ * that loses is the F19-4 failure: describing the empty task folder as "the
+ * repo". So the prohibition is stated precisely — the model's own hands never
+ * edit or commit — and reading is stated as the expectation it now is.
+ *
+ * "You cannot push" would be wrong in the other direction: `deliver_for_review`
+ * (below) pushes the deliverer's committed branch, and both the operator
+ * definition and that tool's description tell the model delivery is its
+ * decision to make. Contradicting them here would risk an operator that stops
+ * delivering — so the push is named as the SERVER's action, which is what it is.
+ */
+export const OPERATOR_TOOLKIT_INSTRUCTIONS =
+  "Viberr coordination tools. You are the task operator. Use these tools to coordinate the task. " +
+  "You never write code: you cannot edit, create or commit files in the repository checkout, and " +
+  "the file-writing and shell tools are withheld from this run — delivery is a decision you make " +
+  "and the server executes. READING the task's repository checkout is expected of you — any claim " +
+  "you make about the repository must come from reading it, never from the task folder you are " +
+  "standing in.";
+
 /** Build the operator's toolkit for one task run. */
 export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   const { db, ctx, projectSlug, taskKey, authority } = deps;
@@ -408,8 +435,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   const server = createSdkMcpServer({
     name: "viberr",
     version: "1.0.0",
-    instructions:
-      "Viberr governance tools. You are the task operator. Use these tools to coordinate the task; never write code or touch the repository.",
+    instructions: OPERATOR_TOOLKIT_INSTRUCTIONS,
     tools,
   });
 

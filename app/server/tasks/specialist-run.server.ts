@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import {
   deliveringEngagement,
+  deriveValidation,
   supportingEngagements,
   type AgentRef,
   type FileActorRef,
@@ -39,12 +40,14 @@ import {
 import { taskDir } from "~/server/files/file-store-root.server";
 import {
   KB_INJECTION_BUDGET,
+  KB_PRECEDENCE_NOTE,
   readKbBodies,
 } from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
 import {
   mountGrantedSkills,
   stripUngovernedRepoCatalog,
+  type SkillMount,
 } from "~/server/runtimes/skill-mount.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -86,6 +89,7 @@ import {
   githubRemoteSanitizationArgs,
   type CloneFailureLogDetails,
 } from "./git-clone-auth.server";
+import { redactGitStderr } from "./git-stderr-redact.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 
 /**
@@ -259,13 +263,20 @@ export function resolveDeployedSpecialist(
 }
 
 /**
- * R18-1 (widened to SKILLS by LV-F3): the context grants the task's DELIVERING
- * engagement used, so a reviewer can judge the work against the same
- * conventions. Returns [] when there is no deliverer, when the deliverer IS
- * this profile (its own run already carries them), or when the deliverer is
- * undeployed since delivery (its live grants cannot be confirmed — the reviewer
- * keeps its own). `resolve` throwing (undeployed profile) is treated as "no
- * extras".
+ * R18-1 (KNOWLEDGE BASES ONLY — R19-3): the KB grants the task's DELIVERING
+ * engagement used, so a reviewer judges the work against the same conventions.
+ * Returns [] when there is no deliverer, when the deliverer IS this profile
+ * (its own run already carries them), or when the deliverer is undeployed since
+ * delivery (its live grants cannot be confirmed — the reviewer keeps its own).
+ * `resolve` throwing (undeployed profile) is treated as "no extras".
+ *
+ * F19-2/R19-3: this docstring used to claim the inheritance was "widened to
+ * SKILLS by LV-F3". It never was — both call sites union `kb` only, the fresh
+ * and resume paths each mount the reviewer's OWN skills, and "LV-F3" existed
+ * nowhere in the repo except that sentence. The owner ruled the inheritance
+ * stays KBs (R18-1 stands), so SKILLS ARE DELIBERATELY NOT INHERITED: a
+ * reviewer's craft is its own profile's grant. `specialist-run.server.test.ts`
+ * pins the absence — do not "restore" a widening that never shipped.
  */
 function deliveringContextGrants(
   frontmatter: Parameters<typeof deliveringEngagement>[0],
@@ -531,6 +542,16 @@ export async function assignReviewer(
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
         (r) => !(r.kind === "assign_reviewer" && r.profileId === reviewer.profileId),
       );
+      // UX19-3 (mechanism 2): `validation` is a DERIVED cache whose contract is
+      // "ONE writer — deriveValidation" (F10-15), and the required-reviewer set
+      // is one of its inputs (`requiredReviewers`). Engaging a verdict-capable
+      // reviewer changes that set, so a cache written before this engagement is
+      // stale the instant the roster moves: an already-approved task would keep
+      // showing "validation healthy" on the queue card and the task hero while
+      // every acceptance gate — which derives fresh — now refuses on the new
+      // reviewer's missing verdict. Recompute it here, from the post-mutation
+      // frontmatter, so the file (canonical truth) never carries the lie.
+      parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
       parsed.timeline.unshift(event);
     },
   );
@@ -603,6 +624,12 @@ export async function removeReviewer(
       parsed.frontmatter.engagements = parsed.frontmatter.engagements.filter(
         (r) => r.delivers || r.profileId !== input.profileId,
       );
+      // UX19-3 (mechanism 2): the removal side of the same stale cache. Dropping
+      // the SOLE approving reviewer leaves `deriveValidation` at "changed" while
+      // the cached `validation:` line still reads "healthy" — the review queue
+      // and task hero both render that cache, so they advertise a green task the
+      // acceptance gate refuses. One writer, on every roster change.
+      parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
       parsed.timeline.unshift(event);
     },
   );
@@ -864,9 +891,14 @@ export async function startAgentRun(
   // `.claude` first, so the project setting source can only ever hold Viberr
   // content. Claude only: Codex has no native skills channel (LV-13 severs it
   // deliberately), so a Codex run's grants stay prompt text.
+  // F19-15: the mount takes a LEASE on the shared per-task catalog and refuses
+  // to wipe one another profile's live run is streaming against.
   const skillMount =
     backend === "claude" && realBackend
-      ? await mountGrantedSkills({
+      ? await mountGrantedSkillsLeased(db, {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId: engagement.profileId,
           workspaceDir: clone?.dir ?? null,
           skills,
           dataRoot: ctx.dataRoot,
@@ -923,6 +955,12 @@ export async function startAgentRun(
           cloneFailure: {
             sentence: cloneFailure.sentence,
             hadCredential: cloneFailure.hadCredential,
+            // F19-6: the agent is told to quote the reason verbatim, so this is
+            // the line that carries git's real complaint into its report — and
+            // from there into the operator's blocked packet.
+            ...(cloneFailure.stderrExcerpt
+              ? { stderrExcerpt: cloneFailure.stderrExcerpt }
+              : {}),
           },
         }
       : {}),
@@ -952,7 +990,12 @@ export async function startAgentRun(
             `The agent is running against an EMPTY workspace, so it cannot read or change ${repo}. ` +
             (cloneFailure.reason === "clone_terminated"
               ? "Raise `VIBERR_GIT_CLONE_TIMEOUT_MS` if this repository simply needs longer, then re-run."
-              : "Re-run once the cause above is addressed."),
+              : "Re-run once the cause above is addressed.") +
+            // F19-6: the classification alone ("git exit 128") sent humans
+            // hunting; git's own redacted words are what makes this actionable.
+            (cloneFailure.stderrExcerpt
+              ? `\n\nWhat the checkout reported:\n\n\`\`\`\n${cloneFailure.stderrExcerpt}\n\`\`\``
+              : ""),
           toAgent: false,
           evidence: null,
         });
@@ -1270,6 +1313,11 @@ export function buildSpecialistPersona(input: {
   // was dropped instead of quietly shrinking. (An agent silently missing a
   // granted KB reports on the ones it got and nobody learns the difference.)
   const kbSet = readKbBodies(input.kb ?? [], input.dataRoot, KB_INJECTION_BUDGET);
+  // R19-2: the precedence rule rides WITH the KB text — pushed ONCE (not per KB)
+  // and BEFORE the bodies it ranks, so the rule is read before the guidance it
+  // qualifies. Gated on real KB text, so a run with no knowledge base never
+  // carries a rule about a resource it does not have.
+  if (kbSet.parts.length > 0) resourceParts.push(KB_PRECEDENCE_NOTE);
   for (const part of kbSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);
   }
@@ -1377,7 +1425,12 @@ export function buildAnalyzePrompt(input: {
   /** Why there is no checkout, when `cloned` is false and the server tried.
    *  Without this the agent can only infer a cause from an empty directory,
    *  and it inferred the most expensive wrong one: a missing credential. */
-  cloneFailure?: { sentence: string; hadCredential: boolean } | null;
+  cloneFailure?: {
+    sentence: string;
+    hadCredential: boolean;
+    /** F19-6: git's own redacted output — the agent must quote it. */
+    stderrExcerpt?: string;
+  } | null;
   /** Which delivery steps the profile's capabilities permit (XS-4). */
   delivery: DeliveryPermissions;
   /** Whether this engagement DELIVERS. A supporting (non-delivering) run is
@@ -1430,7 +1483,14 @@ export function buildAnalyzePrompt(input: {
               ? ` — the credential is present and working; repeating that request wastes a human's time on a false lead` :
                 ``) +
             `. Report that the checkout could not be provisioned, quote the reason above verbatim, and stop. ` +
-            `Do not speculate about the cause beyond what that sentence says.\n`
+            `Do not speculate about the cause beyond what that sentence says.\n` +
+            // F19-6: without this the reason a human can act on ("GH006:
+            // Protected branch", "could not resolve host", "Repository not
+            // found") never leaves the server — the agent's report, and so the
+            // operator's blocked packet, could only ever say "git exit 128".
+            (input.cloneFailure.stderrExcerpt
+              ? `- The checkout's own error output (already redacted by Viberr): \`${input.cloneFailure.stderrExcerpt}\` — include it VERBATIM in your report so a human can act on it.\n`
+              : "")
           : `- Clone \`https://github.com/${input.repo}\` INTO the current directory (\`git clone https://github.com/${input.repo}.git .\`) before making changes.\n`);
     if (!input.delivers) {
       // F10-12: a SUPPORTING (reviewing) run is physically read-only (Codex
@@ -1687,9 +1747,14 @@ export async function resolveResumeConfinement(
     // the mount refuses anything that is not a plain checkout, so a task whose
     // clone is gone falls back to injection rather than opening a project
     // setting source we do not own.
+    // F19-15: same lease as the fresh run — a RESUMED supporting agent used to
+    // wipe the delivering run's mounted skills through this very call.
     const skillMount =
       input.backend === "claude"
-        ? await mountGrantedSkills({
+        ? await mountGrantedSkillsLeased(db, {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            profileId: input.profileId,
             workspaceDir: taskCloneDir(ctx, input.projectSlug, input.taskKey),
             skills: resolved.skills,
             dataRoot: ctx.dataRoot,
@@ -1811,6 +1876,15 @@ export interface CloneFailure extends CloneFailureLogDetails {
   hadCredential: boolean;
   /** One plain sentence, safe to show a human and to put in a prompt. */
   sentence: string;
+  /**
+   * F19-6: git's OWN complaint, redacted and truncated. `sentence` classifies
+   * the failure ("git exit 128"); this is the only channel that says WHY —
+   * exit 128 covers auth rejection, a missing remote, DNS, a proxy and an LFS
+   * hook alike, and live (VC-3) the human had a working credential, a repo that
+   * cloned from a shell, and nothing to act on. Absent when git printed
+   * nothing usable.
+   */
+  stderrExcerpt?: string;
 }
 
 interface CloneOutcome {
@@ -1824,6 +1898,192 @@ interface CloneOutcome {
 // mounting Viberr's granted skills into the same directory are two halves of one
 // rule (Viberr owns the workspace catalog), and keeping them together is what
 // lets the mount guarantee "only Viberr content is discoverable" on its own.
+
+// ------------------------------------------- workspace catalog lease (F19-15)
+
+/**
+ * F19-15 — the task workspace's `.claude` catalog is SINGLE-WRITER while a run
+ * is live.
+ *
+ * The clone is per-TASK (`<taskDir>/workspace/<repo>`) and shared by every
+ * engagement, but only the DELIVERING agent is single-flighted (:684) —
+ * supporting agents deliberately run concurrently. Both halves of the catalog
+ * contract wipe that shared directory unconditionally: `cloneRepo`'s reuse arm
+ * re-strips it (R18-3, ruling 49) and `mountGrantedSkills` strips before it
+ * writes (R18-5, ruling 51). So a SECOND run starting while a Claude run
+ * streamed deleted that live run's `<workspace>/.claude/skills/*` out from
+ * under it — and because R18-5 deliberately stops injecting a mounted skill's
+ * BODY into the persona, those bodies existed nowhere else. The run kept
+ * advertising the skill (its metadata was already loaded) and could no longer
+ * load it: silent capability loss, nothing on the timeline, nothing in a log.
+ *
+ * The fix keeps BOTH rulings by making the catalog a leased resource rather
+ * than by serializing the runs (which would break the deliberate concurrency):
+ *
+ *  · a Claude run that MOUNTS granted skills takes the lease for the task;
+ *  · while a lease is live, `cloneRepo`'s reuse arm does NOT re-strip (the
+ *    checkout was stripped when it was created, `.claude/` is in
+ *    `.git/info/exclude` and the tracked paths are `--skip-worktree`, so there
+ *    is nothing new to strip — only a live mount to destroy);
+ *  · a second run does NOT mount natively while another profile holds the
+ *    lease; its granted skills fall back to prompt-text injection, which is
+ *    the SAME fallback a checkout-less run already takes (no capability loss,
+ *    and `buildSpecialistPersona` states what it has either way).
+ *
+ * R18-3 is not weakened: the only runs that open `settingSources: ['project']`
+ * are runs that just stripped and rewrote the catalog themselves (a run that
+ * mounts nothing gets `settingSources: []` and a denied `Skill` tool —
+ * claude-runtime.server.ts:607-609), so no run can ever discover another run's
+ * mount, an agent-written `.claude/settings.json`, or the repo's own catalog.
+ *
+ * In-process, matching the single-writer data-root rule (one app process per
+ * data root, ever). A restart drops the leases, which is correct: no run of
+ * this process is streaming against that workspace any more.
+ */
+interface WorkspaceCatalogLease {
+  /** The profile whose skills are mounted in the shared catalog. */
+  profileId: string;
+  /** When the mount happened — covers the window before its run row exists. */
+  claimedAt: number;
+  /** What it mounted (diagnostics only). */
+  skills: string[];
+}
+
+/** Grace for the mount → `startRun` window ONLY: until the run row exists,
+ *  liveness cannot be read from it. Sub-second in practice (persona + toolkit
+ *  assembly); generous here so a slow host cannot drop a live run's lease. It
+ *  stops applying the moment the row appears, so a finished run releases the
+ *  catalog immediately rather than holding it for the whole window. */
+const CATALOG_LEASE_HANDOFF_MS = 60_000;
+
+const workspaceCatalogLeases = new Map<string, WorkspaceCatalogLease[]>();
+
+function catalogLeaseKey(projectSlug: string, taskKey: string): string {
+  return `${projectSlug}/${taskKey}`;
+}
+
+/**
+ * The live lease on this task's workspace catalog, or null. A lease is live
+ * while its profile has a queued/running run on the task — or, before that row
+ * exists, for {@link CATALOG_LEASE_HANDOFF_MS}. Dead leases are pruned here, so
+ * no release hook is needed (a crashed/interrupted run cannot strand the
+ * catalog).
+ *
+ * `exceptProfileId` excludes the CALLER's own profile: the same profile
+ * re-running or resuming re-mounts byte-identical content from the same grants,
+ * so it must never be blocked by its own predecessor.
+ */
+function liveWorkspaceCatalogLease(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+  exceptProfileId?: string,
+): WorkspaceCatalogLease | null {
+  const key = catalogLeaseKey(projectSlug, taskKey);
+  const leases = workspaceCatalogLeases.get(key);
+  if (!leases?.length) return null;
+  const now = Date.now();
+  const rows = listRunsForTaskRows(db, projectSlug, taskKey);
+  const stillLive = leases.filter((lease) => {
+    const mine = rows.filter((r) => r.agent_profile_id === lease.profileId);
+    // The lease-holder's run is streaming (or waiting to) — the catalog is in
+    // use by definition.
+    if (mine.some((r) => r.state === "running" || r.state === "queued")) {
+      return true;
+    }
+    // No live row. Either the run row does not exist YET (we are inside the
+    // mount → startRun handoff) or the run reached a terminal state and the
+    // lease is spent. `created_at` is UTC ISO, so the string compare orders
+    // correctly.
+    const claimedAtIso = new Date(lease.claimedAt).toISOString();
+    const rowExists = mine.some((r) => r.created_at >= claimedAtIso);
+    return !rowExists && now - lease.claimedAt < CATALOG_LEASE_HANDOFF_MS;
+  });
+  if (stillLive.length) workspaceCatalogLeases.set(key, stillLive);
+  else workspaceCatalogLeases.delete(key);
+  return (
+    stillLive.find((lease) => lease.profileId !== exceptProfileId) ?? null
+  );
+}
+
+/** Take (or refresh) this profile's lease on the task's workspace catalog. */
+function holdWorkspaceCatalog(
+  projectSlug: string,
+  taskKey: string,
+  profileId: string,
+  skills: string[],
+): void {
+  const key = catalogLeaseKey(projectSlug, taskKey);
+  const leases = (workspaceCatalogLeases.get(key) ?? []).filter(
+    (lease) => lease.profileId !== profileId,
+  );
+  leases.push({ profileId, claimedAt: Date.now(), skills });
+  workspaceCatalogLeases.set(key, leases);
+}
+
+/**
+ * Mount the run's granted skills UNLESS another profile's live run holds the
+ * catalog (F19-15). The refusal degrades to prompt-text injection — the same
+ * path a checkout-less run takes — instead of unmounting the live run.
+ */
+async function mountGrantedSkillsLeased(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    workspaceDir: string | null;
+    skills: readonly string[];
+    dataRoot?: string;
+  },
+): Promise<SkillMount> {
+  const holder = liveWorkspaceCatalogLease(
+    db,
+    input.projectSlug,
+    input.taskKey,
+    input.profileId,
+  );
+  if (holder) {
+    if (input.skills.length > 0) {
+      logger.warn(
+        "granted skills did not mount natively — a live run holds this task's workspace catalog (they are injected as prompt text instead)",
+        {
+          taskKey: input.taskKey,
+          profileId: input.profileId,
+          heldBy: holder.profileId,
+          skills: [...input.skills],
+        },
+      );
+    }
+    return {
+      mounted: [],
+      skipped: input.skills.map((name) => ({
+        name,
+        reason:
+          "another agent's live run holds this task's workspace catalog (Viberr injects it as prompt text instead)",
+      })),
+    };
+  }
+  const mount = await mountGrantedSkills({
+    workspaceDir: input.workspaceDir,
+    skills: input.skills,
+    ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
+  });
+  if (mount.mounted.length > 0) {
+    holdWorkspaceCatalog(
+      input.projectSlug,
+      input.taskKey,
+      input.profileId,
+      mount.mounted,
+    );
+  }
+  return mount;
+}
+
+/** Test-only: forget every workspace-catalog lease (fresh state per test). */
+export function resetWorkspaceCatalogLeasesForTests(): void {
+  workspaceCatalogLeases.clear();
+}
 
 async function cloneRepo(
   db: DatabaseSync,
@@ -1839,6 +2099,10 @@ async function cloneRepo(
   },
 ): Promise<CloneOutcome> {
   let hadCredential = false;
+  // F19-6: hoisted out of the try so the catch can scrub it BY VALUE. The token
+  // never reaches argv or the remote URL (askpass env only), so this literal
+  // scrub plus the userinfo patterns is the whole redaction surface.
+  let token: string | null = null;
   const setIdentity = async (dir: string) => {
     if (!input.identity) return;
     try {
@@ -1865,13 +2129,35 @@ async function cloneRepo(
         { timeout: 10_000 },
       );
       await setIdentity(dir);
-      await stripUngovernedRepoCatalog(dir);
+      // F19-15: do NOT re-strip while a live run holds the mounted catalog —
+      // that strip is what deleted a streaming Claude run's granted skills.
+      // There is nothing here to strip anyway: this checkout was stripped when
+      // it was created, its tracked `.claude` paths are `--skip-worktree` and
+      // `.claude/` is in `.git/info/exclude`, so nothing ungoverned can have
+      // reappeared. The lease-less path below is unchanged (R18-3 holds), and a
+      // run that mounts nothing never opens the project setting source at all.
+      const catalogHolder = liveWorkspaceCatalogLease(
+        db,
+        input.projectSlug,
+        input.taskKey,
+      );
+      if (catalogHolder) {
+        logger.info(
+          "reusing the task workspace WITHOUT re-stripping its catalog — a live run holds it",
+          {
+            taskKey: input.taskKey,
+            heldBy: catalogHolder.profileId,
+          },
+        );
+      } else {
+        await stripUngovernedRepoCatalog(dir);
+      }
       return { dir };
     }
     mkdirSync(path.dirname(dir), { recursive: true });
 
     const cred = getProjectCredential(db, input.projectSlug);
-    const token = cred ? getPatToken(db, cred.id) : null;
+    token = cred ? getPatToken(db, cred.id) : null;
     hadCredential = !!token;
     const clone = createGitHubClonePlan({
       repo: input.repo,
@@ -1904,12 +2190,18 @@ async function cloneRepo(
     // downstream signal was an empty directory — from which the agent inferred
     // a credential problem that did not exist.
     const details = cloneFailureLogDetails(error);
+    // F19-6: `cloneFailureLogDetails` keeps its intentionally small contract
+    // (reason/exitCode/signal). The excerpt is a SEPARATE, redacted channel —
+    // scrub-by-value of the token that authenticated this clone, plus the
+    // userinfo patterns a legacy origin URL could carry.
+    const stderrExcerpt = redactGitStderr(error, token ? [token] : []);
     logger.warn("specialist run clone failed — running WITHOUT a checkout", {
       taskKey: input.taskKey,
       repo: input.repo,
       hadCredential,
       timeoutMs: CLONE_TIMEOUT_MS,
       ...details,
+      ...(stderrExcerpt ? { stderrExcerpt } : {}),
     });
     return {
       dir: null,
@@ -1920,6 +2212,7 @@ async function cloneRepo(
           hadCredential,
           timeoutMs: CLONE_TIMEOUT_MS,
         }),
+        ...(stderrExcerpt ? { stderrExcerpt } : {}),
       },
     };
   }

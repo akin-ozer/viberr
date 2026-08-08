@@ -273,8 +273,28 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
   // own cause — "no PR was opened" is only useful if it says why.
   const NOT_DELIVERABLE = [
     {
-      push: { status: "no_commits" as const, reason: "no local commits ahead of the default branch" },
+      // R19-8: `no_commits` carries the workspace evidence too. A CLEAN tree is
+      // what makes "nothing to review" a verified statement rather than a guess.
+      push: {
+        status: "no_commits" as const,
+        reason: "no local commits ahead of the default branch",
+        defaultBranchEvidence: { verified: true as const },
+      },
       outcome: "nothing_to_review",
+      says: "no commits ahead",
+    },
+    {
+      // …and the same status over a tree the delivery commit failed to clean is
+      // a genuine failure: the deliverable is still sitting uncommitted.
+      push: {
+        status: "no_commits" as const,
+        reason: "no local commits ahead of the default branch",
+        defaultBranchEvidence: {
+          verified: false as const,
+          why: "the workspace still has uncommitted changes after the delivery commit attempt",
+        },
+      },
+      outcome: "failed",
       says: "no commits ahead",
     },
     {
@@ -294,7 +314,11 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     },
   ];
   for (const c of NOT_DELIVERABLE) {
-    it(`A3: a ${c.push.status} push opens NO PR and says so`, async () => {
+    const label =
+      c.push.status === "no_commits"
+        ? `a no_commits push over a ${c.push.defaultBranchEvidence?.verified ? "CLEAN" : "DIRTY"} tree`
+        : `a ${c.push.status} push`;
+    it(`A3: ${label} opens NO PR and says so`, async () => {
       seed({ stage: "review", branch: "vib-1" });
       pushMock.mockResolvedValue(c.push);
       const outcome = await performDelivery(

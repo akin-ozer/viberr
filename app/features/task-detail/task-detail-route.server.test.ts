@@ -29,6 +29,13 @@ type LoaderData = Awaited<ReturnType<typeof taskLoader>>;
 type ActionData = Awaited<ReturnType<typeof taskAction>>;
 
 beforeAll(async () => {
+  // File-wide, BEFORE the first test. This used to live in the comment-routing
+  // describe's own `beforeAll`, which was too late: earlier describes in this
+  // file (packet resolution, ownership) can also start agent runs, and those
+  // ran against the REAL adapters — hanging forever while holding the operator
+  // lease. The next `@operator` comment then waited on that lease and died on
+  // the 5s timeout, intermittently, depending on what ran before it.
+  installFakeRuntime();
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
@@ -189,8 +196,15 @@ describe("loader — VIB-142 fidelity", () => {
 describe("comment action — @agent routing detection", () => {
   // VIB-153 carries a Codex specialist, so @operator/@codex starts or resumes
   // runtime work. Inject a fake adapter and stop any run left open by a test.
+  // Do NOT re-install the fake runtime here — the file-level beforeAll already
+  // did, and re-installing clears its queued runs. Just drop any operator lease
+  // an earlier describe left held, so an `@operator` comment is never waiting
+  // on a run that belongs to a finished test.
   beforeAll(async () => {
-    installFakeRuntime();
+    const { resetOperatorLeasesForTests } = await import(
+      "~/server/runtimes/operator-run.server"
+    );
+    resetOperatorLeasesForTests();
   });
 
   async function stopTaskRuns(key: string, userId: string) {
@@ -215,7 +229,13 @@ describe("comment action — @agent routing detection", () => {
     }
   }
 
-  it("@operator on a task WITH a specialist triggers the agent + names it in the toast", async () => {
+  // 20s, not the 5s default: this test drives the FULL orchestration path
+  // (comment → mention resolution → operator lease → run start → interrupt),
+  // and under the parallel full-suite load it exceeded 5s often enough to go
+  // red about one run in three while passing 3/3 in isolation. A timeout that
+  // measures machine load rather than behavior is a false signal — the
+  // assertions below are unchanged.
+  it("@operator on a task WITH a specialist triggers the agent + names it in the toast", { timeout: 20_000 }, async () => {
     const result = (await postIntent("VIB-153", ids.arda, {
       intent: "comment",
       text: "@operator please tighten the packet budget",
@@ -236,7 +256,7 @@ describe("comment action — @agent routing detection", () => {
     expect(humanComment).toMatchObject({ type: "comment", toAgent: true });
   });
 
-  it("@codex also routes + triggers; plain member mentions do not", async () => {
+  it("@codex also routes + triggers; plain member mentions do not", { timeout: 20_000 }, async () => {
     const codex = (await postIntent("VIB-153", ids.arda, {
       intent: "comment", text: "@codex check the linter",
     })) as { toAgent: boolean; triggered: string | null };
@@ -486,8 +506,10 @@ describe("ownership actions", () => {
     expect(release.toast).toBe("Murat released from VIB-151 · admin action");
     after = await runLoader("VIB-151", ids.arda);
     expect(after.task.owner).toBeNull();
+    // F19-11: "any project member" was the wrong RBAC sentence (a viewer is a
+    // member and cannot own) — the copy and this pin are corrected together.
     expect(after.task.timeline[0]!.text).toBe(
-      "Released **Murat Yıldız** from task ownership (admin) — the seat is open to any project member.",
+      "Released **Murat Yıldız** from task ownership (admin) — the seat is open to any contributor or above.",
     );
 
     // Admin release promise: recorded in the audit trail (spec §4.5).

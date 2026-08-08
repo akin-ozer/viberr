@@ -5,6 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { authoredPacketOptions, buildOperatorSystemPrompt } from "./operator-run.server";
+import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -50,6 +51,33 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     expect(prompt).not.toContain("does-not-exist (knowledge base)");
     // C1: it is not injected AND it is not silent — see the section below.
     expect(prompt).toContain("Attached resources that did NOT reach this run");
+  });
+
+  it("R19-2: the operator gets the SAME repo-wins precedence rule the specialists get", () => {
+    // The owner ruled that repo-documented conventions outrank KB guidance and
+    // that the rule ships with EVERY KB injection. The operator coordinates the
+    // agents that write the files, so it must not be told a different story
+    // than they are — one exported constant, injected by both runtimes.
+    //
+    // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildOperatorSystemPrompt
+    // and the first two assertions fail.
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-kb-prec-"));
+    const kbDir = path.join(dataRoot, "kb", "house-style");
+    mkdirSync(kbDir, { recursive: true });
+    writeFileSync(path.join(kbDir, "style.md"), "# House\n\nKB-MARKER-HOUSE.", "utf8");
+
+    const prompt = buildOperatorSystemPrompt(authorityWith(["house-style"]), dataRoot);
+    expect(prompt).toContain(KB_PRECEDENCE_NOTE.trim());
+    // Stated once, and BEFORE the bodies it governs.
+    expect(prompt.split("Which source wins (knowledge bases vs the repository)").length - 1).toBe(1);
+    expect(prompt.indexOf("Which source wins")).toBeLessThan(
+      prompt.indexOf("house-style (knowledge base)"),
+    );
+
+    // …and an operator with no KB carries no rule about one.
+    expect(buildOperatorSystemPrompt(authorityWith([]), dataRoot)).not.toContain(
+      "Which source wins",
+    );
   });
 });
 

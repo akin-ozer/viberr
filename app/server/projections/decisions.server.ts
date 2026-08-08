@@ -28,12 +28,13 @@ import { isTerminalStage, resolveStageRoles } from "~/shared/workflow/stage-role
  * the queue. The union belongs HERE, in the shared helper, so every surface
  * inherits it. The acceptance predicate mirrors the review queue's `isReady`:
  * the resolved review stage, `waiting = human`, no projected acceptance block
- * (`validation_block_reason` — failing verdict / awaiting reviewer / no
- * delivered revision / R15-1's verdict gate on delivered work), and a review PR
- * that was not closed unmerged (a rejected PR needs a rework/reopen/archive
- * call, not acceptance). The gate reaches both queues through the PROJECTION
- * (rebuilder.server.ts `acceptanceBlockReason`) rather than being re-derived
- * here, so this predicate and the server's refusal cannot drift apart.
+ * (`validation_block_reason` — a closed PR, a failing verdict, an awaiting
+ * reviewer, no delivered revision, R15-1's verdict gate on delivered work, an
+ * open blocked packet, or a conflicting PR), and a review PR that was not closed
+ * unmerged (a rejected PR needs a rework/reopen/archive call, not acceptance).
+ * The gate reaches both queues through the PROJECTION (rebuilder.server.ts
+ * `acceptanceBlockReason`) rather than being re-derived here, so this predicate
+ * and the server's refusal cannot drift apart.
  *
  * Member-scoping (the fix): a decision is `mine` iff the user can actually act
  * on it — maintainer+ on that project (resolve-packet / accept-completion /
@@ -128,6 +129,17 @@ export function decisionsRequiring(
   // decision OBJECT. Predicate parity with the review queue's `isReady`
   // (review-queue.server.ts): resolved review stage, waiting on a human, no
   // projected acceptance block, and no PR closed unmerged.
+  //
+  // UX19-3: that parity claim went STALE. `validation_block_reason` used to carry
+  // only the reviewer/verdict half of the gate, so the queue compensated with a
+  // LOCAL re-derivation of the two missing refusals (`gateBlockedByKey` — an open
+  // blocked packet, a conflicting PR) and this query compensated with nothing. A
+  // review-stage, human-waiting, packet-less task whose PR was
+  // `mergeable: "conflicting"` therefore emitted `kind: "acceptance"` into
+  // "decisions requiring you" — an acceptance `acceptanceRefusalReason` refuses —
+  // while the queue correctly filed the same task under "Still in review". Both
+  // refusals now live in the projected column itself, so the ONE predicate below
+  // is again the whole gate and the two readers cannot drift.
   const acceptanceRows = db
     .prepare(
       `SELECT project_slug, task_key, stage, owner_user_id

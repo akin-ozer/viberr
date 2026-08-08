@@ -1,0 +1,124 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
+import type { TaskSummary } from "~/shared/mapping/task.server";
+import { rolesForAction } from "~/shared/rbac";
+import {
+  ExecutionProfile,
+  type DeployedSpecialistView,
+  type TaskMemberView,
+} from "./execution-profile";
+
+afterEach(cleanup);
+
+/**
+ * F19-11 — the human-owner cell described ownership as "open to any project
+ * member" while the control rendered beside it, in the SAME cell, said "a
+ * contributor or above can take it". `own-task` is admin/maintainer/contributor
+ * (app/shared/rbac.ts) and a viewer IS a project member, so the first line
+ * misdescribed the matrix — and a viewer saw both sentences at once.
+ */
+
+const membersFixture: TaskMemberView[] = [
+  { userId: "u-elif", role: "admin", user: { name: "Elif Demir", initials: "ED", tone: "rose" } },
+  { userId: "u-arda", role: "viewer", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
+];
+
+const deployedFixture: DeployedSpecialistView[] = [
+  { id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large" },
+];
+
+/** An UNOWNED task — `owner: null` is the branch this finding lives in. */
+function unownedTask(): TaskSummary {
+  return {
+    key: "VIB-151",
+    title: "Compress long-running task timelines",
+    projectSlug: "viberr-core",
+    waiting: "agent",
+    packet: null,
+    owner: null,
+    specialist: null,
+    reviewers: [],
+    operator: null,
+  } as unknown as TaskSummary;
+}
+
+function renderExec(props: Partial<Record<string, unknown>> = {}) {
+  return render(
+    <MemoryRouter>
+      <ExecutionProfile
+        task={unownedTask()}
+        meId="u-arda"
+        myRole="admin"
+        members={membersFixture}
+        busy={false}
+        onOwner={() => {}}
+        onRelease={() => {}}
+        deployedSpecialists={deployedFixture}
+        operatorBackend="claude"
+        backendAvailable={{ claude: true, codex: true }}
+        canRunAgents
+        deliveringActive={false}
+        activeReviewerIds={[]}
+        operatorRunActive={false}
+        runBusy={false}
+        onAssignSpecialist={() => {}}
+        onRunSpecialist={() => {}}
+        reviewerBusy={false}
+        onAssignReviewer={() => {}}
+        onRunReviewer={() => {}}
+        onRemoveReviewer={() => {}}
+        operatorBusy={false}
+        onRunOperator={() => {}}
+        {...props}
+      />
+    </MemoryRouter>,
+  );
+}
+
+const OWNERSHIP_COPY = "Unowned — a contributor or above can take it";
+
+describe("ExecutionProfile — unowned copy matches the RBAC matrix (F19-11)", () => {
+  it("the matrix this copy claims: own-task excludes viewer", () => {
+    // The copy says "a contributor or above". If the matrix ever widens
+    // `own-task` to viewers (or narrows it past contributor), this test fails
+    // FIRST and the sentence gets rewritten with it.
+    const roles = rolesForAction("own-task");
+    expect([...roles].sort()).toEqual(["admin", "contributor", "maintainer"]);
+    expect(roles).not.toContain("viewer");
+  });
+
+  it("an unowned task never claims ownership is open to any project member", () => {
+    const { container } = renderExec();
+    expect(container.textContent).not.toContain("open to any project member");
+  });
+
+  it("admin: the eligibility line is stated once, next to the take affordance", () => {
+    const { container, getAllByText } = renderExec({ myRole: "admin" });
+    expect(getAllByText(OWNERSHIP_COPY)).toHaveLength(1);
+    // The affordance itself is still offered to a role that holds `own-task`.
+    expect(
+      [...container.querySelectorAll("button")].some((b) =>
+        b.textContent?.includes("Assign me"),
+      ),
+    ).toBe(true);
+  });
+
+  it("viewer: same single line, no take affordance, no contradicting sibling", () => {
+    const { container, getAllByText } = renderExec({
+      myRole: "viewer",
+      canRunAgents: false,
+    });
+    expect(getAllByText(OWNERSHIP_COPY)).toHaveLength(1);
+    // And it is the ONLY ownership sentence: the pre-fix render printed the
+    // (wrong) cell copy AND the control's own sentence — two claims about who
+    // may own, disagreeing, side by side in one cell.
+    expect(getAllByText(/^Unowned/)).toHaveLength(1);
+    expect(
+      [...container.querySelectorAll("button")].some((b) =>
+        b.textContent?.includes("Assign me"),
+      ),
+    ).toBe(false);
+  });
+});

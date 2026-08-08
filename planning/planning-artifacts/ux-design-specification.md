@@ -345,7 +345,19 @@ A practical palette direction is:
 
 Both light and dark themes should be supported, but semantic meaning must remain consistent across modes. Core workflow views should avoid decorative gradients, glow effects, or ornamental color treatments. If atmospheric visual treatments are used at all, they should stay outside the main operational surfaces.
 
-> **Superseded — the concrete palette above is advisory and the build did not take it.** The shipped palette is `design/design-system.html` (a bright Miro-inspired canvas): a `#5b76fe` blue accent rather than steel blue, pastel semantic surfaces, a violet agent-identity tint distinct from human blue, and two heavily transparent radial gradients washing the page background behind opaque surfaces. `app/app.css`'s `:root` block is the single source of the real tokens; use those names, never a literal hex. The *principles* in this section still hold and are enforced — color never operates alone, semantic meaning stays consistent across light and dark, and the light theme's secondary text ladder is contrast-constrained rather than free.
+> **Superseded — the concrete palette above is advisory and the build did not take it.** The shipped palette *direction* is `design/design-system.html` (a bright Miro-inspired canvas): a `#5b76fe` blue accent rather than steel blue, pastel semantic surfaces, a violet agent-identity tint distinct from human blue, and two heavily transparent radial gradients washing the page background behind opaque surfaces. `app/app.css`'s `:root` block is the single source of the real tokens; use those names, never a literal hex. The *principles* in this section still hold and are enforced — color never operates alone, semantic meaning stays consistent across light and dark, and the light theme's secondary text ladder is contrast-constrained rather than free.
+
+> **`design/design-system.html` is a reference MOCK, not the token source — and it has itself drifted.** *(Recorded 2026-08-06, pass 19 — N19-4.)* The note above and the one under Typography both cited the mock as "the shipped X", which reads as an authority claim it cannot support: the mock is a static prototype nobody re-renders, while `app/app.css` is compiled into the product on every build. Where they disagree the **app is right and the doc is what gets corrected**. Five values verified against `app/app.css` on 2026-08-06:
+>
+> | `design/design-system.html` `:root` | `app/app.css` `:root` (shipped) |
+> |---|---|
+> | `--radius-card: 18px` | `--radius-card: 16px` |
+> | `--radius-panel: 28px` | `--radius-panel: 22px` |
+> | `--radius-large: 44px` (the large `.system-card` canvas radius) | **not ported** — no such token. The shipped radius vocabulary is exactly four: button `8px`, chip `999px`, card `16px`, panel `22px`. |
+> | `--pink: #fde0f0`, `--dark-red: #e3c5c5` | **not ported** — neither is ever declared. Pink-adjacent surfaces use `--rose-light` / `--red-light`, which both files define. |
+> | `--font-display: "Roobert PRO Medium", …` | `--font-display: "Manrope", …` — see the Typography note below. |
+>
+> The two radius tightenings were deliberate at port time; the rest are simply tokens the port did not take. Nothing in the product can reach for the unported four by accident: the porting rule is **a `var(--x)` that is not defined in `:root` is a bug, not a style choice**, and `app/app.css.test.ts` enforces it with no allowlist ("every var(--x) reference resolves to a declared token"). So the drift is a *documentation* hazard only — nobody's build breaks, a reader is just told the wrong number. Which is exactly why it is written down here instead of left for the next reader to re-derive: the mock stays as the visual reference it is good at being, and the token values are read from the stylesheet.
 
 ### Typography System
 
@@ -370,7 +382,9 @@ A practical type strategy:
 - moderate body line-height
 - tighter spacing for labels, metadata, and compact operational blocks
 
-> **Superseded — the named typefaces are advisory and the build did not take them.** The shipped stack comes from `design/design-system.html`: Roobert PRO Medium for display, Noto Sans for body, JetBrains Mono for the technical/reference role. The mono-used-intentionally rule and the scan-first hierarchy above are honoured; only the family names changed.
+> **Superseded — the named typefaces are advisory and the build did not take them.** The shipped stack is `app/app.css`'s `:root`: **Manrope** for display (`--font-display`), **Noto Sans** for body (`--font-body`), **JetBrains Mono** for the technical/reference role (`--font-mono`) — all three bundled and self-hosted (`@fontsource/manrope` 500/600/700/800, `@fontsource/noto-sans` 400–700, `@fontsource/jetbrains-mono` 400–600, imported in `app/root.tsx`). The mono-used-intentionally rule and the scan-first hierarchy above are honoured; only the family names changed.
+>
+> *(Corrected 2026-08-06, pass 19 — N19-2. This note previously named **Roobert PRO Medium** for display and cited `design/design-system.html` as the shipped stack. Roobert has never shipped anywhere in the product: the mock declares it, the app does not, and no Roobert font file is bundled. The app once carried the mock's Roobert-first stack in its token block while a second `:root` 2600 lines further down silently overrode it with Manrope — P16-UI-04 deleted the duplicate, so `--font-display` is now declared exactly once, at the token block, and `app/app.css.test.ts` pins that count. A superseding note that has itself gone stale is worse than the advisory text it supersedes, because it is the line a reader trusts instead of checking; so the citation now points at the stylesheet, the one source that cannot drift from itself.)*
 
 ### Spacing & Layout Foundation
 

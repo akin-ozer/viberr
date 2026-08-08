@@ -106,6 +106,9 @@ function OwnerControl({
 
   if (!o) {
     // Only contributor+ may take ownership (Q5) — hide from viewers/non-members.
+    // F19-11: the eligibility sentence now lives in the cell's VALUE (it was
+    // the half that misdescribed the matrix), stated once for every role — so
+    // this control renders the affordance or nothing, never a second copy.
     return canOwn ? (
       <button
         type="button"
@@ -117,9 +120,7 @@ function OwnerControl({
         <Icon name="plus" />
         Assign me
       </button>
-    ) : (
-      <span className="sub">Unowned — a contributor or above can take it</span>
-    );
+    ) : null;
   }
 
   // Hand-off requires being the current owner or holding the manage-others tier
@@ -799,7 +800,15 @@ export function ExecutionProfile({
                 </span>
               )}
               {!o && (
-                <span className="sub">Unowned — open to any project member</span>
+                // F19-11: this read "open to any project member", which the
+                // RBAC matrix contradicts on the very next line of the same
+                // row — `own-task` is admin/maintainer/contributor (rbac.ts:65),
+                // and a viewer IS a project member. The sibling copy inside
+                // OwnerControl had it right, so the two disagreed in one cell.
+                // Ownership eligibility is stated here, once, for every role.
+                <span className="sub">
+                  Unowned — a contributor or above can take it
+                </span>
               )}
               <OwnerControl
                 task={task}

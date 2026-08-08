@@ -11,6 +11,7 @@ import {
   projectFilePath,
   taskFilePath,
 } from "~/server/files/file-store-root.server";
+import type { TaskPacket } from "~/schemas/task-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
 import { rebuildAll, rebuildPath, rebuildProject } from "./rebuilder.server";
@@ -445,6 +446,176 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
       (t) => t.key === "VIB-2",
     )!;
     expect(task.blockReason).toContain("closed on GitHub without merging");
+  });
+});
+
+/**
+ * UX19-3 — one projection row must not contradict itself.
+ *
+ * The row's `validation` column came from `fm.validation` (a CACHE the schema
+ * itself calls derived) while `validation_block_reason` beside it derived fresh
+ * from the same `fm`. A cache writer that skipped its recompute — or a
+ * hand-edited `validation:` line, which "files are canonical truth" lets through
+ * — put "validation healthy" on the review-queue card and the task hero pill at
+ * the same instant the gate underneath read "no approving verdict yet". Both
+ * columns now come from ONE derivation of ONE `fm` snapshot.
+ *
+ * The same fix closes the SPLIT gate: the projected reason now carries the two
+ * refusals it used to leave to each reader (open blocked packet, conflicting PR),
+ * which is what `acceptanceRefusalReason` has always enforced on the writers.
+ */
+describe("UX19-3: the projected validation column and the acceptance gate agree", () => {
+  const REV = {
+    id: "rev_ux3",
+    headSha: "e".repeat(40),
+    treeSha: "f".repeat(40),
+    branch: "vib-9-work",
+    createdAt: "2026-08-06T00:00:00.000Z",
+    sourceProfileId: "developer",
+  };
+  const REVIEWER = {
+    profileId: "reviewer",
+    backend: "claude" as const,
+    role: "Review",
+    delivers: false,
+    verdictCapable: true,
+  };
+  const APPROVAL = {
+    profileId: "reviewer",
+    revisionId: REV.id,
+    headSha: REV.headSha,
+    result: "approve" as const,
+    reason: "looks good",
+    at: "2026-08-06T01:00:00.000Z",
+  };
+
+  function seed(
+    store: ReturnType<typeof setupTestStore>,
+    patch: Record<string, unknown>,
+    packet: TaskPacket | null = null,
+  ) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        stage: "review",
+        waiting: "human",
+        readiness: "ready",
+        branch: REV.branch,
+        workRevision: REV,
+        engagements: [REVIEWER],
+        pr: { number: 900, state: "review", title: "Work" },
+        ...patch,
+      }),
+      ...(packet ? { packet } : {}),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    return listProjectTasks(store.db, store.slug).find((t) => t.key === "VIB-9")!;
+  }
+
+  it("projects the DERIVED validation, not a stale `validation: healthy` cache", () => {
+    const store = setupTestStore(ctx);
+    // The file CLAIMS healthy; the engaged reviewer has recorded no verdict on
+    // the current revision, so the derivation says `changed`. This is exactly
+    // what `removeReviewer` leaves behind after dropping the sole approver.
+    const task = seed(store, { validation: "healthy", verdicts: [] });
+    expect(task.validation).toBe("changed");
+    // …and the gate beside it agrees, from the same snapshot.
+    expect(task.blockReason).toMatch(/Waiting on 1 required reviewer approval/);
+  });
+
+  it("a genuinely approved revision still projects healthy with no block", () => {
+    const store = setupTestStore(ctx);
+    // The mirror case: the derivation is what makes the pill trustworthy, so it
+    // must still say `healthy` when the verdicts really are in — even when the
+    // file's cached line is stale in the OTHER direction.
+    const task = seed(store, { validation: "none", verdicts: [APPROVAL] });
+    expect(task.validation).toBe("healthy");
+    expect(task.blockReason).toBeNull();
+  });
+
+  it("a CONFLICTING PR blocks acceptance in the projected column (P14-LV-07)", () => {
+    const store = setupTestStore(ctx);
+    const task = seed(store, {
+      verdicts: [APPROVAL],
+      pr: {
+        number: 900,
+        state: "review",
+        title: "Work",
+        mergeable: "conflicting",
+      },
+    });
+    // Approved and healthy — the ONLY thing standing in the way is the conflict,
+    // which used to be left to each reader to re-derive (and one of them didn't).
+    expect(task.validation).toBe("healthy");
+    expect(task.blockReason).toBe(
+      "VIB-9's review PR #900 conflicts with the base branch — GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
+    );
+  });
+
+  it("an OPEN BLOCKED PACKET blocks acceptance in the projected column", () => {
+    const store = setupTestStore(ctx);
+    const task = seed(
+      store,
+      { readiness: "blocked", verdicts: [APPROVAL] },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Credentials missing",
+        body: "",
+        observations: [],
+        options: [],
+      },
+    );
+    expect(task.blockReason).toBe(
+      "This task has an open blocked decision — resolve the operator's packet before accepting it.",
+    );
+  });
+
+  it("keeps `acceptanceRefusalReason`'s order: the closed PR outranks both new gates", () => {
+    const store = setupTestStore(ctx);
+    const task = seed(
+      store,
+      {
+        readiness: "blocked",
+        verdicts: [APPROVAL],
+        pr: {
+          number: 900,
+          state: "closed",
+          title: "Work",
+          mergeable: "conflicting",
+        },
+      },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Credentials missing",
+        body: "",
+        observations: [],
+        options: [],
+      },
+    );
+    expect(task.blockReason).toContain("closed on GitHub without merging");
+  });
+
+  it("an `input` packet is not a blocked decision and does not gate acceptance", () => {
+    const store = setupTestStore(ctx);
+    // Both halves of the writers' predicate are required: `readiness: blocked`
+    // alone, or an `input` packet alone, is not the refusal.
+    const task = seed(
+      store,
+      { readiness: "blocked", verdicts: [APPROVAL] },
+      {
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "Pick one",
+        body: "",
+        observations: [],
+        options: [],
+      },
+    );
+    expect(task.blockReason).toBeNull();
   });
 });
 

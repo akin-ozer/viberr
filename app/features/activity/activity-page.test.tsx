@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
-import { ActivityPage, actIcon } from "./activity-page";
+import {
+  ActivityPage,
+  actIcon,
+  AUDIT_COMPACT_MIN,
+  compactAuditEntries,
+  isRuntimeSessionOpen,
+} from "./activity-page";
 import {
   auditTimeLabel,
   auditTimeLabelUTC,
@@ -312,6 +320,319 @@ describe("stream vocabulary (P14-UI-62)", () => {
     expect(
       container.querySelector(".pev-ico svg")!.innerHTML,
     ).toContain("circle");
+  });
+});
+
+/**
+ * R19-7 (closes UX19-5) — the audit column compacts consecutive
+ * runtime-session-open rows.
+ *
+ * Observed live on a 1440px viewport: 8 of the 9 rows the "Audit logs · policy
+ * & access · all actors" column had room for were the identical "operator
+ * opened the <role> runtime session — recorded per audit policy on VC-4". The
+ * credential assignment, the scope re-check and the project creation the column
+ * exists to surface were below the fold, buried by routine agent bookkeeping —
+ * "calm over chatter / human attention is scarce" inverted.
+ *
+ * Audit policy requires the event, so the ruling is compaction, not removal:
+ * the run folds into one "N runtime sessions opened" row that gives every row
+ * back — with its own real timestamp — on one click.
+ */
+const RUNTIME_SESSION_TEXT =
+  "operator opened the Developer runtime session — recorded per audit policy on";
+
+function session(id: number, h: number, m: number): AuditLogEntryView {
+  return {
+    id: `evt_run_${id}`,
+    kind: "audit",
+    text: RUNTIME_SESSION_TEXT,
+    taskKey: "VC-4",
+    occurredAt: iso(0, h, m),
+    status: null,
+    resolvedAt: null,
+    resolvedBy: null,
+  };
+}
+
+const CREDENTIAL: AuditLogEntryView = {
+  id: "evt_cred",
+  kind: "change",
+  text: "Arda Kaya assigned the project GitHub credential.",
+  taskKey: null,
+  occurredAt: iso(0, 8, 30),
+  status: null,
+  resolvedAt: null,
+  resolvedBy: null,
+};
+
+const ROLE_CHANGE: AuditLogEntryView = {
+  id: "evt_role",
+  kind: "change",
+  text: "Elif Demir set Murat Yilmaz to **maintainer**.",
+  taskKey: null,
+  occurredAt: iso(1, 9, 15),
+  status: null,
+  resolvedAt: null,
+  resolvedBy: null,
+};
+
+describe("audit-column compaction (R19-7)", () => {
+  it("recognises the row by the projection's OWN sentence, not a guess", () => {
+    // The view model carries no action name, so the fold matches on rendered
+    // text. Pin that text to the projection that writes it: reword
+    // `runtime.run.started` and this fails here rather than silently
+    // un-compacting the column.
+    // Resolved from the vitest root, not `import.meta.url`: under jsdom that
+    // is an http: URL and `fileURLToPath` throws.
+    const src = readFileSync(
+      path.resolve(process.cwd(), "app/server/projections/activity-feed.server.ts"),
+      "utf8",
+    );
+    const template = /case "runtime\.run\.started":[\s\S]*?return `([^`]+)`/.exec(
+      src,
+    );
+    expect(template, "runtime.run.started must still have a text template")
+      .toBeTruthy();
+    const rendered = template![1]!
+      .replace("${actor}", "operator")
+      .replace("${role}", "Reviewer");
+    // A renamed interpolation is a reworded sentence too.
+    expect(rendered).not.toContain("${");
+    expect(isRuntimeSessionOpen({ ...session(1, 9, 0), text: rendered })).toBe(
+      true,
+    );
+    // The WHOLE trailing sentence is required, end-anchored — see the spoof
+    // test below for why. A row that merely opens with the phrase, or that
+    // carries anything after the audit-policy tail, is not this event.
+    expect(
+      isRuntimeSessionOpen({
+        ...session(1, 9, 0),
+        text: "operator opened the Reviewer runtime session.",
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeSessionOpen({ ...session(1, 9, 0), text: `${rendered} VC-4` }),
+    ).toBe(false);
+  });
+
+  /**
+   * The recogniser reads `entry.text`, and `entry.text` OPENS with the actor's
+   * display name — which any member sets for themselves (`app/routes/
+   * profile.tsx`). So the fold must not be reachable from a name. It is not,
+   * because the pattern is anchored to the projection's whole trailing
+   * sentence and every audit template puts fixed words AFTER `${actor}`; a
+   * name can only ever be a prefix.
+   *
+   * Derived from the projection's own `AUDIT_ACTION_KINDS` map rather than a
+   * hand-listed set: add a new "audit" action whose sentence happens to end
+   * `runtime session — recorded per audit policy on` and this fails.
+   */
+  it("a member cannot spoof the fold with their display name", () => {
+    const src = readFileSync(
+      path.resolve(process.cwd(), "app/server/projections/activity-feed.server.ts"),
+      "utf8",
+    );
+    const map = /const AUDIT_ACTION_KINDS[\s\S]*?\n\};/.exec(src)![0];
+    const auditActions = [...map.matchAll(/"([\w.]+)":\s*"(\w+)"/g)]
+      .filter(([, , kind]) => kind === "audit")
+      .map(([, action]) => action!);
+    // The families the column exists for must be in scope, or this proves
+    // nothing.
+    expect(auditActions).toContain("task.acceptance.forced");
+    expect(auditActions).toContain("project.org_admin.override");
+    expect(auditActions).toContain("runtime.run.started");
+
+    // The exact name a hostile member would pick: their own row, quoting the
+    // sentence the fold looks for.
+    const names = [
+      "Mallory (opened the dev runtime session)",
+      "Mallory (opened the dev runtime session — recorded per audit policy on)",
+      "opened the dev runtime session — recorded per audit policy on",
+    ];
+
+    for (const action of auditActions) {
+      const from = src.indexOf(`case "${action}":`);
+      expect(from, `${action} must have a template`).toBeGreaterThan(-1);
+      const rest = src.slice(from + action.length + 8);
+      const stop = /\n    (?:case "|default:)/.exec(rest);
+      const block = rest.slice(0, stop ? stop.index : rest.length);
+      const templates = [...block.matchAll(/`([^`]*)`/g)].map((m) => m[1]!);
+      expect(templates.length, `${action} must render a sentence`)
+        .toBeGreaterThan(0);
+
+      for (const template of templates) {
+        for (const name of names) {
+          const text = template
+            .replace("${actor}", name)
+            .replace(/\$\{[^}]*\}/g, "X");
+          // Rows ending in " on" expect the task chip; `finishText` swaps the
+          // dangler for "." when there is none. Both forms must behave.
+          for (const rendered of [text, text.replace(/ on$/, ".")]) {
+            expect(
+              isRuntimeSessionOpen({ ...session(1, 9, 0), text: rendered }),
+              `${action} + display name "${name}" → ${rendered}`,
+            ).toBe(action === "runtime.run.started" && rendered === text);
+          }
+        }
+      }
+    }
+  });
+
+  it("a spoofed name does not fold the two override rows away", () => {
+    // The live consequence, end to end: a force-accept and an org-admin
+    // override, authored back to back by a member whose display name quotes
+    // the session sentence. They are the whole point of the audit column —
+    // they must render as two rows, not as "2 runtime sessions opened".
+    const spoof = "Mallory (opened the dev runtime session)";
+    const forced: AuditLogEntryView = {
+      id: "evt_forced",
+      kind: "audit",
+      text: `${spoof} force-accepted the completion, bypassing the required reviewer — on`,
+      taskKey: "VC-4",
+      occurredAt: iso(0, 9, 20),
+      status: null,
+      resolvedAt: null,
+      resolvedBy: null,
+    };
+    const override: AuditLogEntryView = {
+      id: "evt_override",
+      kind: "audit",
+      text: `${spoof} used the org-admin override to accept a completion (project role: not a member).`,
+      taskKey: null,
+      occurredAt: iso(0, 9, 18),
+      status: null,
+      resolvedAt: null,
+      resolvedBy: null,
+    };
+    const rows = compactAuditEntries([forced, override]);
+    expect(rows.map((r) => (r.compacted ? "compacted" : r.entry.id))).toEqual([
+      "evt_forced",
+      "evt_override",
+    ]);
+
+    const { container, queryByText } = renderActivity(STREAM, [
+      forced,
+      override,
+    ]);
+    expect(container.querySelectorAll(".pev-list .pol-ev")).toHaveLength(2);
+    expect(queryByText("2 runtime sessions opened")).toBeNull();
+    expect(container.textContent).toContain("force-accepted the completion");
+    expect(container.textContent).toContain("used the org-admin override");
+  });
+
+  it("only folds the audit-kind session row — never a lookalike", () => {
+    expect(isRuntimeSessionOpen(session(1, 9, 0))).toBe(true);
+    // Same sentence filed as a policy violation is a different event class; it
+    // keeps its own row and its open/resolved pill.
+    expect(
+      isRuntimeSessionOpen({ ...session(1, 9, 0), kind: "violation" }),
+    ).toBe(false);
+    expect(isRuntimeSessionOpen(CREDENTIAL)).toBe(false);
+    expect(
+      isRuntimeSessionOpen({
+        ...session(1, 9, 0),
+        text: "operator interrupted an agent run — recorded per audit policy on",
+      }),
+    ).toBe(false);
+  });
+
+  it("folds a consecutive run into one row, keeping order and every entry", () => {
+    const entries = [
+      session(1, 9, 40),
+      session(2, 9, 35),
+      session(3, 9, 30),
+      CREDENTIAL,
+      ROLE_CHANGE,
+    ];
+    const rows = compactAuditEntries(entries);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]!.compacted).toBe(true);
+    expect(
+      rows[0]!.compacted ? rows[0]!.entries.map((e) => e.id) : [],
+    ).toEqual(["evt_run_1", "evt_run_2", "evt_run_3"]);
+    // Real policy/access events keep their own rows, in place.
+    expect(rows[1]!.compacted ? null : rows[1]!.entry.id).toBe("evt_cred");
+    expect(rows[2]!.compacted ? null : rows[2]!.entry.id).toBe("evt_role");
+  });
+
+  it("a run is CONSECUTIVE — a real event between two sessions splits it", () => {
+    const rows = compactAuditEntries([
+      session(1, 9, 40),
+      session(2, 9, 35),
+      CREDENTIAL,
+      session(3, 9, 20),
+      session(4, 9, 15),
+    ]);
+    expect(rows.map((r) => (r.compacted ? "compacted" : r.entry.id))).toEqual([
+      "compacted",
+      "evt_cred",
+      "compacted",
+    ]);
+  });
+
+  it("a lone session row stays verbatim — one row folded into one saves nothing", () => {
+    expect(AUDIT_COMPACT_MIN).toBe(2);
+    const rows = compactAuditEntries([CREDENTIAL, session(1, 9, 40), ROLE_CHANGE]);
+    expect(rows.every((r) => !r.compacted)).toBe(true);
+    expect(rows).toHaveLength(3);
+  });
+
+  it("never folds anything else, however repetitive", () => {
+    const repeated = [CREDENTIAL, { ...CREDENTIAL, id: "evt_cred_2" }];
+    expect(compactAuditEntries(repeated).every((r) => !r.compacted)).toBe(true);
+  });
+
+  it("renders the live case as one summary row, with the real events visible", () => {
+    const flood = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => session(n, 9, 50 - n));
+    const { container, getByText, queryByText } = renderActivity(STREAM, [
+      ...flood,
+      CREDENTIAL,
+      ROLE_CHANGE,
+    ]);
+    const rows = container.querySelectorAll(".pev-list .pol-ev");
+    // 8 + 2 entries collapse to 3 rows: the summary and the two real events.
+    expect(rows).toHaveLength(3);
+    expect(getByText("8 runtime sessions opened")).toBeTruthy();
+    // The repeated sentence is gone from the column while folded…
+    expect(queryByText(RUNTIME_SESSION_TEXT)).toBeNull();
+    // …and the events the column exists for are on screen, not below the fold.
+    expect(container.textContent).toContain(
+      "assigned the project GitHub credential",
+    );
+    expect(container.textContent).toContain("Elif Demir set Murat Yilmaz to");
+    // The summary is agent bookkeeping, tinted as the audit rows it stands for.
+    expect(rows[0]!.querySelector(".pev-ico.audit")).toBeTruthy();
+    // Anchored at the newest of the run (entries arrive newest-first).
+    expect(rows[0]!.querySelector(".pev-t")!.textContent).toBe("today 09:49");
+  });
+
+  it("expanding gives every folded row back with its own real timestamp", () => {
+    const { container, getByText } = renderActivity(STREAM, [
+      session(1, 9, 40),
+      session(2, 9, 35),
+      session(3, 9, 30),
+      CREDENTIAL,
+    ]);
+    const toggle = getByText("Show each");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(toggle);
+    const expanded = getByText("Hide sessions");
+    expect(expanded.getAttribute("aria-expanded")).toBe("true");
+    const subs = container.querySelectorAll(".pev-list .pol-ev.pev-sub");
+    expect(subs).toHaveLength(3);
+    expect([...subs].map((r) => r.querySelector(".pev-t")!.textContent)).toEqual(
+      ["today 09:40", "today 09:35", "today 09:30"],
+    );
+    // Real rows, not a summary: each keeps its text and its task chip.
+    expect(subs[0]!.textContent).toContain("runtime session");
+    expect(subs[0]!.querySelector(".keybtn")!.textContent).toBe("VC-4");
+
+    fireEvent.click(expanded);
+    expect(
+      container.querySelectorAll(".pev-list .pol-ev.pev-sub"),
+    ).toHaveLength(0);
+    expect(getByText("Show each")).toBeTruthy();
   });
 });
 

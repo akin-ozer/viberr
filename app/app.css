@@ -2177,6 +2177,11 @@ dialog[data-closing]::backdrop {
 /* P13-D-18: was var(--link, …); --link is defined nowhere, so only the fallback
    ever rendered. Resolved to the token that was already doing the work. */
 .act-toggle { font-size: .78rem; font-weight: 600; color: var(--teal-dark); }
+/* R19-7: the rows an "N runtime sessions opened" summary stands for, revealed
+   in place. Indented to the summary's TEXT column — the `.pev-ico` box (26px)
+   plus the `.pol-ev` gap (.65rem) — so the run reads as belonging to the line
+   that folded it rather than as N new top-level entries. */
+.pol-ev.pev-sub { padding-left: 2.28rem; }
 .pev-t { font-family: var(--font-mono); font-size: .7rem; color: var(--placeholder); flex: none; padding-top: .3rem; white-space: nowrap; }
 
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { TaskSummary } from "~/shared/mapping/task.server";
@@ -34,6 +35,10 @@ function task(patch: Partial<TaskSummary> = {}): TaskSummary {
     urgent: false,
     validation: "none",
     blockReason: null,
+    // F19-27: the projected stage gate. "In Progress" is the stage with the
+    // edge into Done in STAGES above, so the default card really is at the
+    // boundary — an off-boundary case sets this false alongside its stage.
+    atAcceptanceBoundary: true,
     owner: null,
     specialist: null,
     reviewers: [],
@@ -583,5 +588,524 @@ describe("R16-6: the card says when Done still needs a human", () => {
       expect(queryByText("closed"), state).toBeNull();
       unmount();
     }
+  });
+});
+
+/**
+ * F19-13 — the two board layouts are one board. The card foot drew the
+ * PR-state, failing-checks and changes-requested pills; the list row drew none
+ * of them, so a task whose Done still owes a human merge (R16-6 / ruling 40)
+ * read "merge pending" under Board and looked finished under List — one toggle
+ * apart, same stored state.
+ */
+describe("F19-13: the list row reads the same state the card does", () => {
+  const listRow = (tasks: TaskSummary[]) =>
+    renderBoard(tasks, { view: "list" }).container.querySelector(".list-row")!
+      .textContent!;
+
+  it("draws `merge pending` on an accepted-but-unmerged PR", () => {
+    expect(
+      listRow([
+        task({
+          stage: "done",
+          displayReadiness: "accepted",
+          pr: { number: 124, state: "accepted", title: "Attach a credential" },
+        }),
+      ]),
+    ).toContain("merge pending");
+  });
+
+  it("draws the `closed` pill on a PR closed without merging", () => {
+    expect(
+      listRow([task({ pr: { number: 124, state: "closed", title: "t" } })]),
+    ).toContain("closed");
+  });
+
+  it("draws failing checks and a changes-requested review", () => {
+    const text = listRow([
+      task({
+        pr: { number: 124, state: "review", title: "t" },
+        prChecks: { total: 3, passing: 2, failing: 1, pending: 0, state: "failing" },
+        prReview: "changes_requested",
+      }),
+    ]);
+    expect(text).toContain("1/3 checks failing");
+    expect(text).toContain("changes requested");
+  });
+
+  it("keeps the same silences — merged and in-review earn no pill in either view", () => {
+    for (const view of [undefined, "list"] as const) {
+      for (const state of ["merged", "review"] as const) {
+        const { queryByText, unmount } = renderBoard(
+          [task({ pr: { number: 124, state, title: "t" } })],
+          view ? { view } : {},
+        );
+        expect(queryByText("merge pending"), `${view}/${state}`).toBeNull();
+        expect(queryByText("closed"), `${view}/${state}`).toBeNull();
+        unmount();
+      }
+    }
+  });
+});
+
+/**
+ * F19-8 — an ARCHIVED card kept every live control and every live claim under a
+ * banner calling the work abandoned: the readiness pill still said someone owed
+ * a verdict, the validation pill and wait tag still asserted obligations, and
+ * the Move menu still offered to walk the task into Done — where the same click
+ * runs the full acceptance contract and a real merge (R18-7). UXO-1 made
+ * exactly this cut on the task hero; the board is the surface that shows
+ * archived work by name.
+ */
+describe("F19-8: an archived card is inert and honest", () => {
+  const ARCHIVED = "filter=archived";
+  const archivedTask = (patch: Partial<TaskSummary> = {}) =>
+    task({
+      key: "VIB-9",
+      title: "Abandoned mid-review",
+      stage: "impl",
+      archived: true,
+      displayReadiness: "ready",
+      validation: "changed",
+      waiting: "agent",
+      urgent: true,
+      branch: "VIB-9-abandoned",
+      pr: { number: 124, state: "accepted", title: "Abandoned" },
+      ...patch,
+    } as Partial<TaskSummary>);
+
+  it("says `archived` instead of a readiness anyone owes", () => {
+    const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
+    const top = container.querySelector(".card-top")!.textContent!;
+    expect(top).toContain("archived");
+    // The live claims: "ready" (someone will act) and "awaiting verdict"
+    // (someone owes a verdict) — nobody does on abandoned work.
+    expect(top).not.toMatch(/\bready\b/);
+    expect(container.textContent).not.toContain("awaiting verdict");
+  });
+
+  it("drops every obligation pill and the wait tag, keeps the traceability chips", () => {
+    const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
+    const card = container.querySelector(".card")!.textContent!;
+    expect(card).not.toContain("merge pending");
+    expect(card).not.toContain("awaiting verdict");
+    expect(container.querySelector(".wait-tag")).toBeNull();
+    // "How far did this get?" stays answerable — the hero keeps its stage pill
+    // for the same reason.
+    expect(card).toContain("VIB-9");
+    expect(card).toContain("#124");
+    expect(card).toContain("VIB-9-abandoned");
+  });
+
+  it("keeps the urgent/waiting card treatment off an archived card", () => {
+    const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
+    const card = container.querySelector(".card")!;
+    expect(card.classList.contains("urgent")).toBe(false);
+    expect(card.classList.contains("wait-human")).toBe(false);
+  });
+
+  it("offers no Move control and no drag, even to a maintainer", () => {
+    const { container } = renderBoard([archivedTask()], {
+      search: ARCHIVED,
+      canTransition: true,
+    });
+    // The keyboard path into Done (an acceptance + real merge, R18-7).
+    expect(container.querySelector(".card-move")).toBeNull();
+    expect(
+      container.querySelector('[aria-label^="Change stage"]'),
+    ).toBeNull();
+    // The pointer path — the wrapper stops advertising itself as draggable.
+    expect(
+      container.querySelector(".card-wrap")!.classList.contains("draggable"),
+    ).toBe(false);
+  });
+
+  it("still lets a live card next to it move", () => {
+    // The guard is per-card, not a board-wide freeze.
+    const { container } = renderBoard([task({ key: "VIB-1" })]);
+    expect(container.querySelector(".card-move")).toBeTruthy();
+    expect(
+      container.querySelector(".card-wrap")!.classList.contains("draggable"),
+    ).toBe(true);
+  });
+
+  it("makes the same cut in the list view", () => {
+    const { container } = renderBoard([archivedTask()], {
+      search: ARCHIVED,
+      view: "list",
+    });
+    const row = container.querySelector(".list-row")!;
+    expect(row.textContent).toContain("archived");
+    expect(row.textContent).not.toContain("merge pending");
+    expect(row.textContent).not.toContain("awaiting verdict");
+    expect(container.querySelector(".wait-tag")).toBeNull();
+    // The row falls back to the static stage pill, like a viewer who cannot
+    // move tasks sees.
+    expect(container.querySelector('[aria-label^="Change stage"]')).toBeNull();
+    expect(row.textContent).toContain("In Progress");
+  });
+});
+
+/**
+ * F19-27 — the board acceptance confirm received `taskKey` + `stageName` and
+ * disclosed neither the PR it merges, the head it merges, nor the verdict it
+ * merges over, on a card whose own summary carries all three. Ruling 42 wants
+ * the divergence surfaced on "the accept dialog" and R18-7 says this IS an
+ * accept dialog — board acceptance runs the identical contract.
+ */
+describe("F19-27: the board accept confirm discloses what it merges", () => {
+  const openConfirm = (patch: Partial<TaskSummary>) => {
+    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
+      action: () => ({ ok: true as const, toast: "moved" }),
+    });
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
+  };
+
+  it("names the pull request and its state through the one PR-state map", () => {
+    expect(
+      openConfirm({
+        pr: { number: 124, state: "review", title: "Attach a credential" },
+      }),
+    ).toContain("PR #124 · in review");
+  });
+
+  it("warns that commits added since the review merge unreviewed (ruling 42)", () => {
+    const text = openConfirm({
+      pr: {
+        number: 124,
+        state: "review",
+        title: "Attach a credential",
+        revisionDrift: { aheadBy: 2, headSha: "a4c790ce63efbeef" },
+      },
+    });
+    expect(text).toContain("a4c790ce63ef");
+    expect(text).toContain("2 commits added since review");
+    expect(text).toContain("they merge unreviewed");
+  });
+
+  // F19-23: the noun was already switched here; the VERB was not, so a single
+  // drifted commit read "1 commit added since review; they merge unreviewed."
+  // Assert the whole clause — the old assertion stopped before the bug.
+  it("uses the singular for a single added commit, verb included", () => {
+    const text = openConfirm({
+      pr: {
+        number: 124,
+        state: "review",
+        title: "t",
+        revisionDrift: { aheadBy: 1, headSha: "a4c790ce63efbeef" },
+      },
+    });
+    expect(text).toContain("1 commit added since review");
+    expect(text).toContain("it merges unreviewed");
+    expect(text).not.toContain("they merge unreviewed");
+  });
+
+  it("shows the verdict it is about to accept over", () => {
+    expect(openConfirm({ validation: "changed" })).toContain("awaiting verdict");
+  });
+
+  it("states the standing refusal instead of spending the click on an error", () => {
+    expect(
+      openConfirm({ blockReason: "No reviewer verdict on the delivered revision." }),
+    ).toContain("No reviewer verdict on the delivered revision.");
+  });
+
+  it("says so honestly when there is no pull request to merge", () => {
+    const text = openConfirm({ pr: null });
+    expect(text).toContain("No linked pull request");
+    expect(text).not.toContain("PR #");
+  });
+});
+
+/**
+ * F19-27 (residual) — the confirm's "Blocked" row read `task.blockReason` alone
+ * and presented it as THE acceptance gate. It is the projected REVISION gate
+ * only: `acceptanceBlockReason` (rebuilder.server.ts) names four refusals it
+ * deliberately leaves to the reader — archived task, stage boundary, blocked
+ * packet, conflicting PR — while the server's `acceptanceRefusalReason`
+ * (task-actions.server.ts) enforces all of them on this exact click. Three are
+ * answerable from the summary the dialog already holds, so a task with an open
+ * blocked decision (or a PR GitHub cannot merge) used to open a confident
+ * dialog with no blocked row, and the server refused the click afterwards.
+ */
+describe("F19-27: the board confirm asks the server's own refusal questions", () => {
+  const openConfirm = (patch: Partial<TaskSummary>) => {
+    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
+      action: () => ({ ok: true as const, toast: "moved" }),
+    });
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
+  };
+
+  const blockedPacket = {
+    type: "blocked" as const,
+    kind: "Blocked decision",
+    from: "Operator",
+    title: "Credential missing",
+    body: "",
+    observations: [],
+    options: [],
+  };
+
+  it("names an open blocked decision the server refuses on", () => {
+    // Same predicate the acceptance writers pass as `blockedPacket`, and the
+    // same sentence the task page shows for it.
+    expect(
+      openConfirm({
+        readiness: "blocked",
+        packet: blockedPacket,
+        blockReason: null,
+      }),
+    ).toContain("An open blocked decision is holding this task.");
+  });
+
+  it("leaves an INPUT packet alone — only a blocked one gates acceptance", () => {
+    expect(
+      openConfirm({
+        readiness: "input_required",
+        packet: { ...blockedPacket, type: "input", kind: "Completion report" },
+        blockReason: null,
+      }),
+    ).not.toContain("blocked decision");
+  });
+
+  it("names a conflicting PR through the server's own predicate", () => {
+    const text = openConfirm({
+      blockReason: null,
+      pr: {
+        number: 124,
+        state: "review",
+        title: "Attach a credential",
+        mergeable: "conflicting",
+      },
+    });
+    expect(text).toContain("conflicts with the base branch");
+    expect(text).toContain("Rebase the branch and re-review");
+  });
+
+  it("stays silent on a PR that merges cleanly", () => {
+    expect(
+      openConfirm({
+        blockReason: null,
+        pr: {
+          number: 124,
+          state: "review",
+          title: "t",
+          mergeable: "clean",
+        },
+      }),
+    ).not.toContain("conflicts with the base branch");
+  });
+
+  it("keeps the server's precedence — the revision gate speaks first", () => {
+    const text = openConfirm({
+      blockReason: "VIB-1's delivered revision has no approving verdict yet.",
+      readiness: "blocked",
+      packet: blockedPacket,
+      pr: { number: 124, state: "review", title: "t", mergeable: "conflicting" },
+    });
+    expect(text).toContain("no approving verdict yet");
+    expect(text).not.toContain("blocked decision");
+    expect(text).not.toContain("conflicts with the base branch");
+  });
+
+});
+
+/**
+ * The Triage → Done drag. The board's own StageMenu offers it, the server
+ * refuses it (`acceptanceStageBlockedReason`, task-actions.server.ts) — and the
+ * dialog in between used to show no blocked row at all, because the gate turns
+ * on the PROJECT's workflow graph and nothing on the card carried it. The
+ * summary carries `atAcceptanceBoundary` now (shared/mapping/task.server.ts),
+ * derived server-side through the same `resolveStageRoles` the writers gate on.
+ */
+describe("F19-27: the confirm names the stage gate the server will refuse on", () => {
+  const fromTriage = (patch: Partial<TaskSummary> = {}) => {
+    const r = renderBoard([task({ key: "VIB-1", stage: "triage", ...patch })], {
+      action: () => ({ ok: true as const, toast: "moved" }),
+    });
+    fireEvent.click(r.getByLabelText("Change stage (currently Triage)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
+  };
+
+  const fromBoundary = (patch: Partial<TaskSummary> = {}) => {
+    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
+      action: () => ({ ok: true as const, toast: "moved" }),
+    });
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
+  };
+
+  it("still names the stage the card is leaving in the head sentence", () => {
+    const text = fromTriage({ atAcceptanceBoundary: false });
+    expect(text).toContain("Moving VIB-1 from Triage into Done");
+    // The one-way warning the whole dialog exists for stays put.
+    expect(text).toContain("Merging is one-way");
+  });
+
+  it("blocks an off-boundary accept and says which stage the task is at", () => {
+    const text = fromTriage({ atAcceptanceBoundary: false });
+    expect(text).toContain("Blocked");
+    expect(text).toContain(
+      "VIB-1 is at Triage, not the boundary the workflow puts before Done",
+    );
+    expect(text).toContain("Move the task through the workflow first.");
+  });
+
+  it("leaves a boundary accept unblocked — the graph really allows that edge", () => {
+    const text = fromBoundary();
+    expect(text).not.toContain("the boundary the workflow puts before");
+    expect(text).not.toContain("Blocked");
+  });
+
+  /**
+   * The flag is the GRAPH's answer, not the column order's: a project whose
+   * workflow declares triage → done really can be accepted from Triage, and
+   * refusing it here would be the forked mapping rulings 12/14 ban.
+   */
+  it("trusts the projected flag over the card's column position", () => {
+    expect(fromTriage({ atAcceptanceBoundary: true })).not.toContain(
+      "the boundary the workflow puts before",
+    );
+  });
+
+  it("keeps R16-3's precedence — a closed PR outranks the stage gate", () => {
+    // The server names the terminal GitHub fact first; running the workflow is
+    // not the path when the PR is gone.
+    const text = fromTriage({
+      atAcceptanceBoundary: false,
+      pr: { number: 124, state: "closed", title: "t" },
+    });
+    expect(text).toContain("closed on GitHub without merging");
+    expect(text).not.toContain("the boundary the workflow puts before");
+  });
+
+  it("keeps the stage gate above the revision gate, like the server", () => {
+    const text = fromTriage({
+      atAcceptanceBoundary: false,
+      blockReason: "VIB-1's delivered revision has no approving verdict yet.",
+    });
+    expect(text).toContain("the boundary the workflow puts before Done");
+    expect(text).not.toContain("no approving verdict yet");
+  });
+});
+
+/**
+ * A board whose payload CHANGES under a pending gesture — the revalidation the
+ * static `renderBoard` helper cannot express. The confirm resolves its task
+ * from the CURRENT payload on every render (F19-27), which is what keeps the
+ * disclosed PR head fresh; this is the harness for what happens when that
+ * lookup misses.
+ */
+function renderMutableBoard(
+  initial: TaskSummary[],
+  opts: { action?: () => { ok: boolean; toast?: string; error?: string } } = {},
+) {
+  let set!: (next: TaskSummary[]) => void;
+  const Stub = createRoutesStub([
+    {
+      path: "/projects/:slug/board",
+      Component: () => {
+        const [tasks, setTasks] = useState(initial);
+        set = setTasks;
+        return (
+          <ToastProvider>
+            <BoardPage
+              columns={columns(tasks)}
+              orphanTasks={[]}
+              canCreate
+              canTransition
+              canRescan
+            />
+          </ToastProvider>
+        );
+      },
+      ...(opts.action ? { action: opts.action } : {}),
+    },
+  ]);
+  const r = render(<Stub initialEntries={["/projects/viberr-core/board"]} />);
+  return {
+    ...r,
+    /** The revalidation: hand the board a different task payload. */
+    reproject: (next: TaskSummary[]) => act(() => set(next)),
+  };
+}
+
+/**
+ * F19-27 (residual, LOW) — resolving the pending task late costs one failure
+ * mode: if the task leaves the payload between the gesture and the render
+ * (archived elsewhere, file deleted, reprojected away), the dialog rendered
+ * nothing while `pendingAccept` stayed set. No dialog, no toast, no cancel —
+ * the human's drag vanished and the state stayed wedged.
+ */
+describe("F19-27: a pending acceptance is never stranded", () => {
+  const live = task({ key: "VIB-1", stage: "impl" });
+
+  const openConfirm = (r: ReturnType<typeof renderMutableBoard>) => {
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    expect(r.container.querySelector("dialog")).not.toBeNull();
+  };
+
+  it("says so when the task leaves the board mid-gesture", async () => {
+    const r = renderMutableBoard([live]);
+    openConfirm(r);
+    r.reproject([]);
+
+    expect(r.container.querySelector("dialog")).toBeNull();
+    await waitFor(() =>
+      expect(r.container.querySelector(".toast")).not.toBeNull(),
+    );
+    const toast = r.container.querySelector(".toast")!;
+    expect(toast.textContent).toContain(
+      "VIB-1 left the board before its acceptance was confirmed",
+    );
+    expect(toast.getAttribute("data-kind")).toBe("error");
+  });
+
+  it("really clears the pending state — the dialog does not come back", async () => {
+    // The proof the gesture was ABANDONED and not merely hidden: put the task
+    // back. A still-set `pendingAccept` would re-render the confirm from a
+    // gesture the human made minutes ago.
+    const r = renderMutableBoard([live]);
+    openConfirm(r);
+    r.reproject([]);
+    r.reproject([live]);
+    expect(r.container.querySelector("dialog")).toBeNull();
+    expect(r.getByLabelText("Change stage (currently In Progress)")).toBeTruthy();
+  });
+
+  it("posts nothing — an abandoned gesture is not an acceptance", async () => {
+    const submitted: string[] = [];
+    const r = renderMutableBoard([live], {
+      action: () => {
+        submitted.push("POST");
+        return { ok: true as const, toast: "moved" };
+      },
+    });
+    openConfirm(r);
+    r.reproject([]);
+    await new Promise((res) => setTimeout(res, 50));
+    expect(submitted).toHaveLength(0);
+  });
+
+  it("keeps the dialog open and re-reads it when the task merely CHANGES", async () => {
+    // The other half of the fresh lookup: the task is still there, so the
+    // gesture stands — and the dialog now discloses the archived refusal the
+    // server would answer with (`archivedTaskBlockedReason`, the same function
+    // `acceptanceRefusalReason` calls).
+    const r = renderMutableBoard([live]);
+    openConfirm(r);
+    r.reproject([{ ...live, archived: true }]);
+    const dialog = r.container.querySelector("dialog");
+    expect(dialog).not.toBeNull();
+    expect(dialog!.textContent!.replace(/\s+/g, " ")).toContain(
+      "VIB-1 is archived — restore it before accepting the completion.",
+    );
   });
 });

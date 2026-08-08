@@ -303,6 +303,35 @@ describe("operatorAssignSpecialist", () => {
     expect(task().timeline.some((e) => e.actor.kind === "operator" && e.type === "comment")).toBe(true);
   });
 
+  it("F19-12: the rendered card and message use ENGAGEMENT vocabulary, never 'primary specialist'", async () => {
+    // D9/Q17-5 retired the primary/consultant model for `engagements[]` with one
+    // `delivers: true`. The capability ID keeps its historical name; the copy
+    // this module renders must not.
+    deployRoster([
+      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("impl");
+    const r = await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      authority("supervised"),
+    );
+    expect(r.message).toBe("Recommended engaging Dev as the delivering agent.");
+    const rec = task().frontmatter.recommendations[0]!;
+    expect(rec.label).toBe("Engage Dev as the delivering agent");
+    // The retired phrase appears nowhere the human reads: card, message, or the
+    // operator comment the card's reasoning writes to the timeline.
+    const rendered = [
+      r.message,
+      rec.label,
+      rec.detail,
+      ...task().timeline.map((e) => e.text),
+    ].join("\n");
+    expect(rendered).not.toMatch(/primary specialist/i);
+  });
+
   it("F10-35: records a routing trace — candidates considered, chosen, reason", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
@@ -886,6 +915,97 @@ describe("operatorTransitionStage", () => {
     ).toBe(true);
   });
 
+  /**
+   * F19-26 — a transition whose TARGET is the terminal stage IS an acceptance.
+   *
+   * A supervised operator calling transition_stage("done") used to file a plain
+   * "Move the task to Done" card whose Apply runs the full acceptance contract
+   * (a real, irreversible PR merge) under a label that never says "accept" or
+   * "merge" — a third route to Done that the accept-completion fixes would not
+   * have covered. Gate on the TARGET, not the tool.
+   */
+  it("F19-26: a supervised transition to the TERMINAL stage produces an ACCEPTANCE card, not a disguised move", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    expect(r.message).toMatch(/accepting completion/i);
+    expect(task().frontmatter.stage).toBe("review");
+    const recs = task().frontmatter.recommendations;
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.kind).toBe("accept_completion");
+    // The card names what Apply really does — accept, and merge the PR.
+    expect(recs[0]!.label).toMatch(/^Accept completion/);
+    expect(recs[0]!.label).toContain("Done");
+    expect(recs[0]!.detail).toMatch(/Accepting completion moves/i);
+    expect(recs[0]!.detail).toMatch(/merges the review PR/i);
+    // The pre-fix harm, gone from every string the human reads: a bland move
+    // that never says "accept" or "merge" over an irreversible merge.
+    const rendered = [r.message, recs[0]!.label, recs[0]!.detail].join("\n");
+    expect(rendered).not.toMatch(/Recommended moving the task to Done/i);
+    expect(rendered).not.toMatch(/ready to advance to Done/i);
+    // …and it is recorded as a completion recommendation, not a bare transition.
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+    ).toHaveLength(1);
+  });
+
+  /**
+   * R19-6 — the capability LEAK the F19-26 reroute opened, proven live this
+   * pass by cluster B's verifier.
+   *
+   * `operatorTransitionStage` gates only on `stage-transitions`. With
+   * `stage-transitions: recommend` + `completion-for-acceptance: off` — the
+   * mode the schema documents as "withheld entirely (the tool is not even
+   * offered)" — a probe got back a real `accept_completion` recommendation card
+   * AND a `task.operator.recommended_completion` audit row, because the
+   * delegated `operatorAcceptCompletion` had no withheld-mode guard of its own.
+   * The acceptance capability now answers on this path too.
+   */
+  it("R19-6: a terminal-target transition is refused when completion-for-acceptance is OFF — no card, no audit row", async () => {
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "off" },
+    ]);
+    seedTask("review");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toMatch(/not permitted for the operator here/i);
+    expect(task().frontmatter.stage).toBe("review");
+    // Neither the acceptance card the reroute would file NOR the plain
+    // "Move the task to Done" card the reroute replaced.
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+    ).toHaveLength(0);
+  });
+
+  it("F19-26: a terminal-target transition from a PRE-BOUNDARY stage is refused out loud, with no card", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("noop");
+    // The shared acceptance gate speaks: the task is not at the boundary.
+    expect(r.message).toMatch(/In Progress, not Review/);
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+  });
+
   it("R7-4 guard: a HEALTHY task cannot be moved backward by the operator (no rework license)", async () => {
     deployRoster(DEFAULT_POLICY);
     writeTask(store.dataRoot, store.slug, {
@@ -906,7 +1026,9 @@ describe("operatorTransitionStage", () => {
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
         authority("full"),
       ),
-    ).rejects.toThrow(/no governed boundary/i);
+      // F19-39: the refusal used to say "No governed boundary" — a BANNED word
+      // in copy a human reads. The pin follows the corrected string.
+    ).rejects.toThrow(/no allowed transition/i);
     expect(task().frontmatter.stage).toBe("review");
   });
 });
@@ -1090,6 +1212,69 @@ describe("operatorAcceptCompletion", () => {
     expect(
       task().frontmatter.recommendations.some((rec) => rec.kind === "accept_completion"),
     ).toBe(true);
+  });
+
+  /**
+   * R19-6 (owner ruling 2026-08-06) — a capability set to `off` is a HARD
+   * REFUSE by every route: no recommendation card, no audit row, and the
+   * operator says so out loud instead of silently rerouting.
+   *
+   * The hole this closes: the function's ONLY `gate()` read lived inside the
+   * direct/recommend choice (`!== "direct"` ⇒ recommend), so `off` — the mode
+   * the schema documents as "withheld entirely (the tool is not even offered)"
+   * — fell into the RECOMMEND branch and produced a real `accept_completion`
+   * card plus a `task.operator.recommended_completion` audit row.
+   */
+  it("R19-6: `completion-for-acceptance: off` is a hard refuse — no card, no audit row", async () => {
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "off" },
+    ]);
+    seedTask("review");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("denied");
+    // Refused OUT LOUD: the sentence names the withholding, so the operator
+    // narrates it rather than the run going quiet.
+    expect(r.message).toMatch(/withheld from the operator here/i);
+    expect(task().frontmatter.stage).toBe("review");
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+    ).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.accepted_completion" }),
+    ).toHaveLength(0);
+  });
+
+  it("R19-6: `human` refuses the same way, and says it is reserved for a human", async () => {
+    // `human` and `off` are distinct modes (schema: withheld entirely vs.
+    // reserved for a human to perform) and both mean "not the operator's to
+    // do". A card is not a neutral note — applying one IS the acceptance
+    // (ruling 22) — so `human` gets the same hard refuse with its own sentence,
+    // matching the Claude toolkit, which builds the `accept_completion` tool for
+    // neither mode.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "human" },
+    ]);
+    seedTask("review");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toMatch(/reserved for a human here/i);
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+    ).toHaveLength(0);
   });
 });
 

@@ -79,6 +79,8 @@ export function getTaskSummary(
   const memberIds = new Set(listProjectMembers(db, slug).map((m) => m.userId));
   return mapTaskProjectionRow(row, {
     stages,
+    // F19-27: same graph the acceptance writers gate on.
+    workflow: project?.workflow ?? [],
     owner: resolveTaskOwner(db, row.owner_user_id, memberIds),
     accepted: isAcceptedDisplayState({
       stage: row.stage,

@@ -133,7 +133,21 @@ export function createReconcileBehindByLookup(
   };
 }
 
-/** Newest reconcile across ALL of a project's task files; null = never. */
+/**
+ * Newest reconcile OBSERVATION ROW across all of a project's task files.
+ *
+ * F19-22 — read the name literally: this is the last pass that CHANGED
+ * something, never the last pass that ran. DG-3
+ * (`github-reconciler.server.ts`: `if (changed || !ctx.skipUnchangedProvenance)`)
+ * deliberately withholds the row on an unchanged poller tick to bound the
+ * table, so a healthy poller over a quiet repository leaves this value frozen
+ * for hours. Null therefore means "no pass has ever recorded a change" — NOT
+ * "never reconciled", which is what every caller used to render it as.
+ *
+ * For "when did a pass last COMPLETE?" use
+ * `server/audit/audit-query.server.ts`, which reads the unconditional per-tick
+ * audit row. Surfaces that describe freshness to a human need BOTH.
+ */
 export function latestProjectReconcileAt(
   db: DatabaseSync,
   projectSlug: string,
@@ -149,8 +163,11 @@ export function latestProjectReconcileAt(
   return row?.latest ?? null;
 }
 
-/** Newest reconcile for ONE task; null = never. The task page's freshness cue
- *  (UI-57) — previously a raw `.prepare()` inside the route loader. */
+/** Newest reconcile OBSERVATION ROW for ONE task — the task page's "Last
+ *  change" cue (UI-57; previously a raw `.prepare()` inside the route loader).
+ *  Same F19-22 caveat as {@link latestProjectReconcileAt}: null means no pass
+ *  ever recorded a change for this task, not that none ever ran, and the
+ *  "Checked" half of that panel comes from the audit query instead. */
 export function latestTaskReconcileAt(
   db: DatabaseSync,
   projectSlug: string,

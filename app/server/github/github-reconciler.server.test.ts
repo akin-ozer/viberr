@@ -476,6 +476,49 @@ describe("reconcileTask", () => {
     expect(after).toBe(before); // byte-stable, no updatedAt churn
   });
 
+  it("F19-19: two OVERLAPPING passes announce the divergence once, and notify once", async () => {
+    // `reconcileTask` reads the task file, then awaits 2-4 GitHub round trips
+    // before writing, and every out-of-band guard compares the live PR state
+    // against the PRE-await snapshot. Nothing serialized two passes over one
+    // task: no lock in reconcileProject/runReconcile, the poller runs
+    // independently of the "Update status" button, and that button's disabled
+    // guard is per-fetcher — so two maintainers (or one in two tabs) both saw
+    // `pr.state: review`, both computed "just merged", and the task got the
+    // divergence note TWICE plus two inbox rows for one event.
+    //
+    // The sequential case was already covered (the test above) and always
+    // passed; only the concurrent one was uncovered. Canary: call
+    // `reconcileTaskExclusive` directly (drop `serializePerTask`) and the
+    // counts below become 2.
+    const { store, actor } = setup(); // VIB-301 at "review", owner arda (admin)
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318, title: "Attach execution workspace", state: "closed",
+        merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
+        additions: 1, deletions: 0, changed_files: 1,
+      },
+    };
+    const pass = () =>
+      reconcileTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-301" },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+      );
+    // Started together, never awaited in between — the real overlap.
+    await Promise.all([pass(), pass()]);
+
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    expect(events.filter((e) => /\*\*Divergence:\*\*/.test(e.text))).toHaveLength(1);
+    const notifs = listNotifications(store.db, store.users.arda.id).filter(
+      (n) => n.kind === "policy" && /merged on GitHub/.test(n.text),
+    );
+    expect(notifs).toHaveLength(1);
+  });
+
   it("merged PR → sync 'merged' beats behind (ruling 12 precedence)", async () => {
     const { store, actor } = setup();
     const routes = happyRoutes();

@@ -119,6 +119,231 @@ const PEV_META: Record<string, { icon: IconName; cls: string }> = {
   audit: { icon: "user", cls: "audit" },
 };
 
+/* ------------------------------------------ R19-7: audit-column compaction */
+
+/**
+ * R19-7 — consecutive runtime-session-open rows compact into one expandable
+ * row.
+ *
+ * Live on a 1440px viewport, 8 of the 9 rows this column had room for read
+ * "operator opened the <role> runtime session — recorded per audit policy on
+ * VC-4". One piece of routine agent bookkeeping, repeated, pushed the events
+ * the column exists for — a credential assigned, scopes re-checked, a role
+ * changed, the project created — below the fold. That is the "calm over
+ * chatter / human attention is scarce" principles inverted: the noisiest event
+ * won the most space.
+ *
+ * The event stays RECORDED (audit policy requires it) and stays REACHABLE (one
+ * click, with its real per-row timestamp). It just stops being repeated at the
+ * reader.
+ *
+ * Shape borrowed from the timeline's anti-noise compaction
+ * (`app/server/tasks/timeline-compaction.server.ts`): a pure function over a
+ * newest-first list that walks it once, collects each RUN of consecutive
+ * routine events, and replaces a run with a single marker carrying the count —
+ * including its "a run too short to be worth a marker stays verbatim" rule.
+ * The one deliberate difference is what a marker holds: the server's rewrites
+ * canonical `task.md` and keeps only a count, so the events are gone; this one
+ * keeps its entries and hands them back on expand, because nothing here is
+ * being deleted — only folded.
+ */
+
+/**
+ * A `runtime.run.started` row, recognised by the sentence its projection
+ * writes: `${actor} opened the ${role} runtime session — recorded per audit
+ * policy on` (`app/server/projections/activity-feed.server.ts`, the
+ * `runtime.run.started` case). `AuditLogEntryView` carries no action name —
+ * only the display kind and the rendered text — and threading one through
+ * would mean editing the projection, its row type and the loader for a purely
+ * visual fold. The co-located test pins this pattern against the projection's
+ * OWN template text, so rewording that sentence fails the test rather than
+ * silently un-compacting the column.
+ *
+ * The pattern matches the projection's WHOLE trailing sentence, anchored at the
+ * end, and that anchoring is load-bearing rather than tidiness. `entry.text`
+ * OPENS with the actor's display name, which any member sets for themselves on
+ * the profile page — a member named `Mallory (opened the dev runtime session)`
+ * satisfied the earlier unanchored `\bopened the .+ runtime session\b` on every
+ * row they authored, which included their own `task.acceptance.forced` and
+ * `project.org_admin.override` rows: the two overrides this column exists to
+ * make visible would fold behind a "2 runtime sessions opened" summary. Nothing
+ * was deleted — expand still gave them back — but a fold the actor picks is a
+ * fold that hides the row from the reader who never expands it.
+ *
+ * A display name cannot reach the end of the string: every audit template puts
+ * fixed words after `${actor}`, and no other one ends in `runtime session —
+ * recorded per audit policy on` (`runtime.run.interrupted` ends `agent run —
+ * …`, `github.reconcile.project` `GitHub — …`, `task.ownership.admin_released`
+ * `task owner — …`, `task.acceptance.forced` and the overrides elsewhere
+ * entirely). The trailing ` on` is the task-chip dangler, which every run row
+ * keeps: `startRun` always audits with a `taskKey`, so `finishText` never
+ * rewrites it to `.`.
+ */
+const RUNTIME_SESSION_OPENED =
+  /\bopened the .+ runtime session — recorded per audit policy on$/;
+
+export function isRuntimeSessionOpen(entry: AuditLogEntryView): boolean {
+  return entry.kind === "audit" && RUNTIME_SESSION_OPENED.test(entry.text);
+}
+
+/** A run shorter than this renders verbatim: one row replaced by one summary
+ *  row is no saving — the timeline compaction's own `folded.length <= 1` rule,
+ *  and it keeps the FIRST session of a quiet project fully legible. */
+export const AUDIT_COMPACT_MIN = 2;
+
+export type AuditFeedRow =
+  | { compacted: false; entry: AuditLogEntryView }
+  | { compacted: true; key: string; entries: AuditLogEntryView[] };
+
+/**
+ * The audit column's render list: every entry in order, with each run of
+ * consecutive runtime-session opens replaced by one compacted row holding that
+ * run. Never reorders, never drops an entry, and never folds anything else —
+ * a credential assignment sitting between two sessions splits the run, exactly
+ * as it splits the reader's attention.
+ */
+export function compactAuditEntries(
+  entries: AuditLogEntryView[],
+  min: number = AUDIT_COMPACT_MIN,
+): AuditFeedRow[] {
+  const rows: AuditFeedRow[] = [];
+  let run: AuditLogEntryView[] = [];
+  const flush = () => {
+    if (run.length === 0) return;
+    if (run.length < min) {
+      for (const entry of run) rows.push({ compacted: false, entry });
+    } else {
+      rows.push({ compacted: true, key: `sessions:${run[0]!.id}`, entries: run });
+    }
+    run = [];
+  };
+  for (const entry of entries) {
+    if (isRuntimeSessionOpen(entry)) {
+      run.push(entry);
+      continue;
+    }
+    flush();
+    rows.push({ compacted: false, entry });
+  }
+  flush();
+  return rows;
+}
+
+function AuditRow({
+  entry,
+  sub,
+  timeLabel,
+  onOpen,
+}: {
+  entry: AuditLogEntryView;
+  /** One of the rows a compacted summary stands for, revealed in place. */
+  sub?: boolean;
+  timeLabel: (iso: string) => string;
+  onOpen: (key: string) => void;
+}) {
+  const m = PEV_META[entry.kind] ?? PEV_META.change!;
+  const resolved = entry.status === "resolved";
+  return (
+    <div className={sub ? "pol-ev pev-sub" : "pol-ev"}>
+      <span className={"pev-ico " + m.cls}>
+        <Icon name={m.icon} />
+      </span>
+      <span className="pev-main">
+        <ActivityText text={entry.text} />
+        {entry.taskKey && (
+          <>
+            {" "}
+            <button
+              type="button"
+              className="keybtn"
+              onClick={() => onOpen(entry.taskKey!)}
+            >
+              {entry.taskKey}
+            </button>
+          </>
+        )}
+        {entry.kind === "violation" && (
+          <>
+            {" "}
+            <span
+              title={
+                resolved
+                  ? "Resolved" +
+                    (entry.resolvedBy ? ` by ${entry.resolvedBy}` : "") +
+                    (entry.resolvedAt
+                      ? ` · ${timeLabel(entry.resolvedAt)}`
+                      : "")
+                  : "Open — grant the missing scope to resolve"
+              }
+            >
+              <Pill kind={resolved ? "done" : "input"} sm>
+                {resolved ? "resolved" : "open"}
+              </Pill>
+            </span>
+          </>
+        )}
+      </span>
+      <span className="pev-t">{timeLabel(entry.occurredAt)}</span>
+    </div>
+  );
+}
+
+/**
+ * The compacted row. Collapsed it is one line — the count, the audit fact, and
+ * the toggle that gives the rows back; expanded it keeps that line and renders
+ * every folded row beneath it with its own real timestamp, so "when did the
+ * reviewer session open" is still answerable without leaving the page.
+ *
+ * The glyph is the agent mark rather than the audit column's generic `user`:
+ * naming the summary as agent bookkeeping is exactly the distinction that makes
+ * the fold safe to skim past.
+ */
+function CompactedSessions({
+  entries,
+  timeLabel,
+  onOpen,
+}: {
+  entries: AuditLogEntryView[];
+  timeLabel: (iso: string) => string;
+  onOpen: (key: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <div className="pol-ev">
+        <span className="pev-ico audit">
+          <Icon name="agents" />
+        </span>
+        <span className="pev-main">
+          <strong>{entries.length} runtime sessions opened</strong> — each one
+          recorded per audit policy.{" "}
+          <button
+            type="button"
+            className="keybtn act-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "Hide sessions" : "Show each"}
+          </button>
+        </span>
+        {/* Entries arrive newest-first, so the summary carries the newest of
+            the run — the same anchor the timeline marker uses. */}
+        <span className="pev-t">{timeLabel(entries[0]!.occurredAt)}</span>
+      </div>
+      {expanded &&
+        entries.map((entry) => (
+          <AuditRow
+            key={entry.id}
+            entry={entry}
+            sub
+            timeLabel={timeLabel}
+            onOpen={onOpen}
+          />
+        ))}
+    </>
+  );
+}
+
 function AuditLogs({
   entries,
   total,
@@ -154,53 +379,23 @@ function AuditLogs({
         </span>
       </div>
       <div className="pev-list">
-        {entries.map((e) => {
-          const m = PEV_META[e.kind] ?? PEV_META.change!;
-          const resolved = e.status === "resolved";
-          return (
-            <div className="pol-ev" key={e.id}>
-              <span className={"pev-ico " + m.cls}>
-                <Icon name={m.icon} />
-              </span>
-              <span className="pev-main">
-                <ActivityText text={e.text} />
-                {e.taskKey && (
-                  <>
-                    {" "}
-                    <button
-                      type="button"
-                      className="keybtn"
-                      onClick={() => onOpen(e.taskKey!)}
-                    >
-                      {e.taskKey}
-                    </button>
-                  </>
-                )}
-                {e.kind === "violation" && (
-                  <>
-                    {" "}
-                    <span
-                      title={
-                        resolved
-                          ? "Resolved" +
-                            (e.resolvedBy ? ` by ${e.resolvedBy}` : "") +
-                            (e.resolvedAt
-                              ? ` · ${timeLabel(e.resolvedAt)}`
-                              : "")
-                          : "Open — grant the missing scope to resolve"
-                      }
-                    >
-                      <Pill kind={resolved ? "done" : "input"} sm>
-                        {resolved ? "resolved" : "open"}
-                      </Pill>
-                    </span>
-                  </>
-                )}
-              </span>
-              <span className="pev-t">{timeLabel(e.occurredAt)}</span>
-            </div>
-          );
-        })}
+        {compactAuditEntries(entries).map((row) =>
+          row.compacted ? (
+            <CompactedSessions
+              key={row.key}
+              entries={row.entries}
+              timeLabel={timeLabel}
+              onOpen={onOpen}
+            />
+          ) : (
+            <AuditRow
+              key={row.entry.id}
+              entry={row.entry}
+              timeLabel={timeLabel}
+              onOpen={onOpen}
+            />
+          ),
+        )}
         {entries.length === 0 && (
           <div className="feed-empty">No policy or access events yet.</div>
         )}

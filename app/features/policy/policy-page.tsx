@@ -41,7 +41,13 @@ import { stageFlowPath } from "~/shared/workflow/transitions";
 
 type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
 
-const PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" } as const;
+/* F19-33: the three panel-head counts below used to be styled by a private
+   `PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" }` const —
+   a byte copy of the sheet's `.fine` utility (app.css:230) that github-view.tsx
+   and settings-page.tsx each kept a copy of too. Hoisting the object out of the
+   JSX also slipped it past app.css.test.ts's `style={{…}}` scan. Ruling 14:
+   shared single implementations, never fork per surface — the count is
+   `right sub fine`, the same three classes seven other panel heads use. */
 
 // ------------------------------------------------- Surface 1: human access
 
@@ -87,7 +93,7 @@ export function HumanAccess({
       <div className="panel-head">
         <Icon name="user" />
         <h2>Human access · RBAC</h2>
-        <span className="right sub" style={PANEL_COUNT_STYLE}>
+        <span className="right sub fine">
           {live.length} member{live.length === 1 ? "" : "s"}
           {stale.length > 0
             ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
@@ -261,7 +267,7 @@ export function AgentCapability({
       <div className="panel-head">
         <Icon name="agents" />
         <h2>Agent capability</h2>
-        <span className="right sub" style={PANEL_COUNT_STYLE}>
+        <span className="right sub fine">
           {profiles.length} profiles
         </span>
       </div>
@@ -390,7 +396,7 @@ export function WorkflowRules({
       <div className="panel-head">
         <Icon name="board" />
         <h2>Workflow rules</h2>
-        <span className="right sub" style={PANEL_COUNT_STYLE}>
+        <span className="right sub fine">
           {stages.length} stages · {transitions.length} transition rules
         </span>
       </div>

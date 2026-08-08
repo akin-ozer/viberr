@@ -155,6 +155,24 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     ).toBeNull();
   });
 
+  it("F19-21: the no-revision refusal names the way OUT of it", () => {
+    // Live (VC-5) this refusal was a dead end on a verification-only task:
+    // nothing that task would ever do produces a revision, so "nothing to
+    // approve" read as permanent and the remaining exits were force-accept,
+    // archive, or an operator packet recommending "manually mark Done" — the
+    // ceremony bypass R17-2 exists to prevent. Running delivery once IS the
+    // path: it inspects the workspace and records the verified no-change
+    // outcome, minting the base revision these reviewers then approve.
+    const reason = acceptanceBlockedReason({
+      engagements: [reviewerA],
+      workRevision: null,
+      verdicts: [],
+    });
+    expect(reason).toContain("run delivery once to verify and record that");
+    // Still the same refusal first — the guidance is an addition, not a swap.
+    expect(reason).toMatch(/^No reviewed revision yet/);
+  });
+
   it("nextWorkRevision: same tree = same subject (no invalidation); different tree = new revision", () => {
     const same = nextWorkRevision(rev1, {
       id: "rev_x",

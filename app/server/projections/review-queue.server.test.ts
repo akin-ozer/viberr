@@ -156,8 +156,18 @@ describe("getReviewQueue", () => {
       viewerUserId: store.users.arda.id,
     });
     expect(queue.ready[0]!.pr).toEqual({ number: 318, state: "review" });
-    expect(queue.ready[0]!.validation).toBe("changed");
-    expect(queue.working[0]!.validation).toBe("healthy");
+    // UX19-3: `validation` is a DERIVED cache (task-file.schema.ts: "no longer
+    // written as a source of truth"), and the projection now derives it from the
+    // same `fm` snapshot that produces `blockReason` — so the row can no longer
+    // contradict itself. Neither fixture task has a delivered revision, so the
+    // derived value is `none` on both, and the `validation:` lines they carry
+    // ("changed" / "healthy") are exactly the stale cache that must NOT reach the
+    // pill. This test used to pin that passthrough. (The derivation's own
+    // healthy/failing/changed coverage lives in rebuilder.server.test.ts.)
+    expect(queue.ready[0]!.validation).toBe("none");
+    expect(queue.ready[0]!.validation).not.toBe("changed");
+    expect(queue.working[0]!.validation).toBe("none");
+    expect(queue.working[0]!.validation).not.toBe("healthy");
   });
 
   it("returns empty panels for a project with no review-stage tasks", () => {
@@ -546,6 +556,165 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
     const row = q.working.find((t) => t.key === "VIB-6")!;
     expect(row.pr).toMatchObject({ number: 66, state: "merged" });
     expect(row.blockReason).toMatch(/no approving verdict yet/);
+  });
+});
+
+/**
+ * F19-32 / ruling 40 (R16-6): "accepted" — a completion accepted with the real
+ * GitHub merge still outstanding — is a FIRST-CLASS pr state, and the ruling
+ * requires the difference to be visible on the board card AND this queue. The
+ * row used to narrow the union to review|merged|closed and coerce everything
+ * else through a catch-all `: ("review" as const)`, so the state arrived here
+ * indistinguishable from an open PR and `prStatePill`'s amber "merge pending"
+ * branch was structurally unreachable from the queue.
+ */
+describe("the row carries the canonical PR state, uncoerced", () => {
+  function seedPrState(
+    store: ReturnType<typeof setupTestStore>,
+    key: string,
+    state: "review" | "accepted" | "merged" | "closed",
+  ) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(key, {
+        title: `PR is ${state}`,
+        stage: "review",
+        waiting: "human",
+        pr: { number: 44, state, title: `PR is ${state}` },
+      }),
+    });
+  }
+
+  it("passes ACCEPTED (merge pending) through instead of folding it into 'review'", () => {
+    const store = setupTestStore(ctx);
+    seedPrState(store, "VIB-21", "accepted");
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = [...q.ready, ...q.working].find((t) => t.key === "VIB-21")!;
+    expect(row.pr).toEqual({ number: 44, state: "accepted" });
+    // The point of the fix: NOT "review". A coerced row renders the blue
+    // "in review" pill over a PR whose merge is the outstanding human step.
+    expect(row.pr!.state).not.toBe("review");
+  });
+
+  it("keeps every other state intact (no new coercion replaced the old one)", () => {
+    const store = setupTestStore(ctx);
+    seedPrState(store, "VIB-22", "review");
+    seedPrState(store, "VIB-23", "merged");
+    seedPrState(store, "VIB-24", "closed");
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const stateOf = (key: string) =>
+      [...q.ready, ...q.working].find((t) => t.key === key)!.pr!.state;
+    expect(stateOf("VIB-22")).toBe("review");
+    expect(stateOf("VIB-23")).toBe("merged");
+    // NEW-1's original point: a rejected PR must not read as an open one.
+    expect(stateOf("VIB-24")).toBe("closed");
+  });
+});
+
+/**
+ * UX19-3: "Waiting on your acceptance" is a PROMISE, and it was being made for
+ * tasks the server refuses to accept. The projected `blockReason` column carries
+ * only part of the gate (`acceptanceBlockReason` deliberately omits the open
+ * blocked-decision and conflicting-PR refusals that `acceptanceRefusalReason`
+ * enforces on every writer), and the panel split re-checked neither — so a row
+ * sat under "Waiting on your acceptance" while the task page one click away read
+ * "Acceptance is blocked". The row itself stays a triage link (R15-11: it says
+ * "Review", never "Accept"); it is the PANEL that must not over-promise.
+ */
+describe("UX19-3: the acceptance panel asks the same questions the writer does", () => {
+  it("a task with an OPEN blocked decision is listed, but never as acceptance-ready", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-31", {
+        title: "Blocked at the boundary",
+        stage: "review",
+        // A blocked packet is what SET waiting to human (operator-actions).
+        waiting: "human",
+        readiness: "blocked",
+        validation: "healthy",
+      }),
+      packet: {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Pick a recovery path",
+        body: "b",
+        observations: [],
+        options: [],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(q.ready.map((t) => t.key)).not.toContain("VIB-31");
+    expect(q.working.map((t) => t.key)).toContain("VIB-31");
+    // It stays visible with its packet header — this is a re-file, not a hide.
+    expect(q.working.find((t) => t.key === "VIB-31")!.packet).toEqual({
+      kind: "Blocked decision",
+      title: "Pick a recovery path",
+    });
+    expect(q.total).toBe(1);
+  });
+
+  it("a task whose PR CONFLICTS with the base branch is not acceptance-ready", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-32", {
+        title: "Conflicting PR at the boundary",
+        stage: "review",
+        waiting: "human",
+        validation: "healthy",
+        pr: {
+          number: 55,
+          state: "review",
+          title: "Conflicting PR at the boundary",
+          mergeable: "conflicting",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    // GitHub cannot merge it, so the server refuses the accept — the panel that
+    // names "your acceptance" must not claim otherwise.
+    expect(q.ready.map((t) => t.key)).not.toContain("VIB-32");
+    const row = q.working.find((t) => t.key === "VIB-32")!;
+    expect(row.pr!.mergeable).toBe("conflicting");
+  });
+
+  it("the same task with a CLEAN PR and no blocked packet is still ready — the gate did not widen", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-33", {
+        title: "Mergeable at the boundary",
+        stage: "review",
+        waiting: "human",
+        validation: "healthy",
+        pr: {
+          number: 56,
+          state: "review",
+          title: "Mergeable at the boundary",
+          mergeable: "clean",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(q.ready.map((t) => t.key)).toEqual(["VIB-33"]);
   });
 });
 

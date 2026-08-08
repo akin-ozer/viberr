@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
@@ -12,10 +14,15 @@ import {
   installFakeRuntime,
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { getProject } from "~/server/projections/board-query.server";
-import type { TaskSchedule } from "~/schemas/task-file.schema";
+import type { RunHandle, RunSpec, RuntimeAdapter } from "~/server/runtimes/adapter.server";
+import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
+import { resetOperatorLeasesForTests } from "~/server/runtimes/operator-run.server";
+import type { TaskFileEvent, TaskSchedule } from "~/schemas/task-file.schema";
+import { CLONE_TIMEOUT_MS } from "./git-clone-auth.server";
 import {
+  CLAIM_LEASE_MS,
   cancelScheduledAction,
   fireDueSchedules,
   scheduleTaskAction,
@@ -33,15 +40,29 @@ const terminalStage = () => {
 const schedules = (key: string): TaskSchedule[] =>
   readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed
     .frontmatter.schedules;
+const timeline = (key: string): TaskFileEvent[] =>
+  readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed
+    .timeline;
+const operatorRunCount = () =>
+  startedRunSpecs().filter((s) => s.kind === "operator").length;
 const dctx = () => ({ dataRoot: store.dataRoot });
 
-/** Poll until a schedule reaches an expected status (the F10-16 finalize is a
- *  detached async step after the synchronous claim). */
+/**
+ * Poll until a schedule reaches an expected status (the F10-16 finalize is a
+ * detached async step after the synchronous claim).
+ *
+ * The budget bounds a HANG, it does not measure anything: a green run returns
+ * on the first poll. It is generous because what it waits on is a whole
+ * `runOperator` — which since R19-1 provisions a repository checkout, i.e.
+ * spawns a subprocess, before it starts the drive. A budget tuned to the
+ * pre-R19-1 path is how this file's assertions started failing with
+ * "never reached fired (last: claimed)" while the product was working.
+ */
 async function waitForSchedule(
   key: string,
   id: string,
   status: string,
-  timeoutMs = 4000,
+  timeoutMs = 10_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -50,6 +71,53 @@ async function waitForSchedule(
   }
   const actual = schedules(key).find((s) => s.id === id)?.status;
   throw new Error(`schedule ${id} never reached ${status} (last: ${actual})`);
+}
+
+/**
+ * A runtime adapter whose first `start` closes the task — the mid-tick
+ * acceptance, made deterministic.
+ *
+ * The schedule runner claims every due occurrence first, then drives them one
+ * awaited `runOperator` at a time. The in-flight turn is frequently the one
+ * that calls `accept_completion`, so "the task went Done between the claim and
+ * the next drive" is the ordinary case, not an exotic one. Everything under
+ * test — the guard, the refusal, the retirement, the audit — is real; only the
+ * moment the task closes is pinned.
+ *
+ * The close goes through `updateTaskFile` rather than a raw `writeTask`, and
+ * that is what makes it deterministic rather than racy. Per-file writes are
+ * FIFO on one lock: this one is enqueued from inside `start`, so it is already
+ * queued when the runner's own finalize for the first occurrence enqueues
+ * behind it — and the runner AWAITS that finalize before driving the second
+ * occurrence. (A raw `writeTask` also loses outright: landing inside 100 ms of
+ * the claim's write, `repairStaleRead` correctly reads it as a stale view of
+ * the writer's own cache and undoes it.)
+ */
+class ClosesTheTaskOnFirstStart implements RuntimeAdapter {
+  readonly backend = "claude" as const;
+  readonly starts: RunSpec[] = [];
+  closed: Promise<unknown> | null = null;
+  readonly taskKey: string;
+
+  constructor(taskKey: string) {
+    this.taskKey = taskKey;
+  }
+
+  start(spec: RunSpec): RunHandle {
+    this.starts.push(spec);
+    if (this.starts.length === 1) {
+      const stage = terminalStage();
+      this.closed = updateTaskFile(
+        { projectSlug: store.slug, taskKey: this.taskKey, dataRoot: store.dataRoot },
+        (parsed) => {
+          parsed.frontmatter.stage = stage;
+        },
+      );
+    }
+    // The run is deliberately never completed: the drive stays in flight, just
+    // as it would while the next occurrence in the same tick is being driven.
+    return { runId: spec.runId, interrupt() {} };
+  }
 }
 
 /** A raw schedule object (bypasses the future-only guard) for fire tests. */
@@ -72,14 +140,57 @@ function rawSchedule(over: Partial<TaskSchedule> = {}): TaskSchedule {
   };
 }
 
+/**
+ * Hermetic git for this file. R19-1 made `runOperator` provision a read-only
+ * repository checkout before it starts a drive, and the fixture project has a
+ * `repo` — so every scheduled re-run here started a REAL `git clone` against
+ * github.com from a unit test. It failed (no credential), but only after a
+ * network round trip, which is what made this file's two poll-based
+ * assertions flap: `waitForSchedule` allows 4s and the clone regularly ate
+ * more, so the occurrence was still `claimed` when the poll gave up, and the
+ * drive that was still holding the operator lease made the NEXT test's run
+ * queue instead of start.
+ *
+ * Point `https://github.com/` at a directory that does not exist and forbid
+ * every protocol but `file`, so the clone fails instantly and OFFLINE. The
+ * drive then takes `ensureOperatorRepoCheckout`'s `unavailable` arm — which is
+ * the honest answer for a fixture project with no credential anyway — and the
+ * schedule lifecycle, which is what this file is about, is what gets timed.
+ */
+const GIT_ENV_KEYS = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_ALLOW_PROTOCOL"] as const;
+let savedGitEnv: Partial<Record<(typeof GIT_ENV_KEYS)[number], string | undefined>> = {};
+
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   // Project the project so getProject() has its stages (terminal-stage checks).
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
+
+  const gitRoot = ctx.makeTempDir();
+  const configPath = path.join(gitRoot, "gitconfig");
+  writeFileSync(
+    configPath,
+    `[url "${path.join(gitRoot, "no-such-origin")}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
+  );
+  savedGitEnv = Object.fromEntries(GIT_ENV_KEYS.map((k) => [k, process.env[k]]));
+  process.env.GIT_CONFIG_GLOBAL = configPath;
+  process.env.GIT_CONFIG_SYSTEM = "/dev/null";
+  // Belt and braces: if the rewrite ever stopped applying, git must FAIL rather
+  // than quietly reach github.com from a unit test.
+  process.env.GIT_ALLOW_PROTOCOL = "file";
 });
-afterEach(() => ctx.cleanup());
+afterEach(() => {
+  for (const key of GIT_ENV_KEYS) {
+    const value = savedGitEnv[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  // The operator lease is module state: a test that leaves a drive in flight
+  // (below) must not hand the next one a held lease.
+  resetOperatorLeasesForTests();
+  ctx.cleanup();
+});
 
 describe("scheduleTaskAction", () => {
   it("adds a pending schedule to the task file + projection", async () => {
@@ -159,6 +270,13 @@ describe("fireDueSchedules", () => {
     expect(after.find((s) => s.id === "sch_future")!.status).toBe("pending");
     const fired = listAuditEvents(store.db).filter((e) => e.action === "task.schedule.fired");
     expect(fired).toHaveLength(1);
+    expect(fired[0]!.details?.outcome).toBe("claimed");
+    // FR39's terminal-stage refusal must not swallow the ordinary path: a due
+    // schedule on a LIVE task really starts an operator turn.
+    expect(operatorRunCount()).toBe(1);
+    expect(timeline("VIB-1").some((e) => e.text.includes("no run was started"))).toBe(
+      false,
+    );
 
     // Idempotent — a second pass finds nothing due (already fired).
     expect((await fireDueSchedules(store.db, dctx())).fired).toBe(0);
@@ -195,8 +313,23 @@ describe("fireDueSchedules", () => {
     expect(audit[0]?.details).toMatchObject({ outcome: "skipped-archived" });
   });
 
+  it("the claim lease outlives the slowest LEGITIMATE start (a clone), so a live drive is never re-driven", () => {
+    // R19-1 put a repository clone inside `runOperator`, BEFORE the drive
+    // starts: a healthy scheduled drive can now sit there for up to
+    // `CLONE_TIMEOUT_MS`. A lease shorter than that declares that live drive
+    // crashed, and the next tick re-drives the same occurrence — two unwatched
+    // operator turns for one scheduled action, which is the exact thing FR39
+    // exists to prevent. Pinned as a RELATIONSHIP, not a number, so raising
+    // `VIBERR_GIT_CLONE_TIMEOUT_MS` cannot silently reintroduce the overlap.
+    expect(CLAIM_LEASE_MS).toBeGreaterThan(CLONE_TIMEOUT_MS);
+  });
+
   it("F10-16: re-drives a STALLED claim (crash recovery — never lost)", async () => {
     // A claim whose lease expired = the enqueuing tick crashed before finalize.
+    // Derived from the lease rather than a literal: this fixture used to say
+    // "10 minutes", which encoded the OLD 5-minute lease and silently became a
+    // FRESH claim — testing the opposite of its own name — the moment R19-1's
+    // clone forced the lease up.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
@@ -204,7 +337,7 @@ describe("fireDueSchedules", () => {
           rawSchedule({
             id: "sch_stale",
             status: "claimed",
-            claimedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+            claimedAt: new Date(Date.now() - CLAIM_LEASE_MS - 60_000).toISOString(),
           }),
         ],
       }),
@@ -248,6 +381,106 @@ describe("fireDueSchedules", () => {
     expect(schedules("VIB-3")[0]!.status).toBe("fired");
     const ev = listAuditEvents(store.db).find((e) => e.action === "task.schedule.fired");
     expect(ev!.details?.outcome).toBe("skipped-done");
+  });
+
+  it("F19-20: a task Done'd AFTER the tick's SELECT is retired, not run (the file decides, not the projection)", async () => {
+    // The tick reads candidates from `task_projections`, then works through
+    // them one awaited locked write at a time. An acceptance landing in that
+    // gap left `row.stage` stale, and the in-lock re-check only looked at
+    // `target.status` — which an acceptance never touches — so the occurrence
+    // was CLAIMED and a real unwatched operator turn was enqueued against a
+    // merged, Done task. FR39: never on a terminal stage.
+    //
+    // The projection row keeps the pre-accept stage while the FILE is already
+    // Done — exactly the mid-tick state, reproduced without a race.
+    //
+    // Canary: re-derive `mootBecause` from `row.stage` instead of
+    // `parsed.frontmatter.stage` and this fires an operator run.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-7", {
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_toctou" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // …and now the task reaches Done in the file, with the projection unrebuilt.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-7", {
+        stage: terminalStage(),
+        schedules: [rawSchedule({ id: "sch_toctou" })],
+      }),
+    });
+    expect(
+      (
+        store.db
+          .prepare(`SELECT stage FROM task_projections WHERE task_key='VIB-7'`)
+          .get() as { stage: string }
+      ).stage,
+    ).toBe("impl"); // the stale snapshot the tick will select
+
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(0);
+    expect(res.skipped).toBe(1);
+    expect(schedules("VIB-7").find((s) => s.id === "sch_toctou")!.status).toBe("fired");
+    const ev = listAuditEvents(store.db).find((e) => e.action === "task.schedule.fired");
+    expect(ev!.details?.outcome).toBe("skipped-done");
+    // No operator turn was enqueued against the closed task.
+    expect(startedRunSpecs().some((s) => s.kind === "operator")).toBe(false);
+  });
+
+  it("F19-20: a task Done'd AFTER its occurrence was CLAIMED is refused at fire time — and the task SAYS no run started", async () => {
+    // The claim-time re-check above closes the window it can see. This is the
+    // one it cannot: both occurrences were claimed while the task was live, and
+    // the FIRST drive's turn closes the task before the second is driven. FR39
+    // says never on a terminal stage, so `runOperator` refuses — and the
+    // occurrence's own record has to match, because the claim already wrote
+    // "Scheduled action starting" to the timeline and an audit row saying
+    // `claimed`. A `fired` occurrence whose only trace claims a run happened is
+    // the dishonest outcome.
+    //
+    // Canary (both verified): drop the `refusedTerminal` handling in the
+    // finalize block of fireDueSchedules and the note + the final audit row
+    // disappear. Drop runOperator's `scheduled` guard and the same assertions
+    // fail for the worse reason — nothing refuses, so the second occurrence is
+    // silently QUEUED behind the live drive to start on its release, and its
+    // record still says a run was started on a task that is Done.
+    const adapter = new ClosesTheTaskOnFirstStart("VIB-8");
+    configureRunServiceForTests({ claude: adapter, codex: adapter });
+
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-8", {
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_first" }), rawSchedule({ id: "sch_second" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const res = await fireDueSchedules(store.db, dctx());
+    // Both were claimed: at claim time the file really was live.
+    expect(res.fired).toBe(2);
+    expect(res.skipped).toBe(0);
+    await waitForSchedule("VIB-8", "sch_second", "fired");
+    await adapter.closed; // surface a failed close rather than a silent one
+
+    // Two scheduled occurrences, one operator turn — the second never started.
+    expect(adapter.starts).toHaveLength(1);
+    expect(
+      timeline("VIB-8").some((e) => e.text.includes("no run was started")),
+    ).toBe(true);
+
+    // `listAuditEvents` is newest-first.
+    const second = listAuditEvents(store.db).filter(
+      (e) => e.action === "task.schedule.fired" && e.details?.scheduleId === "sch_second",
+    );
+    // The claim-time row (`claimed`) is true as of when it was written; the
+    // occurrence's FINAL disposition is recorded too, so the trail and the
+    // timeline agree about whether an agent turn happened.
+    expect(second).toHaveLength(2);
+    expect(second.at(-1)!.details).toMatchObject({ outcome: "claimed" });
+    expect(second[0]!.details).toMatchObject({
+      outcome: "skipped-done",
+      refusedAtStart: true,
+    });
   });
 
   it("B-WF3: the operator run says it is SCHEDULED and carries the note", async () => {

@@ -36,7 +36,11 @@ import type {
 } from "~/server/runtimes/adapter.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
-import { installFakeRuntime, lastRunSpec } from "../../../test-support/fake-runtime";
+import {
+  installFakeRuntime,
+  lastRunSpec,
+  queueFakeRun,
+} from "../../../test-support/fake-runtime";
 import {
   assignReviewer,
   assignSpecialist,
@@ -48,6 +52,7 @@ import {
   startAgentRun,
   buildSpecialistPersona,
   resolveResumeConfinement,
+  resetWorkspaceCatalogLeasesForTests,
 } from "./specialist-run.server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -130,6 +135,9 @@ beforeEach(() => {
 
 afterEach(() => {
   resetSseBrokerForTests();
+  // F19-15: the workspace-catalog lease is module state — a leaked lease from
+  // one test would silently downgrade the next test's mount to injection.
+  resetWorkspaceCatalogLeasesForTests();
   ctx.cleanup();
 });
 
@@ -644,6 +652,147 @@ describe("assignReviewer / removeReviewer", () => {
     expect(noop.removed).toBe(false);
   });
 
+  /**
+   * UX19-3 (mechanism 2) — `validation` is a DERIVED cache with exactly ONE
+   * writer, `deriveValidation` (F10-15). The required-reviewer set is one of its
+   * inputs, so ANY roster change invalidates it. `assignReviewer` and
+   * `removeReviewer` mutated `engagements` without recomputing, which is how the
+   * review queue could render "validation healthy" (it reads the cache) at the
+   * same instant the task page refused acceptance (it derives fresh).
+   */
+  describe("UX19-3: a roster change re-derives the `validation` cache", () => {
+    const REV = {
+      id: "rev-1",
+      headSha: "a".repeat(40),
+      treeSha: null,
+      branch: "viberr/VIB-1",
+      createdAt: "2026-08-06T09:00:00.000Z",
+      sourceProfileId: "dev",
+    };
+
+    /** Deploy a deliverer plus two VERDICT-CAPABLE reviewers. The explicit
+     *  `report-validation-verdict: direct` grant is the only thing that makes an
+     *  engagement a required reviewer (F10-14, explicit-only). */
+    function deployReviewPanel(): void {
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      const specialist = (profileId: string, role: string, verdict: boolean) =>
+        ({
+          profileId,
+          capabilities: [
+            {
+              capabilityId: "report-validation-verdict",
+              mode: verdict ? "direct" : "off",
+            },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: profileId,
+            role,
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        }) as never;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: null,
+        agents: [
+          specialist("dev", "developer", false),
+          specialist("critic", "reviewer", true),
+          specialist("critic2", "reviewer", true),
+          specialist("scout", "reviewer", false),
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }
+
+    /** VIB-1 at review with a delivered revision `critic` has ALREADY approved —
+     *  an honestly-cached `validation: healthy`, the state both the queue chip
+     *  and the task hero pill render. */
+    function writeApprovedTask(): void {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "review",
+          ownerUserId: store.users.arda.id,
+          title: "Attach execution workspace",
+          engagements: [
+            { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+            { profileId: "critic", backend: "claude", role: "reviewer", delivers: false, verdictCapable: true },
+          ],
+          workRevision: REV,
+          verdicts: [
+            {
+              profileId: "critic",
+              revisionId: REV.id,
+              headSha: REV.headSha,
+              result: "approve",
+              reason: "",
+              at: "2026-08-06T10:00:00.000Z",
+            },
+          ],
+          validation: "healthy",
+        }),
+        goal: "Let the operator attach a repo and run the specialist.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }
+
+    const readFm = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+
+    beforeEach(() => {
+      deployReviewPanel();
+      writeApprovedTask();
+    });
+
+    it("assignReviewer disarms a healthy cache when it adds a required reviewer", async () => {
+      // Canary: drop `parsed.frontmatter.validation = deriveValidation(...)`
+      // from assignReviewer's updateTaskFile callback → the file still says
+      // "healthy" while the acceptance gate waits on critic2.
+      expect(readFm().validation).toBe("healthy"); // honest before the change
+      await assignReviewer(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic2" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const fm = readFm();
+      expect(fm.engagements.some((e) => e.profileId === "critic2" && e.verdictCapable)).toBe(true);
+      // The new required reviewer has no verdict on rev-1 → not healthy.
+      expect(fm.validation).toBe("changed");
+    });
+
+    it("removeReviewer disarms a healthy cache when it drops the approving reviewer", async () => {
+      // Canary: drop the same line from removeReviewer's callback → the file
+      // keeps "healthy" with zero required reviewers and zero live verdicts.
+      await removeReviewer(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const fm = readFm();
+      expect(supportingEngagements(fm)).toEqual([]);
+      expect(fm.validation).toBe("changed");
+    });
+
+    it("a roster change that leaves the gate satisfied keeps the cache healthy", async () => {
+      // The recompute is a DERIVATION, not a blanket downgrade: `scout` holds no
+      // verdict grant, so engaging it adds no gate and healthy still stands.
+      await assignReviewer(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "scout" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const fm = readFm();
+      expect(fm.engagements.some((e) => e.profileId === "scout" && !e.verdictCapable)).toBe(true);
+      expect(fm.validation).toBe("healthy");
+    });
+  });
+
   it("denies reviewer + viewer roles (admin|maintainer only)", async () => {
     for (const user of [store.users.selin, store.users.elif]) {
       await expect(
@@ -1081,6 +1230,41 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("Do NOT try to clone");
     expect(prompt).toContain("provision credentials");
     expect(prompt).toContain("wastes a human's time on a false lead");
+  });
+
+  it("F19-6: git's own (redacted) words reach the prompt, with an order to quote them", () => {
+    // The classification alone is not actionable: exit 128 covers auth
+    // rejection, a missing remote, DNS, a proxy and an LFS hook alike. Live
+    // (VC-3) the credential was present, the repo cloned from a shell, and
+    // every channel a human could read said only "git exit 128" — so the
+    // agent's report, and the operator's blocked packet built from it, could
+    // say nothing else either.
+    // Canary: drop the `stderrExcerpt` line from the cloneFailure branch and
+    // both assertions below fail.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      cloned: false,
+      cloneFailure: {
+        sentence: "The workspace checkout failed (git exit 128).",
+        hadCredential: true,
+        stderrExcerpt: "remote: Repository not found.\nfatal: repository not found",
+      },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+    });
+    expect(prompt).toContain("fatal: repository not found");
+    expect(prompt).toContain("include it VERBATIM in your report");
+    // Absent excerpt ⇒ no empty contract line pretending git said something.
+    expect(
+      buildAnalyzePrompt({
+        ...base,
+        cloned: false,
+        cloneFailure: {
+          sentence: "The workspace checkout failed (git exit 128).",
+          hadCredential: true,
+        },
+        delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      }),
+    ).not.toContain("error output (already redacted by Viberr)");
   });
 
   it("still tells the agent to clone when the server never had a credential to try", () => {
@@ -1656,6 +1840,91 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     expect(sys.split("shared (knowledge base)").length - 1).toBe(1);
   });
 
+  it("R19-3/F19-2: SKILLS are NOT inherited — only KBs cross from the deliverer", async () => {
+    // The `deliveringContextGrants` docstring claimed the inheritance had been
+    // "widened to SKILLS by LV-F3". It never was: both call sites union `kb`
+    // only, and "LV-F3" appeared nowhere in the repo except that sentence. The
+    // owner ruled the inheritance stays KBs (R18-1 stands), so this pins the
+    // absence — a future reader who believes the old comment and implements the
+    // widening breaks a test instead of silently handing every reviewer the
+    // deliverer's craft.
+    //
+    // Canary: union `resolveDeployedSpecialist(...).skills` into the reviewer's
+    // skills at either call site and the SENTINEL assertion fails.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: null, // no checkout ⇒ skills ride the prompt, where we can see them
+      agents: [
+        {
+          profileId: "dev", capabilities: [], extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "developer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: ["deliverer-craft"], mcps: [], kb: ["shared-kb"] },
+          },
+        } as never,
+        {
+          profileId: "critic", capabilities: [], extras: [],
+          definition: {
+            kind: "specialist", name: "critic", role: "reviewer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: [], mcps: [], kb: [] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    mkdirSync(path.join(store.dataRoot, "skills", "deliverer-craft"), { recursive: true });
+    writeFileSync(
+      path.join(store.dataRoot, "skills", "deliverer-craft", "SKILL.md"),
+      "# Craft\n\nSENTINEL-DELIVERER-SKILL",
+    );
+    writeKb("shared-kb", "# Conventions\n\nSENTINEL-DELIVERER-KB");
+
+    const sys = await engageAndRunCritic();
+
+    // The KB crosses (R18-1) …
+    expect(sys).toContain("SENTINEL-DELIVERER-KB");
+    // … the skill does NOT, on either channel.
+    expect(sys).not.toContain("SENTINEL-DELIVERER-SKILL");
+    expect(sys).not.toContain("deliverer-craft");
+    expect(lastRunSpec()?.skills).toBeUndefined();
+  });
+
+  it("R19-2: the repo-wins precedence rule ships WITH the KB text, and only then", async () => {
+    // Live-caught this pass: a KB-granted Codex developer and a KB-less Claude
+    // writer produced two different formats for the same file family on ONE
+    // repo, because nothing told either run which source outranks the other.
+    // The owner ruled the repo wins and the KB supplements — and that the rule
+    // ships with every KB injection.
+    //
+    // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildSpecialistPersona and
+    // the first two assertions fail.
+    deployKbPair(["house"], []);
+    writeKb("house", "# House style\n\nSENTINEL-DELIVERER-KB");
+    const sys = await engageAndRunCritic();
+    expect(sys).toContain("Which source wins (knowledge bases vs the repository)");
+    expect(sys).toContain("outrank the knowledge bases");
+    // It is stated ONCE, not per KB, and it precedes the bodies.
+    expect(
+      sys.split("Which source wins (knowledge bases vs the repository)").length - 1,
+    ).toBe(1);
+    expect(sys.indexOf("Which source wins")).toBeLessThan(
+      sys.indexOf("house (knowledge base)"),
+    );
+
+    // …and a run with NO knowledge base carries no rule about one.
+    const none = buildSpecialistPersona({
+      profileId: "dev",
+      skills: [],
+      kb: [],
+      dataRoot: store.dataRoot,
+    });
+    expect(none).not.toContain("Which source wins");
+  });
+
   it("does NOT leak the reviewer's own KB back onto the delivering run", async () => {
     // critic grants "bar"; dev grants nothing. Running dev (the deliverer) must
     // not gain the reviewer's KB — inheritance is one-directional.
@@ -1741,6 +2010,41 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       actor(store.users.arda));
   }
 
+  /**
+   * Run `work` with git forced OFFLINE, for the two cases below that need the
+   * workspace clone to FAIL.
+   *
+   * They used to depend on github.com answering "Repository not found" — a real
+   * network round trip inside a unit test. Observed on this machine roughly one
+   * run in three: the clone instead spent ~5s reaching the network and the
+   * assertions went red for a reason that had nothing to do with the code.
+   * `cloneRepo`'s child env spreads `process.env` (`createGitHubAskpassEnv`), so
+   * a proxy pointed at a port nothing listens on produces the SAME `git exit
+   * 128` failure instantly, offline, with git's real stderr — which is exactly
+   * what the F19-6 assertion reads.
+   */
+  const PROXY_ENV_KEYS = [
+    "https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY",
+    "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY",
+  ] as const;
+
+  async function withOfflineGit<T>(work: () => Promise<T>): Promise<T> {
+    const saved = PROXY_ENV_KEYS.map((k) => [k, process.env[k]] as const);
+    for (const key of PROXY_ENV_KEYS) {
+      process.env[key] = key.toLowerCase().startsWith("no_")
+        ? "" // never bypass the dead proxy
+        : "http://127.0.0.1:1";
+    }
+    try {
+      return await work();
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
   it("mounts the grant into the workspace, passes it to the SDK, and stops injecting the body", async () => {
     // End to end on the fresh-run path: store grant → workspace mount → RunSpec.
     // Canary: drop `skills: skillMount.mounted` from the startRun call and the
@@ -1788,10 +2092,213 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     deployWithSkills(["conventional-commits"]);
     writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
 
-    await runDev();
+    await withOfflineGit(runDev);
 
     expect(lastRunSpec()?.skills).toBeUndefined();
     expect(lastRunSpec()?.systemPrompt ?? "").toContain("SENTINEL-SKILL-BODY");
+  });
+
+  it("F19-6: the checkout-failure NOTE quotes git, not just the classification", async () => {
+    // The same no-checkout path as above, read from the human's side: a repo is
+    // configured and the clone genuinely fails (no such repository / no
+    // network), so the run takes `cloneRepo`'s catch. Before this, every
+    // channel a person could read said only "git exit 128" — which covers auth
+    // rejection, a missing remote, DNS, a proxy and an LFS hook alike — and
+    // live (VC-3) the credential was fine, the repo cloned from a shell, and
+    // nobody could act.
+    //
+    // The assertion is on the SHAPE, not on git's exact words: whichever way
+    // the clone fails here, its own output must reach the note.
+    // Canary: drop the `stderrExcerpt` arm from the note text and the
+    // "What the checkout reported" assertion fails.
+    deployWithSkills(["conventional-commits"]);
+    writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
+
+    await withOfflineGit(runDev);
+
+    const note = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.text.includes("**Workspace checkout failed:**"));
+    expect(note).toBeDefined();
+    expect(note!.text).toContain("What the checkout reported:");
+    // Fenced, so a multi-line git complaint stays readable on the task page.
+    expect(note!.text).toMatch(/```\n[\s\S]+\n```/);
+    // …and the classification the note already carried is still there.
+    expect(note!.text).toContain("The workspace checkout");
+  });
+
+  /**
+   * F19-15 — the shared catalog is single-writer while a run is live.
+   *
+   * The clone is per-TASK and shared by every engagement, but only the
+   * DELIVERING agent is single-flighted; supporting agents run concurrently on
+   * purpose. Both `cloneRepo`'s reuse arm and `mountGrantedSkills` wiped
+   * `<workspace>/.claude` unconditionally, so a second run started while a
+   * Claude run streamed deleted that run's mounted skills — and because R18-5
+   * deliberately stops injecting a mounted skill's BODY, the body existed
+   * nowhere else. The live run kept advertising a skill it could no longer
+   * load, with nothing on the timeline and nothing in a log.
+   */
+  describe("F19-15 — a second run never unmounts a live run's skills", () => {
+    /** Deploy a delivering `dev` and a supporting `critic`, each with its own
+     *  granted skill, on a repo project. */
+    function deployPairWithSkills(): void {
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "dev", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "dev", role: "developer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: ["dev-craft"], mcps: [], kb: [] },
+            },
+          } as never,
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: ["critic-craft"], mcps: [], kb: [] },
+            },
+          } as never,
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      writeSkill("dev-craft", "# Dev\n\nSENTINEL-DEV-SKILL");
+      writeSkill("critic-craft", "# Critic\n\nSENTINEL-CRITIC-SKILL");
+    }
+
+    it("leaves the delivering run's mount intact and injects the second run's skills instead", async () => {
+      // Canary: call `mountGrantedSkills` directly at either call site (drop the
+      // lease) and `dev-craft` disappears from the workspace while the live dev
+      // run still believes it is installed.
+      const ws = await workspaceCheckout();
+      deployPairWithSkills();
+
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+
+      // dev starts and KEEPS STREAMING (never interrupted) — the live run whose
+      // catalog the second run used to delete.
+      queueFakeRun({ lines: [], keepRunning: true }, "claude");
+      const devRun = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      expect(lastRunSpec()?.skills).toEqual(["dev-craft"]);
+      expect(
+        existsSync(path.join(ws, ".claude", "skills", "dev-craft", "SKILL.md")),
+      ).toBe(true);
+      // The lease is held by a genuinely LIVE run, not by a start-up grace
+      // window — otherwise this test could pass for the wrong reason.
+      expect(getRun(store.db, devRun.runId)?.state).toBe("running");
+
+      // A human @mentions the reviewer mid-run: a SECOND run in the same clone.
+      const criticRun = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+
+      // The live run's craft survived, byte-for-byte.
+      const devSkill = path.join(ws, ".claude", "skills", "dev-craft", "SKILL.md");
+      expect(existsSync(devSkill)).toBe(true);
+      expect(readFileSync(devSkill, "utf8")).toContain("SENTINEL-DEV-SKILL");
+      // The second run did NOT mount over it…
+      expect(existsSync(path.join(ws, ".claude", "skills", "critic-craft"))).toBe(false);
+      expect(lastRunSpec()?.skills).toBeUndefined();
+      // …and lost nothing: its grant fell back to prompt-text injection, the
+      // same fallback a checkout-less run already takes.
+      expect(lastRunSpec()?.systemPrompt ?? "").toContain("SENTINEL-CRITIC-SKILL");
+
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: criticRun.runId },
+        actor(store.users.arda));
+      interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId },
+        actor(store.users.arda));
+    });
+
+    it("a RESUMED second agent takes the same fallback (the resume path re-mounts too)", async () => {
+      // resolveResumeConfinement re-mounts into the SAME shared clone, so an
+      // @mention that RESUMES a supporting agent wiped the live run's catalog
+      // through a second door.
+      const ws = await workspaceCheckout();
+      deployPairWithSkills();
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      queueFakeRun({ lines: [], keepRunning: true }, "claude");
+      const devRun = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+
+      const confinement = await resolveResumeConfinement(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          profileId: "critic",
+          backend: "claude",
+          delivers: false,
+        },
+      );
+
+      expect(confinement.skills).toBeUndefined();
+      expect(confinement.systemPrompt ?? "").toContain("SENTINEL-CRITIC-SKILL");
+      expect(
+        readFileSync(path.join(ws, ".claude", "skills", "dev-craft", "SKILL.md"), "utf8"),
+      ).toContain("SENTINEL-DEV-SKILL");
+
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId },
+        actor(store.users.arda));
+    });
+
+    it("once the holder's run ends, the next run mounts natively again (R18-5 is not narrowed)", async () => {
+      // The lease is not a permanent downgrade: it is released by the run row
+      // going terminal, so the very next run re-strips and mounts its own set —
+      // which is also what keeps R18-3's "only Viberr content is discoverable"
+      // true for every run that opens the project setting source.
+      const ws = await workspaceCheckout();
+      deployPairWithSkills();
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      queueFakeRun({ lines: [], keepRunning: true }, "claude");
+      const devRun = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId },
+        actor(store.users.arda));
+
+      const criticRun = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+
+      expect(lastRunSpec()?.skills).toEqual(["critic-craft"]);
+      expect(existsSync(path.join(ws, ".claude", "skills", "critic-craft"))).toBe(true);
+      // Viberr owns the catalog end to end: the previous set is gone (R18-3).
+      expect(existsSync(path.join(ws, ".claude", "skills", "dev-craft"))).toBe(false);
+      interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: criticRun.runId },
+        actor(store.users.arda));
+    });
   });
 
   it("a RESUMED run re-mounts and re-arms the same skills (fresh/resume parity)", async () => {

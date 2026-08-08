@@ -16,7 +16,13 @@ import {
   runSetCredential,
 } from "~/features/github/github-actions.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
-import { GithubViewPage } from "~/features/github/github-view";
+import {
+  GithubViewPage,
+  type ReconcileCheckView,
+} from "~/features/github/github-view";
+import { latestProjectReconcileCheckAt } from "~/server/audit/audit-query.server";
+import { isReconcileStale } from "~/server/interpretation/freshness-policy.server";
+import { formatRelative } from "~/shared/dates/format";
 import type { RbacAction } from "~/shared/rbac";
 
 /**
@@ -30,13 +36,55 @@ import type { RbacAction } from "~/shared/rbac";
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
+  // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a
+  // client-supplied `?_routes=` filter, so
+  // `GET /projects/<slug>/github.data?_routes=routes/project.github` runs this
+  // loader ALONE and the layout's membership refusal never executes. The guard
+  // answers a non-member with the byte-identical unknown-slug 404 — a 403 here
+  // would confirm the project exists (WI-13).
   await requireProjectMember(request, params.slug, "view this project's GitHub surface");
   const db = getDb();
   const view = await getGithubViewData(db, params.slug);
   if (!view) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  return { view };
+  return { view, reconcileCheck: reconcileCheckView(db, params.slug) };
+}
+
+/**
+ * F19-22 — the freshness chip's second fact.
+ *
+ * `view.reconcile` is `MAX(observed_at)` over `github.reconcile` PROVENANCE,
+ * and DG-3 (github-reconciler.server.ts) deliberately skips that row when a
+ * poller tick finds nothing new, so it is the last pass that CHANGED something.
+ * Rendered as "Updated 3m ago" it claimed to be the last pass that RAN, and on
+ * a quiet repository it drifted to hours while the poller was healthy.
+ *
+ * The last CHECK comes off the per-tick `github.reconcile.task` audit row
+ * instead (unioned with the human sweep's `github.reconcile.project`, since a
+ * poller tick writes only the former and a sweep over an all-terminal board
+ * only the latter). It arrives BESIDE `view.reconcile` rather than inside it
+ * because `getGithubViewData` builds the projection view and this is an audit
+ * read — the same composition `routes/project.task.tsx` already does with
+ * `githubReconciledAt`.
+ *
+ * Label and staleness are computed HERE, server-side, for the reason the
+ * `view.reconcile` label is: both halves of the chip must render from one
+ * loader payload, or SSR and hydration straddle a minute boundary and disagree.
+ */
+function reconcileCheckView(
+  db: ReturnType<typeof getDb>,
+  projectSlug: string,
+): ReconcileCheckView {
+  const at = latestProjectReconcileCheckAt(db, projectSlug);
+  return {
+    at,
+    label: at && Number.isFinite(Date.parse(at)) ? formatRelative(at) : null,
+    // Only meaningful when `at` is set — the view treats a null `at` as "no
+    // check on record" and falls back to the change-based cue, which is the
+    // only evidence of a pass it has left.
+    stale: isReconcileStale(at),
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -86,6 +134,10 @@ export async function action({ request, params }: Route.ActionArgs) {
 export default function GithubView({ loaderData }: Route.ComponentProps) {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   return (
-    <GithubViewPage data={loaderData.view} myRole={layout?.myRole ?? null} />
+    <GithubViewPage
+      data={loaderData.view}
+      reconcileCheck={loaderData.reconcileCheck}
+      myRole={layout?.myRole ?? null}
+    />
   );
 }

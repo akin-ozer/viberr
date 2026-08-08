@@ -1253,7 +1253,15 @@ export async function operatorSetGoal(
   return { outcome: "done", message: "Task goal drafted." };
 }
 
-/** Assign the primary specialist (governed by assign-primary-specialist). */
+/**
+ * Engage the DELIVERING agent (capability id `assign-primary-specialist`).
+ *
+ * F19-12: "primary specialist" is retired vocabulary — D9/Q17-5 replaced the
+ * primary/consultant model with `engagements[]`, exactly one of which carries
+ * `delivers: true`. The capability ID is machinery and keeps its historical
+ * name; every string this module RENDERS (recommendation labels, tool messages
+ * that reach the timeline) says "delivering agent".
+ */
 export async function operatorAssignSpecialist(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -1264,7 +1272,7 @@ export async function operatorAssignSpecialist(
   if (g === "deny") {
     return {
       outcome: "denied",
-      message: "Assigning the primary specialist is not permitted for the operator here.",
+      message: "Engaging the delivering agent is not permitted for the operator here.",
     };
   }
   if (g === "recommend") {
@@ -1277,11 +1285,11 @@ export async function operatorAssignSpecialist(
       {
         kind: "assign_specialist",
         profileId: input.profileId,
-        label: `Assign ${name} as the primary specialist`,
+        label: `Engage ${name} as the delivering agent`,
       },
       input.reason ?? `${name} fits the current stage of work.`,
     );
-    return { outcome: "recommended", message: `Recommended assigning ${name} as the primary specialist.` };
+    return { outcome: "recommended", message: `Recommended engaging ${name} as the delivering agent.` };
   }
   const result = await assignSpecialist(
     db,
@@ -1289,10 +1297,10 @@ export async function operatorAssignSpecialist(
     OPERATOR_TASK_ACTOR,
     opCtx(ctx),
   );
-  return { outcome: "done", message: `Assigned ${result.name} as the primary specialist.` };
+  return { outcome: "done", message: `Engaged ${result.name} as the delivering agent.` };
 }
 
-/** Start the primary specialist's run (governed by assign-primary-specialist). */
+/** Start the delivering agent's run (capability id `assign-primary-specialist`). */
 export async function operatorRunSpecialist(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -1301,7 +1309,7 @@ export async function operatorRunSpecialist(
 ): Promise<OperatorActionResult> {
   const g = gate(authority, "assign-primary-specialist");
   if (g === "deny") {
-    return { outcome: "denied", message: "Running the specialist is not permitted for the operator here." };
+    return { outcome: "denied", message: "Running the delivering agent is not permitted for the operator here." };
   }
   if (g === "recommend") {
     await addRecommendation(
@@ -1309,15 +1317,15 @@ export async function operatorRunSpecialist(
       ctx,
       input.projectSlug,
       input.taskKey,
-      { kind: "run_specialist", label: "Start the primary specialist's run" },
-      "The specialist is ready to work this task; a maintainer starts the run.",
+      { kind: "run_specialist", label: "Start the delivering agent's run" },
+      "The delivering agent is ready to work this task; a maintainer starts the run.",
     );
-    return { outcome: "recommended", message: "Recommended starting the primary specialist's run." };
+    return { outcome: "recommended", message: "Recommended starting the delivering agent's run." };
   }
   const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
     outcome: "done",
-    message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} specialist.`,
+    message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} agent.`,
   };
 }
 
@@ -1445,7 +1453,7 @@ function taskContext(
   return { title, goal, stageName };
 }
 
-/** Assign and prompt the stage's delivering specialist, or recommend the handoff. */
+/** Engage and prompt the stage's DELIVERING agent, or recommend the handoff. */
 export async function operatorPromptSpecialist(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -1462,7 +1470,7 @@ export async function operatorPromptSpecialist(
   if (g === "deny") {
     return {
       outcome: "denied",
-      message: "Prompting the primary specialist is not permitted for the operator here.",
+      message: "Prompting the delivering agent is not permitted for the operator here.",
     };
   }
   const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
@@ -1479,14 +1487,14 @@ export async function operatorPromptSpecialist(
       {
         kind: "assign_specialist",
         profileId: input.profileId,
-        label: `Assign ${agent.name} as the primary specialist`,
+        label: `Engage ${agent.name} as the delivering agent`,
       },
       input.reason ?? input.directive ?? `${agent.name} fits the current stage of work.`,
     );
-    return { outcome: "recommended", message: `Recommended assigning ${agent.name} as the primary specialist.` };
+    return { outcome: "recommended", message: `Recommended engaging ${agent.name} as the delivering agent.` };
   }
 
-  // direct: assign as primary if it isn't already, then prompt + run.
+  // direct: make it the delivering engagement if it isn't already, then prompt + run.
   const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   const currentPrimary = file
     ? (deliveringEngagement(file.parsed.frontmatter)?.profileId ?? null)
@@ -1803,6 +1811,65 @@ export async function operatorPromptAgentGeneric(
 }
 
 /**
+ * R19-4 (F19-1, owner ruling 2026-08-06) — after a SUPERVISED operator delivery
+ * the server GUARANTEES an actionable next step.
+ *
+ * Live (VC-1): the operator delivered, narrated "the task will move to Review;
+ * no further action needed", and recorded nothing — the task settled
+ * `waiting: human` with no recommendation, no packet and no chip, so the human
+ * had nothing to act on anywhere in the product. R18-2 deliberately skips the
+ * full-autonomy re-queue at supervised autonomy, and delivery is not a
+ * transition, so no existing backstop covers this moment: the invariant rested
+ * entirely on the model remembering to record a card.
+ *
+ * Called by `performDelivery` on an operator-authorized delivery that is NOT at
+ * full autonomy. Deliberately conservative — it adds nothing when the task
+ * already has an open packet (that IS the next step), when it is already at or
+ * past the review stage, or when the workflow declares no edge from here to
+ * review. `addRecommendation` dedupes per (kind, profileId, toStageId), so an
+ * operator that records its own "Move to Review" card in the same run collapses
+ * onto this one; any stage move prunes pending `transition` cards and acceptance
+ * consumes every card, so the synthesized card cannot outlive its moment.
+ */
+export async function ensureDeliveredNextStep(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  prNumber: number,
+): Promise<void> {
+  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  if (!file) return;
+  // An open packet is already a decision waiting on a human — the strongest
+  // actionable surface there is. Never stack a card on top of it.
+  if (file.parsed.packet) return;
+  const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  if (!project) return;
+  const stages = project.parsed.frontmatter.stages;
+  const workflow = project.parsed.frontmatter.workflow;
+  const roles = resolveStageRoles(stages, workflow);
+  const reviewId = roles.reviewId;
+  const terminalId = roles.terminalId ?? stages[stages.length - 1]?.id ?? null;
+  const stage = file.parsed.frontmatter.stage;
+  if (!reviewId || stage === reviewId || stage === terminalId) return;
+  // Only propose a move the project's own workflow declares.
+  if (!workflow.some((w) => w.from === stage && w.to === reviewId)) return;
+  const reviewName = stageNameOf(ctx, projectSlug, reviewId);
+  await addRecommendation(
+    db,
+    ctx,
+    projectSlug,
+    taskKey,
+    {
+      kind: "transition",
+      toStageId: reviewId,
+      label: `Move the task to ${reviewName}`,
+    },
+    `Review PR #${prNumber} is open, so the work now stands for review. Moving ${taskKey} to ${reviewName} starts it.`,
+  );
+}
+
+/**
  * R15-2: DELIVER the task — push the deliverer's branch and open (or reuse) the
  * review PR. Delivery is the operator's decision, gated by `deliver-review-pr`:
  * `direct` performs it via the shared `performDelivery` core and reports the
@@ -1927,6 +1994,31 @@ export async function operatorTransitionStage(
   // + failing before honoring the off-graph move.
   const isRework = isReworkMove(ctx, input.projectSlug, input.taskKey, input.toStageId);
   const boundary = operatorBoundaryFor(ctx, input.projectSlug, input.taskKey, input.toStageId);
+  // F19-26: a transition whose TARGET is the terminal stage is an ACCEPTANCE,
+  // whatever the tool it arrived through. A supervised operator calling
+  // transition_stage(<terminal>) used to file a plain "Move the task to Done"
+  // card whose Apply runs the full acceptance contract — a real, irreversible PR
+  // merge — under a label that never says "accept" or "merge". Route it to the
+  // acceptance path instead, which files a truthful `accept_completion` card
+  // (and refuses out loud when the acceptance gates are not met). The DIRECT
+  // branch already refuses (task-actions.server.ts: "The operator reaches Done
+  // only by accepting completion, not a bare transition"), which is why the
+  // guard is scoped to the recommend gate.
+  //
+  // R19-6: rerouting also means this path must answer to the ACCEPTANCE
+  // capability, not just `stage-transitions` — `stage-transitions: recommend`
+  // with `completion-for-acceptance: off` was live-proven to produce a real
+  // acceptance card + audit row through exactly this delegation. The gate is
+  // the first thing `operatorAcceptCompletion` does, so the refusal is
+  // inherited here rather than duplicated (one gate read, one sentence).
+  if (g === "recommend" && input.toStageId === terminalStageIdOf(ctx, input.projectSlug)) {
+    return operatorAcceptCompletion(
+      db,
+      ctx,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      authority,
+    );
+  }
   if (g === "recommend" && boundary !== "auto" && !isRework) {
     const name = stageNameOf(ctx, input.projectSlug, input.toStageId);
     await addRecommendation(
@@ -1950,6 +2042,22 @@ export async function operatorTransitionStage(
     opCtx(ctx),
   );
   return { outcome: "done", message: `Moved ${input.taskKey} to ${task.stage}.` };
+}
+
+/** The project's terminal (Done-equivalent) stage id — the structural resolver
+ *  everywhere, positional only as the degenerate fallback (B-WF4). */
+function terminalStageIdOf(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): string | null {
+  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  if (!file) return null;
+  const stages = file.parsed.frontmatter.stages;
+  return (
+    resolveStageRoles(stages, file.parsed.frontmatter.workflow).terminalId ??
+    stages[stages.length - 1]?.id ??
+    null
+  );
 }
 
 /** Resolve a stage's display name for a recommendation label. */
@@ -2008,6 +2116,47 @@ function operatorBoundaryFor(
 }
 
 /**
+ * R19-6 (owner ruling 2026-08-06) — `completion-for-acceptance` withheld is a
+ * HARD REFUSE: no recommendation card, no audit row, an out-loud refusal.
+ *
+ * `gate()` collapses both withheld modes to `deny`, and they mean different
+ * things, so the refusal names which one it is:
+ *
+ *  - **`off`** — "withheld entirely (the tool is not even offered)"
+ *    (`project-file.schema.ts`). Nothing about acceptance may originate with the
+ *    operator: not the act, not the recommendation, not the audit trace of one.
+ *  - **`human`** — "reserved for a human to perform". Same refusal, deliberately.
+ *    A recommendation card is not a neutral note: applying one IS the acceptance
+ *    (ruling 22 — the Apply click is the authorization), so a card would put the
+ *    operator back in the acceptance path a `human` grant just removed it from.
+ *    The Claude toolkit already withholds the `accept_completion` tool for BOTH
+ *    modes and the Codex plan schema drops it for both; this keeps every other
+ *    route consistent with that instead of leaving a second door open.
+ *  - **no operator deployed** — `gate()` denies everything (A4); the same
+ *    refusal, phrased for a project that granted nothing at all.
+ *
+ * Returns null when acceptance may proceed (`direct` or `recommend`).
+ */
+function completionCapabilityRefusal(
+  authority: OperatorAuthority,
+  taskKey: string,
+): string | null {
+  if (gate(authority, "completion-for-acceptance") !== "deny") return null;
+  const mode = authority.deployed
+    ? (authority.policy.get("completion-for-acceptance") ?? "off")
+    : "off";
+  const because =
+    mode === "human"
+      ? "that capability is reserved for a human here"
+      : "that capability is withheld from the operator here";
+  return (
+    `Accepting completion is not permitted for the operator here — ${because}, ` +
+    `so I am not recommending it either. ${taskKey} stays where it is; ` +
+    `a maintainer accepts it on the task page.`
+  );
+}
+
+/**
  * Accept completion and move the task to Done. This is the ONE deliberate
  * exception to the human-only-Done invariant: it performs the move ONLY under
  * FULL autonomy (governed additionally by completion-for-acceptance). Under
@@ -2020,6 +2169,17 @@ export async function operatorAcceptCompletion(
   input: { projectSlug: string; taskKey: string },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
+  // R19-6 — FIRST, before any read, card or audit row. This function's only
+  // `gate()` read used to live inside the direct/recommend choice below
+  // (`!== "direct"` ⇒ recommend), so a WITHHELD capability fell into the
+  // recommend branch and produced exactly what the grant forbids: a real
+  // `accept_completion` card plus a `task.operator.recommended_completion`
+  // audit row. Live-proven this pass via the F19-26 reroute, which reaches this
+  // function under `stage-transitions: recommend` alone.
+  {
+    const refusal = completionCapabilityRefusal(authority, input.taskKey);
+    if (refusal) return { outcome: "denied", message: refusal };
+  }
   const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!file) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const project = readProjectFile({
@@ -2054,11 +2214,16 @@ export async function operatorAcceptCompletion(
     if (refusal) return { outcome: "noop", message: refusal };
   }
 
-  // Supervised (or without the completion capability) → recommend only: post an
-  // actionable "accept completion → Done" recommendation card (symmetric with the
-  // other stage-transition cards, so the review→done boundary gets the same clear
-  // one-click prompt as impl→review) — never move to Done ourselves. A
+  // Supervised, or `completion-for-acceptance: recommend` → recommend only: post
+  // an actionable "accept completion → Done" recommendation card (symmetric with
+  // the other stage-transition cards, so the review→done boundary gets the same
+  // clear one-click prompt as impl→review) — never move to Done ourselves. A
   // maintainer applies it to accept completion into Done.
+  //
+  // R19-6: this branch is reached ONLY with a granted capability. It used to
+  // read "or without the completion capability", which is what let `off`/`human`
+  // file a card — the withheld modes now refuse at the top of the function and
+  // never arrive here.
   if (authority.autonomy !== "full" || gate(authority, "completion-for-acceptance") !== "direct") {
     const doneName = stageNameOf(ctx, input.projectSlug, doneStageId);
     await addRecommendation(

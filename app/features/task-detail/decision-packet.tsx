@@ -10,6 +10,12 @@ import { Pill } from "~/ui/pill";
  * INDEX (the server re-reads the packet and dispatches on the option's
  * stable `kind` — ruling 7, never the English title).
  *
+ * F19-7: `onResolve` is NOT always a submit. An `accept_completion` option runs
+ * the full acceptance contract including the real, irreversible PR merge, so the
+ * page interposes the shared `AcceptConfirm` ceremony (ruling 20) on that one
+ * kind and replays this call's index + note only if the human confirms. Nothing
+ * on this card should assume the click wrote anything.
+ *
  * Port additions (sanctioned): arrow-key roving on the radiogroup
  * (spec §7 accessibility inventory), busy-disable while the resolve action
  * is in flight (no optimistic governed state).
@@ -22,6 +28,15 @@ import { Pill } from "~/ui/pill";
 /** Ties the Confirm button to its visible refusal reason (E4). */
 const BLOCK_REASON_ID = "pkt-block-reason";
 const DENY_NOTE_STYLE = { marginTop: ".75rem" } as const;
+const REDELIVER_NOTE_STYLE = { marginTop: ".85rem" } as const;
+/**
+ * UX19-4 — the exact label of the GitHub panel's delivery button
+ * (`task-side-panels.tsx`). The note below points a human at a control BY NAME,
+ * so it is exported and the co-located test renders `GithubTrace` beside this
+ * card and asserts the panel's button carries this very string — two files that
+ * cannot drift apart into a note pointing at a control nobody can find.
+ */
+export const DELIVER_LABEL = "Deliver branch & open PR";
 /** `.btn:disabled` in the sheet is what dims a refused control; an
  *  `aria-disabled` button is not `:disabled`, so it carries the dim itself —
  *  the same inline treatment the blocked option radios below already use. */
@@ -113,6 +128,46 @@ export function DecisionPacket({
   // unstated reading. Recorded on the decision event.
   const [note, setNote] = useState("");
   const isBlocked = p.type === "blocked";
+
+  /**
+   * UX19-4 — the closed-PR recovery packet enumerated rework / archive /
+   * archive-and-delete-the-branch and told the reader that reopening the PR on
+   * GitHub was "also a valid path", while the one-click in-app path sat
+   * directly ABOVE the card: the GitHub panel's "Deliver branch & open PR". A
+   * human was sent to GitHub for something this page does. Traced end-to-end
+   * first, because naming a control that then refuses is worse than naming none:
+   *
+   *  - the panel renders that button whenever no LIVE pr stands
+   *    (`task-side-panels.tsx`: `!task.pr || state === "closed" | "merged"`) —
+   *    a closed PR satisfies it;
+   *  - authority is `run-agents` OR this task's own owner
+   *    (`manualDeliverForReview`), which is exactly the set `canResolve`
+   *    carries here (`task-detail-page.tsx`: `canRunAgents || isOwner`), so the
+   *    note is shown only to a viewer who has the button;
+   *  - `manualDeliverForReview` gates on exactly that authority and nothing
+   *    else — no packet check, no stage check — then calls `performDelivery`;
+   *  - `performDelivery` → `openTaskPr` treats a CLOSED cached PR as terminal
+   *    and falls through to the create path (`pr-open.server.ts`): it opens a
+   *    FRESH review PR and never reopens the closed one. Re-pushing a branch
+   *    with nothing new still reports `pushed` (`push-workspace.server.ts`), so
+   *    a PR closed by mistake really does come back through this door.
+   *  - and NOTHING on that path touches the packet — `ensureDeliveredNextStep`
+   *    returns early precisely because a packet is open. So the last clause is
+   *    not politeness: the packet body (authored from `operator-run.server.ts`)
+   *    promises that reopening on GitHub is "detected automatically" and
+   *    withdraws the packet, and a reader would otherwise carry that promise
+   *    over to the in-app door, where it is false.
+   *
+   * Keyed on the `archive_task` + `deleteBranch` option because that is the
+   * closed-PR signature the schema itself names ("the discard-entirely path for
+   * work whose PR a human closed without merging"), the operator only authors
+   * it when the task HAS a branch (so there is something to push), and branch
+   * deletion is refused while a PR is open (`deleteTaskRemoteBranch`) — so its
+   * presence also means no live PR stands in the button's way.
+   */
+  const branchDiscardOffered = p.options.some(
+    (o) => o.kind === "archive_task" && o.deleteBranch === true,
+  );
 
   // E4: the reason the Confirm button can't be pressed. It used to live ONLY in
   // `title` on a `disabled` button — the one place a browser guarantees nobody
@@ -272,6 +327,21 @@ export function DecisionPacket({
             );
           })}
         </div>
+
+        {canResolve && branchDiscardOffered && (
+          // Body copy, not a footnote: it is a recovery path the options list
+          // left out, and the last clause is decision-relevant to the option
+          // sitting right above it.
+          <p className="packet-lede" style={REDELIVER_NOTE_STYLE}>
+            Not in this list: the GitHub panel on this page still offers{" "}
+            <strong>{DELIVER_LABEL}</strong>. It pushes this task&rsquo;s branch
+            again and opens a new review pull request — Viberr never reopens a
+            closed one — so a pull request closed by mistake is recovered from
+            here, with no trip to GitHub. Delivering does not resolve this
+            packet, and the archive option that deletes the branch ends that
+            path.
+          </p>
+        )}
 
         {canResolve && (
           // The one input on the app's highest-stakes card wears the same

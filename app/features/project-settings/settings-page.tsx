@@ -50,8 +50,15 @@ type ActionResult =
   | { ok: true; toast: string; stageId?: string }
   | { ok: false; error: string };
 
-const PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" } as const;
-const POL_NOTE_STYLE = { marginBottom: 0, marginTop: ".8rem" } as const;
+/* F19-33: the panel-head counts and the trailing panel notes below used to be
+   styled by two private consts here — `PANEL_COUNT_STYLE` (a byte copy of the
+   sheet's `.fine`, app.css:230) and `POL_NOTE_STYLE` (a copy of
+   `.pol-note.after` + `.pol-note.last`, app.css:3844-3846). github-view.tsx and
+   policy-page.tsx each kept their own copies, and the note copies had already
+   drifted three ways: .8rem here, .9rem in github-view, .85rem in the sheet.
+   Hoisting the objects out of the JSX also slipped them past app.css.test.ts's
+   `style={{…}}` scan, which is why the drift went unnoticed. Ruling 14: shared
+   single implementations, never fork per surface. */
 
 // ------------------------------------------------------------------ project
 
@@ -713,7 +720,7 @@ export function StagesPanel({
       <div className="panel-head">
         <Icon name="branch" />
         <h2>Workflow stages</h2>
-        <span className="right sub" style={PANEL_COUNT_STYLE}>
+        <span className="right sub fine">
           {countLabel(stages.length, "stage")}
         </span>
       </div>
@@ -759,7 +766,7 @@ export function StagesPanel({
           reader, including a role whose controls are all disabled — telling a
           contributor to do something the page will not let them do. Speak to
           the reader's actual authority. */}
-      <div className="pol-note" style={POL_NOTE_STYLE}>
+      <div className="pol-note after last">
         <Icon name={canManage ? "shield" : "lock"} />
         <span>
           {canManage ? (
@@ -858,7 +865,7 @@ export function MembersPanel({
       <div className="panel-head">
         <Icon name="user" />
         <h2>Members</h2>
-        <span className="right sub" style={PANEL_COUNT_STYLE}>
+        <span className="right sub fine">
           {members.length - stale.length} active
           {stale.length > 0
             ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
@@ -948,7 +955,7 @@ export function MembersPanel({
           </button>
         </div>
       )}
-      <div className="pol-note" style={POL_NOTE_STYLE}>
+      <div className="pol-note after last">
         <Icon name="shield" />
         <span>
           New members join as Viewer. Roles are managed in{" "}
