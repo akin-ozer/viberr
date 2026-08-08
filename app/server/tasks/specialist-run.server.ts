@@ -408,6 +408,72 @@ async function freshRunAnchor(
 
 // ------------------------------------------------------- run-input disclosure
 
+/**
+ * The half of `RunInputs` that describes RESOLVED RESOURCES — everything a run
+ * start can know without seeing the turn's own prompt. The remaining three
+ * fields belong to the caller that composes the prompt.
+ */
+export type ResolvedResourceInputs = Omit<
+  RunInputs,
+  "anchor" | "promptChars" | "directive"
+>;
+
+/**
+ * ONE builder for the resource half, shared by the fresh-run and resume paths.
+ *
+ * Not a convenience: `resolveResumeConfinement` exists precisely because resume
+ * kept silently dropping half of a run's policy (the XS-1 class), and a
+ * disclosure that describes the fresh run accurately and the resumed run
+ * approximately would re-create that bug in the surface built to detect it.
+ */
+export function resolvedResourceInputs(input: {
+  cwd: string | null;
+  repo: string | null;
+  cloned: boolean;
+  delivers: boolean;
+  personaChars: number;
+  skills: string[];
+  nativeSkills: readonly string[];
+  kb: string[];
+  mountedMcps: string[];
+  unresolvedMcps: string[];
+  unhealthyMcps: string[];
+  unresolvedResources: { name: string; reason: string }[];
+  deniedTools: string[];
+  /** The collaboration tools actually mounted (null → none). */
+  toolkit: { comment: boolean; ask: boolean; verdict: boolean } | null;
+}): ResolvedResourceInputs {
+  return {
+    cwd: input.cwd,
+    repo: input.repo,
+    cloned: input.cloned,
+    delivers: input.delivers,
+    personaChars: input.personaChars,
+    skills: {
+      granted: input.skills,
+      native: [...input.nativeSkills],
+      injected: input.skills.filter((s) => !input.nativeSkills.includes(s)),
+    },
+    knowledge: input.kb,
+    mcp: {
+      mounted: input.mountedMcps,
+      unresolved: input.unresolvedMcps,
+      unhealthy: input.unhealthyMcps,
+    },
+    unresolvedResources: input.unresolvedResources,
+    tools: {
+      denied: input.deniedTools,
+      toolkit: input.toolkit
+        ? [
+            ...(input.toolkit.comment ? ["post_comment"] : []),
+            ...(input.toolkit.ask ? ["ask_human"] : []),
+            ...(input.toolkit.verdict ? ["report_outcome"] : []),
+          ]
+        : [],
+    },
+  };
+}
+
 /** One-line console summary of `RunInputs` (the expandable detail is the rest). */
 function runInputsSummary(inputs: RunInputs): string {
   const bits: string[] = [
@@ -1316,35 +1382,24 @@ export async function startAgentRun(
     backend,
     dataRoot: ctx.dataRoot,
     inputs: {
-      cwd: runWorkdir,
-      repo,
-      cloned: !!clone?.dir,
-      delivers,
-      personaChars: persona.length,
+      ...resolvedResourceInputs({
+        cwd: runWorkdir,
+        repo,
+        cloned: !!clone?.dir,
+        delivers,
+        personaChars: persona.length,
+        skills,
+        nativeSkills: skillMount.mounted,
+        kb,
+        mountedMcps: Object.keys(mergedMcpServers),
+        unresolvedMcps: resolvedMcps.unresolved,
+        unhealthyMcps: resolvedMcps.unhealthy,
+        unresolvedResources,
+        deniedTools: disallowedTools,
+        toolkit: toolkit ? collab : null,
+      }),
       promptChars: prompt.length,
       anchor,
-      skills: {
-        granted: skills,
-        native: skillMount.mounted,
-        injected: skills.filter((s) => !skillMount.mounted.includes(s)),
-      },
-      knowledge: kb,
-      mcp: {
-        mounted: Object.keys(mergedMcpServers),
-        unresolved: resolvedMcps.unresolved,
-        unhealthy: resolvedMcps.unhealthy,
-      },
-      unresolvedResources,
-      tools: {
-        denied: disallowedTools,
-        toolkit: toolkit
-          ? [
-              ...(collab.comment ? ["post_comment"] : []),
-              ...(collab.ask ? ["ask_human"] : []),
-              ...(collab.verdict ? ["report_outcome"] : []),
-            ]
-          : [],
-      },
       directive: input.directive?.trim()
         ? {
             from: input.directiveFrom?.trim() || null,
@@ -1973,6 +2028,12 @@ export async function resolveResumeConfinement(
   outcomeKey?: string;
   /** F7: the Codex outcome-envelope schema to re-arm on resume. */
   outputSchema?: unknown;
+  /** P19-G8/G11: the resolved-resource half of this resumed run's input
+   *  disclosure — the SAME record the fresh path writes, built from the SAME
+   *  resolution this function performs. The caller owns the remaining three
+   *  fields (it composes the prompt) and passes the whole thing to
+   *  `recordRunInputs` once `resumeRun` has minted the run id. */
+  runInputs: ResolvedResourceInputs;
 }> {
   const env = {
     ...workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot),
@@ -2018,6 +2079,7 @@ export async function resolveResumeConfinement(
             dataRoot: ctx.dataRoot,
           })
         : { mounted: [] as string[], skipped: [] };
+    const resumeUnresolved: { name: string; reason: string }[] = [];
     const persona = buildSpecialistPersona({
       profileId: input.profileId,
       skills: resolved.skills,
@@ -2028,6 +2090,7 @@ export async function resolveResumeConfinement(
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
       ...(resolved.definition ? { definition: resolved.definition } : {}),
       dataRoot: ctx.dataRoot,
+      unresolvedOut: resumeUnresolved,
     });
     // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
     // the in-process toolkit on Claude, the outcome-envelope outputSchema on
@@ -2064,9 +2127,27 @@ export async function resolveResumeConfinement(
       outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
     }
     const merged = { ...mcpServers, ...toolkitServers };
+    const cloneDir = taskCloneDir(ctx, input.projectSlug, input.taskKey);
+    const disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
     return {
-      disallowedTools: resolveSpecialistDisallowedTools(resolved.capabilities),
+      disallowedTools,
       env,
+      runInputs: resolvedResourceInputs({
+        cwd: cloneDir,
+        repo: projectRepo(ctx, input.projectSlug),
+        cloned: !!cloneDir && existsSync(cloneDir),
+        delivers: input.delivers === true,
+        personaChars: persona.length,
+        skills: resolved.skills,
+        nativeSkills: skillMount.mounted,
+        kb,
+        mountedMcps: Object.keys(merged),
+        unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
+        unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
+        unresolvedResources: resumeUnresolved,
+        deniedTools: disallowedTools,
+        toolkit: Object.keys(toolkitServers).length ? collab : null,
+      }),
       ...(Object.keys(merged).length ? { mcpServers: merged } : {}),
       ...(persona ? { systemPrompt: persona } : {}),
       ...(skillMount.mounted.length ? { skills: skillMount.mounted } : {}),
@@ -2078,7 +2159,36 @@ export async function resolveResumeConfinement(
     // any grant, so confine CONSERVATIVELY — deny ALL delivery tools, not just
     // the always-human merge (AO-5 #5). A resumed run of a vanished profile may
     // read/validate but never write/push/PR.
-    return { disallowedTools: resolveUndeployedDisallowedTools(), env };
+    const withheld = resolveUndeployedDisallowedTools();
+    return {
+      disallowedTools: withheld,
+      env,
+      // P19-G11: the disclosure states the withheld posture rather than going
+      // silent — "this run's profile could not be resolved" is exactly the kind
+      // of thing a human reading the console needs to be told.
+      runInputs: resolvedResourceInputs({
+        cwd: taskCloneDir(ctx, input.projectSlug, input.taskKey),
+        repo: projectRepo(ctx, input.projectSlug),
+        cloned: false,
+        delivers: input.delivers === true,
+        personaChars: 0,
+        skills: [],
+        nativeSkills: [],
+        kb: [],
+        mountedMcps: [],
+        unresolvedMcps: [],
+        unhealthyMcps: [],
+        unresolvedResources: [
+          {
+            name: input.profileId,
+            reason:
+              "the agent profile is no longer a deployment on this project — no grant could be confirmed, so this run is fully withheld",
+          },
+        ],
+        deniedTools: withheld,
+        toolkit: null,
+      }),
+    };
   }
 }
 

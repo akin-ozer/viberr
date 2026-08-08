@@ -2176,6 +2176,82 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(lastRunSpec()?.systemPrompt ?? "").toContain("did NOT reach this run");
   });
 
+  it("resolveResumeConfinement returns the SAME resolved-resource record for a resumed turn", async () => {
+    // The resume half of the disclosure. `resolveResumeConfinement` exists
+    // because resume kept silently dropping half of a run's policy (XS-1) — a
+    // disclosure that described the fresh run accurately and the resumed one
+    // approximately would re-create that bug inside the surface built to catch
+    // it. So both paths build this record through `resolvedResourceInputs`,
+    // from their own resolution.
+    //
+    // The caller (task-actions' @mention resume) owns the remaining three
+    // fields and hands the whole thing to `recordRunInputs`; TypeScript makes
+    // that omission explicit rather than lettings a placeholder ship.
+    //
+    // Canary: drop `runInputs` from the returned object and this fails to
+    // compile, then fails here.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            resources: { skills: [], mcps: [], kb: ["house-style"] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const confinement = await resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "dev",
+        backend: "claude",
+        delivers: true,
+      },
+    );
+    expect(confinement.runInputs.knowledge).toEqual(["house-style"]);
+    expect(confinement.runInputs.unresolvedResources.map((r) => r.name)).toContain(
+      "house-style",
+    );
+    expect(confinement.runInputs.tools.denied).toEqual(confinement.disallowedTools);
+    expect(confinement.runInputs.delivers).toBe(true);
+  });
+
+  it("says so when a resumed run's profile cannot be resolved at all", async () => {
+    // The conservative branch. It withholds every delivery tool — and now says
+    // WHY on the run, instead of a console that just looks unusually quiet.
+    const confinement = await resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "vanished",
+        backend: "claude",
+        delivers: true,
+      },
+    );
+    expect(confinement.runInputs.unresolvedResources[0]?.name).toBe("vanished");
+    expect(confinement.runInputs.unresolvedResources[0]?.reason).toContain(
+      "fully withheld",
+    );
+    expect(confinement.runInputs.tools.denied.length).toBeGreaterThan(0);
+  });
+
   it("records which granted skills MOUNTED natively and which rode the prompt", async () => {
     // R18-5's disclosure promise, per run: the same grant reaches Claude as a
     // native mount and Codex as prompt text, and until now neither surface

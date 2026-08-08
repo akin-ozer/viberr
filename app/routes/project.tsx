@@ -98,7 +98,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       (r) => r.key,
     ),
   ]);
-  const annotate = (t: TaskSummary): TaskSummary => ({
+  // Gap 10: generic, so the columns keep the fields the activity projection
+  // adds (`lastActivityAt`, `quiet`). Re-typing through `TaskSummary` erased
+  // them from the type while the spread carried them at runtime — the feature
+  // worked, but nothing downstream could see it in the type system.
+  const annotate = <T extends TaskSummary>(t: T): T => ({
     ...t,
     waitingOnMe: myDecisions.has(t.key),
   });
