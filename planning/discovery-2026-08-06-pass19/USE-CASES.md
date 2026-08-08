@@ -87,3 +87,29 @@ The two findings that only a live run could have produced are worth naming: **F1
 recommendation merged a PR with no dialog — found by clicking Apply and watching the merge land) and
 **F19-27** (a closed no-change task claiming a pending verdict — found by running R19-1's own use case
 end to end for the first time, after implementing it). Neither is visible from reading the code.
+
+
+---
+
+## F. Round 6 — driving the NEW features as an end user
+
+The 14 roadmap features were verified by code, curl, sqlite and unit tests. That is not the same as
+using them. This round created a fresh project (**Pass19 Verify**, PV-1) and drove the new surfaces
+through the browser. Two defects fell out that no test could have caught, because both were about how
+the app reads to a person.
+
+| # | Use case | Result |
+|---|----------|--------|
+| 37 | **Fresh project through the UI** with the new features present | ✓ board renders the new **No activity** filter chip alongside the four existing ones |
+| 38 | **Vocabulary collision, home vs board** | ✗ **found and fixed.** The home project card has always read "9 tasks · quiet" for `running === 0` — a healthy project with nothing in flight. Gap 10 then shipped a task-level "Gone quiet" meaning the opposite: *this task has stalled*. Two meanings for one word, one click apart. The newer one was mine, so the chip became **"No activity"**, matching the pill it selects rather than paraphrasing it. |
+| 39 | **Autonomy selector honesty, both panels** | ✗ **found and fixed.** The run picker correctly offered only "Supervised" on a supervised project; the schedule form one panel above still offered "Full". I had applied one half of the patch. The half I missed was the worse one — a scheduled run fires unattended, so nobody would be watching when the level was silently clamped. Both now offer only what will run, and the writer clamps at schedule time so the canonical entry cannot advertise a level the run will not have. |
+| 40 | **The clamp bites and says so** | ✓ live: running at `full` on a supervised project wrote `task.operator.autonomy_clamped {"requested":"full","ranAt":"supervised"}`. This audit row exists only because an earlier live test found the clamp working but INVISIBLE — its audit needed a `db` handle the run path never passed. |
+| 41 | **Corrupted task file is refused, not destroyed** | ✓ live: a tab-indented frontmatter on a real task made a comment return **409** with the file byte-intact and all 4 timeline entries preserved. Before the guard, that one comment reset every field and took the goal and timeline with it. |
+| 42 | **`store:check` names the break** | ✓ live: file path, parse error, offending line with a numbered excerpt, and the recovery command. |
+| 43 | **Backup on a live instance** | ✓ live: `npm run backup` against the running app — `integrity_check ok`, 3 users / 826 audit rows / 10 tasks readable *out of the artefact*, one file, no WAL sidecars. |
+| 44 | **Health tells the truth** | ✓ live: `status`/`degraded`/`disk`/`maintenance`/`build`, and `build.revision` matched the HEAD commit exactly — proof it reads real git state rather than a placeholder. |
+
+**What this round is really evidence for:** every one of these features passed its unit tests before I
+opened the browser. Two were still wrong in the way that matters to a user, and a third (the clamp's
+audit) was wrong in a way only a live run could expose. Tests prove a function does what it says;
+they do not prove the product reads honestly.
