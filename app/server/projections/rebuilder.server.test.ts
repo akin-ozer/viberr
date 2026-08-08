@@ -413,7 +413,9 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
   it("an OPEN PR still projects the verdict gate verbatim (R15-1 unchanged)", () => {
     const store = setupTestStore(ctx);
     expect(seedDelivered(store, "review").blockReason).toBe(
-      "VIB-3's delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.",
+      // R19-B: a project member's GitHub approval is now a third way to satisfy
+      // the gate, and the sentence names it.
+      "VIB-3's delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.",
     );
   });
 

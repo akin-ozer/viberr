@@ -699,6 +699,14 @@ export async function runOperator(
   const authority = resolveOperatorAuthority(ctx, input.projectSlug, {
     ...(input.backend ? { backend: input.backend } : {}),
     ...(input.autonomy ? { autonomy: input.autonomy } : {}),
+    // R19-A: this resolve LAUNCHES work, so a clamp that bites is recorded.
+    // Loader paths resolve authority too and deliberately pass no db — a read
+    // must not write audit rows. Live-verified: without this the clamp still
+    // held, but the reduction was invisible, which is the half of the ruling
+    // that matters to whoever wonders why their full-autonomy run behaved.
+    db,
+    taskKey: input.taskKey,
+    ...(input.actor ? { actor: input.actor } : {}),
   });
   const backend = authority.backend;
 

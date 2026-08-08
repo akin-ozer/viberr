@@ -471,6 +471,7 @@ export function ExecutionSection({
   onRelease,
   deployedSpecialists,
   operatorBackend,
+  operatorAutonomy,
   backendAvailable,
   canRunAgents,
   deliveringActive,
@@ -486,6 +487,8 @@ export function ExecutionSection({
   onRelease: () => void;
   deployedSpecialists: DeployedSpecialistView[];
   operatorBackend: "claude" | "codex";
+  /** R19-A: the project's configured operator autonomy (the run ceiling). */
+  operatorAutonomy: "supervised" | "full";
   backendAvailable: { claude: boolean; codex: boolean };
   canRunAgents: boolean;
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
@@ -578,6 +581,7 @@ export function ExecutionSection({
       onRelease={onRelease}
       deployedSpecialists={deployedSpecialists}
       operatorBackend={operatorBackend}
+      operatorAutonomy={operatorAutonomy}
       backendAvailable={backendAvailable}
       canRunAgents={canRunAgents}
       deliveringActive={deliveringActive}

@@ -51,6 +51,7 @@ import {
   type RealBackend,
 } from "~/server/runtimes/runtime-registry.server";
 import {
+  operatorAutonomyFor,
   operatorBackendFor,
   type OperatorAutonomy,
 } from "~/server/tasks/operator-actions.server";
@@ -242,6 +243,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     deployedSpecialists,
     // P11-76: the operator's configured backend so the run picker defaults to it.
     operatorBackend: operatorBackendFor({}, params.slug),
+    // R19-A: the ceiling, so the run picker offers only what will actually run.
+    operatorAutonomy: operatorAutonomyFor({}, params.slug),
     // P11-41: which backends are actually configured, so the run picker can
     // disable an option that would fail fast rather than offering it blindly.
     backendAvailable: {
@@ -844,6 +847,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}
+      operatorAutonomy={loaderData.operatorAutonomy}
       backendAvailable={loaderData.backendAvailable}
       deliveringActive={loaderData.deliveringActive}
       activeReviewerIds={loaderData.activeReviewerIds}

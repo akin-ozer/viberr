@@ -312,6 +312,33 @@ export function operatorBackendFor(
   }
 }
 
+/**
+ * R19-A — the operator deployment's CONFIGURED autonomy for a project: the
+ * ceiling every run is clamped to. The exact sibling of `operatorBackendFor`
+ * (P11-76) and for the same reason — the run picker must offer the options that
+ * will ACTUALLY run. A selector listing "Full autonomy" on a project configured
+ * `supervised` is a control that lies: the server clamps it, the run is
+ * supervised, and the only trace is an audit row the operator never reads.
+ *
+ * Falls back to `supervised` for an unreadable project / no operator deployed —
+ * the same default the run path resolves to.
+ */
+export function operatorAutonomyFor(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): OperatorAutonomy {
+  try {
+    const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+    const deployment = file?.parsed.frontmatter.agents.find(
+      (a) => effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY).kind === "operator",
+    );
+    if (!deployment) return "supervised";
+    return readAutonomy((deployment as Record<string, unknown>).definition);
+  } catch {
+    return "supervised";
+  }
+}
+
 export function resolveOperatorAuthority(
   ctx: TaskMutationContext,
   projectSlug: string,

@@ -570,6 +570,7 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         onRelease={() => {}}
         deployedSpecialists={deployedFixture}
         operatorBackend="claude"
+          operatorAutonomy="supervised"
         backendAvailable={{ claude: true, codex: true }}
         canRunAgents
         deliveringActive={false}
@@ -710,7 +711,8 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
 
   it("P11-41: the operator backend picker disables an unconfigured backend and defaults to an available one", () => {
     const { container } = renderExec(execTask({ operator: attachedOperator }), {
-      operatorBackend: "codex", // configured backend...
+      operatorBackend: "codex",
+    operatorAutonomy: "supervised" as const, // configured backend...
       backendAvailable: { claude: true, codex: false }, // ...but NOT available
     });
     const sel = container.querySelector<HTMLSelectElement>(

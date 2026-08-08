@@ -54,6 +54,7 @@ import {
   operatorRunSpecialist,
   operatorSnapshot,
   operatorTransitionStage,
+  operatorAutonomyFor,
   operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
@@ -297,6 +298,23 @@ describe("resolveOperatorAuthority backend override", () => {
     expect(codexAuth.backend).toBe("codex");
     expect(codexAuth.model).not.toBe("sonnet");
     expect(codexAuth.model).toBe(defaultModelFor("codex"));
+  });
+});
+
+describe("operatorAutonomyFor (R19-A — the run picker's ceiling)", () => {
+  it("returns the operator deployment's configured autonomy", () => {
+    deployRoster(DEFAULT_POLICY, "supervised");
+    expect(operatorAutonomyFor({ dataRoot: store.dataRoot }, store.slug)).toBe(
+      "supervised",
+    );
+    deployRoster(DEFAULT_POLICY, "full");
+    expect(operatorAutonomyFor({ dataRoot: store.dataRoot }, store.slug)).toBe("full");
+  });
+  it("defaults to supervised when no operator is deployed or the project is unknown", () => {
+    expect(operatorAutonomyFor({ dataRoot: store.dataRoot }, store.slug)).toBe(
+      "supervised",
+    );
+    expect(operatorAutonomyFor({ dataRoot: store.dataRoot }, "nope")).toBe("supervised");
   });
 });
 

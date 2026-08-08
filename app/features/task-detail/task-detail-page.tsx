@@ -63,6 +63,7 @@ export function TaskDetailPage({
   runtime,
   deployedSpecialists,
   operatorBackend,
+  operatorAutonomy,
   backendAvailable,
   deliveringActive,
   activeReviewerIds,
@@ -94,6 +95,8 @@ export function TaskDetailPage({
   deployedSpecialists: DeployedSpecialistView[];
   /** The operator's configured backend — the run picker's default (P11-76). */
   operatorBackend: "claude" | "codex";
+  /** R19-A: the project's configured operator autonomy (the run ceiling). */
+  operatorAutonomy: "supervised" | "full";
   /** P11-41: which backends are configured, for the run picker. */
   backendAvailable: { claude: boolean; codex: boolean };
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
@@ -473,6 +476,7 @@ export function TaskDetailPage({
           onRelease={() => setReleasing(true)}
           deployedSpecialists={deployedSpecialists}
           operatorBackend={operatorBackend}
+          operatorAutonomy={operatorAutonomy}
           backendAvailable={backendAvailable}
           canRunAgents={canRunAgents}
           deliveringActive={deliveringActive}

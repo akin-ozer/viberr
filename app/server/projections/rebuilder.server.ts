@@ -11,6 +11,10 @@ import {
   supportingEngagements,
   type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
+import {
+  humanApprovalRefusalNote,
+  humanVerdictApproval,
+} from "~/server/github/pr-human-approval.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
   getDataRoot,
@@ -322,7 +326,17 @@ function acceptanceBlockReason(fm: TaskFrontmatter): string | null {
   const validation = deriveValidation(fm);
   // `healthy` clears the gate; `failing` was already named precisely above.
   if (validation === "healthy" || validation === "failing") return null;
-  return `${fm.key}'s delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.`;
+  // R19-B: a project member's GitHub approval bound to the DELIVERED revision
+  // is the verdict (owner ruling, gap 24). This is the mirror of
+  // `verdictGateReason` — the two must move together, or the review queue and
+  // decisions inbox say "no approving verdict yet" about a task the task page
+  // will happily accept.
+  if (humanVerdictApproval(fm)) return null;
+  const nearMiss = humanApprovalRefusalNote(fm);
+  if (nearMiss) {
+    return `${fm.key}'s delivered revision has no approving verdict yet — ${nearMiss}`;
+  }
+  return `${fm.key}'s delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.`;
 }
 
 export function rebuildTaskFile(

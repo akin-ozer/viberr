@@ -105,6 +105,7 @@ function renderPage(props: {
             runtime={[]}
             deployedSpecialists={[]}
             operatorBackend="claude"
+          operatorAutonomy="supervised"
             backendAvailable={{ claude: true, codex: true }}
             deliveringActive={false}
             activeReviewerIds={[]}
@@ -1149,6 +1150,7 @@ function renderExec(opts: {
         onRelease={() => calls.owner.push("release")}
         deployedSpecialists={opts.deployedSpecialists ?? []}
         operatorBackend="claude"
+          operatorAutonomy="supervised"
         backendAvailable={{ claude: true, codex: true }}
         canRunAgents
         deliveringActive={false}

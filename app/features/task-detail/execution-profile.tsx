@@ -581,6 +581,7 @@ function OperatorRunControl({
   busy,
   disabled,
   defaultBackend,
+  configuredAutonomy,
   backendAvailable,
   onRun,
 }: {
@@ -589,6 +590,11 @@ function OperatorRunControl({
   disabled?: boolean;
   /** The operator profile's configured backend — the picker's default (P11-76). */
   defaultBackend: "claude" | "codex";
+  /** R19-A: the project's configured operator autonomy — the CEILING a run may
+   *  not exceed. The selector offers only what will actually run: a dropdown
+   *  that lists an option the server silently clamps is the dishonest
+   *  affordance this ruling exists to remove. */
+  configuredAutonomy: "supervised" | "full";
   /** Which backends are configured — unavailable ones are disabled (P11-41). */
   backendAvailable: { claude: boolean; codex: boolean };
   onRun: (backend: string, autonomy: string) => void;
@@ -605,7 +611,7 @@ function OperatorRunControl({
           ? "codex"
           : defaultBackend;
   const [backend, setBackend] = useState<string>(initialBackend);
-  const [autonomy, setAutonomy] = useState("supervised");
+  const [autonomy, setAutonomy] = useState<string>(configuredAutonomy);
   const off = busy || disabled;
   return (
     <span className="op-run">
@@ -631,8 +637,17 @@ function OperatorRunControl({
         disabled={off}
       >
         <option value="supervised">Supervised</option>
-        <option value="full">Full autonomy</option>
+        {configuredAutonomy === "full" && (
+          <option value="full">Full autonomy</option>
+        )}
       </select>
+      {configuredAutonomy === "supervised" && (
+        // Explain the option that is NOT there. An absent control with no
+        // reason reads as a bug; naming the policy makes it a decision.
+        <span className="sub xs dim">
+          Project policy: supervised — raise it on the operator profile.
+        </span>
+      )}
       {/* The operator coordinates ongoing work, so it stays runnable even while
           a specialist run streams — only its own in-flight run disables it.
           A closed (terminal-stage) task disables it too (G9). */}
@@ -671,6 +686,7 @@ export function ExecutionProfile({
   onRelease,
   deployedSpecialists,
   operatorBackend,
+  operatorAutonomy,
   backendAvailable,
   canRunAgents,
   deliveringActive,
@@ -697,6 +713,8 @@ export function ExecutionProfile({
   deployedSpecialists: DeployedSpecialistView[];
   /** The operator's configured backend — the run picker's default (P11-76). */
   operatorBackend: "claude" | "codex";
+  /** R19-A: the project's configured operator autonomy (the run ceiling). */
+  operatorAutonomy: "supervised" | "full";
   /** Which backends are configured — unavailable ones are disabled (P11-41). */
   backendAvailable: { claude: boolean; codex: boolean };
   /** admin|maintainer — gates the assign/run affordances (server re-checks). */
@@ -812,6 +830,7 @@ export function ExecutionProfile({
                 busy={operatorBusy}
                 disabled={closed}
                 defaultBackend={operatorBackend}
+                configuredAutonomy={operatorAutonomy}
                 backendAvailable={backendAvailable}
                 onRun={onRunOperator}
               />
