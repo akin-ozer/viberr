@@ -16,6 +16,7 @@ import {
   resolveTaskFilePath,
 } from "~/server/files/task-writer.server";
 import { storeRelativePath } from "~/server/files/file-store-root.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   findOpenScopeViolation,
 } from "~/server/projections/policy-violations.server";
@@ -35,6 +36,12 @@ import {
 import { branchCleanupOnMerge } from "./branch-cleanup.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 import { deriveMergeable, findPrForBranch, type PrFacts } from "./pr-linker.server";
+import {
+  derivePrHumanApproval,
+  readPrHumanApproval,
+  PR_HUMAN_APPROVAL_KEY,
+  type PrHumanApproval,
+} from "./pr-human-approval.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import {
@@ -210,6 +217,22 @@ function withTaskReconcileLock<T>(
   return run;
 }
 
+/**
+ * R19-B — the project's member user ids, from the CANONICAL project file (the
+ * same source `loadProjectContext` reads for every RBAC decision), so "a
+ * project member approved it" can never be answered from a stale projection.
+ * `db` is unused here on purpose: membership is file truth.
+ */
+function projectMemberIds(
+  _db: DatabaseSync,
+  projectSlug: string,
+  dataRoot: string | undefined,
+): ReadonlySet<string> {
+  const file = readProjectFile({ projectSlug, dataRoot });
+  if (!file) return new Set();
+  return new Set(file.parsed.frontmatter.members.map((m) => m.userId));
+}
+
 /** Body of `reconcileTask` — only ever entered through the per-task lock. */
 async function reconcileTaskUnlocked(
   db: DatabaseSync,
@@ -381,6 +404,30 @@ async function reconcileTaskUnlocked(
       revisionDrift = { aheadBy: driftCompare.compare.aheadBy, headSha: pr.headSha };
     }
   }
+  // R19-B (owner ruling): a project member's GitHub approval on the PR IS the
+  // approving verdict. Derived from the SAME `/reviews` payload the pill
+  // already costs, mapped to a Viberr member through `users.github_handle`, and
+  // bound to the DELIVERED revision.
+  //
+  // The unknown/stale rule is the same one `checks`, `review` and `mergeable`
+  // follow above, and it is what keeps an unreachable GitHub from flipping a
+  // satisfied gate red: `approvals` ABSENT means the reviews call did not run
+  // (terminal PR, failed request), so the last-known record is carried forward
+  // for the SAME PR rather than erased. A re-delivery still revokes it
+  // instantly — `humanVerdictApproval` re-checks the binding against the
+  // current `workRevision` on every read, with no GitHub round-trip.
+  let humanApproval: PrHumanApproval | null = null;
+  if (pr && ownsAPr) {
+    humanApproval =
+      pr.approvals !== undefined
+        ? derivePrHumanApproval({
+            approvals: pr.approvals,
+            deliveredSha: reviewedSha,
+            memberUserIds: projectMemberIds(db, input.projectSlug, ctx.dataRoot),
+            db,
+          })
+        : readPrHumanApproval(cachedPr);
+  }
   const newPr: PrRef | null =
     pr && ownsAPr
       ? {
@@ -391,6 +438,7 @@ async function reconcileTaskUnlocked(
           ...(review ? { review } : {}),
           ...(mergeable ? { mergeable } : {}),
           ...(revisionDrift ? { revisionDrift } : {}),
+          ...(humanApproval ? { [PR_HUMAN_APPROVAL_KEY]: humanApproval } : {}),
         }
       : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
 

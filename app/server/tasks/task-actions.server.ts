@@ -18,6 +18,14 @@ import {
   type TaskPacket,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
+// R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
+// consult the human GitHub approval synchronously without the dynamic-import
+// dance the rest of the github/ surface needs to stay cycle-free.
+import {
+  humanApprovalRefusalNote,
+  humanVerdictApproval,
+  humanVerdictNote,
+} from "~/server/github/pr-human-approval.server";
 import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
 import {
   canRunAgents,
@@ -5011,7 +5019,24 @@ function verdictGateReason(fm: TaskFrontmatter, taskKey: string): string | null 
   if (validation === "healthy") return null;
   // `failing` is named precisely by acceptanceBlockedReason (checked first).
   if (validation === "failing") return null;
-  return `${taskKey}'s delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.`;
+  // R19-B (owner ruling, pass 19): a PROJECT MEMBER'S GITHUB APPROVAL ON THE PR
+  // IS the approving verdict. On a project running no verdict-capable agent,
+  // `deriveValidation` can never reach `healthy`, so every acceptance had to be
+  // an admin force-accept — an override row asserting the human bypassed a gate
+  // he had actually satisfied, in the exact audit trail FR33 exists for.
+  //
+  // Bound to the delivered revision, mapped to a member, and re-checked on this
+  // read — see `humanVerdictApproval`. It does NOT relax `acceptanceBlockedReason`
+  // above: a reviewer the project deliberately ENGAGED still owes its verdict.
+  if (humanVerdictApproval(fm)) return null;
+  // Fail closed, but never silently: an approval that exists and did not count
+  // says why (unlinked handle, non-member, approved an older commit) instead of
+  // sending the reviewer to look for a review that already happened.
+  const nearMiss = humanApprovalRefusalNote(fm);
+  if (nearMiss) {
+    return `${taskKey}'s delivered revision has no approving verdict yet — ${nearMiss}`;
+  }
+  return `${taskKey}'s delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.`;
 }
 
 /**
@@ -5244,6 +5269,18 @@ export interface AcceptanceAffordance {
   /** R16-3: the blocker is a terminal GitHub fact (a closed, unmerged PR), not a
    *  process gate — so no override may be offered against it. */
   terminallyBlocked: boolean;
+  /**
+   * R19-B — when the R15-1 verdict gate is satisfied by a HUMAN's GitHub
+   * approval rather than an agent verdict, the sentence naming them and the
+   * commit they approved. Null otherwise (no approval, or an agent verdict
+   * cleared the gate).
+   *
+   * The acceptance surface must RENDER this: a gate that a person satisfied
+   * cannot just go green, or the human who accepts has no idea whose judgement
+   * they are standing on — the same "a chip is evidence, never a pseudo-check"
+   * rule (ruling 19) that this pass has been applying everywhere else.
+   */
+  verdictSatisfiedBy: string | null;
 }
 
 /**

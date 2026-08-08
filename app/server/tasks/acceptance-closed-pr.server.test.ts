@@ -66,6 +66,12 @@ function deployOperator(): void {
           name: "Operator",
           backends: ["claude"],
           model: "sonnet",
+          // R19-A: a per-run `autonomy: "full"` is now CLAMPED to the project's
+          // configured level, so the full-autonomy paths below only exist on a
+          // project that actually configured full autonomy. Previously the
+          // fixture left this unset (= supervised) and the run override alone
+          // conjured the power — the very hole R19-A closes.
+          autonomy: "full",
         },
       },
     ] as never,

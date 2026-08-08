@@ -147,6 +147,10 @@ describe("Codex structured operator completion", () => {
             name: "Operator",
             backends: ["codex"],
             model: defaultModelFor("codex"),
+            // R19-A: per-run autonomy is CLAMPED to the project's configured
+            // level, so `start()`'s `autonomy: "full"` below only means
+            // something on a project that CONFIGURED full autonomy.
+            autonomy: "full",
           },
         },
       ] as never,

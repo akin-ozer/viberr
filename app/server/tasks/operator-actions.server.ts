@@ -32,7 +32,11 @@ import {
   resolveStageRoles,
 } from "~/shared/workflow/stage-roles";
 import { newId } from "~/shared/ids/new-id.server";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  recordAudit,
+  SYSTEM_ACTOR,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { encodeRefPath } from "~/server/github/github-client.server";
 import {
@@ -98,7 +102,22 @@ export type OperatorAutonomy = "supervised" | "full";
 export interface OperatorAuthority {
   /** capabilityId → mode, from the project's operator deployment. */
   policy: Map<string, CapabilityMode>;
+  /** The autonomy this run ACTUALLY holds — already clamped to
+   *  {@link OperatorAuthority.configuredAutonomy}. Never above it (R19-A). */
   autonomy: OperatorAutonomy;
+  /**
+   * R19-A — the project deployment's CONFIGURED autonomy: the ceiling for any
+   * run. Optional on the interface only so the handful of hand-built authority
+   * literals in tests keep compiling; `resolveOperatorAuthority` always sets it.
+   */
+  configuredAutonomy?: OperatorAutonomy;
+  /**
+   * R19-A — non-null when THIS run asked for more autonomy than the project
+   * allows and was reduced to the ceiling. Carries what was asked for, so the
+   * reduction can be named (audit row, run disclosure) instead of silently
+   * happening.
+   */
+  autonomyClampedFrom?: OperatorAutonomy | null;
   backend: RealBackend;
   model: string;
   effort: string;
@@ -164,6 +183,94 @@ function readAutonomy(definition: unknown): OperatorAutonomy {
   return "supervised";
 }
 
+/** Autonomy ordered low → high. A run may sit AT or BELOW the project's
+ *  configured level; nothing may sit above it. */
+const AUTONOMY_RANK: Record<OperatorAutonomy, number> = {
+  supervised: 0,
+  full: 1,
+};
+
+/** The audit fact recorded when a run asked for more autonomy than the project
+ *  configured and was reduced to the ceiling (R19-A). Exported so the audit
+ *  panel's whitelist and the tests name the same string. */
+export const AUTONOMY_CLAMPED_AUDIT_ACTION = "task.operator.autonomy_clamped";
+
+/**
+ * R19-A (owner ruling, pass 19) — **a run may never exceed the project's
+ * configured autonomy**.
+ *
+ * `resolveOperatorAuthority` used to return `overrides.autonomy ?? configured`
+ * verbatim, so any `run-agents` role (maintainer+) could launch ONE turn at
+ * `full` on a project whose operator is deployed `supervised` — promoting every
+ * `recommend` capability (stage transitions, packets, typed events,
+ * `deliver-review-pr`) to direct execution, with no confirm, no distinct audit
+ * row, and only a toast. The Policy page presents operator autonomy as PROJECT
+ * configuration (ruling 2); a per-run dropdown that silently outranks it makes
+ * that page a lie.
+ *
+ * This is a CEILING, not a pin: choosing LESS autonomy for a single run stays
+ * allowed and is not a clamp (a maintainer may always ask for more supervision
+ * than the project demands). Omitting the override means "run at the configured
+ * level", which is also not a clamp.
+ *
+ * Pure and exported so the clamp can be unit-asserted, and so the UI can offer
+ * exactly the options that will actually run.
+ */
+export function clampAutonomy(
+  requested: OperatorAutonomy | undefined,
+  ceiling: OperatorAutonomy,
+): { autonomy: OperatorAutonomy; clampedFrom: OperatorAutonomy | null } {
+  if (requested === undefined) return { autonomy: ceiling, clampedFrom: null };
+  if (AUTONOMY_RANK[requested] <= AUTONOMY_RANK[ceiling]) {
+    return { autonomy: requested, clampedFrom: null };
+  }
+  return { autonomy: ceiling, clampedFrom: requested };
+}
+
+/**
+ * R19-A — audit the clamp WHEN IT ACTUALLY BITES, so a silently-reduced run is
+ * visible rather than mysterious.
+ *
+ * Deliberately not recorded when the run simply omitted an override, or asked
+ * for LESS than the ceiling: those are not reductions and an audit row for
+ * every operator resolve would bury the one event that matters. Recording is
+ * skipped entirely when the caller passed no `db` — `resolveOperatorAuthority`
+ * is also a pure READ on loader paths (the review page, the acceptance
+ * authority probe), and a read must not write audit rows.
+ */
+function auditAutonomyClamp(
+  overrides: OperatorAuthorityOverrides,
+  projectSlug: string,
+  clampedFrom: OperatorAutonomy,
+  ceiling: OperatorAutonomy,
+): void {
+  if (!overrides.db) return;
+  recordAudit(overrides.db, {
+    action: AUTONOMY_CLAMPED_AUDIT_ACTION,
+    actor: overrides.actor ?? SYSTEM_ACTOR,
+    subjectKind: "project",
+    subjectId: projectSlug,
+    projectSlug,
+    ...(overrides.taskKey ? { taskKey: overrides.taskKey } : {}),
+    details: { requested: clampedFrom, ranAt: ceiling, configured: ceiling },
+  });
+}
+
+/** Per-run overrides + the optional audit context the clamp needs. */
+export interface OperatorAuthorityOverrides {
+  backend?: RealBackend;
+  autonomy?: OperatorAutonomy;
+  /**
+   * R19-A — supply on RUN paths only. Present = "this resolve launches work",
+   * so a clamp that bites is recorded; absent = a pure read, which stays silent.
+   */
+  db?: DatabaseSync;
+  /** Task the run belongs to, for the clamp audit row. */
+  taskKey?: string;
+  /** The human who asked for the run — who the clamp audit names. */
+  actor?: AuditActor;
+}
+
 /**
  * Resolve the operator's authority for a project from its `agents:`
  * deployment. `overrides` lets a run pick the backend / autonomy for THIS run
@@ -208,7 +315,7 @@ export function operatorBackendFor(
 export function resolveOperatorAuthority(
   ctx: TaskMutationContext,
   projectSlug: string,
-  overrides: { backend?: RealBackend; autonomy?: OperatorAutonomy } = {},
+  overrides: OperatorAuthorityOverrides = {},
 ): OperatorAuthority {
   const file = readProjectFile({
     projectSlug,
@@ -228,9 +335,19 @@ export function resolveOperatorAuthority(
   });
 
   if (!deployment) {
+    // R19-A: no deployment ⇒ nothing configured `full`, so the ceiling is
+    // `supervised` here too. `deployed: false` already denies every capability,
+    // but an authority that REPORTS "full" would still be a lie on the run
+    // disclosure — and would hand a future default in this branch real power.
+    const undeployed = clampAutonomy(overrides.autonomy, "supervised");
+    if (undeployed.clampedFrom) {
+      auditAutonomyClamp(overrides, projectSlug, undeployed.clampedFrom, "supervised");
+    }
     return {
       policy: new Map(),
-      autonomy: overrides.autonomy ?? "supervised",
+      autonomy: undeployed.autonomy,
+      configuredAutonomy: "supervised",
+      autonomyClampedFrom: undeployed.clampedFrom,
       backend: overrides.backend ?? "claude",
       model: defaultModelFor(overrides.backend ?? "claude"),
       effort: "",
@@ -262,9 +379,18 @@ export function resolveOperatorAuthority(
       ? resolveRunModel(backend, view.model)
       : defaultModelFor(backend);
 
+  // R19-A: the deployment's configured autonomy is the CEILING for this run.
+  const configuredAutonomy = readAutonomy(definition);
+  const clamped = clampAutonomy(overrides.autonomy, configuredAutonomy);
+  if (clamped.clampedFrom) {
+    auditAutonomyClamp(overrides, projectSlug, clamped.clampedFrom, configuredAutonomy);
+  }
+
   return {
     policy,
-    autonomy: overrides.autonomy ?? readAutonomy(definition),
+    autonomy: clamped.autonomy,
+    configuredAutonomy,
+    autonomyClampedFrom: clamped.clampedFrom,
     backend,
     model,
     effort: backend === declaredBackend ? view.effort || "" : "",

@@ -162,6 +162,10 @@ function deployAgents(withOperator = false): void {
                 name: "Operator",
                 backends: ["claude"],
                 model: "sonnet",
+                // R19-A: a per-run `autonomy: "full"` is CLAMPED to the
+                // project's configured ceiling, so a fixture that exercises
+                // full-autonomy behaviour must configure full autonomy.
+                autonomy: "full",
               },
             },
           ]

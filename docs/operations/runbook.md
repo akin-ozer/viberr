@@ -3,6 +3,21 @@
 Quick reference for the common operational tasks and failure modes. All commands run
 from the repo root (or `docker compose exec app …` inside the container).
 
+
+## First diagnostic: is every canonical file trustworthy?
+
+```bash
+npm run store:check
+```
+
+Read-only, needs no lock, and runs against a live instance. It parses every
+`project.md` and `task.md`, and for anything the app cannot trust it names the
+file, the parse error and the offending line with an excerpt. A file in that
+state is forced to `blocked` and **the app refuses to write to it** — a write
+would replace your content with defaults — so this is the first thing to run
+when a task looks wrong. Recover one file from a backup with
+`npm run restore -- --from <artefact> --file <path>`.
+
 ## Health & liveness
 
 - `GET /resources/health` →
@@ -27,7 +42,8 @@ audit, notifications). Anything projection-shaped can be rebuilt from files.
 
 ## Rescan vs. rebuild
 
-- **Re-scan** (Home store strip, or `npm run rescan`): incremental — re-reads changed
+- **Re-scan** (Home store strip — use the app while it is running; `npm run rescan`
+  takes the single-writer lock and REFUSES against a live instance): incremental — re-reads changed
   files (content-hash short-circuit) and updates projections. Use after editing task/
   project files directly, or if the watcher missed a change.
 - **Rebuild projections** (Home, admin-only, confirm dialog; or the boot reconcile): drops
@@ -51,7 +67,7 @@ readiness downgrade (tolerant parsing):
   pill and readiness reflect the severity (`input_required` / `inconsistency_risk_detected`
   / `blocked`), and an entry appears under Activity → Audit logs.
 - Fix the file on disk → the watcher re-projects within ~1 s and the diagnostic clears
-  (or run `npm run rescan`).
+  (or, with the app stopped, `npm run rescan`).
 - Unknown workflow stage → warning + readiness floor until the stage is added in project
   settings or the task is moved. Duplicate `## Goal`/`## Packet`/`## Timeline` sections →
   warning, first occurrence wins.

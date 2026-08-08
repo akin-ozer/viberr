@@ -60,6 +60,11 @@ export interface PrFacts {
    * read this pass (terminal PR, or the call failed) — UNKNOWN, so callers keep
    * the cached value; `null` means read-and-nothing-outstanding. */
   review?: PrReviewState | null;
+  /** R19-B: the standing approvals with the commit each was submitted on.
+   *  ABSENT under exactly the same rule as `review` — not read this pass
+   *  (terminal PR, or the call failed) means UNKNOWN, so callers keep the
+   *  cached value instead of erasing a real approval on a GitHub hiccup. */
+  approvals?: PrApproval[];
   /** P14-LV-07: can GitHub merge this PR? ABSENT when the detail fetch failed
    * (unknown → callers keep the cached value) or the PR is terminal. */
   mergeable?: PrMergeable;
@@ -106,6 +111,24 @@ interface GhCheckRuns {
 export interface GhReview {
   state?: string;
   user?: { login?: string } | null;
+  /** R19-B: the commit the review was submitted ON. This is what binds a human
+   *  approval to a revision — GitHub keeps an approval standing after new
+   *  commits land, so without it "approved" says nothing about WHAT was
+   *  approved. */
+  commit_id?: string | null;
+  submitted_at?: string | null;
+}
+
+/** R19-B — a reviewer whose LATEST review is an approval, and the commit it
+ *  was submitted on. */
+export interface PrApproval {
+  /** GitHub login of the approver (never a Viberr identity — mapping happens
+   *  in the reconciler, against the project's members). */
+  login: string;
+  /** The commit the approval was submitted on; null when GitHub omitted it. */
+  commitSha: string | null;
+  /** ISO timestamp of the approval, or null. */
+  at: string | null;
 }
 
 const PASSING = new Set(["success", "neutral", "skipped"]);
@@ -150,6 +173,39 @@ export function deriveReviewState(
   if (states.includes("CHANGES_REQUESTED")) return "changes_requested";
   if (states.includes("APPROVED")) return "approved";
   return requestedReviewers > 0 ? "review_required" : null;
+}
+
+/**
+ * R19-B — the reviewers whose CURRENT state is APPROVED, with the commit each
+ * one approved.
+ *
+ * Same event-log reduction as {@link deriveReviewState} (latest entry per
+ * reviewer wins; `COMMENTED`/`PENDING` are not verdicts and never replace a
+ * standing one; `DISMISSED` withdraws it) — deliberately derived from the SAME
+ * already-fetched `/reviews` payload rather than a second call. The difference
+ * is that this keeps the identity and the commit, which is what lets a human
+ * approval be bound to the delivered revision the way an agent verdict is.
+ *
+ * A reviewer with an outstanding CHANGES_REQUESTED is not listed, by
+ * construction: their latest state is not APPROVED.
+ */
+export function deriveApprovals(reviews: readonly GhReview[]): PrApproval[] {
+  const latest = new Map<string, PrApproval & { state: string }>();
+  for (const review of reviews) {
+    const state = (review.state ?? "").toUpperCase();
+    if (state === "COMMENTED" || state === "PENDING" || state === "") continue;
+    const login = review.user?.login;
+    if (!login) continue;
+    latest.set(login, {
+      state,
+      login,
+      commitSha: review.commit_id ?? null,
+      at: review.submitted_at ?? null,
+    });
+  }
+  return [...latest.values()]
+    .filter((r) => r.state === "APPROVED")
+    .map(({ login, commitSha, at }) => ({ login, commitSha, at }));
 }
 
 /**
@@ -276,6 +332,7 @@ export async function findPrForBranch(
   // finding was filed about. A failed read leaves `review` ABSENT (unknown) so
   // the caller keeps the cached value instead of blanking the pill.
   let review: PrReviewState | null | undefined;
+  let approvals: PrApproval[] | undefined;
   if (state === "review") {
     const reviews = await client.request<GhReview[]>(
       "GET",
@@ -283,10 +340,14 @@ export async function findPrForBranch(
       { searchParams: { per_page: 100 } },
     );
     if (reviews.ok) {
+      const entries = Array.isArray(reviews.data) ? reviews.data : [];
       review = deriveReviewState(
-        Array.isArray(reviews.data) ? reviews.data : [],
+        entries,
         (pr.requested_reviewers?.length ?? 0) + (pr.requested_teams?.length ?? 0),
       );
+      // R19-B: same payload, no extra call — the identities + commits behind
+      // the pill, so a project member's approval can BE the verdict.
+      approvals = deriveApprovals(entries);
     }
   }
 
@@ -299,6 +360,7 @@ export async function findPrForBranch(
       draft: pr.draft ?? false,
       headSha,
       ...(review !== undefined ? { review } : {}),
+      ...(approvals !== undefined ? { approvals } : {}),
       // P14-LV-07: only an OPEN PR has a meaningful mergeability, and only the
       // detail fetch carries it. A failed detail read — or GitHub still
       // COMPUTING the answer (the first read after a push) — leaves the key
