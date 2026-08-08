@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
+import { capabilityById } from "~/shared/capabilities";
 import { prStatePill } from "~/features/github/github-pills";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 
@@ -22,6 +23,21 @@ import { reviewRowSub, type ReviewRowView } from "./review-helpers";
  * P13-D-9: the "human only" chip and the acceptance footer are conditional on
  * the project's operator authority (see review-acceptance-authority.server.ts).
  */
+
+/**
+ * UXV19-1: the capability's rendered NAME comes from the shared catalog, by id.
+ *
+ * This page shipped the retired label "Completion for human acceptance" in both
+ * the chip tooltip and the acceptance footer — and it is the surface that sends
+ * the reader to Policy to verify the claim, where the same control is called
+ * "Accept completion into Done" (the rename's reason is on the catalog entry:
+ * the old label read as a guarantee it does not make). Naming the control by
+ * hand is what let the rename miss this file; reading it from the catalog means
+ * the queue, Policy and the Agents profile cannot say three different things.
+ */
+const ACCEPTANCE_CAP_LABEL =
+  capabilityById("completion-for-acceptance")?.label ??
+  "Accept completion into Done";
 
 function RQRow({
   t,
@@ -137,18 +153,20 @@ export function ReviewQueuePage({
           {/* UI-27 residual: this was a <button> wearing `hero-file`, visually
               identical to the non-interactive `hero-file` spans elsewhere — no
               affordance that it navigates. It reads as the link it is now. */}
-          {/* P13-D-9: the chip claimed "human only" on EVERY project. On an
-              Autonomous-preset project the operator holds an explicit
-              `completion-for-acceptance: direct` grant and closes tasks itself,
-              so the chip has to say so — the same exception Policy and the
-              create modal already disclose. */}
+          {/* P13-D-9: the chip claimed "human only" on EVERY project. On a
+              full-autonomy project whose operator ALSO holds an explicit
+              `completion-for-acceptance: direct` grant, that operator closes
+              tasks itself, so the chip has to say so — the same exception
+              Policy and the create modal already disclose. (The grant is
+              `promotable: false`: no preset and no autonomy change ever confers
+              it; an admin sets it deliberately.) */}
           <button
             type="button"
             className="btn ghost sm"
             onClick={onPolicy}
             title={
               operatorCanAccept
-                ? `${operatorName} runs at full autonomy with Completion for human acceptance set to Direct, so it can move a task to ${stageNames.terminal} itself — every other actor at this boundary is a human. See Policy.`
+                ? `${operatorName} runs at full autonomy and separately holds ${ACCEPTANCE_CAP_LABEL} set to Direct, so it can move a task to ${stageNames.terminal} itself — every other actor at this boundary is a human. See Policy.`
                 : `${stageNames.review} → ${stageNames.terminal} is locked to humans — see Policy`
             }
           >
@@ -186,17 +204,19 @@ export function ReviewQueuePage({
             <Icon name={operatorCanAccept ? "bolt" : "lock"} />
             {/* P13-D-9: wording tracks the Policy note (policy-page.tsx) — one
                 exception, explicitly granted and audited, never a general
-                "agents can close tasks". */}
+                "agents can close tasks". UXV19-1: the control's name is the
+                catalog's, so "tracks the Policy note" stays true. */}
             {operatorCanAccept ? (
               <span>
                 Accepting a completion merges the review PR and moves the task
                 to <strong>{stageNames.terminal}</strong> — always in the audit
                 log. Normally a human action, with one exception on this
                 project: <strong>{operatorName}</strong> runs at{" "}
-                <strong>full autonomy</strong> with{" "}
-                <strong>Completion for human acceptance</strong> set to{" "}
-                <em>Direct</em>, an explicit opt-in that lets it accept a
-                completion itself (it still refuses a failing-validation task).
+                <strong>full autonomy</strong> and separately holds{" "}
+                <strong>{ACCEPTANCE_CAP_LABEL}</strong> set to <em>Direct</em> —
+                an explicit grant, never implied by the autonomy setting, that
+                lets it accept a completion itself (it still refuses a
+                failing-validation task).
               </span>
             ) : (
               <span>

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ReviewQueuePage } from "./review-page";
+import { capabilityById } from "~/shared/capabilities";
 import type { ReviewRowView } from "./review-helpers";
 
 afterEach(cleanup);
@@ -266,11 +267,46 @@ describe("P13-D-9: the queue stops promising human-only Done unconditionally", (
     expect(note).not.toContain("always a human action");
     expect(note).toContain("Atlas");
     expect(note).toContain("full autonomy");
-    expect(note).toContain("Completion for human acceptance");
+    expect(note).toContain("Accept completion into Done");
     expect(note).toContain("Direct");
     // It stays an exception, not a licence.
     expect(note).toContain("one exception");
     expect(note).toContain("always in the audit log");
+  });
+
+  // UXV19-1: this queue named the capability by hand and kept the RETIRED
+  // label ("Completion for human acceptance") after the catalog renamed it —
+  // on the one surface that tells the reader to go verify the claim on Policy,
+  // where only "Accept completion into Done" exists. Both the tooltip and the
+  // footer now render the catalog's own label, by id.
+  // Canary: hardcode "Completion for human acceptance" back into either the
+  // title at review-page.tsx or the footer <strong> and this test fails.
+  it("names the acceptance capability exactly as the catalog does, in the chip AND the footer", () => {
+    const label = capabilityById("completion-for-acceptance")!.label;
+    expect(label).toBe("Accept completion into Done");
+
+    const { container, getByText } = renderQueue([rowHuman], [], 1, {
+      operatorCanAccept: true,
+      operatorName: "Atlas",
+    });
+    const title = getByText("Review → Done · human or operator")
+      .closest("button")!
+      .getAttribute("title")!;
+    const note = container.querySelector(".pol-note")!.textContent!;
+
+    for (const copy of [title, note]) {
+      expect(copy).toContain(label);
+      // The name it was renamed AWAY from must not survive anywhere here: it
+      // matches no control on Policy, on the operator profile, or in the
+      // capability editor.
+      expect(copy).not.toContain("Completion for human acceptance");
+    }
+    // The exception needs BOTH facts — full autonomy alone never confers it
+    // (`promotable: false`), so the copy must not read as a consequence of the
+    // autonomy setting.
+    expect(note).toContain("full autonomy");
+    expect(note).toContain("separately holds");
+    expect(note).toContain("never implied by the autonomy setting");
   });
 
   it("defaults to the strict boundary when the caller passes no acceptance data", () => {

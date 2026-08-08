@@ -52,6 +52,11 @@ type ActionResult =
 
 const PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" } as const;
 const POL_NOTE_STYLE = { marginBottom: 0, marginTop: ".8rem" } as const;
+// Pass-19 UX audit #22: the invite inputs now carry visible labels, which makes
+// the two form columns taller than the button. `.invite-row` is a grid, so its
+// items stretch — bottom-align the button to the input line instead of letting
+// it grow to label height. (Style here, not in app.css: one row, one rule.)
+const INVITE_BTN_STYLE = { alignSelf: "end" } as const;
 
 // ------------------------------------------------------------------ project
 
@@ -925,24 +930,52 @@ export function MembersPanel({
           </div>
         ))}
       </div>
+      {/* Pass-19 UX coherence audit, finding #22: these two inputs were bare —
+          no `.flabel`, no `htmlFor`, their only name a placeholder that leaves
+          the screen on the first keystroke. The org-level twin of this exact
+          action labels every field (org-settings/users-panel.tsx: "Full name" /
+          "Email" over inputs whose placeholders are the same strings), as do
+          this page's own identity fields, so one invite form in the product
+          disagreed with the rest. It matters most below 1300px, where
+          `.invite-row` collapses to one column (app.css) and the two
+          same-looking boxes stack — a 1280px laptop is inside that. Same
+          in-house `.field` + `.flabel` idiom, no new visual language. */}
       {canManage && (
         <div className="invite-row">
-          <input
-            type="text"
-            placeholder="Full name"
-            value={nm}
-            onChange={(e) => setNm(e.target.value)}
-          />
-          <input
-            type="text"
-            placeholder="email@company.dev"
-            value={em}
-            onChange={(e) => setEm(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") invite();
-            }}
-          />
-          <button type="button" className="btn sm" onClick={invite} disabled={busy}>
+          <div className="field">
+            <label className="flabel" htmlFor="pm-invite-name">
+              Full name<span className="req">*</span>
+            </label>
+            <input
+              id="pm-invite-name"
+              type="text"
+              placeholder="Full name"
+              value={nm}
+              onChange={(e) => setNm(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label className="flabel" htmlFor="pm-invite-email">
+              Email<span className="req">*</span>
+            </label>
+            <input
+              id="pm-invite-email"
+              type="text"
+              placeholder="email@company.dev"
+              value={em}
+              onChange={(e) => setEm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") invite();
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn sm"
+            style={INVITE_BTN_STYLE}
+            onClick={invite}
+            disabled={busy}
+          >
             <Icon name="send" />
             Invite
           </button>
@@ -1037,6 +1070,11 @@ function RepairRepoDialog({
           </span>
         </label>
       )}
+      {/* Pass-19 UX audit #20 named this slot too, but it is NOT silent: the
+          repair rides `repoFetcher`, and `useActionToast(repoFetcher)` in
+          SettingsPage already pushes the failure through the app's announcer
+          with the error glyph. This div is the "also render it in place" half.
+          Adding `role="alert"` here would announce the same refusal twice. */}
       {error && (
         <div className="cred-warn">
           <Icon name="alert" />

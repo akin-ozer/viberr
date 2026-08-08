@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  engagementVocabulary,
   reviewingAgentsLabel,
   type DeployedSpecialistView,
 } from "./execution-profile";
@@ -61,5 +62,63 @@ describe("reviewingAgentsLabel", () => {
         [profile("old", undefined)],
       ),
     ).toBe("Reviewing agents");
+  });
+});
+
+/**
+ * UX19-4 — UC-13 renamed the heading and stopped there, so the cell could read
+ * "Supporting agents" while every control inside it said "reviewer", including
+ * an empty state that flatly contradicted the heading ("All deployed agents are
+ * already reviewing."). Heading and verbs now come from ONE call, so they
+ * cannot drift apart again.
+ */
+describe("engagementVocabulary", () => {
+  it("gives the supporting cell engagement verbs — no reviewer word anywhere", () => {
+    const v = engagementVocabulary(
+      [{ profileId: "docs" }],
+      [profile("docs", false)],
+    );
+    expect(v.heading).toBe("Supporting agents");
+    const strings = [
+      v.add,
+      v.panel,
+      v.allEngaged,
+      v.closed,
+      v.release,
+      v.releaseOf("Documentation"),
+    ];
+    expect(strings).toEqual([
+      "Engage agent",
+      "Engage an agent",
+      "All deployed agents are already engaged.",
+      "Task closed — no new engagements.",
+      "Release agent",
+      "Release Documentation agent",
+    ]);
+    // The contradiction that made this a defect rather than drift: a cell that
+    // says these engagements are NOT reviewing must not also say they are.
+    expect(strings.join(" ")).not.toMatch(/review/i);
+  });
+
+  it("keeps the reviewer vocabulary as soon as one engagement gates acceptance", () => {
+    const v = engagementVocabulary(
+      [{ profileId: "docs" }, { profileId: "senior" }],
+      [profile("docs", false), profile("senior", true)],
+    );
+    expect(v.heading).toBe("Reviewing agents");
+    expect([v.add, v.panel, v.allEngaged, v.closed, v.release]).toEqual([
+      "Engage reviewer",
+      "Engage a reviewer",
+      "All deployed agents are already reviewing.",
+      "Task closed — no new reviewer engagements.",
+      "Release reviewer",
+    ]);
+    expect(v.releaseOf("Code review")).toBe("Release Code review reviewer");
+  });
+
+  it("an empty cell keeps the reviewer vocabulary (nothing has been demoted yet)", () => {
+    const v = engagementVocabulary([], []);
+    expect(v.heading).toBe("Reviewing agents");
+    expect(v.add).toBe("Engage reviewer");
   });
 });

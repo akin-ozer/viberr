@@ -22,9 +22,17 @@ export function ntfMeta(n: {
   ptype?: "input" | "blocked" | null;
 }): NtfMeta {
   if (n.kind === "packet") {
+    // F19-24: the non-blocked branch used to be `check` + `act-completion` —
+    // the COMPLETION palette — so an operator's scoping question rendered with
+    // a completion checkmark, exactly the "something to accept" reading a
+    // supervisor scanning the inbox must NOT get. A non-blocked packet is an
+    // open question: `hand` is the glyph this app already uses for "waiting on
+    // a human" (board WaitTag, "Waiting on me" filter, review queue), and
+    // `act-policy` is the orange/yellow icon palette that matches `.pill.input`
+    // — the very pill the packet wears on the task page (decision-packet.tsx).
     return n.ptype === "blocked"
       ? { icon: "alert", cls: "act-blocked" }
-      : { icon: "check", cls: "act-completion" };
+      : { icon: "hand", cls: "act-policy" };
   }
   if (n.kind === "approval") return { icon: "arrow", cls: "act-transition" };
   if (n.kind === "mention") return { icon: "message", cls: "act-comment" };
@@ -40,6 +48,14 @@ export function plainText(s: string | null | undefined): string {
 /**
  * Notification kind → type-pill on the /notifications "Waiting on you"
  * cards (contracts §4; mock `ntfPill`, notifications.jsx — Phase 9C).
+ *
+ * The label is DERIVED from `ptype` because the notification row does not carry
+ * the packet's own `kind` string. It cannot drift today — `operatorOpenPacket`
+ * is the sole writer of `kind: "packet"` rows and computes both the packet's
+ * stored `kind` and this row's `ptype` from one `packetType` — but the honest
+ * end state is to carry the stored string on the row (select the packet's
+ * `kind` in `listNotifications`' existing task_projections join and surface it
+ * as an optional `packetKind` on `NotificationView`) and prefer it here.
  */
 export interface NtfPill {
   kind: "info" | "blocked" | "input";
@@ -51,8 +67,25 @@ export function ntfPill(n: {
   ptype?: "input" | "blocked" | null;
 }): NtfPill {
   if (n.kind === "approval") return { kind: "info", label: "approval" };
-  if (n.ptype === "blocked") {
-    return { kind: "blocked", label: "blocked decision" };
+  // F19-24: this used to end in `return { kind: "input", label: "completion
+  // report" }` as the FALL-THROUGH, so every non-blocked packet was pilled a
+  // completion report — a scoping question, a redirect, an edit_goal. That name
+  // is load-bearing elsewhere (the `completion` timeline event, what the Review
+  // queue says lands at the acceptance boundary), and the row contradicted its
+  // own title one line to its left ("Decision needed: …") and the same packet's
+  // pill on the task page ("Decision required"). Name the packet instead. The
+  // two labels below are the lowercased forms of the `kind` string the packet
+  // itself stores (operator-actions.server.ts:786, written from the SAME
+  // `packetType` that becomes this row's `ptype` at :853) — see the note on
+  // NtfPill about threading the stored string through instead.
+  if (n.kind === "packet") {
+    return n.ptype === "blocked"
+      ? { kind: "blocked", label: "blocked decision" }
+      : { kind: "input", label: "decision required" };
   }
-  return { kind: "input", label: "completion report" };
+  // Nothing else reaches this pill — "Waiting on you" holds packets and
+  // approvals only (notifications-page-helpers.ts). If something ever does, it
+  // names itself rather than borrowing a decision's vocabulary (the UI-57
+  // tolerant-AND-honest fallback, event-meta.ts).
+  return { kind: "info", label: n.kind || "notification" };
 }

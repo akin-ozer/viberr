@@ -502,6 +502,46 @@ describe("MembersPanel", () => {
     expect(emailInput.value).toBe("");
   });
 
+  /**
+   * Pass-19 UX coherence audit, finding #22 (a11y).
+   *
+   * This was the only invite form in the product without persistent field
+   * labels: two bare `<input>`s whose sole name was a placeholder that leaves
+   * the screen on the first keystroke. The org-level twin of the very same
+   * action (`org-settings/users-panel.tsx`) labels "Full name" and "Email" over
+   * inputs carrying those identical placeholders, and this page's own identity
+   * fields use the same `.field` + `.flabel` idiom. It bites hardest under
+   * 1300px, where `.invite-row` collapses to one column and the two
+   * same-looking boxes stack.
+   */
+  it("#22: both invite fields keep a real label, not just a vanishing placeholder", () => {
+    const { container, getByLabelText } = render(
+      <MembersPanel {...base} onInvite={() => {}} onRemove={() => {}} />,
+    );
+    const inputs = [
+      ...container.querySelectorAll<HTMLInputElement>(".invite-row input"),
+    ];
+    expect(inputs).toHaveLength(2);
+    for (const input of inputs) {
+      expect(input.id).not.toBe("");
+      const label = container.querySelector(`label[for="${input.id}"]`);
+      expect(label).not.toBeNull();
+      expect(label!.textContent!.trim()).not.toBe("");
+    }
+
+    // The whole point: the name is still on screen once the field is filled.
+    const name = getByLabelText(/Full name/) as HTMLInputElement;
+    const email = getByLabelText(/Email/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Deniz Şahin" } });
+    fireEvent.change(email, { target: { value: "deniz@viberr.dev" } });
+    expect(
+      container.querySelector(`label[for="${name.id}"]`)!.textContent,
+    ).toContain("Full name");
+    expect(
+      container.querySelector(`label[for="${email.id}"]`)!.textContent,
+    ).toContain("Email");
+  });
+
   it("hides invite + remove for non-admins", () => {
     const { container, queryByPlaceholderText } = render(
       <MembersPanel {...base} canManage={false} onInvite={() => {}} onRemove={() => {}} />,

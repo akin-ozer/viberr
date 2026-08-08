@@ -36,13 +36,21 @@ describe("runLabel / roleShort", () => {
     expect(runLabel(base)).toBe("Codex · Developer");
     expect(runLabel({ ...base, op: true, who: { kind: "agent", name: "Operator" } })).toBe("Operator");
   });
-  it("roleShort maps op/primary/reviewer", () => {
+  it("roleShort speaks engagement vocabulary: operator / delivering / supporting", () => {
+    // UXV19-3: the run picker printed the internal RunKind literal "primary"
+    // for the delivering run — a third name for the agent the Execution
+    // profile on the SAME page calls "Delivering agent" and the Agents roster
+    // calls "delivering" (F10-20's mapping). The kind literals stay on the row.
+    // Canary: restore `kind === "primary" ? "primary" : "reviewer"` and both
+    // halves below fail.
     expect(roleShort({ ...base, op: true })).toBe("operator");
-    expect(roleShort(base)).toBe("primary");
+    expect(roleShort(base)).toBe("delivering");
+    // `kind: "reviewer"` is what EVERY non-delivering run is written with
+    // (specialist-run.server.ts), so the label is the honest superset.
+    expect(roleShort({ ...base, kind: "reviewer" })).toBe("supporting");
     // Kind is data on the run row — the role label is free-form (live
     // engagement role), so roleShort keys on kind, never the label.
-    expect(roleShort({ ...base, kind: "reviewer" })).toBe("reviewer");
-    expect(roleShort({ ...base, kind: "reviewer", role: "Anything" })).toBe("reviewer");
+    expect(roleShort({ ...base, kind: "reviewer", role: "Anything" })).toBe("supporting");
   });
 });
 

@@ -19,7 +19,6 @@ import {
   fmtClock,
   fmtTok,
   roleShort,
-  RUN_STATE,
   runLabel,
   runStatePill,
   useElapsed,
@@ -127,9 +126,20 @@ function AgentPicker({
                   {r.role} · {r.sdk}
                 </span>
               </span>
+              {/* UXV19-5: the option used to print `RUN_STATE[r.state].label`,
+                  the four-value RENDER projection, in which `renderStateOf`
+                  collapses both `interrupted` and `queued` to "idle". So the
+                  list a user reads FIRST to choose a stream called a run
+                  "idle" while the pill and footer four lines below — which do
+                  apply ruling 11's lifecycle mapping — read "interrupted · by
+                  Arda" / "queued". One panel, one vocabulary: the label comes
+                  from `runStatePill`, the module written for that ruling. The
+                  DOT keeps the render-state class: it is a CSS state name, and
+                  every lifecycle `runStatePill` re-labels is idle-shaped
+                  (neutral) anyway, so tone never disagrees with the word. */}
               <span className={"ri-state " + r.state}>
                 <span className={"rdot " + r.state} />
-                {RUN_STATE[r.state].label}
+                {runStatePill(r).label}
               </span>
             </button>
           ))}

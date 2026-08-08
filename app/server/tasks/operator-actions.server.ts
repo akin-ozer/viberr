@@ -1812,7 +1812,7 @@ export async function operatorRunSpecialist(
       input.projectSlug,
       input.taskKey,
       { kind: "run_specialist", label: "Start the delivering agent's run" },
-      "The specialist is ready to work this task; a maintainer starts the run.",
+      "The delivering agent is ready to work this task; a maintainer starts the run.",
     );
     return { outcome: "recommended", message: "Recommended starting the delivering agent's run." };
   }

@@ -665,3 +665,65 @@ describe("F19-13: the list row draws the PR-state pills the card draws", () => {
     expect(getByText("closed")).toBeTruthy();
   });
 });
+
+/**
+ * UXV19-6 — the other half of F19-13. Board and List are two views of ONE
+ * surface, and the card foot draws two more pills under its actionable-state
+ * rule: a failing build, and a teammate asking for changes on the PR. The list
+ * row drew neither, so switching the segmented control made a broken build
+ * invisible — and nothing else on the row covers it (validation is task-row
+ * state with no CI input, and "Blocked or waiting" does not filter on either).
+ *
+ * Canary: delete the two pills from ListView's non-archived branch and the
+ * three list-view expectations below fail while the card ones stay green.
+ */
+describe("UXV19-6: the list row draws the ACTIONABLE PR-check/review pills the card draws", () => {
+  const broken = () =>
+    task({
+      pr: { number: 124, state: "review", title: "Attach a credential" },
+      prChecks: { total: 5, passing: 2, failing: 3, pending: 0, state: "failing" },
+      prReview: "changes_requested",
+    });
+
+  it("a failing build and a changes-requested review survive the Board→List switch", () => {
+    const card = renderBoard([broken()]);
+    expect(card.getByText("3/5 checks failing")).toBeTruthy();
+    expect(card.getByText("changes requested")).toBeTruthy();
+    cleanup();
+
+    const { container, getByText } = renderBoard([broken()], { view: "list" });
+    const row = container.querySelector(".list-row")!;
+    expect(getByText("3/5 checks failing")).toBeTruthy();
+    expect(getByText("changes requested")).toBeTruthy();
+    // Both live on the row itself, not somewhere else on the page.
+    expect(row.textContent).toContain("3/5 checks failing");
+    expect(row.textContent).toContain("changes requested");
+  });
+
+  it("stays silent when the checks pass and nobody asked for changes — same density rule as the card", () => {
+    const { container } = renderBoard(
+      [
+        task({
+          pr: { number: 124, state: "review", title: "Attach a credential" },
+          prChecks: { total: 5, passing: 5, failing: 0, pending: 0, state: "passing" },
+          prReview: "approved",
+        }),
+      ],
+      { view: "list" },
+    );
+    const row = container.querySelector(".list-row")!;
+    expect(row.textContent).not.toContain("checks");
+    expect(row.textContent).not.toContain("approved");
+  });
+
+  it("an archived row still states only that it is archived", () => {
+    const { container } = renderBoard(
+      [{ ...broken(), archived: true }],
+      { view: "list", search: "filter=archived" },
+    );
+    const row = container.querySelector(".list-row")!;
+    expect(row.textContent).toContain("archived");
+    expect(row.textContent).not.toContain("checks failing");
+    expect(row.textContent).not.toContain("changes requested");
+  });
+});

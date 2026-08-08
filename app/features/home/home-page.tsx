@@ -290,6 +290,10 @@ export function HomePage({
           connections={org.connectionOwners}
           connectionHealth={org.connectionHealth}
           storeRoot={data.storeRoot}
+          // UX19-14: a member may create a project but may NOT add a PAT, so the
+          // zero-connections note must name who can instead of linking them into
+          // an org-settings 403.
+          isAdmin={user.role === "admin"}
           onClose={() => setModal(false)}
         />
       )}

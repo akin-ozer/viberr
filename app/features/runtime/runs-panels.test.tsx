@@ -435,6 +435,77 @@ describe("P13-D-11: the console pages backwards", () => {
  * did nothing and the only way out was a click elsewhere. The hook gives it the
  * same Escape every other popover in the app has.
  */
+/**
+ * UXV19-3 + UXV19-5: the run picker is the surface a user reads FIRST to choose
+ * which stream to inspect, and it was the one place in the panel that spoke
+ * neither the product's engagement vocabulary nor ruling 11's run lifecycle.
+ */
+describe("the run picker speaks the same vocabulary as the panel around it", () => {
+  const interruptedDev = () =>
+    mkRun({
+      id: "primary",
+      kind: "primary",
+      who: { kind: "agent", backend: "claude", name: "dev", role: "Developer" },
+      state: "idle",
+      lifecycle: "interrupted",
+      interruptedBy: { userId: "u1", label: "Arda Kaya" },
+    });
+  const queuedReviewer = () =>
+    mkRun({
+      id: "c0",
+      kind: "reviewer",
+      who: { kind: "agent", backend: "codex", name: "rev", role: "Reviewer" },
+      backend: "codex",
+      state: "idle",
+      lifecycle: "queued",
+    });
+
+  it("UXV19-3: the trigger names the engagement (delivering/supporting), never the RunKind literal", () => {
+    // Canary: restore `kind === "primary" ? "primary" : "reviewer"` in
+    // roleShort and both assertions below fail.
+    const runs = [interruptedDev(), queuedReviewer()];
+    const { container, rerender } = render(
+      <AgentLogsPanel runtime={runs} sel="primary" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,
+    );
+    const role = () => container.querySelector(".rsel-role")!.textContent!;
+    expect(role()).toContain("delivering");
+    // "primary" is the internal kind literal — a THIRD name for the agent the
+    // Execution profile on this same page calls "Delivering agent".
+    expect(role()).not.toContain("primary");
+    rerender(
+      <AgentLogsPanel runtime={runs} sel="c0" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,
+    );
+    expect(role()).toContain("supporting");
+  });
+
+  it("UXV19-5: an option carries its run's LIFECYCLE, so the list, the pill and the footer agree", () => {
+    // Canary: put `RUN_STATE[r.state].label` back in the option and the
+    // interrupted/queued expectations below fail on "idle".
+    const { container } = render(
+      <AgentLogsPanel
+        runtime={[interruptedDev(), queuedReviewer()]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: [], c0: [] }}
+      />,
+    );
+    fireEvent.click(container.querySelector(".rsel-btn")!);
+    const states = [...container.querySelectorAll('[role="option"] .ri-state')].map(
+      (n) => n.textContent,
+    );
+    expect(states).toEqual(["interrupted · by Arda", "queued"]);
+    expect(states.some((s) => s?.includes("idle"))).toBe(false);
+    // …and four lines of markup below, the pill and the footer for the SAME
+    // run say exactly that.
+    expect(container.querySelector(".logs-bar .pill")!.textContent).toBe(
+      "interrupted · by Arda",
+    );
+    expect(container.textContent).toContain(
+      "interrupted by Arda — the thread stays resumable",
+    );
+  });
+});
+
 describe("AgentPicker dismissal (shared useDismiss)", () => {
   function openPicker() {
     const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });

@@ -16,7 +16,8 @@ import { getProject } from "./board-query.server";
  *
  * Status vocabulary is the mock's, derived from real waiting state
  * (contracts §2.4):
- *   operator   waiting=human → "packet open", else "coordinating"
+ *   operator   waiting=human → "packet open" WITH a packet, else "waiting on
+ *              human" · else "coordinating"
  *   primary    waiting=agent → "working" · waiting=human → "waiting on
  *              human" · else "on call"
  *   reviewer always "anchored · on call"
@@ -32,6 +33,9 @@ interface DeploymentTaskRow {
   specialist_json: string | null;
   reviewers_json: string;
   operator_json: string | null;
+  /** 1 when this task carries an open decision packet (the same predicate
+   *  decisions.server.ts and home-query.server.ts use). */
+  has_packet: number;
 }
 
 interface RunningRunRow {
@@ -40,8 +44,31 @@ interface RunningRunRow {
   thread_id: string;
 }
 
-function operatorStatus(waiting: Waiting): DeploymentStatus {
-  return waiting === "human" ? "packet open" : "coordinating";
+/**
+ * UXV19-7: this derived the label from `waiting` ALONE — every operator on a
+ * human-waiting task was reported "packet open".
+ *
+ * Human-waiting is not the same as packet-present, and two server modules say
+ * so in as many words: review-queue.server.ts ("a review-stage task waiting on
+ * a human can have no packet/recommendation … yet still need a human to accept
+ * it") and decisions.server.ts (B-FD5, "acceptance-ready review-stage tasks —
+ * the class that carries no decision OBJECT"). The roster was the only surface
+ * naming an ARTIFACT where every other names the STATE — board "waiting on a
+ * human", queue "needs a human decision", task page "Waiting on: Human
+ * decision" — and it is the only one of the four that can be false: clicking
+ * that row lands on a task page whose Decision packet section does not render,
+ * while the Decisions surfaces simultaneously list nothing for it. Any
+ * non-terminal stage whose operator turn ends without opening a packet hits
+ * this, not just Review.
+ *
+ * The state-named fallback is the vocabulary the rest of the app already uses
+ * (and `primaryStatus`'s own human-waiting label), so the page-level "agent
+ * threads waiting on a human" stat — which counts BOTH — stays exactly as
+ * honest as it was.
+ */
+function operatorStatus(waiting: Waiting, hasPacket: boolean): DeploymentStatus {
+  if (waiting !== "human") return "coordinating";
+  return hasPacket ? "packet open" : "waiting on human";
 }
 
 function primaryStatus(waiting: Waiting): DeploymentStatus {
@@ -68,7 +95,9 @@ export function listAgentDeployments(
   const tasks = db
     .prepare(
       `SELECT task_key, title, stage, waiting, specialist_json,
-              reviewers_json, operator_json
+              reviewers_json, operator_json,
+              (CASE WHEN packet_json IS NOT NULL AND packet_json <> ''
+                    THEN 1 ELSE 0 END) AS has_packet
          FROM task_projections
         -- R14-3: an archived task is out of the flow, so its engagement must not
         -- keep showing under a profile's "Active deployments" (P14-RV-03).
@@ -115,7 +144,7 @@ export function listAgentDeployments(
         engagement: "operator",
         taskKey: task.task_key,
         taskTitle: task.title,
-        status: operatorStatus(task.waiting),
+        status: operatorStatus(task.waiting, task.has_packet === 1),
         running: isRunning(task.task_key, "operator"),
       });
     }

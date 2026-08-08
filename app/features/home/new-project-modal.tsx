@@ -107,6 +107,7 @@ function NewProjectConnectionField({
   health,
   connOwner,
   setConnOwner,
+  isAdmin,
 }: {
   connections: string[];
   /** UI-09: per-owner credential health, so an unhealthy connection is not
@@ -114,6 +115,8 @@ function NewProjectConnectionField({
   health: Record<string, "valid" | "unvalidated" | "failed">;
   connOwner: string;
   setConnOwner: (owner: string) => void;
+  /** Pass-19 UX audit #14: whether THIS reader can reach /org/settings. */
+  isAdmin: boolean;
 }) {
   const picked = health[connOwner];
   return (
@@ -165,17 +168,36 @@ function NewProjectConnectionField({
           </span>
         </div>
       )}
+      {/* Pass-19 UX coherence audit, finding #14: creating a project is
+          deliberately self-serve for ANY org member (routes/_index.tsx —
+          "Org role is intentionally NOT consulted here"), but a repository, and
+          therefore a PAT connection, is required. On a connectionless instance
+          this note was the member's only instruction — and it was a live link
+          into /org/settings, which `requireRole(request, "admin")` answers with
+          a bare "Error 403 / Forbidden" splash. The same class was already
+          ruled on one file away: OrgTile (home-sections.tsx) and the user menu
+          both stop offering the link and name the authority instead (B-FD4).
+          This was the last surface handing a member a door that refuses. */}
       {connections.length === 0 && (
         <div className="def-note">
           <Icon name="alert" />
-          <span>
-            No GitHub connections yet — every project needs a repository. Add
-            a PAT in{" "}
-            <Link to="/org/settings?tab=connections">
-              <b>Instance settings → GitHub connections</b>
-            </Link>
-            , then come back.
-          </span>
+          {isAdmin ? (
+            <span>
+              No GitHub connections yet — every project needs a repository. Add
+              a PAT in{" "}
+              <Link to="/org/settings?tab=connections">
+                <b>Instance settings → GitHub connections</b>
+              </Link>
+              , then come back.
+            </span>
+          ) : (
+            <span>
+              No GitHub connections yet — every project needs a repository, and
+              an org admin adds the PAT under{" "}
+              <b>Instance settings → GitHub connections</b>. Ask an admin to add
+              one, then come back.
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -375,6 +397,7 @@ export function NewProjectModal({
   connections,
   connectionHealth,
   storeRoot,
+  isAdmin,
   onClose,
 }: {
   /** Connection owners (Phase-4 stand-in — distinct repo owners in use). */
@@ -382,8 +405,18 @@ export function NewProjectModal({
   /** UI-09: per-owner credential health for the chip list. */
   connectionHealth: Record<string, "valid" | "unvalidated" | "failed">;
   storeRoot: string | null;
+  /**
+   * Pass-19 UX audit #14: does this reader hold the ORG admin role — i.e. can
+   * they follow a pointer into /org/settings at all? Optional only so the one
+   * caller can adopt it without a lockstep edit; until it is passed we fall
+   * back to the admin fact the loader ALREADY encoded in `storeRoot`
+   * (`user.role === "admin" ? VIBERR_DATA_ROOT : null`, routes/_index.tsx), so
+   * the gate is honest either way and never guesses "admin" for a member.
+   */
+  isAdmin?: boolean;
   onClose: () => void;
 }) {
+  const admin = isAdmin ?? storeRoot !== null;
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [key, setKey] = useState("");
@@ -540,6 +573,7 @@ export function NewProjectModal({
           health={connectionHealth}
           connOwner={connOwner}
           setConnOwner={setConnOwner}
+          isAdmin={admin}
         />
         <NewProjectRepoField
           repo={repo}
@@ -550,8 +584,15 @@ export function NewProjectModal({
         />
         <NewProjectWorkflowField />
         <NewProjectPolicyField policy={policy} setPolicy={setPolicy} />
+        {/* Pass-19 UX coherence audit, finding #20: the two other outcomes of
+            this same button already reach an announcer — success pushes a toast
+            (role="status", ui/toast.tsx) and the pre-submit blocker hint below
+            carries role="status" — while the SERVER's refusal rendered here
+            silently. A screen-reader user pressed Create, heard nothing, and
+            the dialog sat there looking unchanged. `role="alert"` is the app's
+            own idiom for a submission failure (routes/login.tsx). */}
         {serverError && (
-          <div className="form-err">
+          <div className="form-err" role="alert">
             <Icon name="alert" />
             <span>{serverError}</span>
           </div>

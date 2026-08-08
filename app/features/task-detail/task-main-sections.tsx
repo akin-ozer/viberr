@@ -292,6 +292,10 @@ export function RecommendationsSection({
   );
 }
 
+/** UX19-10: the honest default when the page has not wired `backendAvailable`
+ *  — the pre-fix behaviour (both options live), never a silent narrowing. */
+const BOTH_BACKENDS = { claude: true, codex: true } as const;
+
 /** O-3: pending scheduled operator re-runs + a form to schedule one. Scheduling
  *  and cancelling are `run-agents` (maintainer+); the server re-checks. Hidden
  *  entirely for viewers/contributors with nothing scheduled. */
@@ -299,16 +303,32 @@ export function ScheduledActions({
   schedules,
   canRunAgents,
   taskClosed,
+  backendAvailable = BOTH_BACKENDS,
 }: {
   schedules: TaskSchedule[];
   canRunAgents: boolean;
   taskClosed: boolean;
+  /** UX19-10: which backends this deployment actually has a credential for —
+   *  the SAME loader fact `OperatorRunControl` reads one panel down. A schedule
+   *  fires unattended, so an option that `selectAdapter` will refuse must not be
+   *  offered here either. */
+  backendAvailable?: { claude: boolean; codex: boolean };
 }) {
   const csrf = useCsrfToken();
   const fetcher = useFetcher<ActionResult>();
   useActionFeedback(fetcher);
   const busy = fetcher.state !== "idle";
   const canSchedule = canRunAgents && !taskClosed;
+  // UX19-10: same fallback formula as `OperatorRunControl` (P11-41) — the
+  // picker never starts on an option that would fail fast. It used to be a flat
+  // `defaultValue="claude"`, so on a Codex-only instance the two operator
+  // pickers on one screen defaulted to DIFFERENT backends and this one defaulted
+  // to the backend that cannot run.
+  const defaultBackend = backendAvailable.claude
+    ? "claude"
+    : backendAvailable.codex
+      ? "codex"
+      : "claude";
 
   // Nothing to show: no pending schedules AND the viewer can't create one.
   if (schedules.length === 0 && !canSchedule) return null;
@@ -380,7 +400,7 @@ export function ScheduledActions({
             submit({
               intent: "schedule-action",
               delayMinutes: String(f.get("delayMinutes") ?? "60"),
-              backend: String(f.get("backend") ?? "claude"),
+              backend: String(f.get("backend") ?? defaultBackend),
               autonomy: String(f.get("autonomy") ?? "supervised"),
               note: String(f.get("note") ?? ""),
             });
@@ -398,9 +418,21 @@ export function ScheduledActions({
             </label>
             <label className="flabel">
               Backend
-              <select name="backend" defaultValue="claude">
-                <option value="claude">Claude Code</option>
-                <option value="codex">Codex</option>
+              {/* UX19-10: the same option treatment `OperatorRunControl` gives
+                  the immediate run (execution-profile.tsx) — an unconfigured
+                  backend is disabled and says so. This picker offered both
+                  unconditionally, so a maintainer could schedule a re-run onto
+                  a backend `selectAdapter` refuses; hours later, with nobody
+                  watching, the run failed and escalated into a blocked packet
+                  the human then had to clear. A refusal knowable at click time
+                  is stated at click time. */}
+              <select name="backend" defaultValue={defaultBackend}>
+                <option value="claude" disabled={!backendAvailable.claude}>
+                  Claude Code{backendAvailable.claude ? "" : " — not configured"}
+                </option>
+                <option value="codex" disabled={!backendAvailable.codex}>
+                  Codex{backendAvailable.codex ? "" : " — not configured"}
+                </option>
               </select>
             </label>
             <label className="flabel">

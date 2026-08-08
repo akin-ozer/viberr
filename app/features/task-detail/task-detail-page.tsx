@@ -426,6 +426,14 @@ export function TaskDetailPage({
             // `updateTaskGoal` itself enforces (E3).
             canEditGoal={canEditGoal}
             canArchive={canArchiveViaPacket}
+          // UX19-9: what an `archive_task` resolution destroys — the branch its
+          // `deleteBranch` variant deletes permanently, and the recommendations
+          // the archive withdraws. The same two facts ArchiveConfirm is handed.
+          archiveDisclosure={{
+            taskKey: task.key,
+            branch: task.branch,
+            pendingRecommendations: recommendations.length,
+          }}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
           />
@@ -449,6 +457,10 @@ export function TaskDetailPage({
           schedules={schedules}
           canRunAgents={canRunAgents}
           taskClosed={taskClosed}
+          // UX19-10: the same availability the operator run picker below uses,
+          // so the two operator pickers on one screen cannot offer different
+          // backends.
+          backendAvailable={backendAvailable}
         />
 
         <ExecutionSection

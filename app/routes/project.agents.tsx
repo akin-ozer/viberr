@@ -176,7 +176,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       );
       return {
         ok: true as const,
-        toast: `Profile "${result.name}" deleted — running threads continue until reassigned`,
+        toast: `Profile "${result.name}" deleted — its engagements can't deliver or comment until a replacement is assigned`,
         profileId: "operator",
       };
     }

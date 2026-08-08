@@ -52,7 +52,14 @@ const KIND_LABEL: Record<RecommendationView["kind"], string> = {
   // wore two names one viewport apart. The generic-agents vocabulary won.
   assign_specialist: "Delivering agent",
   assign_reviewer: "Reviewer",
-  run_specialist: "Run specialist",
+  // UXA-6 residual: UXA-6 prescribed this rename too and only the
+  // `assign_specialist` half was applied, so on a project whose operator holds
+  // `assign-primary-specialist: recommend` the card wore the chip "Run
+  // specialist" directly above the operator's own title "Start the delivering
+  // agent's run" and detail "The specialist is ready to work this task" — one
+  // actor, two registers, inside one card. `run_reviewer` below already matched
+  // its role name; this was the last chip that didn't.
+  run_specialist: "Run delivering agent",
   run_reviewer: "Run reviewer",
   transition: "Stage",
   accept_completion: "Completion",

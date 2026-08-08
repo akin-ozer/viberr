@@ -43,7 +43,16 @@ export function runLabel(run: RunView): string {
 export function roleShort(run: RunView): string {
   // Kind is data on the run row — never string-match the role label (run rows
   // now carry the engagement's live role snapshot, not a kind literal).
-  return run.op ? "operator" : run.kind === "primary" ? "primary" : "reviewer";
+  //
+  // UXV19-3: the kind LITERALS are internal machinery and stay
+  // (`kind: delivers ? "primary" : "reviewer"`, specialist-run.server.ts) — the
+  // returned string is rendered copy and speaks the one shipped engagement
+  // vocabulary. "primary" gave the delivering agent a THIRD name on the very
+  // page whose Execution profile already heads it "Delivering agent"; and
+  // "reviewer" is written for EVERY non-delivering run, so it claimed verdict
+  // authority for supporting engagements that hold none. Same mapping the
+  // Agents roster applies under F10-20.
+  return run.op ? "operator" : run.kind === "primary" ? "delivering" : "supporting";
 }
 
 export function fmtClock(s: number): string {

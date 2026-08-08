@@ -1,13 +1,19 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { MemoryRouter, createRoutesStub } from "react-router";
+import {
+  ExecutionProfile,
+  type DeployedSpecialistView,
+} from "./execution-profile";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { ToastProvider } from "~/ui/toast";
 import { AcceptConfirm } from "./accept-confirm";
+import { DecisionPacket } from "./decision-packet";
 import type { RecommendationView } from "./operator-recommendations";
 import { TaskDetailPage } from "./task-detail-page";
+import { ScheduledActions } from "./task-main-sections";
 
 afterEach(cleanup);
 
@@ -842,4 +848,617 @@ describe("UX19-2: the two acceptance panels name one gate", () => {
       findButton(container, "Force accept (override review gate)"),
     ).toBeUndefined();
   });
+});
+
+/**
+ * UX19-9 — the packet's `archive_task` option, and above all its
+ * `deleteBranch: true` variant, resolved straight to the server from the card's
+ * generic "Confirm decision" button. Ruling 17 makes that resolution the only
+ * remote-branch deletion the product has ("Remote-branch deletion exists only
+ * as that packet resolution"); rulings 20 (R15-1) and 53 (R18-7) put a confirm
+ * that states the consequence on every one-way write, and pass 19 closed the
+ * last four gaps in that family. This one inverted the app's own ceremony: the
+ * REVERSIBLE archive (the Current-state button) opened `ArchiveConfirm` and
+ * enumerated what it withdraws, while the irreversible one — the same archive
+ * PLUS a permanent GitHub branch delete carrying the only copy of the rejected
+ * work — committed from a bare click and announced itself afterwards, as a
+ * timeline note.
+ */
+describe("UX19-9: a packet archive_task option states what it destroys", () => {
+  const ARCHIVE_DISCLOSURE = {
+    taskKey: "VIB-151",
+    branch: "vib-151",
+    pendingRecommendations: 2,
+  };
+
+  const archivePacket = (deleteBranch: boolean) =>
+    ({
+      type: "blocked",
+      kind: "blocked decision",
+      from: "Operator",
+      title: "PR #147 was closed without merging — pick a recovery path",
+      body: "The pull request was closed on GitHub without merging.",
+      observations: [],
+      options: [
+        {
+          kind: "archive_task",
+          t: deleteBranch
+            ? "Archive and delete the branch"
+            : "Archive the task",
+          d: "Discards the rejected work entirely.",
+          rec: true,
+          ...(deleteBranch ? { deleteBranch: true } : {}),
+        },
+      ],
+    }) as unknown as TaskDetail["packet"];
+
+  const archiveDialog = (container: HTMLElement) =>
+    container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Packet archive dialog"]',
+    );
+
+  /** The card on its own, so the disclosure the page supplies can be asserted
+   *  (the branch name and the withdrawn recommendations live on the task, not
+   *  on the packet render). */
+  const renderPacket = (
+    deleteBranch: boolean,
+    disclosure: typeof ARCHIVE_DISCLOSURE | undefined,
+    onResolve: (index: number, note: string) => void,
+  ) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <DecisionPacket
+              packet={archivePacket(deleteBranch)!}
+              busy={false}
+              canResolve
+              canResolveCompletion
+              canEditGoal
+              canArchive
+              {...(disclosure ? { archiveDisclosure: disclosure } : {})}
+              onResolve={onResolve}
+              onAsk={() => {}}
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    return render(<Stub initialEntries={["/"]} />);
+  };
+
+  it("Confirm decision opens a dialog instead of posting the deletion", async () => {
+    const { container, submitted } = renderPage({
+      task: { packet: archivePacket(true) },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    // Canary: drop the `archive_task` branch from the button's onClick and
+    // this fails — the remote branch is deleted on the first click, as it was.
+    await settle();
+    expect(submitted).toHaveLength(0);
+    expect(archiveDialog(container)).toBeTruthy();
+    expect(findButton(container, "Not yet")).toBeDefined();
+  });
+
+  it("names the branch, says the deletion cannot be undone, and lists what the archive withdraws", () => {
+    const { container } = renderPacket(true, ARCHIVE_DISCLOSURE, () => {});
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = archiveDialog(container)!.textContent!;
+    expect(text).toContain("vib-151");
+    expect(text).toContain("cannot be undone");
+    // The withdrawal `ArchiveConfirm` states on the reversible path and this
+    // one disclosed nowhere.
+    expect(text).toContain("2 pending operator recommendations");
+    expect(text).toContain(
+      "PR #147 was closed without merging — pick a recovery path",
+    );
+    // The button names the outcome, unlike "Confirm decision".
+    expect(findButton(container, "Archive & delete vib-151")).toBeDefined();
+  });
+
+  it("confirming resolves the packet by index, with the note", async () => {
+    const { container, submitted } = renderPage({
+      task: { packet: archivePacket(true) },
+    });
+    fireEvent.change(container.querySelector("#pkt-note")!, {
+      target: { value: "closed as won't fix" },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    // The page wires `archiveDisclosure`, so the dialog names the REAL branch
+    // (`vib-151`) rather than the generic "the branch" fallback a bare
+    // `DecisionPacket` render falls back to — that wiring is the fix, so the
+    // page-level assertion has to name the branch too.
+    fireEvent.click(findButton(container, "Archive & delete vib-151")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("resolve-packet");
+    expect(submitted[0]!.option).toBe("0");
+    expect(submitted[0]!.note).toBe("closed as won't fix");
+  });
+
+  it("the plain archive option confirms too, and claims no branch deletion", () => {
+    const { container } = renderPacket(false, ARCHIVE_DISCLOSURE, () => {});
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = archiveDialog(container)!.textContent!;
+    expect(text).toContain("Archive this task?");
+    expect(text).not.toContain("cannot be undone");
+    expect(text).not.toContain("vib-151");
+  });
+
+  it("dismissing writes nothing", async () => {
+    const onResolve = vi.fn();
+    const { container } = renderPacket(true, ARCHIVE_DISCLOSURE, onResolve);
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    fireEvent.click(findButton(container, "Not yet")!);
+    await settle();
+    expect(onResolve).not.toHaveBeenCalled();
+    expect(archiveDialog(container)).toBeNull();
+  });
+
+  it("a non-archive option still resolves from the card in one step", async () => {
+    const { container, submitted } = renderPage({
+      task: {
+        packet: {
+          ...archivePacket(true)!,
+          options: [
+            {
+              kind: "custom",
+              t: "Rework and reopen the PR",
+              d: "Send it back to the delivering agent.",
+              rec: true,
+            },
+          ],
+        } as unknown as TaskDetail["packet"],
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(archiveDialog(container)).toBeNull();
+  });
+});
+
+/**
+ * UX19-10 — "Scheduled re-runs" listed both backends unconditionally and
+ * defaulted to Claude Code, while `OperatorRunControl` one panel down disables
+ * an unconfigured backend, labels it "— not configured" and re-defaults away
+ * from it. On a Codex-only instance the two operator pickers on one screen
+ * therefore defaulted to DIFFERENT backends, and the schedule form's default
+ * was the one that cannot run: the failure was the path of least resistance,
+ * not a misclick. A schedule fires unattended, so the refusal `selectAdapter`
+ * would issue at run time arrives hours later as a blocked packet a human has
+ * to clear.
+ */
+describe("UX19-10: the schedule picker honours backend availability", () => {
+  const renderSchedule = (backendAvailable: {
+    claude: boolean;
+    codex: boolean;
+  }) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <ScheduledActions
+              schedules={[]}
+              canRunAgents
+              taskClosed={false}
+              backendAvailable={backendAvailable}
+            />
+          </ToastProvider>
+        ),
+        action: async () => ({ ok: true }),
+      },
+    ]);
+    return render(<Stub initialEntries={["/"]} />);
+  };
+
+  const backendSelect = (container: HTMLElement) =>
+    container.querySelector<HTMLSelectElement>(
+      '[data-testid="scheduled-actions"] select[name="backend"]',
+    )!;
+
+  it("disables the unconfigured backend and says why", () => {
+    const { container } = renderSchedule({ claude: true, codex: false });
+    const options = [...backendSelect(container).options];
+    const codex = options.find((o) => o.value === "codex")!;
+    // Canary: drop `disabled`/the suffix and this fails — the picker offers a
+    // backend the deployment has no credential for.
+    expect(codex.disabled).toBe(true);
+    expect(codex.textContent).toContain("not configured");
+    expect(options.find((o) => o.value === "claude")!.disabled).toBe(false);
+  });
+
+  it("defaults to a configured backend instead of a hardcoded Claude Code", () => {
+    const { container } = renderSchedule({ claude: false, codex: true });
+    // The exact fallback `OperatorRunControl` applies (P11-41), so the two
+    // pickers on one screen no longer disagree about what will run.
+    expect(backendSelect(container).value).toBe("codex");
+  });
+
+  it("leaves both live when both are configured", () => {
+    const { container } = renderSchedule({ claude: true, codex: true });
+    const options = [...backendSelect(container).options];
+    expect(options.every((o) => !o.disabled)).toBe(true);
+    expect(backendSelect(container).value).toBe("claude");
+  });
+});
+
+/* ------------------------------------------- execution profile · pass-19 UX */
+
+/**
+ * The Execution profile panel, rendered on its own. These four blocks are about
+ * the cell's own vocabulary, disclosure and keyboard contract — none of which
+ * the page-level fixture above can express (it carries no engagements).
+ */
+
+const EXEC_MEMBERS = [
+  { userId: "u-arda", role: "admin", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
+  { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "" } },
+];
+
+/** An engagement as the task file stores it — profileId, backend, role. */
+const engagement = (
+  profileId: string,
+  role: string,
+  backend: "claude" | "codex" = "claude",
+) =>
+  ({
+    kind: "agent",
+    profileId,
+    backend,
+    role,
+    name: backend === "claude" ? "Claude Code" : "Codex",
+  }) as unknown as NonNullable<TaskDetail["specialist"]>;
+
+/** A deployed profile as the loader ships it. */
+const deployedAgent = (
+  id: string,
+  name: string,
+  role: string,
+  verdict: boolean,
+): DeployedSpecialistView => ({
+  id,
+  name,
+  role,
+  backend: "claude",
+  model: "claude-sonnet",
+  capabilities: { delivery: true, verdict, askHuman: true },
+});
+
+function renderExec(opts: {
+  task?: Partial<TaskDetail>;
+  deployedSpecialists?: DeployedSpecialistView[];
+} = {}) {
+  const calls = {
+    owner: [] as string[],
+    assignSpecialist: [] as string[],
+    runSpecialist: [] as string[],
+    assignReviewer: [] as string[],
+    runReviewer: [] as string[],
+    removeReviewer: [] as string[],
+  };
+  const utils = render(
+    <MemoryRouter>
+      <ExecutionProfile
+        task={detail(opts.task ?? {})}
+        meId="u-arda"
+        myRole="admin"
+        members={EXEC_MEMBERS}
+        busy={false}
+        onOwner={(action) => calls.owner.push(action)}
+        onRelease={() => calls.owner.push("release")}
+        deployedSpecialists={opts.deployedSpecialists ?? []}
+        operatorBackend="claude"
+        backendAvailable={{ claude: true, codex: true }}
+        canRunAgents
+        deliveringActive={false}
+        activeReviewerIds={[]}
+        operatorRunActive={false}
+        runBusy={false}
+        onAssignSpecialist={(id) => calls.assignSpecialist.push(id)}
+        onRunSpecialist={() => calls.runSpecialist.push("run")}
+        reviewerBusy={false}
+        onAssignReviewer={(id) => calls.assignReviewer.push(id)}
+        onRunReviewer={(id) => calls.runReviewer.push(id)}
+        onRemoveReviewer={(id) => calls.removeReviewer.push(id)}
+        operatorBusy={false}
+        onRunOperator={() => {}}
+      />
+    </MemoryRouter>,
+  );
+  return { ...utils, calls };
+}
+
+/** A popover trigger by its visible label (`.own-btn` / `.rev-add`). */
+const popoverTrigger = (container: HTMLElement, label: string) =>
+  Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn, .rev-add")).find(
+    (b) => b.textContent?.includes(label),
+  );
+
+const engagementsCell = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll(".profile-cell")).find((cell) =>
+    cell.querySelector(".val.revs"),
+  ) as HTMLElement;
+
+/**
+ * UXA-6 residual (pass-19 UX coherence audit, finding 2) — UXA-6 renamed the
+ * `assign_specialist` chip to "Delivering agent" and left `run_specialist`
+ * saying "Run specialist", so on a project whose operator holds
+ * `assign-primary-specialist: recommend` one card named one actor twice, in two
+ * registers: the chip said "specialist" and the operator's own title, three
+ * pixels away, said "delivering agent".
+ */
+describe("UXA-6 residual: the run recommendation chip names the delivering agent", () => {
+  const RUN_REC: RecommendationView = {
+    id: "r-run",
+    kind: "run_specialist",
+    // The strings the operator actually writes (operator-actions.server.ts:1814).
+    label: "Start the delivering agent's run",
+    detail: "The specialist is ready to work this task; a maintainer starts the run.",
+  };
+
+  it("chips it 'Run delivering agent' — the actor its own title names", () => {
+    const { container } = renderPage({ recommendations: [RUN_REC] });
+    const chip = container.querySelector(".op-rec-kind")!;
+    // Canary: put `run_specialist: "Run specialist"` back in KIND_LABEL and this
+    // is the assertion that fails.
+    expect(chip.textContent).toContain("Run delivering agent");
+    expect(chip.textContent).not.toContain("Run specialist");
+    // The chip and the title are one actor, so the card still reads as one card.
+    expect(container.querySelector(".op-rec-title")!.textContent).toContain(
+      "delivering agent",
+    );
+  });
+
+  it("leaves the reviewer chip alone — it already matched its role name", () => {
+    const { container } = renderPage({
+      recommendations: [
+        { id: "r-rev", kind: "run_reviewer", label: "Start the reviewer's run", detail: "" },
+      ],
+    });
+    expect(container.querySelector(".op-rec-kind")!.textContent).toContain(
+      "Run reviewer",
+    );
+  });
+});
+
+/**
+ * UX19-4 — UC-13 flipped the cell heading to "Supporting agents" when nothing
+ * engaged holds a verdict grant and stopped at the heading: the controls inside
+ * kept saying "reviewer", and the add menu's empty state said "All deployed
+ * agents are already reviewing." under a heading asserting they are not. Since
+ * the verdict grant is off by default, that is what a fresh install shows the
+ * first time anyone engages a second agent.
+ */
+describe("UX19-4: the engagements cell speaks ONE vocabulary", () => {
+  const docs = deployedAgent("docs", "Docs agent", "Documentation", false);
+  const perf = deployedAgent("perf", "Perf agent", "Performance", false);
+  const senior = deployedAgent("senior", "Senior reviewer", "Code review", true);
+
+  it("a supporting cell offers engagement verbs, not reviewer verbs", () => {
+    const { container } = renderExec({
+      task: { reviewers: [engagement("docs", "Documentation")] },
+      deployedSpecialists: [docs, perf],
+    });
+    const cell = engagementsCell(container);
+    expect(cell.querySelector(".lbl")!.textContent).toBe("Supporting agents");
+    // Canary: pass the reviewer vocabulary unconditionally into ReviewerControl
+    // and every assertion below fails while the heading keeps saying otherwise.
+    expect(popoverTrigger(container, "Engage agent")).toBeDefined();
+    expect(popoverTrigger(container, "Engage reviewer")).toBeUndefined();
+    expect(cell.querySelector(".rev-x")!.getAttribute("aria-label")).toBe(
+      "Release Documentation agent",
+    );
+    expect(cell.querySelector(".rev-x")!.getAttribute("title")).toBe("Release agent");
+    fireEvent.click(popoverTrigger(container, "Engage agent")!);
+    expect(container.querySelector('[aria-label="Engage an agent"]')).not.toBeNull();
+    expect(cell.textContent).not.toMatch(/review/i);
+  });
+
+  it("the add menu's empty state no longer contradicts the heading it sits under", () => {
+    // One deployed agent, and it is the one engaged — the sharpest string in the
+    // cell: it said these engagements are supporting, AND that all deployed
+    // agents are already reviewing, in the same box.
+    const { container } = renderExec({
+      task: { reviewers: [engagement("docs", "Documentation")] },
+      deployedSpecialists: [docs],
+    });
+    fireEvent.click(popoverTrigger(container, "Engage agent")!);
+    const panel = container.querySelector('[aria-label="Engage an agent"]')!;
+    expect(panel.textContent).toContain("All deployed agents are already engaged.");
+    expect(panel.textContent).not.toContain("already reviewing");
+  });
+
+  it("one verdict-holding engagement keeps the whole cell on reviewer vocabulary", () => {
+    const { container } = renderExec({
+      task: {
+        reviewers: [
+          engagement("docs", "Documentation"),
+          engagement("senior", "Code review"),
+        ],
+      },
+      deployedSpecialists: [docs, senior],
+    });
+    const cell = engagementsCell(container);
+    expect(cell.querySelector(".lbl")!.textContent).toBe("Reviewing agents");
+    expect(popoverTrigger(container, "Engage reviewer")).toBeDefined();
+    expect(
+      Array.from(cell.querySelectorAll(".rev-x")).map((x) =>
+        x.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Release Documentation reviewer", "Release Code review reviewer"]);
+  });
+
+  it("the closed-task note takes the same vocabulary as the heading", () => {
+    const supporting = renderExec({
+      task: {
+        reviewers: [engagement("docs", "Documentation")],
+        displayReadiness: "merged",
+      } as Partial<TaskDetail>,
+      deployedSpecialists: [docs, perf],
+    });
+    expect(engagementsCell(supporting.container).textContent).toContain(
+      "Task closed — no new engagements.",
+    );
+    cleanup();
+    const reviewing = renderExec({
+      task: {
+        reviewers: [engagement("senior", "Code review")],
+        displayReadiness: "merged",
+      } as Partial<TaskDetail>,
+      deployedSpecialists: [senior],
+    });
+    expect(engagementsCell(reviewing.container).textContent).toContain(
+      "Task closed — no new reviewer engagements.",
+    );
+  });
+});
+
+/**
+ * UX19-12 — an engagement can outlive its profile (deleted, or re-deployed on
+ * another project). The Agents live table names that state ("profile no longer
+ * here", agents-page.tsx:927); task detail silently substituted the engagement's
+ * ROLE for the missing name and kept a live "Run" button, whose run takes the
+ * fully-withheld posture of R15-7 (ruling 26): it streams and produces no
+ * branch, PR, comment or verdict. One state, two renderings — and the wrong one
+ * on the surface where the action lives.
+ */
+describe("UX19-12: an engagement whose profile is gone says so, and cannot be run", () => {
+  const GONE_NOTE = /Not deployed on this project any more/;
+
+  it("delivering row: names the state, states the consequence, kills Run", () => {
+    const { container } = renderExec({
+      task: { specialist: engagement("dev-2f1c", "Implementation", "codex") },
+      deployedSpecialists: [deployedAgent("other", "Other agent", "Docs", false)],
+    });
+    const cell = Array.from(container.querySelectorAll(".profile-cell")).find(
+      (c) => c.querySelector(".lbl")?.textContent === "Delivering agent",
+    ) as HTMLElement;
+    // Canary: restore the `?? fallback` role substitution in `agentNameOf` and
+    // the name line reads "Implementation" — the role, printed twice.
+    expect(cell.querySelector(".nm")!.textContent).toBe("profile no longer here");
+    expect(cell.textContent).toMatch(GONE_NOTE);
+    expect(cell.textContent).toContain("no branch, PR, comment or verdict");
+    const run = cell.querySelector<HTMLButtonElement>(".btn.primary")!;
+    // Canary: drop `|| spGhost` from the disabled expression and this fails —
+    // the button that delivers nothing goes live again.
+    expect(run.disabled).toBe(true);
+  });
+
+  it("reviewer row: same disclosure, and the release control stays live", () => {
+    const { container, calls } = renderExec({
+      task: { reviewers: [engagement("rev-9a", "Code review")] },
+      deployedSpecialists: [],
+    });
+    const row = container.querySelector(".rev-agent")!;
+    expect(row.querySelector(".nm")!.textContent).toBe("profile no longer here");
+    expect(row.textContent).toMatch(GONE_NOTE);
+    expect(row.textContent).toContain("no verdict, comment or evidence");
+    expect(row.querySelector<HTMLButtonElement>(".btn.primary")!.disabled).toBe(true);
+    // Letting go of a dead engagement is the recovery — it must not be disabled
+    // alongside the run.
+    const release = row.querySelector<HTMLButtonElement>(".rev-x")!;
+    expect(release.disabled).toBe(false);
+    fireEvent.click(release);
+    expect(calls.removeReviewer).toEqual(["rev-9a"]);
+  });
+
+  it("a deployed profile still reads as itself, with a live Run", () => {
+    const { container, calls } = renderExec({
+      task: { specialist: engagement("developer", "Implementation", "codex") },
+      deployedSpecialists: [
+        deployedAgent("developer", "Developer", "Implementation", false),
+      ],
+    });
+    const cell = Array.from(container.querySelectorAll(".profile-cell")).find(
+      (c) => c.querySelector(".lbl")?.textContent === "Delivering agent",
+    ) as HTMLElement;
+    expect(cell.querySelector(".nm")!.textContent).toBe("Developer");
+    expect(cell.textContent).not.toMatch(GONE_NOTE);
+    const run = cell.querySelector<HTMLButtonElement>(".btn.primary")!;
+    expect(run.disabled).toBe(false);
+    fireEvent.click(run);
+    expect(calls.runSpecialist).toEqual(["run"]);
+  });
+});
+
+/**
+ * UX19-18 — "Manage", "Assign delivering agent" and "Engage reviewer" declared
+ * `role="menu"` with `role="menuitem"` children and implemented none of the
+ * keyboard contract those roles promise: a screen reader announced a menu whose
+ * Up/Down did nothing, and Escape (or picking an item) unmounted the focused
+ * element with no restoration, dropping the keyboard user at <body> mid-
+ * workflow. UI-45 settled this shape for the account menu by DROPPING the roles
+ * and managing focus; these three follow it.
+ */
+describe("UX19-18: the three popovers keep the keyboard promises they make", () => {
+  const DEPLOYED = [
+    deployedAgent("developer", "Developer", "Implementation", false),
+    deployedAgent("senior", "Senior reviewer", "Code review", true),
+  ];
+  // Owner is Selin, viewer is Arda (admin) → all three popovers render.
+  const openAll = () => renderExec({ deployedSpecialists: DEPLOYED });
+
+  const menus: [name: string, trigger: string, panel: string, item: string][] = [
+    ["ownership", "Manage", "Manage task ownership", "Take over ownership"],
+    [
+      "delivering agent",
+      "Assign delivering agent",
+      "Assign a delivering agent",
+      "Developer",
+    ],
+    ["reviewer", "Engage reviewer", "Engage a reviewer", "Developer"],
+  ];
+
+  for (const [name, trigger, panel, item] of menus) {
+    const open = () => {
+      const view = openAll();
+      const btn = popoverTrigger(view.container, trigger)!;
+      expect(btn).toBeDefined();
+      fireEvent.click(btn);
+      const el = view.container.querySelector<HTMLElement>(`[aria-label="${panel}"]`)!;
+      expect(el).not.toBeNull();
+      return { ...view, btn, panel: el };
+    };
+
+    it(`${name}: declares no ARIA menu contract it does not implement`, () => {
+      const { container, panel: el } = open();
+      // Canary: put role="menu"/role="menuitem" back and this fails — the roles
+      // promise Arrow/Home/End traversal that no code here provides.
+      expect(container.querySelector('[role="menu"]')).toBeNull();
+      expect(container.querySelector('[role="menuitem"]')).toBeNull();
+      // What it does implement instead: a named, focusable panel in Tab order
+      // after its trigger.
+      expect(el.getAttribute("tabindex")).toBe("-1");
+      expect(popoverTrigger(container, trigger)!.getAttribute("aria-expanded")).toBe(
+        "true",
+      );
+    });
+
+    it(`${name}: moves focus into the panel on open`, () => {
+      const { panel: el } = open();
+      expect(document.activeElement).toBe(el);
+    });
+
+    it(`${name}: Escape closes it AND returns focus to the trigger`, () => {
+      const { container, btn, panel: el } = open();
+      fireEvent.keyDown(el, { key: "Escape" });
+      expect(container.querySelector(`[aria-label="${panel}"]`)).toBeNull();
+      // Canary: drop `closeAndReturnFocus` for a bare `setOpen(false)` and focus
+      // falls back to <body> — the keyboard user is dumped at the top of the
+      // document mid-workflow (F10-25's rule).
+      expect(document.activeElement).toBe(btn);
+    });
+
+    it(`${name}: picking an item returns focus to the trigger`, () => {
+      const { container, btn, panel: el } = open();
+      const target = Array.from(el.querySelectorAll<HTMLButtonElement>(".menu-item")).find(
+        (b) => b.textContent?.includes(item),
+      )!;
+      expect(target).toBeDefined();
+      fireEvent.click(target);
+      expect(container.querySelector(`[aria-label="${panel}"]`)).toBeNull();
+      expect(document.activeElement).toBe(btn);
+    });
+  }
 });

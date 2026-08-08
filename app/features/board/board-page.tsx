@@ -545,6 +545,28 @@ function ListView({
                     {prStatePill(t.pr.state).label}
                   </Pill>
                 )}
+                {/* UXV19-6: the unfinished half of F19-13. The card foot draws
+                    two more pills under its ACTIONABLE-state rule — a failing
+                    build (P13-D-28) and GitHub's `changes_requested` — and the
+                    list row drew neither, so the same task read "3/5 checks
+                    failing · changes requested" in Board view and said nothing
+                    one click later in List. Nothing else on the row can stand
+                    in: `validation` is task-row state with no CI input, and the
+                    "Blocked or waiting" filter does not select on prChecks or
+                    prReview either. The row's deliberate reductions stay
+                    reduced (no branch chip, no `#124` PR chip) — trace is not
+                    actionable state; these two are. Card order throughout:
+                    PR state → checks → review → validation → wait. */}
+                {t.prChecks?.state === "failing" && (
+                  <Pill kind={checksPill(t.prChecks).kind} sm>
+                    {checksPill(t.prChecks).label}
+                  </Pill>
+                )}
+                {t.prReview === "changes_requested" && (
+                  <Pill kind={reviewPill(t.prReview).kind} sm>
+                    {reviewPill(t.prReview).label}
+                  </Pill>
+                )}
                 {/* P13-D-6: same omission in the list row — readiness cannot
                     stand in for validation (deriveReadiness folds only parse
                     diagnostics). Ordered readiness → validation, as task
