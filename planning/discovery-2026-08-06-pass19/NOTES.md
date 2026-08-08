@@ -159,6 +159,10 @@ restore the worse one.
 
 **Suite after: 3048 tests / 225 files green, `tsc --noEmit` clean.**
 
+> **What to build next is [`ROADMAP.md`](ROADMAP.md)** — 27 forward-looking gaps (what is ABSENT, not
+> what is broken), each challenged by an agent trying to disprove it, plus 14 product questions for the
+> owner. This file and the register below are about defects; the roadmap is the other half.
+>
 > **The consolidated, numbered use-case register is [`USE-CASES.md`](USE-CASES.md)** — 36 cases, each
 > run against the live app with its evidence artefact named. The per-round sections below are the
 > working log that produced it.
