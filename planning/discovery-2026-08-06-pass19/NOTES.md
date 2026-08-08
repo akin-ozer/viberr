@@ -276,3 +276,21 @@ Status: ▶ running · ✓ pass · ✗ finding filed · ○ pending
 | UC-26 | Org-admin override on non-member project (audit trail) | ○ phase-3 validation |
 | UC-27 | Interrupt operator mid-run; manual re-run | ○ phase-3 validation |
 | UC-28 | Branch collision with foreign remote branch → human-gated packet (R18-4) | ○ phase-3 validation |
+
+## Open owner questions from round 2/3 (nothing blocked on them)
+
+- **N19-7 — the reviewer's evidence surface.** A reviewer reviews the DIFF. A task whose acceptance
+  criterion is a *runtime* fact (a tool really was called; a skill really was absent) is therefore not
+  reviewable: VC-7's Reviewer correctly refused to treat the delivering agent's self-report as proof.
+  Either such tasks are out of scope for agent review, or a run's own tool-call evidence needs to
+  become citable evidence a reviewer can read. Recorded, not fixed — it needs your call.
+- **F19-26 — an org-admin override on a non-member project is audited as an ordinary action.** The
+  Policy page promises "every override recorded in the audit trail as org-admin override", and
+  `project.org_admin.override` exists and is enforced for guarded MUTATIONS. But the `"any-member"`
+  gate is deliberately exempt (auditing it once wrote a row per page load — F7-pass7 audit noise), and
+  **commenting rides that gate**. Live: a non-member org admin commented on Viberr Core and the audit
+  row is an ordinary `task.comment`, indistinguishable from a member's. The exemption's own comment
+  says it covers "config-surface route READ plus a couple of idempotent no-op paths" — a comment is
+  neither. Narrow fix: audit the override for `any-member` MUTATIONS while keeping reads exempt.
+  Left for your ruling because the fix trades audit completeness against the noise that motivated the
+  exemption.
