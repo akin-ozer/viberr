@@ -44,8 +44,10 @@ against main @65063b8). Intent distillation: INTENT.md.
 | Test hermeticity | **N19-6** | `ed6a6c5` | ✅ committed. Found during verification: the suite made real network clones and flaked under load. |
 | Two-surface acceptance | UX19-2 (UX19-3 retracted) | `2044e02` | ✅ committed, canaried. Fixed a third latent defect: force-accept was offered on a terminally blocked (closed-PR) task, which R16-3 forbids in prose. |
 | Operator repo view + KB precedence | F19-4, Q19-1, Q19-2 (R19-4, R19-2) | `e990eb0` | ✅ committed, canaried |
+| UX coherence audit (24 findings) | 6 dimensions, 2 skeptics each | `fe11c0a` | ✅ committed, all canaried |
+| No-change validation cache | **F19-27** | `732fd47` | ✅ committed, canaried. **Live-caught by running the R19-1 use case end to end for the first time** — VC-9 sat in Done pilled "accepted" while its card claimed "awaiting verdict". Two halves: `deriveValidation` reports `none` for a no-change completion (placed last, so a real approve/request-changes still wins — the existing suite caught an earlier version erasing an approval), and both `performDelivery` sites that set `noChanges` now recompute the cache the projection actually reads. |
 
-**Suite: 2984 tests / 223 files green, `tsc --noEmit` clean.**
+**Suite: 3051 tests / 225 files green, `tsc --noEmit` clean.**
 
 Findings that CHANGED under scrutiny (recorded because the correction is the point):
 - **F19-1 narrowed** — first filed as "the operator never recommends after delivery". Three live runs showed VC-4/VC-5 *did* recommend and VC-1 did not: the real defect was that the guarantee rested on the model, so the fix is server-side.
