@@ -141,3 +141,39 @@ Three claims were **disproved** by the check and are recorded in the JSON rather
 false "this is missing" is the most expensive thing this document could contain. One of mine nearly made
 it: I was about to file "evidence is not readable by humans" before finding that evidence is deliberately
 a *citation* and the raw output lives in the run logs the guardrail points at.
+
+
+---
+
+## Build status (pass 19, round 5)
+
+The owner's instruction was explicit: *"you may not cut corners, you may not defer to future work."*
+So the roadmap is not a wish list — the unambiguous items are being built in this branch. The split:
+
+### Building now — no product ambiguity
+| Gap | Why it needs no decision |
+|-----|--------------------------|
+| **[0]** fresh-run canonical anchor (anchor half only) | The domain requirements say *"Any reactivated agent re-anchors on the canonical task artifact before acting"*, and FR22 promises continuation "even when prior runtime history is unavailable". Mandatory whichever way the resume question is answered. |
+| **[1]** dismissal writes a typed event; operator sees its own pending recommendations | The canonical record is the operating contract; today it never learns the human said no. The optional *reason* field is a product choice and is NOT being built. |
+| **[8] [11]** what a run was given is inspectable | Without it, "I confirmed the rehydration was adequate" is not a check anyone can perform. |
+| **[10]** last-activity + stall signal | The board's stated job is to say what needs a human; a stalled task currently looks identical to a moving one. |
+| **[14]** backup tooling with a consistent snapshot | `projection.sqlite` holds users, credentials, sealed PATs and audit — none of it rebuildable from the markdown. The product's own answer to FR33 is "snapshot the data root" and it provides no safe way to do that. |
+| **[15] [20]** periodic retention + transcript/session pruning | Retention is documented as what bounds a long-lived deployment, but runs only at boot — the event a stable deployment avoids. |
+| **[16]** disk-space awareness | A full disk during a task-file write is the corruption case this product cannot afford. |
+| **[17]** health tells the truth when degraded | It returns 200 while degraded, so no monitor can act. |
+| **[18]** version/build identity | You cannot currently tell which build is running. |
+| **[19]** maintenance CLIs take the writer lock | **A live safety bug.** This project has already lost org tables to dual-writer WAL corruption once, and `PRAGMA integrity_check` passed before and after. The CLIs bypass the one guard against a repeat. |
+| **[21]** finishable key rotation | Without a re-encrypt pass and a remaining-count, an operator can never know when it is safe to drop the previous key. |
+| **[22]** recovery for a corrupted task file | The store is *designed* to be hand-edited (FR10), so a malformed file is expected, not exotic. |
+
+### Held for the owner — genuine forks, listed with their questions above
+**[2] [3] [4]** guardrail configuration surface and scope · **[5] [6]** how a continuity break should
+reach a human (cue vs notification vs recovery packet) · **[7]** changed-file list vs density ·
+**[9]** how a stale branch gets caught up (three viable designs) · **[12]** whether a human may correct
+a recorded claim, or append-only is the contract · **[13]** whether to freeze the baseline now ·
+**[23]** whether a System/Operations page should exist · **[24]** whether a human may record the
+approving verdict · **[25]** whether per-run autonomy should be clamped to project policy ·
+**[26]** whether agent spend becomes visible and bounded.
+
+Each of these changes what the product *means*, not just what it does. Guessing would be worse than
+asking — several are one-sentence answers.
