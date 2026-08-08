@@ -157,6 +157,10 @@ restore the worse one.
 
 **Suite after: 3048 tests / 225 files green, `tsc --noEmit` clean.**
 
+> **The consolidated, numbered use-case register is [`USE-CASES.md`](USE-CASES.md)** — 36 cases, each
+> run against the live app with its evidence artefact named. The per-round sections below are the
+> working log that produced it.
+
 ## Finding ledger
 
 IDs: F19-nn (defects), UX19-nn (UX/coherence), Q19-nn (owner questions), N19-nn (notes/ideas).
