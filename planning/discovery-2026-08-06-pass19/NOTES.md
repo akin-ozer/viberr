@@ -285,7 +285,13 @@ Status: ▶ running · ✓ pass · ✗ finding filed · ○ pending
 
 ## Open owner questions from round 2/3 (nothing blocked on them)
 
-- **N19-7 — the reviewer's evidence surface.** A reviewer reviews the DIFF. A task whose acceptance
+- **N19-7 — the reviewer's evidence surface.** *(Sharpened 2026-08-08.)* The raw
+  evidence surface EXISTS and I nearly filed that it did not: `EvidenceRow` is deliberately a CITATION
+  (`{label, add, del}`) and the `evidence-separation` guardrail strips raw output from prose and points
+  at the run logs — which the UI renders in full (VC-7's MCP tool call AND its result were both visible
+  there). So the gap is narrower than first written: a REVIEWER reviews the diff and has no way to read
+  or cite the delivering run's log, so the proof sits in the app unreachable by the one actor who needs
+  it. The fix is not "build an evidence surface" — it is "let a reviewer cite the delivering run's log". A reviewer reviews the DIFF. A task whose acceptance
   criterion is a *runtime* fact (a tool really was called; a skill really was absent) is therefore not
   reviewable: VC-7's Reviewer correctly refused to treat the delivering agent's self-report as proof.
   Either such tasks are out of scope for agent review, or a run's own tool-call evidence needs to
