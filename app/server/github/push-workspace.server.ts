@@ -59,10 +59,11 @@ export type PushWorkspaceResult =
       reason: string;
     };
 
-/** Ceiling for the branch push itself (the one network step here). */
-const PUSH_TIMEOUT_MS = 120_000;
+/** Ceiling for the branch push itself (the one network step here). Shared with
+ *  the branch-update path, which pushes the same branch the same way. */
+export const PUSH_TIMEOUT_MS = 120_000;
 
-interface Exec {
+export interface Exec {
   (
     file: string,
     args: string[],
@@ -164,8 +165,36 @@ async function countCommitsAhead(
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * The git identity args for a workspace commit — none when the clone already
+ * carries one (cloneRepo stamps it to the delivering profile, matching the
+ * agent's own commits), a stable Viberr identity otherwise so a fresh clone
+ * with no identity never dead-ends the commit (F24).
+ *
+ * Shared with the branch-update path: both write a server-owned commit into the
+ * same workspace, and two different fallback identities in one branch's history
+ * would read as two different authors doing Viberr's work.
+ */
+export async function commitIdentityArgs(
+  exec: Exec,
+  repoDir: string,
+): Promise<string[]> {
+  const emailRes = await exec("git", ["-C", repoDir, "config", "user.email"], {
+    cwd: repoDir,
+    timeoutMs: 5_000,
+  });
+  return emailRes.ok && emailRes.stdout.trim() !== ""
+    ? []
+    : [
+        "-c",
+        "user.name=Viberr Delivery",
+        "-c",
+        "user.email=delivery@viberr.local",
+      ];
+}
+
 /** Locate the workspace git repo for a task (same conventions as the reconciler). */
-function findRepoDir(
+export function findWorkspaceRepoDir(
   projectSlug: string,
   taskKey: string,
   repoName: string,
@@ -237,7 +266,7 @@ export async function pushWorkspaceBranch(
       projectFile?.parsed.frontmatter.defaultBranch || "main";
     const repoName = repo.split("/").pop() ?? repo;
 
-    const repoDir = findRepoDir(
+    const repoDir = findWorkspaceRepoDir(
       projectSlug,
       taskKey,
       repoName,
@@ -308,24 +337,9 @@ export async function pushWorkspaceBranch(
         { cwd: repoDir, timeoutMs: 15_000 },
       );
       if (addRes.ok) {
-        // F24: prefer the workspace's configured identity (cloneRepo stamps it to
-        // the delivering profile, matching the agent's own commits). Fall back to
-        // a stable Viberr identity only when no user is configured, so a fresh
-        // clone with no identity never dead-ends the commit.
-        const emailRes = await exec(
-          "git",
-          ["-C", repoDir, "config", "user.email"],
-          { cwd: repoDir, timeoutMs: 5_000 },
-        );
-        const identityArgs =
-          emailRes.ok && emailRes.stdout.trim() !== ""
-            ? []
-            : [
-                "-c",
-                "user.name=Viberr Delivery",
-                "-c",
-                "user.email=delivery@viberr.local",
-              ];
+        // F24: prefer the workspace's configured identity, fall back to a stable
+        // Viberr identity (see commitIdentityArgs).
+        const identityArgs = await commitIdentityArgs(exec, repoDir);
         const commitRes = await exec(
           "git",
           [

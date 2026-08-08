@@ -57,6 +57,11 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // deployments persisted before this capability existed keep delivering — the
   // same polarity `use-web-search-fetch` uses.
   cap("deliver-review-pr", "Deliver the branch & open the review PR", ["operator"], "Permissions"),
+  // N19-9 (owner ruling): bringing a task branch up to date with its base is an
+  // OPERATOR decision, like delivery. The server executes the merge+push; agents
+  // never rebase or force-push. An absent grant follows the DELIVERY gate
+  // (updateBranchGate) — the capability postdates every deployment.
+  cap("update-task-branch", "Bring the task branch up to date", ["operator"], "Permissions"),
   // Agent repository/execution toggles (bind via the Claude tool denylist)
   cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
   cap("create-task-branch", "Create the task-key branch", ["agent"], "Repository & execution"),
@@ -190,6 +195,7 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   // R15-2: the deliver_for_review tool + performDelivery gate on this grant
   // server-side, on both operator backends.
   "deliver-review-pr",
+  "update-task-branch",
   "transition-to-done",
   "change-project-policy",
   // Generic-agent collaboration gates (real, both-backend enforcement): the

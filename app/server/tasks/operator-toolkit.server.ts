@@ -28,6 +28,10 @@ import {
   type OperatorActionResult,
   type OperatorAuthority,
 } from "./operator-actions.server";
+import {
+  operatorUpdateBranchFromBase,
+  updateBranchGate,
+} from "~/server/github/update-branch-operator.server";
 import type { GithubContextOptions } from "~/server/github/github-context.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import { normalizeEscapedNewlines } from "./model-prose.server";
@@ -475,6 +479,24 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "deliver_for_review",
+    );
+  }
+
+  // N19-9: the branch can finally be moved FORWARD onto an advanced base. Same
+  // shape as delivery (R15-2): the operator decides, the server does the git,
+  // and a conflict stops and asks a human (R18-4) instead of being retried.
+  if (updateBranchGate(authority) !== "deny") {
+    add(
+      tool(
+        "update_branch_from_base",
+        "Bring the task's branch UP TO DATE with the project's base branch — merge the base into the branch and push it. Other tasks share this repository, so a branch goes stale the moment one of them merges; a reviewer then reads a diff against a base that no longer exists, and delivery can hit a conflict nobody chose. Call it BEFORE you deliver and before you hand work to a reviewer. It is idempotent and cheap: an already-current branch changes nothing and says so, so call it when you are unsure rather than guessing. The server does the git inside the delivering agent's workspace — never ask an agent to rebase, merge or force-push. If the branch CONFLICTS with the base, the merge is aborted, the branch is left exactly as it was, and a blocking decision packet is opened for a human: report that and stop. Do not retry it, and never propose a force-push.",
+        {},
+        async () =>
+          resultText(
+            await operatorUpdateBranchFromBase(db, ctx, base, authority),
+          ),
+      ),
+      "update_branch_from_base",
     );
   }
 

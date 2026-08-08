@@ -16,6 +16,10 @@ import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import {
+  operatorUpdateBranchFromBase,
+  updateBranchGate,
+} from "~/server/github/update-branch-operator.server";
+import {
   deliverGate,
   gate,
   operatorAcceptCompletion,
@@ -844,6 +848,10 @@ const OPERATOR_PLAN_TOOLS = [
   // mirror of the Claude `deliver_for_review` tool. `reason` carries the
   // recommendation-card line when policy recommends instead of performs.
   "deliver_for_review",
+  // N19-9 (owner ruling): bringing the task branch up to date with its base is
+  // an operator decision too — the plan mirror of `update_branch_from_base`.
+  // Server-owned merge+push; a conflict opens a packet, never a force.
+  "update_branch_from_base",
   "accept_completion",
 ] as const;
 
@@ -871,6 +879,9 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES: Record<OperatorPlanTool, readonly string[
   // R15-2: absent-means-granted polarity — resolved via deliverGate below, not
   // the plain gate (the capability postdates live deployments).
   deliver_for_review: ["deliver-review-pr"],
+  // Same absent-means-derived polarity as delivery — resolved via
+  // updateBranchGate below, not the plain gate.
+  update_branch_from_base: ["update-task-branch"],
   accept_completion: ["completion-for-acceptance"],
 };
 
@@ -886,7 +897,9 @@ export function operatorPlanToolsFor(
   const permitted = OPERATOR_PLAN_TOOLS.filter((toolName) =>
     toolName === "deliver_for_review"
       ? deliverGate(authority) !== "deny"
-      : OPERATOR_PLAN_TOOL_CAPABILITIES[toolName].some(
+      : toolName === "update_branch_from_base"
+        ? updateBranchGate(authority) !== "deny"
+        : OPERATOR_PLAN_TOOL_CAPABILITIES[toolName].some(
           (cap) => gate(authority, cap) !== "deny",
         ),
   );
@@ -895,7 +908,10 @@ export function operatorPlanToolsFor(
   // fall back to the full list — every action it then proposes is refused
   // VISIBLY by narrateRefusedActions rather than silently.
   //
-  // A4: except `deliver_for_review`. Reaching the fallback means delivery was
+  // A4: except `deliver_for_review` and `update_branch_from_base`. Reaching the
+  // fallback means the grant was either explicitly withheld or (with no
+  // operator deployed) never made, and these are the plan actions with effects
+  // OUTSIDE Viberr — a pushed branch, an opened PR. Delivery was
   // either explicitly withheld or (with no operator deployed) not granted at
   // all, and it is the one plan action with effects OUTSIDE Viberr — a pushed
   // branch, an opened PR. `operatorDeliverForReview` refuses it either way, so
@@ -903,7 +919,9 @@ export function operatorPlanToolsFor(
   // happen.
   return permitted.length
     ? [...permitted]
-    : OPERATOR_PLAN_TOOLS.filter((t) => t !== "deliver_for_review");
+    : OPERATOR_PLAN_TOOLS.filter(
+        (t) => t !== "deliver_for_review" && t !== "update_branch_from_base",
+      );
 }
 
 function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
@@ -1500,6 +1518,12 @@ async function executeCodexPlan(
           if (delivery.outcome === "denied") record(a.tool, delivery);
           break;
         }
+        case "update_branch_from_base":
+          record(
+            a.tool,
+            await operatorUpdateBranchFromBase(db, ctx, base, authority),
+          );
+          break;
         case "accept_completion":
           record(a.tool, await operatorAcceptCompletion(db, ctx, base, authority));
           break;
