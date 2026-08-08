@@ -619,7 +619,7 @@ export function CurrentStatePanel({
           never reach here: `isQuiet` refuses them outright (R14-3 / UXO-1). */}
       {task.quiet && (
         <p className="hint">
-          Gone quiet — nothing has been recorded on this task since then, and no
+          No activity — nothing has been recorded on this task since then, and no
           run is in flight. It stays here until someone engages an agent or
           schedules an operator re-run.
         </p>

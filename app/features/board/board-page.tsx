@@ -899,7 +899,7 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   // the way to ask for them. Named for what it selects (R16-2), and named
   // "quiet" rather than "stalled" because the detector observes an absence of
   // events; it does not diagnose a fault.
-  { id: "quiet", label: "Gone quiet", icon: "clock" },
+  { id: "quiet", label: "No activity", icon: "clock" },
   // R14-3: archived tasks are out of every other view; this is the way back to
   // them. The chip only renders when the project has any (see FilterBar).
   { id: "archived", label: "Archived", icon: "lock" },
@@ -1013,7 +1013,11 @@ function FilterBar({
   query: string;
   /** R8-3: member-scoped count for the "Waiting on me" chip. */
   waitingOnMe: number;
-  /** Gap-10: live tasks that have gone quiet — the "Gone quiet" chip's tally. */
+  /** Gap-10: live tasks with no recorded activity — the "No activity" chip's
+   *  tally. Deliberately NOT "quiet": the home project card already uses that
+   *  word for `running === 0`, i.e. a perfectly healthy project with nothing in
+   *  flight. Two meanings one click apart is the vocabulary drift this pass has
+   *  been removing; the chip now matches the pill it selects ("no activity"). */
   quiet: number;
   /** R14-3: archived tasks in this project — the chip is the only way back to
    *  them, so it renders only when there are any (and always while it is on). */

@@ -784,14 +784,14 @@ describe("gap-10: the board says when a task has gone quiet", () => {
     expect(card.textContent).not.toContain("no activity");
   });
 
-  it("gives the board a 'Gone quiet' chip that selects exactly those tasks", () => {
+  it("gives the board a 'No activity' chip that selects exactly those tasks", () => {
     const tasks = [
       quietTask({ key: "VIB-142" }),
       task({ key: "VIB-143", waiting: "agent" }),
       task({ key: "VIB-144", waiting: "human" }),
     ];
     const chipOff = renderBoard(tasks);
-    const chip = chipOff.getByRole("button", { name: /Gone quiet/ });
+    const chip = chipOff.getByRole("button", { name: /No activity/ });
     // The tally discloses the count before anyone clicks it.
     expect(chip.textContent).toContain("· 1");
     expect(chipOff.container.textContent).toContain("VIB-143");
@@ -806,7 +806,7 @@ describe("gap-10: the board says when a task has gone quiet", () => {
   it("hides the chip's tally when nothing is quiet", () => {
     const { getByRole } = renderBoard([task({ waiting: "agent" })]);
     expect(
-      getByRole("button", { name: /Gone quiet/ }).textContent,
+      getByRole("button", { name: /No activity/ }).textContent,
     ).not.toContain("·");
   });
 });

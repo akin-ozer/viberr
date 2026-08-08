@@ -116,7 +116,7 @@ describe("matchesBoardFilter", () => {
   });
 
   /** Gap-10: the board had no way to ask for the tasks that stopped moving. */
-  it('"quiet" ("Gone quiet") selects on the server-derived flag, and only that', () => {
+  it('"quiet" ("No activity") selects on the server-derived flag, and only that', () => {
     const quiet: FilterableTask = { ...base, quiet: true };
     expect(matchesBoardFilter(quiet, "quiet")).toBe(true);
     expect(matchesBoardFilter(base, "quiet")).toBe(false);

@@ -129,7 +129,7 @@ describe("gap-10: Current state shows when anything last happened", () => {
   it("adds the quiet note only once the task has crossed its threshold", () => {
     const at = new Date(Date.now() - 4 * 60 * 60_000).toISOString();
     const quiet = renderPanel({ lastActivityAt: at, quiet: true });
-    expect(quiet.container.textContent).toContain("Gone quiet");
+    expect(quiet.container.textContent).toContain("No activity");
     // Stated as the two facts the detector actually has.
     expect(quiet.container.textContent).toContain("no run is in flight");
     cleanup();
@@ -137,7 +137,7 @@ describe("gap-10: Current state shows when anything last happened", () => {
     const moving = renderPanel({ lastActivityAt: at, quiet: false });
     // Same stamp on screen, no cue — the threshold, not the timestamp, is what
     // makes it a signal.
-    expect(moving.container.textContent).not.toContain("Gone quiet");
+    expect(moving.container.textContent).not.toContain("No activity");
     expect(kv(moving.container, "Last activity")).toMatch(
       /ago|yesterday|just now/,
     );
