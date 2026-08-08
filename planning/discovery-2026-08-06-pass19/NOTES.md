@@ -121,6 +121,42 @@ evidence needs to become citable evidence a reviewer can read.
 | UC-06 | **Reject path.** Closed PR #149 unmerged on GitHub → divergence note + recovery packet in Viberr. | ✓ |
 | — | **R15-4 secrecy, exhaustively.** Provisioned a genuine NON-member (Murat) through the real admin flow. All 8 project routes → **404**; ⌘K search → **0 hits**; home never names the project; a comment POST → **404**. The project is invisible, not merely refused. | ✓ |
 
+## Phase E: the UX coherence pass (24 findings)
+
+A second adversarial Workflow audited SIX end-user dimensions across every surface — vocabulary,
+state semantics, affordance honesty, empty/error/first-run states, navigation, and a11y/responsive —
+with **two independent skeptics per finding** (a refuter and a reachability checker). 34 candidates →
+**24 confirmed, 10 rejected**. All 24 implemented, each with a test that fails without the fix and a
+canary proving it. Committed as `fe11c0a`. Full detail per finding: `ux-audit-result.json`.
+
+The three that mattered most, all live-reproduced:
+
+- **The notifications inbox pilled EVERY decision packet "completion report"** — by fall-through, not
+  by type — and gave it a completion checkmark. A scoping question therefore arrived looking like
+  something to accept, contradicting its own row title ("Decision needed: …") and the same packet's
+  pill on the task page. Verified fixed live: it now reads `decision required` in the input tone.
+- **An `archive_task` packet option deleted the remote branch from a generic "Confirm decision"** with
+  no disclosure — the same family as the acceptance-disclosure defects this pass already closed, on
+  the one other irreversible act in the product. It now names the branch, says the deletion cannot be
+  undone, lists what the archive withdraws, and offers "Not yet".
+- **The Review queue rendered a capability label that was deliberately retired** ("Completion for
+  human acceptance" — retired because it read as a guarantee it does not make) and then told the
+  reader to go find it on Policy, where it is called something else. A test was PINNING the stale
+  string. The label now comes from the capability catalog by id, so the two surfaces cannot drift again.
+
+Cross-file patches the cluster agents could not make themselves (all applied and verified here):
+the bell popover carried the identical "caught up while unread rows are on screen" defect as the
+notifications page; `home-page` now tells a member who can add a PAT instead of linking them into a
+403; the delete-profile toast and the operator's own recommendation detail both still used retired
+vocabulary or promised behaviour ruling 26 makes false.
+
+One test correction worth recording: wiring `archiveDisclosure` into the page made the confirm name
+the REAL branch (`vib-151`) where the un-wired fallback said "the branch". The test had been written
+against the fallback, so the wiring "broke" it — the fix was to assert the better behaviour, not to
+restore the worse one.
+
+**Suite after: 3048 tests / 225 files green, `tsc --noEmit` clean.**
+
 ## Finding ledger
 
 IDs: F19-nn (defects), UX19-nn (UX/coherence), Q19-nn (owner questions), N19-nn (notes/ideas).
