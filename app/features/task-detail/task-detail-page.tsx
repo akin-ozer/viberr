@@ -464,6 +464,7 @@ export function TaskDetailPage({
           // so the two operator pickers on one screen cannot offer different
           // backends.
           backendAvailable={backendAvailable}
+          configuredAutonomy={operatorAutonomy}
         />
 
         <ExecutionSection

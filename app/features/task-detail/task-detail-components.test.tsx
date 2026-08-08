@@ -663,6 +663,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
     const { container } = renderExec(execTask(), {
       myRole: "contributor",
       canRunAgents: false,
+      configuredAutonomy: "supervised" as const,
     });
     const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
       b.textContent?.includes("Assign delivering agent"),
@@ -821,6 +822,7 @@ describe("ExecutionProfile — reviewers", () => {
     const { container } = renderExec(reviewerTask(), {
       myRole: "contributor",
       canRunAgents: false,
+      configuredAutonomy: "supervised" as const,
     });
     expect(container.querySelector(".rev-agent")).not.toBeNull();
     expect(container.querySelector(".rev-agent .btn.primary")).toBeNull();
@@ -1493,7 +1495,12 @@ describe("ScheduledActions panel head (P13-D-38)", () => {
     // Nesting collapsed the gap to a JSX space and baseline-aligned the SVG —
     // this was the only one of ~48 panel heads that did it.
     const { container } = renderWithRouter(
-      <ScheduledActions schedules={[schedule()]} canRunAgents taskClosed={false} />,
+      <ScheduledActions
+        schedules={[schedule()]}
+        canRunAgents
+        taskClosed={false}
+        configuredAutonomy="supervised"
+      />,
     );
     const head = container.querySelector(
       '[data-testid="scheduled-actions"] .panel-head',
@@ -1507,7 +1514,12 @@ describe("ScheduledActions panel head (P13-D-38)", () => {
 describe("undefined CTA / utility classes (P13-D-19)", () => {
   it("uses `btn primary` and `btn ghost`, never the undefined hyphenated forms", () => {
     const { container } = renderWithRouter(
-      <ScheduledActions schedules={[schedule()]} canRunAgents taskClosed={false} />,
+      <ScheduledActions
+        schedules={[schedule()]}
+        canRunAgents
+        taskClosed={false}
+        configuredAutonomy="supervised"
+      />,
     );
     const buttons = [...container.querySelectorAll("button")];
     // `btn-primary` / `btn-ghost` exist in no stylesheet: both CTAs fell back

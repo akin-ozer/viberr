@@ -1043,6 +1043,7 @@ describe("UX19-10: the schedule picker honours backend availability", () => {
               schedules={[]}
               canRunAgents
               taskClosed={false}
+              configuredAutonomy="supervised"
               backendAvailable={backendAvailable}
             />
           </ToastProvider>

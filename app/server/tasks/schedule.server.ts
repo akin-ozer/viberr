@@ -4,6 +4,10 @@ import {
   SYSTEM_ACTOR,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
+import {
+  clampAutonomy,
+  operatorAutonomyFor,
+} from "~/server/tasks/operator-actions.server";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -163,7 +167,12 @@ export async function scheduleTaskAction(
     action: "run-operator",
     dueAt: new Date(dueMs).toISOString(),
     backend: input.backend,
-    autonomy: input.autonomy,
+    // R19-A: clamp at SCHEDULE time too. The entry is canonical in the task
+    // file and its timeline event quotes the level, so storing an unclamped
+    // value would advertise autonomy the run will not actually have — and a
+    // scheduled run fires with nobody watching to notice the difference.
+    autonomy: clampAutonomy(input.autonomy, operatorAutonomyFor(ctx, input.projectSlug))
+      .autonomy,
     note: input.note?.trim() ? input.note.trim() : "",
     createdBy: actor.userId ?? "system",
     createdByLabel: actor.label,

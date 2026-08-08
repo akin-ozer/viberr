@@ -304,10 +304,15 @@ export function ScheduledActions({
   canRunAgents,
   taskClosed,
   backendAvailable = BOTH_BACKENDS,
+  configuredAutonomy,
 }: {
   schedules: TaskSchedule[];
   canRunAgents: boolean;
   taskClosed: boolean;
+  /** R19-A: the project's configured operator autonomy — the CEILING. A
+   *  schedule fires UNATTENDED, so offering a level the server will clamp is
+   *  worse here than on the run picker: nobody is watching to notice. */
+  configuredAutonomy: "supervised" | "full";
   /** UX19-10: which backends this deployment actually has a credential for —
    *  the SAME loader fact `OperatorRunControl` reads one panel down. A schedule
    *  fires unattended, so an option that `selectAdapter` will refuse must not be
@@ -437,9 +442,11 @@ export function ScheduledActions({
             </label>
             <label className="flabel">
               Autonomy
-              <select name="autonomy" defaultValue="supervised">
+              <select name="autonomy" defaultValue={configuredAutonomy}>
                 <option value="supervised">Supervised</option>
-                <option value="full">Full</option>
+                {configuredAutonomy === "full" && (
+                  <option value="full">Full</option>
+                )}
               </select>
             </label>
           </div>
