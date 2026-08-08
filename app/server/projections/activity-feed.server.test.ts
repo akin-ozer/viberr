@@ -251,7 +251,14 @@ describe("listAuditLog", () => {
       subjectId: "VIB-201",
       projectSlug: store.slug,
       taskKey: "VIB-201",
-      details: { bypassed: "the required reviewer verdict" },
+      // The REAL shape `forceAcceptCompletion` stores: the full refusal
+      // sentence the human was shown, remediation clause and all — not a short
+      // gate name. The old fixture used a hand-written phrase that read fine
+      // after "bypassing" and so hid the live nonsense this test now pins.
+      details: {
+        bypassed:
+          "VIB-201's delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.",
+      },
     });
     recordAudit(store.db, {
       action: "project.org_admin.override",
@@ -271,8 +278,11 @@ describe("listAuditLog", () => {
     const forced = entries.find((e) => e.taskKey === "VIB-201")!;
     expect(forced.kind).toBe("audit");
     expect(forced.text).toBe(
-      `${arda.name} force-accepted the completion, bypassing the required reviewer verdict — on`,
+      `${arda.name} force-accepted the completion, overriding the acceptance gate (VIB-201's delivered revision has no approving verdict yet) — on`,
     );
+    // The remediation half is advice about a decision already made — it must not
+    // survive into the record of the override.
+    expect(forced.text).not.toContain("an admin can force-accept");
     const override = entries.find((e) => e.text.includes("org-admin override"))!;
     expect(override.kind).toBe("audit");
     expect(override.text).toBe(

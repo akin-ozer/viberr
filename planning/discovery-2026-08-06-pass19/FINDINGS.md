@@ -214,3 +214,43 @@ but it defeats the ruling that created it. Fix: anchor the pattern to the projec
 claim a merge-pending task "goes straight to Done"). Both were caught by an independent verifier
 re-deriving the work from the tree rather than reading the implementer's report. Verification is not
 ceremony here; it is where two of this pass's real defects came from.
+
+## Session-3 additions (live verification of the implemented tree)
+
+### F19-41 — MED · audit copy · `app/server/projections/activity-feed.server.ts:268` · FIXED
+
+Live-caught while verifying R19-7 on the Activity page. The force-accept audit row read:
+
+> Arda force-accepted the completion, bypassing **VC-8's delivered revision has no approving
+> verdict yet — run a review for a verdict, or an admin can force-accept.** — on VC-8
+
+The template assumed `bypassed` names a GATE ("the required reviewer verdict"), and its own
+comment said so. The writer (`forceAcceptCompletion`) actually stores
+`acceptanceRefusalReason(...)` — the full refusal SENTENCE the human was shown, remediation clause
+and all. **The unit test hid this**: its fixture hand-wrote a short phrase the writer never
+produces, so the sentence read fine in the test and was nonsense in the app. Fixed to
+`overriding the acceptance gate (<reason>)`, with the remediation half dropped (it is advice
+about a decision already made), and the fixture replaced with the shape the writer really stores.
+
+**Class:** a test fixture that is more convenient than the production value can hide a copy defect
+indefinitely. Sibling of ruling 54's "a finding taken from a UI impression and never re-verified".
+
+### Live verification of the implemented tree (dev server on the pass-19 worktree)
+
+| Fix | Evidence |
+|-----|----------|
+| **F19-21** + R19-8 | VC-9 reached **"Completed — no changes"** end-to-end: operator recommended it, acceptance recorded "Branch `vc-9` carries no commits ahead of `main` (`d889bceb4a17`), re-checked at acceptance". The outcome ruling 43 created is now reachable. |
+| **F19-21 discoverability** | VC-5 (the task that exposed the finding) now reads "…If this task requires no changes, run delivery once to verify and record that." on BOTH the GitHub panel and Current state. |
+| **R19-7** | Audit column shows "**7 runtime sessions opened** — each one recorded per audit policy · Show each"; expanding sets `aria-expanded=true` and reveals all 7 rows. Real access events (force-accept, interrupt, reconcile) are visible again instead of buried. |
+| **F19-22** | GitHub page header reads "**Checked 1m ago · last change 4h ago**" — the two facts separated. It previously read "Synced 4h ago" while the poller ran every 5 minutes. |
+| **UX19-3** | VC-5 sits under "Still in review" with the SAME reason the task page gives. It previously showed "validation healthy · your acceptance" while the task page said acceptance was blocked. |
+| **F19-31** | The queue row renders "waiting on a human", not the pulsing "agent working" tag. |
+| **F19-11** | Execution profile reads "Unowned — a contributor or above can take it" (was "open to any project member", which the RBAC matrix contradicts). |
+| **F19-18/F19-6** | Delivery refusals now say why: "VC-9's workspace carries no commits ahead of the default branch… If the agent produced work, it never reached the task branch — re-run the delivering agent, then deliver again." |
+
+### N19-7 — worktree-only dev artifact (NOT a product bug)
+
+Running the dev server from a git worktree serves fonts via `/@fs/…/node_modules/@fontsource/…`,
+which Vite's `server.fs.allow` refuses → eight 403s and system-font fallback. `node_modules`
+resolves to the parent checkout, outside the worktree root. Only affects worktree dev servers;
+main and the container are unaffected. Recorded so a future pass does not re-file it as a bug.
