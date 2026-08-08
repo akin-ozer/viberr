@@ -178,24 +178,71 @@ test("Escape cancels a lifted drag — no request, visuals cleared, card unmoved
   expect(reorders).toBe(0);
 });
 
-test("a Done-stage drop without an accepted verdict is refused with an error toast", async ({
+// Ruling 53 (R18-7/B1) put a confirm in front of the board drop, because
+// "the most irreversible action in the product was also its most casual one".
+// This test predated that and still asserted the OLD flow — drop, POST, error
+// toast — so it waited for a request the confirm now withholds and timed out.
+// CI has been red on main since. The behaviour it should pin is the shipped
+// one: the drop ASKS first, dismissing writes nothing, and confirming still
+// meets the server's verdict gate.
+test("a Done-stage drop asks before it accepts, and dismissing writes nothing", async ({
   page,
 }) => {
   await page.goto("/projects/viberr-core/board");
   const done = column(page, "Done");
   await expect(done).toBeVisible();
 
-  // VIB-142 is awaiting its verdict — the governed transition must refuse it,
-  // and the board must snap back rather than pretend.
+  let posts = 0;
+  page.on("request", (r) => {
+    if (
+      r.method() === "POST" &&
+      r.url().includes("/projects/viberr-core/board")
+    ) {
+      posts += 1;
+    }
+  });
+
+  await liftOver(page, "VIB-142", done.locator(".col-body"));
+  await page.mouse.up();
+
+  // The confirm names the task and what accepting does, per ruling 20 (R15-1).
+  const confirm = page.locator('dialog[aria-label="Accept completion"]');
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText("VIB-142");
+  await expect(confirm).toContainText("Merging is one-way");
+
+  // "Not yet" is the escape, and it must write NOTHING.
+  await confirm.getByRole("button", { name: "Not yet" }).click();
+  await expect(confirm).toBeHidden();
+  expect(posts).toBe(0);
+  // `.first()`: the snap-back drop animation transiently overlays a clone of
+  // the card, so strict mode would see two while it settles.
+  await expect(
+    column(page, "Review").locator(".card", { hasText: "VIB-142" }).first(),
+  ).toBeVisible();
+  await expect(done.locator(".card", { hasText: "VIB-142" })).toHaveCount(0);
+});
+
+test("confirming a Done-stage drop still meets the verdict gate, and the board snaps back", async ({
+  page,
+}) => {
+  await page.goto("/projects/viberr-core/board");
+  const done = column(page, "Done");
+  await expect(done).toBeVisible();
+
+  // VIB-142 is awaiting its verdict, so the governed transition must refuse it
+  // even once the human has confirmed — the dialog discloses, it never grants.
   await liftOver(page, "VIB-142", done.locator(".col-body"));
   const request = reorderPost(page, (body) => body.includes("taskKey=VIB-142"));
   await page.mouse.up();
+
+  const confirm = page.locator('dialog[aria-label="Accept completion"]');
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: /^Accept →/ }).click();
   await request;
 
   const toast = page.locator('.toast[data-kind="error"]');
   await expect(toast).toBeVisible();
-  // `.first()`: the snap-back drop animation transiently overlays a clone of
-  // the card, so strict mode would see two while it settles.
   await expect(
     column(page, "Review").locator(".card", { hasText: "VIB-142" }).first(),
   ).toBeVisible();
