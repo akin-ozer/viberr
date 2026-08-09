@@ -88,3 +88,12 @@ read_repo_file not offered" — R19-1 merge decision live), and offered recovery
 proceed-without-verification / archive). Codex delivery mechanics remain backed by VC-1/VC-3 live
 history (real Codex PRs #147/#148) + runtime-parity tests. Net: a failed clone produced textbook
 honest behavior — exactly what R19-1/F19-6/ruling-69 exist for.
+
+## UC-17 Codex/Claude parity — PROVEN LIVE on the merged tree
+VC-11's operator (after its clone recovered when the network freed) assigned the **Codex**
+Developer, which committed on branch vc-11 (e063eb6, f9265d5) and the operator delivered
+**PR #158** — the IDENTICAL delivery flow as VC-10's **Claude** Doc Writer (branch vc-10, PR #156):
+operator triage → assign specialist → specialist commits on the task branch (never pushes) →
+operator-owned deliver → PR opened. Same mechanics from Viberr's eye; the only differences are
+the disclosed ones (Codex tool-limits advisory vs Claude-enforced, per the capability matrix).
+Codex parity is now LIVE-proven on the unified tree, not just history-backed (VC-1/VC-3).
