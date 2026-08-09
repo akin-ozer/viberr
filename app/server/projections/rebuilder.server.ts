@@ -291,7 +291,7 @@ function verdictGateReason(
   // non-repo work, which stays acceptable.
   if (!fm.workRevision) return null;
   if (!fm.pr) {
-    // R17-2 (F17-L9) / R19-1: a verified empty branch — or a VERIFICATION
+    // R17-2 (F17-L9) / R19-8: a verified empty branch — or a VERIFICATION
     // revision, the base sha a reviewer judged on a task with nothing to
     // deliver — is a "Completed — no changes" completion, acceptable without a
     // PR.

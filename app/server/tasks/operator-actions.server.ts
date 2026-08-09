@@ -1244,7 +1244,7 @@ export interface OperatorTaskSnapshot {
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
-  /** R19-4: the project's repository ("owner/name"), or null when none is
+  /** R19-1: the project's repository ("owner/name"), or null when none is
    *  attached. The coordinator used to be blind to it — it could not even NAME
    *  the repository it operates on, which is part of how it came to call its own
    *  task folder "the repo" (F19-4). It now works inside a read-only checkout of
@@ -1253,7 +1253,7 @@ export interface OperatorTaskSnapshot {
    *  Optional only so hand-built test fixtures need not restate it (same
    *  reason as `noChanges`); `operatorSnapshot` always sets it. */
   repo?: string | null;
-  /** R19-1: this task is a no-change completion — nothing was delivered and
+  /** R19-8: this task is a no-change completion — nothing was delivered and
    *  there is nothing to merge. Accept it with `accept_completion`; do NOT call
    *  `deliver_for_review` and do NOT open a decision packet asking a human how
    *  to close it out. The operator used to be structurally blind to the shape,
@@ -1458,9 +1458,9 @@ export function operatorSnapshot(
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".
     branch: fm.branch ?? null,
-    // R19-4: name the repository the read-only view reads.
+    // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
-    // R19-1: the "nothing to deliver" shape, stated outright.
+    // R19-8: the "nothing to deliver" shape, stated outright.
     noChanges: noChangeApplies(fm),
     liveRuns: (
       db
@@ -2581,7 +2581,7 @@ export async function operatorAcceptCompletion(
   // never arrive here.
   if (authority.autonomy !== "full" || gate(authority, "completion-for-acceptance") !== "direct") {
     const doneName = stageNameOf(ctx, input.projectSlug, doneStageId);
-    // R19-1: a task with nothing to deliver merges nothing, so the card must not
+    // R19-8: a task with nothing to deliver merges nothing, so the card must not
     // promise a merge — the old single sentence told a human that applying it
     // "merges the review PR", for a task that has no PR and never will.
     const noChange = noChangeApplies(file.parsed.frontmatter);
@@ -2625,7 +2625,7 @@ export async function operatorAcceptCompletion(
   // human path gate by gate and shipped with a subset more than once. The core
   // also re-checks the refusal gates inside the write lock (B-WF1).
   const hasPr = !!file.parsed.frontmatter.pr;
-  // R19-1: the operator closes a no-change task through the SAME live, fail-
+  // R19-8: the operator closes a no-change task through the SAME live, fail-
   // closed re-check the humans do — it has no force override, so an unverifiable
   // remote (or a branch that gained commits) is a plain noop with the reason.
   const noChange = await acceptanceNoChangeCheck(

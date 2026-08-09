@@ -34,7 +34,7 @@ import {
 } from "./operator-actions.server";
 
 /**
- * R19-1 (owner ruling 2026-08-06) — "Completed — no changes", end to end.
+ * R19-8 (ruling 62) — "Completed — no changes", end to end.
  *
  * The live dead end (F19-21): VC-5 was a verification-only task. The operator
  * correctly engaged the reviewer alone with NO deliverer; the reviewer approved;
@@ -45,7 +45,7 @@ import {
  * task out — recommending "Manually mark Done", which bypasses the entire
  * acceptance ceremony.
  *
- * Every test below fails against pre-R19-1 main.
+ * Every test below fails against pre-R19-8 main.
  */
 
 vi.mock("~/server/github/github-context.server", () => ({
@@ -283,7 +283,7 @@ afterEach(() => {
 });
 
 describe("the verdict binds — a verification revision is minted at review time", () => {
-  it("R19-1: a reviewer approving a task with nothing to deliver mints a verification revision and binds the verdict", async () => {
+  it("R19-8: a reviewer approving a task with nothing to deliver mints a verification revision and binds the verdict", async () => {
     // CANARY: remove the mint block in recordAgentCompletion — the event reverts
     // to "Approval noted", validation stays "none", and the task is VC-5 again.
     deployAgents();
@@ -318,7 +318,7 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(affordance.canAccept).toBe(true);
   });
 
-  it("R19-1: a reviewer approving while a deliverer is engaged mints NOTHING", async () => {
+  it("R19-8: a reviewer approving while a deliverer is engaged mints NOTHING", async () => {
     // The mid-run hazard: the branch does not exist YET, which is not the same
     // as never. CANARY: drop the `deliveringEngagement(pre) === null`
     // precondition and an in-flight delivery gets marked "no changes".
@@ -334,7 +334,7 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(quality?.title).toBe("Approval noted");
   });
 
-  it("R19-1: a reviewer approving a task that already has a branch mints nothing", async () => {
+  it("R19-8: a reviewer approving a task that already has a branch mints nothing", async () => {
     deployAgents();
     seedVerificationTask({ branch: "vib-1" });
     await reviewerApproves();
@@ -342,7 +342,7 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(task().frontmatter.noChanges).toBeFalsy();
   });
 
-  it("R19-1: a verification revision alone clears the verdict gate", async () => {
+  it("R19-8: a verification revision alone clears the verdict gate", async () => {
     // `verdictGateReason` refuses "delivered work with no PR". A verification
     // revision is not delivered work, and that must hold on the revision KIND
     // alone — the `noChanges` flag is a separate fact, and pinning only the
@@ -370,7 +370,7 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(affordance.blockedReason).toBeNull();
   });
 
-  it("R19-1: an unverifiable remote mints nothing — the mint fails closed too", async () => {
+  it("R19-8: an unverifiable remote mints nothing — the mint fails closed too", async () => {
     deployAgents();
     seedVerificationTask();
     remote({ network: true });
@@ -381,7 +381,7 @@ describe("the verdict binds — a verification revision is minted at review time
 });
 
 describe("acceptance closes it — with its OWN completion event, and no merge", () => {
-  it("R19-1: acceptance closes it to Done with the no-change completion event and merges nothing", async () => {
+  it("R19-8: acceptance closes it to Done with the no-change completion event and merges nothing", async () => {
     // CANARY: delete the `noChange.applies` arm from acceptCompletion's event
     // builder — the title falls back to "Completion accepted" and the record
     // stops naming what was verified.
@@ -409,7 +409,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(await mergeMock.mock.results[0]?.value).toEqual({ status: "no_pr" });
   });
 
-  it("R19-1 fails CLOSED: a branch that gained commits refuses the acceptance", async () => {
+  it("R19-8 fails CLOSED: a branch that gained commits refuses the acceptance", async () => {
     // The whole reason the stored flag is not the evidence. CANARY: remove the
     // check from BOTH acceptCompletion and applyAcceptanceWrite — either layer
     // alone still refuses, which is the point of the two-layer guard.
@@ -432,7 +432,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(completionEvent()).toBeUndefined();
   });
 
-  it("R19-1: an unverifiable remote refuses, and force-accept says the check did not pass", async () => {
+  it("R19-8: an unverifiable remote refuses, and force-accept says the check did not pass", async () => {
     // CANARY: pass a non-null `verification` when forced — the event would then
     // claim a verification that never happened.
     deployAgents();
@@ -464,7 +464,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(1);
   });
 
-  it("R19-1: the packet path runs the same check", async () => {
+  it("R19-8: the packet path runs the same check", async () => {
     // CANARY: remove the check from resolvePacket's inlined accept.
     deployAgents();
     seedVerificationTask({}, ACCEPT_PACKET);
@@ -482,7 +482,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(task().frontmatter.stage).toBe("review");
   });
 
-  it("R19-1: the packet path closes a verified task with the shared event", async () => {
+  it("R19-8: the packet path closes a verified task with the shared event", async () => {
     deployAgents();
     seedVerificationTask({}, ACCEPT_PACKET);
     await reviewerApproves();
@@ -500,7 +500,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
 });
 
 describe("the operator reaches the outcome without deliver_for_review", () => {
-  it("R19-1: supervised recommends completing with no changes, and does not promise a merge", async () => {
+  it("R19-8: supervised recommends completing with no changes, and does not promise a merge", async () => {
     // CANARY: restore the old single `detail` string — the card tells a human
     // that applying it merges a PR the task does not have.
     deployAgents(true);
@@ -520,7 +520,7 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
     expect(detail?.text).not.toContain("merges the review PR");
   });
 
-  it("R19-1: full autonomy closes it with the no-change event", async () => {
+  it("R19-8: full autonomy closes it with the no-change event", async () => {
     // CANARY: delete the operator's `noChange.applies` arm.
     deployAgents(true);
     seedVerificationTask();
@@ -539,7 +539,7 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
     expect(completionEvent()?.text).not.toMatch(/merged/i);
   });
 
-  it("R19-1: full autonomy is REFUSED when the branch carries work", async () => {
+  it("R19-8: full autonomy is REFUSED when the branch carries work", async () => {
     deployAgents(true);
     seedVerificationTask();
     await reviewerApproves();
@@ -556,7 +556,7 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
     expect(task().frontmatter.stage).toBe("review");
   });
 
-  it("R19-1: the operator can SEE the shape — get_task carries `noChanges`", async () => {
+  it("R19-8: the operator can SEE the shape — get_task carries `noChanges`", async () => {
     // CANARY: drop the snapshot field — the operator is blind again and opens a
     // "how do we close this out?" packet instead of accepting.
     deployAgents(true);

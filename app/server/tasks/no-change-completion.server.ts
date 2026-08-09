@@ -9,7 +9,7 @@ import type {
 } from "~/schemas/task-file.schema";
 
 /**
- * R19-1 (owner ruling 2026-08-06) — the whole "Completed — no changes" contract:
+ * R19-8 (ruling 62) — the whole "Completed — no changes" contract:
  * the live proof, the accept-time gate, and the ONE completion event every
  * writer to Done uses. Extends ruling 43 (R17-2) to the shape it was named for.
  *

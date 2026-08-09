@@ -450,7 +450,7 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
     expect(task.blockReason).toContain("closed on GitHub without merging");
   });
 
-  it("R19-1: a VERIFICATION revision projects no block reason — it is not undelivered work", () => {
+  it("R19-8: a VERIFICATION revision projects no block reason — it is not undelivered work", () => {
     // The projected sentence is the mirror of `verdictGateReason`, so it has to
     // learn the same thing: a revision a reviewer minted on a task with nothing
     // to deliver is not "delivered work with no PR". Left unmirrored, the review

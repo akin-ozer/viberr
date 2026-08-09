@@ -800,7 +800,7 @@ function ListView({
  * still points at the task page — a narrower, true version of the claim this
  * dialog used to make about all of them.
  *
- * The `noChanges` gap is the one that costs copy: R19-1 makes "completed with no
+ * The `noChanges` gap is the one that costs copy: R19-8 makes "completed with no
  * changes" a first-class acceptance, and the task dialog names it. Here that
  * task falls into the no-PR branch below, whose sentence is still TRUE of it
  * ("the task closes without a merge") but does not name the disposition.

@@ -1915,7 +1915,7 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
     seedNoChange(store, null);
 
     // The merge wired B's accept-time no-change probe into every writer to Done
-    // (R19-1): a `noChanges` close is re-proved LIVE against the remote. Give it
+    // (R19-8): a `noChanges` close is re-proved LIVE against the remote. Give it
     // a reachable GitHub where the task branch is absent (`no_branch` basis) and
     // the default-branch head reads, so the probe verifies and this test keeps
     // exercising the R15-1 verdict-gate bypass it was written for.

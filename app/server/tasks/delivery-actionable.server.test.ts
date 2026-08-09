@@ -280,7 +280,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
     expect(recs()).toHaveLength(0);
   });
 
-  it("C2. a no-commits delivery keeps the R19-1 no-change path, not a move card", async () => {
+  it("C2. a no-commits delivery keeps the R19-8 no-change path, not a move card", async () => {
     deployOperator("supervised");
     seedTask();
     // A's DefaultBranchEvidence gate: `no_commits` is a verified zero-diff only

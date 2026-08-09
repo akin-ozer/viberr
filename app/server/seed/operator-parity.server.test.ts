@@ -53,7 +53,7 @@ const operatorDefinitionMd = readFileSync(
 );
 
 /**
- * R19-4 (ruling 58) — the operator's persona must forbid the one false claim it
+ * R19-1 (ruling 55) — the operator's persona must forbid the one false claim it
  * actually made. Live (F19-4): at triage its working directory held only
  * `task.md`, and with nothing else to look at it described that directory AS
  * the repository — writing `Repo contents visible to operator: "only task.md —
@@ -63,7 +63,7 @@ const operatorDefinitionMd = readFileSync(
  * The tool descriptions say this too, but a tool the operator does not call
  * teaches it nothing; the persona is read on every turn.
  */
-describe("R19-4: the persona separates the task workspace from the repository", () => {
+describe("R19-1: the persona separates the task workspace from the repository", () => {
   it("says the working directory is NOT the repository", () => {
     expect(operatorDefinitionMd).toMatch(/It is NOT the repository/);
     expect(operatorDefinitionMd).toMatch(

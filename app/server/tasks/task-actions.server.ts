@@ -1834,7 +1834,7 @@ export async function recordAgentCompletion(
   // noted, rework still needed", NOT a pass.
   let title = "";
   let summary = "";
-  // R19-1 (F19-21, live VC-5): a verdict-capable reviewer approving a task that
+  // R19-8 (F19-21, live VC-5): a verdict-capable reviewer approving a task that
   // has NOTHING to deliver had nothing to bind to — the verdict was dropped, the
   // event read "there is no delivered revision to bind the verdict to yet", and
   // acceptance dead-ended forever on "No reviewed revision yet". Mint a
@@ -1934,7 +1934,7 @@ export async function recordAgentCompletion(
           summary = `${roleDisplay} approved, but there is no delivered revision to bind the verdict to yet.`;
         } else if (validation === "healthy") {
           title = "Review passed";
-          // R19-1: when the subject is a VERIFICATION revision, say what was
+          // R19-8: when the subject is a VERIFICATION revision, say what was
           // actually judged — there is no "work" to have approved. The two
           // bases are different facts (no branch at all vs. a branch carrying
           // nothing), so the sentence must not state one for the other.
@@ -3363,7 +3363,7 @@ async function resolveNoChangeBaseRevision(
       treeSha: typeof treeSha === "string" && treeSha ? treeSha : null,
       branch: gh.defaultBranch,
       createdAt: new Date().toISOString(),
-      // R19-1: this is a VERIFICATION revision — the base a reviewer judges on a
+      // R19-8: this is a VERIFICATION revision — the base a reviewer judges on a
       // task with nothing to deliver, never a delivered diff. The `verified` kind
       // is what the PR-less acceptance arm (`acceptanceBlockReason` /
       // `verdictGateReason`) admits, and what `probeNothingToDeliver` recognises.
@@ -4559,7 +4559,7 @@ export async function resolvePacket(
         input.taskKey,
       );
       if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
-      // R19-1: the packet path is a writer to Done like the other two, so the
+      // R19-8: the packet path is a writer to Done like the other two, so the
       // no-change basis is re-proved live HERE as well — otherwise the
       // operator's own acceptance packet becomes the one door a stale
       // `noChanges` flag closes a now-non-empty branch through. No `force` on
@@ -4624,7 +4624,7 @@ export async function resolvePacket(
       const hasPr = !!existing.parsed.frontmatter.pr;
       // R17-1: name any reviewed-revision drift on the completion record.
       const driftNote = revisionDriftNote(existing.parsed.frontmatter);
-      // R19-1: the ONE shared no-change completion event, same as the other two
+      // R19-8: the ONE shared no-change completion event, same as the other two
       // writers to Done.
       event = noChange.applies
         ? noChangeCompletionEvent({
@@ -5076,7 +5076,7 @@ function verdictGateReason(fm: TaskFrontmatter, taskKey: string): string | null 
   // Delivered work with no PR: nothing stands for review, so acceptance would
   // close the task on work no PR ever carried (R15-1 gate 1).
   if (!fm.pr) {
-    // R17-2 (F17-L9) / R19-1: unless the branch is verified empty, or the
+    // R17-2 (F17-L9) / R19-8: unless the branch is verified empty, or the
     // revision IS a verification revision (a reviewer judged the base sha
     // because there was nothing to deliver) — a "Completed — no changes"
     // outcome. There is nothing to open a PR for; acceptance closes it to Done
@@ -5535,7 +5535,7 @@ export async function applyAcceptanceWrite(
     skipInLockRecheck?: boolean;
     /** A verification already performed by the caller; re-read when absent. */
     headCheck?: AcceptancePrHeadCheck;
-    /** R19-1: the live no-change verification (re-read when absent). Bypassed by
+    /** R19-8: the live no-change verification (re-read when absent). Bypassed by
      *  `skipInLockRecheck` — the audited force override — because this path
      *  merges nothing; the head gate above is never bypassed. */
     noChangeCheck?: AcceptanceNoChangeCheck;
@@ -5546,7 +5546,7 @@ export async function applyAcceptanceWrite(
     input.headCheck ??
     (await acceptancePrHeadCheck(db, ctx, input.projectSlug, input.taskKey));
   if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
-  // R19-1: the SECOND layer of the no-change gate. Every writer to Done funnels
+  // R19-8: the SECOND layer of the no-change gate. Every writer to Done funnels
   // through here, so a caller that forgets the check still cannot close a task
   // on a stale `noChanges` flag (F19-21).
   const noChange =
@@ -5673,7 +5673,7 @@ async function acceptCompletion(
   );
   if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
 
-  // R19-1: a `noChanges` task closes WITHOUT a merge, so its basis must be
+  // R19-8: a `noChanges` task closes WITHOUT a merge, so its basis must be
   // re-proved LIVE at the moment of acceptance — a flag set at some past
   // delivery attempt must never close a task whose branch has since gained
   // commits (F19-21). Fails closed: an unreachable or uncredentialed remote
@@ -5743,7 +5743,7 @@ async function acceptCompletion(
 
   // R17-1: name any reviewed-revision drift on the completion record.
   const driftNote = revisionDriftNote(existing.parsed.frontmatter);
-  // R19-1: the no-change outcome has its OWN completion event, from the one
+  // R19-8: the no-change outcome has its OWN completion event, from the one
   // shared builder — it must never borrow the merge path's title or wording.
   const event: TaskFileEvent = noChange.applies
     ? noChangeCompletionEvent({

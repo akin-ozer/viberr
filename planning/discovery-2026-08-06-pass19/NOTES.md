@@ -10,12 +10,15 @@ App under test: production compose container `viberr-app-1` on :5173, data root
 Reference docs: planning/discovery-2026-08-06-pass19/reference/ (refreshed from pass 18
 against main @65063b8). Intent distillation: INTENT.md.
 
-> **Session B's parallel working log** — its use-case results (UC-01..UC-28), the Phase A–E live
-> verification, the implementation-status table, and the MCP-probe evidence (UC-14, canary
-> `MCP-CANARY-PASS19-4417`) — was authored on the `pass19/product-fixes` branch and belongs under
-> `session-b/` per the merge's canon plan (RECONCILE §4); it is preserved on that branch ref and is
-> not line-merged here. This file is Session A's discovery ledger; execution and disposition detail
-> live in the sibling `FINDINGS.md` / `CAMPAIGN.md` / `DISPOSITION.md`.
+> **Session B's parallel working log now lives whole under `session-b/`** — its use-case results
+> (UC-01..UC-28), the Phase A–E live verification, the implementation-status table, and the
+> MCP-probe evidence (UC-14, `pass19-probe` stdio server, canary `MCP-CANARY-PASS19-4417`) sit in
+> `session-b/NOTES.md`, alongside B's `USE-CASES.md`, `ROADMAP.md`, five `spec-*.md`,
+> `gap-analysis-result.json`, and `ux-audit-result.json`. Per the merge's canon plan (RECONCILE §4)
+> B's ledger was relocated intact, never line-merged into this file. **Read `session-b/README.md`
+> first** — it is the dialect map: finding IDs ≥ F19-22 and ruling tags `R19-*` mean different
+> things in B's ledger than in A's. This file is Session A's discovery ledger; execution and
+> disposition detail live in the sibling `FINDINGS.md` / `CAMPAIGN.md` / `DISPOSITION.md`.
 
 ## Finding ledger
 

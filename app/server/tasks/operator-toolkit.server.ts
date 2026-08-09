@@ -65,7 +65,7 @@ interface ToolkitDeps {
   taskKey: string;
   authority: OperatorAuthority;
   /** Test seam for the GitHub transport behind the read-only repository view
-   *  (R19-4). Production passes nothing and the real client is used. */
+   *  (R19-1). Production passes nothing and the real client is used. */
   github?: GithubContextOptions;
 }
 

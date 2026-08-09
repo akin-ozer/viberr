@@ -293,7 +293,7 @@ describe("path 3 — operatorAcceptCompletion", () => {
     expect(result.message).toMatch(/Done|accepted/i);
     expect(task().frontmatter.stage).toBe("done");
     const completion = task().timeline.find((e) => e.type === "completion");
-    // R19-1: the outcome now has its OWN event title, from the shared builder,
+    // R19-8: the outcome now has its OWN event title, from the shared builder,
     // and its text names the basis the LIVE re-check established — here
     // `no_repo` (this fixture's project has `repo: null`), which is why a
     // repo-less project stays acceptable.

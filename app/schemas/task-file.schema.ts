@@ -446,7 +446,7 @@ export const workRevisionSchema = z
     createdAt: z.string().min(1),
     /** The delivering engagement's profileId that produced this revision. */
     sourceProfileId: z.string().nullable().default(null),
-    /** R19-1: what this revision IS. `delivered` — a commit a delivering run
+    /** R19-8: what this revision IS. `delivered` — a commit a delivering run
      *  produced (the only kind before pass 19). `verified` — a VERIFICATION
      *  revision: the default-branch head a reviewer judged on a task that has
      *  nothing to deliver, so the verdict has a subject to bind to and names the
@@ -454,7 +454,7 @@ export const workRevisionSchema = z
      *  and never carries a task branch (`branch: null`).
      *
      *  ABSENT reads as `delivered`: every revision minted before pass 19 is one,
-     *  and both minters (`nextWorkRevision`, the R19-1 verdict-time mint) now
+     *  and both minters (`nextWorkRevision`, the R19-8 verdict-time mint) now
      *  state the kind outright — so only pre-pass-19 files omit it. Read it as
      *  `=== "verified"`, never as `!== "delivered"`. */
     kind: z.enum(["delivered", "verified"]).optional(),
@@ -519,7 +519,7 @@ export const taskFrontmatterSchema = z.object({
   // null read path. An existing `repo:` line in a task.md is now an UNKNOWN key:
   // preserved verbatim on round-trip, ignored by every resolver.
   pr: prRefSchema.nullable(),
-  // R17-2 / R19-1: this task completes with NOTHING to deliver. Acceptance of a
+  // R17-2 / R19-8: this task completes with NOTHING to deliver. Acceptance of a
   // `workRevision && !pr` task is normally refused ("deliver the branch & open
   // the PR"); this flag is the ONE signal that turns that refusal into a
   // first-class "Completed — no changes" acceptance that closes to Done without
@@ -529,7 +529,7 @@ export const taskFrontmatterSchema = z.object({
   // mints the `kind: "verified"` revision the verdict binds to). Cleared the
   // moment a delivery opens a PR.
   //
-  // R19-1: the flag is a CLAIM about a moment that has passed —
+  // R19-8: the flag is a CLAIM about a moment that has passed —
   // `acceptanceNoChangeCheck` (no-change-completion.server) re-verifies it with a
   // LIVE remote read before any writer closes the task to Done, so a branch that
   // has since gained commits cannot ride a stale flag into Done (F19-21).
@@ -551,7 +551,7 @@ type ReviewState = {
   engagements: Engagement[];
   workRevision: WorkRevision | null;
   verdicts: ReviewVerdict[];
-  /** R19-1: this task was verified to have nothing to deliver. Optional so the
+  /** R19-8: this task was verified to have nothing to deliver. Optional so the
    *  existing call sites (which all pass whole frontmatter) need no change. */
   noChanges?: boolean;
 };
@@ -593,7 +593,7 @@ export function deriveValidation(
   ) {
     return "healthy";
   }
-  // F19-27 / R19-1: a verified no-change completion has a work revision but
+  // F19-27 / R19-8: a verified no-change completion has a work revision but
   // nothing inside it to review — no diff, no pull request, and nobody owing a
   // verdict. Falling through to `changed` made an accepted task sit in Done
   // wearing "awaiting verdict", the same false claim UXO-1 removed from
@@ -621,7 +621,7 @@ export function deriveValidation(
  *  non-repo work); once a revision exists, all required reviewers must approve
  *  it and none may request changes (F10-15).
  *
- *  R19-1: the "No reviewed revision yet" arm is what dead-ended a task with
+ *  R19-8: the "No reviewed revision yet" arm is what dead-ended a task with
  *  nothing to deliver (F19-21, live VC-5) — the reviewer approved, the verdict
  *  had no subject to bind to, and acceptance refused forever. Nothing changes
  *  HERE: such a task now carries a `kind: "verified"` revision minted at verdict
@@ -768,7 +768,7 @@ export function nextWorkRevision(
       branch: input.branch,
       createdAt: input.createdAt,
       sourceProfileId: input.sourceProfileId,
-      // R19-1: this helper has ONE caller — a delivering run's reconcile — so
+      // R19-8: this helper has ONE caller — a delivering run's reconcile — so
       // everything it mints is delivered work. The verification revision is
       // minted at verdict time and never comes through here.
       kind: "delivered",
