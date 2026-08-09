@@ -97,3 +97,35 @@ operator triage → assign specialist → specialist commits on the task branch 
 operator-owned deliver → PR opened. Same mechanics from Viberr's eye; the only differences are
 the disclosed ones (Codex tool-limits advisory vs Claude-enforced, per the capability matrix).
 Codex parity is now LIVE-proven on the unified tree, not just history-backed (VC-1/VC-3).
+
+## In-app CREATION + operator agent-selection (session 3, live)
+Created NEW resources through the UI and validated the operator picks the right one:
+- **New KB** "Release Playbook" (store://kb/release-playbook/, + a conventions.md doc) via the org
+  Agent-resources → New KB modal ("Create & index", folder-path preview). ✓
+- **New MCP** "release-tools" (stdio, node server.mjs) via the MCP → Add modal ("Add & test
+  connection"). Verified in org_mcp_servers. ✓
+- **New agent profile** "Release Engineer" via the project agents → New profile modal (Claude Code,
+  stages Ready+In Progress, granted developer-expertise skill + release-tools MCP + release-playbook
+  KB; decoy kubernetes-rollback deliberately OFF). Deployed into Viberr Core (project.md
+  profileId release-engineer, grants at :278-282). ✓
+- **Task VC-12** "Add the pass-19 release smoke marker" → operator triaged and **SELECTED THE
+  RELEASE ENGINEER** (not Developer/Doc Writer/Reviewer) off its description "Owns release-note and
+  QA smoke MARKER files… use for any task that creates or updates a qa/smoke/ release marker". ✓✓
+- **Resource loading verified in the run log** (…tasks-VC-12-workspace-viberr/*.jsonl):
+  `mcp__release-tools` tool available (new MCP wired), `developer-expertise` mounted ×2,
+  `kubernetes-rollback`=0 and `reviewer-expertise`=0 (decoy + unrelated NOT loaded). ✓✓✓
+- **KB applied**: the committed qa/smoke/pass19-release.md matches the Release Playbook conventions
+  EXACTLY (H1, single Purpose, bullet Task key+Date, no Marker-Convention field) and the agent even
+  flagged the pre-existing non-conforming pass19-kb-marker.md — proving my new KB doc's rules loaded. ✓
+
+This answers the owner's checklist directly: "let operator choose correct agents" ✓, "if mcps work
+well" ✓, "if skills are correctly loaded by agents (not unrelated skills are loaded)" ✓.
+
+## UX findings from the creation flows
+- KB/skill grant chips render by SLUG (release-playbook) while MCP renders by its given name — this
+  is CONSISTENT with the "grants reference the directory name, not the display name" rule (INTENT
+  glossary), so a grant can never silently resolve to nothing. NOT a bug; noted for coherence.
+- The agent-profile Description field is explicitly labelled "the OPERATOR reads this to pick the
+  right agent" — and it worked: the operator selected by description, not name. Good product design.
+- All three creation modals share the MiniModal shell (icon, title, sub, footHint, Escape/focus-trap)
+  — holistic and coherent.
