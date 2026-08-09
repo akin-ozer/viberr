@@ -587,11 +587,6 @@ const ALLOWED_ASSET_LINES: ReadonlyArray<{
   },
   {
     file: "viberr-app-expertise.skill.md",
-    contains: "Coordinate one governed Viberr task",
-    why: "skill frontmatter description — the model's tool-selection blurb",
-  },
-  {
-    file: "viberr-app-expertise.skill.md",
     contains: "coordinate agents and governance",
     why: "operator skill doc — the operating contract",
   },

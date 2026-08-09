@@ -254,3 +254,30 @@ Running the dev server from a git worktree serves fonts via `/@fs/…/node_modul
 which Vite's `server.fs.allow` refuses → eight 403s and system-font fallback. `node_modules`
 resolves to the parent checkout, outside the worktree root. Only affects worktree dev servers;
 main and the container are unaffected. Recorded so a future pass does not re-file it as a bug.
+
+## Session-3 (merged-tree discovery tour + live campaign)
+
+### UX19-6 — MED · copy-ban · `app/server/seed/assets/viberr-app-expertise.skill.md:3` · FIXED
+The seeded `viberr-app-expertise` skill DESCRIPTION ("Coordinate one **governed** Viberr task…")
+renders verbatim in the Agent resources UI panel (observed live), violating INTENT §6.19's ban on
+"govern*" in rendered copy. `copy-ban.test.ts` had ALLOWLISTED it as "the model's tool-selection
+blurb" — but the `description:` field is DUAL-PURPOSE (agent tool-selection AND human UI label), so
+the allowlist masked a real rendered-copy violation. FIX: reworded the description to drop "governed"
+(bodies stay exempt — they are pure agent prompt), removed the allowlist entry so the description is
+now HELD to the ban. Canaried: re-adding "governed" to the description fails copy-ban naming the
+exact line. Store copy synced. Full suite 3629 green.
+- **D-item (structural, optional):** the copy-ban currently exempts seed-asset BODY lines by
+  allowlist but treats the whole file uniformly; a cleaner gate would parse frontmatter `description:`
+  (rendered) as always-banned and only exempt body prose. Left as a note — the per-line allowlist +
+  the now-guarded description are sufficient today.
+
+## Merged-tree live verification summary (this session)
+Full UI tour (home/review/agents+matrix/policy/activity/settings/org+resources/profile/board/task) —
+merged UI is HOLISTIC and COHERENT (details in UI-TOUR.md). Rulings VERIFIED LIVE: R19-1 (operator
+clone grounding, VC-10 Doc Writer read real README), R19-4 (delivered-next-step honest attribution),
+R19-5 (force label), R19-7 (audit compaction), R19-8 (no-change), R19-A (autonomy clamp), R15-1
+(accept confirm dialog full disclosure), R16-6 (human accept → REAL merge PR #156), F19-16 (skills
+asymmetry), F19-22 (freshness), F19-26 (no false ceremony on non-terminal move), F19-42 (force label
+wraps), R16-3 (recovery packet on out-of-band close), FR10 (watcher reconcile), UC-16 (decoy skill
+not loaded). Flagship VC-10: create→deliver→PR #156→review→accept→REAL merge, end to end. Use-case
+register: USE-CASES-MERGED.md (20+ cases mapped to live evidence).

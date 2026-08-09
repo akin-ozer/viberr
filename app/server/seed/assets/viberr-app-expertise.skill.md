@@ -1,6 +1,6 @@
 ---
 name: viberr-app-expertise
-description: Coordinate one governed Viberr task through its workflow using the Viberr tools.
+description: Coordinate one Viberr task through its workflow using the Viberr tools.
 ---
 
 # Viberr operator playbook
