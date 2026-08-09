@@ -261,13 +261,15 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 
 ## Non-Functional Requirements
 
-### Performance
+### Responsiveness
 
-- NFR1: The board view should load and render an active project with up to 200 visible task cards in 2 seconds or less under normal operating conditions.
-- NFR2: A task detail view should load its current state, latest decision packet, and recent timeline context in 2 seconds or less for at least 95% of requests under normal operating conditions.
-- NFR3: User-initiated actions that change governed task state (approval, reassignment, transition decisions) should reflect in the UI in 3 seconds or less for at least 95% of requests.
-- NFR4: Shared task-state updates within an active project should become visible to other connected users within 5 seconds under normal operating conditions.
-- NFR5: Timeline rendering for long-lived tasks should remain usable without requiring the client to load the full raw execution history at once.
+*(Amended 2026-08-08, pass 19 — owner ruling R19-9; section renamed from "Performance". NFR1–NFR4 previously carried numeric targets: board render in 2 seconds or less at 200 cards, task detail in 2 seconds or less at p95, a state-changing action reflected in 3 seconds or less at p95, cross-user propagation within 5 seconds. **All four figures are struck.** Not one was ever measured: there is no performance harness, nothing in the product records a p95, and no test or check goes red when a figure is missed. The gap was carried across several passes as open question D17 — "asserted, not verified" — which is a long way of saying the numbers were decoration. A target nobody measures is a claim, not a requirement, and printing one here teaches the reader that this document's other numbers may be decorative too; that is the real cost, because the requirements around them — the secret-leak, audit, traceability, idempotency and continuity rules of NFR7, NFR10, NFR15, NFR16 and NFR17 — carry real guards in the code and deserve to be read as binding. The replacements below state what the product can honestly be held to. NFR5 survives verbatim because it is an architectural constraint the code honours, not a stopwatch reading. If a numeric latency budget is ever wanted, it arrives in the same change as the harness that measures it — never before it.)*
+
+- NFR1: The board must stay usable as a supervision surface for a project's full task set. It renders every task the viewer is entitled to see; no control, filter, or state is hidden to save render time. The board is not virtualized and its query is unbounded, so a very large project is a known scaling limit to be measured and fixed when a real one exists — not a reason to silently truncate the board today.
+- NFR2: Opening a task must surface its decision-relevant truth — current state, latest decision packet, execution truth — ahead of its depth. Timeline history, run logs, and supporting evidence load progressively behind that first answer (NFR5), so what it takes to get a useful task view does not grow with the task's age.
+- NFR3: Every user-initiated action that changes task state must acknowledge itself in the UI: a pending affordance while it is in flight, then either the new state or a stated reason for the failure. No consequential action may complete or fail silently, and none may leave the user unable to tell which happened.
+- NFR4: Shared task-state updates within an active project must reach other connected users without anyone pressing refresh. The mechanism is the server event stream, with a periodic reconciliation pass as the fallback for changes that originate outside the app; the requirement is that a second viewer converges on its own.
+- NFR5: Timeline rendering for long-lived tasks should remain usable without requiring the client to load the full raw execution history at once. *(Retained 2026-08-08 under R19-9 as a behavioural requirement rather than a timing one — it is the one item in this section the code already enforces: the task loader serves a bounded newest-first timeline slice and a bounded run-log window, and the console pages backwards on demand. See `app/features/task-detail/timeline-slice.ts`, `app/routes/project.task.tsx` and `app/routes/resources.run-log.ts`.)*
 
 ### Security
 

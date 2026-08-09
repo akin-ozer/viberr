@@ -61,7 +61,12 @@ export interface Mentionables {
  *  per project by `backendHandles` below. */
 const RESERVED_ROLES: MentionableReserved[] = [
   { handle: "operator", label: "Operator" },
-  { handle: "agent", label: "Primary specialist" },
+  // F19-12: the picker subline is rendered copy, so it uses the SHIPPED
+  // vocabulary — "delivering agent" (execution-profile.tsx's "Assign delivering
+  // agent" / "Delivering agent" header). "Primary specialist" is retired
+  // vocabulary (D9/Q17-5, INTENT §6.5): the model is `engagements[]` with one
+  // `delivers: true`, and `@agent` resolves to exactly that engagement.
+  { handle: "agent", label: "Delivering agent" },
 ];
 
 const BACKEND_LABEL: Record<RealBackend, string> = {

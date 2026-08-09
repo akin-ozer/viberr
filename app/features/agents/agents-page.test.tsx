@@ -24,8 +24,20 @@ import {
   type BackendHealthMap,
 } from "./agents-page";
 import { ToastProvider } from "~/ui/toast";
+import { capabilityById } from "~/shared/capabilities";
 
 afterEach(cleanup);
+
+/**
+ * F19-12 — the capability LABEL is rendered copy (capability matrix, profile
+ * detail panel, policy page); the capability ID is a persisted key and stays
+ * `assign-primary-specialist` deliberately. Read the label from the REAL
+ * catalog so this fixture can never drift from what the app renders, and pin
+ * the string itself inside the matrix test below: reverting
+ * `app/shared/capabilities.ts` to the retired "Assign the primary specialist"
+ * turns that assertion red.
+ */
+const ASSIGN_DELIVERER_LABEL = capabilityById("assign-primary-specialist")!.label;
 
 /** Curated-ish catalogs the stub's /resources/model-catalog loader returns. */
 const CLAUDE_CATALOG: ModelCatalog = {
@@ -626,7 +638,7 @@ describe("CapabilityMatrixModal", () => {
         name: "Operator",
         icon: "shield",
         actions: {
-          direct: ["Assign the primary specialist"],
+          direct: [ASSIGN_DELIVERER_LABEL],
           recommend: [],
           forbidden: ["Change project policy"],
         },
@@ -653,7 +665,11 @@ describe("CapabilityMatrixModal", () => {
     // Off-catalog actions (operator coordination + the pruned advisory review
     // caps a seed profile still carries) land in "Other actions".
     expect(getByText("Other actions")).toBeTruthy();
-    expect(getByText("Assign the primary specialist")).toBeTruthy();
+    // F19-12: the exact rendered label, pinned against the shipped vocabulary
+    // ("Assign delivering agent" / "Delivering agent" in execution-profile.tsx).
+    expect(ASSIGN_DELIVERER_LABEL).toBe("Assign the delivering agent");
+    expect(getByText(ASSIGN_DELIVERER_LABEL)).toBeTruthy();
+    expect(container.textContent).not.toMatch(/primary specialist/i);
     // Cell modes render as mx-cell classes with accessible titles.
     expect(container.querySelectorAll(".mx-cell.human").length).toBeGreaterThan(0);
     expect(container.querySelectorAll(".mx-cell.off").length).toBeGreaterThan(0);

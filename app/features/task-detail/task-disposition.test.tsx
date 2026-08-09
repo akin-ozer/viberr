@@ -316,6 +316,44 @@ describe("P14-LV-06: the acceptance affordance", () => {
     expect(findButton(container, "Force accept")).toBeDefined();
   });
 
+  it("F19-42: the force-accept button is container-sized (`.btn.full`), so its honest label can wrap", () => {
+    // Live defect: R19-5's off-boundary label ("Force accept (skips the
+    // remaining stages and the review gate)") measured scrollWidth 351 against
+    // clientWidth 299 and painted 52px outside the GitHub card, because the
+    // base `.btn` rule is `white-space: nowrap`.
+    //
+    // `app.css.test.ts` pins the RULE (`.btn.full { white-space: normal }`).
+    // Nothing pinned the CONSUMER, so dropping `full` from this className
+    // re-opened the exact live defect with every test green (audit §2.4).
+    // jsdom computes no layout, so the class IS the assertion — it is the one
+    // thing that decides whether that rule ever reaches this button.
+    //
+    // Canary: remove `full` from `task-side-panels.tsx`'s force-accept
+    // className and this goes red while the stylesheet test stays green.
+    const { container } = renderPage({
+      myRole: "admin",
+      task: { blockReason: "A required reviewer can no longer record a verdict" },
+      acceptance: {
+        // Off-boundary — the arm that renders the LONG label that overflowed.
+        atBoundary: false,
+        canAccept: false,
+        terminallyBlocked: false,
+        blockedReason: "VIB-151's delivered revision has no approving verdict yet",
+      },
+    });
+    const force = findButton(container, "Force accept")!;
+    expect(force).toBeDefined();
+    // The label whose width caused the defect — a shorter one would not need
+    // the override, so the two assertions belong together.
+    expect(force.textContent).toContain(
+      "skips the remaining stages and the review gate",
+    );
+    expect(
+      Array.from(force.classList),
+      "the wrapping override only applies to `.btn.full`; a content-sized force button overflows its panel",
+    ).toContain("full");
+  });
+
   it("F15-11: an ARCHIVED task renders no Accept control, no schedule form, and disabled run controls", () => {
     const { container, queryByText } = renderPage({
       archived: true,
@@ -852,7 +890,16 @@ describe("R14-3: the task archive", () => {
   it("F19-36: the archive confirm names the PR state in the product's vocabulary, not the raw token", () => {
     // It printed "PR #147 accepted" / "PR #147 review" — the internal tokens —
     // on a dialog deciding a disposition. Second site of F19-14's defect.
-    // Canary: print `task.pr.state` again and both assertions flip.
+    //
+    // The first version of this test asserted `not.toContain("PR #147
+    // accepted")` — the PRE-fix string, separator and all. The fix added a
+    // ` · ` separator, so the likeliest regression (swapping `prPill.label`
+    // back to `task.pr.state` and leaving the layout alone) renders
+    // "PR #147 · accepted" and walks straight past that negative (audit §2.4).
+    // The pill's WHOLE text is pinned instead, so any substitution flips it.
+    //
+    // Canary: render `{task.pr.state}` in place of `{prPill.label}` in
+    // archive-confirm.tsx and the exact-text assertion goes red.
     const { container } = renderPage({
       myRole: "maintainer",
       task: {
@@ -863,8 +910,14 @@ describe("R14-3: the task archive", () => {
     const dialog = container.ownerDocument.querySelector(
       'dialog[data-screen-label="Archive task dialog"]',
     )!;
-    expect(dialog.textContent).toContain("merge pending");
-    expect(dialog.textContent).not.toContain("PR #147 accepted");
+    const prPill = Array.from(dialog.querySelectorAll(".pill")).find((p) =>
+      p.textContent?.includes("PR #147"),
+    );
+    expect(prPill, "the archive confirm states the PR the task carries").toBeDefined();
+    expect(prPill!.textContent).toBe("PR #147 · merge pending");
+    // …and the raw token reaches the dialog nowhere, with or without the
+    // separator the fix introduced.
+    expect(dialog.textContent).not.toMatch(/PR #147\s*(·\s*)?accepted/);
   });
 
   it("a contributor never sees the control (archive is board-management authority)", () => {

@@ -243,7 +243,12 @@ describe("assignSpecialist", () => {
     const event = file.parsed.timeline[0]!;
     expect(event.type).toBe("agent");
     expect(event.text).toContain("Deployed **dev**");
-    expect(event.text).toContain("primary specialist");
+    // F19-12: the deploy timeline event is rendered copy — it names the SHIPPED
+    // role ("delivering agent"), never the retired "primary specialist"
+    // (D9/Q17-5). Both directions asserted so neither a reverted string nor a
+    // half-revert (adding the new phrase while keeping the old) passes.
+    expect(event.text).toContain("as the delivering agent.");
+    expect(event.text).not.toMatch(/primary specialist/i);
 
     const audit = listAuditEvents(store.db, { action: "task.specialist.assigned" });
     expect(audit[0]?.taskKey).toBe("VIB-1");
@@ -2610,11 +2615,12 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
    */
   describe("R18-1 / R19-3 — the boundary holds in the NATIVE channel too", () => {
     it("the reviewer inherits the deliverer's KB and mounts ONLY its own skills", async () => {
-      // Canary: union the deliverer's SKILLS alongside its KBs at the fresh-run
-      // call site (`kb = withDeliveringGrants(...)`, specialist-run.server.ts)
-      // and the `skills` filter, the workspace catalog and the whole-spec
-      // assertion all fail — while the prompt-body assertion the repo-less test
-      // relies on would still pass.
+      // Canary (verified): union the deliverer's skills into the `skills:`
+      // argument of the `mountGrantedSkillsLeased` call in startSpecialistRun.
+      // This test goes red on `spec.skills` and on the workspace catalog; the
+      // repo-less "SKILLS are NOT inherited" test above stays GREEN, because
+      // the widened grant is mounted rather than injected and its body is
+      // deliberately absent from the prompt either way.
       const ws = await workspaceCheckout();
       const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
         .parsed.frontmatter;

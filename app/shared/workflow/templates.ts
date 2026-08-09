@@ -53,7 +53,13 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
       from: "ready",
       to: "impl",
       boundary: "auto",
-      by: "Operator, when a primary specialist is assigned",
+      // F19-12 residual: "primary specialist" is retired vocabulary (D9/Q17-5)
+      // — the UI calls this actor the delivering agent. This string ships twice:
+      // rendered on the Policy page AND persisted verbatim into every NEW
+      // project's project.md. Existing projects keep whatever `by` text they
+      // were created with — that is their data, not this template, and this
+      // pass forbids migrations.
+      by: "Operator, when a delivering agent is assigned",
       locked: false,
     },
     {

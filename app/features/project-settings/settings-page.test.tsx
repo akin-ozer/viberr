@@ -1018,3 +1018,103 @@ describe("SettingsPage — each panel gates on the action its own server guard c
     expect(open.disabled).toBe(false);
   });
 });
+
+// N19-5 / owner ruling Q-V1: a read-only viewer — and any member without the
+// lifecycle grant — must not SEE the Danger zone at all, not merely find its
+// buttons disabled. Showing a stakeholder a destructive surface they can never
+// use names archive/delete as if they were on the table.
+//
+// The gate that implements the ruling lives on the PAGE
+// (`{canEditPolicy && <DangerZone …>}` in SettingsPage), which is exactly why
+// the two `DangerZone` tests above cannot defend it: they mount the panel
+// directly, i.e. past the gate, so they keep passing with the gate deleted. The
+// only other full-page render in this file hardcodes `myRole="admin"`, the one
+// role for which the gate is a no-op. So these render the REAL page per role.
+// The admin case is what makes the absences mean something: it proves the panel
+// exists and is reachable, so "not rendered" is a gate and not a dead feature.
+describe("SettingsPage — the Danger zone is withheld from members who cannot act on it", () => {
+  const DATA: SettingsViewData = {
+    project: PROJECT,
+    stages: STAGES,
+    stageCounts: { triage: 2, review: 2 },
+    members: MEMBERS,
+    credential: CREDENTIAL,
+    repoFootprintTasks: 0,
+    branchCleanupOnMerge: true,
+  };
+
+  function renderPageAs(myRole: ProjectRole) {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => <SettingsPage data={DATA} meId="u_arda" myRole={myRole} />,
+      },
+    ]);
+    return render(<Stub initialEntries={["/"]} />).container;
+  }
+
+  /** The panel's own heading — the thing a member either sees or doesn't. */
+  const dangerHeading = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll("h2")).find(
+      (h) => h.textContent?.trim() === "Danger zone",
+    ) ?? null;
+
+  /** A page that failed to render would also be missing the heading. */
+  const pageRendered = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll("h2")).map((h) => h.textContent?.trim());
+
+  it("a read-only viewer gets no Danger zone — heading, panel and copy all absent", () => {
+    // Guard the premise: if `edit-policy` is ever re-tiered to include viewers
+    // this test would silently become vacuous, so state what it assumes.
+    expect(roleCan("viewer", "edit-policy")).toBe(false);
+
+    const container = renderPageAs("viewer");
+    expect(dangerHeading(container)).toBeNull();
+    expect(container.querySelector(".danger-panel")).toBeNull();
+    // Nothing leaks the destructive vocabulary by another route.
+    expect(container.textContent).not.toContain("Delete project");
+    expect(container.textContent).not.toContain("Archive Viberr Core");
+    // …and the rest of the page really did render, so the absence above is the
+    // gate doing its job rather than a blank component tree.
+    expect(pageRendered(container)).toEqual([
+      "Project",
+      "Workflow stages",
+      "Members",
+      "Repository & credentials",
+    ]);
+  });
+
+  it("a contributor — full task authority, no project lifecycle — gets none either", () => {
+    expect(roleCan("contributor", "edit-policy")).toBe(false);
+
+    const container = renderPageAs("contributor");
+    expect(dangerHeading(container)).toBeNull();
+    expect(container.querySelector(".danger-panel")).toBeNull();
+    expect(container.textContent).not.toContain("Delete project");
+  });
+
+  it("an admin still gets it, with both controls live", () => {
+    const container = renderPageAs("admin");
+    expect(dangerHeading(container)).not.toBeNull();
+    expect(container.querySelector(".danger-panel")).not.toBeNull();
+    const archive = container.querySelector(".dz-row .btn.ghost") as HTMLButtonElement;
+    const del = container.querySelector(".dz-row .btn.danger") as HTMLButtonElement;
+    expect(archive.disabled).toBe(false);
+    expect(del.disabled).toBe(false);
+  });
+
+  // The gate and the panel's own control gate must ask the SAME question. If
+  // `edit-policy`'s role set ever changes, the render gate has to follow it —
+  // a role that renders the panel but finds it dead is the pre-ruling state.
+  it("rendering tracks roleCan(edit-policy) for every project role", () => {
+    const roles: ProjectRole[] = ["admin", "maintainer", "contributor", "viewer"];
+    for (const role of roles) {
+      const container = renderPageAs(role);
+      expect({ role, danger: dangerHeading(container) !== null }).toEqual({
+        role,
+        danger: roleCan(role, "edit-policy"),
+      });
+      cleanup();
+    }
+  });
+});

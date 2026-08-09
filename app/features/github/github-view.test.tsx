@@ -370,6 +370,7 @@ describe("RepositoryPanel", () => {
           credential: noneCredential,
         }}
         onOpenTask={() => {}}
+        canSeeCredential
       />,
     );
     const rows = container.querySelectorAll(".kv-row");
@@ -404,11 +405,108 @@ describe("RepositoryPanel", () => {
           credential: healthyCredential,
         }}
         onOpenTask={() => {}}
+        canSeeCredential
       />,
     );
     expect(
       container.querySelectorAll(".kv-row")[1]!.querySelector(".pill.ready"),
     ).not.toBeNull();
+  });
+
+  /**
+   * R19-11 (owner ruling, Q-V1 PAT half) — the credential card is WITHDRAWN
+   * from a reader without the `grant-github-scope` grant, not disabled (ruling
+   * 37: a withdrawn affordance is honest, a disabled one invites a support
+   * question). The panel must still answer "is this repository connected?",
+   * which is legitimate context for reading the board — so the Connection row
+   * stays and a lock note explains the gap. A blank space under the kv rows
+   * would be its own defect.
+   */
+  it("withdraws the credential card from a reader without the grant, keeping the connection facts", () => {
+    const { container } = render(
+      <RepositoryPanel
+        data={{
+          project: {
+            slug: "viberr-core",
+            name: "Viberr Core",
+            repo: "akin-ozer/viberr",
+            defaultBranch: "main",
+          },
+          connection: {
+            status: "connected",
+            repo: "akin-ozer/viberr",
+            remoteDefaultBranch: "main",
+            private: true,
+          },
+          credential: violationCredential,
+        }}
+        onOpenTask={() => {}}
+        canSeeCredential={false}
+        warnActions={<button className="btn sm">Fix in Settings</button>}
+        manageActions={<div className="cred-manage">manage</div>}
+      />,
+    );
+    // The card and every credential fact on it: gone.
+    expect(container.querySelector(".cred-card")).toBeNull();
+    expect(container.textContent).not.toContain("github_pat_••••42af");
+    expect(container.textContent).not.toContain("viberr-bot");
+    expect(container.querySelectorAll(".scope-chip")).toHaveLength(0);
+    expect(container.querySelector(".cred-warn")).toBeNull();
+    expect(container.querySelector(".cred-ok")).toBeNull();
+    // The card owns both action slots, so neither leaks out of the withdrawal.
+    expect(container.querySelector(".cred-manage")).toBeNull();
+    expect(container.textContent).not.toContain("Fix in Settings");
+    // …but the panel still answers the question a reader of the board has.
+    const rows = container.querySelectorAll(".kv-row");
+    expect(rows[0]!.textContent).toContain("akin-ozer/viberr");
+    expect(rows[1]!.querySelector(".pill.ready")!.textContent).toContain(
+      "connected",
+    );
+    // …and says why the rest is missing, naming the grant that carries it.
+    const note = container.querySelector(".pol-note")!;
+    expect(note.textContent).toContain(
+      "Credential details need the Grant GitHub scope grant (project admin or maintainer).",
+    );
+    expect(note.textContent).toContain(
+      "The Connection row above still shows whether this repository is reachable.",
+    );
+  });
+
+  /**
+   * G8's probe note names the card ("the stored project credential is shown
+   * below"). With the card withdrawn there is nothing below, so the note must
+   * go with it — a sentence pointing at an absent surface is worse than none.
+   */
+  it("drops the probe note with the card it points at", () => {
+    const degraded = {
+      project: {
+        slug: "viberr-core",
+        name: "Viberr Core",
+        repo: "akin-ozer/viberr",
+        defaultBranch: "main",
+      },
+      // Degraded probe + a stored PAT = exactly the divergence G8 explains.
+      connection: { status: "repo_not_found" as const, repo: "akin-ozer/viberr" },
+      credential: violationCredential,
+    };
+    const holder = render(
+      <RepositoryPanel data={degraded} onOpenTask={() => {}} canSeeCredential />,
+    );
+    expect(holder.container.querySelector(".probe-note")).not.toBeNull();
+    cleanup();
+
+    const reader = render(
+      <RepositoryPanel
+        data={degraded}
+        onOpenTask={() => {}}
+        canSeeCredential={false}
+      />,
+    );
+    expect(reader.container.querySelector(".probe-note")).toBeNull();
+    // The pill itself — the honest degraded fact — still renders.
+    expect(
+      reader.container.querySelectorAll(".kv-row")[1]!.textContent,
+    ).toContain("repo not found");
   });
 });
 
@@ -635,6 +733,114 @@ describe("UI-37: 'Update status' is gated like the action it calls", () => {
   it("shows it to a maintainer", () => {
     const { getByText } = renderPage("maintainer");
     expect(getByText("Update status")).toBeTruthy();
+  });
+});
+
+/**
+ * R19-11 (owner ruling, Q-V1 PAT half) — "a read-only Viewer must not see the
+ * Danger zone or the PAT". The Danger-zone half shipped in pass 18
+ * (`settings-page.tsx`, gated on `edit-policy`); the PAT half did not, so every
+ * project member — a viewer included — read the token's label, its masked tail
+ * and its scope verdicts off this page.
+ *
+ * The gate is the SERVER's, not a fresh rule: `grant-github-scope` is the
+ * ACTION_ROLES entry `routes/project.github.tsx` enforces on grant-scope,
+ * set-credential and clear-credential alike, and it resolves to admin|maintainer
+ * — so a contributor is below the bar for the same reason a viewer is. Mirroring
+ * the action id through `roleCan` (never a role literal) is what keeps the
+ * display and the enforcement bound; the loader redacts the payload on the same
+ * rule, so the tail is absent from the HTML too, not merely unrendered.
+ */
+describe("R19-11: the credential card is disclosed only to the roles that may change it", () => {
+  const renderPage = (myRole: string | null) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage
+              data={
+                {
+                  project: {
+                    slug: "viberr-core",
+                    name: "Viberr Core",
+                    repo: "akin-ozer/viberr",
+                    defaultBranch: "main",
+                  },
+                  githubHost: "https://github.com",
+                  connection: { status: "connected" as const },
+                  // A real bound PAT — the state that has something to disclose.
+                  credential: violationCredential,
+                  prs: [],
+                  branches: [],
+                  reconcile: { at: null, label: null, stale: true },
+                } as unknown as Parameters<typeof GithubViewPage>[0]["data"]
+              }
+              reconcileCheck={NO_CHECK_ON_RECORD}
+              myRole={myRole}
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
+  };
+
+  it("withholds it from a viewer — no tail, no label, no scope verdicts", () => {
+    const { container } = renderPage("viewer");
+    expect(container.querySelector(".cred-card")).toBeNull();
+    expect(container.textContent).not.toContain("github_pat_••••42af");
+    expect(container.textContent).not.toContain("viberr-bot");
+    expect(container.textContent).not.toContain("pull_request:write");
+    // The viewer is told why, and still learns the repository is connected.
+    expect(container.textContent).toContain(
+      "Credential details need the Grant GitHub scope grant",
+    );
+    expect(container.querySelector(".kv-row .pill.ready")!.textContent).toContain(
+      "connected",
+    );
+  });
+
+  it("withholds it from a contributor too — the grant is maintainer+", () => {
+    const { container } = renderPage("contributor");
+    expect(container.querySelector(".cred-card")).toBeNull();
+    expect(container.textContent).not.toContain("github_pat_••••42af");
+    expect(container.textContent).toContain(
+      "Credential details need the Grant GitHub scope grant",
+    );
+  });
+
+  it("discloses it to a maintainer, with the controls that action authorizes", () => {
+    const { container } = renderPage("maintainer");
+    expect(container.querySelector(".cred-card")).not.toBeNull();
+    expect(container.querySelector(".cred-name")!.textContent).toBe(
+      "viberr-bot · fine-grained PAT",
+    );
+    expect(container.textContent).toContain("github_pat_••••42af");
+    expect(container.querySelectorAll(".scope-chip").length).toBe(4);
+    // Same grant, so the card's own actions come with it.
+    expect(container.textContent).toContain("Grant scope");
+    expect(container.querySelector(".cred-manage")).not.toBeNull();
+    expect(container.textContent).toContain("Rotate credential");
+    // The withheld-note is the viewer's line, not a second permanent fixture.
+    expect(container.textContent).not.toContain(
+      "Credential details need the Grant GitHub scope grant",
+    );
+  });
+
+  it("discloses it to an admin (incl. the D2 org-admin override, which resolves to admin)", () => {
+    const { container } = renderPage("admin");
+    expect(container.querySelector(".cred-card")).not.toBeNull();
+    expect(container.textContent).toContain("github_pat_••••42af");
+  });
+
+  it("withholds it from a non-member role value, never defaulting open", () => {
+    // `myRole` is null for a reader the layout could not place (and `roleCan`
+    // answers false for null by construction). Failing open here would be the
+    // whole finding again, so it is pinned.
+    const { container } = renderPage(null);
+    expect(container.querySelector(".cred-card")).toBeNull();
+    expect(container.textContent).not.toContain("github_pat_••••42af");
   });
 });
 

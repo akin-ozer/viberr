@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
   Link,
@@ -72,7 +73,9 @@ import {
  *     board used to filter on a signal it refused to render;
  *   - P13-D-34: empty states name the filter/search that is hiding tasks, the
  *     header count agrees with the columns, and one `Clear` chip resets both;
- *   - P13-D-10: failure toasts carry `kind: "error"`.
+ *   - P13-D-10: failure toasts carry `kind: "error"`;
+ *   - D19 (ruling R19-10): arrow-key traversal over the cards, on a roving tab
+ *     stop, in both layouts — see `onCardKeyDown` in `BoardPage`.
  */
 
 export interface BoardStage {
@@ -129,6 +132,34 @@ const BOARD_SENSORS = [
 const BOARD_PLUGINS = defaultPreset.plugins.filter(
   (plugin) => plugin !== Accessibility,
 );
+
+/**
+ * D19 (ruling R19-10) — the roving tab stop has to cover the card's Move
+ * trigger, not only the card face.
+ *
+ * Every movable card and list row renders a `StageMenu` button, so the board
+ * held 2N tab stops. Roving only the card faces would still leave N: Tab would
+ * walk the Move buttons of cards the human never focused, and those are
+ * `opacity: 0` until `:focus-within` (app.css), so the ring would appear on a
+ * control that had been invisible a keystroke earlier. `StageMenu` is shared
+ * with task detail and exposes no `tabIndex` prop, so the card wrapper sets it
+ * on the one trigger it owns.
+ *
+ * Deliberately no dependency array: `StageMenu` re-renders its trigger on
+ * open/busy/stage change, and React never writes `tabIndex` on that button, so
+ * re-applying on every render is both necessary and free of any tug-of-war with
+ * React's own attribute reconciliation.
+ */
+function useRovingStageMenu(active: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const btn = ref.current?.querySelector<HTMLButtonElement>(
+      "button.stage-menu-btn",
+    );
+    if (btn) btn.tabIndex = active ? 0 : -1;
+  });
+  return ref;
+}
 
 function WaitTag({ task }: { task: TaskSummary }) {
   if (task.waiting === "agent") {
@@ -300,6 +331,7 @@ function TaskCard({
   arrived,
   allStages,
   onMoveTask,
+  roving,
 }: {
   task: TaskSummary;
   /** The key of the card immediately below this one (null when last) — used to
@@ -314,7 +346,10 @@ function TaskCard({
   /** F10-25: all stages, for the keyboard-accessible "Move to stage" menu. */
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  /** D19: this card holds the board's single tab stop (see `onCardKeyDown`). */
+  roving: boolean;
 }) {
+  const moveRef = useRovingStageMenu(roving);
   // F19-8: an ARCHIVED task is abandoned work kept for the record — it is out
   // of the flow, out of the review queue and owes nobody anything. The card is
   // inert for it: no live pills, no drag, no Move menu (see the render below).
@@ -343,13 +378,23 @@ function TaskCard({
   if (isDragSource) wrapCls.push("dragging");
   if (arrived) wrapCls.push("just-arrived");
   return (
-    <div className={wrapCls.join(" ")} ref={ref}>
+    /* D19: the lane is a list (see `Column`), so each card is one of its items —
+       that is what makes a screen reader say "3 of 7" as the arrows move. */
+    <div className={wrapCls.join(" ")} ref={ref} role="listitem">
       <Link
         className={cls.join(" ")}
         to={`/projects/${task.projectSlug}/tasks/${task.key}`}
         // The wrapper carries the drag; the anchor must not start its own
         // (URL) drag, but a plain click still navigates.
         draggable={false}
+        /* D19: the board's roving tab stop. Exactly one card face is tabbable;
+           the arrows on the board container move it (`onCardKeyDown`), and the
+           app-wide `:focus-visible` ring (app.css) draws where it landed —
+           `a[href]` is in that selector list regardless of tabindex, so a
+           programmatically focused resting card still paints the ring. */
+        tabIndex={roving ? 0 : -1}
+        data-board-card={task.key}
+        data-board-lane={task.stage}
       >
         <div className="card-top">
           <span className="key">{task.key}</span>
@@ -407,7 +452,7 @@ function TaskCard({
           archived task is still in the flow. Restoring the task from its own
           page is the way back in (the banner says so). */}
       {canTransition && !archived && (
-        <div className="card-move">
+        <div className="card-move" ref={moveRef}>
           <StageMenu
             stages={allStages}
             currentStageId={task.stage}
@@ -448,9 +493,13 @@ function Column({
   allStages,
   onMoveTask,
   emptyCopy,
+  rovingKey,
 }: {
   stage: BoardStage;
   tasks: TaskSummary[];
+  /** D19: the key of the one card holding the board's tab stop (may be in
+   *  another lane, in which case no card here is tabbable). */
+  rovingKey: string | null;
   /** Header count — optimistically adjusted during a cross-column drag. */
   count: number;
   /** P13-D-34: filter/search-aware empty copy for this column. */
@@ -498,7 +547,21 @@ function Column({
           </button>
         )}
       </header>
-      <div className="col-body">
+      {/* D19: a lane is a LIST of cards. That role plus its name is how a
+          screen reader announces where the roving focus landed when Left/Right
+          crosses into another lane ("In Progress tasks, list, 4 items") — the
+          board has no other spoken cue for the column boundary.
+
+          The role is dropped when the lane draws no cards, because then the
+          only child is the empty-state sentence and a `list` whose child is not
+          a `listitem` is precisely what axe's aria-required-children fails on.
+          Nothing is lost: an empty lane holds no traversal target either (see
+          `onCardKeyDown`), and the column header still names and counts it. */}
+      <div
+        className="col-body"
+        role={tasks.length > 0 ? "list" : undefined}
+        aria-label={tasks.length > 0 ? `${stage.name} tasks` : undefined}
+      >
         {tasks.length === 0 ? (
           showPreview ? preview : <div className="empty">{emptyCopy}</div>
         ) : (
@@ -514,6 +577,7 @@ function Column({
                   arrived={arrivedKey === t.key}
                   allStages={allStages}
                   onMoveTask={onMoveTask}
+                  roving={rovingKey === t.key}
                 />
               </Fragment>
             ))}
@@ -525,12 +589,86 @@ function Column({
   );
 }
 
+/** D19: extracted from `ListView`'s map so the row can hold the roving-tab-stop
+ *  hook — a hook cannot be called inside a `.map` callback. */
+function ListRow({
+  task,
+  stages,
+  canTransition,
+  onMoveTask,
+  roving,
+}: {
+  task: TaskSummary;
+  stages: BoardStage[];
+  canTransition: boolean;
+  onMoveTask: (taskKey: string, toStageId: string) => void;
+  roving: boolean;
+}) {
+  const archived = isArchived(task);
+  const rowRef = useRovingStageMenu(roving);
+  const stageName =
+    stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+  const to = `/projects/${task.projectSlug}/tasks/${task.key}`;
+  return (
+    <div className="card list-row" role="listitem" ref={rowRef}>
+      {/* D19: the key and the title are two links to the SAME task page, so the
+          key was a duplicate tab stop on every row. It stays a mouse target and
+          keeps its accessible link semantics; the title is the row's roving
+          stop, and no destination becomes unreachable by keyboard. */}
+      <Link className="key" to={to} tabIndex={-1}>
+        {task.key}
+      </Link>
+      <h3>
+        <Link
+          to={to}
+          tabIndex={roving ? 0 : -1}
+          data-board-card={task.key}
+          /* One lane: Up/Down walks the rows and Left/Right has nowhere to go,
+             which is what the list layout actually is. */
+          data-board-lane="list"
+        >
+          {task.title}
+        </Link>
+      </h3>
+      {/* UI-58: the same StageMenu the cards use — the list view's
+          keyboard equivalent for drag-and-drop. F19-8: and off for the
+          same reason on an archived row, which falls back to the same
+          static stage pill a viewer who cannot move tasks sees. */}
+      {canTransition && !archived ? (
+        <StageMenu
+          stages={stages}
+          currentStageId={task.stage}
+          onSelect={(stageId) => onMoveTask(task.key, stageId)}
+        />
+      ) : (
+        <span className="pill neutral sm">{stageName}</span>
+      )}
+      <OwnerLine task={task} />
+      <ReviewerStack task={task} label />
+      {/* F15-09: same duplicate as the card — the row's own WaitTag
+          below already says "agent working". F19-8: and the same
+          readiness → "archived" swap the card makes. */}
+      {archived ? (
+        <ArchivedPill />
+      ) : (
+        <ReadinessPill value={task.displayReadiness} sm />
+      )}
+      {/* F19-13: the card's state block verbatim — the row used to draw
+          validation and the wait tag alone, so the PR-state, checks and
+          review pills existed on one board layout and not the other. */}
+      <StateSignals task={task} />
+    </div>
+  );
+}
+
 function ListView({
   tasks,
   stages,
   canTransition,
   onMoveTask,
   emptyCopy,
+  rovingKey,
+  onCardKeyDown,
 }: {
   tasks: TaskSummary[];
   stages: BoardStage[];
@@ -541,57 +679,30 @@ function ListView({
    *  affordance) only existed on cards. */
   canTransition: boolean;
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  /** D19: the roving tab stop and the traversal handler, shared with the stage
+   *  layout — the list is simply a board with one lane. */
+  rovingKey: string | null;
+  onCardKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
 }) {
-  const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   return (
     <div className="board list">
-      <div className="board-list">
+      <div
+        className="board-list"
+        role={tasks.length > 0 ? "list" : undefined}
+        aria-label={tasks.length > 0 ? "All tasks" : undefined}
+        onKeyDown={onCardKeyDown}
+      >
         {tasks.length === 0 && <div className="empty">{emptyCopy}</div>}
-        {tasks.map((t) => {
-          const archived = isArchived(t);
-          return (
-            <div key={t.key} className="card list-row">
-              <Link
-                className="key"
-                to={`/projects/${t.projectSlug}/tasks/${t.key}`}
-              >
-                {t.key}
-              </Link>
-              <h3>
-                <Link to={`/projects/${t.projectSlug}/tasks/${t.key}`}>
-                  {t.title}
-                </Link>
-              </h3>
-              {/* UI-58: the same StageMenu the cards use — the list view's
-                  keyboard equivalent for drag-and-drop. F19-8: and off for the
-                  same reason on an archived row, which falls back to the same
-                  static stage pill a viewer who cannot move tasks sees. */}
-              {canTransition && !archived ? (
-                <StageMenu
-                  stages={stages}
-                  currentStageId={t.stage}
-                  onSelect={(stageId) => onMoveTask(t.key, stageId)}
-                />
-              ) : (
-                <span className="pill neutral sm">{stageName(t.stage)}</span>
-              )}
-              <OwnerLine task={t} />
-              <ReviewerStack task={t} label />
-              {/* F15-09: same duplicate as the card — the row's own WaitTag
-                  below already says "agent working". F19-8: and the same
-                  readiness → "archived" swap the card makes. */}
-              {archived ? (
-                <ArchivedPill />
-              ) : (
-                <ReadinessPill value={t.displayReadiness} sm />
-              )}
-              {/* F19-13: the card's state block verbatim — the row used to draw
-                  validation and the wait tag alone, so the PR-state, checks and
-                  review pills existed on one board layout and not the other. */}
-              <StateSignals task={t} />
-            </div>
-          );
-        })}
+        {tasks.map((t) => (
+          <ListRow
+            key={t.key}
+            task={t}
+            stages={stages}
+            canTransition={canTransition}
+            onMoveTask={onMoveTask}
+            roving={rovingKey === t.key}
+          />
+        ))}
       </div>
     </div>
   );
@@ -1209,8 +1320,14 @@ function StageBoard({
   draggedTask,
   onMoveTask,
   emptyCopyFor,
+  rovingKey,
+  onCardKeyDown,
 }: {
   columns: BoardColumnData[];
+  /** D19: the one card holding the board's tab stop, and the arrow handler that
+   *  moves it. Delegated on the board container so every lane shares it. */
+  rovingKey: string | null;
+  onCardKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   visible: (tasks: TaskSummary[]) => TaskSummary[];
   /** P13-D-34: per-column empty copy, given that column's UNFILTERED total. */
   emptyCopyFor: (total: number, isEntryColumn?: boolean) => string;
@@ -1229,7 +1346,7 @@ function StageBoard({
   // All stages, for the per-card keyboard "Move to stage" menu (F10-25).
   const allStages = columns.map((c) => c.stage);
   return (
-    <div className="board">
+    <div className="board" onKeyDown={onCardKeyDown}>
       {columns.map((c, columnIndex) => {
         const base = visible(c.tasks);
         // The hovered column is the drop target (same OR different stage).
@@ -1257,6 +1374,7 @@ function StageBoard({
             beforeKey={beforeKey}
             allStages={allStages}
             onMoveTask={onMoveTask}
+            rovingKey={rovingKey}
           />
         );
       })}
@@ -1307,6 +1425,9 @@ export function BoardPage({
   // The card the dropped card should land immediately BEFORE (null = column end).
   const [beforeKey, setBeforeKey] = useState<string | null>(null);
   const [arrivedKey, setArrivedKey] = useState<string | null>(null);
+  /** D19: the card the roving tab stop sits on. Null until an arrow moves it —
+   *  the resting stop is then the first card the layout draws (`rovingKey`). */
+  const [focusKey, setFocusKey] = useState<string | null>(null);
   /** B1: a move into the final stage waits here for an explicit confirmation. */
   const [pendingAccept, setPendingAccept] = useState<{
     taskKey: string;
@@ -1497,6 +1618,123 @@ export function BoardPage({
       (t) => matchesBoardFilter(t, filter) && matchesSearch(t, query),
     );
 
+  /* ---------- D19 / ruling R19-10: arrow-key traversal ----------
+   *
+   * The UX spec put full arrow traversal on the Task Status Card and it was
+   * never built: before this the board's ONLY `onKeyDown` was the new-task
+   * dialog's Enter, and a keyboard user met one tab stop per card face plus one
+   * per Move trigger — 2N stops to cross a five-lane board, with no way to move
+   * sideways at all. INTENT §4 asks for "keyboard access to every packet
+   * action" on the grounds that inaccessible state is untrustworthy state.
+   *
+   * The model is the standard roving tab stop: ONE card is tabbable
+   * (`rovingKey`), the arrows move it, and Tab leaves the board rather than
+   * walking it. The lanes are read back off the DOM (`data-board-lane` /
+   * `data-board-card`) rather than recomputed here, so the traversal order is
+   * by construction the order the human SEES — filters, the archived view, the
+   * list layout and any future ordering all come along for free, and an empty
+   * lane simply is not in the model, which is what makes Left/Right unable to
+   * strand focus on one.
+   *
+   * How this coexists with the dnd-kit drag (@dnd-kit/dom 0.5.0, verified in
+   * `index.js`, not assumed):
+   *   - `KeyboardSensor.bind` puts its keydown listener on `source.handle ??
+   *     source.element` — here the `.card-wrap` div `useSortable` refs — and its
+   *     default `preventActivation` is `event.target !== target`. The roving
+   *     focus lands on the card's `<a>` FACE, a descendant, so Space/Enter here
+   *     can never start a keyboard drag: the two never contend for the same key
+   *     on the same element.
+   *   - The sensor's own arrow handling does not exist until a drag is running;
+   *     `handleStart` binds it on `document` in the CAPTURE phase and
+   *     `handleMove` calls `preventDefault()`. Capture on document runs before
+   *     React's root listener, so the `defaultPrevented` guard below hands the
+   *     arrows to a drag in flight without either side knowing about the other.
+   */
+  const visibleKeys =
+    group === "stage"
+      ? columns.flatMap((c) => visible(c.tasks).map((t) => t.key))
+      : visible(allTasks).map((t) => t.key);
+  // Re-anchors when the card the stop was on leaves the layout (filtered away,
+  // archived, reprojected off the board) — a tab stop pinned to a card that is
+  // no longer drawn is a board with no way in.
+  const rovingKey =
+    focusKey && visibleKeys.includes(focusKey)
+      ? focusKey
+      : (visibleKeys[0] ?? null);
+
+  const onCardKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // A keyboard drag in flight owns the arrows (see the note above); a
+    // modifier means the human is asking the browser for something else.
+    if (
+      event.defaultPrevented ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey
+    )
+      return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    // Anything that is not a card face — the Move trigger (whose own menu owns
+    // Arrow Up/Down), the filter box, the header — is not traversal.
+    const from = target.closest<HTMLElement>("[data-board-card]");
+    if (!from) return;
+
+    if (event.key === "Enter" || event.key === " ") {
+      // The card face is an anchor, so Enter would activate natively but Space
+      // would only scroll. Both are answered the same way instead of one each:
+      // suppress the default and re-issue the activation as a click, which is
+      // the event `Link` navigates on.
+      event.preventDefault();
+      from.click();
+      return;
+    }
+
+    // Lanes in DOM order, cards in visual order within each.
+    const lanes = new Map<string, HTMLElement[]>();
+    for (const el of event.currentTarget.querySelectorAll<HTMLElement>(
+      "[data-board-card]",
+    )) {
+      const lane = el.dataset.boardLane ?? "";
+      const bucket = lanes.get(lane);
+      if (bucket) bucket.push(el);
+      else lanes.set(lane, [el]);
+    }
+    const laneList = [...lanes.values()];
+    const laneIndex = laneList.findIndex((lane) => lane.includes(from));
+    if (laneIndex < 0) return;
+    const lane = laneList[laneIndex]!;
+    const index = lane.indexOf(from);
+
+    let next: HTMLElement | undefined;
+    switch (event.key) {
+      case "ArrowDown":
+        next = lane[index + 1];
+        break;
+      case "ArrowUp":
+        next = lane[index - 1];
+        break;
+      case "ArrowRight":
+      case "ArrowLeft": {
+        const neighbour =
+          laneList[laneIndex + (event.key === "ArrowRight" ? 1 : -1)];
+        // Nearest by index, and the lane's FIRST card when that lane is
+        // shorter — never a dead end, and never a landing the human has to
+        // scroll to find.
+        next = neighbour ? (neighbour[index] ?? neighbour[0]) : undefined;
+        break;
+      }
+      default:
+        return;
+    }
+    // Claimed even at the edges of the board: an ArrowDown on the last card of
+    // a lane must not fall through to scrolling the column out from under the
+    // focus ring.
+    event.preventDefault();
+    if (!next) return;
+    next.focus();
+    setFocusKey(next.dataset.boardCard ?? null);
+  };
+
   // P13-D-34: what the board actually draws, and why anything is missing.
   const shownCount = visible(allTasks).length;
   const filterLabel =
@@ -1636,6 +1874,8 @@ export function BoardPage({
             arrivedKey={arrivedKey}
             draggedTask={draggedTask}
             onMoveTask={onMoveTask}
+            rovingKey={rovingKey}
+            onCardKeyDown={onCardKeyDown}
           />
         </DragDropProvider>
       ) : (
@@ -1645,6 +1885,8 @@ export function BoardPage({
           canTransition={canTransition}
           onMoveTask={onMoveTask}
           emptyCopy={emptyCopyFor(allTasks.length, true)}
+          rovingKey={rovingKey}
+          onCardKeyDown={onCardKeyDown}
         />
       )}
 

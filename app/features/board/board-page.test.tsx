@@ -95,6 +95,12 @@ function renderBoard(
       ),
       ...(opts.action ? { action: opts.action } : {}),
     },
+    // D19: the destination a card face navigates to, so "Enter opens the
+    // focused task" can be asserted as a real navigation rather than a spy.
+    {
+      path: "/projects/:slug/tasks/:key",
+      Component: () => <div>task page</div>,
+    },
   ]);
   const params = new URLSearchParams(opts.search ?? "");
   if (opts.view === "list") params.set("view", "list");
@@ -1107,5 +1113,236 @@ describe("F19-27: a pending acceptance is never stranded", () => {
     expect(dialog!.textContent!.replace(/\s+/g, " ")).toContain(
       "VIB-1 is archived — restore it before accepting the completion.",
     );
+  });
+});
+
+/**
+ * D19 (owner ruling R19-10) — arrow-key traversal on the board.
+ *
+ * The UX spec put full arrow traversal on the Task Status Card; it was never
+ * built. Before this the file's only `onKeyDown` was the new-task dialog's
+ * Enter, so a keyboard user met 2N tab stops (a card face and a Move trigger
+ * per card) and had no sideways move at all. INTENT §4 asks for keyboard access
+ * to every packet action — "inaccessible state is untrustworthy state".
+ */
+describe("D19: arrow-key traversal over the board (R19-10)", () => {
+  const cards = (c: HTMLElement) => [
+    ...c.querySelectorAll<HTMLElement>("[data-board-card]"),
+  ];
+  const cardFor = (c: HTMLElement, key: string) =>
+    cards(c).find((el) => el.dataset.boardCard === key)!;
+  const focused = () =>
+    (document.activeElement as HTMLElement | null)?.dataset.boardCard ?? null;
+  /** Press `key` on a card face, the way the roving focus reaches it. */
+  const press = (el: HTMLElement, key: string) => {
+    el.focus();
+    fireEvent.keyDown(el, { key });
+  };
+  const pressFocused = (key: string) =>
+    press(document.activeElement as HTMLElement, key);
+
+  it("puts ONE card in the tab order, not one per card", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+      task({ key: "VIB-3", stage: "impl" }),
+    ]);
+    expect(cards(container).map((el) => el.tabIndex)).toEqual([0, -1, -1]);
+  });
+
+  it("moves the tab stop with the focus, so Tab re-enters where the human left", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowDown");
+    expect(cards(container).map((el) => el.tabIndex)).toEqual([-1, 0]);
+  });
+
+  it("walks Up and Down within a lane", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+      task({ key: "VIB-2", stage: "impl" }),
+      task({ key: "VIB-3", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowDown");
+    expect(focused()).toBe("VIB-2");
+    pressFocused("ArrowDown");
+    expect(focused()).toBe("VIB-3");
+    pressFocused("ArrowUp");
+    expect(focused()).toBe("VIB-2");
+  });
+
+  it("holds still at the ends of a lane instead of wrapping", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+      task({ key: "VIB-2", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowUp");
+    expect(focused()).toBe("VIB-1");
+    press(cardFor(container, "VIB-2"), "ArrowDown");
+    expect(focused()).toBe("VIB-2");
+  });
+
+  it("crosses lanes with Left/Right, landing at the same index", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+      task({ key: "VIB-3", stage: "impl" }),
+      task({ key: "VIB-4", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-2"), "ArrowRight");
+    expect(focused()).toBe("VIB-4");
+    pressFocused("ArrowLeft");
+    expect(focused()).toBe("VIB-2");
+  });
+
+  it("lands on the target lane's first card when that lane is shorter", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+      task({ key: "VIB-3", stage: "triage" }),
+      task({ key: "VIB-4", stage: "impl" }),
+    ]);
+    // Index 2 in Triage; In Progress holds one card, so the nearest-by-index
+    // rule falls back to that lane's first card rather than to nothing.
+    press(cardFor(container, "VIB-3"), "ArrowRight");
+    expect(focused()).toBe("VIB-4");
+  });
+
+  it("never strands the focus on an empty lane", () => {
+    // In Progress draws no card at all, so Right from Triage must reach Done.
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-9", stage: "done" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowRight");
+    expect(focused()).toBe("VIB-9");
+    pressFocused("ArrowLeft");
+    expect(focused()).toBe("VIB-1");
+  });
+
+  it("stays put when there is no lane in that direction — no wrap-around", () => {
+    // Two lanes, so a wrapping implementation would jump the leftmost card to
+    // the rightmost lane instead of holding still.
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowLeft");
+    expect(focused()).toBe("VIB-1");
+    press(cardFor(container, "VIB-2"), "ArrowRight");
+    expect(focused()).toBe("VIB-2");
+  });
+
+  it("opens the focused task on Enter and on Space", async () => {
+    for (const key of ["Enter", " "]) {
+      const { container, unmount } = renderBoard([
+        task({ key: "VIB-1", stage: "impl" }),
+      ]);
+      press(cardFor(container, "VIB-1"), key);
+      await waitFor(() =>
+        expect(container.textContent, key).toContain("task page"),
+      );
+      unmount();
+    }
+  });
+
+  it("keeps the Move menu reachable from the focused card — and only that one", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+    ]);
+    const triggers = () =>
+      [
+        ...container.querySelectorAll<HTMLButtonElement>("button.stage-menu-btn"),
+      ].map((b) => b.tabIndex);
+    // Without this the board would still hold N tab stops: every card's
+    // StageMenu button stayed tabbable while its face went to -1.
+    expect(triggers()).toEqual([0, -1]);
+    press(cardFor(container, "VIB-1"), "ArrowDown");
+    expect(triggers()).toEqual([-1, 0]);
+  });
+
+  it("leaves the arrows alone on a control that is not a card face", () => {
+    // The StageMenu trigger sits inside the board and owns Arrow Up/Down for
+    // its own menu; traversal must not answer for it.
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+      task({ key: "VIB-2", stage: "impl" }),
+    ]);
+    const trigger = container.querySelector<HTMLButtonElement>(
+      "button.stage-menu-btn",
+    )!;
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("does not answer for the open Move menu's own arrows", () => {
+    // The StageMenu popover is `createPortal`ed to <body>, but React bubbles
+    // synthetic events along the REACT tree — so its Arrow Up/Down really does
+    // reach the board's handler. Two independent gates keep it the menu's:
+    // the menu preventDefaults, and the event target is not a card face.
+    const { container, getByRole } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+      task({ key: "VIB-2", stage: "impl" }),
+    ]);
+    fireEvent.click(
+      container.querySelector<HTMLButtonElement>("button.stage-menu-btn")!,
+    );
+    const item = getByRole("menuitemradio", { name: "Triage" });
+    item.focus();
+    fireEvent.keyDown(item, { key: "ArrowDown" });
+    expect(document.activeElement).not.toBe(cardFor(container, "VIB-2"));
+    expect(
+      (document.activeElement as HTMLElement).closest(".stage-menu-pop"),
+    ).not.toBeNull();
+  });
+
+  it("names each lane as a list so a reader is told where focus landed", () => {
+    const { container, getByRole } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+    ]);
+    const lane = getByRole("list", { name: "In Progress tasks" });
+    expect(lane.querySelectorAll('[role="listitem"]')).toHaveLength(1);
+    // The two empty lanes draw no list role: their only child is the
+    // empty-state sentence, and a `list` without `listitem` children is what
+    // aria-required-children fails on.
+    expect(container.querySelectorAll('[role="list"]')).toHaveLength(1);
+  });
+
+  it("walks the list layout too, where the whole board is one lane", () => {
+    const { container } = renderBoard(
+      [
+        task({ key: "VIB-1", stage: "triage" }),
+        task({ key: "VIB-2", stage: "impl" }),
+      ],
+      { view: "list" },
+    );
+    press(cardFor(container, "VIB-1"), "ArrowDown");
+    expect(focused()).toBe("VIB-2");
+    // One lane — sideways has nowhere to go, and does not silently jump.
+    pressFocused("ArrowRight");
+    expect(focused()).toBe("VIB-2");
+    expect(
+      container.querySelector('[role="list"]')!.getAttribute("aria-label"),
+    ).toBe("All tasks");
+  });
+
+  it("re-anchors the tab stop when its card is filtered off the board", async () => {
+    const { container, getByLabelText } = renderBoard([
+      task({ key: "VIB-1", title: "Attach a credential", stage: "impl" }),
+      task({ key: "VIB-2", title: "Rotate the PAT", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-2"), "ArrowUp");
+    expect(focused()).toBe("VIB-1");
+    // A tab stop pinned to a card the board no longer draws is a board with no
+    // keyboard way in.
+    fireEvent.change(getByLabelText("Filter this board"), {
+      target: { value: "rotate" },
+    });
+    await waitFor(() => expect(cards(container)).toHaveLength(1));
+    expect(cards(container)[0]!.tabIndex).toBe(0);
   });
 });

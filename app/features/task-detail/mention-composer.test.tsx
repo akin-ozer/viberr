@@ -39,7 +39,7 @@ const MENTIONABLES: Mentionables = {
   users: [{ handle: "arda", name: "Arda Kaya", email: "arda@viberr.test" }],
   reserved: [
     { handle: "operator", label: "Operator" },
-    { handle: "agent", label: "Primary specialist" },
+    { handle: "agent", label: "Delivering agent" }, // F19-12 vocabulary
     { handle: "claude", label: "Claude specialist" },
     { handle: "codex", label: "Codex specialist" },
   ],

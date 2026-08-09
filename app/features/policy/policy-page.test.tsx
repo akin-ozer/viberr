@@ -25,7 +25,7 @@ const STAGES = [
 
 const TRANSITIONS: TransitionView[] = [
   { from: "triage", to: "ready", by: "Human, after the quality gate — agents may flag underspecified tasks", boundary: "approval", locked: false },
-  { from: "ready", to: "impl", by: "Operator, when a primary specialist is assigned", boundary: "auto", locked: false },
+  { from: "ready", to: "impl", by: "Operator, when a delivering agent is assigned", boundary: "auto", locked: false },
   { from: "impl", to: "review", by: "Operator transition request, with evidence attached", boundary: "approval", locked: false },
   { from: "review", to: "done", by: "Human acceptance of the completion report", boundary: "human", locked: true },
 ];

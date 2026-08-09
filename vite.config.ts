@@ -1,7 +1,8 @@
+import { createRequire } from "node:module";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
 import { reactRouter } from "@react-router/dev/vite";
-import { defineConfig } from "vite";
+import { defineConfig, searchForWorkspaceRoot } from "vite";
 
 try {
   loadEnvFile();
@@ -17,6 +18,16 @@ try {
 // nested tsconfig (F10-36). Exclude the whole data root from the dev watcher.
 const dataRoot = path.resolve(process.env.VIBERR_DATA_ROOT ?? "./data");
 
+// A git worktree carries no node_modules of its own — Node resolution walks up
+// to the primary checkout's install. Vite's fs allow-list only covers the
+// workspace root, so assets served from the resolved package tree (fonts) 403
+// unless that real node_modules directory is allowed explicitly.
+const resolvedNodeModules = path.join(
+  path.dirname(createRequire(import.meta.url).resolve("@fontsource/manrope/package.json")),
+  "..",
+  "..",
+);
+
 export default defineConfig({
   plugins: [reactRouter()],
   resolve: {
@@ -27,6 +38,9 @@ export default defineConfig({
   server: {
     port: Number(process.env.PORT ?? 5173),
     strictPort: true,
+    fs: {
+      allow: [searchForWorkspaceRoot(process.cwd()), resolvedNodeModules],
+    },
     watch: {
       // Merged with Vite's built-in ignores (node_modules, .git, cacheDir).
       ignored: [`${dataRoot}/**`],

@@ -604,3 +604,100 @@ describe("claude idle hang guard (P13-RT-11)", () => {
     delete process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
   });
 });
+
+/**
+ * UC-16 — the Claude half of the disclosed MCP asymmetries, plus ruling 49.
+ *
+ * The capability matrix tells an admin that org MCP credentials travel on
+ * CLAUDE runs only, and that the mid-run comment / ask-human channel exists here
+ * and nowhere else. Both are properties of what this adapter hands the SDK, so
+ * they are pinned here; the Codex halves (credential dropped, in-process server
+ * dropped) live in `codex-runtime.server.test.ts`, and the paired cross-backend
+ * assertions in `runtime-registry.server.test.ts`.
+ */
+describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
+  interface McpCapture {
+    mcpServers?: Record<string, unknown>;
+    allowedTools?: string[];
+    strictMcpConfig?: boolean;
+    disallowedTools?: string[];
+  }
+
+  async function optionsFor(spec: RunSpec): Promise<McpCapture> {
+    const result = [
+      { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} },
+    ];
+    let captured: McpCapture | undefined;
+    const queryFn = (params: { options?: McpCapture }) => {
+      captured = params.options;
+      const { q } = fakeQuery(result);
+      return q;
+    };
+    createClaudeAdapter({ queryFn: queryFn as never }).start(spec, {
+      onLine: () => {},
+      onExit: () => {},
+    });
+    await drain();
+    return captured ?? {};
+  }
+
+  it("sets strictMcpConfig on EVERY run — kind, resume and skills change nothing", async () => {
+    // R18-3 / ruling 49: only Viberr-granted MCP servers reach a run. Without
+    // this the SDK also picks up a repo `.mcp.json`, the user's MCP config and
+    // plugin MCP — an ambient tool channel no capability grant authorized, on
+    // the backend whose whole isolation story is "settingSources: []". The
+    // existing isolation tests cover a delivering run; an operator or a resumed
+    // run must not be able to lose it.
+    for (const spec of [
+      { ...SPEC, kind: "primary" as const },
+      { ...SPEC, kind: "operator" as const },
+      { ...SPEC, kind: "reviewer" as const },
+      { ...SPEC, resumeSessionId: "sess-9" },
+      { ...SPEC, skills: ["developer-expertise"] },
+      { ...SPEC, mcpServers: { docs: { type: "http", url: "https://x.test" } } },
+    ]) {
+      expect(
+        (await optionsFor(spec)).strictMcpConfig,
+        `strictMcpConfig for ${JSON.stringify({ kind: spec.kind, resume: spec.resumeSessionId, skills: spec.skills })}`,
+      ).toBe(true);
+    }
+  });
+
+  it("hands the SDK the granted servers verbatim — credentials and the in-process toolkit included", async () => {
+    // The exact shapes `resolveSpecialistMcpServers` builds: an HTTP server with
+    // the decrypted org credential as an Authorization header, a stdio server
+    // with it in MCP_CREDENTIAL, and the in-process `{ type: "sdk" }` toolkit
+    // that carries post_comment / ask_human / report_outcome. Claude is the ONLY
+    // backend that gets either — Codex drops the credential (its config becomes
+    // argv) and has no in-process channel at all, which is what the matrix's
+    // "Org MCP credentials are sent on Claude runs only" and "Post mid-run
+    // comments has no Codex channel" notes describe.
+    const servers = {
+      "everything-http": {
+        type: "http",
+        url: "https://mcp.example.test/mcp",
+        headers: { Authorization: "Bearer sentinel-org-mcp-credential" },
+      },
+      "everything-stdio": {
+        command: "npx",
+        args: ["-y", "example-mcp"],
+        env: { MCP_CREDENTIAL: "sentinel-org-mcp-credential" },
+      },
+      viberr_agent: { type: "sdk", instance: {} },
+    };
+    const captured = await optionsFor({
+      ...SPEC,
+      mcpServers: servers,
+      allowedTools: ["mcp__viberr_agent"],
+    });
+
+    // Verbatim: nothing filtered, nothing renamed. The hyphen in the declared
+    // name survives here — Viberr never pre-normalizes it to match the codex
+    // CLI's underscore transform (P14-LV-03).
+    expect(captured.mcpServers).toEqual(servers);
+    // …and every mounted server is auto-approved, or an `mcp__*` call stalls on
+    // a permission prompt no human is there to answer. `withMcpAutoApproval`
+    // derives the missing entries upstream; the caller-named one is preserved.
+    expect(captured.allowedTools).toContain("mcp__viberr_agent");
+  });
+});

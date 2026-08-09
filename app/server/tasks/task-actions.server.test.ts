@@ -550,6 +550,110 @@ describe("appendComment", () => {
     expect(timeline.length).toBeLessThan(flood.length + 1);
   });
 
+  /**
+   * G7's other half: compaction is ONE pass that every comment writer runs, at
+   * the CONFIGURED threshold. The agent-reply site is pinned above; this pins
+   * the human site, where two things have to hold at once — the human's write
+   * triggers the fold, and the human's own prose is never what gets folded
+   * (B-FD9: compaction rewrites canonical task.md, so folding a person's words
+   * deletes them from the source of truth to save noise they did not make).
+   */
+  function withCompactionGuardrail(store: TestStore, value: number): void {
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      guardrails: [
+        { id: "compression-threshold", desc: "compress long timelines", on: true, value, unit: "events" },
+      ],
+    } as never);
+  }
+
+  /** Routine OPERATOR comments — foldable narration, no human prose. Written
+   *  newest-first with real (in-range) timestamps, the way the file store
+   *  stores them: a minute field above 59 is an invalid instant the parser
+   *  drops on read, which would quietly shrink the fixture. */
+  function operatorFlood(count = 15): TaskFileEvent[] {
+    return Array.from({ length: count }, (_, i) => {
+      const minute = count - 1 - i; // index 0 is the newest event
+      const hh = String(Math.floor(minute / 60)).padStart(2, "0");
+      const mm = String(minute % 60).padStart(2, "0");
+      return {
+        occurredAt: `2026-08-04T${hh}:${mm}:00.000Z`,
+        type: "comment",
+        actor: { kind: "operator" },
+        title: null,
+        text: `Operator narration ${i}: coordination continues on the implementation.`,
+        toAgent: false,
+        evidence: null,
+      };
+    });
+  }
+
+  it("a HUMAN comment runs the same compaction pass at the configured threshold, and its own prose survives", async () => {
+    const store = prepared();
+    withCompactionGuardrail(store, 10);
+    const flood = operatorFlood();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+      timeline: flood,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await appendComment(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: "Checked the staging deploy myself — the migration ran clean.",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    expect(timeline.some((e) => e.title === COMPACTION_TITLE)).toBe(true);
+    // 15 events + this comment, folded well below the configured threshold of
+    // 10 — proof the guardrail's VALUE drives the pass (it used to be a
+    // hardcoded 60, which this timeline never reaches).
+    expect(timeline.length).toBeLessThan(flood.length + 1);
+    expect(
+      timeline.find((e) => e.actor.kind === "human")?.text,
+      "the commenter's own prose is never compacted away",
+    ).toBe("Checked the staging deploy myself — the migration ran clean.");
+  });
+
+  it("with the compression-threshold guardrail OFF, a human comment compacts nothing", async () => {
+    const store = prepared();
+    // Long enough that the built-in DEFAULT_COMPACTION (60) would fold it —
+    // so "nothing happened" means the guardrail gate held, not that the
+    // timeline was too short to notice.
+    const flood = operatorFlood(65);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+      timeline: flood,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await appendComment(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "Still watching this one." },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    expect(timeline.some((e) => e.title === COMPACTION_TITLE)).toBe(false);
+    expect(timeline).toHaveLength(flood.length + 1);
+  });
+
   // S5-G3: same reply, ambiguous handle. The agent was told to tag the person
   // it answers; when that tag routes to nobody the reply itself has to say so,
   // because the agent cannot retag and nothing else reports it.
@@ -580,6 +684,47 @@ describe("appendComment", () => {
     expect(
       store.db.prepare(`SELECT COUNT(*) c FROM notifications`).get() as { c: number },
     ).toMatchObject({ c: 0 });
+  });
+
+  /**
+   * G1's rule on the agent-reply writer: a comment a guardrail DROPPED must
+   * never be recorded as a comment that happened, and the drop must leave a
+   * reason behind. Both halves matter for different readers — the timeline must
+   * not gain chatter, and the audit row is what the boot recovery reads to know
+   * this run's reply was already processed (a drop with no row is re-processed
+   * on every restart, forever).
+   */
+  it("an agent reply dropped by the meaningful-comment guardrail records WHY, and posts nothing", async () => {
+    const store = prepared();
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      guardrails: [
+        { id: "meaningful-comment", desc: "drop trivial chatter", on: true },
+      ],
+    } as never);
+    withTask(store);
+
+    await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      runId: "run_chatter",
+      actorRef: REVIEWER_REF,
+      replyText: "ok",
+    });
+
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    expect(timeline.some((e) => e.type === "comment")).toBe(false);
+    const audit = listAuditEvents(store.db, { action: "task.agent.replied" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({
+      runId: "run_chatter",
+      droppedByGuardrail: "meaningful-comment",
+    });
   });
 });
 

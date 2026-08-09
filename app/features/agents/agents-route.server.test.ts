@@ -161,9 +161,26 @@ describe("loader", () => {
     expect(operator.actions.direct).toHaveLength(5);
     expect(operator.actions.recommend).toHaveLength(2);
     expect(operator.actions.forbidden).toHaveLength(3);
-    expect(operator.actions.direct).toContain("Assign the primary specialist");
+    // F19-12: the rendered label is the shipped vocabulary ("delivering agent",
+    // per execution-profile.tsx); the capability ID stays `assign-primary-specialist`
+    // because it is a persisted key. Reverting app/shared/capabilities.ts fails this.
+    expect(operator.actions.direct).toContain("Assign the delivering agent");
+    expect(operator.actions.direct.join(" ")).not.toMatch(/primary specialist/i);
     expect(operator.actions.direct).toContain("Deliver the branch & open the review PR");
     expect(operator.actions.direct).not.toContain("Compress long-running timelines");
+
+    // The label/id split has a trap: the seed (agent-catalog.server.ts) spells
+    // the operator's grants as catalog LABELS and resolves them through
+    // `capabilityByLabel`. A label that drifts from that literal does NOT error
+    // — the grant silently falls through to a display-only `extra`, which lands
+    // in the very same `actions.direct` bucket, so the assertion above would
+    // still pass while the operator held no runtime authority at all. Pin the
+    // resolution, not just the rendered string.
+    expect(
+      operator.capabilities.find((c) => c.capabilityId === "assign-primary-specialist")?.mode,
+    ).toBe("direct");
+    expect(operator.extras.map((e) => e.label)).not.toContain("Assign the delivering agent");
+    expect(operator.extras.map((e) => e.label).join(" ")).not.toMatch(/primary specialist/i);
 
     // The Reviewer's push restriction is now a REAL enforced grant (D4): it uses
     // the exact catalog label "Commit & push to the branch" so it maps to the

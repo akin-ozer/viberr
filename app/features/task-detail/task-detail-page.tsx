@@ -7,6 +7,7 @@ import { Icon } from "~/ui/icon";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { AcceptConfirm, type AcceptCeremonyMode } from "./accept-confirm";
 import { ArchiveConfirm } from "./archive-confirm";
+import { ContinuityRecoveryPanel } from "./continuity-recovery";
 import { DecisionPacket } from "./decision-packet";
 import type {
   DeployedSpecialistView,
@@ -504,6 +505,21 @@ export function TaskDetailPage({
         ) : null}
 
         <DiagnosticsPanel diagnostics={task.diagnostics} />
+
+        {/* D18 — above the packet, not below it. The Operator Desk order canon
+            names is "current state, execution truth, latest packet, steering
+            actions above timeline depth": degraded continuity is execution
+            TRUTH, so it sits with Diagnostics, ahead of the decision it may
+            well explain. It renders itself away when there is nothing to
+            report. */}
+        <ContinuityRecoveryPanel
+          timeline={task.timeline}
+          runtime={runtime}
+          runsVisible={runsVisible}
+          canRunAgents={canRunAgents}
+          {...(runsVisible ? { onOpenConsole: onViewLogs } : {})}
+          onAsk={() => setAsk((a) => a + 1)}
+        />
 
         {task.packet && (
           <DecisionPacket

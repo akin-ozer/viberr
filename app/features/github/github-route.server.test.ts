@@ -580,3 +580,120 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     expect(view.reconcile.label).not.toBeNull();
   });
 });
+
+/**
+ * R19-11 (owner ruling, Q-V1 PAT half) — "a read-only Viewer must not see the
+ * Danger zone or the PAT."
+ *
+ * The render gate in `github-view.tsx` is only half the ruling: single-fetch
+ * serializes this loader's payload into the document, so hiding the card leaves
+ * the masked tail sitting in a viewer's HTML — which is precisely the form the
+ * pass-18 live session reported it in. So the LOADER withholds it, and these
+ * cases assert the payload rather than the DOM.
+ *
+ * The bar is the SERVER's own: `grant-github-scope` (admin|maintainer), the
+ * ACTION_ROLES entry this route's action guard enforces on grant-scope,
+ * set-credential and clear-credential — which is why a contributor is refused
+ * here for the same reason a viewer is. `roleCan` reads that entry; nothing
+ * names a role.
+ *
+ * Runs last: it binds its own PAT and adds a viewer to project.md (the demo
+ * seed's viberr-core has admin/admin/maintainer/contributor and no viewer).
+ */
+describe("R19-11: the loader withholds credential detail from readers without the grant", () => {
+  const MASKED = "····9f3c";
+  let realFetch: typeof fetch;
+
+  beforeAll(async () => {
+    // The route loader takes no fetchImpl by design, and a bound PAT makes
+    // `checkRepoAccess` reach for the network. Offline keeps it hermetic.
+    realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new TypeError("fetch failed");
+    }) as typeof fetch;
+
+    const { createPat, setProjectCredential } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const actor = { userId: ids.arda, label: "arda@viberr.dev" };
+    const pat = createPat(
+      app.db,
+      { userId: ids.arda, label: "r19-11 fixture PAT", token: "ghp_r1911fixture9f3c" },
+      actor,
+    );
+    setProjectCredential(app.db, { projectSlug: "viberr-core", patId: pat.id }, actor);
+
+    const { updateProjectFile } = await import(
+      "~/server/files/project-writer.server"
+    );
+    await updateProjectFile({ projectSlug: "viberr-core" }, (parsed) => {
+      parsed.frontmatter.members.push({ userId: ids.deniz, role: "viewer" });
+    });
+  });
+  afterAll(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  const loadAs = async (userId: string) => {
+    const { loader } = await import("~/routes/project.github");
+    const { cookie } = await app.cookieFor(userId);
+    return (await loader(
+      (await loaderArgs(
+        "/projects/viberr-core/github",
+        { slug: "viberr-core" },
+        cookie,
+      )) as never,
+    )) as { view: import("./github-query.server").GithubViewData };
+  };
+
+  it("hands a maintainer the real credential — the control case", async () => {
+    const { view } = await loadAs(ids.murat);
+    expect(view.credential.source).toBe("pat");
+    expect(view.credential.masked).toBe(MASKED);
+    expect(view.credential.label).toBe("r19-11 fixture PAT");
+    expect(view.credential.patId).not.toBeNull();
+    expect(view.credential.scopes.length).toBeGreaterThan(0);
+  });
+
+  it("strips the tail, label, id and scope verdicts for a VIEWER", async () => {
+    const { view } = await loadAs(ids.deniz);
+    expect(view.credential.masked).toBeNull();
+    expect(view.credential.label).toBeNull();
+    expect(view.credential.patId).toBeNull();
+    expect(view.credential.lastValidatedAt).toBeNull();
+    expect(view.credential.validation).toBeNull();
+    expect(view.credential.scopes).toEqual([]);
+    expect(view.credential.openViolations).toEqual([]);
+    // Nowhere in the payload, not merely on a hidden card.
+    expect(JSON.stringify(view)).not.toContain("9f3c");
+    expect(JSON.stringify(view)).not.toContain("r19-11 fixture PAT");
+  });
+
+  it("strips it for a CONTRIBUTOR too — the grant is maintainer+", async () => {
+    const { view } = await loadAs(ids.selin);
+    expect(view.credential.masked).toBeNull();
+    expect(view.credential.label).toBeNull();
+    expect(view.credential.scopes).toEqual([]);
+  });
+
+  it("keeps the non-secret facts the surface still renders", async () => {
+    // The withheld card is replaced by a lock note plus the Connection row, and
+    // that row must stay truthful: `configured`/`source` say only what the
+    // connection pill says out loud, and required scopes are project policy —
+    // published to every member on the Policy surface. Redacting them would buy
+    // nothing and make the remaining copy guesswork.
+    const { view } = await loadAs(ids.deniz);
+    expect(view.credential.configured).toBe(true);
+    expect(view.credential.source).toBe("pat");
+    expect(view.credential.requiredScopes).toEqual([
+      "repo",
+      "workflow",
+      "read:org",
+      "pull_request:write",
+    ]);
+    // Everything that is NOT the credential is untouched by the redaction.
+    expect(view.project.repo).toBe("akin-ozer/viberr");
+    expect(view.branches.length).toBe(7);
+    expect(view.prs.length).toBe(4);
+  });
+});

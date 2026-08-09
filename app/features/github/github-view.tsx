@@ -46,11 +46,22 @@ type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
 export function RepositoryPanel({
   data,
   onOpenTask,
+  canSeeCredential,
   warnActions,
   manageActions,
 }: {
   data: Pick<GithubViewData, "project" | "connection" | "credential">;
   onOpenTask: (taskKey: string) => void;
+  /**
+   * R19-11 (Q-V1, PAT half) — does this reader hold the credential grant?
+   *
+   * Required, not optional: a caller that forgets it would silently go back to
+   * showing every member the token fingerprint, which IS the finding. The
+   * decision itself is `roleCan(myRole, "grant-github-scope")` in
+   * {@link GithubViewPage} — the same ACTION_ROLES entry the route's action
+   * guard enforces, never a role literal.
+   */
+  canSeeCredential: boolean;
   warnActions?: React.ReactNode;
   manageActions?: React.ReactNode;
 }) {
@@ -60,8 +71,14 @@ export function RepositoryPanel({
   // states they can disagree (pill "no credential" above a PAT card with
   // scopes). When they diverge, add a one-line note so the two surfaces read as
   // measuring different things rather than contradicting each other.
+  //
+  // R19-11: the note points AT the card ("shown below"), so it goes when the
+  // card goes — a reader without the grant must not be told to look at
+  // something that is not there.
   const showProbeNote =
-    conn.kind !== "ready" && data.credential.source !== "none";
+    canSeeCredential &&
+    conn.kind !== "ready" &&
+    data.credential.source !== "none";
   return (
     <div className="panel">
       <div className="panel-head">
@@ -116,17 +133,40 @@ export function RepositoryPanel({
         </div>
       </div>
 
-      <CredentialCard
-        credential={data.credential}
-        onOpenTask={onOpenTask}
-        warnActions={warnActions}
-        manageActions={manageActions}
-        connectionAuth={
-          data.connection.status === "auth_failed"
-            ? data.connection.reason
-            : "ok"
-        }
-      />
+      {/* R19-11 (owner ruling, Q-V1 PAT half): the credential card is the
+          project's token fingerprint, its scope verdicts and its rotate/remove
+          controls. Server-side, every one of those actions gates on
+          `grant-github-scope` (routes/project.github.tsx), so the card is
+          WITHDRAWN below that tier rather than rendered read-only — ruling 37's
+          precedent: a withdrawn affordance is honest, a disabled one invites a
+          support question. What stays is the Connection row above, which is the
+          only credential fact a reader of the board legitimately needs ("can
+          this repository be reached?"), plus a line naming the grant so the gap
+          is explained rather than blank. The loader redacts the same fields it
+          hides, so the withheld tail is not merely unrendered — it never
+          reaches the browser. */}
+      {canSeeCredential ? (
+        <CredentialCard
+          credential={data.credential}
+          onOpenTask={onOpenTask}
+          warnActions={warnActions}
+          manageActions={manageActions}
+          connectionAuth={
+            data.connection.status === "auth_failed"
+              ? data.connection.reason
+              : "ok"
+          }
+        />
+      ) : (
+        <div className="pol-note after last">
+          <Icon name="lock" />
+          <span>
+            Credential details need the <strong>Grant GitHub scope</strong>{" "}
+            grant (project admin or maintainer). The Connection row above still
+            shows whether this repository is reachable.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -402,8 +442,14 @@ export function GithubViewPage({
     );
   };
 
-  // Grant scope stays a governed credential action (conventions: PAT/policy
-  // changes are admin-shaped; project roles admin|maintainer hold it).
+  // The ONE credential-authority decision on this page (R19-11): `roleCan` over
+  // the same `grant-github-scope` ACTION_ROLES entry the route's action guard
+  // enforces for grant-scope, set-credential and clear-credential alike. It
+  // decides all three things that ARE that action — whether the credential card
+  // is disclosed, whether Grant scope is offered, and whether the
+  // attach/rotate/remove row renders — so a role can never be shown a control
+  // it may not use, nor hidden from one it may. The loader redacts the payload
+  // on the same rule; a client-only gate would leave the token tail in the HTML.
   const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
   // Grant scope RE-CHECKS an existing PAT's scopes — meaningless when no
   // credential is configured (F6). Only offer it once a PAT is bound; the
@@ -570,6 +616,7 @@ export function GithubViewPage({
           <RepositoryPanel
             data={data}
             onOpenTask={openTask}
+            canSeeCredential={canGrant}
             warnActions={warnActions}
             manageActions={manageActions}
           />

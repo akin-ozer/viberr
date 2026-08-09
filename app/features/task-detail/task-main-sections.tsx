@@ -15,10 +15,6 @@ import {
   type OwnerAction,
   type TaskMemberView,
 } from "./execution-profile";
-import {
-  OperatorRecommendations,
-  type RecommendationView,
-} from "./operator-recommendations";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
 /**
@@ -27,6 +23,16 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
  * profile. (The live-run strip, decision packet, agent logs and timeline are
  * their own modules already.) Split out of `task-detail-page.tsx` (pass 16,
  * pure structural refactor — no behaviour or copy change).
+ *
+ * RECOMMENDATIONS ARE DELIBERATELY NOT HERE. This module used to export a
+ * `RecommendationsSection` that owned its own fetcher and submitted
+ * `apply-recommendation` straight from the card. F19-3 (live-proven: one Apply
+ * click merged an unreviewed head into main) moved the apply path up into
+ * `task-detail-page.tsx`, because the click has to reach the page's confirm
+ * state — a section that owns its own fetcher structurally CANNOT ask first.
+ * The page renders `OperatorRecommendations` directly and routes Apply through
+ * `AcceptConfirm` (mode `apply-recommendation`). Do not re-add a local wrapper
+ * here: the ceremony lives at the page, and a wrapper is how it gets skipped.
  */
 
 /** Parse/inconsistency findings from the projection (tolerant-parsing
@@ -245,50 +251,6 @@ export function TaskHero({
         </p>
       )}
     </div>
-  );
-}
-
-
-/** Operator recommendation cards plus their apply/dismiss mutations. */
-export function RecommendationsSection({
-  recommendations,
-  canApply,
-}: {
-  recommendations: RecommendationView[];
-  canApply: boolean;
-}) {
-  const csrf = useCsrfToken();
-  const recFetcher = useFetcher<ActionResult>();
-  useActionFeedback(recFetcher);
-  const recBusy = recFetcher.state !== "idle";
-
-  // Apply / dismiss an operator recommendation card (apply is admin|maintainer;
-  // server re-checks). Apply executes the recommended assign/reviewer/transition.
-  const onApplyRec = (recId: string) => {
-    if (recBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "apply-recommendation");
-    fd.set("recId", recId);
-    recFetcher.submit(fd, { method: "post" });
-  };
-  const onDismissRec = (recId: string) => {
-    if (recBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "dismiss-recommendation");
-    fd.set("recId", recId);
-    recFetcher.submit(fd, { method: "post" });
-  };
-
-  return (
-    <OperatorRecommendations
-      recommendations={recommendations}
-      canApply={canApply}
-      busy={recBusy}
-      onApply={onApplyRec}
-      onDismiss={onDismissRec}
-    />
   );
 }
 

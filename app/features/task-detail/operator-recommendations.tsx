@@ -45,7 +45,10 @@ const KIND_LABEL: Record<RecommendationView["kind"], string> = {
   // wore two names one viewport apart. The generic-agents vocabulary won.
   assign_specialist: "Delivering agent",
   assign_reviewer: "Reviewer",
-  run_specialist: "Run specialist",
+  // …and the row one line below said "Run specialist" for the SAME actor. The
+  // server already words this card "Start the delivering agent's run"
+  // (operator-actions.server.ts), so the chip was the last holdout.
+  run_specialist: "Run delivering agent",
   run_reviewer: "Run reviewer",
   transition: "Stage",
   accept_completion: "Completion",

@@ -399,7 +399,10 @@ export async function assignSpecialist(
   const event = agentEvent(
     handoff
       ? `Delivery handed off from **${handoff.profileId}** to **${specialist.name}** (${specialist.role}, ${backendLabel}).`
-      : `Deployed **${specialist.name}** (${specialist.role}, ${backendLabel}) as the primary specialist.`,
+      // F19-12: timeline copy uses the shipped vocabulary — "delivering agent"
+      // (D9/Q17-5 retired "primary specialist"; the model is `engagements[]`
+      // with one `delivers: true`, which is exactly what this event records).
+      : `Deployed **${specialist.name}** (${specialist.role}, ${backendLabel}) as the delivering agent.`,
   );
 
   await updateTaskFile(

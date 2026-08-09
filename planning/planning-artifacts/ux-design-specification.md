@@ -633,6 +633,8 @@ The number of truly first-party workflow components should remain small. Most of
 **Content Guidelines:** Prioritize current truth over secondary metadata.  
 **Interaction Behavior:** Open task detail on select; support keyboard navigation across board lanes.
 
+> **Ruled, not deferred — the "keyboard navigation across board lanes" clause is being built.** *(Recorded 2026-08-08, pass 19 — owner ruling R19-10, `docs/architecture/decisions.md` 64.)* This clause had been open as **D19** for several passes; pass 19's audit found the board's only `onKeyDown` was the new-task dialog's Enter handler, so the cards were reachable but the lanes were not crossable. The owner ruled it **built** rather than converted into a deliberate divergence — a supervision board a keyboard cannot cross only half-honours the WCAG 2.2 AA baseline this document sets, and the board is the surface the product asks people to live on. The line above stands as the build target and is no longer a carried question. This note records the **ruling**, which stands independently of any single implementation attempt; the implementation lands in the same pass-19 wave (`app/features/board/board-page.tsx`) and this document does not certify it — read the tree.
+
 ### Decision Packet
 
 **Purpose:** Present blocking, transition, or completion decisions in a compact, trusted structure.  
@@ -676,6 +678,8 @@ The number of truly first-party workflow components should remain small. Most of
 **Accessibility:** Must clearly distinguish warning from failure and present recovery options in text.  
 **Content Guidelines:** Lead with authoritative task truth, not provider failure detail.  
 **Interaction Behavior:** Guide users toward safe continuation, deeper inspection, or escalation.
+
+> **Ruled, not deferred — this component is being built.** *(Recorded 2026-08-08, pass 19 — owner ruling R19-10, `docs/architecture/decisions.md` 64.)* The Panel had been carried as open question **D18** for several passes and pass 19's audit found it at zero: no such component existed anywhere in the tree, and pass 18's warning-toned `continuity` typed event was its only partial. The owner ruled build rather than retire, because this component sits on the product's trust story rather than its feature list — degraded runtime continuity is exactly the moment the interface must explain itself instead of going quiet, and the Murat journey above has no other home. The anatomy, states, and content guidance above stand as the build target. This note records the **ruling**, which stands independently of any single implementation attempt; the implementation lands in the same pass-19 wave (`app/features/task-detail/continuity-recovery.tsx`) and this document does not certify it — read the tree.
 
 ### Component Implementation Strategy
 
@@ -901,6 +905,8 @@ Viberr uses a desktop-first breakpoint model whose breakpoints are **layout refl
 - no control is hidden or disabled, and no behavior is gated on `matchMedia`
 
 Wide screens should use extra space to keep related context visible, reduce unnecessary navigation, and improve stability. Extra width should not justify more simultaneous panels unless they directly preserve task clarity.
+
+> **Two contracts in this part of the document become enforced checks rather than prose.** *(Recorded 2026-08-08, pass 19 — owner ruling R19-12, `docs/architecture/decisions.md` 66. This is the single authoritative note for both; nothing else in this document restates it.)* The two are **"no control is hidden or disabled, and no behavior is gated on `matchMedia`"** (the last bullet above) and the **both-theme WCAG AA contrast** baseline stated immediately below. Until now each was verified only for a hand-listed set of cases — `app/app.css.test.ts` pins contrast for enumerated token pairs and breakpoint discipline for enumerated patterns, which checks exactly the cases someone already thought of and says nothing about the next token or the next media query. Both contracts deserve better than that, for the same reason: a single stylesheet serving light and dark from one token block is the exact shape where a value tuned for one theme is legible and its counterpart is not, invisible to whoever is not looking at that theme; and hiding a control below a breakpoint is not a layout choice at all but a **correctness** failure wearing accessibility clothing — it makes the surface dishonest about what the user may do, which is why the amendment above has said "nothing is gated on viewport size, and nothing should be" since 2026-07-25. The ruling is that both become systematic gates that fail the suite, on the same footing as the no-undeclared-token rule the stylesheet already enforces with no allowlist. This note records the **ruling**; the checks are a separate change and this document does not assert their shipped state.
 
 ### Accessibility Strategy
 

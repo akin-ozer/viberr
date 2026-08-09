@@ -153,8 +153,12 @@ GitHub-backed, one repo per project, on-prem/authenticated, no mobile target.
 | FR35 | Task quality issues and policy violations as first-class events. | — |
 | FR36 | Manual project re-scan and state reconciliation. | — |
 
-**NFRs (compressed).** *Perf* — board ≤2s @200 cards (1); task detail ≤2s p95 (2); governed
-action reflects ≤3s p95 (3); cross-user propagation ≤5s (4); never load full raw history (5).
+**NFRs (compressed).** *Responsiveness* — **rewritten 2026-08-08; R19-9 struck the numbers, so
+the old ≤2s / ≤2s p95 / ≤3s p95 / ≤5s figures are gone (see §6)** — the board hides no control to save
+render time and names its unbounded-query scaling limit out loud (1); a task surfaces
+decision-relevant truth ahead of its depth (2); every state-changing action acknowledges itself
+rather than completing or failing in silence (3); shared state reaches other connected users
+without a manual refresh (4); never load full raw history (5, the one the code enforces).
 *Security* — TLS everywhere (6); no secrets in timelines/comments/audit/logs (7); separate
 human vs agent permission boundaries on every governed action (8); least-privilege creds (9);
 security-relevant actions audited (10). *Reliability* — state survives restarts (11);
@@ -371,18 +375,46 @@ only; PATs AES-256-GCM in SQLite. RBAC applies to actions, not file existence.
   `PACKET_OPTION_KINDS`, which is the source of truth. (b) the ux-spec's typography
   supersede-note names Roobert PRO as shipped; `app/app.css` ships Manrope.
 - **D16 — GitHub webhooks.** Not built; reconciliation is 5-minute polling + manual re-scan.
-- **D17 — NFR measurement.** The numeric NFR1–NFR5 targets have no measurement harness; they
-  are asserted, not verified.
-- **D18 — Continuity Recovery Panel.** The spec's named component (and a board-card continuity
-  cue, which needs a task-schema continuity field) is still unshipped; pass 18 landed only a
-  warning-toned `continuity` typed event as a partial.
-- **D19 — board keyboard traversal.** Full arrow-key traversal across lanes (spec'd on Task
-  Status Card) is incomplete.
 - **Phase 2 backlog, deliberately unbuilt:** audit export, throughput/governance-load
   analytics, task-graph + subtask orchestration, richer profile templates, deeper
   validation/testing workflows.
-- **Recently closed, do not reopen:** Q-V1 (a read-only Viewer must not see the Danger zone or
-  the PAT — ruled + shipped); F18-9 (not reproducible, ruling 54); F17-L4 (ruled by R18-4).
+
+**Ruled 2026-08-08 — these leave the open list** *(pass 19; `decisions.md` 63–66)*
+
+- **D17 — NFR measurement → DROPPED, not deferred** (R19-9, ruling 63). The numeric NFR1–NFR4
+  targets are struck from the PRD rather than given a harness: a target nobody measures is a
+  claim, not a requirement, and an unenforced number teaches the reader that the enforced ones
+  may be decorative too. Qualitative responsiveness requirements replace them; **NFR5 is kept**,
+  re-cast as behavioural, because the bounded timeline slice and run-log window genuinely
+  enforce it. Do not re-file this as a gap — and do not add a latency number without shipping
+  the harness that measures it in the same change.
+- **D18 — Continuity Recovery Panel → RULED BUILD** (R19-10, ruling 64). No longer debt: the
+  owner ruled the spec's named component gets built rather than retired. The board-card
+  continuity cue (which needs a task-schema continuity field) travels with it. Implementation
+  lands this wave at `app/features/task-detail/continuity-recovery.tsx` — *this file records
+  the ruling and does not certify the build; read the tree.*
+- **D19 — board keyboard traversal → RULED BUILD** (R19-10, ruling 64). Arrow-key traversal
+  across lanes, the Task Status Card's own "support keyboard navigation across board lanes",
+  on a roving tab stop. Implementation lands this wave at
+  `app/features/board/board-page.tsx` — *same caveat.*
+- **Q-V1's second half → RULED IMPLEMENT** (R19-11, ruling 65) at
+  `app/features/github/github-view.tsx` + `app/routes/project.github.tsx`: the credential card
+  is **withdrawn, not disabled**, below `grant-github-scope`, and the loader redacts on the
+  same rule so no token tail sits in the HTML. *Same caveat: ruled here, built there.*
+- **Both accessibility gates → RULED BUILD** (R19-12, ruling 66): a systematic both-theme WCAG
+  AA contrast sweep, and a check enforcing the spec's "no control is hidden or disabled at any
+  width" contract. Previously carried as coverage gap G19-a with no decision either way.
+
+**Recently closed, do not reopen**
+
+- **Q-V1** — a read-only Viewer must not see the Danger zone or the PAT. **Corrected
+  2026-08-08:** this entry previously read "ruled + shipped" for both halves, and that was
+  wrong — only the Danger-zone half had shipped. The PAT half was recorded in a pass-19
+  reference doc and never built, so a closed-item list was vouching for code that did not
+  exist. That is the failure this list must not repeat: an item is "closed" when a test can
+  fail for it, not when a doc says so. R19-11 (ruling 65) rules the PAT half implemented.
+- **F18-9** — not reproducible, ruling 54.
+- **F17-L4** — ruled by R18-4.
 
 ## 7. Design-mock deltas
 

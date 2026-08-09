@@ -32,7 +32,23 @@ const cap = (
 
 export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // Operator coordination (operator editor toggles)
-  cap("assign-primary-specialist", "Assign the primary specialist", ["operator"], "Assignment"),
+  //
+  // F19-12 — the id/label split here is DELIBERATE, not an oversight.
+  // "primary specialist" is retired vocabulary (D9/Q17-5, INTENT §6.5): the
+  // model is `engagements[]` with one `delivers: true`, and the UI has said
+  // "delivering agent" since (execution-profile.tsx's "Assign delivering
+  // agent" / "Delivering agent" header). The LABEL is rendered — on the agents
+  // page, the capability-matrix modal and the policy page — so it moved. The
+  // ID is not rendered anywhere: it is the persisted key in every project.md
+  // `capabilities[].capabilityId`, so renaming it would be a data migration,
+  // and this pass forbids migrations. It stays `assign-primary-specialist`.
+  //
+  // NOTE for whoever changes this label next: `app/server/seed/agent-catalog.server.ts`
+  // spells the seeded operator's grants as catalog LABELS and resolves them
+  // through `capabilityByLabel`. A label that drifts from that literal does not
+  // error — the grant silently degrades to a display-only `extra` with no
+  // runtime authority. `agents-route.server.test.ts` pins the mapping.
+  cap("assign-primary-specialist", "Assign the delivering agent", ["operator"], "Assignment"),
   cap("summon-reviewers", "Summon reviewer specialists", ["operator"], "Assignment"),
   cap("generate-packets", "Generate decision & blocking packets", ["operator"], "Coordination"),
   cap("append-typed-events", "Append typed important events", ["operator"], "Coordination"),

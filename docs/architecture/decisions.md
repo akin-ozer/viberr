@@ -613,6 +613,101 @@ it is regenerated from the filesystem rather than restated here.
     and frontmatter cannot see a checkout.
     (`app/server/tasks/task-actions.server.ts`, `app/server/github/push-workspace.server.ts`)
 
+63. **R19-9 (2026-08-08): the numeric NFR1–NFR5 performance targets are DROPPED from canon —
+    a target nobody measures is a claim, not a requirement.** *(NFR5's slot survives; what it
+    loses is the timing framing, not the constraint — see below.)* The PRD asserted a 200-card board
+    in ≤2 s, task detail ≤2 s p95, a state-changing action reflected ≤3 s p95, and cross-user
+    propagation ≤5 s. None of the four was ever measured, in any pass: there is no performance
+    harness, nothing records a p95, and no test goes red when a figure is missed — which is why
+    the gap kept resurfacing verbatim (D17, "asserted, not verified", carried since pass 17;
+    pass 19 filed it as G19-g, the one gap whose own table offered two branches and took
+    neither). The damage is not the missing milliseconds, it is the precision: a requirements
+    document that prints an unenforced number teaches its reader that the enforced ones — NFR7,
+    NFR10, NFR15, NFR16 and NFR17 each have real guards in the tree — might be decorative too.
+    (NFR6, TLS in transit, is honestly the deployment's job and says so.) So the figures are struck
+    and replaced by qualitative requirements the product can honestly be held to — the board
+    hides nothing to save render time and names its unbounded-query scaling limit out loud,
+    a task surfaces decision-relevant truth ahead of its depth, every state-changing action
+    acknowledges itself rather than completing or failing in silence, and shared state reaches
+    other connected users without a manual refresh. **NFR5 is kept**, re-cast from a timing
+    requirement into a behavioural one, because unlike the other four it is real and enforced:
+    the loader ships a bounded newest-first timeline slice and a bounded run-log window and the
+    console pages backwards on demand. The standing rule for anyone tempted to restore a
+    number: a latency budget lands in the SAME change as the harness that measures it, never
+    before it. Applies ruling 44 to the non-functional half of the PRD.
+    (`planning/planning-artifacts/prd.md` §Responsiveness + its mirror `design/prd.md`;
+    the NFR5 machinery at `app/features/task-detail/timeline-slice.ts`,
+    `app/routes/project.task.tsx`, `app/routes/resources.run-log.ts`)
+
+64. **R19-10 (2026-08-08): the two unshipped spec'd components — the Continuity Recovery Panel
+    (D18) and board arrow-key traversal (D19) — get BUILT; they stop being debt.** Both were
+    named in the UX specification (the Panel is a Phase-3 workflow component and the named
+    home of the Murat continuity journey; traversal is the Task Status Card's "support keyboard
+    navigation across board lanes"), both had been carried as open questions for several passes,
+    and pass 19's audit found them at zero and near-zero: the Panel did not exist in the tree
+    at all — pass 18's warning-toned `continuity` typed event was its only partial — and the
+    board's only `onKeyDown` belonged to the new-task dialog. The choice was ship or convert them
+    into deliberate divergences, and the owner ruled ship, on the grounds that both sit on the
+    product's trust story rather than its feature list: continuity degradation is precisely the
+    moment the product must explain itself instead of going quiet, and a supervision board a
+    keyboard cannot cross is a board that only half-honours the accessibility posture the spec
+    calls baseline. Recorded here alongside the build rather than after it, so the ruling
+    survives independently of whether any single implementation attempt does — a rule this
+    document knows only as an unbuilt spec line is a rule the next pass re-files as a gap.
+    Closes D18 and D19 as open questions; the UX spec's descriptions of both components stand
+    unchanged as the build target. Extends ruling 44 (a ruling no canon file records is a
+    ruling that gets reversed).
+    (`app/features/task-detail/continuity-recovery.tsx` for D18;
+    `app/features/board/board-page.tsx` for D19's roving tab stop)
+
+65. **R19-11 (2026-08-08): a read-only Viewer does not see the project credential card — the
+    PAT half of Q-V1 is implemented, not deferred.** Q-V1 had two halves. The Danger-zone half
+    shipped and was listed as closed; the PAT half was recorded only in a pass-19 reference doc
+    and quietly never built, so the question read "ruled + shipped" while half of it was
+    neither. The principle is the one that decided the first half: a surface shows a role what
+    it may act on, and the credential card is not a status readout — it advertises a secret's
+    existence, its token fingerprint, its scope verdicts and its rotate/remove controls to
+    someone whose role cannot touch any of it. A Viewer reading it learns only that the project
+    holds a credential they are not trusted with, which is disclosure without capability. Three
+    consequences the ruling carries: the card is **withdrawn, not disabled** (ruling 37's
+    precedent — a withdrawn affordance is honest, a disabled one invites a support question);
+    the predicate is the SAME `ACTION_ROLES` entry the route's action guard already enforces
+    (`grant-github-scope`, covering grant-scope, set-credential and clear-credential alike), so
+    a role can never be shown a control it may not use nor hidden from one it may; and the
+    **loader redacts on that same rule**, because a client-only gate leaves the token tail
+    sitting in the HTML. Because pass 19's audit caught the Danger-zone half sitting on an owner
+    ruling with **no test that could fail** (the suite rendered the section component directly
+    and its only full-page render hardcoded an admin), this ruling also requires a full-page
+    render at Viewer asserting the card is ABSENT, canaried by removing the gate: an owner
+    ruling whose guard cannot go red is a ruling that gets reverted in silence. Completes Q-V1;
+    extends ruling 25's members-only posture from "may you open it" to "may you see what is
+    inside it".
+    (`app/features/github/github-view.tsx`, `app/routes/project.github.tsx`; the already-shipped
+    Danger-zone half at `app/features/project-settings/settings-page.tsx`)
+
+66. **R19-12 (2026-08-08): both accessibility gates get built — a systematic both-theme WCAG AA
+    contrast sweep, and a check that enforces the spec's "no control is hidden or disabled at
+    any width" contract.** Today's coverage is enumerated, not systematic: `app.css.test.ts`
+    pins contrast for a hand-listed set of pairs and breakpoint discipline for a hand-listed set
+    of patterns, which verifies exactly the cases someone already thought of and says nothing
+    about the next token pair or the next media query. Both contracts are load-bearing rather
+    than cosmetic. Contrast is: the spec makes WCAG 2.2 AA the baseline in **both** themes, and
+    a single stylesheet serving light and dark from one token block is the exact shape where a
+    value tuned for one theme is legible and its counterpart is not — the failure is invisible
+    to whoever is not looking at that theme. The width contract is stronger still, and is a
+    correctness rule wearing accessibility clothing: hiding a control below a breakpoint makes
+    the surface **dishonest about what the user may do**, so a narrow window must reflow the
+    same interface rather than switch into a reduced one, and nothing may be gated on
+    `matchMedia`. Neither contract survives as prose alone — the responsive amendment has said
+    "nothing is gated on viewport size, and nothing should be" since 2026-07-25 with no check
+    behind it, which is exactly how long it could have been broken unnoticed. So both
+    become gates that fail the suite, on the same footing as the no-undeclared-token rule the
+    stylesheet already enforces with no allowlist. Extends §UI porting rules' "a `var(--x)` that
+    is not defined in `:root` is a bug, not a style choice" — the one styling contract this
+    project already enforces mechanically — to the two the spec calls baseline.
+    (`app/app.css`, `app/app.css.test.ts`; the spec contract at
+    `planning/planning-artifacts/ux-design-specification.md` §Breakpoint Strategy)
+
 ## Route map
 
 ```
