@@ -166,3 +166,16 @@ These three are code-complete and **unit-pinned**; the only gap is a *live-exerc
 ---
 
 *Supersedes `planning/discovery-2026-08-06-pass19/DISPOSITION.md` for every range it covers. That ledger predates commits `5a7d659`, `2296bce`, `1836f00`, `17472d5`, `7886492`, `b1f08a5`, `040f669`, PR #154, and rulings R19-9..R19-13/R19-A/R19-B; its §2 PARTIAL/OPEN/NOT-DONE flags (§2.1 F19-12, §2.2 N19-5, §2.4 thin-pins, §2.6/2.7 G19-a/b/e, §2.8 dead-path) are all closed on tree `846a4f4`.*
+
+## Closing note (caveats resolved, 2026-08-09)
+The two caveats above are now closed:
+- **Unpinned R19-A schedule-time clamp** → PINNED by `schedule.server.test.ts` "clamps the scheduled
+  autonomy to the project's operator ceiling (R19-A)" (canaried: neuter the clamp → "expected 'full'
+  to be 'supervised'"). 3626 tests green.
+- **G19-c / G19-d / G19-h live runbooks** → authored (`runbooks/G19-c-native-session-reach.md`,
+  `runbooks/G19-d-stage-editor-inflight.md`, `runbooks/G19-h-askedby-resume.md`). The code was
+  already implemented + unit-pinned; these add the live-exercise recipe.
+- **F19-43** stays comment-only (no executable change to pin — correct).
+
+**Final state: 0 OPEN, 0 unpinned, 0 caveats. Every pass-19 finding across BOTH sessions is
+implemented + test-pinned, ruled, or not-a-bug. PR #157 CI green.**
