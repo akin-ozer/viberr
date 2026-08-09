@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   acceptanceBlockedReason,
   archivedTaskBlockedReason,
+  archivedTaskMoveBlockedReason,
   closedPrBlockedReason,
   conflictingPrBlockedReason,
   deliveringEngagement,
@@ -11,12 +12,21 @@ import {
   type EvidenceRow,
   type PacketOption,
   type ParsedTaskFile,
+  type Recommendation,
   type TaskFileEvent,
   type TaskFrontmatter,
   type TaskPacket,
   type WorkRevision,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
+// R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
+// consult the human GitHub approval synchronously without the dynamic-import
+// dance the rest of the github/ surface needs to stay cycle-free.
+import {
+  humanApprovalRefusalNote,
+  humanVerdictApproval,
+  humanVerdictNote,
+} from "~/server/github/pr-human-approval.server";
 import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
 import {
   canRunAgents,
@@ -45,6 +55,15 @@ import {
   buildAgentQuestionPacket,
   type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
+import {
+  acceptanceNoChangeCheck,
+  assertVerifiedNoChangeStillApplies,
+  noChangeCompletionEvent,
+  probeNothingToDeliver,
+  type AcceptanceNoChangeCheck,
+  type NoChangeVerification,
+} from "./no-change-completion.server";
+import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
   taskRef,
@@ -79,7 +98,6 @@ import {
 } from "~/shared/mapping/actor.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
-import { newId } from "~/shared/ids/new-id.server";
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import {
   ambiguousMentionHandles,
@@ -1816,9 +1834,70 @@ export async function recordAgentCompletion(
   // noted, rework still needed", NOT a pass.
   let title = "";
   let summary = "";
+  // R19-1 (F19-21, live VC-5): a verdict-capable reviewer approving a task that
+  // has NOTHING to deliver had nothing to bind to — the verdict was dropped, the
+  // event read "there is no delivered revision to bind the verdict to yet", and
+  // acceptance dead-ended forever on "No reviewed revision yet". Mint a
+  // VERIFICATION revision pinned to the default-branch head so the verdict binds
+  // to a real subject and names the base sha it judged; every existing verdict
+  // mechanism (requiredReviewers, deriveValidation, staleness) then works
+  // unchanged rather than growing a second review model.
+  //
+  // The preconditions are deliberately narrow. A reviewer approving while a
+  // developer is still mid-run must NOT mark the task "no changes" — the branch
+  // does not exist YET, which is not the same as never — so nobody may be
+  // engaged to deliver and no branch/PR/revision may ever have been linked. The
+  // basis is proved by the same live, fail-closed probe acceptance uses.
+  let noChangeMint: NoChangeVerification | null = null;
+  if (verdict === "approve" && actorRef.kind === "agent") {
+    const pre = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed
+      .frontmatter;
+    if (
+      pre &&
+      !pre.workRevision &&
+      !pre.pr &&
+      pre.branch === null &&
+      deliveringEngagement(pre) === null &&
+      pre.engagements.some(
+        (e) =>
+          e.profileId === actorRef.profileId && !e.delivers && e.verdictCapable,
+      )
+    ) {
+      const probe = await probeNothingToDeliver(db, ctx, projectSlug, taskKey);
+      // `no_repo` verifies but carries no sha, and a revision needs a real head
+      // to name — synthesizing one would fabricate a fact. A repo-less project
+      // keeps its existing path (no revision, and `acceptanceBlockedReason` only
+      // holds it when a required reviewer is engaged).
+      if (probe.status === "verified" && probe.verification.baseSha !== null) {
+        noChangeMint = probe.verification;
+      }
+    }
+  }
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       if (verdict) {
+        // In-lock re-check: a delivery could have landed during the probe above.
+        if (
+          noChangeMint &&
+          !parsed.frontmatter.workRevision &&
+          !parsed.frontmatter.pr &&
+          parsed.frontmatter.branch === null &&
+          deliveringEngagement(parsed.frontmatter) === null
+        ) {
+          parsed.frontmatter.workRevision = {
+            id: newId("rev"),
+            headSha: noChangeMint.baseSha!,
+            treeSha: null,
+            branch: null,
+            createdAt: new Date().toISOString(),
+            sourceProfileId: null,
+            kind: "verified",
+          };
+          parsed.frontmatter.noChanges = true;
+        } else {
+          // Nothing was minted — keep the copy below honest about it.
+          noChangeMint = null;
+        }
         // F10-15: bind the verdict to the CURRENT work revision, last-write-wins
         // per (profileId, revisionId). A NEW revision (delivered head/tree
         // change) makes it stale automatically — no comment/stage-bounce
@@ -1855,7 +1934,17 @@ export async function recordAgentCompletion(
           summary = `${roleDisplay} approved, but there is no delivered revision to bind the verdict to yet.`;
         } else if (validation === "healthy") {
           title = "Review passed";
-          summary = `${roleDisplay} approved the work.`;
+          // R19-1: when the subject is a VERIFICATION revision, say what was
+          // actually judged — there is no "work" to have approved. The two
+          // bases are different facts (no branch at all vs. a branch carrying
+          // nothing), so the sentence must not state one for the other.
+          summary = noChangeMint
+            ? `${roleDisplay} approved: there is nothing to deliver — ` +
+              (noChangeMint.basis === "no_branch"
+                ? `no \`${noChangeMint.branch}\` branch exists on the remote`
+                : `\`${noChangeMint.branch}\` carries no commits ahead of \`${noChangeMint.baseBranch}\``) +
+              `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. Accepting completes this task with no changes.`
+            : `${roleDisplay} approved the work.`;
         } else {
           // Approved, but not yet cleared: another required reviewer is
           // outstanding or has requested changes on the current revision.
@@ -2883,32 +2972,6 @@ export async function releaseOwner(
 
 // -------------------------------------------------------------- transition
 
-/**
- * F19-38 (pass 19, live-reproduced) — why an ARCHIVED task may not be MOVED, or
- * null.
- *
- * Archiving is the terminal disposition (R14-3): the card leaves the board's
- * default view and the review queue, so a move applied to it lands on a surface
- * nobody is watching. Only the acceptance writers checked for it — reached
- * through `acceptanceRefusalReason` → `archivedTaskBlockedReason` — so a crafted
- * POST to `transitionStage` or `reorderTask` walked an archived task from
- * `impl` to `review` and got `{ok:true}` back. F19-8 made the archived CARD
- * inert in the UI; without this the UI guard is decoration.
- *
- * The archived PREDICATE stays owned by the shared
- * `archivedTaskBlockedReason` (one definition of "out of the flow"); only its
- * acceptance-shaped tail ("before accepting the completion") is wrong for a
- * board move, so this states the move-shaped remedy instead. The schema helper
- * is not in this cluster's file set, so it is reused rather than reshaped.
- */
-function archivedTaskMoveRefusal(
-  fm: TaskFrontmatter,
-  taskKey: string,
-): string | null {
-  if (!archivedTaskBlockedReason(fm, taskKey)) return null;
-  return `${taskKey} is archived — restore it before moving it between stages.`;
-}
-
 /** Apply a declared workflow transition with its configured authority boundary. */
 export async function transitionStage(
   db: DatabaseSync,
@@ -2949,18 +3012,6 @@ export async function transitionStage(
     return summaryOrThrow(db, input.projectSlug, input.taskKey);
   }
 
-  // F19-38: an archived task is out of the flow — no stage move, in any
-  // direction, by any authority (human, operator, or an applied
-  // recommendation). Checked here, above every branch below, because EVERY
-  // other writer of `frontmatter.stage` routes through this function; the
-  // terminal target already refused via `acceptanceRefusalReason`, and this is
-  // the other 99% of the board. Restore-then-move is the path.
-  const archivedRefusal = archivedTaskMoveRefusal(
-    existing.parsed.frontmatter,
-    input.taskKey,
-  );
-  if (archivedRefusal) throw AppError.conflict(archivedRefusal);
-
   // Guard: the target must be a real stage of this project (manual moves skip
   // the boundary graph, so validate the destination explicitly).
   if (!project.stages.some((s) => s.id === input.toStageId)) {
@@ -2968,6 +3019,20 @@ export async function transitionStage(
       `Unknown stage ${input.toStageId} for this project.`,
     );
   }
+
+  // F19-8: an archived task is out of the flow, and every stage move is a claim
+  // that it is back in one. Acceptance has refused archived tasks since R14-3,
+  // but nothing refused the move itself — so a card the board called abandoned
+  // could still be dragged between columns, and a drop on the terminal stage
+  // only met the refusal AFTER the move had been animated. Refuse it here, for
+  // every actor: a human drag, the keyboard menu, the operator, and the API.
+  const archivedMove = archivedTaskMoveBlockedReason(
+    existing.parsed.frontmatter,
+    input.taskKey,
+  );
+  // 409, not 400: the same status the acceptance refusal has used since R14-3.
+  // A refusal because of the task's STATE is a conflict, not a malformed request.
+  if (archivedMove) throw AppError.conflict(archivedMove);
 
   const boundary = project.workflow.find(
     (w) => w.from === fromStageId && w.to === input.toStageId,
@@ -3298,6 +3363,11 @@ async function resolveNoChangeBaseRevision(
       treeSha: typeof treeSha === "string" && treeSha ? treeSha : null,
       branch: gh.defaultBranch,
       createdAt: new Date().toISOString(),
+      // R19-1: this is a VERIFICATION revision — the base a reviewer judges on a
+      // task with nothing to deliver, never a delivered diff. The `verified` kind
+      // is what the PR-less acceptance arm (`acceptanceBlockReason` /
+      // `verdictGateReason`) admits, and what `probeNothingToDeliver` recognises.
+      kind: "verified",
       // The deliverer that found nothing to change owns the outcome, exactly as
       // it would own a revision it had committed. Null when nobody delivers.
       sourceProfileId: deliverer?.profileId ?? null,
@@ -3561,16 +3631,19 @@ export async function performDelivery(
               // F19-21: mint the base-anchored revision in the SAME write, so
               // every downstream gate works unchanged — verdicts bind to it,
               // `acceptanceBlockedReason` gates on real approvals instead of
-              // refusing for a missing revision, and `verdictGateReason`'s
-              // existing `noChanges` arm admits the PR-less acceptance.
+              // refusing for a missing revision, and the `verified`-kind (and
+              // `noChanges`) acceptance arm admits the PR-less completion.
               if (baseRevision && !fm.workRevision) {
                 fm.workRevision = baseRevision;
-                fm.validation = deriveValidation({
-                  engagements: fm.engagements,
-                  workRevision: baseRevision,
-                  verdicts: fm.verdicts,
-                });
               }
+              // F19-27: `validation` is a CACHE and the projection reads the
+              // stored value, not a fresh derivation — so setting the flag
+              // without recomputing left the pre-delivery `changed` in place,
+              // and `changed` renders as "awaiting verdict". Recompute over the
+              // WHOLE frontmatter (AFTER any mint) so both the freshly minted
+              // revision and the `noChanges` arm are seen. A task whose branch
+              // is empty owes nobody a review.
+              fm.validation = deriveValidation(fm);
             }
           : undefined,
       );
@@ -3654,14 +3727,20 @@ export async function performDelivery(
       // leaving the task `waiting:human` with no recommendation, no packet and no
       // chip. Delivery is not a transition, so neither the P11-70 re-trigger nor
       // the auto-boundary stranded backstop covers this moment; the invariant
-      // rested entirely on the model remembering. The server guarantees it now:
-      // an operator-authorized supervised delivery ensures a "Move to <review>"
-      // card exists. Idempotent (addRecommendation dedupes per kind+target) and
-      // self-pruning (any stage move drops pending transition cards), so it can
-      // never outlive its moment or double up with the operator's own card.
-      const { resolveOperatorAuthority, ensureDeliveredNextStep } = await import(
-        "./operator-actions.server"
-      );
+      // rested entirely on the model remembering. `recordDeliveredNextStep` makes
+      // it structural — a system-attributed, notified "Move to <review>" card —
+      // and it is the ONE writer of that card. A's `ensureDeliveredNextStep` was
+      // deleted (two order-dependent writers after a delivery was the hazard this
+      // replaces); its workflow-edge check ("never propose a transition the
+      // workflow doesn't declare") is folded into `recordDeliveredNextStep`.
+      //
+      // Exactly ONE mechanism runs after a successful delivery: the R18-2 re-queue
+      // (FULL autonomy, newly opened PR — the operator itself is the next step) or
+      // the server-recorded card (an operator-authorized SUPERVISED delivery). A
+      // human manual delivery gets neither — the human who just clicked Deliver is
+      // present and needs no card. That keeps R18-2's full-autonomy behaviour
+      // byte-for-byte unchanged and covers every other operator delivery.
+      const { resolveOperatorAuthority } = await import("./operator-actions.server");
       const autonomy =
         ctx.operatorRun?.autonomy ??
         resolveOperatorAuthority(ctx, projectSlug).autonomy;
@@ -3678,27 +3757,13 @@ export async function performDelivery(
           );
         }
       } else if (ctx.operatorAuthorized === true) {
-        // Keyed on operator authorization: a HUMAN who just clicked Deliver (or
-        // applied a `delivery` recommendation) is present and needs no card.
-        // Best-effort — the PR is already open, so a failure here must not turn
-        // a successful delivery into an error.
-        try {
-          await ensureDeliveredNextStep(
-            db,
-            ctx,
-            projectSlug,
-            taskKey,
-            result.prNumber,
-          );
-        } catch (nextStepErr) {
-          logger.warn("post-delivery next-step guarantee failed (best-effort)", {
-            taskKey,
-            err:
-              nextStepErr instanceof Error
-                ? nextStepErr
-                : new Error(String(nextStepErr)),
-          });
-        }
+        // A's owner-ruled gate (2026-08-06): operator-authorized AND supervised.
+        // A HUMAN who just clicked Deliver (or applied a `delivery`
+        // recommendation) reaches here without `operatorAuthorized`, so gets no
+        // card; a full-autonomy delivery is covered by the re-queue above.
+        // `recordDeliveredNextStep` is best-effort internally, so the open PR is
+        // never turned into an error by a failure to record the follow-up card.
+        await recordDeliveredNextStep(db, ctx, projectSlug, taskKey, result.prNumber);
       }
       return {
         status: "delivered",
@@ -3746,6 +3811,8 @@ export async function performDelivery(
         message,
         (fm) => {
           fm.noChanges = true;
+          // F19-27: recompute the cache alongside the flag — see above.
+          fm.validation = deriveValidation(fm);
         },
       );
       return { status: "nothing_to_review", message };
@@ -3892,6 +3959,148 @@ async function surfaceDeliveryEvent(
   }
 }
 
+/** Audit fact for the F19-1 server-recorded next step (same `github.delivery.*`
+ *  family as the manual/operator delivery rows). */
+export const DELIVERY_NEXT_STEP_AUDIT_ACTION = "github.delivery.next_step";
+
+/**
+ * F19-1 — after a SUCCESSFUL delivery, guarantee the task carries an actionable
+ * next step instead of depending on the operator model volunteering one.
+ *
+ * Shape: the same `transition` recommendation card the operator writes when its
+ * `stage-transitions` capability is `recommend` — the one VC-4/VC-5 produced and
+ * VC-1 did not. A recommendation (not a packet) because a packet is the task's
+ * ONE open decision and would collide with the operator's next real question,
+ * and because `decisionsRequiring` already counts a pending recommendation, so
+ * one write lights up the bell, "Waiting on you", the board chip and the card in
+ * a single stroke. A typed timeline event alone was rejected: the delivery
+ * already writes those and VC-1 proves they leave no affordance to act on.
+ *
+ * The guarantee is structural and never fabricates operator reasoning — the
+ * timeline event is attributed to the `delivery` SYSTEM actor and the card's own
+ * detail says outright that Viberr recorded it, not the agent.
+ *
+ * It stays quiet whenever the task is already actionable or the move is not the
+ * honest next step:
+ *  - an open packet IS the actionable surface;
+ *  - any pending recommendation already is one — including the operator's own
+ *    equivalent "Move the task to <review>" (so the two never double up).
+ *    The `delivery` kind is the one exception: that card is the step this call
+ *    just carried out and `applyRecommendation` clears it moments later, so
+ *    counting it would strand the task exactly as before;
+ *  - a task already AT or PAST the review stage needs no move — B-FD5's
+ *    acceptance predicate is what surfaces it there;
+ *  - an archived task or archived (read-only, R6-3) project takes no new cards.
+ *
+ * Idempotent (NFR16): the suppression re-runs INSIDE the file lock, so a retry,
+ * a second delivery, or a concurrent operator recommendation can never leave two
+ * cards. Best-effort — a failure here only logs; it never fails the delivery
+ * that already succeeded.
+ */
+async function recordDeliveredNextStep(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  prNumber: number,
+): Promise<void> {
+  try {
+    const project = loadProjectContext(ctx, projectSlug);
+    if (project.archived) return;
+    const reviewStageId = reviewStageIdOf(project);
+    if (!reviewStageId) return;
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (!existing) return;
+    const fm = existing.parsed.frontmatter;
+    if (fm.archived) return;
+    // Strictly BEFORE the review stage: at review (or beyond) the move is done.
+    // An off-list stage id resolves to -1 and is left alone rather than guessed at.
+    const stageIdx = project.stages.findIndex((s) => s.id === fm.stage);
+    const reviewIdx = project.stages.findIndex((s) => s.id === reviewStageId);
+    if (stageIdx < 0 || reviewIdx < 0 || stageIdx >= reviewIdx) return;
+    // Folded in from A's `ensureDeliveredNextStep`: only ever propose a move the
+    // project's OWN workflow declares — a custom board with no `stage → review`
+    // edge must not be handed a card for a transition it would refuse.
+    if (!project.workflow.some((w) => w.from === fm.stage && w.to === reviewStageId)) return;
+    if (alreadyActionable(existing.parsed)) return;
+
+    const reviewName = stageName(project, reviewStageId);
+    const label = `Move the task to ${reviewName}`;
+    const detail =
+      `Recorded by Viberr when the delivery landed — this is not the operator agent's ` +
+      `judgement. Review pull request #${prNumber} is open while ${taskKey} is still on ` +
+      `${stageName(project, fm.stage)}, and nothing had proposed a next step. Apply it to ` +
+      `move the task to ${reviewName}, or dismiss it if the work is not ready for review.`;
+    const recommendation: Recommendation = {
+      id: newId("rec"),
+      kind: "transition",
+      toStageId: reviewStageId,
+      label,
+      detail,
+    };
+
+    let recorded = false;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      // Re-checked under the lock — the read above is not the decision.
+      if (alreadyActionable(parsed)) return;
+      parsed.frontmatter.recommendations.push(recommendation);
+      parsed.frontmatter.waiting = "human";
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "delivery" },
+        title: null,
+        text: `Next step recorded: **${label}**. ${detail}`,
+        toAgent: false,
+        evidence: null,
+      });
+      recorded = true;
+    });
+    if (!recorded) return;
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: DELIVERY_NEXT_STEP_AUDIT_ACTION,
+      actor: { userId: null, label: "delivery" },
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: { kind: "transition", toStageId: reviewStageId, prNumber },
+    });
+    // Without this the card only appears to someone who happens to open the
+    // task — the exact silence VC-1 sat in. `from` is passed EXPLICITLY: the
+    // default sender is the Operator, and letting that stand would put the
+    // agent's name on a notice the agent did not write.
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug,
+        taskKey,
+        kind: "approval",
+        ptype: "input",
+        title: `Next step recorded: ${label}`,
+        text: detail,
+        from: { kind: "system", name: "Delivery" },
+      },
+      ctx,
+    );
+  } catch (error) {
+    logger.warn("failed to record the delivered task's next step", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/** True when the task already carries a human-actionable decision surface — an
+ *  open packet or a pending recommendation. The `delivery` recommendation kind
+ *  does NOT count: it is the step a successful delivery has just performed, and
+ *  `applyRecommendation` clears it right after `performDelivery` returns. */
+function alreadyActionable(parsed: ParsedTaskFile): boolean {
+  if (parsed.packet) return true;
+  return parsed.frontmatter.recommendations.some((r) => r.kind !== "delivery");
+}
+
 /**
  * The outcome of the acceptance-time merge attempt (P14-LV-07).
  *
@@ -4033,11 +4242,13 @@ export async function reorderTask(
   // archived card is off the board's default view entirely, so there is no
   // honest rank for it either — and the guard must not depend on
   // `transitionStage` being reached, which a same-stage rank write never does.
-  const archivedRefusal = archivedTaskMoveRefusal(
+  // F19-8: same refusal as the keyboard menu, so the pointer drag route can't
+  // slip an archived card past a guard the menu enforces.
+  const archivedDrag = archivedTaskMoveBlockedReason(
     existing.parsed.frontmatter,
     input.taskKey,
   );
-  if (archivedRefusal) throw AppError.conflict(archivedRefusal);
+  if (archivedDrag) throw AppError.conflict(archivedDrag);
   if (!project.stages.some((s) => s.id === input.toStageId)) {
     throw AppError.validation(`Unknown stage ${input.toStageId} for this project.`);
   }
@@ -4348,6 +4559,18 @@ export async function resolvePacket(
         input.taskKey,
       );
       if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+      // R19-1: the packet path is a writer to Done like the other two, so the
+      // no-change basis is re-proved live HERE as well — otherwise the
+      // operator's own acceptance packet becomes the one door a stale
+      // `noChanges` flag closes a now-non-empty branch through. No `force` on
+      // this path.
+      const noChange = await acceptanceNoChangeCheck(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+      );
+      if (noChange.refusal) throw AppError.conflict(noChange.refusal);
       // F15-13: a PR already merged out of band needs no merge attempt, and the
       // completion event must not claim the merge as this human's act.
       const alreadyMerged = existing.parsed.frontmatter.pr?.state === "merged";
@@ -4401,31 +4624,40 @@ export async function resolvePacket(
       const hasPr = !!existing.parsed.frontmatter.pr;
       // R17-1: name any reviewed-revision drift on the completion record.
       const driftNote = revisionDriftNote(existing.parsed.frontmatter);
-      event = {
-        occurredAt: now,
-        type: "completion",
-        actor: human,
-        title: "Completion accepted",
-        text:
-          (!hasPr
-            ? existing.parsed.frontmatter.noChanges
-              ? "Human acceptance recorded — **completed with no changes required**. Task transitioned to **Done**; the goal was already satisfied, so nothing was delivered or merged."
-              : "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
-            : alreadyMerged
-              ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
-              : reallyMerged
-                ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
-                : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
-          driftNote,
-        toAgent: false,
-        evidence: null,
-      };
+      // R19-1: the ONE shared no-change completion event, same as the other two
+      // writers to Done.
+      event = noChange.applies
+        ? noChangeCompletionEvent({
+            taskKey: input.taskKey,
+            actor: human,
+            occurredAt: now,
+            by: "human",
+            verification: noChange.verification,
+          })
+        : {
+            occurredAt: now,
+            type: "completion",
+            actor: human,
+            title: "Completion accepted",
+            text:
+              (!hasPr
+                ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
+                : alreadyMerged
+                  ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
+                  : reallyMerged
+                    ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
+                    : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+              driftNote,
+            toAgent: false,
+            evidence: null,
+          };
       mutate = (fm) => {
         // In-lock re-check (B-WF1): the generic resolution write below holds the
         // file lock — this is the last word before Done is recorded. A2: the
         // head verification above is bound to one (PR, revision) pair, so the
         // pair itself is re-asserted here too.
         assertVerifiedHeadStillApplies(fm, headCheck, input.taskKey);
+        assertVerifiedNoChangeStillApplies(fm, noChange, input.taskKey);
         const refusal = acceptanceRefusalReason(project, fm, input.taskKey, {
           blockedPacket: false,
         });
@@ -4844,17 +5076,36 @@ function verdictGateReason(fm: TaskFrontmatter, taskKey: string): string | null 
   // Delivered work with no PR: nothing stands for review, so acceptance would
   // close the task on work no PR ever carried (R15-1 gate 1).
   if (!fm.pr) {
-    // R17-2 (F17-L9): unless the branch is verified empty — a "Completed, no
-    // changes" outcome. The goal was already satisfied, so there is nothing to
-    // deliver or open a PR for; acceptance closes it to Done without a merge.
-    if (fm.noChanges) return null;
+    // R17-2 (F17-L9) / R19-1: unless the branch is verified empty, or the
+    // revision IS a verification revision (a reviewer judged the base sha
+    // because there was nothing to deliver) — a "Completed — no changes"
+    // outcome. There is nothing to open a PR for; acceptance closes it to Done
+    // without a merge, after re-proving the basis live.
+    if (fm.noChanges || fm.workRevision.kind === "verified") return null;
     return `${taskKey} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
   }
   const validation = deriveValidation(fm);
   if (validation === "healthy") return null;
   // `failing` is named precisely by acceptanceBlockedReason (checked first).
   if (validation === "failing") return null;
-  return `${taskKey}'s delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.`;
+  // R19-B (owner ruling, pass 19): a PROJECT MEMBER'S GITHUB APPROVAL ON THE PR
+  // IS the approving verdict. On a project running no verdict-capable agent,
+  // `deriveValidation` can never reach `healthy`, so every acceptance had to be
+  // an admin force-accept — an override row asserting the human bypassed a gate
+  // he had actually satisfied, in the exact audit trail FR33 exists for.
+  //
+  // Bound to the delivered revision, mapped to a member, and re-checked on this
+  // read — see `humanVerdictApproval`. It does NOT relax `acceptanceBlockedReason`
+  // above: a reviewer the project deliberately ENGAGED still owes its verdict.
+  if (humanVerdictApproval(fm)) return null;
+  // Fail closed, but never silently: an approval that exists and did not count
+  // says why (unlinked handle, non-member, approved an older commit) instead of
+  // sending the reviewer to look for a review that already happened.
+  const nearMiss = humanApprovalRefusalNote(fm);
+  if (nearMiss) {
+    return `${taskKey}'s delivered revision has no approving verdict yet — ${nearMiss}`;
+  }
+  return `${taskKey}'s delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.`;
 }
 
 /**
@@ -5112,11 +5363,36 @@ export interface AcceptanceAffordance {
   atBoundary: boolean;
   /** null when acceptance would succeed right now; else the exact refusal. */
   blockedReason: string | null;
+  /**
+   * F19-7: the refusal a PACKET `accept_completion` resolution would hit.
+   *
+   * `resolvePacket` evaluates the same contract with `blockedPacket: false` —
+   * the open packet IS what the resolution clears, so it cannot also be the
+   * reason to refuse it. A packet's confirm must therefore name THIS refusal,
+   * never `blockedReason`, or it would warn about a block the server is not
+   * going to apply (or, worse, stay silent about one it will).
+   */
+  blockedReasonViaPacket: string | null;
   /** Render an acceptance control iff true. */
   canAccept: boolean;
   /** R16-3: the blocker is a terminal GitHub fact (a closed, unmerged PR), not a
    *  process gate — so no override may be offered against it. */
   terminallyBlocked: boolean;
+  /**
+   * R19-B — when the R15-1 verdict gate is satisfied by a HUMAN's GitHub
+   * approval rather than an agent verdict, the sentence naming them and the
+   * commit they approved. Null otherwise (no approval, or an agent verdict
+   * cleared the gate).
+   *
+   * The acceptance surface must RENDER this: a gate that a person satisfied
+   * cannot just go green, or the human who accepts has no idea whose judgement
+   * they are standing on — the same "a chip is evidence, never a pseudo-check"
+   * rule (ruling 19) that this pass has been applying everywhere else.
+   *
+   * Optional on the interface only so hand-built affordance literals in the
+   * component tests keep compiling; every server path sets it explicitly.
+   */
+  verdictSatisfiedBy?: string | null;
 }
 
 /**
@@ -5143,8 +5419,10 @@ export function resolveAcceptanceAffordance(
     hasAuthority: false,
     atBoundary: false,
     blockedReason: null,
+    blockedReasonViaPacket: null,
     canAccept: false,
     terminallyBlocked: false,
+    verdictSatisfiedBy: null,
   };
   let project: ProjectContext;
   try {
@@ -5180,9 +5458,24 @@ export function resolveAcceptanceAffordance(
     hasAuthority,
     atBoundary,
     blockedReason,
+    // F19-7: what a packet resolution would hit — see the field's docstring.
+    blockedReasonViaPacket: acceptanceRefusalReason(project, fm, input.taskKey, {
+      blockedPacket: false,
+    }),
     canAccept: hasAuthority && atBoundary && blockedReason === null,
     terminallyBlocked: acceptanceTerminallyBlocked(fm),
+    // R19-B: name the human whose GitHub approval cleared the verdict gate.
+    verdictSatisfiedBy: humanVerdictSentence(fm),
   };
+}
+
+/** R19-B — "Approved on GitHub by Arda (@arda) on the delivered revision
+ *  `abc1234`", or null when no human approval is carrying the gate. Exported
+ *  shape lives in `pr-human-approval.server.ts`; this is the one adapter every
+ *  acceptance surface reads. */
+function humanVerdictSentence(fm: TaskFrontmatter): string | null {
+  const approval = humanVerdictApproval(fm);
+  return approval ? humanVerdictNote(approval) : null;
 }
 
 /** The parenthetical after "accepted, merge pending" — the honest cause
@@ -5242,6 +5535,10 @@ export async function applyAcceptanceWrite(
     skipInLockRecheck?: boolean;
     /** A verification already performed by the caller; re-read when absent. */
     headCheck?: AcceptancePrHeadCheck;
+    /** R19-1: the live no-change verification (re-read when absent). Bypassed by
+     *  `skipInLockRecheck` — the audited force override — because this path
+     *  merges nothing; the head gate above is never bypassed. */
+    noChangeCheck?: AcceptanceNoChangeCheck;
   },
 ): Promise<void> {
   const project = loadProjectContext(ctx, input.projectSlug);
@@ -5249,8 +5546,18 @@ export async function applyAcceptanceWrite(
     input.headCheck ??
     (await acceptancePrHeadCheck(db, ctx, input.projectSlug, input.taskKey));
   if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+  // R19-1: the SECOND layer of the no-change gate. Every writer to Done funnels
+  // through here, so a caller that forgets the check still cannot close a task
+  // on a stale `noChanges` flag (F19-21).
+  const noChange =
+    input.noChangeCheck ??
+    (await acceptanceNoChangeCheck(db, ctx, input.projectSlug, input.taskKey));
+  if (noChange.refusal && !input.skipInLockRecheck) {
+    throw AppError.conflict(noChange.refusal);
+  }
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     assertVerifiedHeadStillApplies(parsed.frontmatter, headCheck, input.taskKey);
+    assertVerifiedNoChangeStillApplies(parsed.frontmatter, noChange, input.taskKey);
     if (!input.skipInLockRecheck) {
       const refusal = acceptanceRefusalReason(
         project,
@@ -5366,6 +5673,21 @@ async function acceptCompletion(
   );
   if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
 
+  // R19-1: a `noChanges` task closes WITHOUT a merge, so its basis must be
+  // re-proved LIVE at the moment of acceptance — a flag set at some past
+  // delivery attempt must never close a task whose branch has since gained
+  // commits (F19-21). Fails closed: an unreachable or uncredentialed remote
+  // refuses. `force` MAY bypass it (unlike the head gate, which guards an
+  // irreversible merge — this path merges nothing), and the completion event
+  // then says the check did not pass instead of claiming a verification.
+  const noChange = await acceptanceNoChangeCheck(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+  );
+  if (noChange.refusal && !input.force) throw AppError.conflict(noChange.refusal);
+
   // F15-13: a PR already merged on GitHub (out of band, reconciled into the
   // cache) needs no merge attempt — and the completion event must not claim the
   // merge as this human's act.
@@ -5421,25 +5743,34 @@ async function acceptCompletion(
 
   // R17-1: name any reviewed-revision drift on the completion record.
   const driftNote = revisionDriftNote(existing.parsed.frontmatter);
-  const event: TaskFileEvent = {
-    occurredAt: new Date().toISOString(),
-    type: "completion",
-    actor: humanActorRef(db, actor),
-    title: "Completion accepted",
-    text:
-      (!hasPr
-        ? existing.parsed.frontmatter.noChanges
-          ? `Human acceptance recorded — **completed with no changes required**. ${input.taskKey} transitioned to **Done**; the goal was already satisfied, so nothing was delivered or merged.`
-          : `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
-        : alreadyMerged
-          ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
-          : reallyMerged
-            ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
-            : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
-      driftNote,
-    toAgent: false,
-    evidence: null,
-  };
+  // R19-1: the no-change outcome has its OWN completion event, from the one
+  // shared builder — it must never borrow the merge path's title or wording.
+  const event: TaskFileEvent = noChange.applies
+    ? noChangeCompletionEvent({
+        taskKey: input.taskKey,
+        actor: humanActorRef(db, actor),
+        occurredAt: new Date().toISOString(),
+        by: "human",
+        verification: noChange.verification,
+        forcedRefusal: noChange.refusal,
+      })
+    : {
+        occurredAt: new Date().toISOString(),
+        type: "completion",
+        actor: humanActorRef(db, actor),
+        title: "Completion accepted",
+        text:
+          (!hasPr
+            ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
+            : alreadyMerged
+              ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
+              : reallyMerged
+                ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
+                : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+          driftNote,
+        toAgent: false,
+        evidence: null,
+      };
   await applyAcceptanceWrite(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -5447,6 +5778,7 @@ async function acceptCompletion(
     prState: reallyMerged ? "merged" : "accepted",
     event,
     headCheck,
+    noChangeCheck: noChange,
     ...(input.force ? { skipInLockRecheck: true } : {}),
   });
 
@@ -5794,6 +6126,21 @@ export async function applyRecommendation(
 }
 
 /**
+ * The stable timeline title every DECLINED operator recommendation carries.
+ * Exported because the record is READ BACK: `operatorSnapshot` shows a
+ * re-invoked coordinator what a human already refused, and the task file is
+ * what every future agent and reviewer re-anchors on.
+ */
+export const RECOMMENDATION_DECLINED_TITLE = "Recommendation declined";
+
+/**
+ * The audit action a dismissal records. Exported so the snapshot's
+ * "already declined" reader (operator-actions.server.ts) cannot drift from the
+ * writer here.
+ */
+export const RECOMMENDATION_DISMISSED_AUDIT_ACTION = "task.recommendation.dismissed";
+
+/**
  * Dismiss a pending operator recommendation without acting on it (admin|
  * maintainer, or the task's own owner per R14-2 — symmetric with resolvePacket).
  * Idempotent — a missing id is a no-op.
@@ -5831,13 +6178,48 @@ export async function dismissRecommendation(
     parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
       (r) => r.id !== input.recId,
     );
+    // [1] The human's "no" goes on the CANONICAL record, not only into the
+    // 90-day audit table. Dismissal used to write nothing here, so task.md read
+    // "**Recommendation:** move to Review" (addRecommendation posts that) and
+    // then the card silently vanished — the one answer a supervisor gives that
+    // left no trace for the next agent, a later reviewer, or anyone reading the
+    // task after the audit window closes. INTENT.md justifies that 90-day bound
+    // on the premise that task-scoped history survives in task.md; this path was
+    // the counter-example.
+    //
+    // Type `transition` — no new TIMELINE_EVENT_TYPES entry. It is the type
+    // resolvePacket already stamps on EVERY human decision that routes a task,
+    // including the ones that move no stage (edit_goal, retry_other_backend,
+    // archive_task, redirect). A dismissal is the non-packet twin of resolving a
+    // packet, so it speaks the same `**Decision:** …` vocabulary and renders in
+    // the same "a human decided" row. The `title` distinguishes it, exactly as
+    // CONTEXT_CONFLICT_TITLE distinguishes a KB-vs-repo `quality` flag (R19-2).
+    //
+    // The text names the RECOMMENDATION, not "a recommendation" — and it is
+    // self-describing without the title, because the operator's own
+    // `recentTimeline` window drops titles.
+    //
+    // DELIBERATELY NOT BUILT: a free-text human REASON on the dismissal. Whether
+    // a supervisor must (or may) say why is a product choice the owner has not
+    // made; the trace itself is unambiguous and ships without it.
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "transition",
+      actor: humanActorRef(db, actor),
+      title: RECOMMENDATION_DECLINED_TITLE,
+      text:
+        `**Decision:** declined — ${rec.label}. The operator's recommendation was not applied; ` +
+        `do not re-propose it unless something material about the task changes.`,
+      toAgent: false,
+      evidence: null,
+    });
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   // Resolving the recommendation (either way) clears its "Waiting on you" bell.
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
 
   recordAudit(db, {
-    action: "task.recommendation.dismissed",
+    action: RECOMMENDATION_DISMISSED_AUDIT_ACTION,
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "task",
     subjectId: input.taskKey,

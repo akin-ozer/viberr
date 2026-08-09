@@ -4,9 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import type { TaskSummary } from "~/shared/mapping/task.server";
-import type { BoardColumn } from "~/server/projections/board-query.server";
-import { BoardPage } from "./board-page";
+import { BoardPage, type BoardColumnData, type BoardTask } from "./board-page";
 
 /**
  * UI-26: `board-page.tsx` (1000+ lines) had no component test at all — only the
@@ -22,7 +20,7 @@ const STAGES = [
   { id: "done", name: "Done", color: "#00b473" },
 ];
 
-function task(patch: Partial<TaskSummary> = {}): TaskSummary {
+function task(patch: Partial<BoardTask> = {}): BoardTask {
   return {
     projectSlug: "viberr-core",
     key: "VIB-142",
@@ -58,11 +56,14 @@ function task(patch: Partial<TaskSummary> = {}): TaskSummary {
     updatedAt: "2026-07-01T09:00:00.000Z",
     boardRank: null,
     filePath: "projects/viberr-core/tasks/VIB-142/task.md",
+    // Gap-10: `listProjectTasks` annotates every summary with these two.
+    lastActivityAt: null,
+    quiet: false,
     ...patch,
-  } as TaskSummary;
+  } as BoardTask;
 }
 
-function columns(tasks: TaskSummary[]): BoardColumn[] {
+function columns(tasks: BoardTask[]): BoardColumnData[] {
   return STAGES.map((stage) => ({
     stage,
     tasks: tasks.filter((t) => t.stage === stage.id),
@@ -70,7 +71,7 @@ function columns(tasks: TaskSummary[]): BoardColumn[] {
 }
 
 function renderBoard(
-  tasks: TaskSummary[],
+  tasks: BoardTask[],
   opts: {
     view?: "list";
     canTransition?: boolean;
@@ -605,7 +606,7 @@ describe("R16-6: the card says when Done still needs a human", () => {
  * apart, same stored state.
  */
 describe("F19-13: the list row reads the same state the card does", () => {
-  const listRow = (tasks: TaskSummary[]) =>
+  const listRow = (tasks: BoardTask[]) =>
     renderBoard(tasks, { view: "list" }).container.querySelector(".list-row")!
       .textContent!;
 
@@ -665,7 +666,7 @@ describe("F19-13: the list row reads the same state the card does", () => {
  */
 describe("F19-8: an archived card is inert and honest", () => {
   const ARCHIVED = "filter=archived";
-  const archivedTask = (patch: Partial<TaskSummary> = {}) =>
+  const archivedTask = (patch: Partial<BoardTask> = {}) =>
     task({
       key: "VIB-9",
       title: "Abandoned mid-review",
@@ -678,7 +679,7 @@ describe("F19-8: an archived card is inert and honest", () => {
       branch: "VIB-9-abandoned",
       pr: { number: 124, state: "accepted", title: "Abandoned" },
       ...patch,
-    } as Partial<TaskSummary>);
+    } as Partial<BoardTask>);
 
   it("says `archived` instead of a readiness anyone owes", () => {
     const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
@@ -753,6 +754,86 @@ describe("F19-8: an archived card is inert and honest", () => {
 });
 
 /**
+ * F19-8 / F19-13 — the board's archived contract, and one vocabulary across both
+ * views.
+ *
+ * Under the "Archived" filter the board rendered archived tasks through the
+ * ordinary card: live readiness, live validation, "waiting on a human", a drag
+ * handle and a working Move menu — directly beneath a banner calling the work
+ * abandoned and out of the review queue. UXO-1 had removed exactly those pills
+ * from the task hero one commit earlier, for exactly this reason: an archived
+ * task owes nobody a verdict. The list row carried the same defect and, on top
+ * of it, silently dropped the PR-state pills the card draws (H10 re-opened in
+ * one of two views).
+ */
+describe("F19-8: an archived task states that it is archived, and nothing else", () => {
+  const archived = () =>
+    task({
+      archived: true,
+      displayReadiness: "ready",
+      validation: "healthy",
+      waiting: "human",
+    });
+
+  it("replaces the live readiness/validation/wait signals on the card", () => {
+    const { container } = renderBoard([archived()], {
+      search: "filter=archived",
+    });
+    // Scope to the card: the board SUBTITLE legitimately says "0 ready", and a
+    // page-wide text query would match that instead of the card's pills.
+    const card = container.querySelector(".card")!;
+    expect(card).toBeTruthy();
+    expect(card.textContent).toContain("archived");
+    expect(card.textContent).not.toContain("ready");
+    expect(card.textContent).not.toContain("healthy");
+    expect(card.textContent).not.toMatch(/waiting on a human/i);
+  });
+
+  it("offers no Move control on an archived card, even to a viewer who can move tasks", () => {
+    const { queryByLabelText } = renderBoard([archived()], {
+      search: "filter=archived",
+      canTransition: true,
+    });
+    expect(queryByLabelText(/change stage/i)).toBeNull();
+  });
+
+  it("keeps the Move control on a LIVE card — the gate is `archived`, not the filter", () => {
+    const { getByLabelText } = renderBoard([task()], { canTransition: true });
+    expect(getByLabelText(/change stage/i)).toBeTruthy();
+  });
+
+  it("applies the same contract to the list row", () => {
+    const { container } = renderBoard([archived()], {
+      view: "list",
+      search: "filter=archived",
+    });
+    const row = container.querySelector(".list-row")!;
+    expect(row).toBeTruthy();
+    expect(row.textContent).toContain("archived");
+    expect(row.textContent).not.toContain("ready");
+    expect(row.textContent).not.toContain("healthy");
+  });
+});
+
+describe("F19-13: the list row draws the PR-state pills the card draws", () => {
+  it("names a merge-pending PR in the list view too", () => {
+    const { getByText } = renderBoard(
+      [task({ pr: { number: 124, state: "accepted", title: "Attach a credential" } })],
+      { view: "list" },
+    );
+    expect(getByText("merge pending")).toBeTruthy();
+  });
+
+  it("names a closed PR in the list view too", () => {
+    const { getByText } = renderBoard(
+      [task({ pr: { number: 124, state: "closed", title: "Attach a credential" } })],
+      { view: "list" },
+    );
+    expect(getByText("closed")).toBeTruthy();
+  });
+});
+
+/**
  * F19-27 — the board acceptance confirm received `taskKey` + `stageName` and
  * disclosed neither the PR it merges, the head it merges, nor the verdict it
  * merges over, on a card whose own summary carries all three. Ruling 42 wants
@@ -760,7 +841,7 @@ describe("F19-8: an archived card is inert and honest", () => {
  * accept dialog — board acceptance runs the identical contract.
  */
 describe("F19-27: the board accept confirm discloses what it merges", () => {
-  const openConfirm = (patch: Partial<TaskSummary>) => {
+  const openConfirm = (patch: Partial<BoardTask>) => {
     const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
       action: () => ({ ok: true as const, toast: "moved" }),
     });
@@ -837,7 +918,7 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
  * dialog with no blocked row, and the server refused the click afterwards.
  */
 describe("F19-27: the board confirm asks the server's own refusal questions", () => {
-  const openConfirm = (patch: Partial<TaskSummary>) => {
+  const openConfirm = (patch: Partial<BoardTask>) => {
     const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
       action: () => ({ ok: true as const, toast: "moved" }),
     });
@@ -929,7 +1010,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
  * derived server-side through the same `resolveStageRoles` the writers gate on.
  */
 describe("F19-27: the confirm names the stage gate the server will refuse on", () => {
-  const fromTriage = (patch: Partial<TaskSummary> = {}) => {
+  const fromTriage = (patch: Partial<BoardTask> = {}) => {
     const r = renderBoard([task({ key: "VIB-1", stage: "triage", ...patch })], {
       action: () => ({ ok: true as const, toast: "moved" }),
     });
@@ -938,7 +1019,7 @@ describe("F19-27: the confirm names the stage gate the server will refuse on", (
     return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
   };
 
-  const fromBoundary = (patch: Partial<TaskSummary> = {}) => {
+  const fromBoundary = (patch: Partial<BoardTask> = {}) => {
     const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
       action: () => ({ ok: true as const, toast: "moved" }),
     });
@@ -1009,10 +1090,10 @@ describe("F19-27: the confirm names the stage gate the server will refuse on", (
  * lookup misses.
  */
 function renderMutableBoard(
-  initial: TaskSummary[],
+  initial: BoardTask[],
   opts: { action?: () => { ok: boolean; toast?: string; error?: string } } = {},
 ) {
-  let set!: (next: TaskSummary[]) => void;
+  let set!: (next: BoardTask[]) => void;
   const Stub = createRoutesStub([
     {
       path: "/projects/:slug/board",
@@ -1038,7 +1119,7 @@ function renderMutableBoard(
   return {
     ...r,
     /** The revalidation: hand the board a different task payload. */
-    reproject: (next: TaskSummary[]) => act(() => set(next)),
+    reproject: (next: BoardTask[]) => act(() => set(next)),
   };
 }
 
@@ -1344,5 +1425,149 @@ describe("D19: arrow-key traversal over the board (R19-10)", () => {
     });
     await waitFor(() => expect(cards(container)).toHaveLength(1));
     expect(cards(container)[0]!.tabIndex).toBe(0);
+  });
+});
+
+/**
+ * UXV19-6 — the other half of F19-13. Board and List are two views of ONE
+ * surface, and the card foot draws two more pills under its actionable-state
+ * rule: a failing build, and a teammate asking for changes on the PR. The list
+ * row drew neither, so switching the segmented control made a broken build
+ * invisible — and nothing else on the row covers it (validation is task-row
+ * state with no CI input, and "Blocked or waiting" does not filter on either).
+ *
+ * Canary: delete the two pills from ListView's non-archived branch and the
+ * three list-view expectations below fail while the card ones stay green.
+ */
+describe("UXV19-6: the list row draws the ACTIONABLE PR-check/review pills the card draws", () => {
+  const broken = () =>
+    task({
+      pr: { number: 124, state: "review", title: "Attach a credential" },
+      prChecks: { total: 5, passing: 2, failing: 3, pending: 0, state: "failing" },
+      prReview: "changes_requested",
+    });
+
+  it("a failing build and a changes-requested review survive the Board→List switch", () => {
+    const card = renderBoard([broken()]);
+    expect(card.getByText("3/5 checks failing")).toBeTruthy();
+    expect(card.getByText("changes requested")).toBeTruthy();
+    cleanup();
+
+    const { container, getByText } = renderBoard([broken()], { view: "list" });
+    const row = container.querySelector(".list-row")!;
+    expect(getByText("3/5 checks failing")).toBeTruthy();
+    expect(getByText("changes requested")).toBeTruthy();
+    // Both live on the row itself, not somewhere else on the page.
+    expect(row.textContent).toContain("3/5 checks failing");
+    expect(row.textContent).toContain("changes requested");
+  });
+
+  it("stays silent when the checks pass and nobody asked for changes — same density rule as the card", () => {
+    const { container } = renderBoard(
+      [
+        task({
+          pr: { number: 124, state: "review", title: "Attach a credential" },
+          prChecks: { total: 5, passing: 5, failing: 0, pending: 0, state: "passing" },
+          prReview: "approved",
+        }),
+      ],
+      { view: "list" },
+    );
+    const row = container.querySelector(".list-row")!;
+    expect(row.textContent).not.toContain("checks");
+    expect(row.textContent).not.toContain("approved");
+  });
+
+  it("an archived row still states only that it is archived", () => {
+    const { container } = renderBoard(
+      [{ ...broken(), archived: true }],
+      { view: "list", search: "filter=archived" },
+    );
+    const row = container.querySelector(".list-row")!;
+    expect(row.textContent).toContain("archived");
+    expect(row.textContent).not.toContain("checks failing");
+    expect(row.textContent).not.toContain("changes requested");
+  });
+});
+
+/**
+ * Pass-19 gap 10 — a task that quietly stopped moving looked exactly like one
+ * being worked, right down to the pulsing "agent working" dot.
+ *
+ * `quiet` arrives resolved from the server (board-query.server.ts): it is what
+ * the chip selects on and what three surfaces draw, so it must be the SAME value
+ * in the SSR pass and in hydration. The relative TEXT beside it is the
+ * time-dependent part, and that goes through `LocalRelative`.
+ */
+describe("gap-10: the board says when a task has gone quiet", () => {
+  const quietTask = (patch: Partial<BoardTask> = {}) =>
+    task({
+      waiting: "agent",
+      lastActivityAt: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
+      quiet: true,
+      ...patch,
+    });
+
+  it("draws the cue on the card, and nothing at all on a moving task", () => {
+    const { container } = renderBoard([quietTask()]);
+    const foot = container.querySelector(".card-foot")!;
+    expect(foot.textContent).toContain("no activity");
+    // The neutral pill, not one of the loud state colours (risk/blocked/input).
+    expect(container.querySelector(".card-foot .pill.neutral")).toBeTruthy();
+    // The wait tag stays — "agent working" and "no activity 4h" together are the
+    // whole point: the badge alone was the lie.
+    expect(foot.textContent).toContain("agent working");
+    cleanup();
+
+    const moving = renderBoard([task({ waiting: "agent" })]);
+    expect(
+      moving.container.querySelector(".card-foot")!.textContent,
+    ).not.toContain("no activity");
+  });
+
+  it("draws the same cue on the list row — one board, two views, one vocabulary", () => {
+    const { container } = renderBoard([quietTask()], { view: "list" });
+    expect(container.querySelector(".list-row")!.textContent).toContain(
+      "no activity",
+    );
+  });
+
+  it("never draws it on an archived card", () => {
+    // R14-3 / F19-8: archived work is out of the flow and owes nobody anything.
+    // The server's `isQuiet` refuses archived tasks outright; this pins the
+    // second belt, so a stale annotation can never light up an archived card.
+    const { container } = renderBoard(
+      [quietTask({ archived: true })],
+      { search: "filter=archived" },
+    );
+    const card = container.querySelector(".card")!;
+    expect(card.textContent).toContain("archived");
+    expect(card.textContent).not.toContain("no activity");
+  });
+
+  it("gives the board a 'No activity' chip that selects exactly those tasks", () => {
+    const tasks = [
+      quietTask({ key: "VIB-142" }),
+      task({ key: "VIB-143", waiting: "agent" }),
+      task({ key: "VIB-144", waiting: "human" }),
+    ];
+    const chipOff = renderBoard(tasks);
+    const chip = chipOff.getByRole("button", { name: /No activity/ });
+    // The tally discloses the count before anyone clicks it.
+    expect(chip.textContent).toContain("· 1");
+    expect(chipOff.container.textContent).toContain("VIB-143");
+    cleanup();
+
+    const { container } = renderBoard(tasks, { search: "filter=quiet" });
+    expect(container.textContent).toContain("VIB-142");
+    expect(container.textContent).not.toContain("VIB-143");
+    expect(container.textContent).not.toContain("VIB-144");
+  });
+
+  it("hides the chip's tally when nothing is quiet", () => {
+    const { getByRole } = renderBoard([task({ waiting: "agent" })]);
+    expect(
+      getByRole("button", { name: /No activity/ }).textContent,
+    ).not.toContain("·");
   });
 });

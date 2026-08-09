@@ -446,6 +446,18 @@ export const workRevisionSchema = z
     createdAt: z.string().min(1),
     /** The delivering engagement's profileId that produced this revision. */
     sourceProfileId: z.string().nullable().default(null),
+    /** R19-1: what this revision IS. `delivered` — a commit a delivering run
+     *  produced (the only kind before pass 19). `verified` — a VERIFICATION
+     *  revision: the default-branch head a reviewer judged on a task that has
+     *  nothing to deliver, so the verdict has a subject to bind to and names the
+     *  base sha it was given. A verification revision is never "delivered work"
+     *  and never carries a task branch (`branch: null`).
+     *
+     *  ABSENT reads as `delivered`: every revision minted before pass 19 is one,
+     *  and both minters (`nextWorkRevision`, the R19-1 verdict-time mint) now
+     *  state the kind outright — so only pre-pass-19 files omit it. Read it as
+     *  `=== "verified"`, never as `!== "delivered"`. */
+    kind: z.enum(["delivered", "verified"]).optional(),
   })
   .loose();
 export type WorkRevision = z.infer<typeof workRevisionSchema>;
@@ -507,13 +519,20 @@ export const taskFrontmatterSchema = z.object({
   // null read path. An existing `repo:` line in a task.md is now an UNKNOWN key:
   // preserved verbatim on round-trip, ignored by every resolver.
   pr: prRefSchema.nullable(),
-  // R17-2 (F17-L9): the last delivery attempt confirmed the execution branch has
-  // NO commits ahead of the default branch — a verified no-change completion (the
-  // goal was already satisfied). Acceptance of a `workRevision && !pr` task is
-  // normally refused ("deliver the branch & open the PR"); this flag is the ONE
-  // signal that turns that refusal into a first-class "Completed — no changes"
-  // acceptance that closes to Done without a PR or merge. Set on a delivery's
-  // `nothing_to_review` result; cleared the moment a delivery opens a PR.
+  // R17-2 / R19-1: this task completes with NOTHING to deliver. Acceptance of a
+  // `workRevision && !pr` task is normally refused ("deliver the branch & open
+  // the PR"); this flag is the ONE signal that turns that refusal into a
+  // first-class "Completed — no changes" acceptance that closes to Done without
+  // a PR or merge. Two producers: a delivery attempt that found the branch empty
+  // (`performDelivery`'s `nothing_to_review` result), and a reviewer approving a
+  // task that never needed a branch at all (`recordAgentCompletion`, which also
+  // mints the `kind: "verified"` revision the verdict binds to). Cleared the
+  // moment a delivery opens a PR.
+  //
+  // R19-1: the flag is a CLAIM about a moment that has passed —
+  // `acceptanceNoChangeCheck` (no-change-completion.server) re-verifies it with a
+  // LIVE remote read before any writer closes the task to Done, so a branch that
+  // has since gained commits cannot ride a stale flag into Done (F19-21).
   noChanges: z.boolean().optional(),
   github: githubCacheSchema.nullable(),
   createdAt: z.string().nullable(),
@@ -532,6 +551,9 @@ type ReviewState = {
   engagements: Engagement[];
   workRevision: WorkRevision | null;
   verdicts: ReviewVerdict[];
+  /** R19-1: this task was verified to have nothing to deliver. Optional so the
+   *  existing call sites (which all pass whole frontmatter) need no change. */
+  noChanges?: boolean;
 };
 
 /** Supporting engagements that are REQUIRED reviewers (verdict-capable). Their
@@ -571,13 +593,40 @@ export function deriveValidation(
   ) {
     return "healthy";
   }
+  // F19-27 / R19-1: a verified no-change completion has a work revision but
+  // nothing inside it to review — no diff, no pull request, and nobody owing a
+  // verdict. Falling through to `changed` made an accepted task sit in Done
+  // wearing "awaiting verdict", the same false claim UXO-1 removed from
+  // archived tasks.
+  //
+  // Placed LAST on purpose. Both real outcomes still win: a recorded
+  // request-changes stays `failing`, and a reviewer who DID approve a
+  // nothing-to-deliver task stays `healthy` — an approval is evidence and must
+  // not be erased into "nothing to see". Only the genuinely empty case —
+  // no verdict owed, none given — becomes `none`.
+  //
+  // NARROWED to `required.length === 0` (post-merge): under A's mint-before-
+  // approval flow a verify-only task carries a `kind:"verified"` revision the
+  // required reviewer has not yet approved, and reaching here means at least one
+  // required reviewer is still PENDING (all-approved → `healthy` above, any
+  // request-changes → `failing` above). Labelling that "none" would tell the
+  // human "nothing owed" while the acceptance gate is genuinely holding on a
+  // verdict — the F19-21 regression. It stays `changed` until the verdict lands.
+  if (fm.noChanges && required.length === 0) return "none";
   return "changed";
 }
 
 /** Why acceptance is blocked on the current revision, or null when allowed. A
  *  task with NO required reviewers and NO revision stays acceptable (planning /
  *  non-repo work); once a revision exists, all required reviewers must approve
- *  it and none may request changes (F10-15). */
+ *  it and none may request changes (F10-15).
+ *
+ *  R19-1: the "No reviewed revision yet" arm is what dead-ended a task with
+ *  nothing to deliver (F19-21, live VC-5) — the reviewer approved, the verdict
+ *  had no subject to bind to, and acceptance refused forever. Nothing changes
+ *  HERE: such a task now carries a `kind: "verified"` revision minted at verdict
+ *  time, so it walks the ordinary required-reviewer path below. A second
+ *  required reviewer who has not approved still holds it, which is intended. */
 export function acceptanceBlockedReason(fm: ReviewState): string | null {
   const required = requiredReviewers(fm);
   if (!fm.workRevision) {
@@ -670,6 +719,25 @@ export function archivedTaskBlockedReason(
   return `${taskKey} is archived — restore it before accepting the completion.`;
 }
 
+/**
+ * F19-8 — why an ARCHIVED task can't be MOVED between stages, or null.
+ *
+ * The same reasoning as `archivedTaskBlockedReason` one step earlier in the
+ * flow. Acceptance was guarded from the start, but nothing guarded a plain
+ * transition, so an archived task could be dragged (or keyboard-moved, or
+ * transitioned through the API) from column to column while every surface
+ * called it abandoned — and dropping it on the terminal stage walked it into
+ * the acceptance path that DOES refuse, producing a refusal for a move the
+ * board had already animated. Restore it first; then it moves like any task.
+ */
+export function archivedTaskMoveBlockedReason(
+  fm: { archived: boolean },
+  taskKey: string,
+): string | null {
+  if (!fm.archived) return null;
+  return `${taskKey} is archived — restore it before moving it between stages.`;
+}
+
 /** Compute the next work revision for a freshly delivered head. A head with the
  *  SAME tree (or same head when the tree is unavailable) as the current revision
  *  is the SAME review subject — no new revision, so prior verdicts are NOT
@@ -700,6 +768,10 @@ export function nextWorkRevision(
       branch: input.branch,
       createdAt: input.createdAt,
       sourceProfileId: input.sourceProfileId,
+      // R19-1: this helper has ONE caller — a delivering run's reconcile — so
+      // everything it mints is delivered work. The verification revision is
+      // minted at verdict time and never comes through here.
+      kind: "delivered",
     },
     changed: true,
   };

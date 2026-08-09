@@ -8,7 +8,7 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import { createGitHubAskpassEnv } from "~/server/tasks/git-clone-auth.server";
-import { redactGitStderr } from "~/server/tasks/git-stderr-redact.server";
+import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import {
   getPatToken,
   getProjectCredential,
@@ -65,6 +65,14 @@ export type PushWorkspaceResult =
    *  (non-fast-forward) — a HISTORY divergence, never a credential problem. The
    *  branch is carried so recovery copy can name what diverged. */
   | { status: "push_conflict"; branch: string; reason: string }
+  /** F19-18: the residual failure bucket. `reason` is Viberr's own sentence;
+   *  `detail` and `stderrExcerpt` both carry git's own text, scrubbed
+   *  (`redactGitOutput`) — `detail` for the structured log field, `stderrExcerpt`
+   *  for the human-facing "What the push reported" timeline block. Without them a
+   *  protected-branch, pre-receive-hook or permission rejection reached the human
+   *  as the literal words "git push returned non-zero", and the only way to learn
+   *  the cause was to reproduce the push outside the product. */
+  | { status: "push_failed"; reason: string; detail?: string; stderrExcerpt?: string }
   | {
       status: "no_branch";
       reason: string;
@@ -80,7 +88,6 @@ export type PushWorkspaceResult =
         | "no_repo"
         | "no_workspace"
         | "no_commits"
-        | "push_failed"
         | "grant_withheld"
         | "task_not_found";
       reason: string;
@@ -92,18 +99,19 @@ export type PushWorkspaceResult =
        *  because the commit failed". Only a tree that is CLEAN at that point is
        *  evidence of the former. Absent means "not verified" here too. */
       defaultBranchEvidence?: DefaultBranchEvidence;
-      /** F19-18: git's OWN output for a `push_failed`, redacted (scrub-by-value
-       *  of the PAT + URL userinfo) and truncated. `reason` carries a one-line
-       *  form for the timeline sentence; this is the full thing for the log and
-       *  for any surface that can show a block. Absent when git said nothing. */
+      /** F19-18: declared here too so a caller narrowed to the combined
+       *  `push_failed | no_pat` failure block (task-actions `performDelivery`)
+       *  can read git's excerpt across the union. Only `push_failed` ever
+       *  populates it; on this family it is always absent. */
       stderrExcerpt?: string;
     };
 
-/** Ceiling for the branch push itself (the one network step here). */
-const PUSH_TIMEOUT_MS = 120_000;
+/** Ceiling for the branch push itself (the one network step here). Shared with
+ *  the branch-update path, which pushes the same branch the same way. */
+export const PUSH_TIMEOUT_MS = 120_000;
 
 /** How much of git's complaint fits inside a one-sentence timeline message
- *  (F19-18). The full redacted excerpt still rides `stderrExcerpt`. */
+ *  (F19-18). The full redacted excerpt still rides `detail`. */
 const REASON_EXCERPT_CHARS = 240;
 
 /** Flatten a multi-line git excerpt into one readable clause: `performDelivery`
@@ -120,7 +128,7 @@ function oneLine(excerpt: string): string {
     : flat;
 }
 
-interface Exec {
+export interface Exec {
   (
     file: string,
     args: string[],
@@ -338,8 +346,36 @@ async function readDefaultBranchEvidence(
   return { verified: true };
 }
 
+/**
+ * The git identity args for a workspace commit — none when the clone already
+ * carries one (cloneRepo stamps it to the delivering profile, matching the
+ * agent's own commits), a stable Viberr identity otherwise so a fresh clone
+ * with no identity never dead-ends the commit (F24).
+ *
+ * Shared with the branch-update path: both write a server-owned commit into the
+ * same workspace, and two different fallback identities in one branch's history
+ * would read as two different authors doing Viberr's work.
+ */
+export async function commitIdentityArgs(
+  exec: Exec,
+  repoDir: string,
+): Promise<string[]> {
+  const emailRes = await exec("git", ["-C", repoDir, "config", "user.email"], {
+    cwd: repoDir,
+    timeoutMs: 5_000,
+  });
+  return emailRes.ok && emailRes.stdout.trim() !== ""
+    ? []
+    : [
+        "-c",
+        "user.name=Viberr Delivery",
+        "-c",
+        "user.email=delivery@viberr.local",
+      ];
+}
+
 /** Locate the workspace git repo for a task (same conventions as the reconciler). */
-function findRepoDir(
+export function findWorkspaceRepoDir(
   projectSlug: string,
   taskKey: string,
   repoName: string,
@@ -414,7 +450,7 @@ export async function pushWorkspaceBranch(
       projectFile?.parsed.frontmatter.defaultBranch || "main";
     const repoName = repo.split("/").pop() ?? repo;
 
-    const repoDir = findRepoDir(
+    const repoDir = findWorkspaceRepoDir(
       projectSlug,
       taskKey,
       repoName,
@@ -515,24 +551,9 @@ export async function pushWorkspaceBranch(
         { cwd: repoDir, timeoutMs: 15_000 },
       );
       if (addRes.ok) {
-        // F24: prefer the workspace's configured identity (cloneRepo stamps it to
-        // the delivering profile, matching the agent's own commits). Fall back to
-        // a stable Viberr identity only when no user is configured, so a fresh
-        // clone with no identity never dead-ends the commit.
-        const emailRes = await exec(
-          "git",
-          ["-C", repoDir, "config", "user.email"],
-          { cwd: repoDir, timeoutMs: 5_000 },
-        );
-        const identityArgs =
-          emailRes.ok && emailRes.stdout.trim() !== ""
-            ? []
-            : [
-                "-c",
-                "user.name=Viberr Delivery",
-                "-c",
-                "user.email=delivery@viberr.local",
-              ];
+        // F24: prefer the workspace's configured identity, fall back to a stable
+        // Viberr identity (see commitIdentityArgs).
+        const identityArgs = await commitIdentityArgs(exec, repoDir);
         const commitRes = await exec(
           "git",
           [
@@ -631,16 +652,19 @@ export async function pushWorkspaceBranch(
         // reproduce the push by hand outside Viberr to learn the cause, which
         // is exactly the failure the UX spec calls make-or-break.
         //
-        // The old comment ("Redact stderr") named a real rule and then
-        // over-applied it: the PAT reaches git only through the askpass env
-        // (`createGitHubAskpassEnv`), never argv and never the remote URL, and
-        // we hold the exact secret here — so scrub BY VALUE and keep the words.
-        const stderrExcerpt = redactGitStderr(pushRes.stderr, [token]);
-        logger.info("workspace branch push failed", {
+        // git's stderr is SCRUBBED, not dropped: the PAT reaches git only
+        // through the askpass env (`createGitHubAskpassEnv`), never argv and
+        // never the remote URL, so `redactGitOutput` scrubs BY VALUE and keeps
+        // git's diagnosis — the only text that can name the cause.
+        //
+        // WARN, not info, for the same reason the clone path is: a delivery that
+        // did not happen changes what the review PR would have contained.
+        const detail = redactGitOutput(pushRes.stderr, { token });
+        logger.warn("workspace branch push failed", {
           taskKey,
           branch,
           ...(pushRes.timedOut ? { timedOut: true } : {}),
-          ...(stderrExcerpt ? { stderrExcerpt } : {}),
+          ...(detail ? { detail } : {}),
         });
         return {
           status: "push_failed",
@@ -649,10 +673,10 @@ export async function pushWorkspaceBranch(
           // rides the structured field and the log line.
           reason: pushRes.timedOut
             ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
-            : stderrExcerpt
-              ? `git push failed — git said: ${oneLine(stderrExcerpt)}`
+            : detail
+              ? `git push failed — git said: ${oneLine(detail)}`
               : "git push returned non-zero, and git printed nothing to explain it",
-          ...(stderrExcerpt ? { stderrExcerpt } : {}),
+          ...(detail ? { detail, stderrExcerpt: detail } : {}),
         };
       }
     } finally {
@@ -669,18 +693,18 @@ export async function pushWorkspaceBranch(
     return { status: "pushed", branch, commits: localAhead ?? 0 };
   } catch (error) {
     // F19-18: "unexpected error" named nothing either. Same redacted channel.
-    const stderrExcerpt = redactGitStderr(error, token ? [token] : []);
+    const detail = redactGitOutput(gitErrorText(error), { token });
     logger.info("workspace branch push errored — skipping", {
       taskKey,
       err: error instanceof Error ? error.message : String(error),
-      ...(stderrExcerpt ? { stderrExcerpt } : {}),
+      ...(detail ? { detail } : {}),
     });
     return {
       status: "push_failed",
-      reason: stderrExcerpt
-        ? `the push could not run — ${oneLine(stderrExcerpt)}`
+      reason: detail
+        ? `the push could not run — ${oneLine(detail)}`
         : "the push could not run, and the failure carried no message",
-      ...(stderrExcerpt ? { stderrExcerpt } : {}),
+      ...(detail ? { detail, stderrExcerpt: detail } : {}),
     };
   }
 }

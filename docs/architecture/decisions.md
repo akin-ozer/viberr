@@ -48,10 +48,16 @@ it is regenerated from the filesystem rather than restated here.
 
 ## Data & naming
 
-- **SQLite:** plural snake_case tables (`users`, `sessions`, `task_projections`,
-  `audit_events`), snake_case columns, `<entity>_id` FKs, `idx_<table>__<cols>` indexes. DB
+- **SQLite:** plural snake_case tables (`users`, `task_projections`, `audit_events`,
+  `notifications`), snake_case columns, `<entity>_id` FKs, `idx_<table>__<cols>` indexes. DB
   rows map to camelCase through the centralized mapping modules in `app/shared/mapping/` —
   never ad hoc at a call site.
+  **Exception, and it is not ours to rename:** better-auth owns four tables and names them
+  in the SINGULAR with camelCase columns — `user`, `session`, `account`, `verification`
+  (`db/migrations/0001_baseline.sql`). Its adapter generates the SQL, so the convention
+  above applies to Viberr's own tables only. *(Corrected 2026-08-06, pass 19 — the example
+  list here said `sessions`, a table that does not exist. That invented name had already
+  propagated into `docs/operations/runbook.md`, which described a sweep of it; F19-17.)*
 - **TS/JSON:** camelCase. Timestamps are UTC ISO 8601 strings at all boundaries and in
   files. Booleans stay booleans; null stays null.
 - **Readiness values** are exactly `ready` | `input_required` |
@@ -104,6 +110,13 @@ it is regenerated from the filesystem rather than restated here.
 - Keep `viberr.css` classes and CSS variables exactly; add new CSS only in clearly-marked
   appended sections of `app/app.css`. No Tailwind, no inline hex colors — use the existing
   tokens. A `var(--x)` that is not defined in `:root` is a bug, not a style choice.
+  *(Clarified 2026-08-06, pass 19 — N19-4.)* "Exactly" bound the class names and the naming
+  convention (flat, unprefixed), and those held. It does **not** make the mock's VALUES
+  authoritative, and several have deliberately diverged: shipped `--radius-card` is 16px and
+  `--radius-panel` 22px against the mock's 18/28, there is no canvas/large radius token, the
+  display face is Manrope not Roobert PRO, and `--pink` / `--dark-red` / `--radius-large`
+  exist in `design/*.html` and nowhere in the app. `app/app.css`'s `:root` is the ONLY token
+  source; read a value there, never out of the mock.
 - Icons: one ported `Icon` component in `app/ui/icon.tsx`, reused everywhere.
 - Theme: light/dark/system, persisted per user (profile) plus a cookie for SSR-safe first
   paint.
@@ -410,7 +423,9 @@ it is regenerated from the filesystem rather than restated here.
     as unsubstantiated because it never saw the KB. The union is deduped (a KB both grant never
     double-charges the shared injection budget), applies only to non-delivering runs, and is
     tolerant of an undeployed deliverer. Same on the resumed/@mention review path.
-    (`app/server/tasks/specialist-run.server.ts` — `deliveringKbGrants`/`withDeliveringKb`)
+    (`app/server/tasks/specialist-run.server.ts` — `deliveringContextGrants`/`withDeliveringGrants`;
+    the pair was renamed from `deliveringKbGrants`/`withDeliveringKb` after this ruling. Names
+    corrected 2026-08-06, pass 19.)
     *(Re-affirmed 2026-08-06, pass 19 — owner ruling; see ruling 57 / R19-3. The
     inheritance is KBs and ONLY KBs: the docstring claiming it had been "widened to
     skills by LV-F3" described a widening that never shipped.)*
@@ -500,6 +515,10 @@ it is regenerated from the filesystem rather than restated here.
     does not KNOW it is blind falls straight back into describing the task folder. Closes
     Q19-1, extends F19-4. (`operatorWorkspaceView` in
     `app/server/runtimes/operator-run.server.ts`)
+    *(History, pass 19 — a cheaper READ-ONLY VIEW was offered as the alternative: let the
+    operator list and read the default branch at triage without a working clone. The owner
+    rejected it along with the summary-only file listing, ruling for the full clone above; the
+    view-only option is recorded here only so a reader knows it was weighed and declined.)*
 
 56. **R19-2 (2026-08-06): repo-documented conventions OUTRANK knowledge bases; the KB
     supplements.** Live (Q19-2): a KB-granted Codex developer followed its KB's pass-note
@@ -509,7 +528,8 @@ it is regenerated from the filesystem rather than restated here.
     repo file states a convention (README, CONTRIBUTING, `docs/`, a linter/formatter config,
     or the established pattern of the files being edited) the repository wins; KB guidance
     applies where the repo is silent; a genuine conflict is followed *repo-first and reported
-    by name* so a human can reconcile it; and an existing file family is never rewritten into
+    by name* — surfaced as a typed context-conflict event and never silently resolved in either
+    direction — so a human can reconcile it; and an existing file family is never rewritten into
     a KB's style just because the KB describes one. It ships as ONE constant emitted
     immediately before the KB bodies it ranks, imported by both runtimes so it cannot drift
     between them, and emitted only when real KB text is present — a run with no knowledge base
@@ -612,6 +632,13 @@ it is regenerated from the filesystem rather than restated here.
     files and forgets `git checkout -B` leaves exactly the frontmatter of a verify-only task,
     and frontmatter cannot see a checkout.
     (`app/server/tasks/task-actions.server.ts`, `app/server/github/push-workspace.server.ts`)
+    *(Provenance, pass 19 — VC-5 live evidence: a reviewer approved on `main`, no branch was ever
+    created, and `accept_completion` returned `[noop] No reviewed revision yet — nothing for the
+    required reviewers to approve`, forcing the operator to open a packet asking a human how to
+    close the task out — the exact wedge this ruling removes. The consuming machinery — the live
+    fail-closed no-change probe at every writer to Done, the in-lock re-proof, and the shared
+    "Completed — no changes" timeline-event builder — lives in
+    `app/server/tasks/no-change-completion.server.ts`.)*
 
 63. **R19-9 (2026-08-08): the numeric NFR1–NFR5 performance targets are DROPPED from canon —
     a target nobody measures is a claim, not a requirement.** *(NFR5's slot survives; what it
@@ -707,17 +734,74 @@ it is regenerated from the filesystem rather than restated here.
     project already enforces mechanically — to the two the spec calls baseline.
     (`app/app.css`, `app/app.css.test.ts`; the spec contract at
     `planning/planning-artifacts/ux-design-specification.md` §Breakpoint Strategy)
+67. **R19-A (2026-08-06): a run may never exceed the project's configured operator autonomy —
+    the per-run level is a CEILING, not a pin.** `resolveOperatorAuthority` used to return
+    `overrides.autonomy ?? configured` verbatim, so any `run-agents` role (maintainer+) could
+    launch ONE turn at `full` on a project whose operator is deployed `supervised` — promoting
+    every `recommend` capability (stage transitions, packets, typed events, `deliver-review-pr`)
+    to direct execution with no confirm, no distinct audit row, only a toast. The Policy page
+    presents operator autonomy as PROJECT configuration (ruling 2); a per-run dropdown that
+    silently outranks it makes that page a lie. So the configured autonomy is a ceiling the run
+    is clamped to. Choosing LESS autonomy for a single run stays allowed and is not a clamp (a
+    maintainer may always ask for more supervision than the project demands); omitting the
+    override means "run at the configured level", also not a clamp. The clamp is audited only
+    WHEN IT ACTUALLY BITES — a silently-reduced run is made visible with the typed
+    `task.operator.autonomy_clamped` fact rather than left mysterious — and the selector and the
+    schedule surface offer exactly the options that will really run. Extends ruling 2's
+    capability model. (`clampAutonomy` / `auditAutonomyClamp` / `operatorAutonomyFor` in
+    `app/server/tasks/operator-actions.server.ts`)
+
+68. **R19-B (2026-08-06): a project member's GitHub approval on the PR counts as the approving
+    verdict.** The asymmetry this closes: a human's DISAPPROVAL already binds the gate (closing
+    the PR unmerged is a terminal fact that outranks every process gate — ruling 37 / R16-3),
+    while their APPROVAL was inert — the review state was "a status pill, not the merge gate". So
+    on a project running no verdict-capable agent, EVERY acceptance had to be an admin
+    force-accept, permanently audited as bypassing a gate nobody could satisfy, even though FR37
+    names the task owner "reviewer + acceptance authority". Four things make the approval evidence
+    rather than a rubber stamp: (1) it is BOUND TO THE DELIVERED REVISION — the approval's
+    `commit_id` must equal the delivered head, checked when recorded AND on every read, so a
+    re-delivery invalidates it instantly (the same contract an agent verdict has with
+    `workRevision.id`); (2) the approver must be a PROJECT MEMBER, resolved from the GitHub login
+    through `users.github_handle`; (3) it FAILS CLOSED — an approval that cannot be confidently
+    mapped (no linked handle, two claimants, a non-member) does not count and the reason is
+    recorded; (4) it is NEVER SILENT — a gate satisfied this way names the human, their handle
+    and the commit. **Composes with, and is no exception to, rulings 20 and 62:** because it
+    binds to a *delivered* revision it cannot fire on a no-change verification revision (which
+    has no delivery to approve), and ruling 62's no-change path is not an exception to the
+    verdict gate either — neither reads as a carve-out of the other. Extends ruling 20 (R15-1) and
+    FR37. (`humanVerdictApproval` in `app/server/github/pr-human-approval.server.ts`; threaded
+    through `verdictGateReason` and the rebuilder's acceptance-block derivation)
+
+69. **(2026-08-08, pending owner confirmation): git's own failure text is SURFACED to the human,
+    redacted, where it used to be dropped whole.** Clone and push failures used to scrub git's
+    `stderr`/`message` entirely for credential safety (`cloneFailureLogDetails` dropped both), so
+    a failed delivery or checkout recorded its reason NOWHERE (F19-6, F19-18): the operator opened
+    an honest blocked packet, but no human — and no agent — could act on it, because nothing said
+    why. The reversal: the credential lives in the askpass env, never in argv or the URL, so a
+    token-SHAPE backstop redaction plus ANSI/C0 control-character stripping is sufficient to make
+    the text safe, and git's redacted complaint (e.g. `fatal: could not read Username…`) is now
+    surfaced in the run log, in fenced "What the checkout/push reported:" timeline blocks, and in
+    a ≤240-char one-line delivery reason. One redactor module owns the scrub, at one choke point.
+    Recorded here as the next free number: B's `spec-failure-diagnostics.md` instruction to record
+    it as "ruling 59" is VOID — 59 is taken by R19-5. Confirm the number with the owner at merge
+    close. (`app/server/secrets/git-output-redact.server.ts`; the timeline rendering in
+    `specialist-run.server.ts` / `operator-run.server.ts` / `push-workspace.server.ts`)
 
 ## Route map
 
 ```
 /login  /logout  /api/auth/*            (better-auth, incl. OAuth callbacks)
 /                                       → home (project list)
+/projects                               → home (bare /projects is not a 404 — N5)
 /projects/:slug                         → redirect to board
 /projects/:slug/board  /review  /agents  /policy  /github  /activity  /settings
 /projects/:slug/tasks/:key
 /org/settings                           (org admin, tabbed)
-/profile   /notifications
+/profile   /notifications   /notifications/read   /prefs/theme
 /resources/events  (SSE)   /resources/health   /resources/run-log
-/resources/session-export   /resources/model-catalog
+/resources/search   /resources/session-export   /resources/model-catalog
 ```
+
+*(Corrected 2026-08-06, pass 19, against `app/routes.ts`: `/projects`, `/notifications/read`,
+`/prefs/theme` and `/resources/search` — the ⌘K palette query from ruling 23 / R15-5 — ship but
+were never added here.)*

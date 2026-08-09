@@ -411,6 +411,7 @@ const ACCEPTANCE: AcceptanceAffordance = {
   hasAuthority: true,
   atBoundary: true,
   blockedReason: null,
+  blockedReasonViaPacket: null,
   canAccept: true,
   terminallyBlocked: false,
 };
@@ -475,6 +476,7 @@ function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [broken
             runtime={runtime}
             deployedSpecialists={[]}
             operatorBackend="claude"
+            operatorAutonomy="supervised"
             backendAvailable={{ claude: true, codex: true }}
             deliveringActive={false}
             activeReviewerIds={[]}

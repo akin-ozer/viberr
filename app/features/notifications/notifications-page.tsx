@@ -232,6 +232,18 @@ export function NotificationsPage({
 }) {
   const [f, setF] = useState<NotificationFilter>("all");
   const { needs, rest, needsTotal } = splitNotifications(items, f);
+  // F19-25: `unread` is the BELL BADGE number, and F18-1 deliberately drops
+  // rows whose project no longer exists from it so a removed project cannot
+  // inflate the badge. This page still RENDERS those rows — unread dot,
+  // explicit "Mark read" — so counting the badge number here made the header
+  // say "all caught up" above visible unread rows and, worse, withdrew the
+  // "Mark all read" button, the one control that clears them in a single click
+  // (`markAllNotificationsRead` has no project filter — only its trigger was
+  // hidden). The header counts what the page shows. The two sets are disjoint:
+  // the badge counts unread rows that are org-wide or whose project exists,
+  // `targetMissing` is exactly the rows it excluded.
+  const orphanUnread = items.filter((n) => n.unread && n.targetMissing).length;
+  const shownUnread = unread + orphanUnread;
 
   return (
     <div className="board-wrap" data-screen-label="Notifications">
@@ -240,7 +252,9 @@ export function NotificationsPage({
           <h1>Notifications</h1>
           <div className="sub">
             Everything routed to you, across all projects
-            {unread > 0 ? " · " + unread + " unread" : " · all caught up"}
+            {shownUnread > 0
+              ? " · " + shownUnread + " unread"
+              : " · all caught up"}
           </div>
         </div>
         <div className="board-tools">
@@ -271,7 +285,7 @@ export function NotificationsPage({
               </button>
             ))}
           </div>
-          {unread > 0 && (
+          {shownUnread > 0 && (
             <button type="button" className="btn ghost sm" onClick={onReadAll}>
               <Icon name="check" />
               Mark all read

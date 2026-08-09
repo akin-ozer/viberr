@@ -26,8 +26,13 @@ VIBERR_SECRET_ENCRYPTION_KEY=$(openssl rand -base64 32)  # decodes to exactly 32
 
 Inject them at runtime — do not bake them into the image. With Compose they come from
 `.env` via `env_file`; on a container platform, set them as runtime secrets/env vars.
-`VIBERR_SECRET_ENCRYPTION_KEY` encrypts stored GitHub PATs; **losing or rotating it
-makes existing encrypted tokens undecryptable** (users must re-add PATs).
+`VIBERR_SECRET_ENCRYPTION_KEY` encrypts stored GitHub PATs and MCP credentials;
+**losing it makes existing encrypted tokens undecryptable** (users must re-add PATs).
+Rotating is supported and finishable: set `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` to
+the old key, run `npm run keys -- status` (read-only, works on a live instance) to see
+how many secrets still open only under it, `npm run keys -- reseal` to move them, and
+drop the previous key once status reports none. Without that count there is no moment
+at which removing the old key is known to be safe.
 
 Optional integrations, enabled only when their vars are present:
 `GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in), `VIBERR_SEED_ADMIN_*` (bootstrap
@@ -148,12 +153,16 @@ docker compose logs -f app  # watch the boot integrity log (dirs, migrations, co
 - Migrations apply automatically at boot; no manual migrate step is needed.
 - On an **empty** users table the bootstrap admin is created from `VIBERR_SEED_ADMIN_EMAIL`
   / `VIBERR_SEED_ADMIN_PASSWORD` (or a random password logged once).
-- `docker compose exec app npm run seed` seeds the product baseline — the built-in agent
+- Seed BEFORE the app starts (or stop it first) — `npm run seed` takes the
+  single-writer lock and refuses against a running container.
+  `npm run seed` seeds the product baseline — the built-in agent
   catalog, knowledge bases, skills — and nothing else: no demo/mock board data. The board
   always starts as a clean sheet.
-- Health: `GET /resources/health` → `{ ok, projections: { projects, tasks }, watcher }`.
+- Health: `GET /resources/health` →
+  `{ ok, projections: { projects, tasks }, watcher, kbWatcher, lock, backends }`.
   Compose has a healthcheck hitting it; container platforms should use it as the readiness
-  probe.
+  probe. *(Field list corrected 2026-08-06, pass 19 — `kbWatcher`, `lock` and `backends`
+  ship and were missing here, though `lock` and `backends` are both documented below.)*
 
 ## Persistence, backup & restore
 
@@ -172,20 +181,30 @@ That is the whole set — created at boot from `DATA_ROOT_SUBDIRS` in
 `app/server/files/file-store-root.server.ts`. There is no `auth/`, `cache/` or `logs/`
 directory; application logs are structured JSON on stdout.
 
-- **Backup** = snapshot the whole `./docker-data` directory, **including the
-  `projection.sqlite-wal` and `-shm` sidecars whenever they are present**. SQLite runs in
-  WAL mode. On a *clean* shutdown the app now checkpoints the WAL into the main file and
-  closes it (`shutdownDatabase()` → `PRAGMA wal_checkpoint(TRUNCATE)`, armed at boot by
-  `armProcessShutdown()`), which unlinks the sidecars — but you cannot assume that
-  happened. A crash, `SIGKILL`, an OOM kill or power loss bypasses the handler; the
-  checkpoint is best-effort and logs-and-continues if it fails; and a hot backup of a
-  *running* container captures live `-wal` data by definition. In all of those cases
-  committed rows — users, sessions, PATs — still live in the `-wal` file, so copying
-  `projection.sqlite` alone can silently lose them. Stopping the container first gives you
-  a quieter snapshot and, when the checkpoint succeeds, may leave no sidecars to copy at
-  all — but it does not let you *skip* them: include them if they exist. If
-  `runtimes/codex-home/auth.json` exists, the backup contains a live credential and must be
-  encrypted and access controlled like any other secret.
+- **Backup** = `npm run backup` (add `--out <dir>`). It writes a timestamped artefact
+  containing a genuine point-in-time `projection.sqlite` — taken with `VACUUM INTO` from a
+  read-only connection, so it folds in WAL content and lands as ONE file with no sidecars —
+  plus the canonical markdown tree, and a `MANIFEST.json` recording byte size, sha256 and
+  the row counts read back out of the artefact. It does **not** take the writer lock: a
+  backup that refused to run on a live instance would be no backup at all.
+
+  Read the artefact's own README for what it excludes. Two exclusions matter most:
+  `runtimes/` (live agent logins — opt in with `--include-runtimes`, and then treat the
+  artefact as a secret), and **`VIBERR_SECRET_ENCRYPTION_KEY` itself**, which lives in the
+  environment. Without that key every sealed PAT and MCP credential in the backed-up
+  database is unreadable, so back the key up separately.
+
+  The older advice — copy `./docker-data` wholesale, being careful to include the
+  `-wal`/`-shm` sidecars — still works, but it is exactly the trap `VACUUM INTO` removes:
+  a hot copy of `projection.sqlite` alone silently loses every committed row still living
+  in the WAL.
+
+- **Restore** = `npm run restore -- --from <artefact>`. Whole-root restore takes the writer
+  lock, requires `--force` if the root is occupied, and *moves* displaced data aside rather
+  than deleting it. To recover a single hand-broken canonical file without touching the
+  database: `npm run restore -- --from <artefact> --file projects/<slug>/tasks/<KEY>/task.md`
+  — the broken bytes are kept beside it as `task.md.broken-<ts>`.
+
 - **Restore** = drop the directory back — sidecars included — and start the container.
 
 **`state/projection.sqlite` is primary storage, not a cache — back it up.** The

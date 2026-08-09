@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ReviewQueuePage } from "./review-page";
+import { capabilityById } from "~/shared/capabilities";
 import type { ReviewRowView } from "./review-helpers";
 
 afterEach(cleanup);
@@ -19,6 +20,8 @@ const rowHuman: ReviewRowView = {
   pr: { number: 318, state: "review" },
   validation: "changed",
   blockReason: null,
+  lastActivityAt: "2026-07-02T09:41:00.000Z",
+  quiet: false,
 };
 
 const rowAgent: ReviewRowView = {
@@ -31,6 +34,8 @@ const rowAgent: ReviewRowView = {
   pr: { number: 311, state: "merged" },
   validation: "healthy",
   blockReason: null,
+  lastActivityAt: "2026-07-02T09:41:00.000Z",
+  quiet: false,
 };
 
 function renderQueue(
@@ -256,6 +261,8 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
     validation: "changed",
     blockReason:
       "VIB-9's delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.",
+    lastActivityAt: "2026-07-02T09:41:00.000Z",
+    quiet: false,
   };
 
   it("the subline names the closed PR and the queue never advertises force-accept", () => {
@@ -323,11 +330,46 @@ describe("P13-D-9: the queue stops promising human-only Done unconditionally", (
     expect(note).not.toContain("always a human action");
     expect(note).toContain("Atlas");
     expect(note).toContain("full autonomy");
-    expect(note).toContain("Completion for human acceptance");
+    expect(note).toContain("Accept completion into Done");
     expect(note).toContain("Direct");
     // It stays an exception, not a licence.
     expect(note).toContain("one exception");
     expect(note).toContain("always in the audit log");
+  });
+
+  // UXV19-1: this queue named the capability by hand and kept the RETIRED
+  // label ("Completion for human acceptance") after the catalog renamed it —
+  // on the one surface that tells the reader to go verify the claim on Policy,
+  // where only "Accept completion into Done" exists. Both the tooltip and the
+  // footer now render the catalog's own label, by id.
+  // Canary: hardcode "Completion for human acceptance" back into either the
+  // title at review-page.tsx or the footer <strong> and this test fails.
+  it("names the acceptance capability exactly as the catalog does, in the chip AND the footer", () => {
+    const label = capabilityById("completion-for-acceptance")!.label;
+    expect(label).toBe("Accept completion into Done");
+
+    const { container, getByText } = renderQueue([rowHuman], [], 1, {
+      operatorCanAccept: true,
+      operatorName: "Atlas",
+    });
+    const title = getByText("Review → Done · human or operator")
+      .closest("button")!
+      .getAttribute("title")!;
+    const note = container.querySelector(".pol-note")!.textContent!;
+
+    for (const copy of [title, note]) {
+      expect(copy).toContain(label);
+      // The name it was renamed AWAY from must not survive anywhere here: it
+      // matches no control on Policy, on the operator profile, or in the
+      // capability editor.
+      expect(copy).not.toContain("Completion for human acceptance");
+    }
+    // The exception needs BOTH facts — full autonomy alone never confers it
+    // (`promotable: false`), so the copy must not read as a consequence of the
+    // autonomy setting.
+    expect(note).toContain("full autonomy");
+    expect(note).toContain("separately holds");
+    expect(note).toContain("never implied by the autonomy setting");
   });
 
   it("defaults to the strict boundary when the caller passes no acceptance data", () => {
@@ -335,5 +377,34 @@ describe("P13-D-9: the queue stops promising human-only Done unconditionally", (
     expect(container.querySelector(".pol-note")!.textContent).toContain(
       "always a human action",
     );
+  });
+});
+
+/**
+ * Pass-19 gap 10 — the acceptance boundary carried no time at all. A completion
+ * report that landed five minutes ago and one that has waited since Tuesday
+ * rendered identically, on the queue whose entire job is triage.
+ */
+describe("gap-10: a review row that has gone quiet says so", () => {
+  const stale: ReviewRowView = {
+    ...rowHuman,
+    key: "VIB-777",
+    lastActivityAt: new Date(Date.now() - 4 * 24 * 60 * 60_000).toISOString(),
+    quiet: true,
+  };
+
+  it("draws the neutral cue and keeps the acceptance wait-tag beside it", () => {
+    const { container } = renderQueue([stale], []);
+    const meta = container.querySelector(".rq-meta")!;
+    expect(meta.textContent).toContain("no activity");
+    expect(meta.querySelector(".pill.neutral")).toBeTruthy();
+    // The row still says whose move it is — the cue adds time, it never replaces
+    // the wait state.
+    expect(meta.textContent).toContain("your acceptance");
+  });
+
+  it("says nothing on a row that is still moving", () => {
+    const { container } = renderQueue([rowHuman], [rowAgent]);
+    expect(container.textContent).not.toContain("no activity");
   });
 });

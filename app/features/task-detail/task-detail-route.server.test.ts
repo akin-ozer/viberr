@@ -628,8 +628,17 @@ describe("assign-specialist + run-specialist intents", () => {
       profileId: "developer",
       role: "Implementation",
     });
-    expect(after.task.timeline[0]).toMatchObject({ type: "agent" });
-    expect(after.task.timeline[0]!.text).toContain("Deployed **Developer**");
+    // Moving VIB-166 into the auto "ready" stage above auto-invokes the
+    // operator; with no workspace to advance (the read-only checkout fails
+    // fast under GIT_ALLOW_PROTOCOL=file) its stranded-resume chain hits the
+    // transition-chain cap and leaves a system stall note. That async note can
+    // sit ABOVE the assign event, so locate the deployment by type + copy
+    // rather than assuming it is the newest entry — the same reason the
+    // request_edit case finds its transition by type instead of position.
+    const deployed = after.task.timeline.find(
+      (e) => e.type === "agent" && e.text.includes("Deployed **Developer**"),
+    );
+    expect(deployed, "the assign event must be recorded as an agent event").toBeDefined();
   });
 
   it("reviewer + viewer are denied assign (admin|maintainer only)", async () => {

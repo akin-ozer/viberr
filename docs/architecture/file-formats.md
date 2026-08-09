@@ -171,7 +171,11 @@ verdicts:                         # per-engagement, each bound to a revision
     reason: Scope matches the goal.
     at: 2026-07-04T06:52:00.000Z
 branch: vib-142-attach-workspace  # task-key branch; null before creation
-repo: null                        # always null — see the note below
+archived: false                   # R14-3: abandoned work, kept for the record —
+                                  # leaves the board's default view and the review
+                                  # queue, keeps its timeline, restorable
+noChanges: true                   # optional; R17-2/R19-1 — this task completes
+                                  # with NOTHING to deliver (see the note below)
 pr:                               # GitHub projection mirrored into the file
   number: 318                     # (Phase 7 reconciler owns sync)
   state: review
@@ -214,6 +218,8 @@ options:
     rec: true                     #   redirect | retry_other_backend |
     accept: true                  #   edit_goal | archive_task | custom
                                   # (acceptance path marker — human-only)
+                                  # Source of truth: PACKET_OPTION_KINDS in
+                                  # app/schemas/task-file.schema.ts.
   - kind: request_edit
     t: Request one edit
     d: …
@@ -256,12 +262,22 @@ Notes:
   recomputed from the other two plus the required-reviewer set on every write; do not
   hand-edit it as a source of truth. A verdict names the `revisionId` it judged, so a new
   revision automatically staleness-expires every prior verdict.
-- **`repo` is vestigial and always `null`.** The task-level repository override was
-  struck by owner ruling on 2026-07-25: one project, one repository. The read path still
-  honours a non-null value, but nothing in the product ever writes one and no UI offers
-  it. Do not hand-set it — a task pointing at a different repository still authenticates
-  with the *project's* credential, so a cross-owner value fails authentication with no
-  useful diagnosis, and such a task is never reconciled by the background poller.
+- **`repo` is GONE from the task frontmatter.** The task-level repository override was
+  struck by owner ruling on 2026-07-25 (P13-D-5): one project, one repository. *(Corrected
+  2026-08-06, pass 19 — this note used to say the field was "vestigial and always null" and
+  that "the read path still honours a non-null value". Neither is true: `repo` is not in
+  `taskFrontmatterSchema` at all, and every `frontmatter.repo` read in the tree is on
+  `project.md`.)* A `repo:` line in an existing `task.md` is now simply an UNKNOWN key —
+  preserved verbatim on round-trip, ignored by every resolver. Do not hand-set it expecting
+  an effect; there is none.
+- **`noChanges` is the no-change completion flag** (R17-2, made reachable by R19-1). It marks
+  a task that completes with nothing to deliver, turning acceptance's normal "deliver the
+  branch & open the PR" refusal into the first-class "Completed — no changes" close. Two
+  producers: a delivery attempt that found the branch empty, and a reviewer approving a task
+  that never needed a branch at all. It is a claim about a moment that has passed, so it is
+  re-verified against the live remote before any writer closes the task to Done — a branch
+  that has since gained commits cannot ride a stale flag into Done. Cleared the moment a
+  delivery opens a PR. Do not hand-set it.
 - Unknown top-level frontmatter keys are preserved verbatim on write (the legacy
   engagement keys above are the deliberate exception).
 
@@ -272,9 +288,15 @@ Notes:
   the bottom are tolerated — display sorts by timestamp and an
   `timeline.out_of_order` info diagnostic is recorded).
 - Heading line: `### <UTC ISO> · <type> · <actor-ref>` — separator is
-  `<space>·<space>` (U+00B7). `type` is one of the 10 contract types
+  `<space>·<space>` (U+00B7). `type` is one of the 11 contract types
   (`comment completion github policy note quality transition blocked agent
-  assign`); unknown types are kept and render as plain comments.
+  assign continuity`); unknown types are kept and render as plain comments.
+  `continuity` (added pass 18, G8; count corrected here 2026-08-06, pass 19,
+  against `TIMELINE_EVENT_TYPES`) marks a runtime-continuity RESET — a resumed
+  session whose provider transcript was gone, so the agent re-anchored on
+  `task.md` in a fresh one. It is warning-toned on purpose: nothing was violated
+  (not `policy`) and nothing is stuck (not `blocked`), but a supervisor scanning
+  the board must get a cue that context was lost and recovered.
   `note` was split out of `policy` in pass 13 (P13-LV-03): `policy` is now
   reserved for genuine governance violations and refusals, which render with a
   coral shield, and every neutral system remark — a goal edit, a divergence

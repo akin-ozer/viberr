@@ -217,7 +217,8 @@ export function CapabilityMatrixModal({
                 clipped, and one that no longer fits is announced as omitted. A
                 Claude run that cannot install them (no checkout, or another live
                 run already holds this task's workspace) falls back to the same
-                prompt text.
+                prompt text. Keep a skill short if agents on both backends must
+                follow it.
               </li>
               <li>
                 <b>Post mid-run comments</b> has no Codex channel — granting it does

@@ -452,13 +452,30 @@ describe("audit-column compaction (R19-7)", () => {
 
     for (const action of auditActions) {
       const from = src.indexOf(`case "${action}":`);
-      expect(from, `${action} must have a template`).toBeGreaterThan(-1);
-      const rest = src.slice(from + action.length + 8);
-      const stop = /\n    (?:case "|default:)/.exec(rest);
-      const block = rest.slice(0, stop ? stop.index : rest.length);
-      const templates = [...block.matchAll(/`([^`]*)`/g)].map((m) => m[1]!);
-      expect(templates.length, `${action} must render a sentence`)
-        .toBeGreaterThan(0);
+      // Most governance families have a bespoke `case` template. A newly
+      // registered kind may instead render through the projection's DOCUMENTED
+      // default fallback: the `AUDIT_ACTION_KINDS` docstring blesses it for
+      // "additions that land here before a bespoke sentence does", and RECONCILE
+      // §1.2 registered R19-A's `task.operator.autonomy_clamped` as a map entry
+      // only. The default is `${actor} — <action words>.` — it ALWAYS ends in
+      // ".", so it can never carry the `runtime session — recorded per audit
+      // policy on` tail the fold looks for. The spoof-must-fail law (R19-7) is
+      // asserted over it below all the same, so a name still cannot fold it.
+      let templates: string[];
+      if (from === -1) {
+        expect(
+          src,
+          "an untemplated audit kind must fall through to the documented default",
+        ).toContain('${row.action.replace(/[._]/g, " ")}');
+        templates = ["${actor} — " + action.replace(/[._]/g, " ") + "."];
+      } else {
+        const rest = src.slice(from + action.length + 8);
+        const stop = /\n    (?:case "|default:)/.exec(rest);
+        const block = rest.slice(0, stop ? stop.index : rest.length);
+        templates = [...block.matchAll(/`([^`]*)`/g)].map((m) => m[1]!);
+        expect(templates.length, `${action} must render a sentence`)
+          .toBeGreaterThan(0);
+      }
 
       for (const template of templates) {
         for (const name of names) {

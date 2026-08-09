@@ -46,6 +46,7 @@ import {
   prStatePill,
   reviewPill,
 } from "~/features/github/github-pills";
+import { LocalRelative } from "~/ui/local-time";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -84,9 +85,25 @@ export interface BoardStage {
   color: string;
 }
 
+/**
+ * Gap-10: a board card's task, plus the two activity fields `listProjectTasks`
+ * annotates every summary with (`TaskActivitySummary` in board-query.server.ts).
+ *
+ * They are OPTIONAL here for one reason only: `routes/project.tsx` re-types the
+ * columns through `annotate: (t: TaskSummary): TaskSummary`, which erases them
+ * from the type while the spread carries the values through at runtime. The
+ * one-line patch that restores the type is in this pass's report; until it
+ * lands, `undefined` means "no loader annotated this" and reads as "not quiet",
+ * which is the safe direction — a missing signal must never invent a cue.
+ */
+export interface BoardTask extends TaskSummary {
+  lastActivityAt?: string | null;
+  quiet?: boolean;
+}
+
 export interface BoardColumnData {
   stage: BoardStage;
-  tasks: TaskSummary[];
+  tasks: BoardTask[];
 }
 
 /** Data carried by every card sortable so the drag handlers can refine the
@@ -203,8 +220,13 @@ function WaitTag({ task }: { task: TaskSummary }) {
  * the same reason (UXO-1). The traceability chips beside this block (branch, PR
  * number) stay: "how far did this get?" is still a true question about an
  * archived task, exactly as the hero keeps its stage pill.
+ *
+ * Gap-10: the "gone quiet" cue lives here too, rendered between validation and
+ * the wait tag. Putting it INSIDE this block means the archived-null return
+ * above guards it for free — an archived task is a terminal disposition and is
+ * never "quiet".
  */
-function StateSignals({ task }: { task: TaskSummary }) {
+function StateSignals({ task }: { task: BoardTask }) {
   if (isArchived(task)) return null;
   return (
     <>
@@ -261,6 +283,9 @@ function StateSignals({ task }: { task: TaskSummary }) {
       {task.validation !== "none" && (
         <ValidationPill value={task.validation} sm />
       )}
+      {/* Gap-10: the quiet cue sits after validation and before the wait tag,
+          the order both board views share. */}
+      <QuietTag task={task} />
       <WaitTag task={task} />
     </>
   );
@@ -274,6 +299,35 @@ function ArchivedPill() {
     <Pill kind="neutral" sm>
       <Icon name="lock" />
       archived
+    </Pill>
+  );
+}
+
+/**
+ * Gap-10 — the "gone quiet" cue, and the board's only last-activity display.
+ *
+ * TONE, deliberately: a NEUTRAL pill, the same grey the `archived` chip uses,
+ * and copy that states a fact rather than reaching a verdict. The board spends
+ * its loud colours on states something asserted — blocked, inconsistency risk,
+ * failing checks, a rejected PR. Going quiet is inferred from an ABSENCE of
+ * events, so it earns a place on the card but not a colour that competes with a
+ * real failure. The thresholds carry the "don't cry wolf" weight instead: a task
+ * waiting on a human gets three days, so an overnight wait never draws this at
+ * all (see task-activity.server.ts).
+ *
+ * It renders ONLY past the threshold. A relative stamp on every card would be
+ * history on a surface whose principle is "status before history"; here the
+ * elapsed time IS the status, and only when it has become one.
+ */
+function QuietTag({ task }: { task: BoardTask }) {
+  if (!task.quiet || !task.lastActivityAt) return null;
+  return (
+    <Pill kind="neutral" sm>
+      {/* LocalRelative, not a bare format call: relative text depends on NOW,
+          so the SSR pass and hydration can straddle a minute boundary. It
+          renders a non-breaking space for one frame and fills in after
+          hydration (app/ui/local-time.tsx). */}
+      no activity · <LocalRelative iso={task.lastActivityAt} />
     </Pill>
   );
 }
@@ -333,7 +387,7 @@ function TaskCard({
   onMoveTask,
   roving,
 }: {
-  task: TaskSummary;
+  task: BoardTask;
   /** The key of the card immediately below this one (null when last) — used to
    *  resolve "drop below this card" into an insertion slot. */
   nextKey: string | null;
@@ -353,6 +407,11 @@ function TaskCard({
   // F19-8: an ARCHIVED task is abandoned work kept for the record — it is out
   // of the flow, out of the review queue and owes nobody anything. The card is
   // inert for it: no live pills, no drag, no Move menu (see the render below).
+  // UXO-1 removed the live readiness/validation pills from the task hero for the
+  // same reason; before this the board kept drawing them, so a task archived
+  // mid-review still read "ready · awaiting verdict · waiting on a human"
+  // directly beneath the banner calling it abandoned, with a working Move
+  // control besides.
   const archived = isArchived(task);
   // The card is both drag source and drop target (insert-before-this-card).
   // Clone feedback keeps today's model: the original stays as a faded ghost
@@ -496,7 +555,7 @@ function Column({
   rovingKey,
 }: {
   stage: BoardStage;
-  tasks: TaskSummary[];
+  tasks: BoardTask[];
   /** D19: the key of the one card holding the board's tab stop (may be in
    *  another lane, in which case no card here is tabbable). */
   rovingKey: string | null;
@@ -511,7 +570,7 @@ function Column({
   arrivedKey: string | null;
   /** This column is the current drop target (highlight + show the preview). */
   dropTarget: boolean;
-  previewTask: TaskSummary | null;
+  previewTask: BoardTask | null;
   /** Insertion slot: render the preview before this card (null = column end). */
   beforeKey: string | null;
   allStages: BoardStage[];
@@ -598,7 +657,7 @@ function ListRow({
   onMoveTask,
   roving,
 }: {
-  task: TaskSummary;
+  task: BoardTask;
   stages: BoardStage[];
   canTransition: boolean;
   onMoveTask: (taskKey: string, toStageId: string) => void;
@@ -670,7 +729,7 @@ function ListView({
   rovingKey,
   onCardKeyDown,
 }: {
-  tasks: TaskSummary[];
+  tasks: BoardTask[];
   stages: BoardStage[];
   /** P13-D-34: filter/search-aware empty copy (the list has ONE empty state). */
   emptyCopy: string;
@@ -1109,6 +1168,13 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   // proceed (blocked, waiting on an answer, failing validation, urgent, or a
   // rejected PR). See matchesBoardFilter.
   { id: "risk", label: "Blocked or waiting", icon: "alert" },
+  // Gap-10: the board is a triage console whose job is to say what needs a
+  // human, and a task that stopped producing events looked exactly like one
+  // being worked — right down to the pulsing "agent working" dot. This chip is
+  // the way to ask for them. Named for what it selects (R16-2), and named
+  // "quiet" rather than "stalled" because the detector observes an absence of
+  // events; it does not diagnose a fault.
+  { id: "quiet", label: "No activity", icon: "clock" },
   // R14-3: archived tasks are out of every other view; this is the way back to
   // them. The chip only renders when the project has any (see FilterBar).
   { id: "archived", label: "Archived", icon: "lock" },
@@ -1212,6 +1278,7 @@ function FilterBar({
   filter,
   query,
   waitingOnMe,
+  quiet,
   archived,
   setParam,
   onClear,
@@ -1221,6 +1288,12 @@ function FilterBar({
   query: string;
   /** R8-3: member-scoped count for the "Waiting on me" chip. */
   waitingOnMe: number;
+  /** Gap-10: live tasks with no recorded activity — the "No activity" chip's
+   *  tally. Deliberately NOT "quiet": the home project card already uses that
+   *  word for `running === 0`, i.e. a perfectly healthy project with nothing in
+   *  flight. Two meanings one click apart is the vocabulary drift this pass has
+   *  been removing; the chip now matches the pill it selects ("no activity"). */
+  quiet: number;
   /** R14-3: archived tasks in this project — the chip is the only way back to
    *  them, so it renders only when there are any (and always while it is on). */
   archived: number;
@@ -1243,6 +1316,9 @@ function FilterBar({
           {f.label}
           {f.id === "human" && waitingOnMe > 0 && (
             <span className="tally">· {waitingOnMe}</span>
+          )}
+          {f.id === "quiet" && quiet > 0 && (
+            <span className="tally">· {quiet}</span>
           )}
           {f.id === "archived" && archived > 0 && (
             <span className="tally">· {archived}</span>
@@ -1328,7 +1404,7 @@ function StageBoard({
    *  moves it. Delegated on the board container so every lane shares it. */
   rovingKey: string | null;
   onCardKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
-  visible: (tasks: TaskSummary[]) => TaskSummary[];
+  visible: (tasks: BoardTask[]) => BoardTask[];
   /** P13-D-34: per-column empty copy, given that column's UNFILTERED total. */
   emptyCopyFor: (total: number, isEntryColumn?: boolean) => string;
   doneStageId: string | undefined;
@@ -1339,7 +1415,7 @@ function StageBoard({
   overStage: string | null;
   beforeKey: string | null;
   arrivedKey: string | null;
-  draggedTask: TaskSummary | null;
+  draggedTask: BoardTask | null;
   /** F10-25: the StageMenu move — the always-available non-drag path. */
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
@@ -1390,7 +1466,7 @@ export function BoardPage({
   canRescan,
 }: {
   columns: BoardColumnData[];
-  orphanTasks: TaskSummary[];
+  orphanTasks: BoardTask[];
   canCreate: boolean;
   /** admin|maintainer — enables the per-card stage-move dropdown. */
   canTransition: boolean;
@@ -1585,6 +1661,10 @@ export function BoardPage({
   const waitingHuman = liveTasks.filter((t) => t.waiting === "human").length;
   // R8-3: the "Waiting on me" chip is member-scoped — decisions THIS viewer can act on.
   const waitingOnMe = liveTasks.filter((t) => t.waitingOnMe).length;
+  // Gap-10: counted over LIVE tasks for the same reason the two above are —
+  // `isQuiet` already refuses archived and terminal tasks, and this keeps the
+  // chip's tally reading the same population its filter draws.
+  const quietCount = liveTasks.filter((t) => t.quiet === true).length;
   const archivedCount = countArchived(allTasks);
   // The card in flight (for the drop-preview shown in the hovered column).
   const draggedTask = drag
@@ -1613,7 +1693,7 @@ export function BoardPage({
     );
   }, [pendingAccept, pendingAcceptTask, push]);
 
-  const visible = (tasks: TaskSummary[]) =>
+  const visible = (tasks: BoardTask[]) =>
     tasks.filter(
       (t) => matchesBoardFilter(t, filter) && matchesSearch(t, query),
     );
@@ -1833,6 +1913,7 @@ export function BoardPage({
         filter={filter}
         query={query}
         waitingOnMe={waitingOnMe}
+        quiet={quietCount}
         archived={archivedCount}
         setParam={setParam}
         onClear={clearFilters}

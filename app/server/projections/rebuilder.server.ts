@@ -13,6 +13,10 @@ import {
   type TaskFrontmatter,
   type Validation,
 } from "~/schemas/task-file.schema";
+import {
+  humanApprovalRefusalNote,
+  humanVerdictApproval,
+} from "~/server/github/pr-human-approval.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
   getDataRoot,
@@ -287,15 +291,27 @@ function verdictGateReason(
   // non-repo work, which stays acceptable.
   if (!fm.workRevision) return null;
   if (!fm.pr) {
-    // R17-2 (F17-L9): a verified empty branch is a "Completed, no changes"
-    // completion — acceptable without a PR.
-    if (fm.noChanges) return null;
+    // R17-2 (F17-L9) / R19-1: a verified empty branch — or a VERIFICATION
+    // revision, the base sha a reviewer judged on a task with nothing to
+    // deliver — is a "Completed — no changes" completion, acceptable without a
+    // PR.
+    if (fm.noChanges || fm.workRevision.kind === "verified") return null;
     return `${fm.key} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
   }
   // `healthy` clears the gate; `failing` was already named precisely by
   // `acceptanceBlockedReason`, which runs first.
   if (validation === "healthy" || validation === "failing") return null;
-  return `${fm.key}'s delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.`;
+  // R19-B: a project member's GitHub approval bound to the DELIVERED revision
+  // is the verdict (owner ruling, gap 24). This mirrors `acceptanceBlockReason`
+  // in task-actions.server.ts — the two must move together, or the review queue
+  // and decisions inbox say "no approving verdict yet" about a task the task
+  // page will happily accept.
+  if (humanVerdictApproval(fm)) return null;
+  const nearMiss = humanApprovalRefusalNote(fm);
+  if (nearMiss) {
+    return `${fm.key}'s delivered revision has no approving verdict yet — ${nearMiss}`;
+  }
+  return `${fm.key}'s delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.`;
 }
 
 /**

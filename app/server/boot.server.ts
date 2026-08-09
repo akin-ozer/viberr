@@ -10,7 +10,6 @@ import {
   startDataRootLockGuard,
 } from "./db/data-root-lock.server";
 import { getDb } from "./db/sqlite.server";
-import { applyRetention } from "./db/retention.server";
 import { startEventPublisher } from "./events/event-publisher.server";
 import { armProcessShutdown } from "./events/sse-broker.server";
 import {
@@ -22,6 +21,12 @@ import { startFileWatcher } from "./files/file-watch.service.server";
 import { startKbWatcher } from "./files/kb-watch.service.server";
 import { startGithubReconcilePoller } from "./github/reconcile-poller.server";
 import { logger } from "./logging/logger.server";
+import { getBuildInfo } from "./ops/build-info.server";
+import { formatBytes, measureDataRootSpace } from "./ops/disk-space.server";
+import {
+  runMaintenancePass,
+  startMaintenanceScheduler,
+} from "./ops/maintenance.server";
 import { rescanProjections } from "./projections/rescan.server";
 import {
   finalizeOrphanedRuns,
@@ -40,8 +45,15 @@ const BOOT_KEY = Symbol.for("viberr.booted");
  * Boot integrity report (Phase 10): data-root dirs + migration state +
  * projection counts, logged once at startup. Basic runtime sanity — no
  * security posture implied.
+ *
+ * Gap 18: it now also names the BUILD. deployment.md §First run tells the
+ * operator to "watch the boot integrity log", and §Upgrades to roll back by
+ * "redeploying the previous image" — neither was verifiable, because the only
+ * identity-shaped field here was `latestMigration`, a constant
+ * (`0001_baseline.sql`) for every build ever made. Exported so the line's
+ * contents are testable instead of only asserted in a comment.
  */
-function logBootIntegrity(db: DatabaseSync): void {
+export function logBootIntegrity(db: DatabaseSync): void {
   const root = getDataRoot();
   const missingDirs = DATA_ROOT_SUBDIRS.filter(
     (dir) => !existsSync(path.join(root, dir)),
@@ -62,6 +74,8 @@ function logBootIntegrity(db: DatabaseSync): void {
   const users = (
     db.prepare(`SELECT count(*) AS c FROM users`).get() as { c: number }
   ).c;
+  const build = getBuildInfo();
+  const disk = measureDataRootSpace();
   logger.info("boot integrity check", {
     dataRoot: root,
     dataRootDirsOk: missingDirs.length === 0,
@@ -70,7 +84,48 @@ function logBootIntegrity(db: DatabaseSync): void {
     latestMigration: migrations.latest,
     projections: { projects, tasks },
     users,
+    // Which build this is. Nulls are honest — an image built without a version
+    // stamp says so rather than printing a placeholder.
+    build,
+    // Gap 16: how much room is left, at the one moment an operator is already
+    // reading this log. `null` when the filesystem could not be measured.
+    ...(disk
+      ? {
+          disk: {
+            free: formatBytes(disk.freeBytes),
+            total: formatBytes(disk.totalBytes),
+            status: disk.status,
+          },
+        }
+      : { disk: null }),
   });
+}
+
+/**
+ * Boot's store-maintenance step, and the timer that makes it recur (gaps 15/20).
+ *
+ * Retention ran exactly once per process, at boot — coupled to the restart a
+ * stable deployment never performs. Boot keeps its one-shot pass (it is the
+ * cheapest moment to prune, and it must happen before the first request), and
+ * now also arms the periodic scheduler so a container that stays up for three
+ * months prunes ~360 times instead of never.
+ *
+ * `reclaimWorkspaces: false` here is deliberate: `reconcileRestartedWork` owns
+ * the workspace reclaim at boot, sequenced AFTER run recovery so nothing in
+ * flight is touched (P14-RT-09). Doing it here as well would reintroduce
+ * exactly that race. The periodic pass has its own active-run guard instead.
+ *
+ * Exported so the wiring is testable without booting a real server.
+ */
+export function startStoreMaintenance(db: DatabaseSync): void {
+  try {
+    runMaintenancePass(db, { reason: "boot", reclaimWorkspaces: false });
+  } catch (error) {
+    logger.error("boot maintenance pass failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  startMaintenanceScheduler(db);
 }
 
 /**
@@ -279,16 +334,12 @@ export async function bootServer(): Promise<void> {
     });
   }
 
-  // F10-29: bounded retention/compaction of the high-volume log/audit/
-  // notification tables so a long-lived deployment doesn't grow the SQLite file
-  // without limit. Best-effort; canonical task files (source of truth) untouched.
-  try {
-    applyRetention(db);
-  } catch (error) {
-    logger.error("retention pass failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-  }
+  // F10-29 + gaps 15/20: bounded retention/compaction of the high-volume
+  // log/audit/notification tables AND the raw run transcripts / provider session
+  // homes on disk, so a long-lived deployment doesn't grow without limit —
+  // once here, then on a timer for the deployment that never restarts.
+  // Best-effort; canonical task files (source of truth) untouched.
+  startStoreMaintenance(db);
 
   // Fire-and-forget: the chain awaits its own runs internally and must never
   // hold up the server coming online.

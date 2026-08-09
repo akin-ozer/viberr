@@ -85,7 +85,15 @@ export function AcceptConfirm({
   defaultBranch,
   atBoundary = true,
   ceremony,
-  /** The refusal a force-accept bypasses (null for a clean accept). */
+  /** R19-B: when a HUMAN's GitHub approval cleared the verdict gate, the
+   *  sentence naming them and the commit they approved — rendered on the verdict
+   *  row so the human accepting knows whose judgement they stand on (ruling 19:
+   *  a chip is evidence, never a pseudo-check). Null when an agent verdict
+   *  cleared the gate, or nothing has. */
+  verdictSatisfiedBy = null,
+  /** The refusal a force-accept bypasses (null for a clean accept). For the
+   *  packet mode the page passes `blockedReasonViaPacket` here — the refusal a
+   *  packet resolution would hit, never the open packet it clears (F19-7). */
   blockedReason,
   busy,
   onCancel,
@@ -107,6 +115,8 @@ export function AcceptConfirm({
   atBoundary?: boolean;
   /** Which acceptance writer is asking (plus what the human clicked). */
   ceremony: AcceptCeremony;
+  /** R19-B: the human GitHub approval carrying the verdict gate, or null. */
+  verdictSatisfiedBy?: string | null;
   blockedReason: string | null;
   busy: boolean;
   onCancel: () => void;
@@ -283,6 +293,14 @@ export function AcceptConfirm({
             <span className="k">Verdict</span>
             <span>
               <ValidationPill value={task.validation} />
+              {/* R19-B: the R15-1 verdict gate can be cleared by a human's
+                  GitHub approval rather than an agent verdict. The pill goes
+                  green either way, so name the person and the commit they
+                  approved — a gate a human satisfied cannot pass silently
+                  (ruling 19). */}
+              {verdictSatisfiedBy && (
+                <span className="fine xs"> — {verdictSatisfiedBy}</span>
+              )}
             </span>
           </div>
           {/* R19-5: the skip is allowed — being quiet about it is not. Name the

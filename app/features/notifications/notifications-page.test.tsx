@@ -36,7 +36,10 @@ const ITEMS: NotificationPageItem[] = [
     id: "n-dep-31",
     kind: "packet",
     ptype: "input",
-    title: "Completion report — staging promotion ready",
+    // F19-24: the shape `operatorOpenPacket` actually writes — EVERY packet row
+    // is titled "Decision needed: …" (operator-actions.server.ts), which is
+    // why pilling them "completion report" contradicted the row's own title.
+    title: "Decision needed: which scope should we take?",
     text: "Promotion to staging needs your acceptance.",
     projectSlug: "deploy-pipeline",
     projectName: "Deploy Pipeline",
@@ -185,14 +188,26 @@ describe("NotificationsPage", () => {
     expect(rows).toHaveLength(3);
     expect(getByText("3 decisions")).toBeTruthy();
 
-    // Type pills per kind/ptype.
+    // Type pills per kind/ptype. F19-24: the non-blocked packet pill used to
+    // read "completion report" by FALL-THROUGH — a name that belongs to the
+    // acceptance boundary — while the row's own title said "Decision needed: …"
+    // and the same packet was pilled "Decision required" on the task page.
     expect(rows[0]!.querySelector(".pill.blocked")!.textContent).toBe(
       "blocked decision",
     );
     expect(rows[1]!.querySelector(".pill.input")!.textContent).toBe(
-      "completion report",
+      "decision required",
     );
     expect(rows[2]!.querySelector(".pill.info")!.textContent).toBe("approval");
+
+    // …and the icon tone agrees with the word: a question does not get the
+    // completion checkmark. (The sibling fall-through in `ntfMeta`.)
+    expect(
+      rows[1]!.querySelector(".pev-ico")!.classList.contains("act-completion"),
+    ).toBe(false);
+    expect(
+      rows[1]!.querySelector(".pev-ico")!.classList.contains("act-policy"),
+    ).toBe(true);
 
     // Global page: the project pill renders for every row (open Q C).
     expect(rows[0]!.querySelector(".pill.neutral")!.textContent).toBe(
@@ -272,6 +287,48 @@ describe("NotificationsPage", () => {
       getByText(
         '3 decisions are waiting on you — switch to "All" to see them.',
       ),
+    ).toBeTruthy();
+  });
+
+  // F19-25: `unread` is the BELL BADGE count, and F18-1 deliberately excludes
+  // rows whose project no longer exists (removed out of band from the file
+  // store, then re-scanned) so a wiped project cannot inflate the badge. The
+  // page renders those rows anyway — unread dot, "Mark read" button — so it
+  // read "all caught up" above three visible unread rows AND withdrew "Mark all
+  // read", the one control that clears them in a single click.
+  it("counts the ORPHANED unread rows it renders, and keeps Mark all read reachable", () => {
+    const orphans = ITEMS.filter((n) => n.kind !== "packet").map((n) => ({
+      ...n,
+      unread: true,
+      waitingOnYou: false,
+      targetMissing: true,
+    }));
+    // The badge number the loader hands over: zero, because every unread row
+    // points at a project that is gone.
+    const { container, getByText, queryByText } = renderPage(orphans, 0);
+
+    expect(container.querySelectorAll(".ntf-ev.unread")).toHaveLength(
+      orphans.length,
+    );
+    expect(
+      getByText(
+        `Everything routed to you, across all projects · ${orphans.length} unread`,
+      ),
+    ).toBeTruthy();
+    expect(queryByText("all caught up")).toBeNull();
+    expect(getByText("Mark all read")).toBeTruthy();
+  });
+
+  it("orphan rows do not double-count against the badge number", () => {
+    // One live unread row (already in `unread`) plus one orphan (excluded from
+    // it) must read "2 unread", not 3.
+    const items: NotificationPageItem[] = [
+      { ...ITEMS[3]!, unread: true },
+      { ...ITEMS[4]!, unread: true, targetMissing: true },
+    ];
+    const { getByText } = renderPage(items, 1);
+    expect(
+      getByText("Everything routed to you, across all projects · 2 unread"),
     ).toBeTruthy();
   });
 

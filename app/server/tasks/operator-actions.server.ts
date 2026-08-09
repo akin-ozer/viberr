@@ -32,7 +32,11 @@ import {
   resolveStageRoles,
 } from "~/shared/workflow/stage-roles";
 import { newId } from "~/shared/ids/new-id.server";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  recordAudit,
+  SYSTEM_ACTOR,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
@@ -59,6 +63,7 @@ import {
   DEFAULT_GOAL,
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
+  RECOMMENDATION_DISMISSED_AUDIT_ACTION,
   acceptanceRefusalFor,
   applyAcceptanceWrite,
   notifyTaskWatchers,
@@ -68,6 +73,11 @@ import {
   transitionStage,
   type TaskMutationContext,
 } from "./task-actions.server";
+import {
+  acceptanceNoChangeCheck,
+  noChangeApplies,
+  noChangeCompletionEvent,
+} from "./no-change-completion.server";
 import {
   assignReviewer,
   assignSpecialist,
@@ -87,7 +97,22 @@ export type OperatorAutonomy = "supervised" | "full";
 export interface OperatorAuthority {
   /** capabilityId → mode, from the project's operator deployment. */
   policy: Map<string, CapabilityMode>;
+  /** The autonomy this run ACTUALLY holds — already clamped to
+   *  {@link OperatorAuthority.configuredAutonomy}. Never above it (R19-A). */
   autonomy: OperatorAutonomy;
+  /**
+   * R19-A — the project deployment's CONFIGURED autonomy: the ceiling for any
+   * run. Optional on the interface only so the handful of hand-built authority
+   * literals in tests keep compiling; `resolveOperatorAuthority` always sets it.
+   */
+  configuredAutonomy?: OperatorAutonomy;
+  /**
+   * R19-A — non-null when THIS run asked for more autonomy than the project
+   * allows and was reduced to the ceiling. Carries what was asked for, so the
+   * reduction can be named (audit row, run disclosure) instead of silently
+   * happening.
+   */
+  autonomyClampedFrom?: OperatorAutonomy | null;
   backend: RealBackend;
   model: string;
   effort: string;
@@ -153,6 +178,94 @@ function readAutonomy(definition: unknown): OperatorAutonomy {
   return "supervised";
 }
 
+/** Autonomy ordered low → high. A run may sit AT or BELOW the project's
+ *  configured level; nothing may sit above it. */
+const AUTONOMY_RANK: Record<OperatorAutonomy, number> = {
+  supervised: 0,
+  full: 1,
+};
+
+/** The audit fact recorded when a run asked for more autonomy than the project
+ *  configured and was reduced to the ceiling (R19-A). Exported so the audit
+ *  panel's whitelist and the tests name the same string. */
+export const AUTONOMY_CLAMPED_AUDIT_ACTION = "task.operator.autonomy_clamped";
+
+/**
+ * R19-A (owner ruling, pass 19) — **a run may never exceed the project's
+ * configured autonomy**.
+ *
+ * `resolveOperatorAuthority` used to return `overrides.autonomy ?? configured`
+ * verbatim, so any `run-agents` role (maintainer+) could launch ONE turn at
+ * `full` on a project whose operator is deployed `supervised` — promoting every
+ * `recommend` capability (stage transitions, packets, typed events,
+ * `deliver-review-pr`) to direct execution, with no confirm, no distinct audit
+ * row, and only a toast. The Policy page presents operator autonomy as PROJECT
+ * configuration (ruling 2); a per-run dropdown that silently outranks it makes
+ * that page a lie.
+ *
+ * This is a CEILING, not a pin: choosing LESS autonomy for a single run stays
+ * allowed and is not a clamp (a maintainer may always ask for more supervision
+ * than the project demands). Omitting the override means "run at the configured
+ * level", which is also not a clamp.
+ *
+ * Pure and exported so the clamp can be unit-asserted, and so the UI can offer
+ * exactly the options that will actually run.
+ */
+export function clampAutonomy(
+  requested: OperatorAutonomy | undefined,
+  ceiling: OperatorAutonomy,
+): { autonomy: OperatorAutonomy; clampedFrom: OperatorAutonomy | null } {
+  if (requested === undefined) return { autonomy: ceiling, clampedFrom: null };
+  if (AUTONOMY_RANK[requested] <= AUTONOMY_RANK[ceiling]) {
+    return { autonomy: requested, clampedFrom: null };
+  }
+  return { autonomy: ceiling, clampedFrom: requested };
+}
+
+/**
+ * R19-A — audit the clamp WHEN IT ACTUALLY BITES, so a silently-reduced run is
+ * visible rather than mysterious.
+ *
+ * Deliberately not recorded when the run simply omitted an override, or asked
+ * for LESS than the ceiling: those are not reductions and an audit row for
+ * every operator resolve would bury the one event that matters. Recording is
+ * skipped entirely when the caller passed no `db` — `resolveOperatorAuthority`
+ * is also a pure READ on loader paths (the review page, the acceptance
+ * authority probe), and a read must not write audit rows.
+ */
+function auditAutonomyClamp(
+  overrides: OperatorAuthorityOverrides,
+  projectSlug: string,
+  clampedFrom: OperatorAutonomy,
+  ceiling: OperatorAutonomy,
+): void {
+  if (!overrides.db) return;
+  recordAudit(overrides.db, {
+    action: AUTONOMY_CLAMPED_AUDIT_ACTION,
+    actor: overrides.actor ?? SYSTEM_ACTOR,
+    subjectKind: "project",
+    subjectId: projectSlug,
+    projectSlug,
+    ...(overrides.taskKey ? { taskKey: overrides.taskKey } : {}),
+    details: { requested: clampedFrom, ranAt: ceiling, configured: ceiling },
+  });
+}
+
+/** Per-run overrides + the optional audit context the clamp needs. */
+export interface OperatorAuthorityOverrides {
+  backend?: RealBackend;
+  autonomy?: OperatorAutonomy;
+  /**
+   * R19-A — supply on RUN paths only. Present = "this resolve launches work",
+   * so a clamp that bites is recorded; absent = a pure read, which stays silent.
+   */
+  db?: DatabaseSync;
+  /** Task the run belongs to, for the clamp audit row. */
+  taskKey?: string;
+  /** The human who asked for the run — who the clamp audit names. */
+  actor?: AuditActor;
+}
+
 /**
  * Resolve the operator's authority for a project from its `agents:`
  * deployment. `overrides` lets a run pick the backend / autonomy for THIS run
@@ -194,10 +307,37 @@ export function operatorBackendFor(
   }
 }
 
+/**
+ * R19-A — the operator deployment's CONFIGURED autonomy for a project: the
+ * ceiling every run is clamped to. The exact sibling of `operatorBackendFor`
+ * (P11-76) and for the same reason — the run picker must offer the options that
+ * will ACTUALLY run. A selector listing "Full autonomy" on a project configured
+ * `supervised` is a control that lies: the server clamps it, the run is
+ * supervised, and the only trace is an audit row the operator never reads.
+ *
+ * Falls back to `supervised` for an unreadable project / no operator deployed —
+ * the same default the run path resolves to.
+ */
+export function operatorAutonomyFor(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): OperatorAutonomy {
+  try {
+    const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+    const deployment = file?.parsed.frontmatter.agents.find(
+      (a) => effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY).kind === "operator",
+    );
+    if (!deployment) return "supervised";
+    return readAutonomy((deployment as Record<string, unknown>).definition);
+  } catch {
+    return "supervised";
+  }
+}
+
 export function resolveOperatorAuthority(
   ctx: TaskMutationContext,
   projectSlug: string,
-  overrides: { backend?: RealBackend; autonomy?: OperatorAutonomy } = {},
+  overrides: OperatorAuthorityOverrides = {},
 ): OperatorAuthority {
   const file = readProjectFile({
     projectSlug,
@@ -217,9 +357,19 @@ export function resolveOperatorAuthority(
   });
 
   if (!deployment) {
+    // R19-A: no deployment ⇒ nothing configured `full`, so the ceiling is
+    // `supervised` here too. `deployed: false` already denies every capability,
+    // but an authority that REPORTS "full" would still be a lie on the run
+    // disclosure — and would hand a future default in this branch real power.
+    const undeployed = clampAutonomy(overrides.autonomy, "supervised");
+    if (undeployed.clampedFrom) {
+      auditAutonomyClamp(overrides, projectSlug, undeployed.clampedFrom, "supervised");
+    }
     return {
       policy: new Map(),
-      autonomy: overrides.autonomy ?? "supervised",
+      autonomy: undeployed.autonomy,
+      configuredAutonomy: "supervised",
+      autonomyClampedFrom: undeployed.clampedFrom,
       backend: overrides.backend ?? "claude",
       model: defaultModelFor(overrides.backend ?? "claude"),
       effort: "",
@@ -251,9 +401,18 @@ export function resolveOperatorAuthority(
       ? resolveRunModel(backend, view.model)
       : defaultModelFor(backend);
 
+  // R19-A: the deployment's configured autonomy is the CEILING for this run.
+  const configuredAutonomy = readAutonomy(definition);
+  const clamped = clampAutonomy(overrides.autonomy, configuredAutonomy);
+  if (clamped.clampedFrom) {
+    auditAutonomyClamp(overrides, projectSlug, clamped.clampedFrom, configuredAutonomy);
+  }
+
   return {
     policy,
-    autonomy: overrides.autonomy ?? readAutonomy(definition),
+    autonomy: clamped.autonomy,
+    configuredAutonomy,
+    autonomyClampedFrom: clamped.clampedFrom,
     backend,
     model,
     effort: backend === declaredBackend ? view.effort || "" : "",
@@ -956,6 +1115,49 @@ function specialistName(
   return found?.name ?? profileId;
 }
 
+// ------------------------------------------------- KB-vs-repository conflict
+
+/** R19-2 — the timeline title a context conflict always carries. */
+export const CONTEXT_CONFLICT_TITLE =
+  "Knowledge base disagrees with the repository";
+
+export interface ContextConflict {
+  /** The knowledge-base document that disagrees. */
+  kbSource: string;
+  /** The repository file that is authoritative. */
+  repoSource: string;
+  /** One or two sentences: what each says, and what was followed. */
+  detail: string;
+}
+
+/**
+ * R19-2 (ruling 56) — a KB-vs-repo disagreement is a `quality` flag on the
+ * timeline. The existing type carries exactly this meaning: nothing was
+ * violated (`policy`) and nothing is stuck (`blocked`), but a human must see
+ * that two sources of convention disagree about the same repository. It already
+ * renders as "Quality flag" and is already a notification kind, so no new
+ * timeline type is added — `TIMELINE_EVENT_TYPES` is untouched.
+ *
+ * The event states the RULING as its first words, because the record is also
+ * what the next agent re-anchors on: the repository won, and here is what lost.
+ */
+export function contextConflictEvent(
+  actor: TaskFileEvent["actor"],
+  conflict: ContextConflict,
+): TaskFileEvent {
+  return {
+    occurredAt: new Date().toISOString(),
+    type: "quality",
+    actor,
+    title: CONTEXT_CONFLICT_TITLE,
+    text:
+      `**The repository wins:** \`${conflict.repoSource}\` is authoritative; the knowledge base ` +
+      `\`${conflict.kbSource}\` says otherwise. ${conflict.detail}`,
+    toAgent: false,
+    evidence: null,
+  };
+}
+
 // ------------------------------------------------------------- snapshot
 
 export interface OperatorTaskSnapshot {
@@ -997,6 +1199,42 @@ export interface OperatorTaskSnapshot {
     options: string[];
   } | null;
   recentTimeline: { type: string; actor: string; text: string }[];
+  /** [1] The coordinator's OWN proposals — what it already asked for, and what a
+   *  human already refused. Without this the supervised loop spins: a supervisor
+   *  declines "move to Review", the next drive cannot see the refusal (the
+   *  dismissal clears the card, and `addRecommendation`'s duplicate guard
+   *  compares only against still-PENDING cards), so it proposes the identical
+   *  thing and re-pings the same supervisors.
+   *
+   *  BOUNDED on purpose — the whole snapshot is JSON-embedded in the operator
+   *  prompt (buildCodexOperatorPrompt) and returned verbatim by `get_task`: at
+   *  most MAX_SNAPSHOT_RECOMMENDATIONS entries per list, each label capped at
+   *  RECOMMENDATION_LABEL_CAP characters.
+   *
+   *  `declined` reads the `task.recommendation.dismissed` audit rows — which had
+   *  no reader anywhere in the product before this — so this list is bounded by
+   *  the 90-day audit retention. The DURABLE trace of a refusal is the typed
+   *  timeline event `dismissRecommendation` writes
+   *  (RECOMMENDATION_DECLINED_TITLE); that one lives in task.md for good and is
+   *  what the operator re-reads through `recentTimeline`.
+   *
+   *  Optional only so hand-built test fixtures need not restate it (same reason
+   *  as `repo`/`noChanges`); `operatorSnapshot` always sets it. */
+  recommendations?: {
+    /** Still awaiting a human — do NOT re-propose these. */
+    pending: {
+      id: string;
+      kind: string;
+      label: string;
+      /** Target profile id (assign/run recommendations), when the kind has one. */
+      profileId: string | null;
+      /** transition target stage id, when the kind carries one. */
+      toStageId: string | null;
+    }[];
+    /** Already REFUSED by a human, newest first. Re-proposing one of these is
+     *  the loop this field exists to stop. */
+    declined: { kind: string; label: string; at: string }[];
+  };
   /** P13-D-4: the review PR, or null. The operator used to be structurally
    *  blind to it — no `pr` field anywhere in the snapshot — so it could neither
    *  see that a human had CLOSED the PR on GitHub (an out-of-band rejection)
@@ -1006,6 +1244,25 @@ export interface OperatorTaskSnapshot {
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
+  /** R19-4: the project's repository ("owner/name"), or null when none is
+   *  attached. The coordinator used to be blind to it — it could not even NAME
+   *  the repository it operates on, which is part of how it came to call its own
+   *  task folder "the repo" (F19-4). It now works inside a read-only checkout of
+   *  that repository (owner ruling 2026-08-06), so naming it is table stakes.
+   *
+   *  Optional only so hand-built test fixtures need not restate it (same
+   *  reason as `noChanges`); `operatorSnapshot` always sets it. */
+  repo?: string | null;
+  /** R19-1: this task is a no-change completion — nothing was delivered and
+   *  there is nothing to merge. Accept it with `accept_completion`; do NOT call
+   *  `deliver_for_review` and do NOT open a decision packet asking a human how
+   *  to close it out. The operator used to be structurally blind to the shape,
+   *  which is how VC-5 became a "how do we close this out?" packet whose
+   *  recommended option was "Manually mark Done" (F19-21).
+   *
+   *  Optional only so hand-built test fixtures need not restate it; the real
+   *  producer (`operatorSnapshot`) always sets it. */
+  noChanges?: boolean;
   /** Queued/running agent runs on THIS task — the ONLY truth for "a run is
    *  in flight". Live-caught: the operator inferred an in-flight deliverer
    *  from `waiting: "agent"` (a board display flag) plus its own directive
@@ -1020,6 +1277,69 @@ export interface OperatorTaskSnapshot {
   autonomy: OperatorAutonomy;
   /** capabilityId → mode the operator holds (the RBAC the tools honor). */
   policy: Record<string, string>;
+}
+
+/** [1] Hard bound on `snapshot.recommendations`: the whole snapshot is
+ *  JSON-embedded in the operator prompt, so neither list may grow with the
+ *  task's age. Five is enough to stop a re-proposal loop — the operator only
+ *  needs to recognise the card it is about to raise. */
+const MAX_SNAPSHOT_RECOMMENDATIONS = 5;
+/** Labels are model-authored prose; cap them so five entries stay small. */
+const RECOMMENDATION_LABEL_CAP = 160;
+
+function capRecommendationLabel(label: string): string {
+  return label.length > RECOMMENDATION_LABEL_CAP
+    ? label.slice(0, RECOMMENDATION_LABEL_CAP - 1) + "…"
+    : label;
+}
+
+/**
+ * [1] The recommendations a human already REFUSED on this task, newest first.
+ *
+ * Reads the audit rows `dismissRecommendation` writes — the structured
+ * kind+label pair, rather than re-parsing the prose of the timeline event. This
+ * also gives `task.recommendation.dismissed` its first reader anywhere in the
+ * product. Bounded by the 90-day audit retention; the durable refusal record is
+ * the timeline event (RECOMMENDATION_DECLINED_TITLE), not this list.
+ */
+function declinedRecommendations(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+): { kind: string; label: string; at: string }[] {
+  const rows = db
+    .prepare(
+      `SELECT occurred_at, details_json FROM audit_events
+        WHERE project_slug = ? AND task_key = ? AND action = ?
+        ORDER BY occurred_at DESC, rowid DESC
+        LIMIT ?`,
+    )
+    .all(
+      projectSlug,
+      taskKey,
+      RECOMMENDATION_DISMISSED_AUDIT_ACTION,
+      MAX_SNAPSHOT_RECOMMENDATIONS,
+    ) as { occurred_at: string; details_json: string | null }[];
+  return rows.flatMap((row) => {
+    let details: { kind?: unknown; label?: unknown };
+    try {
+      details = row.details_json
+        ? (JSON.parse(row.details_json) as { kind?: unknown; label?: unknown })
+        : {};
+    } catch {
+      return [];
+    }
+    // A row whose details cannot name WHAT was declined is worse than silent —
+    // it would tell the model "something was refused" with nothing to match on.
+    if (typeof details.label !== "string" || details.label.length === 0) return [];
+    return [
+      {
+        kind: typeof details.kind === "string" ? details.kind : "unknown",
+        label: capRecommendationLabel(details.label),
+        at: row.occurred_at,
+      },
+    ];
+  });
 }
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
@@ -1114,6 +1434,20 @@ export function operatorSnapshot(
       text:
         e.text.length > 1500 ? e.text.slice(0, 1497) + "…" : e.text,
     })),
+    // [1] What this coordinator already proposed, and what a human already
+    // refused — the two facts it needed to stop re-proposing a declined move.
+    recommendations: {
+      pending: fm.recommendations
+        .slice(0, MAX_SNAPSHOT_RECOMMENDATIONS)
+        .map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          label: capRecommendationLabel(r.label),
+          profileId: r.profileId ?? null,
+          toStageId: r.toStageId ?? null,
+        })),
+      declined: declinedRecommendations(db, projectSlug, taskKey),
+    },
     // P13-D-4: expose the review PR. `state: "closed"` means a human closed it
     // on GitHub WITHOUT merging — an out-of-band rejection the operator must
     // not paper over by recommending or accepting completion.
@@ -1124,6 +1458,10 @@ export function operatorSnapshot(
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".
     branch: fm.branch ?? null,
+    // R19-4: name the repository the read-only view reads.
+    repo: project.parsed.frontmatter.repo ?? null,
+    // R19-1: the "nothing to deliver" shape, stated outright.
+    noChanges: noChangeApplies(fm),
     liveRuns: (
       db
         .prepare(
@@ -1178,6 +1516,82 @@ export async function operatorPostComment(
     return { outcome: "noop", message: commentOutcomeMessage(result) };
   }
   return { outcome: "done", message: commentOutcomeMessage(result) };
+}
+
+/**
+ * R19-2 — record a KB-vs-repository conflict as a typed `quality` event.
+ *
+ * The ruling has two halves and this is the second: the repository wins, AND
+ * the disagreement is never settled quietly. Live (Q19-2) a KB-granted Codex
+ * developer followed the knowledge base's pass-note format while a KB-less
+ * Claude writer followed `qa/smoke/README.md` and flagged the KB-shaped files
+ * as non-conforming — two agents, one repo, two house styles, and nothing on
+ * the timeline said why. A precedence rule with no visible record just moves
+ * the silence.
+ *
+ * Gated on `append-typed-events` — this writes to the canonical record, so it
+ * answers to the same capability as every other operator-authored event.
+ */
+export async function operatorFlagContextConflict(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string } & ContextConflict,
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const kbSource = input.kbSource.trim();
+  const repoSource = input.repoSource.trim();
+  const detail = input.detail.trim();
+  if (!kbSource || !repoSource) {
+    return {
+      outcome: "noop",
+      message:
+        "A conflict needs BOTH sources named — the knowledge-base document and the repository file it disagrees with.",
+    };
+  }
+  if (gate(authority, "append-typed-events") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot post events in this project.",
+    };
+  }
+  const event = contextConflictEvent(
+    { kind: "operator" },
+    { kbSource, repoSource, detail },
+  );
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift(event);
+    },
+  );
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.operator.context_conflict",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { kbSource, repoSource },
+  });
+  // A convention conflict is a judgement call a human owns; the flag is worth
+  // nothing if it only exists on a page nobody opens.
+  notifyTaskWatchers(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      kind: "quality",
+      title: CONTEXT_CONFLICT_TITLE,
+      text: event.text,
+      occurredAt: event.occurredAt,
+    },
+    ctx,
+  );
+  return {
+    outcome: "done",
+    message: `Recorded — \`${repoSource}\` wins; a human will settle it.`,
+  };
 }
 
 /** Fill only an unspecified goal; established scope remains human-controlled. */
@@ -1811,65 +2225,6 @@ export async function operatorPromptAgentGeneric(
 }
 
 /**
- * R19-4 (F19-1, owner ruling 2026-08-06) — after a SUPERVISED operator delivery
- * the server GUARANTEES an actionable next step.
- *
- * Live (VC-1): the operator delivered, narrated "the task will move to Review;
- * no further action needed", and recorded nothing — the task settled
- * `waiting: human` with no recommendation, no packet and no chip, so the human
- * had nothing to act on anywhere in the product. R18-2 deliberately skips the
- * full-autonomy re-queue at supervised autonomy, and delivery is not a
- * transition, so no existing backstop covers this moment: the invariant rested
- * entirely on the model remembering to record a card.
- *
- * Called by `performDelivery` on an operator-authorized delivery that is NOT at
- * full autonomy. Deliberately conservative — it adds nothing when the task
- * already has an open packet (that IS the next step), when it is already at or
- * past the review stage, or when the workflow declares no edge from here to
- * review. `addRecommendation` dedupes per (kind, profileId, toStageId), so an
- * operator that records its own "Move to Review" card in the same run collapses
- * onto this one; any stage move prunes pending `transition` cards and acceptance
- * consumes every card, so the synthesized card cannot outlive its moment.
- */
-export async function ensureDeliveredNextStep(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  taskKey: string,
-  prNumber: number,
-): Promise<void> {
-  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
-  if (!file) return;
-  // An open packet is already a decision waiting on a human — the strongest
-  // actionable surface there is. Never stack a card on top of it.
-  if (file.parsed.packet) return;
-  const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
-  if (!project) return;
-  const stages = project.parsed.frontmatter.stages;
-  const workflow = project.parsed.frontmatter.workflow;
-  const roles = resolveStageRoles(stages, workflow);
-  const reviewId = roles.reviewId;
-  const terminalId = roles.terminalId ?? stages[stages.length - 1]?.id ?? null;
-  const stage = file.parsed.frontmatter.stage;
-  if (!reviewId || stage === reviewId || stage === terminalId) return;
-  // Only propose a move the project's own workflow declares.
-  if (!workflow.some((w) => w.from === stage && w.to === reviewId)) return;
-  const reviewName = stageNameOf(ctx, projectSlug, reviewId);
-  await addRecommendation(
-    db,
-    ctx,
-    projectSlug,
-    taskKey,
-    {
-      kind: "transition",
-      toStageId: reviewId,
-      label: `Move the task to ${reviewName}`,
-    },
-    `Review PR #${prNumber} is open, so the work now stands for review. Moving ${taskKey} to ${reviewName} starts it.`,
-  );
-}
-
-/**
  * R15-2: DELIVER the task — push the deliverer's branch and open (or reuse) the
  * review PR. Delivery is the operator's decision, gated by `deliver-review-pr`:
  * `direct` performs it via the shared `performDelivery` core and reports the
@@ -2226,6 +2581,10 @@ export async function operatorAcceptCompletion(
   // never arrive here.
   if (authority.autonomy !== "full" || gate(authority, "completion-for-acceptance") !== "direct") {
     const doneName = stageNameOf(ctx, input.projectSlug, doneStageId);
+    // R19-1: a task with nothing to deliver merges nothing, so the card must not
+    // promise a merge — the old single sentence told a human that applying it
+    // "merges the review PR", for a task that has no PR and never will.
+    const noChange = noChangeApplies(file.parsed.frontmatter);
     await addRecommendation(
       db,
       ctx,
@@ -2234,9 +2593,13 @@ export async function operatorAcceptCompletion(
       {
         kind: "accept_completion",
         toStageId: doneStageId,
-        label: `Accept completion — move ${input.taskKey} to ${doneName}`,
+        label: noChange
+          ? `Complete ${input.taskKey} with no changes — move it to ${doneName}`
+          : `Accept completion — move ${input.taskKey} to ${doneName}`,
       },
-      `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable — otherwise it records the PR as accepted (merge pending).`,
+      noChange
+        ? `The review is clean and there is nothing to deliver — no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
+        : `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable — otherwise it records the PR as accepted (merge pending).`,
     );
     recordAudit(db, {
       action: "task.operator.recommended_completion",
@@ -2262,6 +2625,16 @@ export async function operatorAcceptCompletion(
   // human path gate by gate and shipped with a subset more than once. The core
   // also re-checks the refusal gates inside the write lock (B-WF1).
   const hasPr = !!file.parsed.frontmatter.pr;
+  // R19-1: the operator closes a no-change task through the SAME live, fail-
+  // closed re-check the humans do — it has no force override, so an unverifiable
+  // remote (or a branch that gained commits) is a plain noop with the reason.
+  const noChange = await acceptanceNoChangeCheck(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+  );
+  if (noChange.refusal) return { outcome: "noop", message: noChange.refusal };
   // R17-1 (F17-L12): name any reviewed-revision drift on the completion record.
   const driftNote = revisionDriftNote(file.parsed.frontmatter);
   await applyAcceptanceWrite(db, ctx, {
@@ -2269,21 +2642,28 @@ export async function operatorAcceptCompletion(
     taskKey: input.taskKey,
     doneStageId,
     prState: "accepted",
-    event: {
-      occurredAt: new Date().toISOString(),
-      type: "completion",
-      actor: { kind: "operator" },
-      title: "Completion accepted",
-      text:
-        (hasPr
-          ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
-          : file.parsed.frontmatter.noChanges
-            ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done, **completed with no changes required** (nothing to deliver or merge).`
-            : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`) +
-        driftNote,
-      toAgent: false,
-      evidence: null,
-    },
+    noChangeCheck: noChange,
+    event: noChange.applies
+      ? noChangeCompletionEvent({
+          taskKey: input.taskKey,
+          actor: { kind: "operator" },
+          occurredAt: new Date().toISOString(),
+          by: "operator",
+          verification: noChange.verification,
+        })
+      : {
+          occurredAt: new Date().toISOString(),
+          type: "completion",
+          actor: { kind: "operator" },
+          title: "Completion accepted",
+          text:
+            (hasPr
+              ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
+              : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`) +
+            driftNote,
+          toAgent: false,
+          evidence: null,
+        },
   });
   recordAudit(db, {
     action: "task.operator.accepted_completion",

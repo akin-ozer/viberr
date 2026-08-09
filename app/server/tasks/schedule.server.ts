@@ -4,6 +4,10 @@ import {
   SYSTEM_ACTOR,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
+import {
+  clampAutonomy,
+  operatorAutonomyFor,
+} from "~/server/tasks/operator-actions.server";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -94,6 +98,11 @@ function terminalStageId(db: DatabaseSync, projectSlug: string): string | null {
   );
 }
 
+// FR39 asked at DRIVE time is now enforced inside `runOperator` itself, which
+// returns `refused: "terminal-stage"` for a scheduled turn on a task that has
+// reached its terminal stage (the belt to this claim-time brace). B's standalone
+// `scheduledRunIsMoot` drive probe was retired with that guard (RECONCILE §1.2).
+
 // ------------------------------------------------------------------ create
 
 export interface ScheduleInput {
@@ -134,7 +143,12 @@ export async function scheduleTaskAction(
     action: "run-operator",
     dueAt: new Date(dueMs).toISOString(),
     backend: input.backend,
-    autonomy: input.autonomy,
+    // R19-A: clamp at SCHEDULE time too. The entry is canonical in the task
+    // file and its timeline event quotes the level, so storing an unclamped
+    // value would advertise autonomy the run will not actually have — and a
+    // scheduled run fires with nobody watching to notice the difference.
+    autonomy: clampAutonomy(input.autonomy, operatorAutonomyFor(ctx, input.projectSlug))
+      .autonomy,
     note: input.note?.trim() ? input.note.trim() : "",
     createdBy: actor.userId ?? "system",
     createdByLabel: actor.label,
@@ -317,18 +331,21 @@ export async function fireDueSchedules(
       return s.status === "pending" || isStaleClaim(s);
     });
     if (due.length === 0) continue;
-    // P14-RV-03: an ARCHIVED task is as moot as a Done one. Archiving withdraws
-    // the packet and the recommendations but never touched `schedules`, so a
-    // scheduled operator re-run on abandoned work still fired — the one thing
-    // archiving failed to stop was the one thing that acts with NO human
-    // watching (FR39). Retired here the same way a Done task's is, so the
-    // occurrence is recorded rather than silently dropped.
-    const terminalStage = terminalFor(row.project_slug);
-    /** Mootness as the tick's PROJECTION snapshot saw it. Re-derived from the
-     *  canonical file under the lock below — see F19-20. */
-    const snapshotMoot =
-      row.archived === 1 ||
-      (terminalStage !== null && row.stage === terminalStage);
+    // F19-20: the projection row FINDS candidates; it no longer DECIDES.
+    // `row.stage` is a snapshot taken at the top of the tick, so an acceptance
+    // that lands between the SELECT and this row's claim leaves it reading the
+    // pre-accept stage — and the occurrence is then claimed and a real,
+    // unwatched operator turn is enqueued on a task that is Done and merged.
+    // FR39 says a scheduled run never fires on a terminal task, so the decision
+    // moves into the claim below, which already holds the canonical frontmatter
+    // under the file lock.
+    //
+    // (P14-RV-03's ARCHIVED case survived this only because `setTaskArchived`
+    // ALSO cancels the schedules in the file, so the existing
+    // `status !== "pending"` re-check caught it. Done had no such second layer.
+    // Both dimensions are now decided from the same locked read, and that
+    // belt-and-braces stays belt-and-braces.)
+    const terminal = terminalFor(row.project_slug);
 
     for (const s of due) {
       try {
@@ -339,63 +356,56 @@ export async function fireDueSchedules(
         // row that a later tick re-drives once its lease expires — the action is
         // never lost (the old pending→fired-before-enqueue flow lost it).
         let claimed = false;
-        let mootBecause: "archived" | "done" | null = snapshotMoot
-          ? row.archived === 1
-            ? "archived"
-            : "done"
-          : null;
         const staleClaim = isStaleClaim(s);
-        await updateTaskFile(taskFileRef(ctx, row.project_slug, row.task_key), (parsed) => {
-          const target = parsed.frontmatter.schedules.find((x) => x.id === s.id);
-          if (!target) return;
-          if (target.status !== "pending" && !isStaleClaim(target)) return;
-          // F19-20: decide mootness from the CANONICAL file, under the lock,
-          // not from the projection row this tick selected. Each row costs an
-          // awaited locked write + reproject + audit insert, so an acceptance
-          // landing mid-tick left the snapshot's `stage` stale — and the in-lock
-          // re-check only looked at `target.status`, which an acceptance never
-          // touches. FR39 says a scheduled re-run NEVER fires on a terminal
-          // stage; the file already answers that question here.
-          //
-          // (The `archived` dimension survived a stale snapshot only because
-          // `setTaskArchived` also flips pending/claimed schedules to
-          // `cancelled` in the FILE, so the status re-check above catches it.
-          // Done has no such second layer, which is why it needs this one — and
-          // it is re-checked here too, so the two agree.)
-          mootBecause =
-            parsed.frontmatter.archived === true
-              ? "archived"
-              : terminalStage !== null &&
-                  parsed.frontmatter.stage === terminalStage
-                ? "done"
-                : null;
-          if (mootBecause) {
-            target.status = "fired";
-            target.firedAt = new Date().toISOString();
-            parsed.timeline.unshift(
-              scheduleEvent(
-                { kind: "system", systemId: "schedule-runner" },
-                // Name the REAL reason. The audit row already distinguishes
-                // `skipped-archived` from `skipped-done`; the note a human
-                // actually reads told an archived task it was "already Done".
-                mootBecause === "archived"
-                  ? `**Scheduled action skipped:** ${row.task_key} was archived — the scheduled operator re-run is moot.`
-                  : `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled operator re-run is moot.`,
-              ),
-            );
-          } else {
-            target.status = "claimed";
-            target.claimedAt = new Date().toISOString();
-            parsed.timeline.unshift(
-              scheduleEvent(
-                { kind: "system", systemId: "schedule-runner" },
-                `**Scheduled action starting:** ${staleClaim ? "recovering a stalled claim and re-" : ""}running the scheduled operator re-run for ${row.task_key}${s.note ? ` — ${s.note}` : ""}.`,
-              ),
-            );
-          }
-          claimed = true;
-        });
+        const claimedFile = await updateTaskFile(
+          taskFileRef(ctx, row.project_slug, row.task_key),
+          (parsed) => {
+            const target = parsed.frontmatter.schedules.find((x) => x.id === s.id);
+            if (!target) return;
+            if (target.status !== "pending" && !isStaleClaim(target)) return;
+            // FR39, decided HERE: the canonical stage/archived flag, read under
+            // the same lock that claims the occurrence (F19-20). The projection
+            // row only FOUND the candidate; an acceptance (or archive) landing
+            // between the SELECT and this locked read never rides a stale
+            // snapshot into a real, unwatched operator turn.
+            const mootNow =
+              parsed.frontmatter.archived === true ||
+              (terminal !== null && parsed.frontmatter.stage === terminal);
+            if (mootNow) {
+              target.status = "fired";
+              target.firedAt = new Date().toISOString();
+              parsed.timeline.unshift(
+                scheduleEvent(
+                  { kind: "system", systemId: "schedule-runner" },
+                  // Name the REAL reason — the audit row distinguishes
+                  // `skipped-archived` from `skipped-done`, and the note a human
+                  // reads must not tell an archived task it was "already Done".
+                  parsed.frontmatter.archived === true
+                    ? `**Scheduled action skipped:** ${row.task_key} has been archived — the scheduled operator re-run is moot.`
+                    : `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled operator re-run is moot.`,
+                ),
+              );
+            } else {
+              target.status = "claimed";
+              target.claimedAt = new Date().toISOString();
+              parsed.timeline.unshift(
+                scheduleEvent(
+                  { kind: "system", systemId: "schedule-runner" },
+                  `**Scheduled action starting:** ${staleClaim ? "recovering a stalled claim and re-" : ""}running the scheduled operator re-run for ${row.task_key}${s.note ? ` — ${s.note}` : ""}.`,
+                ),
+              );
+            }
+            claimed = true;
+          },
+        );
         if (!claimed) continue; // another tick/restart already handled it
+        // Read the verdict back off the file that was WRITTEN rather than out of
+        // a closure variable: `updateTaskFile` returns the resulting parse, and
+        // a `let` assigned inside the callback is narrowed to its initializer at
+        // every read site out here.
+        const wasMoot =
+          claimedFile.frontmatter.schedules.find((x) => x.id === s.id)?.status ===
+          "fired";
         reproject(db, ctx, row.project_slug, row.task_key);
         recordAudit(db, {
           action: "task.schedule.fired",
@@ -408,14 +418,14 @@ export async function fireDueSchedules(
             scheduleId: s.id,
             // The outcome names what the FILE said at claim time, so the audit
             // row and the retirement can never disagree (F19-20).
-            outcome: mootBecause
-              ? mootBecause === "archived"
+            outcome: wasMoot
+              ? claimedFile.frontmatter.archived === true
                 ? "skipped-archived"
                 : "skipped-done"
               : "claimed",
           },
         });
-        if (mootBecause) {
+        if (wasMoot) {
           skipped += 1;
         } else {
           toRun.push({

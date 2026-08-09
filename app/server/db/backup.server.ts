@@ -1,0 +1,596 @@
+import { createHash } from "node:crypto";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { hostname } from "node:os";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
+import { writeFileAtomic } from "~/server/files/atomic-file.server";
+import { getDataRoot } from "~/server/files/file-store-root.server";
+import { logger } from "~/server/logging/logger.server";
+import { DATA_ROOT_LOCK_FILENAME } from "./data-root-lock.server";
+import { openDatabase } from "./sqlite.server";
+
+/**
+ * Backup and restore for the data root (gap 14).
+ *
+ * `state/projection.sqlite` is not a cache. It is the ONLY home of users,
+ * better-auth credentials and sessions, AES-sealed PATs, audit events and
+ * notifications — none of it rebuildable from the canonical markdown. The
+ * product's own answer to FR33's 90-day audit hard-delete is "snapshot the
+ * data root on a schedule", and to a bad hand-edit it is "restore the backup".
+ * Both rested on a paragraph of prose: there was no backup command, and the
+ * documented procedure conceded its own flaw — *"a hot backup of a running
+ * container captures live -wal data by definition"*, with "stop the container
+ * first" as the only correct-by-construction alternative. A small team either
+ * does not back up, or takes an unsafe hot copy and discovers on restore that
+ * committed rows were in the `-wal` it skipped.
+ *
+ * ## What makes this consistent WITHOUT stopping the app
+ *
+ * `VACUUM INTO` is SQLite's own online snapshot: it runs inside a read
+ * transaction, so the artefact is the database as of one instant — WAL content
+ * included — written to a single file with no sidecars. The source is opened
+ * READ-ONLY, so this is not a second writer and needs no data-root lock (a
+ * backup that refused to run while the app was up would defeat the point).
+ * Proven by test: a row committed but not yet checkpointed is present in the
+ * artefact and absent from a raw `cp` of the main file taken at the same
+ * moment.
+ *
+ * The markdown side is copied file by file. Every store write is atomic
+ * (tmp + rename), so no individual file is ever captured half-written; the
+ * tree as a whole is a short window rather than a single instant, which is the
+ * honest thing to say about it and is why the manifest says it.
+ *
+ * ## Restore
+ *
+ * `restoreBackup` is a WRITER and its CLI holds the data-root lock. It also
+ * removes any `-wal`/`-shm` left beside the old projection: those belong to
+ * the database being replaced, and SQLite would try to replay them over the
+ * restored file. That trap is not in the prose procedure.
+ *
+ * `restoreStoreFile` puts back ONE canonical markdown file. It touches no
+ * SQLite at all, which is the difference between recovering a botched
+ * hand-edit and rolling every user, session and audit row back with it
+ * (gap 22).
+ */
+
+export const BACKUP_FORMAT = "viberr-backup/1";
+const MANIFEST_NAME = "MANIFEST.json";
+const README_NAME = "README.txt";
+const PROJECTION_NAME = "projection.sqlite";
+const STORE_DIR = "store";
+
+/** The file-native store directories a backup carries by default. */
+export const BACKED_UP_STORE_DIRS = ["projects", "agents", "kb", "skills"] as const;
+
+/**
+ * `runtimes/` holds LIVE agent credentials (`codex-home/auth.json`) and run
+ * transcripts. Opt in with `includeRuntimes` when you want them; the default
+ * is out, and the manifest says so rather than leaving an operator to guess
+ * whether their artefact contains a credential.
+ */
+export const OPTIONAL_STORE_DIRS = ["runtimes"] as const;
+
+/** Row counts recorded in the manifest — the tables no rescan can rebuild. */
+const COUNTED_TABLES = [
+  "users",
+  "session",
+  "account",
+  "github_pats",
+  "audit_events",
+  "notifications",
+  "org_mcp_servers",
+] as const;
+
+export interface BackupManifest {
+  format: typeof BACKUP_FORMAT;
+  createdAt: string;
+  hostname: string;
+  /** The data root this artefact was taken from. */
+  dataRoot: string;
+  projection: {
+    file: string;
+    bytes: number;
+    sha256: string;
+    /** Row counts, read back OUT of the artefact. */
+    rows: Record<string, number>;
+  } | null;
+  store: {
+    dirs: string[];
+    files: number;
+    bytes: number;
+  };
+  /** Plain-English inventory — what a restore of this artefact brings back. */
+  contains: string[];
+  /** …and what it does not. */
+  excludes: string[];
+}
+
+export interface BackupResult {
+  /** Absolute path of the artefact directory. */
+  dir: string;
+  manifest: BackupManifest;
+  /** Operator-facing summary, ready for stdout. */
+  text: string;
+}
+
+function sha256File(file: string): string {
+  return createHash("sha256").update(readFileSync(file)).digest("hex");
+}
+
+function walkFiles(dir: string): { files: number; bytes: number } {
+  let files = 0;
+  let bytes = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.isFile()) {
+        files += 1;
+        bytes += statSync(full).size;
+      }
+    }
+  }
+  return { files, bytes };
+}
+
+export function projectionPathIn(dataRoot: string): string {
+  return path.join(dataRoot, "state", PROJECTION_NAME);
+}
+
+/** Default artefact name — sortable, and unambiguous about which instant. */
+export function backupDirName(at: Date = new Date()): string {
+  return `viberr-backup-${at.toISOString().replace(/[:.]/g, "-")}`;
+}
+
+export interface CreateBackupOptions {
+  dataRoot?: string;
+  /** Directory the artefact is created INSIDE. */
+  destination: string;
+  includeRuntimes?: boolean;
+  /** Override the generated artefact directory name. */
+  name?: string;
+}
+
+/**
+ * Take a consistent snapshot of the data root. Read-only with respect to the
+ * live store: no writer lock, no mutation, safe while the app serves traffic.
+ */
+export function createBackup(options: CreateBackupOptions): BackupResult {
+  const dataRoot = getDataRoot(options.dataRoot);
+  const dir = path.resolve(options.destination, options.name ?? backupDirName());
+  if (existsSync(dir)) {
+    throw new Error(`refusing to overwrite an existing backup at ${dir}`);
+  }
+  if (dir.startsWith(`${dataRoot}${path.sep}`) || dir === dataRoot) {
+    throw new Error(
+      `refusing to write the backup inside the data root it is backing up (${dir})`,
+    );
+  }
+  mkdirSync(dir, { recursive: true });
+
+  // ---------------------------------------------------------- the database
+  const source = projectionPathIn(dataRoot);
+  let projection: BackupManifest["projection"] = null;
+  if (existsSync(source)) {
+    const target = path.join(dir, PROJECTION_NAME);
+    // READ-ONLY: a backup is a reader, never the second writer that B-FD1
+    // exists to prevent. VACUUM INTO runs in a read transaction, so the
+    // artefact includes everything committed to the WAL at that instant.
+    const db = new DatabaseSync(source, { readOnly: true });
+    try {
+      db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+    } finally {
+      db.close();
+    }
+    projection = {
+      file: PROJECTION_NAME,
+      bytes: statSync(target).size,
+      sha256: sha256File(target),
+      rows: countRows(target),
+    };
+  }
+
+  // ------------------------------------------------------ the file store
+  const dirs = [
+    ...BACKED_UP_STORE_DIRS,
+    ...(options.includeRuntimes ? OPTIONAL_STORE_DIRS : []),
+  ];
+  const storeRoot = path.join(dir, STORE_DIR);
+  mkdirSync(storeRoot, { recursive: true });
+  const copied: string[] = [];
+  for (const name of dirs) {
+    const from = path.join(dataRoot, name);
+    if (!existsSync(from)) continue;
+    cpSync(from, path.join(storeRoot, name), {
+      recursive: true,
+      // `*.tmp` is a half-written atomic write in flight; it is never content.
+      filter: (src) => !src.endsWith(".tmp"),
+    });
+    copied.push(name);
+  }
+  const store = { dirs: copied, ...walkFiles(storeRoot) };
+
+  const manifest: BackupManifest = {
+    format: BACKUP_FORMAT,
+    createdAt: new Date().toISOString(),
+    hostname: hostname(),
+    dataRoot,
+    projection,
+    store,
+    contains: contains(projection !== null, copied),
+    excludes: excludes(options.includeRuntimes ?? false),
+  };
+  writeFileAtomic(
+    path.join(dir, MANIFEST_NAME),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  writeFileAtomic(path.join(dir, README_NAME), readmeText(manifest));
+  logger.info("data-root backup written", {
+    dir,
+    files: store.files,
+    projectionBytes: projection?.bytes ?? 0,
+  });
+  return { dir, manifest, text: renderBackup(dir, manifest) };
+}
+
+function countRows(dbPath: string): Record<string, number> {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const present = new Set(
+      (
+        db
+          .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+          .all() as { name: string }[]
+      ).map((r) => r.name),
+    );
+    const rows: Record<string, number> = {};
+    for (const table of COUNTED_TABLES) {
+      if (!present.has(table)) continue;
+      rows[table] = (
+        db.prepare(`SELECT count(*) AS c FROM ${table}`).get() as { c: number }
+      ).c;
+    }
+    return rows;
+  } finally {
+    db.close();
+  }
+}
+
+function contains(hasProjection: boolean, dirs: string[]): string[] {
+  const list = [
+    ...(hasProjection
+      ? [
+          "state/projection.sqlite — users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials, audit events, notifications, and every projection (a consistent point-in-time copy, WAL included)",
+        ]
+      : []),
+    ...dirs.map((dir) => `${dir}/ — the canonical files, copied verbatim`),
+  ];
+  return list;
+}
+
+function excludes(includeRuntimes: boolean): string[] {
+  return [
+    ...(includeRuntimes
+      ? []
+      : [
+          "runtimes/ — agent CLI logins (codex-home/auth.json is a LIVE credential) and run transcripts. Re-authenticate after a restore, or pass --include-runtimes to carry them (and then treat the artefact as a secret).",
+        ]),
+    "state/writer.lock — the running process's lock; restoring one would refuse the next boot.",
+    "The encryption key itself. VIBERR_SECRET_ENCRYPTION_KEY lives in the environment, NOT in this artefact: without it every sealed PAT and MCP credential in the database is unreadable. Back the key up separately.",
+    "*.tmp — atomic writes in flight, never content.",
+  ];
+}
+
+function readmeText(manifest: BackupManifest): string {
+  return [
+    `Viberr data-root backup (${manifest.format})`,
+    `Taken ${manifest.createdAt} from ${manifest.dataRoot} on ${manifest.hostname}`,
+    "",
+    "CONTAINS",
+    ...manifest.contains.map((line) => `  - ${line}`),
+    "",
+    "DOES NOT CONTAIN",
+    ...manifest.excludes.map((line) => `  - ${line}`),
+    "",
+    "RESTORE",
+    "  Whole data root (stop the app first — the restore takes the writer lock):",
+    "    npm run restore -- --from <this directory>",
+    "  One canonical file, without rolling back users/sessions/audit:",
+    "    npm run restore -- --from <this directory> --file projects/<slug>/tasks/<KEY>/task.md",
+    "",
+  ].join("\n");
+}
+
+function renderBackup(dir: string, manifest: BackupManifest): string {
+  const lines = [
+    `viberr backup written to ${dir}`,
+    "",
+    "CONTAINS",
+    ...manifest.contains.map((line) => `  - ${line}`),
+  ];
+  if (manifest.projection) {
+    lines.push(
+      "",
+      `  projection.sqlite — ${manifest.projection.bytes} bytes, sha256 ${manifest.projection.sha256.slice(0, 16)}…`,
+      ...Object.entries(manifest.projection.rows).map(
+        ([table, count]) => `    ${table}: ${count} rows`,
+      ),
+    );
+  }
+  lines.push(
+    "",
+    `  ${manifest.store.files} store files (${manifest.store.bytes} bytes) from ${manifest.store.dirs.join(", ") || "nothing"}`,
+    "",
+    "DOES NOT CONTAIN",
+    ...manifest.excludes.map((line) => `  - ${line}`),
+    "",
+    `Restore with: npm run restore -- --from ${dir}`,
+  );
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------- restore
+
+export function readManifest(artefact: string): BackupManifest {
+  const file = path.join(artefact, MANIFEST_NAME);
+  if (!existsSync(file)) {
+    throw new Error(
+      `${artefact} is not a viberr backup (no ${MANIFEST_NAME}). Point --from at the artefact directory itself.`,
+    );
+  }
+  const manifest = JSON.parse(readFileSync(file, "utf8")) as BackupManifest;
+  if (manifest.format !== BACKUP_FORMAT) {
+    throw new Error(
+      `unsupported backup format "${manifest.format}" (this build reads ${BACKUP_FORMAT})`,
+    );
+  }
+  return manifest;
+}
+
+export interface RestoreResult {
+  dataRoot: string;
+  manifest: BackupManifest;
+  /** Directories replaced in the data root. */
+  restoredDirs: string[];
+  projectionRestored: boolean;
+  /** Stale `-wal` / `-shm` removed beside the replaced projection. */
+  removedSidecars: string[];
+  /** Where the replaced data root was moved, when anything was displaced. */
+  displacedTo: string | null;
+  text: string;
+}
+
+export interface RestoreBackupOptions {
+  artefact: string;
+  dataRoot?: string;
+  /**
+   * Required when the target data root already holds a projection or store
+   * files — a restore replaces them, and that must be a decision.
+   */
+  force?: boolean;
+}
+
+/**
+ * Restore a whole data root from an artefact. WRITES — the caller must hold
+ * the data-root writer lock (`npm run restore` takes it, so restoring into a
+ * live instance is refused rather than silently racing it).
+ */
+export function restoreBackup(options: RestoreBackupOptions): RestoreResult {
+  const manifest = readManifest(options.artefact);
+  const dataRoot = getDataRoot(options.dataRoot);
+  const occupied = occupiedPaths(dataRoot);
+  if (occupied.length > 0 && !options.force) {
+    throw new Error(
+      `${dataRoot} already holds data (${occupied.join(", ")}). A restore REPLACES it. ` +
+        `Re-run with --force once you are sure; the replaced copy is moved aside, not deleted.`,
+    );
+  }
+
+  // Displace rather than delete: a restore onto the wrong root must be undoable.
+  const removedSidecars: string[] = [];
+  let displacedTo: string | null = null;
+  if (occupied.length > 0) {
+    displacedTo = `${dataRoot}.replaced-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    for (const name of occupied) {
+      const to = path.join(displacedTo, name);
+      mkdirSync(path.dirname(to), { recursive: true });
+      renameSync(path.join(dataRoot, name), to);
+      if (/projection\.sqlite-(wal|shm)$/.test(name)) {
+        removedSidecars.push(path.basename(name));
+      }
+    }
+  }
+
+  const restoredDirs: string[] = [];
+  for (const name of manifest.store.dirs) {
+    const from = path.join(options.artefact, STORE_DIR, name);
+    if (!existsSync(from)) continue;
+    cpSync(from, path.join(dataRoot, name), { recursive: true });
+    restoredDirs.push(name);
+  }
+
+  let projectionRestored = false;
+  if (manifest.projection) {
+    const target = projectionPathIn(dataRoot);
+    mkdirSync(path.dirname(target), { recursive: true });
+    // A `-wal`/`-shm` left from the database we just replaced belongs to a
+    // DIFFERENT file. SQLite would try to replay it over the restored one.
+    // Displacement above normally carries them off; this is the backstop.
+    for (const suffix of ["-wal", "-shm"]) {
+      const sidecar = `${target}${suffix}`;
+      if (existsSync(sidecar)) {
+        rmSync(sidecar, { force: true });
+        removedSidecars.push(path.basename(sidecar));
+      }
+    }
+    cpSync(path.join(options.artefact, manifest.projection.file), target);
+    projectionRestored = true;
+
+    // Record the restore INTO the restored database, then leave it checkpointed
+    // and closed so the data root is quiet again.
+    const db = openDatabase(target);
+    try {
+      recordAudit(db, {
+        action: "store.restored",
+        actor: SYSTEM_ACTOR,
+        details: {
+          artefact: options.artefact,
+          takenAt: manifest.createdAt,
+          dirs: restoredDirs,
+        },
+      });
+      db.exec(`PRAGMA wal_checkpoint(TRUNCATE);`);
+    } finally {
+      db.close();
+    }
+  }
+
+  logger.info("data root restored from backup", {
+    dataRoot,
+    artefact: options.artefact,
+    dirs: restoredDirs,
+  });
+  const result: Omit<RestoreResult, "text"> = {
+    dataRoot,
+    manifest,
+    restoredDirs,
+    projectionRestored,
+    removedSidecars,
+    displacedTo,
+  };
+  return { ...result, text: renderRestore(result) };
+}
+
+/**
+ * What a restore would replace, as data-root-relative paths.
+ *
+ * `state/` is enumerated ENTRY BY ENTRY so `state/writer.lock` can be left
+ * exactly where it is: this process is holding it, and moving it aside would
+ * drop the single-writer guard mid-restore (and trip the F18-5 ownership guard
+ * of any process still watching it). `runtimes/` is never listed — a restore
+ * must not wipe the agent CLI logins it deliberately does not carry.
+ */
+function occupiedPaths(dataRoot: string): string[] {
+  if (!existsSync(dataRoot)) return [];
+  const names: string[] = [];
+  for (const name of BACKED_UP_STORE_DIRS) {
+    const full = path.join(dataRoot, name);
+    if (!existsSync(full)) continue;
+    if (readdirSync(full).length > 0) names.push(name);
+  }
+  const stateDir = path.join(dataRoot, "state");
+  if (existsSync(stateDir)) {
+    for (const entry of readdirSync(stateDir)) {
+      if (entry === DATA_ROOT_LOCK_FILENAME) continue;
+      names.push(path.join("state", entry));
+    }
+  }
+  return names;
+}
+
+function renderRestore(result: Omit<RestoreResult, "text">): string {
+  const lines = [
+    `viberr restore complete — ${result.dataRoot} now holds the backup taken ${result.manifest.createdAt}`,
+    `  projection.sqlite ${result.projectionRestored ? "restored" : "NOT in this artefact"}`,
+    `  store directories: ${result.restoredDirs.join(", ") || "none"}`,
+  ];
+  if (result.removedSidecars.length > 0) {
+    lines.push(
+      `  removed stale ${result.removedSidecars.join(" and ")} — they belonged to the replaced database`,
+    );
+  }
+  if (result.displacedTo) {
+    lines.push(`  the replaced data was moved to ${result.displacedTo} (not deleted)`);
+  }
+  lines.push(
+    "  runtimes/ was left exactly as it was — a restore never touches the agent CLI logins",
+    "",
+    "VIBERR_SECRET_ENCRYPTION_KEY is not part of the artefact: without the key this backup was taken under, every sealed PAT and MCP credential is unreadable.",
+    "Start the app — boot reconciles the projection against the restored files.",
+  );
+  return lines.join("\n");
+}
+
+// ------------------------------------------------------- single-file restore
+
+/** Store directories a single-file restore may write into. `state/` is the
+ *  database (whole-root restore only) and `runtimes/` is live credentials. */
+const FILE_RESTORE_ROOTS = BACKED_UP_STORE_DIRS;
+
+export interface RestoreFileResult {
+  /** Store-relative path that was restored. */
+  path: string;
+  absPath: string;
+  /** Where the file being replaced was moved, or null when there was none. */
+  displacedTo: string | null;
+  bytes: number;
+  text: string;
+}
+
+/**
+ * Put back ONE canonical file from an artefact (gap 22). Writes markdown and
+ * nothing else — no SQLite, so recovering a botched `task.md` does not roll
+ * users, sessions, PATs, audit and notifications back with it. The file the
+ * restore displaces is moved aside, never deleted: a human's bytes are theirs.
+ */
+export function restoreStoreFile(options: {
+  artefact: string;
+  dataRoot?: string;
+  relPath: string;
+}): RestoreFileResult {
+  readManifest(options.artefact); // format check
+  const dataRoot = getDataRoot(options.dataRoot);
+  const rel = normalizeStoreRelPath(options.relPath);
+  const from = path.join(options.artefact, STORE_DIR, rel);
+  if (!existsSync(from)) {
+    throw new Error(`${rel} is not in this backup (looked for ${from}).`);
+  }
+  const target = path.join(dataRoot, rel);
+
+  let displacedTo: string | null = null;
+  if (existsSync(target)) {
+    // `.broken-<ts>` deliberately does NOT end in `.md`: the watcher and the
+    // rebuilder key off exact store paths, so the copy sits inert beside it.
+    displacedTo = `${target}.broken-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    renameSync(target, displacedTo);
+  }
+  const content = readFileSync(from, "utf8");
+  writeFileAtomic(target, content);
+
+  const text = [
+    `viberr restored ${rel} from ${options.artefact}`,
+    ...(displacedTo
+      ? [`  the file it replaced was moved to ${displacedTo} (not deleted)`]
+      : []),
+    "  the database was NOT touched — users, sessions, PATs, audit and notifications are unchanged",
+    "  the watcher re-projects it within ~1s while the app runs; otherwise `npm run rescan`",
+  ].join("\n");
+  return { path: rel, absPath: target, displacedTo, bytes: content.length, text };
+}
+
+function normalizeStoreRelPath(relPath: string): string {
+  const rel = path.normalize(relPath).replace(/^[/\\]+/, "");
+  if (rel.split(/[/\\]/).includes("..")) {
+    throw new Error(`refusing a path that escapes the store: ${relPath}`);
+  }
+  const root = rel.split(/[/\\]/)[0] ?? "";
+  if (!(FILE_RESTORE_ROOTS as readonly string[]).includes(root)) {
+    throw new Error(
+      `single-file restore only writes into ${FILE_RESTORE_ROOTS.join("/, ")}/ — ` +
+        `got "${relPath}". The database (state/) is a whole-root restore: drop --file.`,
+    );
+  }
+  return rel;
+}

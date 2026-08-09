@@ -8,6 +8,7 @@ import {
 import { rebuildAll } from "./rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
 import { listAgentDeployments } from "./agent-deployments.server";
+import type { TaskPacket } from "~/schemas/task-file.schema";
 
 /**
  * Live-deployment projection (agents spec §3.3 + ruling 7): derivation from
@@ -19,9 +20,20 @@ import { listAgentDeployments } from "./agent-deployments.server";
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
+/** An open decision packet — what "packet open" is allowed to mean. */
+const PACKET: TaskPacket = {
+  type: "input",
+  kind: "Decision required",
+  from: "operator",
+  title: "Pick one",
+  body: "",
+  observations: [],
+  options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
+};
+
 function seedTasks(dataRoot: string, slug: string) {
-  // review + waiting human → operator "packet open", primary "waiting on
-  // human", reviewer "anchored · on call".
+  // review + waiting human + an OPEN PACKET → operator "packet open", primary
+  // "waiting on human", reviewer "anchored · on call".
   writeTask(dataRoot, slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", {
       stage: "review",
@@ -32,6 +44,7 @@ function seedTasks(dataRoot: string, slug: string) {
         { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
       ],
     }),
+    packet: PACKET,
   });
   // impl + waiting agent → operator "coordinating", primary "working".
   writeTask(dataRoot, slug, {
@@ -165,5 +178,84 @@ describe("listAgentDeployments", () => {
     expect(vib1Primary.running).toBe(false);
     // Status vocabulary is untouched by the join.
     expect(vib1Primary.status).toBe("waiting on human");
+  });
+});
+
+/**
+ * UXV19-7 — the roster was the only surface naming an ARTIFACT instead of the
+ * state, and the only one of the four that could be false. `operatorStatus`
+ * read `waiting` alone, so the documented no-packet acceptance-ready class
+ * (review-queue.server.ts's R8-3 note, decisions.server.ts's B-FD5) showed an
+ * amber "packet open" pill whose click lands on a task page that renders no
+ * Decision packet section at all.
+ *
+ * Canary: restore `waiting === "human" ? "packet open" : "coordinating"` and
+ * the no-packet case below fails ("packet open" for a task with no packet)
+ * while the with-packet case stays green.
+ */
+describe("an operator is only 'packet open' when a packet is actually open", () => {
+  /** The acceptance-ready class: waiting on a human, carrying no packet. */
+  function seedNoPacket(store: ReturnType<typeof setupTestStore>, key: string, stage: string) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(key, {
+        stage,
+        waiting: "human",
+        operator: { assignedAtStageId: "triage" },
+      }),
+    });
+  }
+
+  it("names the STATE for a human-waiting task with no packet, on any stage", () => {
+    const store = setupTestStore(ctx);
+    seedNoPacket(store, "VIB-9", "review");
+    // The trigger is not Review-specific: any non-terminal stage whose
+    // operator turn ends without opening a packet reads the same.
+    seedNoPacket(store, "VIB-10", "impl");
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const statuses = listAgentDeployments(store.db, store.slug)
+      .filter((d) => d.engagement === "operator")
+      .map((d) => [d.taskKey, d.status]);
+    expect(statuses).toEqual([
+      ["VIB-9", "waiting on human"],
+      ["VIB-10", "waiting on human"],
+    ]);
+    // …and the wording is the one the board, the queue and the task page use,
+    // so the page-level "waiting on a human" stat (which counts both labels)
+    // is unchanged by the fix.
+    expect(statuses.some(([, s]) => s === "packet open")).toBe(false);
+  });
+
+  it("still says 'packet open' when the task really carries one", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-11", {
+        stage: "review",
+        waiting: "human",
+        operator: { assignedAtStageId: "triage" },
+      }),
+      packet: PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const operator = listAgentDeployments(store.db, store.slug).find(
+      (d) => d.engagement === "operator",
+    )!;
+    expect(operator.status).toBe("packet open");
+  });
+
+  it("leaves the non-human-waiting operator alone — 'coordinating' names activity, not an artifact", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-12", {
+        stage: "impl",
+        waiting: "agent",
+        operator: { assignedAtStageId: "triage" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(
+      listAgentDeployments(store.db, store.slug).find((d) => d.engagement === "operator")!.status,
+    ).toBe("coordinating");
   });
 });

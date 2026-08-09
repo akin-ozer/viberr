@@ -94,6 +94,7 @@ export function TaskDetailPage({
   runtime,
   deployedSpecialists,
   operatorBackend,
+  operatorAutonomy,
   backendAvailable,
   deliveringActive,
   activeReviewerIds,
@@ -126,6 +127,8 @@ export function TaskDetailPage({
   deployedSpecialists: DeployedSpecialistView[];
   /** The operator's configured backend — the run picker's default (P11-76). */
   operatorBackend: "claude" | "codex";
+  /** R19-A: the project's configured operator autonomy (the run ceiling). */
+  operatorAutonomy: "supervised" | "full";
   /** P11-41: which backends are configured, for the run picker. */
   backendAvailable: { claude: boolean; codex: boolean };
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
@@ -532,6 +535,14 @@ export function TaskDetailPage({
             // `updateTaskGoal` itself enforces (E3).
             canEditGoal={canEditGoal}
             canArchive={canArchiveViaPacket}
+          // UX19-9: what an `archive_task` resolution destroys — the branch its
+          // `deleteBranch` variant deletes permanently, and the recommendations
+          // the archive withdraws. The same two facts ArchiveConfirm is handed.
+          archiveDisclosure={{
+            taskKey: task.key,
+            branch: task.branch,
+            pendingRecommendations: recommendations.length,
+          }}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
           />
@@ -549,6 +560,11 @@ export function TaskDetailPage({
           schedules={schedules}
           canRunAgents={canRunAgents}
           taskClosed={taskClosed}
+          // UX19-10: the same availability the operator run picker below uses,
+          // so the two operator pickers on one screen cannot offer different
+          // backends.
+          backendAvailable={backendAvailable}
+          configuredAutonomy={operatorAutonomy}
         />
 
         <ExecutionSection
@@ -561,6 +577,7 @@ export function TaskDetailPage({
           onRelease={() => setReleasing(true)}
           deployedSpecialists={deployedSpecialists}
           operatorBackend={operatorBackend}
+          operatorAutonomy={operatorAutonomy}
           backendAvailable={backendAvailable}
           canRunAgents={canRunAgents}
           deliveringActive={deliveringActive}
@@ -663,6 +680,9 @@ export function TaskDetailPage({
           // R19-5: a force-accept from before the boundary MAY skip the
           // remaining stages and the review gate — the dialog has to name which.
           atBoundary={acceptance.atBoundary}
+          // R19-B: the human GitHub approval carrying the verdict gate, rendered
+          // on the verdict row (null when an agent verdict cleared it).
+          verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
           ceremony={
             "label" in confirmAccept
               ? { mode: confirmAccept.mode, label: confirmAccept.label }
@@ -681,7 +701,14 @@ export function TaskDetailPage({
                 // block on a merge nothing is blocking.
                 confirmAccept.mode === "complete-merge"
                 ? null
-                : acceptance.blockedReason
+                : // F19-7 (B's correctness win): a packet resolution evaluates
+                  // the acceptance contract with `blockedPacket: false` — the
+                  // open packet is what this resolution CLEARS, so it cannot
+                  // also be the reason to refuse it. Name the refusal the PACKET
+                  // path would hit, never the open-packet one.
+                  confirmAccept.mode === "packet"
+                  ? acceptance.blockedReasonViaPacket
+                  : acceptance.blockedReason
           }
           busy={acceptBusy || runBusy || recBusy || resolveBusy || transitionBusy}
           onCancel={() => setConfirmAccept(null)}

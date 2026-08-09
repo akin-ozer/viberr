@@ -502,6 +502,46 @@ describe("MembersPanel", () => {
     expect(emailInput.value).toBe("");
   });
 
+  /**
+   * Pass-19 UX coherence audit, finding #22 (a11y).
+   *
+   * This was the only invite form in the product without persistent field
+   * labels: two bare `<input>`s whose sole name was a placeholder that leaves
+   * the screen on the first keystroke. The org-level twin of the very same
+   * action (`org-settings/users-panel.tsx`) labels "Full name" and "Email" over
+   * inputs carrying those identical placeholders, and this page's own identity
+   * fields use the same `.field` + `.flabel` idiom. It bites hardest under
+   * 1300px, where `.invite-row` collapses to one column and the two
+   * same-looking boxes stack.
+   */
+  it("#22: both invite fields keep a real label, not just a vanishing placeholder", () => {
+    const { container, getByLabelText } = render(
+      <MembersPanel {...base} onInvite={() => {}} onRemove={() => {}} />,
+    );
+    const inputs = [
+      ...container.querySelectorAll<HTMLInputElement>(".invite-row input"),
+    ];
+    expect(inputs).toHaveLength(2);
+    for (const input of inputs) {
+      expect(input.id).not.toBe("");
+      const label = container.querySelector(`label[for="${input.id}"]`);
+      expect(label).not.toBeNull();
+      expect(label!.textContent!.trim()).not.toBe("");
+    }
+
+    // The whole point: the name is still on screen once the field is filled.
+    const name = getByLabelText(/Full name/) as HTMLInputElement;
+    const email = getByLabelText(/Email/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Deniz Şahin" } });
+    fireEvent.change(email, { target: { value: "deniz@viberr.dev" } });
+    expect(
+      container.querySelector(`label[for="${name.id}"]`)!.textContent,
+    ).toContain("Full name");
+    expect(
+      container.querySelector(`label[for="${email.id}"]`)!.textContent,
+    ).toContain("Email");
+  });
+
   it("hides invite + remove for non-admins", () => {
     const { container, queryByPlaceholderText } = render(
       <MembersPanel {...base} canManage={false} onInvite={() => {}} onRemove={() => {}} />,
@@ -962,6 +1002,26 @@ describe("SettingsPage — each panel gates on the action its own server guard c
       ),
     };
   }
+
+  /**
+   * Q-V1 (owner ruling, pass 18) shipped with no test — the one gap pass 19's
+   * doc verification called out. A read-only member must not see the Danger
+   * zone AT ALL: it used to render for every member with the buttons disabled,
+   * which showed a stakeholder a destructive surface they can never use and
+   * named archive/delete as if they were on the table. The gate is
+   * `edit-policy` — the same id the archive/delete server guards check — so
+   * drive it with `grantOnly` like every other panel gate here.
+   */
+  it("Q-V1: the Danger zone renders only under edit-policy — any other grant hides it entirely", () => {
+    grantOnly.action = "manage-members";
+    const withoutGrant = renderPage();
+    expect(withoutGrant.container.textContent).not.toContain("Danger zone");
+    cleanup();
+
+    grantOnly.action = "edit-policy";
+    const withGrant = renderPage();
+    expect(withGrant.container.textContent).toContain("Danger zone");
+  });
 
   it("grants ONLY edit-policy → identity, stages and repo repair; members and credentials stay shut", () => {
     grantOnly.action = "edit-policy";

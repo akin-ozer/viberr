@@ -174,8 +174,11 @@ story (TLS, backup/restore, projection rebuild) and
 ## Health endpoint
 
 `GET /resources/health` is an unauthenticated ops probe (used by the Docker healthcheck
-above). It returns `200` with `{ ok, projections: { projects, tasks }, watcher, backends }`
-when the database answers — `watcher` reports whether the file store watcher is alive, and
+above). It returns `200` with
+`{ ok, projections: { projects, tasks }, watcher, kbWatcher, lock, backends }`
+when the database answers — `watcher` / `kbWatcher` report whether the file-store and
+knowledge-base watchers are alive, `lock: { pid, hostname, startedAt }` names the process
+holding the single-writer lock on this data root (one app process per data root, ever), and
 `backends: { claude, codex }` reports `real`/`unavailable` per runtime (see
 [Enabling real agent backends](#enabling-real-agent-backends)). It returns `503` with
 `{ ok: false }` if the database cannot be read.
@@ -195,8 +198,8 @@ app/
                    # github, interpretation, logging, org, prefs, projections,
                    # runtimes, secrets, seed, tasks, theme + boot.server.ts
   schemas/         # shared Zod schemas (task file, project file, SSE events…)
-  shared/          # cross-surface helpers (auth, capabilities, dates, ids,
-                   # mapping, rbac, workflow)
+  shared/          # cross-surface helpers (auth, capabilities, dates, docs,
+                   # freshness, ids, mapping, rbac, text, workflow)
   app.css          # the ported viberr.css design system + marked additions
 db/migrations/     # SQL-first migrations (auto-applied at boot)
 scripts/           # seed / seed-demo / rescan (tsx)

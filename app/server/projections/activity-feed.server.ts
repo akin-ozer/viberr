@@ -137,6 +137,7 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "github.credential.revalidated": "change",
   "github.pr.merge_refused": "blockedact",
   "task.ownership.admin_released": "audit",
+    "task.operator.autonomy_clamped": "audit",
   "runtime.run.started": "audit",
   "runtime.run.interrupted": "audit",
   // P13-D-7: the two governance overrides that were RECORDED but surfaced

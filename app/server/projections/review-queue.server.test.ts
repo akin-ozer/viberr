@@ -540,7 +540,10 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
       viewerUserId: store.users.arda.id,
     });
     expect(q.working.find((t) => t.key === "VIB-6")!.blockReason).toMatch(
-      /no approving verdict yet — run a review for a verdict, or an admin can force-accept/,
+      // R19-B added a third way to satisfy the gate, so the sentence names it.
+      // Telling a reader only two of the three ways to unblock is the same
+      // half-truth this pass has been removing everywhere else.
+      /no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept/,
     );
   });
 

@@ -1,13 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { createTestDbContext } from "../../test-support/test-db";
-import {
-  applyRetention,
-  AUDIT_RETENTION_DAYS,
-} from "./db/retention.server";
+import { logger } from "./logging/logger.server";
 
 /**
  * P14-RT-09: the boot reconcile chain is ORDERED.
@@ -50,9 +46,29 @@ vi.mock("./tasks/workspace-retention.server", async () => {
   return { ...actual, reclaimTerminalTaskWorkspaces };
 });
 
-const { reconcileRestartedWork, takeDataRootWriterLock } = await import(
-  "./boot.server"
+/**
+ * Gap 15: boot's retention step used to be the ONLY one in the process
+ * lifetime. These two stand in for the periodic scheduler so the boot WIRING
+ * (which cannot be exercised without booting a real server) is testable.
+ */
+const runMaintenancePass = vi.fn(
+  (_db: unknown, _options: { reason: string; reclaimWorkspaces?: boolean }) =>
+    ({}) as never,
 );
+const startMaintenanceScheduler = vi.fn();
+vi.mock("./ops/maintenance.server", async () => {
+  const actual = await vi.importActual<
+    typeof import("./ops/maintenance.server")
+  >("./ops/maintenance.server");
+  return { ...actual, runMaintenancePass, startMaintenanceScheduler };
+});
+
+const {
+  logBootIntegrity,
+  reconcileRestartedWork,
+  startStoreMaintenance,
+  takeDataRootWriterLock,
+} = await import("./boot.server");
 
 /** The chain only passes the handle through — no query runs in these tests. */
 const db = {} as DatabaseSync;
@@ -62,6 +78,9 @@ beforeEach(() => {
   recoverUnreactedAgentRuns.mockClear();
   recoverStrandedOperatorPlans.mockClear();
   reclaimTerminalTaskWorkspaces.mockClear();
+  runMaintenancePass.mockClear();
+  runMaintenancePass.mockImplementation(() => ({}) as never);
+  startMaintenanceScheduler.mockClear();
 });
 
 /**
@@ -156,79 +175,68 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
 });
 
 /**
- * G19-f — FR33's retention pass runs AT BOOT.
- *
- * `retention.server.test.ts` proves the pass prunes correctly, and the pass-19
- * gap was closed by reading `boot.server.ts:286` and seeing the call. That is a
- * verdict from a read, not a gate: nothing in the suite mentioned retention, so
- * deleting the boot call left FR33's "bounded growth" claim true of a function
- * nobody invokes — with every test green (audit §2.4).
- *
- * `bootServer` cannot be invoked here: it takes the data-root writer lock, opens
- * the real database, seeds an admin, and starts three watchers/pollers plus two
- * timers. So the CALL SITE is pinned statically, against the source, and the
- * EFFECT is pinned behaviourally against a real database. Between them, deleting
- * the call, dropping the import, or widening the window goes red.
- *
- * What this deliberately does NOT bind: the ORDER of boot steps (that is
- * `reconcileRestartedWork`'s describe above) and whether `bootServer` is itself
- * reached — `entry.server.tsx` awaits it at module scope.
+ * Gap 15: retention was a one-shot boot step, so the more stable the
+ * deployment the more it grew — and `compose.yml` sets `restart: unless-stopped`,
+ * meaning a healthy container is only ever restarted by a human. Boot keeps its
+ * pass AND now arms the timer that makes it recur.
  */
-describe("FR33 retention runs at boot (G19-f)", () => {
-  const BOOT_SRC = readFileSync(
-    fileURLToPath(new URL("./boot.server.ts", import.meta.url)),
-    "utf8",
-  );
-  const bootServerAt = BOOT_SRC.indexOf("export async function bootServer");
-  const bootBody = BOOT_SRC.slice(bootServerAt);
+describe("startStoreMaintenance (gap 15)", () => {
+  it("runs a boot pass and ARMS the periodic scheduler", () => {
+    startStoreMaintenance(db);
 
-  it("bootServer calls applyRetention with the boot database handle", () => {
-    expect(bootServerAt, "bootServer must exist to carry the pass").toBeGreaterThan(-1);
-    expect(
-      BOOT_SRC,
-      "the retention pass must come from the ONE retention module",
-    ).toContain('from "./db/retention.server"');
-    expect(
-      bootBody,
-      "FR33's 90-day pass is invoked nowhere else — deleting this call silently unbounds the SQLite file",
-    ).toMatch(/\bapplyRetention\(\s*db\s*\)/);
+    expect(runMaintenancePass).toHaveBeenCalledTimes(1);
+    expect(runMaintenancePass.mock.calls[0]![1]).toMatchObject({
+      reason: "boot",
+      // reconcileRestartedWork owns the reclaim at boot, sequenced AFTER run
+      // recovery (P14-RT-09) — doing it here too would reintroduce that race.
+      reclaimWorkspaces: false,
+    });
+    expect(startMaintenanceScheduler).toHaveBeenCalledTimes(1);
+    expect(startMaintenanceScheduler.mock.calls[0]![0]).toBe(db);
   });
 
-  it("the call is best-effort — a failing pass never stops the boot", () => {
-    // Same contract as every other boot step: retention is housekeeping, and
-    // housekeeping must never be the reason a deployment cannot come online.
-    expect(bootBody).toMatch(
-      /try\s*\{\s*applyRetention\(\s*db\s*\)\s*;?\s*\}\s*catch/,
-    );
+  it("still arms the scheduler when the boot pass throws", () => {
+    runMaintenancePass.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+
+    expect(() => startStoreMaintenance(db)).not.toThrow();
+    expect(startMaintenanceScheduler).toHaveBeenCalledTimes(1);
   });
+});
 
-  it("that pass really drops an audit row past the 90-day window, and keeps one inside it", () => {
-    // The window IS the requirement (FR33), so the number is asserted rather
-    // than trusted, and the row ages are derived from it.
-    expect(AUDIT_RETENTION_DAYS).toBe(90);
+/**
+ * Gap 18: the boot integrity line was the doc's answer to "which build is
+ * running" (deployment.md §First run) while carrying no build identity at all —
+ * `latestMigration` is the constant `0001_baseline.sql` for every build.
+ */
+describe("logBootIntegrity (gaps 16 + 18)", () => {
+  const bootCtx = createTestDbContext();
+  afterEach(bootCtx.cleanup);
 
-    const retentionCtx = createTestDbContext();
+  function integrityFields(): Record<string, unknown> {
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
     try {
-      const bootDb = retentionCtx.makeDb();
-      const audit = (id: string, daysAgo: number) =>
-        bootDb
-          .prepare(
-            `INSERT INTO audit_events (id, occurred_at, actor_user_id, actor_label,
-               action, subject_kind, subject_id, project_slug, task_key, details_json)
-             VALUES (?, ?, null, 'system', 'task.stage.changed', 'task', 'VIB-1', 'p', 'VIB-1', '{}')`,
-          )
-          .run(id, new Date(Date.now() - daysAgo * 86_400_000).toISOString());
-      audit("aud_stale", AUDIT_RETENTION_DAYS + 1);
-      audit("aud_kept", AUDIT_RETENTION_DAYS - 1);
-
-      applyRetention(bootDb);
-
-      const surviving = bootDb
-        .prepare(`SELECT id FROM audit_events ORDER BY id`)
-        .all() as { id: string }[];
-      expect(surviving.map((r) => r.id)).toEqual(["aud_kept"]);
+      logBootIntegrity(bootCtx.makeDb());
+      const line = info.mock.calls.find(
+        ([msg]) => msg === "boot integrity check",
+      );
+      expect(line).toBeDefined();
+      return line![1] as Record<string, unknown>;
     } finally {
-      retentionCtx.cleanup();
+      info.mockRestore();
     }
+  }
+
+  it("names the running build", () => {
+    const fields = integrityFields();
+    expect(fields.build).toBeDefined();
+    expect(fields.build).toHaveProperty("version");
+    expect(fields.build).toHaveProperty("revision");
+    expect(fields.build).toHaveProperty("revisionSource");
+  });
+
+  it("reports free space at the one moment an operator is reading this log", () => {
+    expect(integrityFields()).toHaveProperty("disk");
   });
 });

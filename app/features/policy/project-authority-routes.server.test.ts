@@ -256,7 +256,16 @@ describe("every project-scoped route carries a membership gate", () => {
     "../../routes",
   );
   const files = readdirSync(routesDir)
-    .filter((f) => f.startsWith("project.") && f.endsWith(".tsx"))
+    // Route MODULES only. Colocated component tests share the `project.` prefix
+    // and the `.tsx` extension (e.g. `project.test.tsx`, which renders
+    // ArchivedBanner), so exclude the `.test.tsx` suffix or the scan mistakes a
+    // test file for an ungated route.
+    .filter(
+      (f) =>
+        f.startsWith("project.") &&
+        f.endsWith(".tsx") &&
+        !f.endsWith(".test.tsx"),
+    )
     .sort();
   const source = (f: string) => readFileSync(path.join(routesDir, f), "utf8");
 

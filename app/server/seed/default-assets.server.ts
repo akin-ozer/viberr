@@ -126,6 +126,7 @@ const SHIPPED_MANIFEST_REL = path.join("state", "shipped-assets.json");
  */
 export const PRIOR_SHIPPED_HASHES: Record<string, readonly string[]> = {
   [path.join("agents", "definitions", "operator.md")]: [
+    "03a4f8b7a1c2ed9e7414654e5086288e6dcc187b48f9bd16b1ef141b3eca4f34",
     "128c0e733d181ce93c6b3c15c71e890fc629c592f39b08d03a44b6b77afd0d1c",
     "197eaf0b400f61d690d0ec32198fafbd120fa518ef27f00e13b4b427f8bf5856",
     "2693d1381b637cac935db3b2d95f9fd8f6e4a1eb6228ea3d331e8a890e8e7a32",

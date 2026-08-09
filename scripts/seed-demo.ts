@@ -9,8 +9,13 @@
  *
  *   npm run seed:demo             — idempotent
  *   npm run seed:demo -- --reset  — wipe board + derived state first
+ *
+ * Takes the data-root WRITER lock first (B-FD1) — see scripts/seed.ts. Two
+ * writers on one root corrupts the WAL, and Playwright seeds the same root the
+ * dev server may still be holding.
  */
 import { getEnv } from "../app/server/config/env.server";
+import { runWithDataRootWriterLock } from "../app/server/db/cli-lock.server";
 import { getDb } from "../app/server/db/sqlite.server";
 import { seedOrgResources } from "../app/server/org/org-seed.server";
 
@@ -38,29 +43,39 @@ try {
 const env = getEnv();
 const reset = process.argv.includes("--reset");
 
-const summary = await runDemoSeed(getDb(), {
-  dataRoot: env.VIBERR_DATA_ROOT,
-  reset,
-  adminPassword: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,
-});
+await runWithDataRootWriterLock(
+  "`npm run seed:demo`",
+  async () => {
+    const summary = await runDemoSeed(getDb(), {
+      dataRoot: env.VIBERR_DATA_ROOT,
+      reset,
+      adminPassword: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,
+    });
 
-const org = seedOrgResources(getDb(), {
-  dataRoot: env.VIBERR_DATA_ROOT,
-  reset,
-});
+    const org = seedOrgResources(getDb(), {
+      dataRoot: env.VIBERR_DATA_ROOT,
+      reset,
+    });
 
-console.log(
-  [
-    "viberr DEMO fixture seeded (test/dev only — the product seed is a clean sheet):",
-    `  users          ${summary.users}`,
-    `  projects       ${summary.projects}`,
-    `  tasks          ${summary.tasks}`,
-    `  notifications  ${summary.notifications}`,
-    `  agent profiles ${summary.agentProfiles}`,
-    `  org kbs        ${org.kbs} (${org.kbFiles} files)`,
-    `  org skills     ${org.skills}`,
-    "",
-    `Sign in: arda@viberr.dev / ${env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD}`,
-    `Other users (elif|murat|selin|deniz @viberr.dev): ${SEED_DEFAULT_PASSWORD}`,
-  ].join("\n"),
+    console.log(
+      [
+        "viberr DEMO fixture seeded (test/dev only — the product seed is a clean sheet):",
+        `  users          ${summary.users}`,
+        `  projects       ${summary.projects}`,
+        `  tasks          ${summary.tasks}`,
+        `  notifications  ${summary.notifications}`,
+        `  agent profiles ${summary.agentProfiles}`,
+        `  org kbs        ${org.kbs} (${org.kbFiles} files)`,
+        `  org skills     ${org.skills}`,
+        "",
+        `Sign in: arda@viberr.dev / ${env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD}`,
+        `Other users (elif|murat|selin|deniz @viberr.dev): ${SEED_DEFAULT_PASSWORD}`,
+      ].join("\n"),
+    );
+  },
+  {
+    dataRoot: env.VIBERR_DATA_ROOT,
+    alternative:
+      "Stop the dev server (or the compose app) before seeding the demo fixture into the same data root.",
+  },
 );

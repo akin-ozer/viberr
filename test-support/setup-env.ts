@@ -83,3 +83,25 @@ process.env.CLAUDE_CONFIG_DIR = path.join(transcriptRoot, "claude-home");
 process.env.CODEX_HOME = path.join(transcriptRoot, "codex-home");
 mkdirSync(path.join(process.env.CLAUDE_CONFIG_DIR, "projects"), { recursive: true });
 mkdirSync(path.join(process.env.CODEX_HOME, "sessions"), { recursive: true });
+
+/**
+ * Fail closed against real NETWORK access from git (N19-6).
+ *
+ * Two tests reach `cloneRepo` with a repository name that resolves publicly
+ * (`akin-ozer/viberr`), so `npm test` made a real `git clone` over the network:
+ * `task-detail-route.server.test.ts` and `specialist-run.server.test.ts` each
+ * failed intermittently under parallel load and passed in isolation — the
+ * classic shape of a suite that depends on a socket. Neither test WANTS a
+ * checkout; both assert what the app does when the clone does not produce one.
+ *
+ * `GIT_ALLOW_PROTOCOL` is git's own allow-list. Restricting it to `file` makes
+ * every https/ssh transport fail instantly and offline ("transport 'https' not
+ * allowed") instead of resolving DNS and opening a connection, so the failure
+ * these tests already expect arrives deterministically and costs nothing. Local
+ * fixtures are unaffected: `git init` / `add` / `commit` and `file://` remotes
+ * use no transport at all, which is what the skill-mount fixtures rely on.
+ *
+ * A test that genuinely needs the network must set this explicitly for its own
+ * child process — and should not exist in this suite.
+ */
+process.env.GIT_ALLOW_PROTOCOL = "file";

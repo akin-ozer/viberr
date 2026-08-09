@@ -83,6 +83,13 @@ export interface ReviewQueueRow {
    *  acceptance". R16-3: a PR closed unmerged is named here FIRST, ahead of any
    *  process gate, because no verdict and no force-accept can undo it. */
   blockReason: string | null;
+  /** Gap-10: ISO of the newest timeline event (`occurred_at`), null when the
+   *  timeline is empty. The queue is a triage list and carried no time at all —
+   *  a task that reached the boundary five minutes ago and one that has sat
+   *  there since Tuesday rendered identically. */
+  lastActivityAt: string | null;
+  /** Gap-10: this row has gone quiet past its threshold (see `isQuiet`). */
+  quiet: boolean;
 }
 
 export interface ReviewQueueData {
@@ -97,14 +104,21 @@ export interface ReviewQueueData {
 export function getReviewQueue(
   db: DatabaseSync,
   slug: string,
-  opts: { viewerUserId: string; dataRoot?: string },
+  opts: {
+    viewerUserId: string;
+    dataRoot?: string;
+    /** Gap-10: the instant "has this gone quiet?" is asked against (tests only). */
+    now?: Date;
+  },
 ): ReviewQueueData {
   const project = getProject(db, slug);
   const reviewId = project
     ? resolveStageRoles(project.stages, project.workflow).reviewId
     : null;
   const inReview = reviewId
-    ? listProjectTasks(db, slug).filter((t) => t.stage === reviewId)
+    ? listProjectTasks(db, slug, opts.now ? { now: opts.now } : {}).filter(
+        (t) => t.stage === reviewId,
+      )
     : [];
 
   // F10-11/F10-15: acceptance readiness comes from the revision-bound review
@@ -151,6 +165,10 @@ export function getReviewQueue(
       : null,
     validation: t.validation,
     blockReason: t.blockReason,
+    // Gap-10: annotated once, by `listProjectTasks` — the board and this queue
+    // must not answer "when did anything last happen here" two different ways.
+    lastActivityAt: t.lastActivityAt,
+    quiet: t.quiet,
   }));
 
   // R8-3: "Waiting on your acceptance" is member-scoped by ACCEPTANCE AUTHORITY,

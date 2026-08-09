@@ -1525,8 +1525,21 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     defaultBranchEvidence: { verified: true as const },
   };
 
-  /** GitHub answering with the project's default-branch head. */
+  /** GitHub answering with the project's default-branch head. Serves BOTH reads
+   *  the no-change flow makes: the delivery-time base read (`commits/main`, for
+   *  `resolveNoChangeBaseRevision`'s minted revision) AND the accept-time base
+   *  ref read (`git/ref/heads/main`, for B's live `probeNothingToDeliver`). The
+   *  task branch ref 404s, which is the probe's `no_branch` basis. */
   function okGithub(sha: string = BASE_SHA): void {
+    const ok = (data: unknown) => ({
+      ok: true as const,
+      status: 200,
+      data,
+      etag: null,
+      rateLimit: { limit: null, remaining: null, reset: null },
+      scopesHeader: null,
+      tokenExpiration: null,
+    });
     ghCtxMock.mockReturnValue({
       status: "ok",
       repo: "akin-ozer/viberr",
@@ -1536,16 +1549,10 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
       client: {
         request: async (_method: string, path: string) =>
           path === "/repos/akin-ozer/viberr/commits/main"
-            ? {
-                ok: true,
-                status: 200,
-                data: { sha, commit: { tree: { sha: BASE_TREE } } },
-                etag: null,
-                rateLimit: { limit: null, remaining: null, reset: null },
-                scopesHeader: null,
-                tokenExpiration: null,
-              }
-            : { ok: false, kind: "http", status: 404, message: "not found" },
+            ? ok({ sha, commit: { tree: { sha: BASE_TREE } } })
+            : path === "/repos/akin-ozer/viberr/git/ref/heads/main"
+              ? ok({ object: { sha } })
+              : { ok: false, kind: "http", status: 404, message: "not found" },
       },
     });
   }
@@ -1645,8 +1652,14 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     expect(done.pr).toBeNull();
     const event = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!;
     expect(event.type).toBe("completion");
-    expect(event.text).toContain("completed with no changes required");
-    expect(event.text).toContain("nothing was delivered or merged");
+    // The merge adopted B's ONE shared "Completed — no changes" event builder,
+    // whose accept-time text is re-proved LIVE against the remote (no_branch
+    // basis) — never the merge path's title or wording. (Replaces A's older
+    // "completed with no changes required" / "nothing was delivered or merged".)
+    expect(event.title).toBe("Completed — no changes");
+    expect(event.text).toContain("completed with no changes");
+    expect(event.text).toContain("no pull request to merge");
+    expect(event.text).toContain("no `vib-1` branch exists");
   });
 
   it("still refuses acceptance while the required reviewer has not approved", async () => {
@@ -1873,6 +1886,12 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
       { dataRoot: store.dataRoot },
     );
 
+  // Restore the hoisted degraded default after any test opts into an `ok`
+  // context (there is no auto-reset between tests in this file).
+  afterEach(() => {
+    ghCtxMock.mockReturnValue({ status: "no_pat_configured", repo: null });
+  });
+
   it("refuses a task with an OPEN PR that no verdict approved", async () => {
     const store = prepared();
     seedNoChange(store, {
@@ -1894,6 +1913,34 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
   it("still closes the no-PR shape the flag was written for (R17-2)", async () => {
     const store = prepared();
     seedNoChange(store, null);
+
+    // The merge wired B's accept-time no-change probe into every writer to Done
+    // (R19-1): a `noChanges` close is re-proved LIVE against the remote. Give it
+    // a reachable GitHub where the task branch is absent (`no_branch` basis) and
+    // the default-branch head reads, so the probe verifies and this test keeps
+    // exercising the R15-1 verdict-gate bypass it was written for.
+    const BASE = "abc0123456789def0123456789abcdef01234567";
+    ghCtxMock.mockReturnValue({
+      status: "ok",
+      repo: "akin-ozer/viberr",
+      owner: "akin-ozer",
+      defaultBranch: "main",
+      patId: "pat_test",
+      client: {
+        request: async (_m: string, path: string) =>
+          path === "/repos/akin-ozer/viberr/git/ref/heads/main"
+            ? {
+                ok: true,
+                status: 200,
+                data: { object: { sha: BASE } },
+                etag: null,
+                rateLimit: { limit: null, remaining: null, reset: null },
+                scopesHeader: null,
+                tokenExpiration: null,
+              }
+            : { ok: false, kind: "http", status: 404, message: "not found" },
+      },
+    });
 
     await accept(store);
     expect(

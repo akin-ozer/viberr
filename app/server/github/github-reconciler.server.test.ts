@@ -14,6 +14,8 @@ import {
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { updateUserFields } from "~/server/auth/user-store.server";
+import { readPrHumanApproval } from "./pr-human-approval.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import {
@@ -663,6 +665,83 @@ describe("reconcileTask", () => {
       .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
       .all() as { text: string }[];
     expect(events2.filter((e) => /\*\*Divergence:\*\*/.test(e.text))).toHaveLength(1);
+  });
+
+  /** The merged-out-of-band routes, shared by the concurrency tests below. */
+  function mergedOutOfBandRoutes(): Record<string, FakeResponder> {
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318, title: "Attach execution workspace", state: "closed",
+        merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
+        additions: 1, deletions: 0, changed_files: 1,
+      },
+    };
+    return routes;
+  }
+
+  it("F19-19: two OVERLAPPING passes announce an out-of-band merge exactly once", async () => {
+    // The test above fires the two passes SEQUENTIALLY, which is the one
+    // ordering the defect cannot reach. Two OVERLAPPING passes — the poller's
+    // boot pass while a maintainer presses "Update status", or two tabs — both
+    // read `pr.state: review` before either writes, both learn GitHub says
+    // merged, and one merge produces two divergence notes and two identical
+    // inbox alerts per supervisor. NFR16 calls that chatter.
+    // Canary: replace withTaskReconcileLock's body with `return work()` → both
+    // counts below become 2.
+    const { store, actor } = setup();
+    const gh = fakeGithubFetch(mergedOutOfBandRoutes());
+    const results = await Promise.all([
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+    ]);
+
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    expect(
+      events.filter((e) => /\*\*Divergence:\*\* PR #318 was merged on GitHub/.test(e.text)),
+    ).toHaveLength(1);
+    const notifs = listNotifications(store.db, store.users.arda.id);
+    expect(notifs.filter((n) => n.kind === "policy" && /merged on GitHub/.test(n.text)))
+      .toHaveLength(1);
+    // The mutex must not change the no-auto-advance rule.
+    expect(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
+        .parsed.frontmatter.stage,
+    ).toBe("review");
+    // A QUEUE, not a coalescer: the second pass ran its own read AFTER the
+    // first wrote, so it saw the merged cache and found nothing new — rather
+    // than being handed the answer computed before it was called.
+    expect(results[0]).toMatchObject({ status: "reconciled", changed: true });
+    expect(results[1]).toMatchObject({ status: "reconciled", changed: false });
+  });
+
+  it("F19-19: a REJECTED pass never strands the next one on the same task", async () => {
+    // The chain link stored in the map absorbs the failure. Without that, one
+    // thrown reconcile would leave the task's chain permanently rejected and
+    // every later pass — poller and button alike — would silently never run.
+    // Canary: drop the rejection handler from `tail` (`run.then(() => undefined)`)
+    // → passes 2 and 3 never run and the test times out.
+    const { store, actor } = setup();
+    // Fault injection: a transport that hands back a malformed response, which
+    // throws PAST the client's network-error handling (that only wraps the
+    // fetch call itself).
+    const explodingFetch = (async () => ({ status: 200 })) as unknown as typeof fetch;
+    const gh = fakeGithubFetch(happyRoutes());
+    const settled = await Promise.allSettled([
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: explodingFetch }),
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+    ]);
+    expect(settled[0]!.status).toBe("rejected");
+    expect(settled[1]).toMatchObject({ status: "fulfilled", value: { status: "reconciled" } });
+    expect(settled[2]).toMatchObject({ status: "fulfilled", value: { status: "reconciled" } });
   });
 
   function seedWithRecs(store: TestStore) {
@@ -1871,5 +1950,196 @@ describe("reconcileProject fan-out control", () => {
     });
     expect(reconciledKeys(summary)).toContain("VIB-800");
     expect(summary.results).toHaveLength(9);
+  });
+});
+
+// ------------------------------------- R19-B human GitHub approval as verdict
+
+/**
+ * R19-B (owner ruling, pass 19) — a project member's GitHub approval on the PR
+ * counts as the approving verdict. The reconciler is where that fact enters the
+ * system: same `/reviews` payload the pill already costs, mapped to a member
+ * through `users.github_handle`, bound to the DELIVERED revision.
+ */
+describe("reconcileTask records the human PR approval (R19-B)", () => {
+  const REVIEWS = `GET ${REPO_PATH}/pulls/318/reviews`;
+
+  /** The happy fixture, plus a delivered revision whose head IS the PR head. */
+  function setupDelivered(headSha = "headsha318"): ReturnType<typeof setup> {
+    const s = setup();
+    writeTask(s.store.dataRoot, s.store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: s.store.users.arda.id,
+        pr: { number: 318, state: "review", title: "Attach execution workspace" },
+        workRevision: {
+          id: "rev_1",
+          headSha,
+          treeSha: null,
+          branch: "vib-301-workspace",
+          createdAt: "2026-08-08T08:00:00Z",
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+      }),
+    });
+    rebuildAll(s.store.db, { dataRoot: s.store.dataRoot, force: true });
+    return s;
+  }
+
+  function readPr(store: TestStore) {
+    return readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.pr;
+  }
+
+  it("counts a project member's approval of the delivered head", async () => {
+    const { store, actor } = setupDelivered();
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    const routes = happyRoutes();
+    routes[REVIEWS] = {
+      body: [
+        {
+          user: { login: "muratdev" },
+          state: "APPROVED",
+          commit_id: "headsha318",
+          submitted_at: "2026-08-08T09:00:00Z",
+        },
+      ],
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    expect(readPrHumanApproval(readPr(store))).toMatchObject({
+      login: "muratdev",
+      userId: store.users.murat.id,
+      commitSha: "headsha318",
+      status: "counted",
+    });
+  });
+
+  it("fails CLOSED on an approver whose GitHub handle maps to nobody — and records WHY", async () => {
+    const { store, actor } = setupDelivered();
+    const routes = happyRoutes();
+    routes[REVIEWS] = {
+      body: [{ user: { login: "octocat" }, state: "APPROVED", commit_id: "headsha318" }],
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    expect(readPrHumanApproval(readPr(store))).toMatchObject({
+      login: "octocat",
+      userId: null,
+      status: "unlinked_handle",
+    });
+  });
+
+  it("fails CLOSED on a registered NON-member's approval", async () => {
+    const { store, actor } = setupDelivered();
+    // deniz has an account but no membership on this project.
+    updateUserFields(store.db, store.users.deniz.id, { githubHandle: "denizdev" });
+    const routes = happyRoutes();
+    routes[REVIEWS] = {
+      body: [{ user: { login: "denizdev" }, state: "APPROVED", commit_id: "headsha318" }],
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    expect(readPrHumanApproval(readPr(store))).toMatchObject({
+      userId: store.users.deniz.id,
+      status: "not_a_member",
+    });
+  });
+
+  it("binds to the DELIVERED revision — an approval of an older commit does not count", async () => {
+    // The PR head advanced past what was reviewed: the approval sits on an
+    // earlier commit, which is exactly the R15-1 case a status pill cannot see.
+    const { store, actor } = setupDelivered();
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    const routes = happyRoutes();
+    routes[REVIEWS] = {
+      body: [{ user: { login: "muratdev" }, state: "APPROVED", commit_id: "oldersha" }],
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    expect(readPrHumanApproval(readPr(store))).toMatchObject({
+      status: "stale_revision",
+      commitSha: "oldersha",
+    });
+  });
+
+  it("an UNREACHABLE GitHub keeps a satisfied gate satisfied (unknown ≠ withdrawn)", async () => {
+    const { store, actor } = setupDelivered();
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    const good = happyRoutes();
+    good[REVIEWS] = {
+      body: [{ user: { login: "muratdev" }, state: "APPROVED", commit_id: "headsha318" }],
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(good).fetchImpl },
+    );
+    expect(readPrHumanApproval(readPr(store))?.status).toBe("counted");
+
+    // The reviews endpoint 500s on the next pass. Erasing the approval here
+    // would flip a gate a human really satisfied into a confusing red — the
+    // same "unknown is not none" rule `checks` and `review` already follow.
+    const flaky = happyRoutes();
+    flaky[REVIEWS] = { status: 500, body: { message: "Server Error" } };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(flaky).fetchImpl },
+    );
+    expect(readPrHumanApproval(readPr(store))?.status).toBe("counted");
+  });
+
+  it("a WITHDRAWN approval is a real fact and does close the gate again", async () => {
+    const { store, actor } = setupDelivered();
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    const good = happyRoutes();
+    good[REVIEWS] = {
+      body: [{ user: { login: "muratdev" }, state: "APPROVED", commit_id: "headsha318" }],
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(good).fetchImpl },
+    );
+    const dismissed = happyRoutes();
+    dismissed[REVIEWS] = {
+      body: [
+        { user: { login: "muratdev" }, state: "APPROVED", commit_id: "headsha318" },
+        { user: { login: "muratdev" }, state: "DISMISSED" },
+      ],
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(dismissed).fetchImpl },
+    );
+    expect(readPrHumanApproval(readPr(store))).toBeNull();
   });
 });

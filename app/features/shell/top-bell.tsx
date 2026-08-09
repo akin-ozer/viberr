@@ -34,6 +34,14 @@ export function TopBell({
   notifications: NotificationView[];
   unread: number;
 }) {
+  // F19-25: `unread` comes from `countUnreadNotifications`, which EXCLUDES rows
+  // whose project no longer exists (F18-1). Those orphan rows are still rendered
+  // below, still wearing their unread dot — so the popover said "caught up" and
+  // withdrew Mark all read while unread rows were on screen. The two sets are
+  // disjoint by construction, so adding them cannot double-count.
+  const shownUnread =
+    unread + notifications.filter((n) => n.unread && n.targetMissing).length;
+
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -127,9 +135,9 @@ export function TopBell({
             <div className="ntf-pop-head">
               <h3>Notifications</h3>
               <span className="ct mono">
-                {unread > 0 ? unread + " unread" : "caught up"}
+                {shownUnread > 0 ? shownUnread + " unread" : "caught up"}
               </span>
-              {unread > 0 && (
+              {shownUnread > 0 && (
                 <button type="button" className="btn ghost sm" onClick={markAllRead}>
                   Mark all read
                 </button>

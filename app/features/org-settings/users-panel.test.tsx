@@ -184,3 +184,79 @@ describe("LV-F1: a pending reset never hides the re-issue action", () => {
     expect(getByText("Reset password")).toBeTruthy();
   });
 });
+
+/**
+ * Pass-19 UX coherence audit, finding #20 (a11y).
+ *
+ * One panel, one server guard, two feedback semantics: the member row's role
+ * toggle routes its refusal through `useOrgAction`'s default handler and toasts
+ * it (`ui/toast.tsx` — role="status", "the app's ONE announcer"), and the
+ * client-side "You can't demote yourself" on the modal's own Save button toasts
+ * too. Only the SERVER saying no — the duplicate-email and last-admin guards in
+ * org-users.server.ts — landed in a roleless `.cred-warn`, because the modals
+ * pass an `onResult` that replaces the default toast. A screen-reader user
+ * pressed Save changes and heard nothing at all while the dialog sat open.
+ */
+describe("#20: a server refusal inside these modals is announced", () => {
+  const OTHER: OrgUserView = {
+    ...ME,
+    id: "u_elif",
+    name: "Elif Demir",
+    email: "elif@viberr.dev",
+    initials: "ED",
+    role: "member",
+  };
+
+  function renderRefusing(error: string) {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <UsersPanel
+              users={[ME, OTHER]}
+              domains={DOMAINS}
+              meId="u_arda"
+              providers={{ github: false, google: false }}
+            />
+          </ToastProvider>
+        ),
+        action: async () => ({ ok: false, error }),
+      },
+    ]);
+    return render(<Stub initialEntries={["/org/settings"]} />);
+  }
+
+  const warning = async (container: HTMLElement, text: string) =>
+    await waitFor(() => {
+      const node = container.querySelector(".cred-warn");
+      expect(node?.textContent).toContain(text);
+      return node!;
+    });
+
+  it("the Edit-user modal's refusal is a live region, like the toast its own row gets", async () => {
+    const { container, getByLabelText, getByText } = renderRefusing(
+      "A user with email elif@viberr.dev already exists.",
+    );
+    fireEvent.click(getByLabelText("Edit Elif Demir"));
+    fireEvent.click(getByText("Save changes"));
+    const node = await warning(container, "already exists.");
+    expect(node.getAttribute("role")).toBe("alert");
+  });
+
+  it("the invite modal's refusal is a live region too", async () => {
+    const { container, getByText, getByPlaceholderText } = renderRefusing(
+      "Enter a valid email address.",
+    );
+    fireEvent.click(getByText("Allow access"));
+    fireEvent.change(getByPlaceholderText("Full name"), {
+      target: { value: "Yeni Kişi" },
+    });
+    fireEvent.change(getByPlaceholderText("name@company.dev"), {
+      target: { value: "yeni@viberr.dev" },
+    });
+    fireEvent.click(getByText("Create account"));
+    const node = await warning(container, "Enter a valid email address.");
+    expect(node.getAttribute("role")).toBe("alert");
+  });
+});

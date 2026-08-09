@@ -19,6 +19,7 @@ import {
 import { countOpenPolicyViolations } from "~/server/projections/policy-violations.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
+import { roleCan } from "~/shared/rbac";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { isArchived } from "~/features/board/board-filters";
 import { sseScopes } from "~/features/live-updates/event-types";
@@ -111,7 +112,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       (r) => r.key,
     ),
   ]);
-  const annotate = (t: TaskSummary): TaskSummary => ({
+  // Gap 10: generic, so the columns keep the fields the activity projection
+  // adds (`lastActivityAt`, `quiet`). Re-typing through `TaskSummary` erased
+  // them from the type while the spread carried them at runtime — the feature
+  // worked, but nothing downstream could see it in the type system.
+  const annotate = <T extends TaskSummary>(t: T): T => ({
     ...t,
     waitingOnMe: myDecisions.has(t.key),
   });
@@ -144,6 +149,39 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     notifications: listNotifications(db, user.id, { limit: 100 }),
     unread: countUnreadNotifications(db, user.id),
   };
+}
+
+/**
+ * Pass-19 UX coherence audit, finding #15 — the archived banner used to tell
+ * EVERY reader to "restore it from Settings → Danger zone". Q-V1 (pass-18 owner
+ * ruling, project-settings/settings-page.tsx:1596) renders that panel only when
+ * the reader holds `edit-policy`, so a maintainer, contributor or viewer
+ * followed an exact named path to a panel that is not on their Settings page —
+ * and nothing anywhere told them who CAN restore it (the in-panel deny note is
+ * unreachable, since the gate and the note test the same grant). Name the route
+ * only to the reader who has it; everyone else gets the authority instead,
+ * which is the same shape the four Settings lock notes already use.
+ */
+export function ArchivedBanner({ canRestore }: { canRestore: boolean }) {
+  return (
+    <div className="archived-banner" role="status">
+      <Icon name="lock" />
+      <span>
+        This project is <strong>archived</strong> — it’s read-only. Timelines
+        and audit stay visible;{" "}
+        {canRestore ? (
+          <>
+            restore it from <strong>Settings → Danger zone</strong> to make
+            changes.
+          </>
+        ) : (
+          <>
+            a <strong>project admin</strong> can restore it to make changes.
+          </>
+        )}
+      </span>
+    </div>
+  );
 }
 
 export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
@@ -237,14 +275,9 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           onToggleRail={() => setRailOpen((open) => !open)}
         />
         {board.project.archived ? (
-          <div className="archived-banner" role="status">
-            <Icon name="lock" />
-            <span>
-              This project is <strong>archived</strong> — it’s read-only.
-              Timelines and audit stay visible; restore it from{" "}
-              <strong>Settings → Danger zone</strong> to make changes.
-            </span>
-          </div>
+          <ArchivedBanner
+            canRestore={roleCan(loaderData.myRole, "edit-policy")}
+          />
         ) : null}
         <Outlet />
       </main>

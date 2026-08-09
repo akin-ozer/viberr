@@ -151,6 +151,10 @@ describe("Codex structured operator completion", () => {
             name: "Operator",
             backends: ["codex"],
             model: defaultModelFor("codex"),
+            // R19-A: per-run autonomy is CLAMPED to the project's configured
+            // level, so `start()`'s `autonomy: "full"` below only means
+            // something on a project that CONFIGURED full autonomy.
+            autonomy: "full",
           },
         },
       ] as never,
@@ -1679,6 +1683,9 @@ describe("runOperator — authority, ordering, orphans", () => {
     const started = await drive({ trigger: "manual" });
     expect(started.queued).toBe(false);
     const spec = adapter5.pending!.spec;
+    // R19-1: an undeployed operator may LOOK at the repository — but through the
+    // read-only checkout under its cwd (Read/Grep/Glob), so the in-process MCP
+    // floor is just `get_task`, and it still changes nothing.
     expect(spec.allowedTools).toEqual(["mcp__viberr__get_task"]);
     expect(spec.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
   });

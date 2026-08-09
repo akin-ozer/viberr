@@ -10,6 +10,13 @@ App under test: production compose container `viberr-app-1` on :5173, data root
 Reference docs: planning/discovery-2026-08-06-pass19/reference/ (refreshed from pass 18
 against main @65063b8). Intent distillation: INTENT.md.
 
+> **Session B's parallel working log** — its use-case results (UC-01..UC-28), the Phase A–E live
+> verification, the implementation-status table, and the MCP-probe evidence (UC-14, canary
+> `MCP-CANARY-PASS19-4417`) — was authored on the `pass19/product-fixes` branch and belongs under
+> `session-b/` per the merge's canon plan (RECONCILE §4); it is preserved on that branch ref and is
+> not line-merged here. This file is Session A's discovery ledger; execution and disposition detail
+> live in the sibling `FINDINGS.md` / `CAMPAIGN.md` / `DISPOSITION.md`.
+
 ## Finding ledger
 
 IDs: F19-nn (defects), UX19-nn (UX/coherence), Q19-nn (owner questions), N19-nn (notes/ideas).

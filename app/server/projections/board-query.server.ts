@@ -14,6 +14,11 @@ import {
   type TaskProjectionRow,
   type TaskSummary,
 } from "~/shared/mapping/task.server";
+import {
+  activityFactsFor,
+  isQuiet,
+  readProjectActivity,
+} from "./task-activity.server";
 
 /**
  * Board/home read models (camelCase render shapes via the central mapping
@@ -53,9 +58,32 @@ export function compareBoardOrder(a: TaskSummary, b: TaskSummary): number {
   );
 }
 
+/**
+ * Gap-10: a task summary carrying its LAST ACTIVITY and whether it has gone
+ * quiet. Annotated here rather than projected into a column, because both parts
+ * are derived — `lastActivityAt` from `task_events`, `quiet` from that stamp
+ * against NOW and the live run registry — and a stored `quiet` flag would be
+ * wrong the moment the clock moved past it.
+ *
+ * `quiet` is resolved SERVER-side on purpose. It is what the board's filter chip
+ * selects on and what three surfaces draw, so it has to be one value that is
+ * identical in the SSR pass and in hydration; a client-side `Date.now()` would
+ * make it differ between the two renders. The board revalidates on every project
+ * SSE event and on navigation, and the shortest threshold is an hour, so the
+ * answer cannot go stale inside a session in any way a supervisor would notice.
+ * The RELATIVE TEXT beside it is a different problem and is solved the way this
+ * app already solves it — `LocalRelative` (app/ui/local-time.tsx).
+ */
+export interface TaskActivitySummary extends TaskSummary {
+  /** ISO of the newest timeline event; null when the timeline is empty. */
+  lastActivityAt: string | null;
+  /** Past its threshold, no run in flight, not archived, not terminal. */
+  quiet: boolean;
+}
+
 export interface BoardColumn {
   stage: { id: string; name: string; color: string };
-  tasks: TaskSummary[];
+  tasks: TaskActivitySummary[];
 }
 
 export interface BoardData {
@@ -64,7 +92,7 @@ export interface BoardData {
   columns: BoardColumn[];
   /** Tasks whose stage id matches no project stage (still listed, flagged
    * by their diagnostics — never silently dropped). */
-  orphanTasks: TaskSummary[];
+  orphanTasks: TaskActivitySummary[];
 }
 
 export function getProject(
@@ -143,8 +171,11 @@ export function listProjectTasks(
      *  view asks for them. Every other read model (board columns, review queue,
      *  home counts) inherits the exclusion by going through here. */
     includeArchived?: boolean;
+    /** Gap-10: the instant "has this gone quiet?" is asked against. Injectable
+     *  for tests only; every caller in the app takes the default. */
+    now?: Date;
   } = {},
-): TaskSummary[] {
+): TaskActivitySummary[] {
   const project = getProject(db, slug);
   const stages = project
     ? project.stages.map((s) => ({ id: s.id, name: s.name }))
@@ -165,8 +196,14 @@ export function listProjectTasks(
        ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
     )
     .all(slug) as unknown as TaskProjectionRow[];
-  return rows.map((row) =>
-    mapTaskProjectionRow(row, {
+  // Gap-10: two aggregate queries for the whole project, not one per row — the
+  // same shape as the shared actor resolver above, and for the same reason
+  // (this is the hottest loader path in the app).
+  const activity = readProjectActivity(db, slug);
+  return rows.map((row) => {
+    const accepted = isAcceptedDisplayState({ stage: row.stage, stageIds });
+    const facts = activityFactsFor(activity, row.task_key);
+    const summary = mapTaskProjectionRow(row, {
       stages,
       // F19-27: the acceptance-boundary fact is derived from the graph, not the
       // column order — a project whose workflow really allows the edge must not
@@ -182,9 +219,21 @@ export function listProjectTasks(
             }),
           )
         : null,
-      accepted: isAcceptedDisplayState({ stage: row.stage, stageIds }),
-    }),
-  );
+      accepted,
+    });
+    return {
+      ...summary,
+      lastActivityAt: facts.lastActivityAt,
+      quiet: isQuiet({
+        lastActivityAt: facts.lastActivityAt,
+        waiting: summary.waiting,
+        archived: summary.archived,
+        terminal: accepted,
+        runInFlight: facts.runInFlight,
+        ...(opts.now ? { now: opts.now } : {}),
+      }),
+    };
+  });
 }
 
 /** Full board read model: columns in project stage order. */
@@ -209,9 +258,9 @@ export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
   // excludes them from every other filter). Every OTHER read model — the review
   // queue, the decisions inbox, home's counts — takes the default exclusion.
   const tasks = listProjectTasks(db, slug, { includeArchived: true });
-  const byStage = new Map<string, TaskSummary[]>();
+  const byStage = new Map<string, TaskActivitySummary[]>();
   for (const stage of project.stages) byStage.set(stage.id, []);
-  const orphanTasks: TaskSummary[] = [];
+  const orphanTasks: TaskActivitySummary[] = [];
   for (const task of tasks) {
     const bucket = byStage.get(task.stage);
     if (bucket) bucket.push(task);

@@ -211,7 +211,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
       toStageId: "review",
       label: "Move the task to Review",
     });
-    expect(fm.recommendations[0]!.detail).toContain("PR #7");
+    expect(fm.recommendations[0]!.detail).toContain("pull request #7");
     expect(fm.waiting).toBe("human");
   });
 

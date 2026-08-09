@@ -119,6 +119,8 @@ describe("/projects/:slug/review", () => {
       pr: null,
       validation: "none",
       blockReason: null,
+      lastActivityAt: null,
+      quiet: false,
     };
     // Nothing is waiting on either side — say exactly that, claim no agent.
     expect(reviewRowSub(bare)).toBe(
