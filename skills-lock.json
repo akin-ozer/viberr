@@ -31,6 +31,12 @@
       "skillPath": "skills/improve-animations/SKILL.md",
       "computedHash": "32f23d860467841f5b07cef198fb53efc70f2adaaa6144cf1a3434d782aed246"
     },
+    "ponytail": {
+      "source": "DietrichGebert/ponytail",
+      "sourceType": "github",
+      "skillPath": "skills/ponytail/SKILL.md",
+      "computedHash": "1316a2f3f95741d2300b116fe0c2d81ce4a9568656ed0a62643f54aaf09957f2"
+    },
     "review-animations": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
