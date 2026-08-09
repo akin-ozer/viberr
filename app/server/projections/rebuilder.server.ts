@@ -13,10 +13,7 @@ import {
   type TaskFrontmatter,
   type Validation,
 } from "~/schemas/task-file.schema";
-import {
-  humanApprovalRefusalNote,
-  humanVerdictApproval,
-} from "~/server/github/pr-human-approval.server";
+import { verdictGateReason } from "~/server/github/pr-human-approval.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
   getDataRoot,
@@ -279,42 +276,6 @@ function listTaskDirs(slug: string, dataRoot?: string): string[] {
 }
 
 /**
- * R15-1's verdict gate — the projection-side twin of `verdictGateReason`
- * (task-actions.server.ts), reading the SAME derivation the caller wrote into
- * the `validation` column rather than deriving a second time.
- */
-function verdictGateReason(
-  fm: TaskFrontmatter,
-  validation: Validation,
-): string | null {
-  // R15-1: delivered work needs a healthy verdict. No revision = planning /
-  // non-repo work, which stays acceptable.
-  if (!fm.workRevision) return null;
-  if (!fm.pr) {
-    // R17-2 (F17-L9) / R19-8: a verified empty branch — or a VERIFICATION
-    // revision, the base sha a reviewer judged on a task with nothing to
-    // deliver — is a "Completed — no changes" completion, acceptable without a
-    // PR.
-    if (fm.noChanges || fm.workRevision.kind === "verified") return null;
-    return `${fm.key} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
-  }
-  // `healthy` clears the gate; `failing` was already named precisely by
-  // `acceptanceBlockedReason`, which runs first.
-  if (validation === "healthy" || validation === "failing") return null;
-  // R19-B: a project member's GitHub approval bound to the DELIVERED revision
-  // is the verdict (owner ruling, gap 24). This mirrors `acceptanceBlockReason`
-  // in task-actions.server.ts — the two must move together, or the review queue
-  // and decisions inbox say "no approving verdict yet" about a task the task
-  // page will happily accept.
-  if (humanVerdictApproval(fm)) return null;
-  const nearMiss = humanApprovalRefusalNote(fm);
-  if (nearMiss) {
-    return `${fm.key}'s delivered revision has no approving verdict yet — ${nearMiss}`;
-  }
-  return `${fm.key}'s delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.`;
-}
-
-/**
  * Why the CURRENT revision cannot be accepted, or null — the acceptance gate as
  * every READ MODEL sees it, projected into `validation_block_reason`.
  *
@@ -369,7 +330,7 @@ function acceptanceBlockReason(
     closedPrBlockedReason(fm, fm.key) ??
     // F10-15: every required reviewer must have approved the current revision.
     acceptanceBlockedReason(fm) ??
-    verdictGateReason(fm, ctx.validation) ??
+    verdictGateReason(fm, ctx.validation, fm.key) ??
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Same sentence the writers refuse with.
     (ctx.blockedPacket

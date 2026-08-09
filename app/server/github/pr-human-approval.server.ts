@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
+import type { PrRef, Validation, WorkRevision } from "~/schemas/task-file.schema";
 import type { PrApproval } from "./pr-linker.server";
 
 /**
@@ -278,4 +278,65 @@ export function humanApprovalRefusalNote(fm: {
         `of this project — only a project member's approval can be the verdict.`
       );
   }
+}
+
+/**
+ * R15-1 (owner ruling 2026-07-28) — the verdict gate: DELIVERED work needs a
+ * healthy verdict on the delivered revision before a human may accept it.
+ *
+ * ONE definition, two readers: the runtime acceptance path
+ * (`acceptanceRefusalReason`, task-actions.server) and the projection
+ * (`acceptanceBlockReason`, rebuilder.server) both call this, so the review
+ * queue and decisions inbox can never disagree with what the task page will
+ * accept. `validation` is passed in — the caller already holds the FRESH
+ * derivation (`deriveValidation(fm)`), never a stored cache.
+ *
+ * Live-proven hole (F15-19): VIB-9's revision wore an "awaiting verdict" chip
+ * and plain human acceptance still merged PR #117 with ZERO verdicts on it —
+ * the required-reviewer gate only binds when a verdict-capable reviewer is
+ * engaged, so an unreviewed delivery sailed through. A task with NO delivered
+ * revision stays acceptable (planning / non-repo work). Force-accept is the
+ * audited bypass.
+ */
+export function verdictGateReason(
+  fm: {
+    pr: PrRef | null;
+    workRevision: WorkRevision | null;
+    noChanges?: boolean;
+  },
+  validation: Validation,
+  taskKey: string,
+): string | null {
+  if (!fm.workRevision) return null;
+  // Delivered work with no PR: nothing stands for review, so acceptance would
+  // close the task on work no PR ever carried (R15-1 gate 1).
+  if (!fm.pr) {
+    // R17-2 (F17-L9) / R19-8: unless the branch is verified empty, or the
+    // revision IS a verification revision (a reviewer judged the base sha
+    // because there was nothing to deliver) — a "Completed — no changes"
+    // outcome. There is nothing to open a PR for; acceptance closes it to Done
+    // without a merge, after re-proving the basis live.
+    if (fm.noChanges || fm.workRevision.kind === "verified") return null;
+    return `${taskKey} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
+  }
+  // `healthy` clears the gate; `failing` was already named precisely by
+  // `acceptanceBlockedReason`, which runs first in both callers.
+  if (validation === "healthy" || validation === "failing") return null;
+  // R19-B (owner ruling, pass 19): a PROJECT MEMBER'S GITHUB APPROVAL ON THE PR
+  // IS the approving verdict. On a project running no verdict-capable agent,
+  // `deriveValidation` can never reach `healthy`, so every acceptance had to be
+  // an admin force-accept — an override row asserting the human bypassed a gate
+  // he had actually satisfied, in the exact audit trail FR33 exists for. Bound
+  // to the delivered revision, mapped to a member, re-checked on this read (see
+  // `humanVerdictApproval`). It does NOT relax `acceptanceBlockedReason` above:
+  // a reviewer the project deliberately ENGAGED still owes its verdict.
+  if (humanVerdictApproval(fm)) return null;
+  // Fail closed, but never silently: an approval that exists and did not count
+  // says why (unlinked handle, non-member, approved an older commit) instead of
+  // sending the reviewer to look for a review that already happened.
+  const nearMiss = humanApprovalRefusalNote(fm);
+  if (nearMiss) {
+    return `${taskKey}'s delivered revision has no approving verdict yet — ${nearMiss}`;
+  }
+  return `${taskKey}'s delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.`;
 }

@@ -28,7 +28,6 @@ import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
 } from "~/server/github/update-branch-operator.server";
-import type { GithubContextOptions } from "~/server/github/github-context.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
@@ -64,9 +63,6 @@ interface ToolkitDeps {
   projectSlug: string;
   taskKey: string;
   authority: OperatorAuthority;
-  /** Test seam for the GitHub transport behind the read-only repository view
-   *  (R19-1). Production passes nothing and the real client is used. */
-  github?: GithubContextOptions;
 }
 
 function textResult(payload: unknown) {

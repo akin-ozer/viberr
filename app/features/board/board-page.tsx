@@ -1705,6 +1705,10 @@ export function BoardPage({
     tasks.filter(
       (t) => matchesBoardFilter(t, filter) && matchesSearch(t, query),
     );
+  // The all-tasks filter feeds the roving tab stop, the "N shown" count and the
+  // list view; run it once per render rather than three times (each pass
+  // rebuilds a per-task search haystack).
+  const visibleAllTasks = visible(allTasks);
 
   /* ---------- D19 / ruling R19-10: arrow-key traversal ----------
    *
@@ -1741,7 +1745,7 @@ export function BoardPage({
   const visibleKeys =
     group === "stage"
       ? columns.flatMap((c) => visible(c.tasks).map((t) => t.key))
-      : visible(allTasks).map((t) => t.key);
+      : visibleAllTasks.map((t) => t.key);
   // Re-anchors when the card the stop was on leaves the layout (filtered away,
   // archived, reprojected off the board) — a tab stop pinned to a card that is
   // no longer drawn is a board with no way in.
@@ -1824,7 +1828,7 @@ export function BoardPage({
   };
 
   // P13-D-34: what the board actually draws, and why anything is missing.
-  const shownCount = visible(allTasks).length;
+  const shownCount = visibleAllTasks.length;
   const filterLabel =
     filter === "all"
       ? null
@@ -1969,7 +1973,7 @@ export function BoardPage({
         </DragDropProvider>
       ) : (
         <ListView
-          tasks={visible(allTasks)}
+          tasks={visibleAllTasks}
           stages={stages}
           canTransition={canTransition}
           onMoveTask={onMoveTask}

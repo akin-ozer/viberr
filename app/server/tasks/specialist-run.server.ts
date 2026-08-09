@@ -27,6 +27,7 @@ import {
   resolveDeclaredStages,
   stageEligible,
 } from "~/shared/workflow/stage-eligibility";
+import { stageName } from "~/shared/workflow/stage-roles";
 import { buildAgentToolkit } from "./agent-toolkit.server";
 import type {
   AgentDeployment,
@@ -345,10 +346,7 @@ function stageDisplayName(
   stageId: string,
 ): string {
   const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
-  return (
-    file?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ??
-    stageId
-  );
+  return file ? stageName(file.parsed.frontmatter.stages, stageId) : stageId;
 }
 
 /**

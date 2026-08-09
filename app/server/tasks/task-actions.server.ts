@@ -23,9 +23,9 @@ import type { ProjectRole } from "~/schemas/project-file.schema";
 // consult the human GitHub approval synchronously without the dynamic-import
 // dance the rest of the github/ surface needs to stay cycle-free.
 import {
-  humanApprovalRefusalNote,
   humanVerdictApproval,
   humanVerdictNote,
+  verdictGateReason,
 } from "~/server/github/pr-human-approval.server";
 import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
 import {
@@ -41,6 +41,7 @@ import {
 import {
   resolveStageRoles,
   isTerminalStage,
+  stageName as resolveStageName,
   type StageRoles,
 } from "~/shared/workflow/stage-roles";
 import {
@@ -182,7 +183,7 @@ export const OPERATOR_TASK_ACTOR: TaskActor = {
 export { requireProjectMutable };
 
 function stageName(project: ProjectContext, stageId: string): string {
-  return project.stages.find((s) => s.id === stageId)?.name ?? stageId;
+  return resolveStageName(project.stages, stageId);
 }
 
 /** The four structural stage roles, resolved once from the workflow graph. */
@@ -5061,54 +5062,6 @@ function acceptanceStageBlockedReason(
 }
 
 /**
- * R15-1 (owner ruling 2026-07-28) — the verdict gate: DELIVERED work needs a
- * healthy verdict on the delivered revision before a human may accept it.
- *
- * Live-proven hole (F15-19): VIB-9's revision wore an "awaiting verdict" chip
- * and plain human acceptance still merged PR #117 with ZERO verdicts on it —
- * the required-reviewer gate only binds when a verdict-capable reviewer is
- * engaged, so an unreviewed delivery sailed through. A task with NO delivered
- * revision stays acceptable (planning / non-repo work). Force-accept is the
- * audited bypass.
- */
-function verdictGateReason(fm: TaskFrontmatter, taskKey: string): string | null {
-  if (!fm.workRevision) return null;
-  // Delivered work with no PR: nothing stands for review, so acceptance would
-  // close the task on work no PR ever carried (R15-1 gate 1).
-  if (!fm.pr) {
-    // R17-2 (F17-L9) / R19-8: unless the branch is verified empty, or the
-    // revision IS a verification revision (a reviewer judged the base sha
-    // because there was nothing to deliver) — a "Completed — no changes"
-    // outcome. There is nothing to open a PR for; acceptance closes it to Done
-    // without a merge, after re-proving the basis live.
-    if (fm.noChanges || fm.workRevision.kind === "verified") return null;
-    return `${taskKey} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
-  }
-  const validation = deriveValidation(fm);
-  if (validation === "healthy") return null;
-  // `failing` is named precisely by acceptanceBlockedReason (checked first).
-  if (validation === "failing") return null;
-  // R19-B (owner ruling, pass 19): a PROJECT MEMBER'S GITHUB APPROVAL ON THE PR
-  // IS the approving verdict. On a project running no verdict-capable agent,
-  // `deriveValidation` can never reach `healthy`, so every acceptance had to be
-  // an admin force-accept — an override row asserting the human bypassed a gate
-  // he had actually satisfied, in the exact audit trail FR33 exists for.
-  //
-  // Bound to the delivered revision, mapped to a member, and re-checked on this
-  // read — see `humanVerdictApproval`. It does NOT relax `acceptanceBlockedReason`
-  // above: a reviewer the project deliberately ENGAGED still owes its verdict.
-  if (humanVerdictApproval(fm)) return null;
-  // Fail closed, but never silently: an approval that exists and did not count
-  // says why (unlinked handle, non-member, approved an older commit) instead of
-  // sending the reviewer to look for a review that already happened.
-  const nearMiss = humanApprovalRefusalNote(fm);
-  if (nearMiss) {
-    return `${taskKey}'s delivered revision has no approving verdict yet — ${nearMiss}`;
-  }
-  return `${taskKey}'s delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.`;
-}
-
-/**
  * Every gate a human acceptance must clear, in one place (P14-LV-02).
  *
  * The three writers to Done each grew their own subset of these checks, which is
@@ -5139,7 +5092,7 @@ function acceptanceRefusalReason(
     // F10-15: every required reviewer must have approved the CURRENT revision.
     acceptanceBlockedReason(fm) ??
     // R15-1: delivered work needs a healthy verdict on the delivered revision.
-    verdictGateReason(fm, taskKey) ??
+    verdictGateReason(fm, deriveValidation(fm), taskKey) ??
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Resolving the packet clears readiness.
     (opts.blockedPacket

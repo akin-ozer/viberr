@@ -30,6 +30,7 @@ import { absentDeliverReviewPrMode } from "~/shared/capabilities";
 import {
   humanGatesPreWorkAdvance,
   resolveStageRoles,
+  stageName,
 } from "~/shared/workflow/stage-roles";
 import { newId } from "~/shared/ids/new-id.server";
 import {
@@ -2366,7 +2367,7 @@ export async function operatorTransitionStage(
   // acceptance card + audit row through exactly this delegation. The gate is
   // the first thing `operatorAcceptCompletion` does, so the refusal is
   // inherited here rather than duplicated (one gate read, one sentence).
-  if (g === "recommend" && input.toStageId === terminalStageIdOf(ctx, input.projectSlug)) {
+  if (g === "recommend" && input.toStageId === resolveTerminalStageId(ctx, input.projectSlug)) {
     return operatorAcceptCompletion(
       db,
       ctx,
@@ -2399,20 +2400,20 @@ export async function operatorTransitionStage(
   return { outcome: "done", message: `Moved ${input.taskKey} to ${task.stage}.` };
 }
 
-/** The project's terminal (Done-equivalent) stage id — the structural resolver
- *  everywhere, positional only as the degenerate fallback (B-WF4). */
-function terminalStageIdOf(
+/** The project's terminal (Done-equivalent) stage id (B-WF4). `resolveStageRoles`
+ *  already does the positional-last fallback internally, so there is nothing to
+ *  add here. Named apart from task-actions' `terminalStageIdOf(project)` — this
+ *  one reads the file, that one takes a loaded `ProjectContext`. */
+function resolveTerminalStageId(
   ctx: TaskMutationContext,
   projectSlug: string,
 ): string | null {
   const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
   if (!file) return null;
-  const stages = file.parsed.frontmatter.stages;
-  return (
-    resolveStageRoles(stages, file.parsed.frontmatter.workflow).terminalId ??
-    stages[stages.length - 1]?.id ??
-    null
-  );
+  return resolveStageRoles(
+    file.parsed.frontmatter.stages,
+    file.parsed.frontmatter.workflow,
+  ).terminalId;
 }
 
 /** Resolve a stage's display name for a recommendation label. */
@@ -2421,11 +2422,8 @@ function stageNameOf(
   projectSlug: string,
   stageId: string,
 ): string {
-  const file = readProjectFile({
-    projectSlug,
-    dataRoot: ctx.dataRoot,
-  });
-  return file?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ?? stageId;
+  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  return file ? stageName(file.parsed.frontmatter.stages, stageId) : stageId;
 }
 
 /** True when moving `taskKey` to `toStageId` is an operator rework move (R7-4):
@@ -2543,11 +2541,11 @@ export async function operatorAcceptCompletion(
   });
   if (!project) throw AppError.notFound(`Project ${input.projectSlug} not found.`);
   const stages = project.parsed.frontmatter.stages;
-  // B-WF4: the STRUCTURAL terminal stage (one resolver everywhere), positional
-  // only as the degenerate fallback.
+  // B-WF4: the STRUCTURAL terminal stage (one resolver everywhere, which does
+  // the positional-last fallback itself); `"done"` is the last-ditch only for a
+  // stage-less board, so this comparison always has a string to test against.
   const doneStageId =
     resolveStageRoles(stages, project.parsed.frontmatter.workflow).terminalId ??
-    stages[stages.length - 1]?.id ??
     "done";
 
   if (file.parsed.frontmatter.stage === doneStageId) {
