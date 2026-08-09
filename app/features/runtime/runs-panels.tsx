@@ -354,7 +354,7 @@ export function AgentLogsPanel({
   sel: string | null;
   onSel: (id: string | null) => void;
   linesByThread: Record<string, StreamedLine[]>;
-  /** Retry the failed run's agent (primary specialist or reviewer) on the
+  /** Retry the failed run's agent (delivering agent or reviewer) on the
    *  other backend (D4). Receives the failed run so the caller can route the
    *  right intent (run-specialist vs run-reviewer + profileId). */
   onRetryBackend?: (backend: "claude" | "codex", run: RunView) => void;

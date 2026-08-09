@@ -213,6 +213,25 @@ describe("scheduleTaskAction", () => {
     expect(listAuditEvents(store.db).some((e) => e.action === "task.schedule.created")).toBe(true);
   });
 
+  it("clamps the scheduled autonomy to the project's operator ceiling (R19-A)", async () => {
+    // The fixture project runs its operator at the default `supervised`
+    // (operatorAutonomyFor), so a schedule requesting `full` must persist as
+    // `supervised` — a schedule cannot outrank the project's configured autonomy
+    // (ruling 67 / R19-A: the per-run level is a CEILING, not a pin).
+    // Canary: swap `clampAutonomy(...)` → `input.autonomy` at
+    // schedule.server.ts and this assertion reads back `full`.
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await scheduleTaskAction(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() + 3_600_000).toISOString(), backend: "codex", autonomy: "full" },
+      actor(),
+      dctx(),
+    );
+    expect(schedules("VIB-1")[0]!.autonomy).toBe("supervised");
+  });
+
   it("rejects a past due time", async () => {
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
