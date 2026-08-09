@@ -338,8 +338,9 @@ export function DecisionPacket({
    *    FRESH review PR and never reopens the closed one. Re-pushing a branch
    *    with nothing new still reports `pushed` (`push-workspace.server.ts`), so
    *    a PR closed by mistake really does come back through this door.
-   *  - and NOTHING on that path touches the packet — `ensureDeliveredNextStep`
-   *    returns early precisely because a packet is open. So the last clause is
+   *  - and NOTHING on that path touches the packet — `recordDeliveredNextStep`
+   *    returns early (via `alreadyActionable`) precisely because a packet is
+   *    open. So the last clause is
    *    not politeness: the packet body (authored from `operator-run.server.ts`)
    *    promises that reopening on GitHub is "detected automatically" and
    *    withdraws the packet, and a reader would otherwise carry that promise

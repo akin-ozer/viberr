@@ -1682,7 +1682,7 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
     // new PR — never a reopen this app cannot perform.
     expect(note.textContent).toContain("opens a new review pull request");
     expect(note.textContent).toContain("never reopens a closed one");
-    // Nothing on the delivery path touches the packet (ensureDeliveredNextStep
+    // Nothing on the delivery path touches the packet (recordDeliveredNextStep
     // returns early *because* one is open), while the packet body above promises
     // that a GitHub reopen withdraws it — so the note must not let that promise
     // travel to the in-app door.

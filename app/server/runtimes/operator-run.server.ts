@@ -19,7 +19,7 @@ import {
   cloneFailureSentence,
   createGitHubClonePlan,
 } from "~/server/tasks/git-clone-auth.server";
-import { redactGitStderr } from "~/server/tasks/git-stderr-redact.server";
+import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { stripUngovernedRepoCatalog } from "./skill-mount.server";
 import {
   KB_INJECTION_BUDGET,
@@ -827,7 +827,7 @@ export async function ensureOperatorRepoCheckout(
     const details = cloneFailureLogDetails(error);
     // F19-6: git's own complaint, redacted by value — "git exit 128" alone told
     // a human with a working credential nothing they could act on.
-    const stderrExcerpt = redactGitStderr(error, token ? [token] : []);
+    const stderrExcerpt = redactGitOutput(gitErrorText(error), { token });
     logger.warn("the operator runs WITHOUT a repository checkout — its clone failed", {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,

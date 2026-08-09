@@ -17,6 +17,18 @@ describe("redactGitOutput (F19-6 / F19-18)", () => {
     expect(out).not.toContain("ghp_short");
   });
 
+  it("strips ANSI colour and stray control characters — a timeline note is plain text", () => {
+    // git colourises `fatal:`/`hint:` when it has a TTY, and a NUL can ride along; plain text only.
+    // Canary: drop the ANSI_CSI_RE / C0_CONTROL_RE replaces and the escapes survive.
+    // eslint-disable-next-line no-control-regex
+    const out = redactGitOutput("\u001b[31mfatal:\u001b[0m bad\u0000 remote\r\ndone");
+    expect(out).toBe("fatal: bad remote\ndone");
+    // eslint-disable-next-line no-control-regex
+    expect(out).not.toMatch(/\u001b/);
+    // eslint-disable-next-line no-control-regex
+    expect(out).not.toMatch(/[\u0000-\u0008]/);
+  });
+
   it("removes a legacy token-bearing origin URL even when the token value is unknown", () => {
     // The one shape a token can reach stderr in without anyone here supplying
     // it: a `remote.origin.url` written by an older Viberr.

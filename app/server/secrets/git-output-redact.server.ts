@@ -19,8 +19,10 @@
  *      token-bearing origin written by an older Viberr could reach stderr in;
  *   3. known token SHAPES, for a credential nobody here supplied.
  *
- * Then a hard clamp, because the text lands on a task-timeline note that the
- * operator reads through `operatorSnapshot`, which caps one event at 1500 chars.
+ * Then ANSI/control-character stripping (a timeline note and an agent prompt are
+ * plain text, never a coloured TTY stream), and a hard clamp, because the text
+ * lands on a task-timeline note that the operator reads through
+ * `operatorSnapshot`, which caps one event at 1500 chars.
  */
 
 export const REDACTED = "[redacted]";
@@ -44,6 +46,15 @@ export const TOKEN_SHAPE_SOURCE = [
 
 /** `scheme://user:secret@host` — git echoes remote URLs verbatim. */
 const URL_USERINFO_RE = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*:[^\s/@]*@/gi;
+
+/** ANSI CSI escape sequences (`ESC [ … m` and friends): git colourises
+ *  `error:`/`hint:` when it thinks it has a TTY. */
+const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+
+/** C0 control characters that survive the line split (NUL, BEL, …). `\t` (	)
+ *  is spared; `\r`/`\n` are consumed by the split, so they never reach here. */
+// eslint-disable-next-line no-control-regex
+const C0_CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
 
 /**
  * Below this length a "token" the caller handed us is a flag or a placeholder,
@@ -81,12 +92,17 @@ export function redactGitOutput(
   // Layer 3 — shapes.
   out = out.replace(new RegExp(TOKEN_SHAPE_SOURCE, "g"), REDACTED);
 
+  // Strip ANSI colour sequences before the split so a colourised `error:` line
+  // is not spent on escape bytes.
+  out = out.replace(ANSI_CSI_RE, "");
+
   // A bare CR is a line here too: git writes transfer progress as one physical
   // line rewritten with `\r`, and keeping it whole would spend the entire clamp
   // on "Receiving objects: 41%".
   const lines = out
     .split(/\r\n|\r|\n/)
-    .map((l) => l.trimEnd())
+    // Strip any stray C0 control character left inside a line; `\t` is kept.
+    .map((l) => l.replace(C0_CONTROL_RE, "").trimEnd())
     .filter((l) => l.trim() !== "");
   const kept = lines.slice(-MAX_DETAIL_LINES).join("\n").trim();
   // Clamp from the END, not the start: a clamp that drops git's verdict to keep

@@ -509,7 +509,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     // The old comment ("Redact stderr — a git push failure can echo the remote
     // URL/token") named a real rule. Keeping git's words means proving the
     // secret is scrubbed BY VALUE, not hoping stderr is clean.
-    // Canary: pass `[]` instead of `[token]` to redactGitStderr and this fails.
+    // Canary: drop the `{ token }` arg to redactGitOutput and this fails.
     bindPat(); // the fixture's PAT is `ghp_faketoken123`
     const git = fakeGit({
       branch: "vib-1-work",
