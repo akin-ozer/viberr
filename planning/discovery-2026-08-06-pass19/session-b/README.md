@@ -27,4 +27,9 @@ exact canary **`MCP-CANARY-PASS19-4417`** — lives in `NOTES.md` (row UC-14). I
 the move, never line-merged into A's NOTES.
 
 > Note: any "assign this the next number 59" / "this is ruling 59" instruction inside B's
-> `spec-*.md` is **void** — superseded by the merged numbering above (RECONCILE §4).
+> `spec-*.md` is **void** — the git-stderr-surfacing reversal is owner-confirmed (2026-08-08)
+> as **ruling 69 / R19-13**, not 59 (59 is R19-5). See RECONCILE §4.
+
+**Owner-confirmed at merge close (2026-08-08):** the three rulings this merge surfaced for the
+owner were all kept — R19-A (ruling 67, autonomy ceiling), R19-B (ruling 68, human GitHub
+approval = verdict), and the git-stderr surfacing (ruling 69 / R19-13).

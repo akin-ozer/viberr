@@ -772,7 +772,7 @@ it is regenerated from the filesystem rather than restated here.
     FR37. (`humanVerdictApproval` in `app/server/github/pr-human-approval.server.ts`; threaded
     through `verdictGateReason` and the rebuilder's acceptance-block derivation)
 
-69. **(2026-08-08, pending owner confirmation): git's own failure text is SURFACED to the human,
+69. **R19-13 (2026-08-08): git's own failure text is SURFACED to the human,
     redacted, where it used to be dropped whole.** Clone and push failures used to scrub git's
     `stderr`/`message` entirely for credential safety (`cloneFailureLogDetails` dropped both), so
     a failed delivery or checkout recorded its reason NOWHERE (F19-6, F19-18): the operator opened
@@ -782,9 +782,9 @@ it is regenerated from the filesystem rather than restated here.
     the text safe, and git's redacted complaint (e.g. `fatal: could not read Username…`) is now
     surfaced in the run log, in fenced "What the checkout/push reported:" timeline blocks, and in
     a ≤240-char one-line delivery reason. One redactor module owns the scrub, at one choke point.
-    Recorded here as the next free number: B's `spec-failure-diagnostics.md` instruction to record
-    it as "ruling 59" is VOID — 59 is taken by R19-5. Confirm the number with the owner at merge
-    close. (`app/server/secrets/git-output-redact.server.ts`; the timeline rendering in
+    Owner-confirmed 2026-08-08 as ruling 69 / R19-13. (B's `spec-failure-diagnostics.md` instruction
+    to record it as "ruling 59" is VOID — 59 is taken by R19-5.)
+    (`app/server/secrets/git-output-redact.server.ts`; the timeline rendering in
     `specialist-run.server.ts` / `operator-run.server.ts` / `push-workspace.server.ts`)
 
 ## Route map
