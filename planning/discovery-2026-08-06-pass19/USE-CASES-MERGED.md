@@ -76,3 +76,15 @@ on the unified merged tree in one flow, proving every ruling I touched in the me
 live. The reject/recovery and FR10 paths verified live. Remaining agent-behavior/MCP/parity cases
 are backed by real VC-1..VC-9 history + permanent tests. ONE UI finding: UX19-6 (governed in seed
 skill description).
+
+## VC-11 Codex parity attempt — transient clone failure = honesty evidence
+Created "Add the pass-19 Codex parity marker" (implementation task for Developer/Codex). The
+operator's R19-1 clone FAILED transiently (`git clone: RPC failed; curl 56 Recv failure:
+Connection reset by peer; fatal: early EOF` — concurrent e2e docker build saturated the network).
+The operator did NOT proceed blind — it opened an HONEST blocked packet "Repository checkout
+unavailable — cannot verify triage scope", surfaced the REDACTED git stderr to the human
+(ruling 69/R19-13 + F19-6 live), confirmed the dropped repo-view tools ("list_repo_files/
+read_repo_file not offered" — R19-1 merge decision live), and offered recovery options (retry /
+proceed-without-verification / archive). Codex delivery mechanics remain backed by VC-1/VC-3 live
+history (real Codex PRs #147/#148) + runtime-parity tests. Net: a failed clone produced textbook
+honest behavior — exactly what R19-1/F19-6/ruling-69 exist for.
