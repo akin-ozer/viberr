@@ -615,11 +615,19 @@ function Column({
           only child is the empty-state sentence and a `list` whose child is not
           a `listitem` is precisely what axe's aria-required-children fails on.
           Nothing is lost: an empty lane holds no traversal target either (see
-          `onCardKeyDown`), and the column header still names and counts it. */}
+          `onCardKeyDown`), and the column header still names and counts it.
+
+          `tabIndex=0` on a non-empty lane keeps the scrollable column reachable
+          by keyboard (WCAG 2.2 / axe `scrollable-region-focusable`): D19's roving
+          focus leaves only the active card at tabIndex 0, so every OTHER lane's
+          cards are tabIndex -1 and a tall column would otherwise have no way to
+          scroll without a mouse. Tab lands on the column to scroll it; the card
+          handler still owns the arrow keys once a card is focused. */}
       <div
         className="col-body"
         role={tasks.length > 0 ? "list" : undefined}
         aria-label={tasks.length > 0 ? `${stage.name} tasks` : undefined}
+        tabIndex={tasks.length > 0 ? 0 : undefined}
       >
         {tasks.length === 0 ? (
           showPreview ? preview : <div className="empty">{emptyCopy}</div>
