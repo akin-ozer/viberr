@@ -787,6 +787,33 @@ it is regenerated from the filesystem rather than restated here.
     (`app/server/secrets/git-output-redact.server.ts`; the timeline rendering in
     `specialist-run.server.ts` / `operator-run.server.ts` / `push-workspace.server.ts`)
 
+70. **R19-14 (2026-08-10): new tasks are created at the ENTRY stage only.** Every non-terminal
+    lane used to carry its own "New task in this stage" button, so a human could drop a
+    brand-new task straight into Review — a stage whose semantics (something delivered, something
+    to judge) presuppose work that does not exist yet — and skip the triage quality gate (FR15)
+    entirely. The owner ruled the flexibility out: `createTask` refuses any non-entry `stageId`
+    (naming the entry stage in the refusal), the board offers the per-lane button on the entry
+    lane alone, and the "operator assigned unless the task starts in triage" special case
+    collapses — a task can no longer start anywhere else. Existing tasks are unaffected;
+    file-level fixtures (`createTaskFile`) that seed mid-stage tasks are the projection/test
+    surface, not the human create path, and stay as they are. (`createTask` in
+    `app/server/tasks/task-actions.server.ts`; the `Column` header in
+    `app/features/board/board-page.tsx`)
+
+71. **R19-15 (2026-08-10): notifications are auto-read on VIEWING their target.** A notification
+    only became read when clicked in the bell popover or the `/notifications` inbox — a user who
+    reached the task from the board left that task's notifications unread forever, so the badge
+    grew into steady-state noise (27 unread against 5 live decisions) and stopped meaning
+    "something you have not seen". The owner ruled for view-marking: loading a task page marks
+    ALL of that user's unread notifications for that task read (every kind — the per-user view
+    event, distinct from `markTaskPacketApprovalRead`'s all-user resolution side-effect). The
+    write lives in the task route's loader deliberately: the app uses no link prefetch, the
+    update is idempotent and monotonic (`read_at IS NULL` guard), the emitted
+    `notification.read` event converges (a second pass marks nothing and emits nothing), and it
+    runs only after authorization so the members-only 404 path (ruling 22 / R15-4) stays pure.
+    (`markTaskNotificationsSeen` in `app/server/projections/notifications.server.ts`; called from
+    `app/routes/project.task.tsx`)
+
 ## Route map
 
 ```

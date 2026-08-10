@@ -542,6 +542,7 @@ function Column({
   tasks,
   count,
   isDone,
+  isEntry,
   canCreate,
   canTransition,
   onNew,
@@ -564,6 +565,8 @@ function Column({
   /** P13-D-34: filter/search-aware empty copy for this column. */
   emptyCopy: string;
   isDone: boolean;
+  /** R19-14: first stage — the only lane allowed to offer task creation. */
+  isEntry: boolean;
   canCreate: boolean;
   canTransition: boolean;
   onNew: () => void;
@@ -594,7 +597,10 @@ function Column({
         <span className="col-stage-dot" style={{ background: stage.color }} />
         <span className="nm">{stage.name}</span>
         <span className="ct">{count}</span>
-        {!isDone && canCreate && (
+        {/* R19-14: new tasks are created at the entry stage only, so only the
+            entry lane offers the affordance (isDone guards the degenerate
+            single-stage board where entry IS done). */}
+        {isEntry && !isDone && canCreate && (
           <button
             type="button"
             className="add"
@@ -984,18 +990,15 @@ function AcceptOnBoardConfirm({
 }
 
 function NewTaskModal({
-  stages,
-  initialStage,
+  entryStageName,
   onClose,
 }: {
-  /** Project stages EXCLUDING the final (done) stage. */
-  stages: BoardStage[];
-  initialStage: string;
+  /** R19-14: every task is created at the entry stage — the modal names it. */
+  entryStageName: string;
   onClose: () => void;
 }) {
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
-  const [stg, setStg] = useState(initialStage);
   const fetcher = useFetcher<{
     ok: boolean;
     key?: string;
@@ -1039,7 +1042,7 @@ function NewTaskModal({
     fd.set("intent", "create-task");
     fd.set("title", title.trim());
     fd.set("goal", goal.trim());
-    fd.set("stage", stg);
+    // R19-14: no stage field — the server creates at the entry stage.
     fetcher.submit(fd, { method: "post" });
   };
 
@@ -1088,32 +1091,14 @@ function NewTaskModal({
           />
         </div>
         <div className="field">
-          {/* A chip-button group has no labelable control for htmlFor, so the
-              name is attached via role=group (span.flabel per home-page.tsx). */}
-          <span className="flabel" id="new-task-stage-label">
-            Stage
+          {/* R19-14: the stage picker is gone — creation lands at the entry
+              stage only, so the modal states where instead of offering a
+              choice the server would refuse. */}
+          <span className="flabel">Stage</span>
+          <span className="fine sm">
+            Starts in {entryStageName} — the triage gate is where the goal is
+            refined before work begins.
           </span>
-          <div
-            className="pick-chips"
-            role="group"
-            aria-labelledby="new-task-stage-label"
-          >
-            {stages.map((s) => (
-              <button
-                type="button"
-                key={s.id}
-                className={"pick-chip" + (stg === s.id ? " on" : "")}
-                aria-pressed={stg === s.id}
-                onClick={() => setStg(s.id)}
-              >
-                <span
-                  className="sdot"
-                  style={stg === s.id ? { background: s.color } : undefined}
-                />
-                {s.name}
-              </button>
-            ))}
-          </div>
         </div>
         <div className="field">
           <label className="flabel" htmlFor="new-task-goal">
@@ -1418,7 +1403,8 @@ function StageBoard({
   doneStageId: string | undefined;
   canCreate: boolean;
   canTransition: boolean;
-  onNew: (stageId: string) => void;
+  /** R19-14: creation lands at the entry stage, so no stage argument here. */
+  onNew: () => void;
   drag: { key: string; fromStage: string } | null;
   overStage: string | null;
   beforeKey: string | null;
@@ -1449,9 +1435,10 @@ function StageBoard({
             count={count}
             emptyCopy={emptyCopyFor(c.tasks.length, columnIndex === 0)}
             isDone={c.stage.id === doneStageId}
+            isEntry={columnIndex === 0}
             canCreate={canCreate}
             canTransition={canTransition}
-            onNew={() => onNew(c.stage.id)}
+            onNew={onNew}
             arrivedKey={arrivedKey}
             dropTarget={hovered}
             previewTask={hovered ? draggedTask : null}
@@ -1487,7 +1474,9 @@ export function BoardPage({
   const filter: BoardFilterId = isBoardFilterId(rawFilter) ? rawFilter : "all";
   const group = searchParams.get("view") === "list" ? "list" : "stage";
   const query = searchParams.get("q") ?? "";
-  const [creating, setCreating] = useState<string | null>(null);
+  // R19-14: creation always lands at the entry stage, so this is a plain
+  // open/closed flag — no per-lane stage rides along any more.
+  const [creating, setCreating] = useState(false);
   const rescanFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
@@ -1914,10 +1903,9 @@ export function BoardPage({
         onRescan={rescan}
         // UI-58: `?? "triage"` was a magic literal for a project with no stages
         // — a create that could only fail server-side. With no stages there is
-        // nothing to create INTO, so the header hides the control instead.
+        // nothing to create INTO, so the control stays a no-op instead.
         onNew={() => {
-          const entry = stages[0]?.id;
-          if (entry) setCreating(entry);
+          if (stages[0]) setCreating(true);
         }}
       />
 
@@ -1960,7 +1948,7 @@ export function BoardPage({
             doneStageId={doneStageId}
             canCreate={canCreate}
             canTransition={canTransition}
-            onNew={(stageId) => setCreating(stageId)}
+            onNew={() => setCreating(true)}
             drag={drag}
             overStage={overStage}
             beforeKey={beforeKey}
@@ -1983,11 +1971,10 @@ export function BoardPage({
         />
       )}
 
-      {creating && (
+      {creating && stages[0] && (
         <NewTaskModal
-          stages={stages.filter((s) => s.id !== doneStageId)}
-          initialStage={creating}
-          onClose={() => setCreating(null)}
+          entryStageName={stages[0].name}
+          onClose={() => setCreating(false)}
         />
       )}
 

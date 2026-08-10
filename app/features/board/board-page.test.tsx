@@ -553,6 +553,31 @@ describe("the new-task dialog does not accuse an untouched form", () => {
   });
 });
 
+/**
+ * R19-14 (owner ruling): new tasks are created at the entry stage ONLY — every
+ * task passes the triage quality gate, so a per-lane "+" on Ready/In Progress
+ * was an invitation the server now refuses.
+ */
+describe("R19-14: only the entry lane offers task creation", () => {
+  it("renders the per-lane + on the entry column and nowhere else", () => {
+    const { container } = renderBoard([task()]);
+    const cols = [...container.querySelectorAll(".column")];
+    expect(cols).toHaveLength(3);
+    expect(cols[0]!.querySelector("button.add")).toBeTruthy();
+    // Before the ruling every non-Done lane drew one.
+    expect(cols[1]!.querySelector("button.add")).toBeNull();
+    expect(cols[2]!.querySelector("button.add")).toBeNull();
+  });
+
+  it("opens a dialog that names the entry stage instead of offering a picker", () => {
+    const { container } = renderBoard([task()]);
+    fireEvent.click(container.querySelector("button.add")!);
+    // The stage chips are gone — the dialog states where the task lands.
+    expect(container.querySelector(".pick-chip")).toBeNull();
+    expect(container.textContent).toContain("Starts in Triage");
+  });
+});
+
 describe("R16-6: the card says when Done still needs a human", () => {
   // Owner ruling 2026-08-04: `merge-pull-request` stays human-only, so a
   // full-autonomy task reaches the done stage with its PR open. `pr.state`

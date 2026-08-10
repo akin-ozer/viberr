@@ -265,18 +265,36 @@ describe("createTask", () => {
     expect(audit[0]?.taskKey).toBe("VIB-100");
   });
 
-  it("assigns the operator when created outside triage", async () => {
+  // R19-14: every task passes the triage quality gate — creation lands at the
+  // entry stage ONLY. The pre-ruling behavior (create mid-stage, operator
+  // assigned at birth) is exactly what the ruling forbids.
+  it("refuses a non-entry stage and names the entry stage (R19-14)", async () => {
+    const store = prepared();
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "Straight to ready", stageId: "ready" },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      message:
+        "New tasks start at Triage — the triage gate is where a goal is " +
+        "refined. Move the task through the workflow after it is created.",
+    });
+  });
+
+  it("accepts an explicit entry stageId, with no operator at birth (R19-14)", async () => {
     const store = prepared();
     const result = await createTask(
       store.db,
-      { projectSlug: store.slug, title: "Straight to ready", stageId: "ready" },
+      { projectSlug: store.slug, title: "Explicit triage", stageId: "triage" },
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
-    expect(result.task.operator).toMatchObject({
-      assignedAtStageId: "ready",
-      sinceLabel: "since Ready", // real stage NAME, not a bare index (F7-UI2)
-    });
+    expect(result.task.stage).toBe("triage");
+    expect(result.task.operator).toBeNull();
   });
 
   it("allocates unique keys under concurrency and persists the counter", async () => {
@@ -336,6 +354,8 @@ describe("createTask", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
+    // R19-14: "done" and a stage that does not exist are both refused the same
+    // way now — they are not the entry stage.
     await expect(
       createTask(
         store.db,
@@ -343,7 +363,21 @@ describe("createTask", () => {
         actor(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("New tasks start at Triage"),
+    });
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "Ghost stage", stageId: "nope" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("New tasks start at Triage"),
+    });
     await expect(
       createTask(
         store.db,

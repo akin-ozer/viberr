@@ -204,4 +204,31 @@ describe("useLiveUpdates", () => {
     expect(FakeEventSource.instances).toHaveLength(2);
     expect(FakeEventSource.last().url).toContain("task%3Ap%2FK-1");
   });
+
+  /**
+   * An event emitted while the stream is torn down and reopened is simply
+   * lost (SSE has no replay here). Live-proven with R19-15: navigating to a
+   * task fires the view-marking `notification.read` DURING the navigation
+   * that re-scopes this very stream, so the bell badge stayed stale until
+   * the next interaction. A (re)connect that follows a previous stream must
+   * pull the loaders once; only the very first stream of the surface's life
+   * skips the pull (its loaders just ran).
+   */
+  it("revalidates once when a SCOPE CHANGE reopens the stream (missed-event catch-up)", () => {
+    const { rerender } = render(<Probe scopes={["project:p", "user"]} />);
+    act(() => {
+      FakeEventSource.last().onopen?.();
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+    });
+    // First stream of the surface's life: opening must NOT revalidate.
+    expect(revalidate).not.toHaveBeenCalled();
+
+    rerender(<Probe scopes={["project:p", "task:p/K-1", "user"]} />);
+    act(() => {
+      FakeEventSource.last().onopen?.();
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+    });
+    // The reopened stream may have missed events emitted in the gap — one pull.
+    expect(revalidate).toHaveBeenCalledTimes(1);
+  });
 });

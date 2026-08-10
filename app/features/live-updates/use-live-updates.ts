@@ -16,11 +16,12 @@ import {
  * projecting ten tasks, a mutation emitting task + project + notification —
  * coalesce into one loader round-trip.
  *
- * Loop safety: revalidation only re-runs loaders (GETs). Loaders never
- * write files or projections, so they never re-enter the projection
- * emitter — an SSE-triggered revalidation cannot emit further SSE events.
- * The initial `stream.open` hello is also ignored, so merely connecting
- * never revalidates.
+ * Loop safety: revalidation only re-runs loaders (GETs). The one loader-side
+ * write — R19-15's task-view read-marking — is MONOTONIC (`read_at IS NULL`
+ * guard) and emits only when rows actually change, so an SSE-triggered
+ * revalidation marks nothing on the second pass and the chain stops there;
+ * no other loader writes files or projections. The initial `stream.open`
+ * hello is also ignored, so merely connecting never revalidates.
  *
  * UI-03 — DISCONNECT HANDLING. `/resources/events` answers 401 for an expired
  * session, 400 for an invalid scope and 403 for all-foreign scopes. Per the
@@ -61,6 +62,9 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
   const revalidator = useRevalidator();
   const [paused, setPaused] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // True once ANY stream of this surface's life has opened — the marker that a
+  // later `onopen` is a REconnect (scope change or recovery), not the first.
+  const everOpenedRef = useRef(false);
 
   // Latest revalidate without resubscribing per render.
   const revalidateRef = useRef(revalidator.revalidate);
@@ -97,8 +101,16 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
     source.onopen = () => {
       setPaused(false);
       // A gap in the stream means the surface may have missed events; pull the
-      // loaders once on (re)connect so the snapshot is current again.
-      if (attempt > 0) scheduleRevalidate();
+      // loaders once on any (re)connect that FOLLOWS a previous stream — a
+      // failed one (attempt > 0) or a scope change (navigating between tasks
+      // re-scopes and reopens the stream, and an event emitted during that
+      // teardown/open gap is simply lost; live-proven with R19-15's
+      // view-marking emit, fired by the very navigation that re-scoped the
+      // stream, leaving the bell badge stale until the next interaction).
+      // Only the very first stream of the surface's life stays excluded: its
+      // loaders just ran, so a pull would be a redundant round-trip.
+      if (attempt > 0 || everOpenedRef.current) scheduleRevalidate();
+      everOpenedRef.current = true;
     };
     source.onerror = () => {
       // readyState CONNECTING = the browser's own retry is running (a transient

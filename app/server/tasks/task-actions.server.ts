@@ -326,7 +326,8 @@ export interface CreateTaskInput {
   projectSlug: string;
   title: string;
   goal?: string;
-  /** Defaults to the first stage ("triage" in the default template). */
+  /** Entry stage only (R19-14): when given it must equal the first stage;
+   *  omitted defaults to it. Any other stage is refused. */
   stageId?: string;
   urgent?: boolean;
 }
@@ -350,13 +351,22 @@ export async function createTask(
   if (title.length < 3) {
     throw AppError.validation("A title of at least 3 characters is required.");
   }
-  const stageId = input.stageId ?? project.stages[0]?.id ?? "triage";
-  const stage = project.stages.find((s) => s.id === stageId);
+  // R19-14: every task goes through the triage quality gate, so creation lands
+  // at the entry stage only — downstream stages presuppose work that has not
+  // happened yet. An omitted stageId still defaults to entry.
+  const stage = project.stages[0];
   if (!stage) {
-    throw AppError.validation(`Stage ${stageId} does not exist in this project.`);
+    throw AppError.validation("This project has no stages to create a task in.");
   }
-  const doneStageId = project.stages[project.stages.length - 1]?.id;
-  if (stageId === doneStageId) {
+  if (input.stageId !== undefined && input.stageId !== stage.id) {
+    throw AppError.validation(
+      `New tasks start at ${stage.name} — the triage gate is where a goal is refined. Move the task through the workflow after it is created.`,
+    );
+  }
+  const stageId = stage.id;
+  // Degenerate single-stage project: the entry stage IS the done stage, and
+  // nothing may be created straight into done.
+  if (stageId === project.stages[project.stages.length - 1]?.id) {
     throw AppError.validation("New tasks cannot be created in the done stage.");
   }
 
@@ -377,11 +387,9 @@ export async function createTask(
     engagements: [],
     recommendations: [],
     schedules: [],
-    // Operator assigned unless the task starts in triage (contracts §1.1).
-    operator:
-      stageId === project.stages[0]?.id
-        ? null
-        : { assignedAtStageId: stageId },
+    // R19-14: creation is gated to the entry stage above, and a task in triage
+    // has no operator until it advances (contracts §1.1) — always null at birth.
+    operator: null,
     urgent: input.urgent ?? false,
     archived: false,
     validation: "none",

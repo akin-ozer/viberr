@@ -18,6 +18,8 @@ import {
   getTaskDetail,
   getTaskSummary,
 } from "~/server/projections/task-query.server";
+import { markTaskNotificationsSeen } from "~/server/projections/notifications.server";
+import { logger } from "~/server/logging/logger.server";
 import {
   applyRecommendation,
   commentToAgent,
@@ -112,6 +114,22 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!detail) {
     throw data(`No task ${params.key} in projects/${params.slug}.`, {
       status: 404,
+    });
+  }
+  // R19-15: opening the task IS seeing its notifications — mark this viewer's
+  // unread rows for it read here, loader-side. Loader-side is correct: the app
+  // uses no link prefetch (this loader runs only on a real view), the write is
+  // idempotent + monotonic, and the `notification.read` it emits converges —
+  // the revalidation it triggers marks nothing on its second pass and emits no
+  // further event, so no loop can sustain. Guarded because viewing a task must
+  // never 500 because read-marking hiccuped.
+  try {
+    markTaskNotificationsSeen(db, user.id, params.slug, params.key);
+  } catch (error) {
+    logger.warn("R19-15 task-view read-marking failed", {
+      projectSlug: params.slug,
+      taskKey: params.key,
+      error,
     });
   }
   const limit = clampTimelineLimit(
