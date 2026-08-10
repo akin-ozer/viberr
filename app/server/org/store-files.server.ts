@@ -603,25 +603,46 @@ export async function importGithubSnapshot(
   let branch = m[3] ?? null;
   const subPath = (m[4] ?? "").replace(/\/+$/, "");
 
-  // Real import needs a connection with a validated token (the DEFAULT
-  // one) — otherwise the honest "needs a connection" state.
+  // A PUBLIC repository needs NO credential — GitHub serves its tree and blobs
+  // unauthenticated — so the import no longer demands a connection up front.
+  // It used to, which made the single most common case (import a skill from a
+  // public repo) impossible on an instance that had never linked GitHub at all.
+  //
+  // A validated connection is still USED whenever one exists: it lifts the
+  // anonymous 60/hr per-IP quota to 5000/hr and is the only way to reach a
+  // private repo. Missing it is not an error — it is only the EXPLANATION
+  // offered when an anonymous read is refused (see `noConnectionState` below).
+  //
   // B-GH7: re-prove a stale `valid` verdict before handing the token out — the
   // other consumer (runSetCredential) already does, and this one could import
   // with a token GitHub revoked months ago.
   const tokenInfo = await getDefaultConnectionTokenFresh(db, {
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });
-  if (!tokenInfo) {
-    return {
-      status: "no_connection",
-      message:
-        "No GitHub connection with a validated token — add one under GitHub connections first.",
-    };
-  }
+  const anonymous = tokenInfo === null;
   const client = createGithubClient({
-    token: tokenInfo.token,
+    token: tokenInfo?.token ?? null,
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });
+
+  // The two refusals that having no credential EXPLAINS. Both are repaired by
+  // adding a connection, so they surface as the no-connection state — the
+  // message that names the fix — rather than a dead-end "failed".
+  const noConnectionState = (message: string): GithubImportResult => ({
+    status: "no_connection",
+    message,
+  });
+  const PRIVATE_HINT =
+    `${owner}/${repo} is not readable without credentials — if it is private, ` +
+    `add a GitHub connection under GitHub connections first.`;
+  const RATE_HINT =
+    "GitHub's unauthenticated rate limit (60 requests/hour per IP) is used up — " +
+    "add a GitHub connection to import against its own quota.";
+  /** 403/429 with no token is the anonymous IP quota, at any call site. */
+  const rateLimited = (res: { kind: string; status?: number }): boolean =>
+    anonymous &&
+    res.kind === "http" &&
+    (res.status === 403 || res.status === 429);
 
   if (!branch) {
     const info = await client.request<{ default_branch?: string }>(
@@ -629,6 +650,12 @@ export async function importGithubSnapshot(
       `/repos/${owner}/${repo}`,
     );
     if (!info.ok) {
+      if (rateLimited(info)) return noConnectionState(RATE_HINT);
+      // Anonymous 404 on the repository itself: private or nonexistent. GitHub
+      // deliberately does not distinguish them without a credential, and a
+      // connection is the only thing that can — so name that, not "not found".
+      if (anonymous && info.kind === "http" && info.status === 404)
+        return noConnectionState(PRIVATE_HINT);
       return {
         status: "failed",
         message:
@@ -647,6 +674,16 @@ export async function importGithubSnapshot(
     searchParams: { recursive: "1" },
   });
   if (!treeRes.ok) {
+    if (rateLimited(treeRes)) return noConnectionState(RATE_HINT);
+    // A 404 HERE is ambiguous when anonymous: a wrong branch on a public repo
+    // and a private repo are indistinguishable at this endpoint. It is also
+    // the FIRST call whenever the URL carried an explicit branch (a /blob/ or
+    // /tree/<branch> link), so guessing would mislabel every private-repo
+    // import as a bad branch. One probe of the repo endpoint settles it.
+    if (anonymous && treeRes.kind === "http" && treeRes.status === 404) {
+      const probe = await client.request("GET", `/repos/${owner}/${repo}`);
+      if (!probe.ok) return noConnectionState(PRIVATE_HINT);
+    }
     return {
       status: "failed",
       message:
@@ -701,6 +738,7 @@ export async function importGithubSnapshot(
       `/repos/${owner}/${repo}/git/blobs/${blob.sha}`,
     );
     if (!blobRes.ok) {
+      if (rateLimited(blobRes)) return noConnectionState(RATE_HINT);
       return {
         status: "failed",
         message: "GitHub refused the file contents — nothing was imported.",
@@ -767,6 +805,10 @@ export async function importGithubSnapshot(
     folder = `${baseName}-${i++}`;
   }
 
+  // Set when a blob fetch is refused by the ANONYMOUS quota — the difference
+  // between "GitHub refused these files" and "you ran out of anonymous quota
+  // partway through", which is repaired by a connection, not by retrying.
+  let anonQuotaHit = false;
   const writeResults = await Promise.all(
     selected.map(async (blob) => {
       const rel = subPath ? blob.path.slice(prefix.length) : blob.path;
@@ -776,7 +818,10 @@ export async function importGithubSnapshot(
         content?: string;
         encoding?: string;
       }>("GET", `/repos/${owner}/${repo}/git/blobs/${blob.sha}`);
-      if (!blobRes.ok) return 0;
+      if (!blobRes.ok) {
+        if (rateLimited(blobRes)) anonQuotaHit = true;
+        return 0;
+      }
       const content = blobRes.data.content ?? "";
       const data =
         blobRes.data.encoding === "base64"
@@ -791,6 +836,7 @@ export async function importGithubSnapshot(
   );
   const written = writeResults.reduce((sum: number, n) => sum + n, 0);
   if (written === 0) {
+    if (anonQuotaHit) return noConnectionState(RATE_HINT);
     return {
       status: "failed",
       message: "GitHub refused the file contents — nothing was imported.",

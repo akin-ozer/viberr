@@ -34,9 +34,11 @@ import {
  *   is a fetcher POST to the org-settings action → real fs write → the
  *   revalidated scan re-renders the tree; sizes/dates are formatted from
  *   sizeBytes/mtime at render time;
- * - GitHub import is the real snapshot action (default org connection);
- *   the honest "needs a connection" / failure states render in the
- *   `.cred-warn` under the import bar;
+ * - GitHub import is the real snapshot action. It runs ANONYMOUSLY when the
+ *   org has no connection — a public repo needs no credential — and uses the
+ *   default connection when there is one (private repos, higher rate limit).
+ *   A refusal that having no credential explains, and any other failure,
+ *   render in the `.cred-warn` under the import bar;
  * - SKILL.md capture happens server-side (the skill body is re-read from
  *   disk) — the capture toast rides the action response;
  * - both layers are native <dialog>s (showModal via useDialog): Escape's

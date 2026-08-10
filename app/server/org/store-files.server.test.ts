@@ -178,15 +178,83 @@ describe("mkdir + delete", () => {
 });
 
 describe("github import", () => {
-  it("returns the honest no-connection state when no validated token exists", async () => {
+  // A PUBLIC repo is readable without a credential, so demanding a connection
+  // up front made the commonest case — "import this skill from GitHub" — flatly
+  // impossible on an instance that had never linked GitHub. The connection is
+  // now an EXPLANATION for a refusal, not a precondition.
+  it("imports a PUBLIC repo with NO connection at all, sending no Authorization", async () => {
     const { db, target } = await setupKb();
+    const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
+    const transport = fakeGithubFetch({
+      "GET /repos/blader/humanizer/git/trees/main": {
+        body: {
+          truncated: false,
+          tree: [{ path: "SKILL.md", type: "blob", sha: "s1", size: 9 }],
+        },
+      },
+      "GET /repos/blader/humanizer/git/blobs/s1": {
+        body: { content: b64("# humanizer"), encoding: "base64" },
+      },
+    });
+
+    const result = await importGithubSnapshot(
+      db,
+      target,
+      "https://github.com/blader/humanizer/blob/main/SKILL.md",
+      ACTOR,
+      { fetchImpl: transport.fetchImpl },
+    );
+
+    expect(result.status).toBe("imported");
+    expect(readFileSync(path.join(target.rootAbs, "SKILL.md"), "utf8")).toBe(
+      "# humanizer",
+    );
+    // Anonymous means NO header — an empty `Bearer ` would 401 endpoints that
+    // answer fine with no credential at all.
+    expect(transport.calls.length).toBeGreaterThan(0);
+    for (const call of transport.calls) {
+      expect(call.headers["authorization"]).toBeUndefined();
+    }
+  });
+
+  it("falls back to the no-connection state when the anonymous read 404s", async () => {
+    const { db, target } = await setupKb();
+    // Tree 404 AND repo 404 (unmatched → 404): private or nonexistent, which
+    // GitHub will not distinguish without a credential.
+    const transport = fakeGithubFetch({});
+    const result = await importGithubSnapshot(
+      db,
+      target,
+      "https://github.com/owner/secret/tree/main/docs",
+      ACTOR,
+      { fetchImpl: transport.fetchImpl },
+    );
+    expect(result.status).toBe("no_connection");
+    if (result.status === "no_connection") {
+      expect(result.message).toContain("owner/secret is not readable");
+      expect(result.message).toContain("add a GitHub connection");
+    }
+  });
+
+  it("names the anonymous rate limit rather than calling it a refusal", async () => {
+    const { db, target } = await setupKb();
+    const transport = fakeGithubFetch({
+      "GET /repos/owner/repo/git/trees/main": {
+        status: 403,
+        body: { message: "API rate limit exceeded for 1.2.3.4." },
+      },
+    });
     const result = await importGithubSnapshot(
       db,
       target,
       "https://github.com/owner/repo/tree/main/docs",
       ACTOR,
+      { fetchImpl: transport.fetchImpl },
     );
     expect(result.status).toBe("no_connection");
+    if (result.status === "no_connection") {
+      expect(result.message).toContain("unauthenticated rate limit");
+    }
   });
 
   it("rejects garbage URLs with the mock copy", async () => {

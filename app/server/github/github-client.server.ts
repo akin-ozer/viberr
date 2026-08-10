@@ -1,7 +1,8 @@
 /**
  * Thin typed fetch wrapper for api.github.com (Phase 7).
  *
- * - Bearer token auth, GitHub v3 JSON media type, X-GitHub-Api-Version.
+ * - Bearer token auth (or ANONYMOUS when `token` is null — GitHub serves
+ *   public read endpoints unauthenticated, at the lower 60/hr IP quota).
  * - If-None-Match ETag support (pass `etag`, get a `not_modified` result).
  * - Rate-limit info surfaced on every response.
  * - NO retry storms: exactly ONE retry, only on 5xx responses.
@@ -55,7 +56,8 @@ export type GithubResponse<T> =
   | { ok: false; kind: "network"; message: string };
 
 export interface GithubClientOptions {
-  token: string;
+  /** `null` = anonymous: no Authorization header, public endpoints only. */
+  token: string | null;
   /** Mock-transport hook for tests. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
   baseUrl?: string;
@@ -121,10 +123,13 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
   ): Promise<Response> {
     const headers: Record<string, string> = {
       accept: "application/vnd.github+json",
-      authorization: `Bearer ${token}`,
       "user-agent": USER_AGENT,
       "x-github-api-version": API_VERSION,
     };
+    // Anonymous when there is no token: GitHub answers public reads without
+    // one. An EMPTY Authorization header is worse than none (401 on endpoints
+    // that would otherwise have answered), so it is omitted entirely.
+    if (token) headers["authorization"] = `Bearer ${token}`;
     if (requestOptions.etag) headers["if-none-match"] = requestOptions.etag;
     // P13-UI-04: every GitHub call was unbounded, so an unreachable or hanging
     // api.github.com left a click looking dead (and, on a delivery path, held a

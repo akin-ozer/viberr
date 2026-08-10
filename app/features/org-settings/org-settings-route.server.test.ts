@@ -1,10 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { fakeGithubFetch } from "../../../test-support/fake-github";
 import type { OrgSettingsView } from "~/server/org/org-view.server";
 
 /**
@@ -290,14 +291,24 @@ describe("resource + store intents", () => {
     expect(existsSync(path.dirname(abs))).toBe(false);
   });
 
-  it("github import without a validated connection is the honest failure", async () => {
-    const result = await postAction(ids.arda, {
-      intent: "store-import-github",
-      kind: "kb",
-      id: "kb_seed_arch",
-      url: "https://github.com/owner/repo/tree/main/docs",
-    });
-    expect(result.ok).toBe(false);
-    expect(String(result.error)).toContain("No GitHub connection");
+  // With no connection the import goes out ANONYMOUSLY (a public repo needs no
+  // credential), so this route reaches the network — the transport is stubbed
+  // to keep the suite hermetic, and answers 404 the way GitHub answers an
+  // unauthenticated read of a private or nonexistent repo.
+  it("github import a connection can't explain is the honest failure", async () => {
+    const transport = fakeGithubFetch({});
+    vi.stubGlobal("fetch", transport.fetchImpl);
+    try {
+      const result = await postAction(ids.arda, {
+        intent: "store-import-github",
+        kind: "kb",
+        id: "kb_seed_arch",
+        url: "https://github.com/owner/repo/tree/main/docs",
+      });
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toContain("add a GitHub connection");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
