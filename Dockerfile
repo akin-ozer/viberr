@@ -12,8 +12,10 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+# --no-audit/--no-fund: npm 11.19 (current node:26-slim) hangs prune on its
+# registry round-trip; pruning an already-installed tree needs no network.
 RUN npm run build \
-    && npm prune --omit=dev
+    && npm prune --omit=dev --no-audit --no-fund
 
 # ============================================================================
 # Runtime stage.
