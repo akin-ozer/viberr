@@ -31,6 +31,19 @@ import {
   whitelistGoogleAccount,
 } from "~/server/org/org-users.server";
 import { getOrgSettingsView } from "~/server/org/org-view.server";
+import { oauthCallbackUrl } from "~/shared/auth/auth-paths";
+import {
+  testOAuthCredentials,
+  type OAuthProvider,
+} from "~/server/auth/oauth-credential-test.server";
+import {
+  deleteOAuthProvider,
+  getOAuthProviderRow,
+  readOAuthSecret,
+  recordOAuthVerification,
+  saveOAuthProvider,
+  setOAuthProviderEnabled,
+} from "~/server/auth/oauth-providers.server";
 import {
   deleteKnowledgeBase,
   deleteMcpServer,
@@ -69,7 +82,14 @@ export function meta(_: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireRole(request, "admin");
-  return { view: getOrgSettingsView(getDb()), meId: user.id };
+  return {
+    view: getOrgSettingsView(getDb()),
+    meId: user.id,
+    // R19-16: computed server-side from the request rather than
+    // `window.location`, so the callback URL the card tells an admin to
+    // register is identical in the SSR markup and after hydration.
+    callbackOrigin: new URL(request.url).origin,
+  };
 }
 
 type Ok = { ok: true; toast?: string } & Record<string, unknown>;
@@ -84,6 +104,14 @@ function fail(error: string, status = 400) {
 
 function parseRole(raw: string): "admin" | "member" {
   return raw === "admin" ? "admin" : "member";
+}
+
+function parseOAuthProvider(raw: string): OAuthProvider | null {
+  return raw === "github" || raw === "google" ? raw : null;
+}
+
+function providerLabel(provider: OAuthProvider): string {
+  return provider === "github" ? "GitHub" : "Google";
 }
 
 function parseJsonStringArray(raw: string): string[] {
@@ -280,6 +308,78 @@ export async function action({ request }: Route.ActionArgs) {
         );
         return ok(result.toast);
       }
+      // ---- R19-16: sign-in providers, configured in the app ----
+      case "oauth-save": {
+        const provider = parseOAuthProvider(field("provider"));
+        if (!provider) return fail("Unknown sign-in provider.");
+        const clientId = field("clientId").trim();
+        if (!clientId) return fail("Paste the client ID.");
+        const secret = field("clientSecret").trim();
+        if (!secret && !getOAuthProviderRow(db, provider)) {
+          return fail("Paste the client secret.");
+        }
+        saveOAuthProvider(
+          db,
+          { provider, clientId, clientSecret: secret || null },
+          actor,
+        );
+        return ok(
+          `${providerLabel(provider)} credentials saved — test them to switch sign-in on.`,
+        );
+      }
+      case "oauth-test": {
+        const provider = parseOAuthProvider(field("provider"));
+        if (!provider) return fail("Unknown sign-in provider.");
+        const row = getOAuthProviderRow(db, provider);
+        const secret = readOAuthSecret(db, provider);
+        if (!row || !secret) {
+          return fail("Save the client ID and secret first.");
+        }
+        const result = await testOAuthCredentials(
+          provider,
+          row.clientId,
+          secret,
+          {
+            // The callback this deployment actually serves — the same string
+            // the card tells the admin to register. Google echoes
+            // `redirect_uri` back during the probe, so sending the real one
+            // keeps the test honest.
+            redirectUri: oauthCallbackUrl(
+              new URL(request.url).origin,
+              provider,
+            ),
+          },
+        );
+        recordOAuthVerification(
+          db,
+          provider,
+          result.ok
+            ? { ok: true, detail: result.detail }
+            : { ok: false, detail: result.reason },
+          actor,
+        );
+        return result.ok
+          ? ok(`${providerLabel(provider)} accepted the credentials.`)
+          : fail(result.reason);
+      }
+      case "oauth-toggle": {
+        const provider = parseOAuthProvider(field("provider"));
+        if (!provider) return fail("Unknown sign-in provider.");
+        const enabled = field("enabled") === "1";
+        const result = setOAuthProviderEnabled(db, provider, enabled, actor);
+        if (!result.ok) return fail(result.reason);
+        return ok(
+          enabled
+            ? `${providerLabel(provider)} sign-in is on.`
+            : `${providerLabel(provider)} sign-in is off.`,
+        );
+      }
+      case "oauth-remove": {
+        const provider = parseOAuthProvider(field("provider"));
+        if (!provider) return fail("Unknown sign-in provider.");
+        deleteOAuthProvider(db, provider, actor);
+        return ok(`${providerLabel(provider)} configuration removed.`);
+      }
       case "mcp-test":
         return ok((await testMcpServer(db, field("mcpId"))).toast);
       case "mcp-delete":
@@ -449,5 +549,11 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function OrgSettings({ loaderData }: Route.ComponentProps) {
-  return <OrgSettingsPage view={loaderData.view} meId={loaderData.meId} />;
+  return (
+    <OrgSettingsPage
+      view={loaderData.view}
+      meId={loaderData.meId}
+      callbackOrigin={loaderData.callbackOrigin}
+    />
+  );
 }

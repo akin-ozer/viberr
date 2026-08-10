@@ -47,6 +47,7 @@ export const SEALED_STORES = [
     table: "github_pats",
     column: "encrypted_token",
     nameColumn: "label",
+    idColumn: "id",
   },
   {
     id: "org_mcp_servers",
@@ -54,6 +55,20 @@ export const SEALED_STORES = [
     table: "org_mcp_servers",
     column: "cred_ref",
     nameColumn: "name",
+    idColumn: "id",
+  },
+  // R19-16: OAuth client secrets for GitHub/Google sign-in. The row's own
+  // `provider` IS its label — there is at most one per provider, and a
+  // provider name is not a secret.
+  {
+    id: "oauth_providers",
+    label: "Sign-in provider secrets",
+    table: "oauth_providers",
+    column: "client_secret",
+    nameColumn: "provider",
+    // Keyed by the provider itself — a store's primary key is its own, not a
+    // column every table is assumed to carry.
+    idColumn: "provider",
   },
 ] as const;
 
@@ -115,10 +130,10 @@ function scanStore(
 ): SealedStoreScan {
   const rows = db
     .prepare(
-      `SELECT id, ${store.nameColumn} AS name, ${store.column} AS box
+      `SELECT ${store.idColumn} AS id, ${store.nameColumn} AS name, ${store.column} AS box
          FROM ${store.table}
         WHERE ${store.column} IS NOT NULL
-        ORDER BY id`,
+        ORDER BY ${store.idColumn}`,
     )
     .all() as { id: string; name: string | null; box: string }[];
 
@@ -262,10 +277,10 @@ export function resealSecrets(
   for (const store of SEALED_STORES) {
     const rows = db
       .prepare(
-        `SELECT id, ${store.nameColumn} AS name, ${store.column} AS box
+        `SELECT ${store.idColumn} AS id, ${store.nameColumn} AS name, ${store.column} AS box
            FROM ${store.table}
           WHERE ${store.column} IS NOT NULL
-          ORDER BY id`,
+          ORDER BY ${store.idColumn}`,
       )
       .all() as { id: string; name: string | null; box: string }[];
 
@@ -292,7 +307,7 @@ export function resealSecrets(
       }
       try {
         db.prepare(
-          `UPDATE ${store.table} SET ${store.column} = ? WHERE id = ?`,
+          `UPDATE ${store.table} SET ${store.column} = ? WHERE ${store.idColumn} = ?`,
         ).run(sealSecret(plaintext), row.id);
         resealed.push(ref);
       } catch (error) {

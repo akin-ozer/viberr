@@ -2,6 +2,7 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { DatabaseSync } from "node:sqlite";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
+import { AUTH_BASE_PATH } from "~/shared/auth/auth-paths";
 import { hashPassword, verifyPassword } from "~/server/auth/password.server";
 import {
   clientIpOf,
@@ -16,6 +17,10 @@ import {
 } from "~/server/auth/oauth-provision.server";
 import { getEnv } from "~/server/config/env.server";
 import { getDb } from "~/server/db/sqlite.server";
+import {
+  oauthConfigFingerprint,
+  resolveOAuthProviders,
+} from "~/server/auth/oauth-providers.server";
 
 /**
  * better-auth instance (authN mechanics only).
@@ -32,7 +37,11 @@ import { getDb } from "~/server/db/sqlite.server";
  *   (seed admin, org-users invite, OAuth provisioning hooks), never open reg.
  */
 
-export const AUTH_BASE_PATH = "/api/auth";
+// The mount point lives in a SHARED module so client code (the Sign-in & SSO
+// card) can render the callback URL without importing this server-only file.
+// Re-exported here because every existing server importer reads it from this
+// module.
+export { AUTH_BASE_PATH };
 
 /**
  * The ONLY Better Auth endpoints the app drives (P11-02) — everything else on
@@ -325,20 +334,40 @@ const AUTH_CACHE_KEY = Symbol.for("viberr.betterAuth");
 
 interface AuthCacheEntry {
   db: DatabaseSync;
+  /** R19-16: identity of the provider config this instance was built from. */
+  providerFingerprint: string;
   auth: ReturnType<typeof betterAuth>;
 }
 
-/** The app's better-auth instance (from getEnv + getDb). */
+/**
+ * The app's better-auth instance (from getEnv + getDb + the stored provider
+ * configuration).
+ *
+ * R19-16: the cache is keyed on the provider FINGERPRINT as well as the db
+ * handle. better-auth reads `socialProviders` once at construction, so without
+ * this an admin who configured GitHub sign-in in the UI would keep meeting the
+ * old instance — "no redeploy" would have meant "no restart, but also no
+ * effect" until the process bounced. The fingerprint moves on any save, test,
+ * enable or removal, so the next request rebuilds.
+ */
 export function getAuth(): ReturnType<typeof betterAuth> {
   const cache = globalThis as unknown as Record<
     symbol,
     AuthCacheEntry | undefined
   >;
   const db = getDb();
+  const providerFingerprint = oauthConfigFingerprint(db);
   const entry = cache[AUTH_CACHE_KEY];
-  if (!entry || entry.db !== db) {
+  if (
+    !entry ||
+    entry.db !== db ||
+    entry.providerFingerprint !== providerFingerprint
+  ) {
     const env = getEnv();
     const baseURL = env.BETTER_AUTH_URL;
+    // App configuration OVERRIDES the deployment env (owner ruling) — including
+    // an app row that deliberately holds a provider off.
+    const resolved = resolveOAuthProviders(db);
     const auth = createAuth({
       db,
       secret: env.BETTER_AUTH_SECRET ?? env.VIBERR_SESSION_SECRET,
@@ -346,22 +375,10 @@ export function getAuth(): ReturnType<typeof betterAuth> {
       // for dev where the preview port varies. Set BETTER_AUTH_URL in prod.
       baseURL,
       trustedOrigins: baseURL ? [baseURL] : [],
-      github:
-        env.GITHUB_OAUTH_CLIENT_ID && env.GITHUB_OAUTH_CLIENT_SECRET
-          ? {
-              clientId: env.GITHUB_OAUTH_CLIENT_ID,
-              clientSecret: env.GITHUB_OAUTH_CLIENT_SECRET,
-            }
-          : undefined,
-      google:
-        env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET
-          ? {
-              clientId: env.GOOGLE_OAUTH_CLIENT_ID,
-              clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
-            }
-          : undefined,
+      ...(resolved.github ? { github: resolved.github } : {}),
+      ...(resolved.google ? { google: resolved.google } : {}),
     });
-    cache[AUTH_CACHE_KEY] = { db, auth };
+    cache[AUTH_CACHE_KEY] = { db, providerFingerprint, auth };
     return auth;
   }
   return entry.auth;

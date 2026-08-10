@@ -221,13 +221,17 @@ describe("SEALED_STORES covers every sealed store", () => {
       // The definition itself.
       "server/secrets/secret-box.server.ts",
       // The two sealed stores…
+      "server/auth/oauth-providers.server.ts",
       "server/org/resources.server.ts",
       "server/secrets/pat-store.server.ts",
-      // …and this module, which re-seals both of them.
+      // …and this module, which re-seals all of them.
       "server/secrets/key-rotation.server.ts",
     ].sort());
     expect(SEALED_STORES.map((s) => s.table).sort()).toEqual([
       "github_pats",
+      // R19-16: sign-in client secrets rotate with everything else — an
+      // unregistered store would silently outlive a key rotation.
+      "oauth_providers",
       "org_mcp_servers",
     ]);
   });

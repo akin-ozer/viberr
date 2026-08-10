@@ -221,6 +221,22 @@ CREATE TABLE github_connections (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- OAuth sign-in providers configured IN THE APP (R19-16). The deployment env
+-- (GITHUB_OAUTH_* / GOOGLE_OAUTH_*) remains a bootstrap default; a row here
+-- OVERRIDES it, so SSO can be set up or rotated without a redeploy. At most one
+-- row per provider. `client_secret` is a sealed secret box, never plaintext.
+-- `verified_at` is the last time the PROVIDER ITSELF accepted the credential
+-- pair — `enabled` cannot be set without it.
+CREATE TABLE oauth_providers (
+  provider TEXT PRIMARY KEY CHECK (provider IN ('github', 'google')),
+  client_id TEXT NOT NULL,
+  client_secret TEXT NOT NULL,        -- sealSecret box
+  enabled INTEGER NOT NULL DEFAULT 0,
+  verified_at TEXT,                   -- ISO; null = never proved
+  verified_detail TEXT,               -- what the provider answered
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE google_domain_allowlist (
   id TEXT PRIMARY KEY,
   domain TEXT NOT NULL UNIQUE,        -- normalized "@company.dev"

@@ -4,6 +4,7 @@ import { countLabel } from "~/shared/text/plural";
 import { Icon, type IconName } from "~/ui/icon";
 import { ConnectionsPanel } from "./connections-panel";
 import { ResourcesPanel } from "./resources-panel";
+import { SsoPanel } from "./sso-panel";
 import { UsersPanel } from "./users-panel";
 
 /**
@@ -13,24 +14,32 @@ import { UsersPanel } from "./users-panel";
  * this shape); default "connections". Admin-only (route-enforced).
  */
 
-export type OrgSettingsTab = "connections" | "users" | "resources";
+export type OrgSettingsTab = "connections" | "users" | "sso" | "resources";
 
 const SETTINGS_TABS: { id: OrgSettingsTab; label: string; icon: IconName }[] = [
   { id: "connections", label: "GitHub connections", icon: "github" },
   { id: "users", label: "Users & access", icon: "user" },
+  // R19-16: sits next to Users & access — the whitelist decides WHO may sign
+  // in, this decides HOW they can.
+  { id: "sso", label: "Sign-in & SSO", icon: "lock" },
   { id: "resources", label: "Agent resources", icon: "memory" },
 ];
 
 function resolveOrgTab(raw: string | null): OrgSettingsTab {
-  return raw === "users" || raw === "resources" ? raw : "connections";
+  return raw === "users" || raw === "resources" || raw === "sso"
+    ? raw
+    : "connections";
 }
 
 export function OrgSettingsPage({
   view,
   meId,
+  callbackOrigin,
 }: {
   view: OrgSettingsView;
   meId: string;
+  /** This deployment's origin — the callback URL an OAuth app must carry. */
+  callbackOrigin: string;
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -44,11 +53,19 @@ export function OrgSettingsPage({
   const counts: Record<OrgSettingsTab, number> = {
     connections: view.connections.length,
     users: view.users.length,
+    // The count is LIVE methods, not configured rows: a provider saved but not
+    // switched on grants nothing, and a badge that counted it would say the
+    // opposite of the card underneath.
+    sso: view.authProviders.filter((p) => p.active).length,
     resources: resourceCount,
   };
   const countHint: Record<OrgSettingsTab, string> = {
     connections: countLabel(view.connections.length, "GitHub connection"),
     users: countLabel(view.users.length, "user"),
+    sso: countLabel(
+      view.authProviders.filter((p) => p.active).length,
+      "live sign-in method",
+    ),
     // The KB/MCP/skill triple was hardcoded plural, so a one-of-each instance
     // advertised "1 knowledge bases · 1 MCP · 1 skills" — the same disagreement
     // as the Users tab's "1 instance accounts", three times in one string.
@@ -105,6 +122,12 @@ export function OrgSettingsPage({
               domains={view.domains}
               meId={meId}
               providers={view.providers}
+            />
+          )}
+          {tab === "sso" && (
+            <SsoPanel
+              providers={view.authProviders}
+              callbackOrigin={callbackOrigin}
             />
           )}
           {tab === "resources" && (

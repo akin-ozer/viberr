@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { getEnv } from "~/server/config/env.server";
+import { resolveOAuthProvider } from "~/server/auth/oauth-providers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import { ROLE_IDS } from "~/features/policy/policy-data";
@@ -164,9 +164,11 @@ export function getProfileView(
     },
     memberships,
     accessRole,
-    githubConfigured: Boolean(
-      getEnv().GITHUB_OAUTH_CLIENT_ID && getEnv().GITHUB_OAUTH_CLIENT_SECRET,
-    ),
+    // R19-16: resolved the same way better-auth resolves it (app configuration
+    // overriding the deployment env), so "link GitHub" appears exactly when the
+    // handler can actually start the flow.
+    githubConfigured:
+      resolveOAuthProvider(db, "github").credentials !== null,
     prefs: {
       notifs: getNotifPrefs(db, userId),
       motion: getMotionPref(db, userId),

@@ -312,3 +312,96 @@ describe("resource + store intents", () => {
     }
   });
 });
+
+/**
+ * R19-16 — the whole point of the Sign-in & SSO tab: an admin can turn GitHub
+ * sign-in on WITHOUT touching the deployment env, and cannot turn it on with a
+ * credential the provider never accepted.
+ */
+describe("R19-16 sign-in providers, configured in the app", () => {
+  it("save → refuse-to-enable → test → enable, and the login page follows", async () => {
+    const loaderBefore = await runLoader(ids.arda);
+    expect(loaderBefore.view.providers.github).toBe(false);
+
+    const saved = await postAction(ids.arda, {
+      intent: "oauth-save",
+      provider: "github",
+      clientId: "Iv1.livetest",
+      clientSecret: "super-secret-value",
+    });
+    expect(saved).toMatchObject({ ok: true });
+
+    // Saving alone must NOT light the method up.
+    const afterSave = await runLoader(ids.arda);
+    expect(afterSave.view.providers.github).toBe(false);
+    expect(afterSave.view.authProviders[0]).toMatchObject({
+      provider: "github",
+      configuredInApp: true,
+      active: false,
+      clientId: "Iv1.livetest",
+    });
+
+    const refused = await postAction(ids.arda, {
+      intent: "oauth-toggle",
+      provider: "github",
+      enabled: "1",
+    });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error).toContain("Test the credentials first");
+
+    // GitHub answering 404 to the app-authenticated probe = the pair is good.
+    const transport = fakeGithubFetch({
+      "POST /applications/Iv1.livetest/token": { status: 404, body: {} },
+    });
+    vi.stubGlobal("fetch", transport.fetchImpl);
+    try {
+      const tested = await postAction(ids.arda, {
+        intent: "oauth-test",
+        provider: "github",
+      });
+      expect(tested).toMatchObject({ ok: true });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // The probe authenticates the APP with Basic auth — never the secret in a
+    // query string or body.
+    const probe = transport.callsTo("POST /applications/Iv1.livetest/token")[0]!;
+    expect(probe.headers["authorization"]).toMatch(/^Basic /);
+    expect(probe.url.search).toBe("");
+
+    const enabled = await postAction(ids.arda, {
+      intent: "oauth-toggle",
+      provider: "github",
+      enabled: "1",
+    });
+    expect(enabled).toMatchObject({ ok: true });
+
+    const afterEnable = await runLoader(ids.arda);
+    expect(afterEnable.view.providers.github).toBe(true);
+    expect(afterEnable.view.authProviders[0]).toMatchObject({
+      active: true,
+      source: "app",
+    });
+
+    // …and the LOGIN page offers the button, from the same resolution.
+    const { loader: loginLoader } = await import("~/routes/login");
+    const login = (await loginLoader({
+      request: app.request("/login"),
+      params: {},
+      context: {},
+    } as never)) as { providers: { github: boolean } };
+    expect(login.providers.github).toBe(true);
+  });
+
+  it("a member cannot configure a sign-in provider", async () => {
+    const result = await postAction(ids.selin, {
+      intent: "oauth-save",
+      provider: "github",
+      clientId: "Iv1.sneaky",
+      clientSecret: "nope",
+    }).catch((e: unknown) => e);
+    // requireRoleAuth throws a Response for non-admins.
+    expect(result).toBeInstanceOf(Response);
+  });
+});
+

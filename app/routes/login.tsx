@@ -12,8 +12,8 @@ import {
   safeReturnTo,
 } from "~/server/auth/require-user.server";
 import { getAuth } from "~/lib/auth.server";
-import { getEnv } from "~/server/config/env.server";
 import { getDb } from "~/server/db/sqlite.server";
+import { resolveOAuthProvider } from "~/server/auth/oauth-providers.server";
 import { serializeThemePreference } from "~/server/theme/theme-cookie.server";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
 import { CsrfInput } from "~/ui/csrf-input";
@@ -31,7 +31,6 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const env = getEnv();
   const url = new URL(request.url);
   const returnTo = safeReturnTo(url.searchParams.get("returnTo"));
   const auth = await authenticate(request);
@@ -42,13 +41,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     mode: auth ? ("reset" as const) : ("login" as const),
     returnTo,
+    // R19-16: the SAME resolution better-auth runs on (app configuration
+    // overriding the deployment env), so the login page never offers a button
+    // the handler would refuse — nor hides one an admin just switched on.
     providers: {
-      github: Boolean(
-        env.GITHUB_OAUTH_CLIENT_ID && env.GITHUB_OAUTH_CLIENT_SECRET,
-      ),
-      google: Boolean(
-        env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET,
-      ),
+      github: resolveOAuthProvider(getDb(), "github").credentials !== null,
+      google: resolveOAuthProvider(getDb(), "google").credentials !== null,
     },
   };
 }

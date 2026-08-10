@@ -10,6 +10,7 @@ import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { ToastProvider } from "~/ui/toast";
 import { ConnectionsPanel } from "./connections-panel";
 import { OrgSettingsPage } from "./org-settings-page";
+import type { AuthProviderView } from "~/server/org/org-view.server";
 import { ResourcesPanel } from "./resources-panel";
 import { UsersPanel } from "./users-panel";
 
@@ -789,6 +790,31 @@ describe("SkillModal — one entry point, two content modes", () => {
   });
 });
 
+const AUTH_PROVIDERS: AuthProviderView[] = [
+  {
+    provider: "github",
+    source: "none",
+    active: false,
+    disabledInApp: false,
+    clientId: null,
+    configuredInApp: false,
+    verifiedAt: null,
+    verifiedDetail: null,
+    envAvailable: false,
+  },
+  {
+    provider: "google",
+    source: "none",
+    active: false,
+    disabledInApp: false,
+    clientId: null,
+    configuredInApp: false,
+    verifiedAt: null,
+    verifiedDetail: null,
+    envAvailable: false,
+  },
+];
+
 describe("resources tab badge counts resources, not resources+templates", () => {
   it("shows the resource count and discloses profiles in the tooltip", () => {
     const { getByRole } = renderPanel(
@@ -803,8 +829,10 @@ describe("resources tab badge counts resources, not resources+templates", () => 
           gagents: GAGENTS,
           stages: STAGES,
           providers: { github: false, google: false },
+          authProviders: AUTH_PROVIDERS,
         }}
         meId={ME.id}
+        callbackOrigin="http://localhost:5173"
       />,
     );
     // 1 KB + 2 MCP + 1 skill = 4. It used to add the 2 agent templates and
@@ -835,8 +863,10 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
           gagents: GAGENTS,
           stages: STAGES,
           providers: { github: false, google: false },
+          authProviders: AUTH_PROVIDERS,
         }}
         meId={ME.id}
+        callbackOrigin="http://localhost:5173"
       />,
     );
     const h1s = container.querySelectorAll("h1");
