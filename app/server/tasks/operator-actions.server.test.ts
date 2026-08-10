@@ -26,6 +26,7 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
+  RECOMMENDATION_DECLINED_TITLE,
   applyRecommendation,
   createTask,
   dismissRecommendation,
@@ -33,6 +34,8 @@ import {
 } from "./task-actions.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
+  AUTONOMY_CLAMPED_AUDIT_ACTION,
+  clampAutonomy,
   deliverGate,
   gate,
   operatorAcceptCompletion,
@@ -49,7 +52,9 @@ import {
   operatorRunAgent,
   operatorRunReviewer,
   operatorRunSpecialist,
+  operatorSnapshot,
   operatorTransitionStage,
+  operatorAutonomyFor,
   operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
@@ -63,8 +68,20 @@ import {
 let ctx: TestDbContext;
 let store: TestStore;
 
-/** Deploy the operator (with a policy) + a dev specialist + a reviewer. */
-function deployRoster(operatorPolicy: { capabilityId: string; mode: CapabilityMode }[]): void {
+/**
+ * Deploy the operator (with a policy) + a dev specialist + a reviewer.
+ *
+ * R19-A: the operator's CONFIGURED autonomy is the ceiling for every run, so it
+ * is part of the fixture now. It defaults to `full` because the tests below
+ * assert what a project that ALLOWS full autonomy does — before the clamp, a
+ * per-run override alone conjured that power on a project configured
+ * `supervised`, which is exactly what R19-A forbids. The clamp's own tests pass
+ * `"supervised"` explicitly.
+ */
+function deployRoster(
+  operatorPolicy: { capabilityId: string; mode: CapabilityMode }[],
+  configuredAutonomy: OperatorAutonomy = "full",
+): void {
   const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
   writeProject(store.dataRoot, {
     ...file.parsed.frontmatter,
@@ -74,7 +91,13 @@ function deployRoster(operatorPolicy: { capabilityId: string; mode: CapabilityMo
         profileId: "operator",
         capabilities: operatorPolicy,
         extras: [],
-        definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet" },
+        definition: {
+          kind: "operator",
+          name: "Operator",
+          backends: ["claude"],
+          model: "sonnet",
+          autonomy: configuredAutonomy,
+        },
       },
       {
         profileId: "developer",
@@ -140,13 +163,120 @@ afterEach(() => {
 });
 
 describe("resolveOperatorAuthority", () => {
-  it("finds the deployed operator + its policy, and honors autonomy override", () => {
-    deployRoster(DEFAULT_POLICY);
+  it("finds the deployed operator + its policy, and honors an autonomy override WITHIN the ceiling", () => {
+    deployRoster(DEFAULT_POLICY); // configured: full
     const a = authority("full");
     expect(a.deployed).toBe(true);
     expect(a.autonomy).toBe("full");
+    expect(a.configuredAutonomy).toBe("full");
+    expect(a.autonomyClampedFrom).toBeNull();
     expect(a.policy.get("assign-primary-specialist")).toBe("direct");
     expect(a.policy.get("stage-transitions")).toBe("recommend");
+  });
+});
+
+/**
+ * R19-A (owner ruling, pass 19) — **a run may never exceed the project's
+ * configured autonomy.** The old assertion here (`"honors autonomy override"`,
+ * unqualified) pinned the defect: on a project whose operator is deployed
+ * `supervised`, any maintainer could launch ONE turn at `full` and promote every
+ * `recommend` capability to direct execution, with no confirm and no audit row.
+ * Lowering for a single run is still allowed — this is a CEILING, not a pin.
+ */
+describe("R19-A — per-run autonomy is clamped to project policy", () => {
+  it("clampAutonomy is a ceiling: it caps a raise, passes a lowering through", () => {
+    expect(clampAutonomy("full", "supervised")).toEqual({
+      autonomy: "supervised",
+      clampedFrom: "full",
+    });
+    expect(clampAutonomy("supervised", "full")).toEqual({
+      autonomy: "supervised",
+      clampedFrom: null,
+    });
+    expect(clampAutonomy("full", "full")).toEqual({
+      autonomy: "full",
+      clampedFrom: null,
+    });
+    // No override at all = run at the configured level; not a clamp.
+    expect(clampAutonomy(undefined, "supervised")).toEqual({
+      autonomy: "supervised",
+      clampedFrom: null,
+    });
+    expect(clampAutonomy(undefined, "full")).toEqual({
+      autonomy: "full",
+      clampedFrom: null,
+    });
+  });
+
+  it("a run asking for full on a SUPERVISED project runs supervised", () => {
+    deployRoster(DEFAULT_POLICY, "supervised");
+    const a = authority("full");
+    expect(a.configuredAutonomy).toBe("supervised");
+    expect(a.autonomy).toBe("supervised");
+    expect(a.autonomyClampedFrom).toBe("full");
+  });
+
+  it("the clamp actually withholds the power: recommend is NOT promoted to direct", () => {
+    deployRoster(DEFAULT_POLICY, "supervised");
+    // `stage-transitions` is deployed `recommend`. Before the clamp, a run
+    // launched at "full" executed it directly with no human gate.
+    expect(gate(authority("full"), "stage-transitions")).toBe("recommend");
+    expect(gate(authority("full"), "assign-primary-specialist")).toBe("direct");
+    // The same project configured `full` DOES promote it — proving the clamp,
+    // not the gate, is what changed.
+    deployRoster(DEFAULT_POLICY, "full");
+    expect(gate(authority("full"), "stage-transitions")).toBe("direct");
+  });
+
+  it("lowering autonomy for one run stays allowed on a full-autonomy project", () => {
+    deployRoster(DEFAULT_POLICY, "full");
+    const a = authority("supervised");
+    expect(a.autonomy).toBe("supervised");
+    expect(a.autonomyClampedFrom).toBeNull();
+    expect(gate(a, "stage-transitions")).toBe("recommend");
+  });
+
+  it("audits the clamp WHEN IT BITES, naming what was asked for and what ran", () => {
+    deployRoster(DEFAULT_POLICY, "supervised");
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
+    resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+      autonomy: "full",
+      db: store.db,
+      taskKey: "VIB-1",
+      actor,
+    });
+    const rows = listAuditEvents(store.db, { action: AUTONOMY_CLAMPED_AUDIT_ACTION });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actorLabel).toBe("arda@viberr.dev");
+    expect(rows[0]!.projectSlug).toBe(store.slug);
+    expect(rows[0]!.taskKey).toBe("VIB-1");
+    expect(rows[0]!.details).toMatchObject({ requested: "full", ranAt: "supervised" });
+  });
+
+  it("records NOTHING when the clamp does not bite, or on a read path with no db", () => {
+    deployRoster(DEFAULT_POLICY, "full");
+    resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+      autonomy: "full",
+      db: store.db,
+      taskKey: "VIB-1",
+    });
+    expect(listAuditEvents(store.db, { action: AUTONOMY_CLAMPED_AUDIT_ACTION })).toHaveLength(0);
+    // A pure READ (loader paths resolve authority too) must never write audit
+    // rows, even when the requested autonomy is above the ceiling.
+    deployRoster(DEFAULT_POLICY, "supervised");
+    authority("full");
+    expect(listAuditEvents(store.db, { action: AUTONOMY_CLAMPED_AUDIT_ACTION })).toHaveLength(0);
+  });
+
+  it("an UNDEPLOYED operator reports the supervised ceiling rather than a phantom full", () => {
+    // No roster written at all — no operator deployed.
+    const a = resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+      autonomy: "full",
+    });
+    expect(a.deployed).toBe(false);
+    expect(a.autonomy).toBe("supervised");
+    expect(a.configuredAutonomy).toBe("supervised");
+    expect(a.autonomyClampedFrom).toBe("full");
   });
 });
 
@@ -168,6 +298,23 @@ describe("resolveOperatorAuthority backend override", () => {
     expect(codexAuth.backend).toBe("codex");
     expect(codexAuth.model).not.toBe("sonnet");
     expect(codexAuth.model).toBe(defaultModelFor("codex"));
+  });
+});
+
+describe("operatorAutonomyFor (R19-A — the run picker's ceiling)", () => {
+  it("returns the operator deployment's configured autonomy", () => {
+    deployRoster(DEFAULT_POLICY, "supervised");
+    expect(operatorAutonomyFor({ dataRoot: store.dataRoot }, store.slug)).toBe(
+      "supervised",
+    );
+    deployRoster(DEFAULT_POLICY, "full");
+    expect(operatorAutonomyFor({ dataRoot: store.dataRoot }, store.slug)).toBe("full");
+  });
+  it("defaults to supervised when no operator is deployed or the project is unknown", () => {
+    expect(operatorAutonomyFor({ dataRoot: store.dataRoot }, store.slug)).toBe(
+      "supervised",
+    );
+    expect(operatorAutonomyFor({ dataRoot: store.dataRoot }, "nope")).toBe("supervised");
   });
 });
 
@@ -301,6 +448,35 @@ describe("operatorAssignSpecialist", () => {
     expect(recs[0]!.detail).toBe("Dev fits impl.");
     // …and the operator's reasoning is also commented to the timeline.
     expect(task().timeline.some((e) => e.actor.kind === "operator" && e.type === "comment")).toBe(true);
+  });
+
+  it("F19-12: the rendered card and message use ENGAGEMENT vocabulary, never 'primary specialist'", async () => {
+    // D9/Q17-5 retired the primary/consultant model for `engagements[]` with one
+    // `delivers: true`. The capability ID keeps its historical name; the copy
+    // this module renders must not.
+    deployRoster([
+      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("impl");
+    const r = await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      authority("supervised"),
+    );
+    expect(r.message).toBe("Recommended engaging Dev as the delivering agent.");
+    const rec = task().frontmatter.recommendations[0]!;
+    expect(rec.label).toBe("Engage Dev as the delivering agent");
+    // The retired phrase appears nowhere the human reads: card, message, or the
+    // operator comment the card's reasoning writes to the timeline.
+    const rendered = [
+      r.message,
+      rec.label,
+      rec.detail,
+      ...task().timeline.map((e) => e.text),
+    ].join("\n");
+    expect(rendered).not.toMatch(/primary specialist/i);
   });
 
   it("F10-35: records a routing trace — candidates considered, chosen, reason", async () => {
@@ -886,6 +1062,97 @@ describe("operatorTransitionStage", () => {
     ).toBe(true);
   });
 
+  /**
+   * F19-26 — a transition whose TARGET is the terminal stage IS an acceptance.
+   *
+   * A supervised operator calling transition_stage("done") used to file a plain
+   * "Move the task to Done" card whose Apply runs the full acceptance contract
+   * (a real, irreversible PR merge) under a label that never says "accept" or
+   * "merge" — a third route to Done that the accept-completion fixes would not
+   * have covered. Gate on the TARGET, not the tool.
+   */
+  it("F19-26: a supervised transition to the TERMINAL stage produces an ACCEPTANCE card, not a disguised move", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    expect(r.message).toMatch(/accepting completion/i);
+    expect(task().frontmatter.stage).toBe("review");
+    const recs = task().frontmatter.recommendations;
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.kind).toBe("accept_completion");
+    // The card names what Apply really does — accept, and merge the PR.
+    expect(recs[0]!.label).toMatch(/^Accept completion/);
+    expect(recs[0]!.label).toContain("Done");
+    expect(recs[0]!.detail).toMatch(/Accepting completion moves/i);
+    expect(recs[0]!.detail).toMatch(/merges the review PR/i);
+    // The pre-fix harm, gone from every string the human reads: a bland move
+    // that never says "accept" or "merge" over an irreversible merge.
+    const rendered = [r.message, recs[0]!.label, recs[0]!.detail].join("\n");
+    expect(rendered).not.toMatch(/Recommended moving the task to Done/i);
+    expect(rendered).not.toMatch(/ready to advance to Done/i);
+    // …and it is recorded as a completion recommendation, not a bare transition.
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+    ).toHaveLength(1);
+  });
+
+  /**
+   * R19-6 — the capability LEAK the F19-26 reroute opened, proven live this
+   * pass by cluster B's verifier.
+   *
+   * `operatorTransitionStage` gates only on `stage-transitions`. With
+   * `stage-transitions: recommend` + `completion-for-acceptance: off` — the
+   * mode the schema documents as "withheld entirely (the tool is not even
+   * offered)" — a probe got back a real `accept_completion` recommendation card
+   * AND a `task.operator.recommended_completion` audit row, because the
+   * delegated `operatorAcceptCompletion` had no withheld-mode guard of its own.
+   * The acceptance capability now answers on this path too.
+   */
+  it("R19-6: a terminal-target transition is refused when completion-for-acceptance is OFF — no card, no audit row", async () => {
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "off" },
+    ]);
+    seedTask("review");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toMatch(/not permitted for the operator here/i);
+    expect(task().frontmatter.stage).toBe("review");
+    // Neither the acceptance card the reroute would file NOR the plain
+    // "Move the task to Done" card the reroute replaced.
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+    ).toHaveLength(0);
+  });
+
+  it("F19-26: a terminal-target transition from a PRE-BOUNDARY stage is refused out loud, with no card", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("noop");
+    // The shared acceptance gate speaks: the task is not at the boundary.
+    expect(r.message).toMatch(/In Progress, not Review/);
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+  });
+
   it("R7-4 guard: a HEALTHY task cannot be moved backward by the operator (no rework license)", async () => {
     deployRoster(DEFAULT_POLICY);
     writeTask(store.dataRoot, store.slug, {
@@ -906,7 +1173,9 @@ describe("operatorTransitionStage", () => {
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
         authority("full"),
       ),
-    ).rejects.toThrow(/no governed boundary/i);
+      // F19-39: the refusal used to say "No governed boundary" — a BANNED word
+      // in copy a human reads. The pin follows the corrected string.
+    ).rejects.toThrow(/no allowed transition/i);
     expect(task().frontmatter.stage).toBe("review");
   });
 });
@@ -1090,6 +1359,69 @@ describe("operatorAcceptCompletion", () => {
     expect(
       task().frontmatter.recommendations.some((rec) => rec.kind === "accept_completion"),
     ).toBe(true);
+  });
+
+  /**
+   * R19-6 (owner ruling 2026-08-06) — a capability set to `off` is a HARD
+   * REFUSE by every route: no recommendation card, no audit row, and the
+   * operator says so out loud instead of silently rerouting.
+   *
+   * The hole this closes: the function's ONLY `gate()` read lived inside the
+   * direct/recommend choice (`!== "direct"` ⇒ recommend), so `off` — the mode
+   * the schema documents as "withheld entirely (the tool is not even offered)"
+   * — fell into the RECOMMEND branch and produced a real `accept_completion`
+   * card plus a `task.operator.recommended_completion` audit row.
+   */
+  it("R19-6: `completion-for-acceptance: off` is a hard refuse — no card, no audit row", async () => {
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "off" },
+    ]);
+    seedTask("review");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("denied");
+    // Refused OUT LOUD: the sentence names the withholding, so the operator
+    // narrates it rather than the run going quiet.
+    expect(r.message).toMatch(/withheld from the operator here/i);
+    expect(task().frontmatter.stage).toBe("review");
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+    ).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.accepted_completion" }),
+    ).toHaveLength(0);
+  });
+
+  it("R19-6: `human` refuses the same way, and says it is reserved for a human", async () => {
+    // `human` and `off` are distinct modes (schema: withheld entirely vs.
+    // reserved for a human to perform) and both mean "not the operator's to
+    // do". A card is not a neutral note — applying one IS the acceptance
+    // (ruling 22) — so `human` gets the same hard refuse with its own sentence,
+    // matching the Claude toolkit, which builds the `accept_completion` tool for
+    // neither mode.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "human" },
+    ]);
+    seedTask("review");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toMatch(/reserved for a human here/i);
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+    ).toHaveLength(0);
   });
 });
 
@@ -1397,6 +1729,110 @@ describe("applyRecommendation / dismissRecommendation", () => {
       (n) => n.kind === "approval",
     ).length;
     expect(after).toBe(before);
+  });
+
+  // ---------------------------------------------------------------- gap [1]
+  // A declined recommendation used to leave NO trace on task.md (only a 90-day
+  // audit row nothing reads), and the operator's snapshot carried no
+  // recommendations at all — so the supervised loop could spin: propose,
+  // decline, re-propose, decline.
+
+  function snapshot() {
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("supervised"),
+    );
+  }
+
+  it("dismissing a recommendation writes a typed timeline event NAMING what was declined", async () => {
+    const recId = await seedRecommendation();
+    const label = task().frontmatter.recommendations[0]!.label;
+    await dismissRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    // The refusal is on the CANONICAL record, newest-first, attributed to the
+    // human who said no — not only in the audit table.
+    const event = task().timeline[0]!;
+    expect(event.title).toBe(RECOMMENDATION_DECLINED_TITLE);
+    expect(event.type).toBe("transition");
+    expect(event.actor.kind).toBe("human");
+    // It names the recommendation, not "a recommendation".
+    expect(event.text).toContain(label);
+    expect(event.text).toContain("declined");
+    // …and it stays readable without its title, because the operator's own
+    // recentTimeline window drops titles.
+    expect(snapshot().recentTimeline[0]!.text).toContain(label);
+  });
+
+  it("the operator snapshot carries its own PENDING recommendations", async () => {
+    await seedRecommendation();
+    const pending = snapshot().recommendations!.pending;
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.kind).toBe("assign_specialist");
+    expect(pending[0]!.profileId).toBe("developer");
+    expect(pending[0]!.label).toContain("Dev");
+    expect(snapshot().recommendations!.declined).toHaveLength(0);
+  });
+
+  it("the operator snapshot carries recently-DECLINED recommendations", async () => {
+    const recId = await seedRecommendation();
+    const label = task().frontmatter.recommendations[0]!.label;
+    await dismissRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    const recs = snapshot().recommendations!;
+    expect(recs.pending).toHaveLength(0);
+    expect(recs.declined).toHaveLength(1);
+    expect(recs.declined[0]!.kind).toBe("assign_specialist");
+    expect(recs.declined[0]!.label).toBe(label);
+    expect(recs.declined[0]!.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("the declined list is BOUNDED (the snapshot is embedded in a prompt)", async () => {
+    // Seven proposals, each declined — the loop this field exists to stop. The
+    // snapshot must not grow with the task's age.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "Operator drive",
+        recommendations: Array.from({ length: 7 }, (_, i) => ({
+          id: `rec-${i}`,
+          kind: "transition" as const,
+          toStageId: "review",
+          label: `Move to Review (proposal ${i})`,
+          detail: "",
+        })),
+      }),
+      goal: "Prove the operator drives the task.",
+    });
+    deployRoster(DEFAULT_POLICY);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapshot().recommendations!.pending).toHaveLength(5);
+    for (let i = 0; i < 7; i++) {
+      await dismissRecommendation(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", recId: `rec-${i}` },
+        { userId: store.users.arda.id, label: store.users.arda.email },
+        { dataRoot: store.dataRoot },
+      );
+    }
+    const recs = snapshot().recommendations!;
+    expect(recs.pending).toHaveLength(0);
+    expect(recs.declined).toHaveLength(5);
+    // …while every one of the seven refusals is on the durable record.
+    expect(
+      task().timeline.filter((e) => e.title === RECOMMENDATION_DECLINED_TITLE),
+    ).toHaveLength(7);
   });
 
   it("only admin|maintainer may dismiss a recommendation", async () => {

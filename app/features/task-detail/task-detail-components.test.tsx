@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { useState, type ReactNode } from "react";
+import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
@@ -8,8 +9,12 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter, createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import { DecisionPacket, observationLabel } from "./decision-packet";
-import { GithubTrace } from "./task-side-panels";
+import {
+  DELIVER_LABEL,
+  DecisionPacket,
+  observationLabel,
+} from "./decision-packet";
+import { GithubTrace, PolicyPanel } from "./task-side-panels";
 import { DiagnosticsPanel, ScheduledActions, TaskHero } from "./task-main-sections";
 import type { DiagnosticRecord } from "~/server/projections/task-query.server";
 import { ReleaseConfirm } from "./release-confirm";
@@ -569,6 +574,7 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         onRelease={() => {}}
         deployedSpecialists={deployedFixture}
         operatorBackend="claude"
+          operatorAutonomy="supervised"
         backendAvailable={{ claude: true, codex: true }}
         canRunAgents
         deliveringActive={false}
@@ -661,6 +667,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
     const { container } = renderExec(execTask(), {
       myRole: "contributor",
       canRunAgents: false,
+      configuredAutonomy: "supervised" as const,
     });
     const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
       b.textContent?.includes("Assign delivering agent"),
@@ -709,7 +716,8 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
 
   it("P11-41: the operator backend picker disables an unconfigured backend and defaults to an available one", () => {
     const { container } = renderExec(execTask({ operator: attachedOperator }), {
-      operatorBackend: "codex", // configured backend...
+      operatorBackend: "codex",
+    operatorAutonomy: "supervised" as const, // configured backend...
       backendAvailable: { claude: true, codex: false }, // ...but NOT available
     });
     const sel = container.querySelector<HTMLSelectElement>(
@@ -818,6 +826,7 @@ describe("ExecutionProfile — reviewers", () => {
     const { container } = renderExec(reviewerTask(), {
       myRole: "contributor",
       canRunAgents: false,
+      configuredAutonomy: "supervised" as const,
     });
     expect(container.querySelector(".rev-agent")).not.toBeNull();
     expect(container.querySelector(".rev-agent .btn.primary")).toBeNull();
@@ -962,6 +971,27 @@ function traceTask(patch: Record<string, unknown> = {}): TaskDetail {
   } as unknown as TaskDetail;
 }
 
+/** UX19-2: the panel reads the acceptance gate from the SAME live affordance the
+ *  Current-state panel renders, never from the projection's `blockReason`. */
+function traceAcceptance(
+  patch: Partial<
+    Pick<
+      AcceptanceAffordance,
+      "atBoundary" | "blockedReason" | "terminallyBlocked"
+    >
+  > = {},
+): Pick<
+  AcceptanceAffordance,
+  "atBoundary" | "blockedReason" | "terminallyBlocked"
+> {
+  return {
+    atBoundary: true,
+    blockedReason: null,
+    terminallyBlocked: false,
+    ...patch,
+  };
+}
+
 describe("GithubTrace — admin force-accept (DG-2)", () => {
   it("renders the block reason + Force-accept button when blocked AND onForceAccept is provided", () => {
     const onForceAccept = vi.fn();
@@ -969,8 +999,10 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
       <MemoryRouter>
         <GithubTrace
           githubHost={GH_HOST}
-          task={traceTask({
-            blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+          task={traceTask()}
+          acceptance={traceAcceptance({
+            blockedReason:
+              "Waiting on 1 required reviewer approval of the current revision.",
           })}
           onForceAccept={onForceAccept}
         />
@@ -985,7 +1017,92 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(onForceAccept).toHaveBeenCalled();
   });
 
-  it("surfaces force-accept for a blocked-packet wedge (null blockReason) even with no branch/PR", () => {
+  it("UX19-2: quotes the LIVE acceptance refusal, not the projection's revision-only blockReason", () => {
+    // The two panels disagreed by construction: `task.blockReason` carries only
+    // the revision dimension (the stage boundary is deliberately left out of
+    // that column), so this panel said "no approving verdict yet" while the
+    // Current-state panel one card down said "at In Progress, not Review".
+    // Canary: read `task.blockReason` here again and the stage sentence vanishes.
+    const { container, getByText, queryByText } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({
+            blockReason:
+              "VIB-151's delivered revision has no approving verdict yet.",
+          })}
+          acceptance={traceAcceptance({
+            atBoundary: false,
+            blockedReason:
+              "VIB-151 is at In Progress, not Review — a completion can only be accepted from the boundary the workflow puts before Done.",
+          })}
+          onForceAccept={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(getByText(/at In Progress, not Review/)).toBeTruthy();
+    expect(queryByText(/no approving verdict yet/)).toBeNull();
+    // …and the offer stops promising a mere "review gate" override: from here it
+    // skips the remaining stages too (verified: force-accept pre-boundary really
+    // does jump In Progress → Done + merge).
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Force accept"),
+    ) as HTMLButtonElement;
+    expect(btn.textContent).toContain("skips the remaining stages");
+    expect(btn.title).toContain("skipping the remaining stages");
+  });
+
+  it("UX19-2: at the review boundary the label stays the plain review-gate override", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask()}
+          acceptance={traceAcceptance({
+            atBoundary: true,
+            blockedReason:
+              "VIB-151's delivered revision has no approving verdict yet.",
+          })}
+          onForceAccept={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Force accept"),
+    ) as HTMLButtonElement;
+    expect(btn.textContent).toContain("override review gate");
+    expect(btn.textContent).not.toContain("skips the remaining stages");
+  });
+
+  it("R16-3: a terminally blocked acceptance (closed PR) withdraws the row entirely", () => {
+    const { container, queryByText } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({
+            pr: { number: 124, state: "closed", title: "x" },
+          })}
+          acceptance={traceAcceptance({
+            terminallyBlocked: true,
+            blockedReason:
+              "VIB-151's review PR was closed on GitHub without merging — it can't be accepted.",
+          })}
+          onForceAccept={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    // The Current-state panel frames this one as "Acceptance is closed."; a
+    // second, softer "Acceptance is blocked … Force accept" beside it is the
+    // exact contradiction R16-3 removed from the rail.
+    expect(queryByText(/Acceptance is blocked/)).toBeNull();
+    expect(
+      Array.from(container.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Force accept"),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("surfaces force-accept for a blocked-packet wedge (no acceptance refusal) even with no branch/PR", () => {
     const onForceAccept = vi.fn();
     const { container, getByText } = render(
       <MemoryRouter>
@@ -997,6 +1114,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
             blockReason: null,
             packet: { type: "blocked" },
           })}
+          acceptance={traceAcceptance()}
           onForceAccept={onForceAccept}
         />
       </MemoryRouter>,
@@ -1017,7 +1135,10 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
       <MemoryRouter>
         <GithubTrace
           githubHost={GH_HOST}
-          task={traceTask({ blockReason: "Waiting on 1 required reviewer approval." })}
+          task={traceTask()}
+          acceptance={traceAcceptance({
+            blockedReason: "Waiting on 1 required reviewer approval.",
+          })}
         />
       </MemoryRouter>,
     );
@@ -1027,9 +1148,9 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(btn).toBeUndefined();
   });
 
-  it("F18-13: renders NO force-accept + no 'Acceptance is blocked' on a terminal (accepted/merged) task, even for an admin whose blockReason still lingers", () => {
+  it("F18-13: renders NO force-accept + no 'Acceptance is blocked' on a terminal (accepted/merged) task, even for an admin whose refusal still lingers", () => {
     // Force-accept BYPASSES the verdict gate rather than satisfying it, so a
-    // task force-accepted into Done keeps a non-null blockReason. The card used
+    // task force-accepted into Done keeps a non-null refusal. The card used
     // to keep offering "Force accept" on a task with nothing left to accept.
     for (const terminal of ["accepted", "merged"] as const) {
       const onForceAccept = vi.fn();
@@ -1037,9 +1158,10 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
         <MemoryRouter>
           <GithubTrace
             githubHost={GH_HOST}
-            task={traceTask({
-              displayReadiness: terminal,
-              blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+            task={traceTask({ displayReadiness: terminal })}
+            acceptance={traceAcceptance({
+              blockedReason:
+                "Waiting on 1 required reviewer approval of the current revision.",
             })}
             onForceAccept={onForceAccept}
           />
@@ -1052,7 +1174,240 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
       expect(queryByText(/Acceptance is blocked/)).toBeNull();
     }
   });
+
+  it("F19-24: the Complete-merge button OPENS the ceremony — it never submits the merge itself", () => {
+    // It is the mandatory human half of every full-autonomy operator acceptance
+    // (R16-6) and the only acceptance-family control that merged on a bare
+    // click. The panel hands the click up; the page owns the dialog.
+    const onCompleteMerge = vi.fn();
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({
+            pr: { number: 147, state: "accepted", title: "x" },
+          })}
+          acceptance={traceAcceptance()}
+          onCompleteMerge={onCompleteMerge}
+        />
+      </MemoryRouter>,
+    );
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Complete merge"),
+    ) as HTMLButtonElement;
+    expect(btn).toBeDefined();
+    // The hover title names the PR the click is about (it named none before).
+    expect(btn.title).toContain("PR #147");
+    fireEvent.click(btn);
+    expect(onCompleteMerge).toHaveBeenCalled();
+  });
 })
+
+/**
+ * F19-22 — the panel's freshness cue reported the last CHANGING reconcile as
+ * though it were the last successful one.
+ *
+ * `reconciledAt` is `MAX(observed_at)` over `github.reconcile` PROVENANCE, and
+ * the reconciler deliberately skips that row on an unchanged poller tick (DG-3,
+ * `github-reconciler.server.ts`: `if (changed || !ctx.skipUnchangedProvenance)`)
+ * so the table cannot grow without bound. Under the label "Synced" it therefore
+ * drifted to "Synced 1h ago / 3h ago / yesterday" on a perfectly healthy task —
+ * live-proven: the panel read "Synced 1h ago" at 12:42Z while `audit_events`
+ * held successful `github.reconcile.task` passes at 12:07/12:12/12:21/12:26/
+ * 12:31/12:36/12:42 and the last provenance row sat at 12:01:55. Its own tooltip
+ * said "a background poller refreshes it every 5 minutes", so the one cell
+ * contradicted itself.
+ *
+ * DG-3 stays. This component owns the NAME of the number it renders — and, since
+ * `checkedAt` was wired through the loader, the second fact beside it: the
+ * per-tick `github.reconcile.task` audit row, which is written after every early
+ * return in `reconcileTaskExclusive` and is therefore the app's only evidence
+ * that a pass ran at all. `server/audit/audit-query.server.test.ts` proves the
+ * two clocks diverge against the real reconciler; these pin what the human sees.
+ */
+describe("F19-22: the GitHub panel names the last CHANGE, not the last check", () => {
+  /** The panel's freshness rows, addressed by their label — never by index, so
+   *  adding a row can't silently repoint an assertion at a different fact. */
+  const freshnessRows = (
+    task: TaskDetail,
+    reconciledAt: string | null,
+    checkedAt: string | null = null,
+  ) => {
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={task}
+          acceptance={traceAcceptance()}
+          reconciledAt={reconciledAt}
+          checkedAt={checkedAt}
+        />
+      </MemoryRouter>,
+    );
+    const rows = [...container.querySelectorAll(".gh-body .kv-row")];
+    const byKey = (k: string) => {
+      const row = rows.find((r) => r.querySelector(".k")?.textContent === k);
+      if (!row) throw new Error(`no "${k}" row in the GitHub panel`);
+      return row;
+    };
+    return { checked: byKey("Checked"), change: byKey("Last change") };
+  };
+  const freshnessRow = (task: TaskDetail, reconciledAt: string | null) =>
+    freshnessRows(task, reconciledAt).change;
+
+  it("labels the row 'Last change' — never 'Synced'", () => {
+    const row = freshnessRow(
+      traceTask({ pr: { number: 147, state: "review", title: "x" } }),
+      "2026-08-06T12:01:55.000Z",
+    );
+    expect(row.querySelector(".k")!.textContent).toBe("Last change");
+    expect(row.textContent).not.toContain("Synced");
+  });
+
+  it("its tooltip says a pass finding nothing new records nothing", () => {
+    // The old title asserted the OPPOSITE of the code it described: "a
+    // background poller refreshes it every 5 minutes" next to an hours-old
+    // number. Both halves have to be here, and they have to agree.
+    const title = freshnessRow(
+      traceTask({ pr: { number: 147, state: "review", title: "x" } }),
+      "2026-08-06T12:01:55.000Z",
+    )
+      .querySelector(".v")!
+      .getAttribute("title")!;
+    expect(title).toContain("every 5 minutes");
+    expect(title).toContain("records nothing on a pass that finds nothing new");
+    expect(title).not.toContain("a background poller refreshes it every 5 minutes.");
+  });
+
+  it("never claims 'not yet synced' from an absent provenance row", () => {
+    // An absent row is silent about whether a pass ran — it only says none of
+    // them found anything to write. The old copy read that silence as "GitHub
+    // has never been contacted", which is the same lie the "Synced Nh ago"
+    // label told, pointing the other way.
+    const bare = freshnessRow(traceTask(), null);
+    expect(bare.textContent).toContain("nothing recorded yet");
+    expect(bare.textContent).not.toContain("not yet synced");
+    cleanup();
+
+    // F15-02's case survives: PR/commit facts written at delivery time, no
+    // change recorded by a pass since.
+    const delivered = freshnessRow(
+      traceTask({ pr: { number: 147, state: "review", title: "x" } }),
+      null,
+    );
+    expect(delivered.textContent).toContain("recorded at delivery");
+    expect(delivered.textContent).toContain("nothing has changed since");
+  });
+
+  it("renders the last CHECK as its own row, off the per-tick audit fact", () => {
+    // The live case, exactly: the provenance row froze at 12:01:55 while passes
+    // kept completing through 12:42. Both instants are on screen, each under
+    // its own label, so neither can be read as the other.
+    const { checked, change } = freshnessRows(
+      traceTask({ pr: { number: 147, state: "review", title: "x" } }),
+      "2026-08-06T12:01:55.000Z",
+      "2026-08-06T12:42:00.000Z",
+    );
+    expect(checked.querySelector("time")!.getAttribute("dateTime")).toBe(
+      "2026-08-06T12:42:00.000Z",
+    );
+    expect(change.querySelector("time")!.getAttribute("dateTime")).toBe(
+      "2026-08-06T12:01:55.000Z",
+    );
+    // The row that says "we looked" must not inherit the change row's caveat…
+    expect(checked.textContent).not.toContain("no completed pass on record");
+    // …and its tooltip has to explain WHY the two differ, or the panel is back
+    // to looking self-contradictory.
+    expect(checked.querySelector(".v")!.getAttribute("title")).toContain(
+      "a pass that finds nothing new is still a check",
+    );
+    // The change row now points at the check row instead of ending on a bare
+    // "not an unchecked one" the panel could not previously substantiate.
+    expect(change.querySelector(".v")!.getAttribute("title")).toContain(
+      "the Checked row above says when GitHub was last read",
+    );
+  });
+
+  it("says 'no completed pass on record' — never 'never synced' — with no audit row", () => {
+    // Null here means the app cannot prove when it last looked (audit rows are
+    // kept 90 days). Claiming GitHub was never contacted is the same class of
+    // lie F19-22 is about, and ruling 46/R17-5 keeps this neutral either way.
+    const { checked } = freshnessRows(
+      traceTask({ pr: { number: 147, state: "review", title: "x" } }),
+      "2026-08-06T12:01:55.000Z",
+      null,
+    );
+    expect(checked.textContent).toContain("no completed pass on record");
+    expect(checked.querySelector("time")).toBeNull();
+    expect(checked.textContent).not.toMatch(/never synced|not yet synced/i);
+  });
+
+  it("keeps the two facts independent — a fresh check over an ancient change", () => {
+    const { checked, change } = freshnessRows(
+      traceTask({ pr: { number: 147, state: "review", title: "x" } }),
+      null,
+      "2026-08-06T12:42:00.000Z",
+    );
+    // Nothing has ever changed, yet a pass completed 2 minutes ago: the panel
+    // must be able to hold both at once.
+    expect(checked.querySelector("time")).not.toBeNull();
+    expect(change.textContent).toContain("recorded at delivery");
+  });
+});
+
+/**
+ * UX19-1 — the Permissions panel's intro cited "the owner authority R6-2 adds":
+ * an internal decisions.md ruling id in copy an end user reads. Nobody outside
+ * the repo can look it up, and knowing the number changes nothing they can do —
+ * so the sentence has to say what the ruling MEANS. (The same citations in this
+ * file's CODE COMMENTS are correct and stay; only the render layer is in scope.)
+ */
+describe("UX19-1: no internal ruling ids in Permissions copy", () => {
+  const intro = (myRole: string, ownsTask = false) => {
+    const { container } = render(
+      <MemoryRouter>
+        <PolicyPanel
+          projectSlug="viberr-core"
+          myRole={myRole}
+          stages={[
+            { id: "review", name: "Review", color: "#5b76fe" },
+            { id: "done", name: "Done", color: "#00b473" },
+          ] as TaskDetail["stages"]}
+          ownsTask={ownsTask}
+        />
+      </MemoryRouter>,
+    );
+    return container.querySelector(".perm-intro")!;
+  };
+
+  it("names the owner's authority in words, not by ruling number", () => {
+    const p = intro("contributor", true);
+    expect(p.textContent).toContain(
+      "plus the authority that comes with owning this task",
+    );
+    expect(p.textContent).not.toMatch(/\bR\d{1,2}-\d+\b/);
+  });
+
+  it("holds for every role the panel renders", () => {
+    for (const role of ["viewer", "contributor", "maintainer", "admin"]) {
+      const { container } = render(
+        <MemoryRouter>
+          <PolicyPanel
+            projectSlug="viberr-core"
+            myRole={role}
+            stages={[
+              { id: "review", name: "Review", color: "#5b76fe" },
+              { id: "done", name: "Done", color: "#00b473" },
+            ] as TaskDetail["stages"]}
+            ownsTask={role === "contributor"}
+          />
+        </MemoryRouter>,
+      );
+      expect(container.textContent).not.toMatch(/\bR\d{1,2}-\d+\b/);
+      cleanup();
+    }
+  });
+});
 
 /* ------------------------------------------------ pass-13 honesty fixes */
 
@@ -1068,7 +1423,7 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
     }) as unknown as TaskDetail;
 
   it("renders a CLOSED (rejected) PR distinctly from one in review", () => {
-    const closed = render(<GithubTrace githubHost={GH_HOST} task={withPr("closed")} />);
+    const closed = render(<GithubTrace githubHost={GH_HOST} task={withPr("closed")} acceptance={traceAcceptance()} />);
     const closedPill = closed.container.querySelector(".gh-bar .pill")!;
     // Before the fix this branch didn't exist: a rejected PR rendered as the
     // blue `info` "PR #14", identical to a PR still under review.
@@ -1076,19 +1431,19 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
     expect(closedPill.className).toContain("risk");
     cleanup();
 
-    const review = render(<GithubTrace githubHost={GH_HOST} task={withPr("review")} />);
+    const review = render(<GithubTrace githubHost={GH_HOST} task={withPr("review")} acceptance={traceAcceptance()} />);
     const reviewPill = review.container.querySelector(".gh-bar .pill")!;
     expect(reviewPill.textContent).toContain("PR #14");
     expect(reviewPill.className).toContain("info");
   });
 
   it("keeps merged and merge-pending distinct", () => {
-    const merged = render(<GithubTrace githubHost={GH_HOST} task={withPr("merged")} />);
+    const merged = render(<GithubTrace githubHost={GH_HOST} task={withPr("merged")} acceptance={traceAcceptance()} />);
     expect(merged.container.querySelector(".gh-bar .pill")!.textContent).toBe(
       "merged",
     );
     cleanup();
-    const accepted = render(<GithubTrace githubHost={GH_HOST} task={withPr("accepted")} />);
+    const accepted = render(<GithubTrace githubHost={GH_HOST} task={withPr("accepted")} acceptance={traceAcceptance()} />);
     expect(
       accepted.container.querySelector(".gh-bar .pill")!.textContent,
     ).toContain("merge pending");
@@ -1105,7 +1460,7 @@ describe("LV-09: pluralization + null-ish packet observations", () => {
       pr: null,
       changed: { files: 1, add: 3, del: 1 },
     } as unknown as TaskDetail;
-    const { container } = render(<GithubTrace githubHost={GH_HOST} task={task} />);
+    const { container } = render(<GithubTrace githubHost={GH_HOST} task={task} acceptance={traceAcceptance()} />);
     const diff = [...container.querySelectorAll(".kv-row")].find((r) =>
       r.textContent?.startsWith("Diff"),
     )!;
@@ -1270,6 +1625,128 @@ describe("UI-42/UI-44: the decision packet", () => {
     const tabbable = opts.filter((o) => o.tabIndex === 0);
     expect(tabbable).toHaveLength(1);
     expect(tabbable[0]!.getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+// UX19-4: the closed-PR recovery packet enumerated rework / archive / archive +
+// delete-the-branch and told the reader that reopening the PR on GitHub was
+// "also a valid path" — while the one-click in-app path sat directly ABOVE the
+// card in the GitHub panel. A human was sent to GitHub for something this page
+// does. The note names that control, and these tests pin the claim to the
+// component that actually renders it.
+describe("UX19-4: the recovery packet names the in-app re-delivery path", () => {
+  /** The pr-diverged recovery packet the operator authors for a CLOSED review
+   *  PR on a still-active task (operator-run.server.ts, `pr-diverged`): rework,
+   *  archive, archive + delete the remote branch. */
+  const recoveryPacket: PacketRender = {
+    ...packet142,
+    kind: "Blocked decision",
+    title: "PR #143 was closed without merging — what now?",
+    body: "Reopening the pull request on GitHub is also a valid path.",
+    options: [
+      { kind: "custom", t: "Rework and re-run the Developer", d: "", rec: true },
+      { kind: "archive_task", t: "Archive the task", d: "Keeps the branch.", rec: false },
+      {
+        kind: "archive_task",
+        t: "Archive and delete the branch",
+        d: "Discards the work.",
+        rec: false,
+        deleteBranch: true,
+      },
+    ],
+  };
+
+  const noteOf = (container: HTMLElement) =>
+    [...container.querySelectorAll(".packet-body > .packet-lede")].find((p) =>
+      p.textContent?.includes("Not in this list"),
+    );
+
+  it("points at the SAME control the GitHub panel renders beside it", () => {
+    const packetView = render(
+      <DecisionPacket
+        packet={recoveryPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const note = noteOf(packetView.container)!;
+    expect(note).toBeTruthy();
+    expect(note.textContent).toContain(DELIVER_LABEL);
+    // The honesty the trace bought: `openTaskPr` treats a CLOSED cached PR as
+    // terminal and falls through to the CREATE path, so the note must promise a
+    // new PR — never a reopen this app cannot perform.
+    expect(note.textContent).toContain("opens a new review pull request");
+    expect(note.textContent).toContain("never reopens a closed one");
+    // Nothing on the delivery path touches the packet (recordDeliveredNextStep
+    // returns early *because* one is open), while the packet body above promises
+    // that a GitHub reopen withdraws it — so the note must not let that promise
+    // travel to the in-app door.
+    expect(note.textContent).toContain("does not resolve this packet");
+
+    // The pin: the panel one column over must actually render a button with
+    // this exact label, for the same task shape (PR closed, deliverer present).
+    const panel = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({ pr: { number: 143, state: "closed", title: "x" } })}
+          acceptance={traceAcceptance({
+            terminallyBlocked: true,
+            blockedReason: "PR #143 was closed on GitHub without merging.",
+          })}
+          onDeliver={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    const deliver = [
+      ...panel.container.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((b) => b.textContent?.includes(DELIVER_LABEL));
+    expect(deliver).toBeTruthy();
+    expect(deliver!.textContent?.trim()).toBe(DELIVER_LABEL);
+  });
+
+  it("stays silent on a packet that is not the closed-PR recovery", () => {
+    // Keyed on the archive + `deleteBranch` option: the operator authors it only
+    // for a task whose PR a human closed and whose branch still stands, and
+    // resolution refuses it while a PR is open — so its presence is also the
+    // proof that no live PR blocks the panel's button.
+    const { container } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    expect(noteOf(container)).toBeUndefined();
+  });
+
+  it("withholds the note from a viewer who could not press that button", () => {
+    // `canResolve` is the packet-resolver set (run-agents OR this task's own
+    // owner), and `canDeliver` on the route is that same set — so a viewer
+    // without it sees neither the button nor a note advertising it.
+    const { container } = render(
+      <DecisionPacket
+        packet={recoveryPacket}
+        busy={false}
+        canResolve={false}
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive={false}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    expect(noteOf(container)).toBeUndefined();
   });
 });
 
@@ -1458,7 +1935,12 @@ describe("ScheduledActions panel head (P13-D-38)", () => {
     // Nesting collapsed the gap to a JSX space and baseline-aligned the SVG —
     // this was the only one of ~48 panel heads that did it.
     const { container } = renderWithRouter(
-      <ScheduledActions schedules={[schedule()]} canRunAgents taskClosed={false} />,
+      <ScheduledActions
+        schedules={[schedule()]}
+        canRunAgents
+        taskClosed={false}
+        configuredAutonomy="supervised"
+      />,
     );
     const head = container.querySelector(
       '[data-testid="scheduled-actions"] .panel-head',
@@ -1472,7 +1954,12 @@ describe("ScheduledActions panel head (P13-D-38)", () => {
 describe("undefined CTA / utility classes (P13-D-19)", () => {
   it("uses `btn primary` and `btn ghost`, never the undefined hyphenated forms", () => {
     const { container } = renderWithRouter(
-      <ScheduledActions schedules={[schedule()]} canRunAgents taskClosed={false} />,
+      <ScheduledActions
+        schedules={[schedule()]}
+        canRunAgents
+        taskClosed={false}
+        configuredAutonomy="supervised"
+      />,
     );
     const buttons = [...container.querySelectorAll("button")];
     // `btn-primary` / `btn-ghost` exist in no stylesheet: both CTAs fell back

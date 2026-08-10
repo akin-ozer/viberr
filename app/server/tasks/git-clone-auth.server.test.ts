@@ -18,6 +18,31 @@ import {
 } from "./git-clone-auth.server";
 
 describe("createGitHubClonePlan", () => {
+/**
+ * Run the generated askpass program, retrying only the transient exec failures
+ * that come from EXECUTING A FILE THIS TEST JUST WROTE while the suite runs
+ * many workers in parallel: the kernel can still hold the image busy (ETXTBSY)
+ * or refuse a fork under load (EAGAIN). Those say nothing about the program's
+ * behavior — but they turned this security assertion red about once per full
+ * suite, and a security gate that cries wolf is a security gate someone deletes.
+ * Every other failure, including a WRONG answer, propagates on the first try.
+ */
+function runAskpass(
+  askpassPath: string,
+  prompt: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const TRANSIENT = new Set(["ETXTBSY", "EAGAIN", "EBUSY"]);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return execFileSync(askpassPath, [prompt], { encoding: "utf8", env }).trim();
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (attempt >= 3 || !TRANSIENT.has(code)) throw error;
+    }
+  }
+}
+
   it("keeps a GitHub PAT out of argv, the remote URL, and the askpass file", () => {
     const token = "github_pat_DO_NOT_LEAK_123";
     const plan = createGitHubClonePlan({
@@ -45,18 +70,12 @@ describe("createGitHubClonePlan", () => {
       expect(plan.env.VIBERR_GIT_ASKPASS_PASSWORD).toBe(token);
       expect(plan.env.GIT_CONFIG_KEY_0).toBe("credential.helper");
       expect(plan.env.GIT_CONFIG_VALUE_0).toBe("");
-      expect(
-        execFileSync(askpassPath, ["Username for 'https://github.com':"], {
-          encoding: "utf8",
-          env: plan.env,
-        }).trim(),
-      ).toBe("x-access-token");
-      expect(
-        execFileSync(askpassPath, ["Password for 'https://github.com':"], {
-          encoding: "utf8",
-          env: plan.env,
-        }).trim(),
-      ).toBe(token);
+      expect(runAskpass(askpassPath, "Username for 'https://github.com':", plan.env)).toBe(
+        "x-access-token",
+      );
+      expect(runAskpass(askpassPath, "Password for 'https://github.com':", plan.env)).toBe(
+        token,
+      );
     } finally {
       plan.dispose();
     }
@@ -120,7 +139,14 @@ describe("createGitHubClonePlan", () => {
 });
 
 describe("cloneFailureLogDetails", () => {
-  it("never copies credential-bearing child-process diagnostics into logs", () => {
+  it("F19-6: carries git's words but never the credential", () => {
+    // This used to assert `toEqual({ reason, exitCode })` — that assertion WAS
+    // the defect. A live `git exit 128` on VC-3 left exactly those two fields as
+    // the only artifact in the whole product: the agent reported blocked, the
+    // operator opened an honest blocked packet recommending "hold for infra to
+    // investigate", and there was nothing to investigate.
+    // Canary: delete the `detail` line from the return object → the
+    // "remote rejected" assertion fails.
     const token = "github_pat_DO_NOT_LEAK_456";
     const error = Object.assign(
       new Error(`fatal: authentication failed for https://x-access-token:${token}@github.com/acme/repo.git`),
@@ -131,9 +157,27 @@ describe("cloneFailureLogDetails", () => {
       },
     );
 
-    const details = cloneFailureLogDetails(error);
-    expect(details).toEqual({ reason: "clone_failed", exitCode: 128 });
+    const details = cloneFailureLogDetails(error, { token });
+    expect(details.reason).toBe("clone_failed");
+    expect(details.exitCode).toBe(128);
+    expect(details.detail).toContain("remote rejected");
     expect(JSON.stringify(details)).not.toContain(token);
+  });
+
+  it("F19-6: scrubs a token it was NOT told about, by shape", () => {
+    // Defence in depth for the case the by-value layer cannot cover: a
+    // credential nobody here supplied (a legacy origin URL, a PAT the repo's
+    // own hooks echoed).
+    // Canary: drop TOKEN_SHAPE_SOURCE from redactGitOutput → the token survives.
+    const token = "github_pat_11AAAAAAA0aaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const details = cloneFailureLogDetails(
+      Object.assign(new Error("fatal: clone failed"), {
+        code: 128,
+        stderr: `remote: Invalid credentials ${token}`,
+      }),
+    );
+    expect(details.detail).toContain("[redacted]");
+    expect(details.detail).not.toContain(token);
   });
 });
 
@@ -181,9 +225,19 @@ describe("clone timeout + failure sentence", () => {
     const token = "github_pat_DO_NOT_LEAK_456";
     const details = cloneFailureLogDetails(
       Object.assign(new Error(`fatal: auth failed ${token}`), { code: 128 }),
+      { token },
     );
     expect(
       cloneFailureSentence(details, { hadCredential: true }),
     ).not.toContain(token);
+    // F19-6: the detail rides its OWN field. The sentence stays one plain
+    // sentence because the agent prompt tells the agent to quote it verbatim —
+    // folding a stack of `remote:` lines into it would have the agent parrot
+    // them back as its blocked reason.
+    // Canary: append details.detail into cloneFailureSentence → this fails.
+    expect(details.detail).toBeTruthy();
+    expect(
+      cloneFailureSentence(details, { hadCredential: true }),
+    ).not.toContain(details.detail!);
   });
 });

@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
   Link,
@@ -30,6 +31,11 @@ import {
 } from "@dnd-kit/dom";
 import { resolveBoardDrop } from "./board-dnd";
 import type { TaskSummary } from "~/shared/mapping/task.server";
+import {
+  archivedTaskBlockedReason,
+  closedPrBlockedReason,
+  conflictingPrBlockedReason,
+} from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
@@ -40,6 +46,7 @@ import {
   prStatePill,
   reviewPill,
 } from "~/features/github/github-pills";
+import { LocalRelative } from "~/ui/local-time";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -67,7 +74,9 @@ import {
  *     board used to filter on a signal it refused to render;
  *   - P13-D-34: empty states name the filter/search that is hiding tasks, the
  *     header count agrees with the columns, and one `Clear` chip resets both;
- *   - P13-D-10: failure toasts carry `kind: "error"`.
+ *   - P13-D-10: failure toasts carry `kind: "error"`;
+ *   - D19 (ruling R19-10): arrow-key traversal over the cards, on a roving tab
+ *     stop, in both layouts — see `onCardKeyDown` in `BoardPage`.
  */
 
 export interface BoardStage {
@@ -76,9 +85,25 @@ export interface BoardStage {
   color: string;
 }
 
+/**
+ * Gap-10: a board card's task, plus the two activity fields `listProjectTasks`
+ * annotates every summary with (`TaskActivitySummary` in board-query.server.ts).
+ *
+ * They are OPTIONAL here for one reason only: `routes/project.tsx` re-types the
+ * columns through `annotate: (t: TaskSummary): TaskSummary`, which erases them
+ * from the type while the spread carries the values through at runtime. The
+ * one-line patch that restores the type is in this pass's report; until it
+ * lands, `undefined` means "no loader annotated this" and reads as "not quiet",
+ * which is the safe direction — a missing signal must never invent a cue.
+ */
+export interface BoardTask extends TaskSummary {
+  lastActivityAt?: string | null;
+  quiet?: boolean;
+}
+
 export interface BoardColumnData {
   stage: BoardStage;
-  tasks: TaskSummary[];
+  tasks: BoardTask[];
 }
 
 /** Data carried by every card sortable so the drag handlers can refine the
@@ -125,6 +150,34 @@ const BOARD_PLUGINS = defaultPreset.plugins.filter(
   (plugin) => plugin !== Accessibility,
 );
 
+/**
+ * D19 (ruling R19-10) — the roving tab stop has to cover the card's Move
+ * trigger, not only the card face.
+ *
+ * Every movable card and list row renders a `StageMenu` button, so the board
+ * held 2N tab stops. Roving only the card faces would still leave N: Tab would
+ * walk the Move buttons of cards the human never focused, and those are
+ * `opacity: 0` until `:focus-within` (app.css), so the ring would appear on a
+ * control that had been invisible a keystroke earlier. `StageMenu` is shared
+ * with task detail and exposes no `tabIndex` prop, so the card wrapper sets it
+ * on the one trigger it owns.
+ *
+ * Deliberately no dependency array: `StageMenu` re-renders its trigger on
+ * open/busy/stage change, and React never writes `tabIndex` on that button, so
+ * re-applying on every render is both necessary and free of any tug-of-war with
+ * React's own attribute reconciliation.
+ */
+function useRovingStageMenu(active: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const btn = ref.current?.querySelector<HTMLButtonElement>(
+      "button.stage-menu-btn",
+    );
+    if (btn) btn.tabIndex = active ? 0 : -1;
+  });
+  return ref;
+}
+
 function WaitTag({ task }: { task: TaskSummary }) {
   if (task.waiting === "agent") {
     return (
@@ -145,6 +198,138 @@ function WaitTag({ task }: { task: TaskSummary }) {
     );
   }
   return null;
+}
+
+/**
+ * F19-13 — the ACTIONABLE state block, drawn identically by BOTH board views.
+ *
+ * The card foot and the list row each hand-rolled their own subset: the card
+ * drew the PR-state pill (R16-6 "merge pending" and the closed-PR risk pill),
+ * the failing-checks pill and GitHub's "changes requested"; the list row drew
+ * none of them. So a full-autonomy task whose Done still owes a human merge
+ * read "merge pending" on the board and looked finished in the list — the same
+ * stored state under two vocabularies, on one screen, one toggle apart. Ruling
+ * 40 asks for exactly the opposite ("the difference must be visible on the board
+ * card AND the review queue"), and rulings 12/14 say a mapping is never forked
+ * per surface. One component, one answer, both views.
+ *
+ * F19-8: it is also the single place archived work goes quiet. Every signal here
+ * asserts an OBLIGATION — a merge nobody will run, a verdict nobody owes, an
+ * agent that is not working — and an archived task is abandoned work kept for
+ * the record, under a banner that says so. The task hero made the same cut for
+ * the same reason (UXO-1). The traceability chips beside this block (branch, PR
+ * number) stay: "how far did this get?" is still a true question about an
+ * archived task, exactly as the hero keeps its stage pill.
+ *
+ * Gap-10: the "gone quiet" cue lives here too, rendered between validation and
+ * the wait tag. Putting it INSIDE this block means the archived-null return
+ * above guards it for free — an archived task is a terminal disposition and is
+ * never "quiet".
+ */
+function StateSignals({ task }: { task: BoardTask }) {
+  if (isArchived(task)) return null;
+  return (
+    <>
+      {/* R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
+          full-autonomy task reaches the done stage with its PR still open —
+          `pr.state: "accepted"` is exactly "a human accepted the completion
+          but the real merge is still pending". The card drew that as the
+          green "accepted" readiness pill and a stateless "#124" chip, which
+          is what a merged task looks like too. Done meant two things and the
+          card showed one.
+
+          The closed case is the same omission from the other side (live
+          finding H10): closing PR #124 unmerged produced a decision packet,
+          a "PR closed" badge and a divergence notification on the DETAIL
+          page, while the card still read "ready · awaiting verdict".
+
+          Both earn a pill under this block's density rule (only ACTIONABLE
+          state, per the checks/review pills below): each names work that
+          cannot finish without a human. `merged` and `review` stay silent —
+          the readiness pill and the PR chip already carry those.
+
+          The vocabulary comes from `prStatePill`, the one PR-state → pill
+          mapping the GitHub view and the task branch panel already read.
+          Restating it here is how "merge pending" would come to mean one
+          thing on the card and another two screens away. */}
+      {(task.pr?.state === "accepted" || task.pr?.state === "closed") && (
+        <Pill kind={prStatePill(task.pr.state).kind} sm>
+          {prStatePill(task.pr.state).label}
+        </Pill>
+      )}
+      {/* P13-D-28: CI health, but only when it is ACTIONABLE. The card is
+          already dense and "N checks passing" is not news; a failing build
+          on a task sitting in Review is. The full passing/running/failing
+          set renders on the task page and the GitHub view. */}
+      {task.prChecks?.state === "failing" && (
+        <Pill kind={checksPill(task.prChecks).kind} sm>
+          {checksPill(task.prChecks).label}
+        </Pill>
+      )}
+      {/* Same rule for GitHub's own review state — a teammate asking for
+          changes on the PR is the case a supervisor needs off the board. */}
+      {task.prReview === "changes_requested" && (
+        <Pill kind={reviewPill(task.prReview).kind} sm>
+          {reviewPill(task.prReview).label}
+        </Pill>
+      )}
+      {/* P13-D-6 (FR24): the card drew stage, agent and waiting state but
+          NOT validation — while the "Blocked or waiting" filter matched on it.
+          A reviewer's request_changes sets validation:"failing" and the card
+          was pixel-identical to a healthy one. Deliberate departure from the
+          HTML mock (design/html-app/app/board.jsx), which omits it too.
+          "none" stays silent so the card keeps its density; placement
+          mirrors the review queue's `.rq-meta` (PR → validation → wait). */}
+      {task.validation !== "none" && (
+        <ValidationPill value={task.validation} sm />
+      )}
+      {/* Gap-10: the quiet cue sits after validation and before the wait tag,
+          the order both board views share. */}
+      <QuietTag task={task} />
+      <WaitTag task={task} />
+    </>
+  );
+}
+
+/** F19-8: the archived card's replacement for the readiness pill — the task
+ *  hero's exact vocabulary (lock glyph + "archived"), so one word describes the
+ *  state on both surfaces. */
+function ArchivedPill() {
+  return (
+    <Pill kind="neutral" sm>
+      <Icon name="lock" />
+      archived
+    </Pill>
+  );
+}
+
+/**
+ * Gap-10 — the "gone quiet" cue, and the board's only last-activity display.
+ *
+ * TONE, deliberately: a NEUTRAL pill, the same grey the `archived` chip uses,
+ * and copy that states a fact rather than reaching a verdict. The board spends
+ * its loud colours on states something asserted — blocked, inconsistency risk,
+ * failing checks, a rejected PR. Going quiet is inferred from an ABSENCE of
+ * events, so it earns a place on the card but not a colour that competes with a
+ * real failure. The thresholds carry the "don't cry wolf" weight instead: a task
+ * waiting on a human gets three days, so an overnight wait never draws this at
+ * all (see task-activity.server.ts).
+ *
+ * It renders ONLY past the threshold. A relative stamp on every card would be
+ * history on a surface whose principle is "status before history"; here the
+ * elapsed time IS the status, and only when it has become one.
+ */
+function QuietTag({ task }: { task: BoardTask }) {
+  if (!task.quiet || !task.lastActivityAt) return null;
+  return (
+    <Pill kind="neutral" sm>
+      {/* LocalRelative, not a bare format call: relative text depends on NOW,
+          so the SSR pass and hydration can straddle a minute boundary. It
+          renders a non-breaking space for one frame and fills in after
+          hydration (app/ui/local-time.tsx). */}
+      no activity · <LocalRelative iso={task.lastActivityAt} />
+    </Pill>
+  );
 }
 
 function OwnerLine({ task }: { task: TaskSummary }) {
@@ -200,8 +385,9 @@ function TaskCard({
   arrived,
   allStages,
   onMoveTask,
+  roving,
 }: {
-  task: TaskSummary;
+  task: BoardTask;
   /** The key of the card immediately below this one (null when last) — used to
    *  resolve "drop below this card" into an insertion slot. */
   nextKey: string | null;
@@ -214,7 +400,19 @@ function TaskCard({
   /** F10-25: all stages, for the keyboard-accessible "Move to stage" menu. */
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  /** D19: this card holds the board's single tab stop (see `onCardKeyDown`). */
+  roving: boolean;
 }) {
+  const moveRef = useRovingStageMenu(roving);
+  // F19-8: an ARCHIVED task is abandoned work kept for the record — it is out
+  // of the flow, out of the review queue and owes nobody anything. The card is
+  // inert for it: no live pills, no drag, no Move menu (see the render below).
+  // UXO-1 removed the live readiness/validation pills from the task hero for the
+  // same reason; before this the board kept drawing them, so a task archived
+  // mid-review still read "ready · awaiting verdict · waiting on a human"
+  // directly beneath the banner calling it abandoned, with a working Move
+  // control besides.
+  const archived = isArchived(task);
   // The card is both drag source and drop target (insert-before-this-card).
   // Clone feedback keeps today's model: the original stays as a faded ghost
   // (`.dragging`) while a visual clone follows the pointer. Optimistic
@@ -225,27 +423,37 @@ function TaskCard({
     group: task.stage,
     index,
     data: { nextKey },
-    disabled: !canTransition,
+    disabled: !canTransition || archived,
     plugins: (defaults) => [
       ...defaults.filter((plugin) => plugin !== OptimisticSortingPlugin),
       Feedback.configure({ feedback: "clone" }),
     ],
   });
   const cls = ["card"];
-  if (task.waiting === "human") cls.push("wait-human");
-  if (task.urgent) cls.push("urgent");
+  if (task.waiting === "human" && !archived) cls.push("wait-human");
+  if (task.urgent && !archived) cls.push("urgent");
   const wrapCls = ["card-wrap"];
-  if (canTransition) wrapCls.push("draggable");
+  if (canTransition && !archived) wrapCls.push("draggable");
   if (isDragSource) wrapCls.push("dragging");
   if (arrived) wrapCls.push("just-arrived");
   return (
-    <div className={wrapCls.join(" ")} ref={ref}>
+    /* D19: the lane is a list (see `Column`), so each card is one of its items —
+       that is what makes a screen reader say "3 of 7" as the arrows move. */
+    <div className={wrapCls.join(" ")} ref={ref} role="listitem">
       <Link
         className={cls.join(" ")}
         to={`/projects/${task.projectSlug}/tasks/${task.key}`}
         // The wrapper carries the drag; the anchor must not start its own
         // (URL) drag, but a plain click still navigates.
         draggable={false}
+        /* D19: the board's roving tab stop. Exactly one card face is tabbable;
+           the arrows on the board container move it (`onCardKeyDown`), and the
+           app-wide `:focus-visible` ring (app.css) draws where it landed —
+           `a[href]` is in that selector list regardless of tabindex, so a
+           programmatically focused resting card still paints the ring. */
+        tabIndex={roving ? 0 : -1}
+        data-board-card={task.key}
+        data-board-lane={task.stage}
       >
         <div className="card-top">
           <span className="key">{task.key}</span>
@@ -253,8 +461,18 @@ function TaskCard({
           {/* F15-09: this slot used to swap in a second "agent working" pill
               whenever the card's foot was ALREADY drawing one via WaitTag —
               the same claim twice, at the cost of the readiness the slot
-              exists for. Readiness here, wait state in the foot, once each. */}
-          <ReadinessPill value={task.displayReadiness} sm />
+              exists for. Readiness here, wait state in the foot, once each.
+
+              F19-8: an archived card says "archived" here instead — the same
+              swap UXO-1 made in the task hero, for the same reason. Readiness
+              is an ACTIONABLE claim ("ready · awaiting verdict" = someone owes
+              a verdict); on abandoned work nobody does, and the board drew that
+              claim directly under a banner calling the work abandoned. */}
+          {archived ? (
+            <ArchivedPill />
+          ) : (
+            <ReadinessPill value={task.displayReadiness} sm />
+          )}
         </div>
         <h3>{task.title}</h3>
         <div className="owner-row">
@@ -278,67 +496,22 @@ function TaskCard({
               <Icon name="pr" />#{task.pr.number}
             </span>
           )}
-          {/* R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
-              full-autonomy task reaches the done stage with its PR still open —
-              `pr.state: "accepted"` is exactly "a human accepted the completion
-              but the real merge is still pending". The card drew that as the
-              green "accepted" readiness pill and a stateless "#124" chip, which
-              is what a merged task looks like too. Done meant two things and the
-              card showed one.
-
-              The closed case is the same omission from the other side (live
-              finding H10): closing PR #124 unmerged produced a decision packet,
-              a "PR closed" badge and a divergence notification on the DETAIL
-              page, while the card still read "ready · awaiting verdict".
-
-              Both earn a pill under this card's density rule (only ACTIONABLE
-              state, per the checks/review pills below): each names work that
-              cannot finish without a human. `merged` and `review` stay silent —
-              the readiness pill and the PR chip already carry those.
-
-              The vocabulary comes from `prStatePill`, the one PR-state → pill
-              mapping the GitHub view and the task branch panel already read.
-              Restating it here is how "merge pending" would come to mean one
-              thing on the card and another two screens away. */}
-          {(task.pr?.state === "accepted" || task.pr?.state === "closed") && (
-            <Pill kind={prStatePill(task.pr.state).kind} sm>
-              {prStatePill(task.pr.state).label}
-            </Pill>
-          )}
-          {/* P13-D-28: CI health, but only when it is ACTIONABLE. The card is
-              already dense and "N checks passing" is not news; a failing build
-              on a task sitting in Review is. The full passing/running/failing
-              set renders on the task page and the GitHub view. */}
-          {task.prChecks?.state === "failing" && (
-            <Pill kind={checksPill(task.prChecks).kind} sm>
-              {checksPill(task.prChecks).label}
-            </Pill>
-          )}
-          {/* Same rule for GitHub's own review state — a teammate asking for
-              changes on the PR is the case a supervisor needs off the board. */}
-          {task.prReview === "changes_requested" && (
-            <Pill kind={reviewPill(task.prReview).kind} sm>
-              {reviewPill(task.prReview).label}
-            </Pill>
-          )}
-          {/* P13-D-6 (FR24): the card drew stage, agent and waiting state but
-              NOT validation — while the "Blocked or waiting" filter matched on it.
-              A reviewer's request_changes sets validation:"failing" and the card
-              was pixel-identical to a healthy one. Deliberate departure from the
-              HTML mock (design/html-app/app/board.jsx), which omits it too.
-              "none" stays silent so the card keeps its density; placement
-              mirrors the review queue's `.rq-meta` (PR → validation → wait). */}
-          {task.validation !== "none" && (
-            <ValidationPill value={task.validation} sm />
-          )}
-          <WaitTag task={task} />
+          <StateSignals task={task} />
         </div>
       </Link>
       {/* F10-25: keyboard-accessible stage move (drag is pointer-only). Sibling
           of the Link so it never triggers navigation; opens the same
-          keyboard-navigable StageMenu the task-detail panel uses. */}
-      {canTransition && (
-        <div className="card-move">
+          keyboard-navigable StageMenu the task-detail panel uses.
+
+          F19-8: not on an archived card. The menu MOVES the task through the
+          workflow — and into the terminal stage, where the same click runs the
+          full acceptance contract and a real merge (R18-7) — on work the archive
+          banner calls abandoned. Dragging is already off above; leaving the
+          keyboard path live would make the two disagree about whether an
+          archived task is still in the flow. Restoring the task from its own
+          page is the way back in (the banner says so). */}
+      {canTransition && !archived && (
+        <div className="card-move" ref={moveRef}>
           <StageMenu
             stages={allStages}
             currentStageId={task.stage}
@@ -369,6 +542,7 @@ function Column({
   tasks,
   count,
   isDone,
+  isEntry,
   canCreate,
   canTransition,
   onNew,
@@ -379,21 +553,27 @@ function Column({
   allStages,
   onMoveTask,
   emptyCopy,
+  rovingKey,
 }: {
   stage: BoardStage;
-  tasks: TaskSummary[];
+  tasks: BoardTask[];
+  /** D19: the key of the one card holding the board's tab stop (may be in
+   *  another lane, in which case no card here is tabbable). */
+  rovingKey: string | null;
   /** Header count — optimistically adjusted during a cross-column drag. */
   count: number;
   /** P13-D-34: filter/search-aware empty copy for this column. */
   emptyCopy: string;
   isDone: boolean;
+  /** R19-14: first stage — the only lane allowed to offer task creation. */
+  isEntry: boolean;
   canCreate: boolean;
   canTransition: boolean;
   onNew: () => void;
   arrivedKey: string | null;
   /** This column is the current drop target (highlight + show the preview). */
   dropTarget: boolean;
-  previewTask: TaskSummary | null;
+  previewTask: BoardTask | null;
   /** Insertion slot: render the preview before this card (null = column end). */
   beforeKey: string | null;
   allStages: BoardStage[];
@@ -417,7 +597,10 @@ function Column({
         <span className="col-stage-dot" style={{ background: stage.color }} />
         <span className="nm">{stage.name}</span>
         <span className="ct">{count}</span>
-        {!isDone && canCreate && (
+        {/* R19-14: new tasks are created at the entry stage only, so only the
+            entry lane offers the affordance (isDone guards the degenerate
+            single-stage board where entry IS done). */}
+        {isEntry && !isDone && canCreate && (
           <button
             type="button"
             className="add"
@@ -429,7 +612,29 @@ function Column({
           </button>
         )}
       </header>
-      <div className="col-body">
+      {/* D19: a lane is a LIST of cards. That role plus its name is how a
+          screen reader announces where the roving focus landed when Left/Right
+          crosses into another lane ("In Progress tasks, list, 4 items") — the
+          board has no other spoken cue for the column boundary.
+
+          The role is dropped when the lane draws no cards, because then the
+          only child is the empty-state sentence and a `list` whose child is not
+          a `listitem` is precisely what axe's aria-required-children fails on.
+          Nothing is lost: an empty lane holds no traversal target either (see
+          `onCardKeyDown`), and the column header still names and counts it.
+
+          `tabIndex=0` on a non-empty lane keeps the scrollable column reachable
+          by keyboard (WCAG 2.2 / axe `scrollable-region-focusable`): D19's roving
+          focus leaves only the active card at tabIndex 0, so every OTHER lane's
+          cards are tabIndex -1 and a tall column would otherwise have no way to
+          scroll without a mouse. Tab lands on the column to scroll it; the card
+          handler still owns the arrow keys once a card is focused. */}
+      <div
+        className="col-body"
+        role={tasks.length > 0 ? "list" : undefined}
+        aria-label={tasks.length > 0 ? `${stage.name} tasks` : undefined}
+        tabIndex={tasks.length > 0 ? 0 : undefined}
+      >
         {tasks.length === 0 ? (
           showPreview ? preview : <div className="empty">{emptyCopy}</div>
         ) : (
@@ -445,6 +650,7 @@ function Column({
                   arrived={arrivedKey === t.key}
                   allStages={allStages}
                   onMoveTask={onMoveTask}
+                  roving={rovingKey === t.key}
                 />
               </Fragment>
             ))}
@@ -456,14 +662,88 @@ function Column({
   );
 }
 
+/** D19: extracted from `ListView`'s map so the row can hold the roving-tab-stop
+ *  hook — a hook cannot be called inside a `.map` callback. */
+function ListRow({
+  task,
+  stages,
+  canTransition,
+  onMoveTask,
+  roving,
+}: {
+  task: BoardTask;
+  stages: BoardStage[];
+  canTransition: boolean;
+  onMoveTask: (taskKey: string, toStageId: string) => void;
+  roving: boolean;
+}) {
+  const archived = isArchived(task);
+  const rowRef = useRovingStageMenu(roving);
+  const stageName =
+    stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+  const to = `/projects/${task.projectSlug}/tasks/${task.key}`;
+  return (
+    <div className="card list-row" role="listitem" ref={rowRef}>
+      {/* D19: the key and the title are two links to the SAME task page, so the
+          key was a duplicate tab stop on every row. It stays a mouse target and
+          keeps its accessible link semantics; the title is the row's roving
+          stop, and no destination becomes unreachable by keyboard. */}
+      <Link className="key" to={to} tabIndex={-1}>
+        {task.key}
+      </Link>
+      <h3>
+        <Link
+          to={to}
+          tabIndex={roving ? 0 : -1}
+          data-board-card={task.key}
+          /* One lane: Up/Down walks the rows and Left/Right has nowhere to go,
+             which is what the list layout actually is. */
+          data-board-lane="list"
+        >
+          {task.title}
+        </Link>
+      </h3>
+      {/* UI-58: the same StageMenu the cards use — the list view's
+          keyboard equivalent for drag-and-drop. F19-8: and off for the
+          same reason on an archived row, which falls back to the same
+          static stage pill a viewer who cannot move tasks sees. */}
+      {canTransition && !archived ? (
+        <StageMenu
+          stages={stages}
+          currentStageId={task.stage}
+          onSelect={(stageId) => onMoveTask(task.key, stageId)}
+        />
+      ) : (
+        <span className="pill neutral sm">{stageName}</span>
+      )}
+      <OwnerLine task={task} />
+      <ReviewerStack task={task} label />
+      {/* F15-09: same duplicate as the card — the row's own WaitTag
+          below already says "agent working". F19-8: and the same
+          readiness → "archived" swap the card makes. */}
+      {archived ? (
+        <ArchivedPill />
+      ) : (
+        <ReadinessPill value={task.displayReadiness} sm />
+      )}
+      {/* F19-13: the card's state block verbatim — the row used to draw
+          validation and the wait tag alone, so the PR-state, checks and
+          review pills existed on one board layout and not the other. */}
+      <StateSignals task={task} />
+    </div>
+  );
+}
+
 function ListView({
   tasks,
   stages,
   canTransition,
   onMoveTask,
   emptyCopy,
+  rovingKey,
+  onCardKeyDown,
 }: {
-  tasks: TaskSummary[];
+  tasks: BoardTask[];
   stages: BoardStage[];
   /** P13-D-34: filter/search-aware empty copy (the list has ONE empty state). */
   emptyCopy: string;
@@ -472,52 +752,29 @@ function ListView({
    *  affordance) only existed on cards. */
   canTransition: boolean;
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  /** D19: the roving tab stop and the traversal handler, shared with the stage
+   *  layout — the list is simply a board with one lane. */
+  rovingKey: string | null;
+  onCardKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
 }) {
-  const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   return (
     <div className="board list">
-      <div className="board-list">
+      <div
+        className="board-list"
+        role={tasks.length > 0 ? "list" : undefined}
+        aria-label={tasks.length > 0 ? "All tasks" : undefined}
+        onKeyDown={onCardKeyDown}
+      >
         {tasks.length === 0 && <div className="empty">{emptyCopy}</div>}
         {tasks.map((t) => (
-          <div
+          <ListRow
             key={t.key}
-            className="card list-row"
-          >
-            <Link
-              className="key"
-              to={`/projects/${t.projectSlug}/tasks/${t.key}`}
-            >
-              {t.key}
-            </Link>
-            <h3>
-              <Link to={`/projects/${t.projectSlug}/tasks/${t.key}`}>
-                {t.title}
-              </Link>
-            </h3>
-            {/* UI-58: the same StageMenu the cards use — the list view's
-                keyboard equivalent for drag-and-drop. */}
-            {canTransition ? (
-              <StageMenu
-                stages={stages}
-                currentStageId={t.stage}
-                onSelect={(stageId) => onMoveTask(t.key, stageId)}
-              />
-            ) : (
-              <span className="pill neutral sm">{stageName(t.stage)}</span>
-            )}
-            <OwnerLine task={t} />
-            <ReviewerStack task={t} label />
-            {/* F15-09: same duplicate as the card — the row's own WaitTag below
-                already says "agent working". */}
-            <ReadinessPill value={t.displayReadiness} sm />
-            {/* P13-D-6: same omission in the list row — readiness cannot stand
-                in for validation (deriveReadiness folds only parse
-                diagnostics). Ordered readiness → validation, as task detail. */}
-            {t.validation !== "none" && (
-              <ValidationPill value={t.validation} sm />
-            )}
-            <WaitTag task={t} />
-          </div>
+            task={t}
+            stages={stages}
+            canTransition={canTransition}
+            onMoveTask={onMoveTask}
+            roving={rovingKey === t.key}
+          />
         ))}
       </div>
     </div>
@@ -527,7 +784,7 @@ function ListView({
 /* ---------- New task modal (board spec §4.6) ---------- */
 
 /**
- * B1 — the board's acceptance confirm.
+ * B1 / F19-27 — the board's acceptance confirm.
  *
  * A human moving a card into the FINAL stage is not a bare move: the server
  * routes it through the full acceptance contract, which attempts a real **PR
@@ -537,21 +794,113 @@ function ListView({
  * most irreversible action in the product was also its most casual one. Ruling
  * 20 / FR27 want the dialog on EVERY acceptance path.
  *
- * The board doesn't hold the PR/verdict detail the task-detail dialog shows, so
- * this states what it can promise honestly and points at the task for the rest.
+ * F19-27 — this comment used to end "the board doesn't hold the PR/verdict
+ * detail the task-detail dialog shows", and that was FALSE. The card's own
+ * `TaskSummary` already carries `pr: PrRef` — number, state and
+ * `revisionDrift.{headSha,aheadBy}` — plus `validation` and `blockReason`
+ * (shared/mapping/task.server.ts), and this very file renders `task.pr.state`
+ * and the ValidationPill on the card the human just dragged. So the dialog
+ * asked for `taskKey` + `stageName`, and a PR whose head had drifted AHEAD of
+ * the reviewed revision merged from the board with the divergence disclosed
+ * nowhere — while ruling 42 requires it on "the accept dialog", and R18-7 says
+ * board acceptance runs the identical contract. Every ruling-42 disclosure the
+ * summary holds is drawn here now, in the task dialog's own row order and
+ * vocabulary (`prStatePill`, ValidationPill — rulings 12/14).
+ *
+ * What genuinely is NOT on a board summary: the delivered revision sha
+ * (`workRevision`), the project's default branch, and the `noChanges` flag —
+ * all three are task-FILE frontmatter the task-detail loader reads directly and
+ * `mapTaskProjectionRow` never projects. Those rows are the reason the footer
+ * still points at the task page — a narrower, true version of the claim this
+ * dialog used to make about all of them.
+ *
+ * The `noChanges` gap is the one that costs copy: R19-8 makes "completed with no
+ * changes" a first-class acceptance, and the task dialog names it. Here that
+ * task falls into the no-PR branch below, whose sentence is still TRUE of it
+ * ("the task closes without a merge") but does not name the disposition.
+ * Projecting `noChanges` into `TaskSummary` would close it — a shared/mapping
+ * change, out of this file's reach.
  */
 function AcceptOnBoardConfirm({
-  taskKey,
+  task,
+  fromStageName,
   stageName,
   onCancel,
   onConfirm,
 }: {
-  taskKey: string;
+  task: TaskSummary;
+  /** The stage the card is leaving — see the `mh-sub` copy below. */
+  fromStageName: string;
   stageName: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { ref: panelRef, close } = useDialog(onCancel);
+  const pr = task.pr;
+  const prPill = pr ? prStatePill(pr.state) : null;
+  const drift = pr?.revisionDrift ?? null;
+  /**
+   * Why the server would refuse THIS click — as much of `acceptanceRefusalReason`
+   * (task-actions.server.ts) as a board summary can answer.
+   *
+   * The row used to read `task.blockReason` alone and call that "the" refusal.
+   * It isn't: `blockReason` is the projected acceptance gate
+   * (`acceptanceBlockReason`, rebuilder.server.ts), and that function's own
+   * docstring names the two refusals which stay OUT of the column — the ARCHIVED
+   * task and the STAGE boundary — because both are per-reader state its
+   * consumers filter on before they ever read it (`archived = 0`, the resolved
+   * review stage). This dialog is the reader that can rely on neither filter: it
+   * re-reads its task from the live payload on every render, so a task archived
+   * elsewhere mid-gesture arrives here archived, and the Move menu it opens from
+   * offers the terminal stage from ANY stage. Both are therefore asked here,
+   * ahead of the column, through the server's own predicate where one is shared
+   * — `archivedTaskBlockedReason` is the SAME function `acceptanceRefusalReason`
+   * calls, so that sentence cannot drift.
+   *
+   * `closedPrBlockedReason` is asked HERE rather than left to `blockReason`
+   * (which opens with the same call) only for precedence: R16-3 puts that
+   * terminal GitHub fact above every process gate, and the stage gate below is a
+   * process gate. Same predicate, same sentence, so a task whose PR is closed
+   * reads identically either way.
+   *
+   * The two gates BELOW `blockReason` are belt-and-braces, not a second opinion:
+   * UX19-3 moved the open-blocked-packet and conflicting-PR gates into the column
+   * itself, which sits above them here and so answers first for any fresh row.
+   * They stay because a stale or missing projection must fail CLOSED — an
+   * unanswered gate opens a confident dialog on a click the server refuses,
+   * which is the whole shape of this finding. The packet predicate and sentence
+   * are the ones the task page and its side panels already use.
+   *
+   * The stage gate — `acceptanceStageBlockedReason`, "you are not at the boundary
+   * the workflow puts before Done" — is the one the task file cannot answer: it
+   * turns on the PROJECT's workflow edges. F19-27: it is not guessed at from the
+   * column ORDER either (that forked mapping would refuse a project whose graph
+   * really allows the edge — rulings 12/14). `TaskSummary.atAcceptanceBoundary`
+   * carries the fact instead, derived server-side from the same stages + edges
+   * through the same `resolveStageRoles` (shared/mapping/task.server.ts). Before
+   * that, a Triage → Done drag opened a dialog with NO blocked row and the
+   * server answered the click with a 409.
+   *
+   * So: a refusal shown here means the server will refuse this click — the board
+   * has no force-accept to bypass it. The absence of one is not the opposite
+   * promise (the three task-FILE facts named in the head comment are still only
+   * on the task page), which is why the head copy commits only to what a click
+   * DOES.
+   */
+  const refusal =
+    archivedTaskBlockedReason(task, task.key) ??
+    closedPrBlockedReason(task, task.key) ??
+    (task.atAcceptanceBoundary
+      ? null
+      : // The server's own sentence names the resolved review stage; a summary
+        // holds no stage roles, and "the boundary" is the truer phrasing anyway
+        // for a graph with several edges into the terminal stage.
+        `${task.key} is at ${fromStageName}, not the boundary the workflow puts before ${stageName} — a completion can only be accepted from there. Move the task through the workflow first.`) ??
+    task.blockReason ??
+    (task.readiness === "blocked" && task.packet?.type === "blocked"
+      ? "An open blocked decision is holding this task."
+      : null) ??
+    conflictingPrBlockedReason(task, task.key);
   return (
     <dialog className="modal-card modal-narrow" aria-label="Accept completion" ref={panelRef}>
       <div className="modal-head">
@@ -559,20 +908,75 @@ function AcceptOnBoardConfirm({
           <Icon name="check" />
         </span>
         <div className="mh-main">
-          <h2>Accept {taskKey}?</h2>
+          <h2>Accept {task.key}?</h2>
+          {/* Naming the stage the card is LEAVING makes the shape of the move
+              visible in the first sentence: a drag from Triage straight to the
+              final stage skips the whole workflow, and reads nothing like an
+              acceptance at the boundary. The Blocked row below then says the
+              server will refuse it. */}
           <div className="mh-sub">
-            Moving a task into {stageName} accepts its completion — Viberr
-            merges the review pull request when GitHub is reachable, and records
-            the acceptance on the timeline. Merging is one-way.
+            Moving {task.key} from {fromStageName} into {stageName} accepts its
+            completion — Viberr merges the review pull request when GitHub is
+            reachable, and records the acceptance on the timeline. Merging is
+            one-way.
           </div>
         </div>
         <button type="button" className="icon-btn modal-close" onClick={close} aria-label="Close">
           <Icon name="x" />
         </button>
       </div>
+      <div className="modal-body tight">
+        <div className="packet-obs flush">
+          <div className="obs">
+            <span className="k">Merges</span>
+            <span>
+              {pr && prPill ? (
+                <Pill kind={prPill.kind} sm>
+                  PR #{pr.number} · {prPill.label}
+                </Pill>
+              ) : (
+                <>No linked pull request — the task closes without a merge.</>
+              )}
+            </span>
+          </div>
+          {/* Ruling 42 (R17-1): accepting may merge a head AHEAD of the reviewed
+              revision, but the extra commits ship unreviewed and the human must
+              see that before the one-way write — same row, same wording as the
+              task-detail dialog. */}
+          {drift && (
+            <div className="obs warn">
+              <span className="k">Merge head</span>
+              <span>
+                <span className="mono">{drift.headSha.slice(0, 12)}</span> —{" "}
+                {drift.aheadBy} commit{drift.aheadBy === 1 ? "" : "s"} added
+                since review;{" "}
+                {drift.aheadBy === 1 ? "it merges" : "they merge"} unreviewed.
+              </span>
+            </div>
+          )}
+          <div className="obs">
+            <span className="k">Verdict</span>
+            <span>
+              <ValidationPill value={task.validation} />
+            </span>
+          </div>
+          {/* Why the server would refuse this click, composed above — the
+              projected revision gate (P11-50) plus the four further refusals
+              `acceptanceRefusalReason` enforces on it. The board has no
+              force-accept, so a refusal shown here is final: saying so beats
+              spending the confirmation on an error toast. */}
+          {refusal && (
+            <div className="obs">
+              <span className="k">Blocked</span>
+              <span>{refusal}</span>
+            </div>
+          )}
+        </div>
+      </div>
       <div className="modal-foot">
         <span className="fine xs dim">
-          Open {taskKey} to see the pull request, revision and verdict first.
+          Open {task.key} for the reviewed revision, the merge target and the
+          full acceptance check.
         </span>
         <button type="button" className="btn ghost" onClick={close}>
           Not yet
@@ -586,18 +990,15 @@ function AcceptOnBoardConfirm({
 }
 
 function NewTaskModal({
-  stages,
-  initialStage,
+  entryStageName,
   onClose,
 }: {
-  /** Project stages EXCLUDING the final (done) stage. */
-  stages: BoardStage[];
-  initialStage: string;
+  /** R19-14: every task is created at the entry stage — the modal names it. */
+  entryStageName: string;
   onClose: () => void;
 }) {
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
-  const [stg, setStg] = useState(initialStage);
   const fetcher = useFetcher<{
     ok: boolean;
     key?: string;
@@ -641,7 +1042,7 @@ function NewTaskModal({
     fd.set("intent", "create-task");
     fd.set("title", title.trim());
     fd.set("goal", goal.trim());
-    fd.set("stage", stg);
+    // R19-14: no stage field — the server creates at the entry stage.
     fetcher.submit(fd, { method: "post" });
   };
 
@@ -690,32 +1091,14 @@ function NewTaskModal({
           />
         </div>
         <div className="field">
-          {/* A chip-button group has no labelable control for htmlFor, so the
-              name is attached via role=group (span.flabel per home-page.tsx). */}
-          <span className="flabel" id="new-task-stage-label">
-            Stage
+          {/* R19-14: the stage picker is gone — creation lands at the entry
+              stage only, so the modal states where instead of offering a
+              choice the server would refuse. */}
+          <span className="flabel">Stage</span>
+          <span className="fine sm">
+            Starts in {entryStageName} — the triage gate is where the goal is
+            refined before work begins.
           </span>
-          <div
-            className="pick-chips"
-            role="group"
-            aria-labelledby="new-task-stage-label"
-          >
-            {stages.map((s) => (
-              <button
-                type="button"
-                key={s.id}
-                className={"pick-chip" + (stg === s.id ? " on" : "")}
-                aria-pressed={stg === s.id}
-                onClick={() => setStg(s.id)}
-              >
-                <span
-                  className="sdot"
-                  style={stg === s.id ? { background: s.color } : undefined}
-                />
-                {s.name}
-              </button>
-            ))}
-          </div>
         </div>
         <div className="field">
           <label className="flabel" htmlFor="new-task-goal">
@@ -778,6 +1161,13 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   // proceed (blocked, waiting on an answer, failing validation, urgent, or a
   // rejected PR). See matchesBoardFilter.
   { id: "risk", label: "Blocked or waiting", icon: "alert" },
+  // Gap-10: the board is a triage console whose job is to say what needs a
+  // human, and a task that stopped producing events looked exactly like one
+  // being worked — right down to the pulsing "agent working" dot. This chip is
+  // the way to ask for them. Named for what it selects (R16-2), and named
+  // "quiet" rather than "stalled" because the detector observes an absence of
+  // events; it does not diagnose a fault.
+  { id: "quiet", label: "No activity", icon: "clock" },
   // R14-3: archived tasks are out of every other view; this is the way back to
   // them. The chip only renders when the project has any (see FilterBar).
   { id: "archived", label: "Archived", icon: "lock" },
@@ -881,6 +1271,7 @@ function FilterBar({
   filter,
   query,
   waitingOnMe,
+  quiet,
   archived,
   setParam,
   onClear,
@@ -890,6 +1281,12 @@ function FilterBar({
   query: string;
   /** R8-3: member-scoped count for the "Waiting on me" chip. */
   waitingOnMe: number;
+  /** Gap-10: live tasks with no recorded activity — the "No activity" chip's
+   *  tally. Deliberately NOT "quiet": the home project card already uses that
+   *  word for `running === 0`, i.e. a perfectly healthy project with nothing in
+   *  flight. Two meanings one click apart is the vocabulary drift this pass has
+   *  been removing; the chip now matches the pill it selects ("no activity"). */
+  quiet: number;
   /** R14-3: archived tasks in this project — the chip is the only way back to
    *  them, so it renders only when there are any (and always while it is on). */
   archived: number;
@@ -912,6 +1309,9 @@ function FilterBar({
           {f.label}
           {f.id === "human" && waitingOnMe > 0 && (
             <span className="tally">· {waitingOnMe}</span>
+          )}
+          {f.id === "quiet" && quiet > 0 && (
+            <span className="tally">· {quiet}</span>
           )}
           {f.id === "archived" && archived > 0 && (
             <span className="tally">· {archived}</span>
@@ -989,27 +1389,34 @@ function StageBoard({
   draggedTask,
   onMoveTask,
   emptyCopyFor,
+  rovingKey,
+  onCardKeyDown,
 }: {
   columns: BoardColumnData[];
-  visible: (tasks: TaskSummary[]) => TaskSummary[];
+  /** D19: the one card holding the board's tab stop, and the arrow handler that
+   *  moves it. Delegated on the board container so every lane shares it. */
+  rovingKey: string | null;
+  onCardKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  visible: (tasks: BoardTask[]) => BoardTask[];
   /** P13-D-34: per-column empty copy, given that column's UNFILTERED total. */
   emptyCopyFor: (total: number, isEntryColumn?: boolean) => string;
   doneStageId: string | undefined;
   canCreate: boolean;
   canTransition: boolean;
-  onNew: (stageId: string) => void;
+  /** R19-14: creation lands at the entry stage, so no stage argument here. */
+  onNew: () => void;
   drag: { key: string; fromStage: string } | null;
   overStage: string | null;
   beforeKey: string | null;
   arrivedKey: string | null;
-  draggedTask: TaskSummary | null;
+  draggedTask: BoardTask | null;
   /** F10-25: the StageMenu move — the always-available non-drag path. */
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
   // All stages, for the per-card keyboard "Move to stage" menu (F10-25).
   const allStages = columns.map((c) => c.stage);
   return (
-    <div className="board">
+    <div className="board" onKeyDown={onCardKeyDown}>
       {columns.map((c, columnIndex) => {
         const base = visible(c.tasks);
         // The hovered column is the drop target (same OR different stage).
@@ -1028,15 +1435,17 @@ function StageBoard({
             count={count}
             emptyCopy={emptyCopyFor(c.tasks.length, columnIndex === 0)}
             isDone={c.stage.id === doneStageId}
+            isEntry={columnIndex === 0}
             canCreate={canCreate}
             canTransition={canTransition}
-            onNew={() => onNew(c.stage.id)}
+            onNew={onNew}
             arrivedKey={arrivedKey}
             dropTarget={hovered}
             previewTask={hovered ? draggedTask : null}
             beforeKey={beforeKey}
             allStages={allStages}
             onMoveTask={onMoveTask}
+            rovingKey={rovingKey}
           />
         );
       })}
@@ -1052,7 +1461,7 @@ export function BoardPage({
   canRescan,
 }: {
   columns: BoardColumnData[];
-  orphanTasks: TaskSummary[];
+  orphanTasks: BoardTask[];
   canCreate: boolean;
   /** admin|maintainer — enables the per-card stage-move dropdown. */
   canTransition: boolean;
@@ -1065,7 +1474,9 @@ export function BoardPage({
   const filter: BoardFilterId = isBoardFilterId(rawFilter) ? rawFilter : "all";
   const group = searchParams.get("view") === "list" ? "list" : "stage";
   const query = searchParams.get("q") ?? "";
-  const [creating, setCreating] = useState<string | null>(null);
+  // R19-14: creation always lands at the entry stage, so this is a plain
+  // open/closed flag — no per-lane stage rides along any more.
+  const [creating, setCreating] = useState(false);
   const rescanFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
@@ -1087,6 +1498,9 @@ export function BoardPage({
   // The card the dropped card should land immediately BEFORE (null = column end).
   const [beforeKey, setBeforeKey] = useState<string | null>(null);
   const [arrivedKey, setArrivedKey] = useState<string | null>(null);
+  /** D19: the card the roving tab stop sits on. Null until an arrow moves it —
+   *  the resting stop is then the first card the layout draws (`rovingKey`). */
+  const [focusKey, setFocusKey] = useState<string | null>(null);
   /** B1: a move into the final stage waits here for an explicit confirmation. */
   const [pendingAccept, setPendingAccept] = useState<{
     taskKey: string;
@@ -1244,19 +1658,166 @@ export function BoardPage({
   const waitingHuman = liveTasks.filter((t) => t.waiting === "human").length;
   // R8-3: the "Waiting on me" chip is member-scoped — decisions THIS viewer can act on.
   const waitingOnMe = liveTasks.filter((t) => t.waitingOnMe).length;
+  // Gap-10: counted over LIVE tasks for the same reason the two above are —
+  // `isQuiet` already refuses archived and terminal tasks, and this keeps the
+  // chip's tally reading the same population its filter draws.
+  const quietCount = liveTasks.filter((t) => t.quiet === true).length;
   const archivedCount = countArchived(allTasks);
   // The card in flight (for the drop-preview shown in the hovered column).
   const draggedTask = drag
     ? (allTasks.find((t) => t.key === drag.key) ?? null)
     : null;
+  // F19-27: the summary the acceptance confirm discloses from. Resolved here
+  // rather than captured into `pendingAccept` so it re-reads on every
+  // revalidation — a stale snapshot is exactly the failure ruling 42 is about.
+  const pendingAcceptTask = pendingAccept
+    ? (allTasks.find((t) => t.key === pendingAccept.taskKey) ?? null)
+    : null;
+  // …and the price of resolving it late: a revalidation between the gesture and
+  // the render can drop the task from the payload (someone archived it, the
+  // task file was deleted, a rescan reprojected it away), and the dialog then
+  // renders NOTHING while `pendingAccept` stays set — no dialog, no toast, no
+  // cancel, the human's drag simply gone, and the state wedged until they drag
+  // again. A gesture that cannot be completed is abandoned OUT LOUD: the same
+  // rule P13-D-10 applies to a refused transition, which is what this is (the
+  // acceptance did not happen), so it carries the same error kind.
+  useEffect(() => {
+    if (!pendingAccept || pendingAcceptTask) return;
+    setPendingAccept(null);
+    push(
+      `${pendingAccept.taskKey} left the board before its acceptance was confirmed — nothing was accepted.`,
+      "error",
+    );
+  }, [pendingAccept, pendingAcceptTask, push]);
 
-  const visible = (tasks: TaskSummary[]) =>
+  const visible = (tasks: BoardTask[]) =>
     tasks.filter(
       (t) => matchesBoardFilter(t, filter) && matchesSearch(t, query),
     );
+  // The all-tasks filter feeds the roving tab stop, the "N shown" count and the
+  // list view; run it once per render rather than three times (each pass
+  // rebuilds a per-task search haystack).
+  const visibleAllTasks = visible(allTasks);
+
+  /* ---------- D19 / ruling R19-10: arrow-key traversal ----------
+   *
+   * The UX spec put full arrow traversal on the Task Status Card and it was
+   * never built: before this the board's ONLY `onKeyDown` was the new-task
+   * dialog's Enter, and a keyboard user met one tab stop per card face plus one
+   * per Move trigger — 2N stops to cross a five-lane board, with no way to move
+   * sideways at all. INTENT §4 asks for "keyboard access to every packet
+   * action" on the grounds that inaccessible state is untrustworthy state.
+   *
+   * The model is the standard roving tab stop: ONE card is tabbable
+   * (`rovingKey`), the arrows move it, and Tab leaves the board rather than
+   * walking it. The lanes are read back off the DOM (`data-board-lane` /
+   * `data-board-card`) rather than recomputed here, so the traversal order is
+   * by construction the order the human SEES — filters, the archived view, the
+   * list layout and any future ordering all come along for free, and an empty
+   * lane simply is not in the model, which is what makes Left/Right unable to
+   * strand focus on one.
+   *
+   * How this coexists with the dnd-kit drag (@dnd-kit/dom 0.5.0, verified in
+   * `index.js`, not assumed):
+   *   - `KeyboardSensor.bind` puts its keydown listener on `source.handle ??
+   *     source.element` — here the `.card-wrap` div `useSortable` refs — and its
+   *     default `preventActivation` is `event.target !== target`. The roving
+   *     focus lands on the card's `<a>` FACE, a descendant, so Space/Enter here
+   *     can never start a keyboard drag: the two never contend for the same key
+   *     on the same element.
+   *   - The sensor's own arrow handling does not exist until a drag is running;
+   *     `handleStart` binds it on `document` in the CAPTURE phase and
+   *     `handleMove` calls `preventDefault()`. Capture on document runs before
+   *     React's root listener, so the `defaultPrevented` guard below hands the
+   *     arrows to a drag in flight without either side knowing about the other.
+   */
+  const visibleKeys =
+    group === "stage"
+      ? columns.flatMap((c) => visible(c.tasks).map((t) => t.key))
+      : visibleAllTasks.map((t) => t.key);
+  // Re-anchors when the card the stop was on leaves the layout (filtered away,
+  // archived, reprojected off the board) — a tab stop pinned to a card that is
+  // no longer drawn is a board with no way in.
+  const rovingKey =
+    focusKey && visibleKeys.includes(focusKey)
+      ? focusKey
+      : (visibleKeys[0] ?? null);
+
+  const onCardKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // A keyboard drag in flight owns the arrows (see the note above); a
+    // modifier means the human is asking the browser for something else.
+    if (
+      event.defaultPrevented ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey
+    )
+      return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    // Anything that is not a card face — the Move trigger (whose own menu owns
+    // Arrow Up/Down), the filter box, the header — is not traversal.
+    const from = target.closest<HTMLElement>("[data-board-card]");
+    if (!from) return;
+
+    if (event.key === "Enter" || event.key === " ") {
+      // The card face is an anchor, so Enter would activate natively but Space
+      // would only scroll. Both are answered the same way instead of one each:
+      // suppress the default and re-issue the activation as a click, which is
+      // the event `Link` navigates on.
+      event.preventDefault();
+      from.click();
+      return;
+    }
+
+    // Lanes in DOM order, cards in visual order within each.
+    const lanes = new Map<string, HTMLElement[]>();
+    for (const el of event.currentTarget.querySelectorAll<HTMLElement>(
+      "[data-board-card]",
+    )) {
+      const lane = el.dataset.boardLane ?? "";
+      const bucket = lanes.get(lane);
+      if (bucket) bucket.push(el);
+      else lanes.set(lane, [el]);
+    }
+    const laneList = [...lanes.values()];
+    const laneIndex = laneList.findIndex((lane) => lane.includes(from));
+    if (laneIndex < 0) return;
+    const lane = laneList[laneIndex]!;
+    const index = lane.indexOf(from);
+
+    let next: HTMLElement | undefined;
+    switch (event.key) {
+      case "ArrowDown":
+        next = lane[index + 1];
+        break;
+      case "ArrowUp":
+        next = lane[index - 1];
+        break;
+      case "ArrowRight":
+      case "ArrowLeft": {
+        const neighbour =
+          laneList[laneIndex + (event.key === "ArrowRight" ? 1 : -1)];
+        // Nearest by index, and the lane's FIRST card when that lane is
+        // shorter — never a dead end, and never a landing the human has to
+        // scroll to find.
+        next = neighbour ? (neighbour[index] ?? neighbour[0]) : undefined;
+        break;
+      }
+      default:
+        return;
+    }
+    // Claimed even at the edges of the board: an ArrowDown on the last card of
+    // a lane must not fall through to scrolling the column out from under the
+    // focus ring.
+    event.preventDefault();
+    if (!next) return;
+    next.focus();
+    setFocusKey(next.dataset.boardCard ?? null);
+  };
 
   // P13-D-34: what the board actually draws, and why anything is missing.
-  const shownCount = visible(allTasks).length;
+  const shownCount = visibleAllTasks.length;
   const filterLabel =
     filter === "all"
       ? null
@@ -1342,10 +1903,9 @@ export function BoardPage({
         onRescan={rescan}
         // UI-58: `?? "triage"` was a magic literal for a project with no stages
         // — a create that could only fail server-side. With no stages there is
-        // nothing to create INTO, so the header hides the control instead.
+        // nothing to create INTO, so the control stays a no-op instead.
         onNew={() => {
-          const entry = stages[0]?.id;
-          if (entry) setCreating(entry);
+          if (stages[0]) setCreating(true);
         }}
       />
 
@@ -1353,6 +1913,7 @@ export function BoardPage({
         filter={filter}
         query={query}
         waitingOnMe={waitingOnMe}
+        quiet={quietCount}
         archived={archivedCount}
         setParam={setParam}
         onClear={clearFilters}
@@ -1387,37 +1948,49 @@ export function BoardPage({
             doneStageId={doneStageId}
             canCreate={canCreate}
             canTransition={canTransition}
-            onNew={(stageId) => setCreating(stageId)}
+            onNew={() => setCreating(true)}
             drag={drag}
             overStage={overStage}
             beforeKey={beforeKey}
             arrivedKey={arrivedKey}
             draggedTask={draggedTask}
             onMoveTask={onMoveTask}
+            rovingKey={rovingKey}
+            onCardKeyDown={onCardKeyDown}
           />
         </DragDropProvider>
       ) : (
         <ListView
-          tasks={visible(allTasks)}
+          tasks={visibleAllTasks}
           stages={stages}
           canTransition={canTransition}
           onMoveTask={onMoveTask}
           emptyCopy={emptyCopyFor(allTasks.length, true)}
+          rovingKey={rovingKey}
+          onCardKeyDown={onCardKeyDown}
         />
       )}
 
-      {creating && (
+      {creating && stages[0] && (
         <NewTaskModal
-          stages={stages.filter((s) => s.id !== doneStageId)}
-          initialStage={creating}
-          onClose={() => setCreating(null)}
+          entryStageName={stages[0].name}
+          onClose={() => setCreating(false)}
         />
       )}
 
-      {/* B1: the acceptance a board move really performs, confirmed. */}
-      {pendingAccept && (
+      {/* B1: the acceptance a board move really performs, confirmed. F19-27:
+          the card's own summary is what the dialog discloses from — looked up
+          fresh so a revalidation between the gesture and the confirmation
+          shows the CURRENT PR head, not the one the drag started on. A lookup
+          that MISSES is handled by the effect above (clear + toast), never by
+          this silent `&&`. */}
+      {pendingAccept && pendingAcceptTask && (
         <AcceptOnBoardConfirm
-          taskKey={pendingAccept.taskKey}
+          task={pendingAcceptTask}
+          fromStageName={
+            stages.find((s) => s.id === pendingAcceptTask.stage)?.name ??
+            pendingAcceptTask.stage
+          }
           stageName={finalStageName}
           onCancel={() => setPendingAccept(null)}
           onConfirm={() => {

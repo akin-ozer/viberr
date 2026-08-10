@@ -5,8 +5,9 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import { AcceptConfirm } from "./accept-confirm";
+import { AcceptConfirm, type AcceptCeremonyMode } from "./accept-confirm";
 import { ArchiveConfirm } from "./archive-confirm";
+import { ContinuityRecoveryPanel } from "./continuity-recovery";
 import { DecisionPacket } from "./decision-packet";
 import type {
   DeployedSpecialistView,
@@ -14,7 +15,10 @@ import type {
   TaskMemberView,
 } from "./execution-profile";
 import { ReleaseConfirm } from "./release-confirm";
-import type { RecommendationView } from "./operator-recommendations";
+import {
+  OperatorRecommendations,
+  type RecommendationView,
+} from "./operator-recommendations";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
@@ -35,7 +39,6 @@ import {
 import {
   DiagnosticsPanel,
   ExecutionSection,
-  RecommendationsSection,
   ScheduledActions,
   TaskHero,
 } from "./task-main-sections";
@@ -54,11 +57,44 @@ import {
  * `task-main-sections.tsx` and `task-side-panels.tsx`.
  */
 
+/**
+ * The acceptance ceremony's pending state (ruling 20 / R15-1). Every variant
+ * ends in "task Done + a real GitHub merge", so every variant asks first; the
+ * payload is whatever the confirmed click has to replay.
+ */
+type PendingAccept =
+  | { mode: Extract<AcceptCeremonyMode, "accept" | "force" | "complete-merge"> }
+  | { mode: "apply-recommendation"; recId: string; label: string }
+  | { mode: "packet"; option: number; note: string; label: string }
+  | { mode: "stage-move"; toStageId: string; label: string };
+
+/**
+ * F19-3 + F19-26 — does APPLYING this recommendation reach acceptance?
+ *
+ * Gate on the recommendation's TARGET, never on its `kind`. A supervised
+ * operator can recommend a plain `transition` to the terminal stage; applying it
+ * runs the identical full acceptance contract (transitionStage → acceptCompletion
+ * → the real PR merge) under a label that says only "Move the task to Done".
+ * A kind-only test would let that one through the ceremony it needs most.
+ */
+function recReachesAcceptance(
+  rec: RecommendationView,
+  terminalStageId: string | null,
+): boolean {
+  if (rec.kind === "accept_completion") return true;
+  return (
+    rec.kind === "transition" &&
+    terminalStageId !== null &&
+    rec.toStageId === terminalStageId
+  );
+}
+
 export function TaskDetailPage({
   task,
   runtime,
   deployedSpecialists,
   operatorBackend,
+  operatorAutonomy,
   backendAvailable,
   deliveringActive,
   activeReviewerIds,
@@ -77,6 +113,7 @@ export function TaskDetailPage({
   acceptance,
   githubHost,
   githubReconciledAt = null,
+  githubCheckedAt = null,
   workRevisionSha = null,
   noChanges = false,
   defaultBranch = "main",
@@ -90,6 +127,8 @@ export function TaskDetailPage({
   deployedSpecialists: DeployedSpecialistView[];
   /** The operator's configured backend — the run picker's default (P11-76). */
   operatorBackend: "claude" | "codex";
+  /** R19-A: the project's configured operator autonomy (the run ceiling). */
+  operatorAutonomy: "supervised" | "full";
   /** P11-41: which backends are configured, for the run picker. */
   backendAvailable: { claude: boolean; codex: boolean };
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
@@ -121,8 +160,13 @@ export function TaskDetailPage({
   acceptance: AcceptanceAffordance;
   /** GitHub web host for browse links — the loader's `githubWebHost()`. */
   githubHost: string;
-  /** UI-57: newest `github.reconcile` for this task (freshness cue). */
+  /** UI-57: newest `github.reconcile` for this task (freshness cue) — the last
+   *  pass that CHANGED something, see the prop docs on `GithubTrace`. */
   githubReconciledAt?: string | null;
+  /** F19-22: newest COMPLETED reconcile pass for this task (`github.reconcile.task`
+   *  audit row). The panel needs both — one number could never say both "the
+   *  poller is alive" and "nothing has moved since Tuesday". */
+  githubCheckedAt?: string | null;
   /** R15-1: the delivered revision's head sha (task file) for the confirm. */
   workRevisionSha?: string | null;
   /** R17-2: a verified no-change completion (empty branch, no PR). */
@@ -177,8 +221,8 @@ export function TaskDetailPage({
 
   // Agent affordances (assign/run specialist, reviewers, operator, apply
   // recommendation) are admin|maintainer (contracts §3.2); server re-checks
-  // RBAC. The mutations themselves live in ExecutionSection /
-  // RecommendationsSection below.
+  // RBAC. The execution mutations live in ExecutionSection; applying a
+  // recommendation is page-owned (F19-3 — an Apply can be an acceptance).
   const canRunAgents = roleCan(myRole as ProjectRole | null, "run-agents");
   const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
   // E3: ask for the action the SERVER enforces, not a neighbouring one.
@@ -232,11 +276,13 @@ export function TaskDetailPage({
     archived;
 
   // F15-10/R15-1: accepting merges the PR — it fires only through the confirm
-  // dialog (which states PR, revision, verdict state and target branch), for
-  // BOTH plain accept and the admin force-accept.
-  const [confirmAccept, setConfirmAccept] = useState<null | "accept" | "force">(
-    null,
-  );
+  // dialog (which states PR, revision, merge head, verdict state and target
+  // branch). Pass 19 (ruling 20 / the acceptance-writer matrix): the dialog now
+  // covers EVERY writer that ends in "Done + real merge", not just the two
+  // buttons that already had it. The pending state carries what the confirmed
+  // action has to replay — a recommendation id, a packet option + its note, or
+  // the stage the human picked out of the Current-state menu (F19-37).
+  const [confirmAccept, setConfirmAccept] = useState<PendingAccept | null>(null);
   const acceptFetcher = useFetcher<ActionResult>();
   useActionFeedback(acceptFetcher);
   const acceptBusy = acceptFetcher.state !== "idle";
@@ -294,6 +340,9 @@ export function TaskDetailPage({
     runtime,
     myRole,
     canRunAgents,
+    // F19-10: the merge control follows the SERVER's acceptance authority
+    // (role OR this task's own owner), not a role-only copy of it.
+    acceptanceHasAuthority: acceptance.hasAuthority,
     acceptanceTerminallyBlocked: acceptance.terminallyBlocked,
   });
   const { shownLogSel, selectLog, onViewLogs, onAgentLog } =
@@ -324,7 +373,7 @@ export function TaskDetailPage({
     archiveFetcher.submit(fd, { method: "post" });
   };
 
-  const onResolve = (optionIndex: number, note = "") => {
+  const submitResolve = (optionIndex: number, note: string) => {
     if (resolveBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -332,6 +381,102 @@ export function TaskDetailPage({
     fd.set("option", String(optionIndex));
     if (note.trim()) fd.set("note", note);
     resolveFetcher.submit(fd, { method: "post" });
+  };
+  // F19-7: an `accept_completion` packet option runs the full acceptance
+  // contract — including the real, irreversible PR merge — from a button
+  // labelled "Confirm decision", whose only disclosure is whatever freeform
+  // title the operator happened to type. The radiogroup is a selection, not a
+  // confirmation of a merge: route it through the one ceremony, which names the
+  // PR, the merge head, the verdict and the target branch. Every other option
+  // kind keeps its one-click resolve — none of them writes to GitHub.
+  const onResolve = (optionIndex: number, note = "") => {
+    if (resolveBusy) return;
+    const option = task.packet?.options[optionIndex];
+    if (option?.kind === "accept_completion") {
+      setConfirmAccept({
+        mode: "packet",
+        option: optionIndex,
+        note,
+        label: option.t,
+      });
+      return;
+    }
+    submitResolve(optionIndex, note);
+  };
+
+  // Apply / dismiss an operator recommendation (apply is admin|maintainer; the
+  // server re-checks). Lifted onto the page — with F19-3 an Apply can BE an
+  // acceptance, so the click has to reach the page's confirm state rather than
+  // submit from inside the card.
+  const recFetcher = useFetcher<ActionResult>();
+  useActionFeedback(recFetcher);
+  const recBusy = recFetcher.state !== "idle";
+  const terminalStageId =
+    task.stages.length > 0 ? task.stages[task.stages.length - 1]!.id : null;
+  const submitApplyRec = (recId: string) => {
+    if (recBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "apply-recommendation");
+    fd.set("recId", recId);
+    recFetcher.submit(fd, { method: "post" });
+  };
+  // F19-3 (live-proven: one Apply click merged an unreviewed head into main).
+  // The confirmed action still posts `apply-recommendation`, NOT
+  // `accept-completion` — that keeps the recommendation-applied audit row, the
+  // R15-3/R14-2 owner-authority seam and the card-clearing on the server.
+  const onApplyRec = (recId: string) => {
+    if (recBusy) return;
+    const rec = recommendations.find((r) => r.id === recId);
+    if (rec && recReachesAcceptance(rec, terminalStageId)) {
+      setConfirmAccept({ mode: "apply-recommendation", recId, label: rec.label });
+      return;
+    }
+    submitApplyRec(recId);
+  };
+  const onDismissRec = (recId: string) => {
+    if (recBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "dismiss-recommendation");
+    fd.set("recId", recId);
+    recFetcher.submit(fd, { method: "post" });
+  };
+
+  // Manual stage change from the Current-state menu. Page-owned since F19-37 —
+  // see below.
+  const transitionFetcher = useFetcher<ActionResult>();
+  useActionFeedback(transitionFetcher);
+  const transitionBusy = transitionFetcher.state !== "idle";
+  const submitTransition = (toStageId: string) => {
+    if (transitionBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "transition");
+    fd.set("to", toStageId);
+    transitionFetcher.submit(fd, { method: "post" });
+  };
+  // F19-37 — the SIXTH acceptance writer. The server treats a human move into
+  // the LAST stage as an acceptance: transitionStage's own comment reads "A
+  // HUMAN manually moving a task INTO the final stage IS accepting completion",
+  // and it calls acceptCompletion — the real, irreversible PR merge. The board's
+  // identical stage menu has confirmed since ruling 53/R18-7; this one was the
+  // last surface where dropping a card on Done merged silently. Same ceremony,
+  // and the confirmed click still posts `transition` (the server's own
+  // stage-move contract writes the acceptance from there).
+  const onTransition = (toStageId: string) => {
+    if (transitionBusy) return;
+    if (toStageId === terminalStageId && task.stage !== terminalStageId) {
+      setConfirmAccept({
+        mode: "stage-move",
+        toStageId,
+        label: `${stage?.name ?? task.stage} → ${
+          task.stages[task.stages.length - 1]?.name ?? toStageId
+        }`,
+      });
+      return;
+    }
+    submitTransition(toStageId);
   };
 
   return (
@@ -364,6 +509,21 @@ export function TaskDetailPage({
 
         <DiagnosticsPanel diagnostics={task.diagnostics} />
 
+        {/* D18 — above the packet, not below it. The Operator Desk order canon
+            names is "current state, execution truth, latest packet, steering
+            actions above timeline depth": degraded continuity is execution
+            TRUTH, so it sits with Diagnostics, ahead of the decision it may
+            well explain. It renders itself away when there is nothing to
+            report. */}
+        <ContinuityRecoveryPanel
+          timeline={task.timeline}
+          runtime={runtime}
+          runsVisible={runsVisible}
+          canRunAgents={canRunAgents}
+          {...(runsVisible ? { onOpenConsole: onViewLogs } : {})}
+          onAsk={() => setAsk((a) => a + 1)}
+        />
+
         {task.packet && (
           <DecisionPacket
             packet={task.packet}
@@ -375,20 +535,36 @@ export function TaskDetailPage({
             // `updateTaskGoal` itself enforces (E3).
             canEditGoal={canEditGoal}
             canArchive={canArchiveViaPacket}
+          // UX19-9: what an `archive_task` resolution destroys — the branch its
+          // `deleteBranch` variant deletes permanently, and the recommendations
+          // the archive withdraws. The same two facts ArchiveConfirm is handed.
+          archiveDisclosure={{
+            taskKey: task.key,
+            branch: task.branch,
+            pendingRecommendations: recommendations.length,
+          }}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
           />
         )}
 
-        <RecommendationsSection
+        <OperatorRecommendations
           recommendations={recommendations}
           canApply={canDecideOwned}
+          busy={recBusy}
+          onApply={onApplyRec}
+          onDismiss={onDismissRec}
         />
 
         <ScheduledActions
           schedules={schedules}
           canRunAgents={canRunAgents}
           taskClosed={taskClosed}
+          // UX19-10: the same availability the operator run picker below uses,
+          // so the two operator pickers on one screen cannot offer different
+          // backends.
+          backendAvailable={backendAvailable}
+          configuredAutonomy={operatorAutonomy}
         />
 
         <ExecutionSection
@@ -401,6 +577,7 @@ export function TaskDetailPage({
           onRelease={() => setReleasing(true)}
           deployedSpecialists={deployedSpecialists}
           operatorBackend={operatorBackend}
+          operatorAutonomy={operatorAutonomy}
           backendAvailable={backendAvailable}
           canRunAgents={canRunAgents}
           deliveringActive={deliveringActive}
@@ -456,10 +633,14 @@ export function TaskDetailPage({
         <GithubTrace
           task={task}
           githubHost={githubHost}
+          acceptance={acceptance}
           reconciledAt={githubReconciledAt}
-          {...(onCompleteMerge ? { onCompleteMerge } : {})}
+          checkedAt={githubCheckedAt}
+          {...(onCompleteMerge
+            ? { onCompleteMerge: () => setConfirmAccept({ mode: "complete-merge" }) }
+            : {})}
           {...(onForceAccept
-            ? { onForceAccept: () => setConfirmAccept("force") }
+            ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
             : {})}
           {...(canDeliver && !taskClosed ? { onDeliver } : {})}
           delivering={deliverBusy}
@@ -476,7 +657,9 @@ export function TaskDetailPage({
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
           onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
-          onAccept={() => setConfirmAccept("accept")}
+          onAccept={() => setConfirmAccept({ mode: "accept" })}
+          onTransition={onTransition}
+          transitionBusy={transitionBusy}
           acceptBusy={acceptBusy}
           dispositionBusy={archiveBusy}
         />
@@ -494,22 +677,52 @@ export function TaskDetailPage({
           workRevisionSha={workRevisionSha}
           noChanges={noChanges}
           defaultBranch={defaultBranch}
-          force={confirmAccept === "force"}
+          // R19-5: a force-accept from before the boundary MAY skip the
+          // remaining stages and the review gate — the dialog has to name which.
+          atBoundary={acceptance.atBoundary}
+          // R19-B: the human GitHub approval carrying the verdict gate, rendered
+          // on the verdict row (null when an agent verdict cleared it).
+          verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
+          ceremony={
+            "label" in confirmAccept
+              ? { mode: confirmAccept.mode, label: confirmAccept.label }
+              : { mode: confirmAccept.mode }
+          }
           blockedReason={
-            confirmAccept === "force"
+            confirmAccept.mode === "force"
               ? (task.blockReason ??
                 acceptance.blockedReason ??
                 (task.packet?.type === "blocked"
                   ? "An open blocked decision is holding this task."
                   : null))
-              : acceptance.blockedReason
+              : // The merge is the SECOND half of an acceptance that already
+                // happened (R16-6), so the acceptance gate has nothing left to
+                // say about it — quoting a stale refusal here would read as a
+                // block on a merge nothing is blocking.
+                confirmAccept.mode === "complete-merge"
+                ? null
+                : // F19-7 (B's correctness win): a packet resolution evaluates
+                  // the acceptance contract with `blockedPacket: false` — the
+                  // open packet is what this resolution CLEARS, so it cannot
+                  // also be the reason to refuse it. Name the refusal the PACKET
+                  // path would hit, never the open-packet one.
+                  confirmAccept.mode === "packet"
+                  ? acceptance.blockedReasonViaPacket
+                  : acceptance.blockedReason
           }
-          busy={acceptBusy || runBusy}
+          busy={acceptBusy || runBusy || recBusy || resolveBusy || transitionBusy}
           onCancel={() => setConfirmAccept(null)}
           onConfirm={() => {
-            const mode = confirmAccept;
+            const pending = confirmAccept;
             setConfirmAccept(null);
-            if (mode === "force") onForceAccept?.();
+            if (pending.mode === "force") onForceAccept?.();
+            else if (pending.mode === "complete-merge") onCompleteMerge?.();
+            else if (pending.mode === "apply-recommendation")
+              submitApplyRec(pending.recId);
+            else if (pending.mode === "packet")
+              submitResolve(pending.option, pending.note);
+            else if (pending.mode === "stage-move")
+              submitTransition(pending.toStageId);
             else submitAccept();
           }}
         />

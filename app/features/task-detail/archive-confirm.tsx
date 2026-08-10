@@ -1,4 +1,5 @@
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import { prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -31,6 +32,11 @@ export function ArchiveConfirm({
   const { ref: panelRef, close } = useDialog(onCancel);
   const stageName =
     task.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+  // F19-36: this printed the raw internal state token — "PR #12 accepted" for a
+  // PR that is really merge-pending, "PR #12 review" for one in review — while
+  // every other surface renders the canonical label from the ONE PR-state map
+  // (ruling 12). Same defect as F19-14 at accept-confirm.tsx, second site.
+  const prPill = task.pr ? prStatePill(task.pr.state) : null;
   // What archiving withdraws, named exactly — the server writes the same list
   // into the archive note on the timeline.
   const withdrawn = [
@@ -77,12 +83,12 @@ export function ArchiveConfirm({
             <span className="k">Now</span>
             <span>
               At <strong>{stageName}</strong>
-              {task.pr ? (
+              {task.pr && prPill ? (
                 <>
                   {" "}
                   ·{" "}
-                  <Pill kind="neutral" sm>
-                    PR #{task.pr.number} {task.pr.state}
+                  <Pill kind={prPill.kind} sm>
+                    PR #{task.pr.number} · {prPill.label}
                   </Pill>
                 </>
               ) : null}

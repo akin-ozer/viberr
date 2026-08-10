@@ -32,7 +32,23 @@ const cap = (
 
 export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // Operator coordination (operator editor toggles)
-  cap("assign-primary-specialist", "Assign the primary specialist", ["operator"], "Assignment"),
+  //
+  // F19-12 — the id/label split here is DELIBERATE, not an oversight.
+  // "primary specialist" is retired vocabulary (D9/Q17-5, INTENT §6.5): the
+  // model is `engagements[]` with one `delivers: true`, and the UI has said
+  // "delivering agent" since (execution-profile.tsx's "Assign delivering
+  // agent" / "Delivering agent" header). The LABEL is rendered — on the agents
+  // page, the capability-matrix modal and the policy page — so it moved. The
+  // ID is not rendered anywhere: it is the persisted key in every project.md
+  // `capabilities[].capabilityId`, so renaming it would be a data migration,
+  // and this pass forbids migrations. It stays `assign-primary-specialist`.
+  //
+  // NOTE for whoever changes this label next: `app/server/seed/agent-catalog.server.ts`
+  // spells the seeded operator's grants as catalog LABELS and resolves them
+  // through `capabilityByLabel`. A label that drifts from that literal does not
+  // error — the grant silently degrades to a display-only `extra` with no
+  // runtime authority. `agents-route.server.test.ts` pins the mapping.
+  cap("assign-primary-specialist", "Assign the delivering agent", ["operator"], "Assignment"),
   cap("summon-reviewers", "Summon reviewer specialists", ["operator"], "Assignment"),
   cap("generate-packets", "Generate decision & blocking packets", ["operator"], "Coordination"),
   cap("append-typed-events", "Append typed important events", ["operator"], "Coordination"),
@@ -53,6 +69,11 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // deployments persisted before this capability existed keep delivering — the
   // same polarity `use-web-search-fetch` uses.
   cap("deliver-review-pr", "Deliver the branch & open the review PR", ["operator"], "Permissions"),
+  // N19-9 (owner ruling): bringing a task branch up to date with its base is an
+  // OPERATOR decision, like delivery. The server executes the merge+push; agents
+  // never rebase or force-push. An absent grant follows the DELIVERY gate
+  // (updateBranchGate) — the capability postdates every deployment.
+  cap("update-task-branch", "Bring the task branch up to date", ["operator"], "Permissions"),
   // Agent repository/execution toggles (bind via the Claude tool denylist)
   cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
   cap("create-task-branch", "Create the task-key branch", ["agent"], "Repository & execution"),
@@ -186,6 +207,7 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   // R15-2: the deliver_for_review tool + performDelivery gate on this grant
   // server-side, on both operator backends.
   "deliver-review-pr",
+  "update-task-branch",
   "transition-to-done",
   "change-project-policy",
   // Generic-agent collaboration gates (real, both-backend enforcement): the

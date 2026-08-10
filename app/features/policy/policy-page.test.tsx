@@ -25,7 +25,7 @@ const STAGES = [
 
 const TRANSITIONS: TransitionView[] = [
   { from: "triage", to: "ready", by: "Human, after the quality gate — agents may flag underspecified tasks", boundary: "approval", locked: false },
-  { from: "ready", to: "impl", by: "Operator, when a primary specialist is assigned", boundary: "auto", locked: false },
+  { from: "ready", to: "impl", by: "Operator, when a delivering agent is assigned", boundary: "auto", locked: false },
   { from: "impl", to: "review", by: "Operator transition request, with evidence attached", boundary: "approval", locked: false },
   { from: "review", to: "done", by: "Human acceptance of the completion report", boundary: "human", locked: true },
 ];
@@ -339,5 +339,58 @@ describe("WorkflowRules — the not-permitted case says why", () => {
     // The V1 lock is a different reason and must survive independently: it
     // still applies to a manager.
     expect(getByText("locked · V1")).toBeTruthy();
+  });
+});
+
+/* F19-33: all three panel heads on this page took their count's type scale from
+   a private `PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" }`
+   — a byte copy of the sheet's `.fine` (app.css:230) that seven other panel
+   heads already opt into by name, and that github-view.tsx and settings-page.tsx
+   each kept their own copy of. app.css.test.ts holds the structural gate (no
+   style object, hoisted or inline, may restate a utility rule); these assert
+   what this surface actually renders. Ruling 14: never fork per surface. */
+describe("policy panel heads take their count styling from the sheet (F19-33)", () => {
+  const expectSheetStyledCount = (container: HTMLElement) => {
+    const count = container.querySelector(".panel-head .right")!;
+    expect(count.className.split(/\s+/)).toEqual(["right", "sub", "fine"]);
+    expect(count.getAttribute("style")).toBeNull();
+  };
+
+  it("Human access · RBAC", () => {
+    const { container } = render(
+      <HumanAccess
+        projectName="Viberr Core"
+        members={MEMBERS}
+        canManage
+        busy={false}
+        onSetRole={() => {}}
+      />,
+    );
+    expectSheetStyledCount(container);
+  });
+
+  it("Agent capability", () => {
+    const { container } = render(
+      <AgentCapability
+        profiles={PROFILES}
+        onOpenProfile={() => {}}
+        onManageProfiles={() => {}}
+        onMatrix={() => {}}
+      />,
+    );
+    expectSheetStyledCount(container);
+  });
+
+  it("Workflow rules", () => {
+    const { container } = render(
+      <WorkflowRules
+        stages={STAGES}
+        transitions={TRANSITIONS}
+        canManage
+        busy={false}
+        onSetBoundary={() => {}}
+      />,
+    );
+    expectSheetStyledCount(container);
   });
 });

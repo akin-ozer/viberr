@@ -615,7 +615,9 @@ OAuth optional, see §Authentication):
 
 ### Complete Project Directory Structure
 
-This tree is **descriptive, regenerated from the filesystem** (last resynced 2026-07-25).
+This tree is **descriptive, regenerated from the filesystem** (last resynced 2026-07-25;
+spot-corrected 2026-08-06, pass 19 — the deltas are marked inline and the promise below is
+exactly why they had to be fixed rather than left).
 It is not a wish list: a directory that is not here does not exist, and a directory here
 that you cannot find is a bug in this document, not a gap to fill. Tests are co-located
 with their modules and elided below except where the file count matters.
@@ -624,6 +626,7 @@ with their modules and elided below except where the file count matters.
 viberr/
 ├── README.md
 ├── CONTRIBUTING.md
+├── FILES.md                    # generated index of Git's tracked files
 ├── package.json
 ├── tsconfig.json
 ├── react-router.config.ts
@@ -631,10 +634,15 @@ viberr/
 ├── vitest.config.ts            # unit suite: app/ + db/ only (scripts/ deliberately excluded)
 ├── playwright.config.ts
 ├── doctor.config.ts            # react-doctor ignore list; manually invoked, not a gate
+├── skills-lock.json
 ├── .env.example
+├── .dockerignore
 ├── .gitignore
+├── .nvmrc
 ├── Dockerfile
 ├── compose.yml
+├── compose.e2e.yml             # production-image e2e stack (2026-08-03 modernization)
+├── qa/                         # fixtures/notes agents produced during live QA passes
 ├── .github/
 │   └── workflows/
 │       └── ci.yml              # two jobs: verify (typecheck/test/build) + e2e
@@ -654,7 +662,10 @@ viberr/
 ├── scripts/
 │   ├── seed.ts                 # product baseline — clean sheet, no demo board data
 │   ├── seed-demo.ts            # the mock dataset the route + e2e suites are written against
-│   └── rescan.ts
+│   ├── rescan.ts
+│   ├── e2e.ts                  # drives compose.e2e.yml: production image, named volume
+│   ├── docker-entrypoint.sh
+│   └── measure-routes.mjs
 ├── public/
 │   └── favicon.svg
 ├── e2e/                        # Playwright specs + auth setup / teardown
@@ -665,7 +676,7 @@ viberr/
     ├── routes.ts
     ├── entry.client.tsx
     ├── entry.server.tsx
-    ├── routes/                 # 25 thin route modules
+    ├── routes/                 # 26 thin route modules (was 25 before /resources/search)
     │   ├── _index.tsx          # home (project list)
     │   ├── login.tsx  logout.tsx  api.auth.$.ts     # api.auth.$ is better-auth's splat
     │   ├── projects.tsx  project.tsx  project._index.tsx
@@ -674,12 +685,14 @@ viberr/
     │   ├── project.settings.tsx  project.task.tsx
     │   ├── org.settings.tsx  profile.tsx  notifications.tsx  notifications.read.tsx
     │   ├── prefs.theme.tsx
-    │   └── resources.{events,health,run-log,session-export,model-catalog}.ts
+    │   └── resources.{events,health,run-log,search,session-export,model-catalog}.ts
+    │                           # resources.search backs the ⌘K palette (R15-5)
     ├── ui/                     # reusable primitives + shared hooks
     │   ├── icon.tsx  pill.tsx  avatar.tsx  identity.tsx  toggle.tsx
     │   ├── rich-text.tsx  markdown.tsx  mention-spans.ts  initials.ts
     │   ├── toast.tsx  page-overlay.tsx  stage-menu.tsx  skip-link.tsx  csrf-input.tsx
-    │   └── use-{dialog,action-toast,fetcher-result,relative-time,shortcut-hint}.ts
+    │   ├── local-time.tsx  roving-radio.ts
+    │   └── use-{dialog,dismiss,action-toast,fetcher-result,relative-time,shortcut-hint}.ts
     ├── lib/
     │   └── auth.server.ts      # the better-auth instance + its Viberr bridge
     ├── features/               # 16 product surfaces; no auth/ — login is a route
@@ -743,7 +756,8 @@ viberr/
         ├── rbac.ts             # THE project-role grant table (guards + Policy page)
         ├── capabilities.ts     # THE agent capability catalog + always-human invariants
         ├── freshness.ts        # THE staleness thresholds (server door: interpretation/)
-        ├── auth/  dates/  ids/  mapping/  workflow/
+        ├── docs/               # prd-sync.test.ts — pins design/prd.md to canon (R18-6)
+        ├── auth/  dates/  ids/  mapping/  text/  workflow/
 ```
 
 **Notes on shape, so the next change stays inside it:**
@@ -790,7 +804,10 @@ The shipped layout, created at boot from `DATA_ROOT_SUBDIRS`:
 ├── kb/<dir>/                # knowledge-base folders (granted BY DIRECTORY)
 ├── skills/<slug>/           # skill folders
 └── state/
-    └── projection.sqlite
+    ├── projection.sqlite
+    └── writer.lock          # the single-writer lock: ONE app process per data
+                             # root, ever (B-FD1 / F18-5). Never delete it while
+                             # a process is running — see docs/operations/deployment.md
 ```
 
 Operational ownership rules:
@@ -809,7 +826,11 @@ Operational ownership rules:
 - `resources.events.ts` is the SSE boundary for live updates.
 - Dedicated JSON endpoints exist only for narrow automation needs, such as comment append or controlled task actions.
 - Narrow JSON/action routes in `app/routes/` must delegate immediately into feature/server modules rather than accumulate business logic locally.
-- OAuth callbacks are isolated to `app/routes/auth.callback.*.tsx`.
+- OAuth callbacks are served by better-auth's own router behind the splat route
+  `app/routes/api.auth.$.ts`, at `/api/auth/callback/<provider>`. *(Corrected 2026-08-06,
+  pass 19 — this line prescribed `app/routes/auth.callback.*.tsx`, which the better-auth
+  migration replaced; no such route exists or should be created. The splat's allow-list of
+  reachable better-auth paths lives in `app/lib/auth.server.ts`.)*
 
 **Component Boundaries:**
 

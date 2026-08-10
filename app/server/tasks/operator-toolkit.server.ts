@@ -12,6 +12,7 @@ import {
   operatorAcceptCompletion,
   operatorDeliverForReview,
   operatorEngageAgent,
+  operatorFlagContextConflict,
   operatorOpenPacket,
   operatorResolvePacket,
   operatorPostComment,
@@ -23,6 +24,10 @@ import {
   type OperatorActionResult,
   type OperatorAuthority,
 } from "./operator-actions.server";
+import {
+  operatorUpdateBranchFromBase,
+  updateBranchGate,
+} from "~/server/github/update-branch-operator.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
@@ -75,6 +80,33 @@ function resultText(r: OperatorActionResult) {
   return textResult(`[${r.outcome}] ${r.message}`);
 }
 
+/**
+ * The MCP instructions block the model reads alongside these tools.
+ *
+ * R19-1 changed what is true here. The old sentence — "never write code or
+ * touch the repository" — was written when the operator had no working tree at
+ * all, and it now contradicts the run's own system prompt, which hands it a
+ * READ-ONLY checkout and requires every packet that reasons about repository
+ * contents to be grounded in it. A model told by one channel to read the repo
+ * and by another never to touch it can resolve that either way, and the way
+ * that loses is the F19-4 failure: describing the empty task folder as "the
+ * repo". So the prohibition is stated precisely — the model's own hands never
+ * edit or commit — and reading is stated as the expectation it now is.
+ *
+ * "You cannot push" would be wrong in the other direction: `deliver_for_review`
+ * (below) pushes the deliverer's committed branch, and both the operator
+ * definition and that tool's description tell the model delivery is its
+ * decision to make. Contradicting them here would risk an operator that stops
+ * delivering — so the push is named as the SERVER's action, which is what it is.
+ */
+export const OPERATOR_TOOLKIT_INSTRUCTIONS =
+  "Viberr coordination tools. You are the task operator. Use these tools to coordinate the task. " +
+  "You never write code: you cannot edit, create or commit files in the repository checkout, and " +
+  "the file-writing and shell tools are withheld from this run — delivery is a decision you make " +
+  "and the server executes. READING the task's repository checkout is expected of you — any claim " +
+  "you make about the repository must come from reading it, never from the task folder you are " +
+  "standing in.";
+
 /** Build the operator's toolkit for one task run. */
 export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   const { db, ctx, projectSlug, taskKey, authority } = deps;
@@ -101,6 +133,15 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     ),
     "get_task",
   );
+
+  // R19-1 (owner ruling): the operator reads the repository from the FULL
+  // read-only checkout provisioned under its cwd (`ensureOperatorRepoCheckout`
+  // in operator-run.server.ts) with Read/Grep/Glob — see `workspaceSection`.
+  // Session B's API-based `list_repo_files`/`read_repo_file` MCP tools were
+  // dropped in the pass-19 merge: the clone is a strictly richer view, and their
+  // "your cwd is NOT the repository" persona is false once the checkout lives in
+  // that cwd. A second repo surface would double-answer the question the ruling
+  // settled.
 
   if (gate(authority, "append-typed-events") !== "deny") {
     add(
@@ -134,6 +175,44 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "set_goal",
+    );
+    // R19-2: the repository wins over a knowledge base for how the repository's
+    // own files should look — but the disagreement is never settled quietly.
+    add(
+      tool(
+        "flag_context_conflict",
+        "Flag that a knowledge base attached to this task's agents contradicts the repository's OWN documented conventions for how its files should look. The REPOSITORY wins — follow it, and say so — but never settle the disagreement silently: this records a flag the humans see. Name both sides.",
+        {
+          kbSource: z
+            .string()
+            .describe("The knowledge-base document that disagrees."),
+          repoSource: z
+            .string()
+            .describe(
+              "The repository file that is authoritative, e.g. 'qa/smoke/README.md'.",
+            ),
+          detail: z
+            .string()
+            .describe(
+              "One or two sentences: what each says, and what was followed.",
+            ),
+        },
+        async (args) =>
+          resultText(
+            await operatorFlagContextConflict(
+              db,
+              ctx,
+              {
+                ...base,
+                kbSource: prose(args.kbSource),
+                repoSource: prose(args.repoSource),
+                detail: prose(args.detail),
+              },
+              authority,
+            ),
+          ),
+      ),
+      "flag_context_conflict",
     );
   }
 
@@ -365,6 +444,24 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     );
   }
 
+  // N19-9: the branch can finally be moved FORWARD onto an advanced base. Same
+  // shape as delivery (R15-2): the operator decides, the server does the git,
+  // and a conflict stops and asks a human (R18-4) instead of being retried.
+  if (updateBranchGate(authority) !== "deny") {
+    add(
+      tool(
+        "update_branch_from_base",
+        "Bring the task's branch UP TO DATE with the project's base branch — merge the base into the branch and push it. Other tasks share this repository, so a branch goes stale the moment one of them merges; a reviewer then reads a diff against a base that no longer exists, and delivery can hit a conflict nobody chose. Call it BEFORE you deliver and before you hand work to a reviewer. It is idempotent and cheap: an already-current branch changes nothing and says so, so call it when you are unsure rather than guessing. The server does the git inside the delivering agent's workspace — never ask an agent to rebase, merge or force-push. If the branch CONFLICTS with the base, the merge is aborted, the branch is left exactly as it was, and a blocking decision packet is opened for a human: report that and stop. Do not retry it, and never propose a force-push.",
+        {},
+        async () =>
+          resultText(
+            await operatorUpdateBranchFromBase(db, ctx, base, authority),
+          ),
+      ),
+      "update_branch_from_base",
+    );
+  }
+
   if (gate(authority, "stage-transitions") !== "deny") {
     add(
       tool(
@@ -396,7 +493,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "accept_completion",
-        "Accept the task's completion. Under FULL autonomy this moves the task to Done and records the review PR as accepted; the real merge is completed when GitHub is reachable, otherwise it is left 'merge pending' for a human to finish — never claim a merge that has not happened. Under supervised autonomy it posts an actionable 'accept completion → move to Done' recommendation card for a maintainer to apply. Only call this once the work has reached the review boundary and the review is clean.",
+        "Accept the task's completion. Under FULL autonomy this moves the task to Done and records the review PR as accepted; the real merge is completed when GitHub is reachable, otherwise it is left 'merge pending' for a human to finish — never claim a merge that has not happened. Under supervised autonomy it posts an actionable 'accept completion → move to Done' recommendation card for a maintainer to apply. Only call this once the work has reached the review boundary and the review is clean. A task with NOTHING to deliver (get_task `noChanges: true` — no branch, no PR) is accepted the same way and completes with no changes: nothing is merged, and the server re-checks the remote branch state before closing. Never call deliver_for_review for such a task, and never open a decision packet asking a human how to close it out.",
         {},
         async () =>
           resultText(await operatorAcceptCompletion(db, ctx, base, authority)),
@@ -408,8 +505,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   const server = createSdkMcpServer({
     name: "viberr",
     version: "1.0.0",
-    instructions:
-      "Viberr governance tools. You are the task operator. Use these tools to coordinate the task; never write code or touch the repository.",
+    instructions: OPERATOR_TOOLKIT_INSTRUCTIONS,
     tools,
   });
 

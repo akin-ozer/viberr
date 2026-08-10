@@ -57,12 +57,18 @@ export function useRunControls({
   runtime,
   myRole,
   canRunAgents,
+  acceptanceHasAuthority,
   acceptanceTerminallyBlocked,
 }: {
   csrf: string;
   runtime: RunView[];
   myRole: string | null;
   canRunAgents: boolean;
+  /** F19-10: `acceptance.hasAuthority` — the server's OWN answer to "may this
+   *  viewer accept/merge THIS task", resolved by `resolveAcceptanceAffordance`
+   *  with the same predicate `requireAcceptCompletion` enforces: the
+   *  `accept-completion` role grant OR the live task-owner exception. */
+  acceptanceHasAuthority: boolean;
   /** R16-3: a closed, unmerged PR blocks acceptance terminally — no override. */
   acceptanceTerminallyBlocked: boolean;
 }) {
@@ -112,8 +118,26 @@ export function useRunControls({
         }
       : undefined;
   // Complete the real merge of an accepted (merge-pending) PR (S2).
-  // admin|maintainer only; server re-checks.
-  const canMerge = roleCan(myRole as ProjectRole | null, "accept-completion");
+  //
+  // F19-24: this SUBMITS — it performs the irreversible GitHub merge, and it is
+  // the mandatory human half of every full-autonomy operator acceptance (R16-6).
+  // Like `onForceAccept` below it must only ever be called from the confirmed
+  // branch of `AcceptConfirm`; the GitHub panel's button opens that dialog, it
+  // does not receive this callback directly.
+  //
+  // F19-10: this asked `roleCan(myRole, "accept-completion")` — a hardcoded copy
+  // of ONE row of the matrix, and the wrong row. `completeTaskMerge`
+  // (task-actions.server.ts) gates on `requireAcceptCompletion(…, "complete a PR
+  // merge")`, which passes the task's own human owner whatever their project
+  // role (R6-2/R14-2 — "completing a merge-pending acceptance is part of the
+  // same acceptance authority"). So a contributor-owner who accepted their own
+  // task and got "accepted (merge pending)" was shown NO way to finish it: the
+  // task stranded until a maintainer happened to visit, while the server would
+  // have merged it on their click. `hasAuthority` is that same predicate,
+  // resolved server-side — one source, and it survives the merge-pending case
+  // (a merge-pending task sits at the terminal stage, where the affordance
+  // returns early but still carries the authority answer).
+  const canMerge = acceptanceHasAuthority;
   const onCompleteMerge = canMerge
     ? () => {
         if (runBusy) return;

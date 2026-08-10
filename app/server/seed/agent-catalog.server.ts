@@ -98,7 +98,12 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
     {
       // R15-2: delivery (push + review PR) is an operator decision — direct in
       // the shipped template (the Strict preset maps it to recommend).
-      direct: ["Assign the primary specialist", "Summon reviewer specialists", "Generate decision & blocking packets", "Append typed important events", "Deliver the branch & open the review PR"],
+      // F19-12: these are catalog LABELS resolved by `capabilityByLabel` above —
+      // they must track `UNIFIED_CAP_CATALOG` exactly or the grant degrades to a
+      // display-only extra. "Assign the delivering agent" is the current label
+      // for capability id `assign-primary-specialist` (the id is persisted and
+      // deliberately unchanged; see the note in app/shared/capabilities.ts).
+      direct: ["Assign the delivering agent", "Summon reviewer specialists", "Generate decision & blocking packets", "Append typed important events", "Deliver the branch & open the review PR"],
       recommend: ["Stage transitions", "Accept completion into Done"],
       forbidden: ["Execute code or write to the repo", "Transition a task to Done", "Change project policy"],
     },

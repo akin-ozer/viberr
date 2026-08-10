@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import type { TaskSummary } from "~/shared/mapping/task.server";
-import type { BoardColumn } from "~/server/projections/board-query.server";
-import { BoardPage } from "./board-page";
+import { BoardPage, type BoardColumnData, type BoardTask } from "./board-page";
 
 /**
  * UI-26: `board-page.tsx` (1000+ lines) had no component test at all — only the
@@ -21,7 +20,7 @@ const STAGES = [
   { id: "done", name: "Done", color: "#00b473" },
 ];
 
-function task(patch: Partial<TaskSummary> = {}): TaskSummary {
+function task(patch: Partial<BoardTask> = {}): BoardTask {
   return {
     projectSlug: "viberr-core",
     key: "VIB-142",
@@ -34,6 +33,10 @@ function task(patch: Partial<TaskSummary> = {}): TaskSummary {
     urgent: false,
     validation: "none",
     blockReason: null,
+    // F19-27: the projected stage gate. "In Progress" is the stage with the
+    // edge into Done in STAGES above, so the default card really is at the
+    // boundary — an off-boundary case sets this false alongside its stage.
+    atAcceptanceBoundary: true,
     owner: null,
     specialist: null,
     reviewers: [],
@@ -53,11 +56,14 @@ function task(patch: Partial<TaskSummary> = {}): TaskSummary {
     updatedAt: "2026-07-01T09:00:00.000Z",
     boardRank: null,
     filePath: "projects/viberr-core/tasks/VIB-142/task.md",
+    // Gap-10: `listProjectTasks` annotates every summary with these two.
+    lastActivityAt: null,
+    quiet: false,
     ...patch,
-  } as TaskSummary;
+  } as BoardTask;
 }
 
-function columns(tasks: TaskSummary[]): BoardColumn[] {
+function columns(tasks: BoardTask[]): BoardColumnData[] {
   return STAGES.map((stage) => ({
     stage,
     tasks: tasks.filter((t) => t.stage === stage.id),
@@ -65,7 +71,7 @@ function columns(tasks: TaskSummary[]): BoardColumn[] {
 }
 
 function renderBoard(
-  tasks: TaskSummary[],
+  tasks: BoardTask[],
   opts: {
     view?: "list";
     canTransition?: boolean;
@@ -89,6 +95,12 @@ function renderBoard(
         </ToastProvider>
       ),
       ...(opts.action ? { action: opts.action } : {}),
+    },
+    // D19: the destination a card face navigates to, so "Enter opens the
+    // focused task" can be asserted as a real navigation rather than a spy.
+    {
+      path: "/projects/:slug/tasks/:key",
+      Component: () => <div>task page</div>,
     },
   ]);
   const params = new URLSearchParams(opts.search ?? "");
@@ -541,6 +553,31 @@ describe("the new-task dialog does not accuse an untouched form", () => {
   });
 });
 
+/**
+ * R19-14 (owner ruling): new tasks are created at the entry stage ONLY — every
+ * task passes the triage quality gate, so a per-lane "+" on Ready/In Progress
+ * was an invitation the server now refuses.
+ */
+describe("R19-14: only the entry lane offers task creation", () => {
+  it("renders the per-lane + on the entry column and nowhere else", () => {
+    const { container } = renderBoard([task()]);
+    const cols = [...container.querySelectorAll(".column")];
+    expect(cols).toHaveLength(3);
+    expect(cols[0]!.querySelector("button.add")).toBeTruthy();
+    // Before the ruling every non-Done lane drew one.
+    expect(cols[1]!.querySelector("button.add")).toBeNull();
+    expect(cols[2]!.querySelector("button.add")).toBeNull();
+  });
+
+  it("opens a dialog that names the entry stage instead of offering a picker", () => {
+    const { container } = renderBoard([task()]);
+    fireEvent.click(container.querySelector("button.add")!);
+    // The stage chips are gone — the dialog states where the task lands.
+    expect(container.querySelector(".pick-chip")).toBeNull();
+    expect(container.textContent).toContain("Starts in Triage");
+  });
+});
+
 describe("R16-6: the card says when Done still needs a human", () => {
   // Owner ruling 2026-08-04: `merge-pull-request` stays human-only, so a
   // full-autonomy task reaches the done stage with its PR open. `pr.state`
@@ -583,5 +620,979 @@ describe("R16-6: the card says when Done still needs a human", () => {
       expect(queryByText("closed"), state).toBeNull();
       unmount();
     }
+  });
+});
+
+/**
+ * F19-13 — the two board layouts are one board. The card foot drew the
+ * PR-state, failing-checks and changes-requested pills; the list row drew none
+ * of them, so a task whose Done still owes a human merge (R16-6 / ruling 40)
+ * read "merge pending" under Board and looked finished under List — one toggle
+ * apart, same stored state.
+ */
+describe("F19-13: the list row reads the same state the card does", () => {
+  const listRow = (tasks: BoardTask[]) =>
+    renderBoard(tasks, { view: "list" }).container.querySelector(".list-row")!
+      .textContent!;
+
+  it("draws `merge pending` on an accepted-but-unmerged PR", () => {
+    expect(
+      listRow([
+        task({
+          stage: "done",
+          displayReadiness: "accepted",
+          pr: { number: 124, state: "accepted", title: "Attach a credential" },
+        }),
+      ]),
+    ).toContain("merge pending");
+  });
+
+  it("draws the `closed` pill on a PR closed without merging", () => {
+    expect(
+      listRow([task({ pr: { number: 124, state: "closed", title: "t" } })]),
+    ).toContain("closed");
+  });
+
+  it("draws failing checks and a changes-requested review", () => {
+    const text = listRow([
+      task({
+        pr: { number: 124, state: "review", title: "t" },
+        prChecks: { total: 3, passing: 2, failing: 1, pending: 0, state: "failing" },
+        prReview: "changes_requested",
+      }),
+    ]);
+    expect(text).toContain("1/3 checks failing");
+    expect(text).toContain("changes requested");
+  });
+
+  it("keeps the same silences — merged and in-review earn no pill in either view", () => {
+    for (const view of [undefined, "list"] as const) {
+      for (const state of ["merged", "review"] as const) {
+        const { queryByText, unmount } = renderBoard(
+          [task({ pr: { number: 124, state, title: "t" } })],
+          view ? { view } : {},
+        );
+        expect(queryByText("merge pending"), `${view}/${state}`).toBeNull();
+        expect(queryByText("closed"), `${view}/${state}`).toBeNull();
+        unmount();
+      }
+    }
+  });
+});
+
+/**
+ * F19-8 — an ARCHIVED card kept every live control and every live claim under a
+ * banner calling the work abandoned: the readiness pill still said someone owed
+ * a verdict, the validation pill and wait tag still asserted obligations, and
+ * the Move menu still offered to walk the task into Done — where the same click
+ * runs the full acceptance contract and a real merge (R18-7). UXO-1 made
+ * exactly this cut on the task hero; the board is the surface that shows
+ * archived work by name.
+ */
+describe("F19-8: an archived card is inert and honest", () => {
+  const ARCHIVED = "filter=archived";
+  const archivedTask = (patch: Partial<BoardTask> = {}) =>
+    task({
+      key: "VIB-9",
+      title: "Abandoned mid-review",
+      stage: "impl",
+      archived: true,
+      displayReadiness: "ready",
+      validation: "changed",
+      waiting: "agent",
+      urgent: true,
+      branch: "VIB-9-abandoned",
+      pr: { number: 124, state: "accepted", title: "Abandoned" },
+      ...patch,
+    } as Partial<BoardTask>);
+
+  it("says `archived` instead of a readiness anyone owes", () => {
+    const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
+    const top = container.querySelector(".card-top")!.textContent!;
+    expect(top).toContain("archived");
+    // The live claims: "ready" (someone will act) and "awaiting verdict"
+    // (someone owes a verdict) — nobody does on abandoned work.
+    expect(top).not.toMatch(/\bready\b/);
+    expect(container.textContent).not.toContain("awaiting verdict");
+  });
+
+  it("drops every obligation pill and the wait tag, keeps the traceability chips", () => {
+    const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
+    const card = container.querySelector(".card")!.textContent!;
+    expect(card).not.toContain("merge pending");
+    expect(card).not.toContain("awaiting verdict");
+    expect(container.querySelector(".wait-tag")).toBeNull();
+    // "How far did this get?" stays answerable — the hero keeps its stage pill
+    // for the same reason.
+    expect(card).toContain("VIB-9");
+    expect(card).toContain("#124");
+    expect(card).toContain("VIB-9-abandoned");
+  });
+
+  it("keeps the urgent/waiting card treatment off an archived card", () => {
+    const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
+    const card = container.querySelector(".card")!;
+    expect(card.classList.contains("urgent")).toBe(false);
+    expect(card.classList.contains("wait-human")).toBe(false);
+  });
+
+  it("offers no Move control and no drag, even to a maintainer", () => {
+    const { container } = renderBoard([archivedTask()], {
+      search: ARCHIVED,
+      canTransition: true,
+    });
+    // The keyboard path into Done (an acceptance + real merge, R18-7).
+    expect(container.querySelector(".card-move")).toBeNull();
+    expect(
+      container.querySelector('[aria-label^="Change stage"]'),
+    ).toBeNull();
+    // The pointer path — the wrapper stops advertising itself as draggable.
+    expect(
+      container.querySelector(".card-wrap")!.classList.contains("draggable"),
+    ).toBe(false);
+  });
+
+  it("still lets a live card next to it move", () => {
+    // The guard is per-card, not a board-wide freeze.
+    const { container } = renderBoard([task({ key: "VIB-1" })]);
+    expect(container.querySelector(".card-move")).toBeTruthy();
+    expect(
+      container.querySelector(".card-wrap")!.classList.contains("draggable"),
+    ).toBe(true);
+  });
+
+  it("makes the same cut in the list view", () => {
+    const { container } = renderBoard([archivedTask()], {
+      search: ARCHIVED,
+      view: "list",
+    });
+    const row = container.querySelector(".list-row")!;
+    expect(row.textContent).toContain("archived");
+    expect(row.textContent).not.toContain("merge pending");
+    expect(row.textContent).not.toContain("awaiting verdict");
+    expect(container.querySelector(".wait-tag")).toBeNull();
+    // The row falls back to the static stage pill, like a viewer who cannot
+    // move tasks sees.
+    expect(container.querySelector('[aria-label^="Change stage"]')).toBeNull();
+    expect(row.textContent).toContain("In Progress");
+  });
+});
+
+/**
+ * F19-8 / F19-13 — the board's archived contract, and one vocabulary across both
+ * views.
+ *
+ * Under the "Archived" filter the board rendered archived tasks through the
+ * ordinary card: live readiness, live validation, "waiting on a human", a drag
+ * handle and a working Move menu — directly beneath a banner calling the work
+ * abandoned and out of the review queue. UXO-1 had removed exactly those pills
+ * from the task hero one commit earlier, for exactly this reason: an archived
+ * task owes nobody a verdict. The list row carried the same defect and, on top
+ * of it, silently dropped the PR-state pills the card draws (H10 re-opened in
+ * one of two views).
+ */
+describe("F19-8: an archived task states that it is archived, and nothing else", () => {
+  const archived = () =>
+    task({
+      archived: true,
+      displayReadiness: "ready",
+      validation: "healthy",
+      waiting: "human",
+    });
+
+  it("replaces the live readiness/validation/wait signals on the card", () => {
+    const { container } = renderBoard([archived()], {
+      search: "filter=archived",
+    });
+    // Scope to the card: the board SUBTITLE legitimately says "0 ready", and a
+    // page-wide text query would match that instead of the card's pills.
+    const card = container.querySelector(".card")!;
+    expect(card).toBeTruthy();
+    expect(card.textContent).toContain("archived");
+    expect(card.textContent).not.toContain("ready");
+    expect(card.textContent).not.toContain("healthy");
+    expect(card.textContent).not.toMatch(/waiting on a human/i);
+  });
+
+  it("offers no Move control on an archived card, even to a viewer who can move tasks", () => {
+    const { queryByLabelText } = renderBoard([archived()], {
+      search: "filter=archived",
+      canTransition: true,
+    });
+    expect(queryByLabelText(/change stage/i)).toBeNull();
+  });
+
+  it("keeps the Move control on a LIVE card — the gate is `archived`, not the filter", () => {
+    const { getByLabelText } = renderBoard([task()], { canTransition: true });
+    expect(getByLabelText(/change stage/i)).toBeTruthy();
+  });
+
+  it("applies the same contract to the list row", () => {
+    const { container } = renderBoard([archived()], {
+      view: "list",
+      search: "filter=archived",
+    });
+    const row = container.querySelector(".list-row")!;
+    expect(row).toBeTruthy();
+    expect(row.textContent).toContain("archived");
+    expect(row.textContent).not.toContain("ready");
+    expect(row.textContent).not.toContain("healthy");
+  });
+});
+
+describe("F19-13: the list row draws the PR-state pills the card draws", () => {
+  it("names a merge-pending PR in the list view too", () => {
+    const { getByText } = renderBoard(
+      [task({ pr: { number: 124, state: "accepted", title: "Attach a credential" } })],
+      { view: "list" },
+    );
+    expect(getByText("merge pending")).toBeTruthy();
+  });
+
+  it("names a closed PR in the list view too", () => {
+    const { getByText } = renderBoard(
+      [task({ pr: { number: 124, state: "closed", title: "Attach a credential" } })],
+      { view: "list" },
+    );
+    expect(getByText("closed")).toBeTruthy();
+  });
+});
+
+/**
+ * F19-27 — the board acceptance confirm received `taskKey` + `stageName` and
+ * disclosed neither the PR it merges, the head it merges, nor the verdict it
+ * merges over, on a card whose own summary carries all three. Ruling 42 wants
+ * the divergence surfaced on "the accept dialog" and R18-7 says this IS an
+ * accept dialog — board acceptance runs the identical contract.
+ */
+describe("F19-27: the board accept confirm discloses what it merges", () => {
+  const openConfirm = (patch: Partial<BoardTask>) => {
+    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
+      action: () => ({ ok: true as const, toast: "moved" }),
+    });
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
+  };
+
+  it("names the pull request and its state through the one PR-state map", () => {
+    expect(
+      openConfirm({
+        pr: { number: 124, state: "review", title: "Attach a credential" },
+      }),
+    ).toContain("PR #124 · in review");
+  });
+
+  it("warns that commits added since the review merge unreviewed (ruling 42)", () => {
+    const text = openConfirm({
+      pr: {
+        number: 124,
+        state: "review",
+        title: "Attach a credential",
+        revisionDrift: { aheadBy: 2, headSha: "a4c790ce63efbeef" },
+      },
+    });
+    expect(text).toContain("a4c790ce63ef");
+    expect(text).toContain("2 commits added since review");
+    expect(text).toContain("they merge unreviewed");
+  });
+
+  // F19-23: the noun was already switched here; the VERB was not, so a single
+  // drifted commit read "1 commit added since review; they merge unreviewed."
+  // Assert the whole clause — the old assertion stopped before the bug.
+  it("uses the singular for a single added commit, verb included", () => {
+    const text = openConfirm({
+      pr: {
+        number: 124,
+        state: "review",
+        title: "t",
+        revisionDrift: { aheadBy: 1, headSha: "a4c790ce63efbeef" },
+      },
+    });
+    expect(text).toContain("1 commit added since review");
+    expect(text).toContain("it merges unreviewed");
+    expect(text).not.toContain("they merge unreviewed");
+  });
+
+  it("shows the verdict it is about to accept over", () => {
+    expect(openConfirm({ validation: "changed" })).toContain("awaiting verdict");
+  });
+
+  it("states the standing refusal instead of spending the click on an error", () => {
+    expect(
+      openConfirm({ blockReason: "No reviewer verdict on the delivered revision." }),
+    ).toContain("No reviewer verdict on the delivered revision.");
+  });
+
+  it("says so honestly when there is no pull request to merge", () => {
+    const text = openConfirm({ pr: null });
+    expect(text).toContain("No linked pull request");
+    expect(text).not.toContain("PR #");
+  });
+});
+
+/**
+ * F19-27 (residual) — the confirm's "Blocked" row read `task.blockReason` alone
+ * and presented it as THE acceptance gate. It is the projected REVISION gate
+ * only: `acceptanceBlockReason` (rebuilder.server.ts) names four refusals it
+ * deliberately leaves to the reader — archived task, stage boundary, blocked
+ * packet, conflicting PR — while the server's `acceptanceRefusalReason`
+ * (task-actions.server.ts) enforces all of them on this exact click. Three are
+ * answerable from the summary the dialog already holds, so a task with an open
+ * blocked decision (or a PR GitHub cannot merge) used to open a confident
+ * dialog with no blocked row, and the server refused the click afterwards.
+ */
+describe("F19-27: the board confirm asks the server's own refusal questions", () => {
+  const openConfirm = (patch: Partial<BoardTask>) => {
+    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
+      action: () => ({ ok: true as const, toast: "moved" }),
+    });
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
+  };
+
+  const blockedPacket = {
+    type: "blocked" as const,
+    kind: "Blocked decision",
+    from: "Operator",
+    title: "Credential missing",
+    body: "",
+    observations: [],
+    options: [],
+  };
+
+  it("names an open blocked decision the server refuses on", () => {
+    // Same predicate the acceptance writers pass as `blockedPacket`, and the
+    // same sentence the task page shows for it.
+    expect(
+      openConfirm({
+        readiness: "blocked",
+        packet: blockedPacket,
+        blockReason: null,
+      }),
+    ).toContain("An open blocked decision is holding this task.");
+  });
+
+  it("leaves an INPUT packet alone — only a blocked one gates acceptance", () => {
+    expect(
+      openConfirm({
+        readiness: "input_required",
+        packet: { ...blockedPacket, type: "input", kind: "Completion report" },
+        blockReason: null,
+      }),
+    ).not.toContain("blocked decision");
+  });
+
+  it("names a conflicting PR through the server's own predicate", () => {
+    const text = openConfirm({
+      blockReason: null,
+      pr: {
+        number: 124,
+        state: "review",
+        title: "Attach a credential",
+        mergeable: "conflicting",
+      },
+    });
+    expect(text).toContain("conflicts with the base branch");
+    expect(text).toContain("Rebase the branch and re-review");
+  });
+
+  it("stays silent on a PR that merges cleanly", () => {
+    expect(
+      openConfirm({
+        blockReason: null,
+        pr: {
+          number: 124,
+          state: "review",
+          title: "t",
+          mergeable: "clean",
+        },
+      }),
+    ).not.toContain("conflicts with the base branch");
+  });
+
+  it("keeps the server's precedence — the revision gate speaks first", () => {
+    const text = openConfirm({
+      blockReason: "VIB-1's delivered revision has no approving verdict yet.",
+      readiness: "blocked",
+      packet: blockedPacket,
+      pr: { number: 124, state: "review", title: "t", mergeable: "conflicting" },
+    });
+    expect(text).toContain("no approving verdict yet");
+    expect(text).not.toContain("blocked decision");
+    expect(text).not.toContain("conflicts with the base branch");
+  });
+
+});
+
+/**
+ * The Triage → Done drag. The board's own StageMenu offers it, the server
+ * refuses it (`acceptanceStageBlockedReason`, task-actions.server.ts) — and the
+ * dialog in between used to show no blocked row at all, because the gate turns
+ * on the PROJECT's workflow graph and nothing on the card carried it. The
+ * summary carries `atAcceptanceBoundary` now (shared/mapping/task.server.ts),
+ * derived server-side through the same `resolveStageRoles` the writers gate on.
+ */
+describe("F19-27: the confirm names the stage gate the server will refuse on", () => {
+  const fromTriage = (patch: Partial<BoardTask> = {}) => {
+    const r = renderBoard([task({ key: "VIB-1", stage: "triage", ...patch })], {
+      action: () => ({ ok: true as const, toast: "moved" }),
+    });
+    fireEvent.click(r.getByLabelText("Change stage (currently Triage)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
+  };
+
+  const fromBoundary = (patch: Partial<BoardTask> = {}) => {
+    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
+      action: () => ({ ok: true as const, toast: "moved" }),
+    });
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
+  };
+
+  it("still names the stage the card is leaving in the head sentence", () => {
+    const text = fromTriage({ atAcceptanceBoundary: false });
+    expect(text).toContain("Moving VIB-1 from Triage into Done");
+    // The one-way warning the whole dialog exists for stays put.
+    expect(text).toContain("Merging is one-way");
+  });
+
+  it("blocks an off-boundary accept and says which stage the task is at", () => {
+    const text = fromTriage({ atAcceptanceBoundary: false });
+    expect(text).toContain("Blocked");
+    expect(text).toContain(
+      "VIB-1 is at Triage, not the boundary the workflow puts before Done",
+    );
+    expect(text).toContain("Move the task through the workflow first.");
+  });
+
+  it("leaves a boundary accept unblocked — the graph really allows that edge", () => {
+    const text = fromBoundary();
+    expect(text).not.toContain("the boundary the workflow puts before");
+    expect(text).not.toContain("Blocked");
+  });
+
+  /**
+   * The flag is the GRAPH's answer, not the column order's: a project whose
+   * workflow declares triage → done really can be accepted from Triage, and
+   * refusing it here would be the forked mapping rulings 12/14 ban.
+   */
+  it("trusts the projected flag over the card's column position", () => {
+    expect(fromTriage({ atAcceptanceBoundary: true })).not.toContain(
+      "the boundary the workflow puts before",
+    );
+  });
+
+  it("keeps R16-3's precedence — a closed PR outranks the stage gate", () => {
+    // The server names the terminal GitHub fact first; running the workflow is
+    // not the path when the PR is gone.
+    const text = fromTriage({
+      atAcceptanceBoundary: false,
+      pr: { number: 124, state: "closed", title: "t" },
+    });
+    expect(text).toContain("closed on GitHub without merging");
+    expect(text).not.toContain("the boundary the workflow puts before");
+  });
+
+  it("keeps the stage gate above the revision gate, like the server", () => {
+    const text = fromTriage({
+      atAcceptanceBoundary: false,
+      blockReason: "VIB-1's delivered revision has no approving verdict yet.",
+    });
+    expect(text).toContain("the boundary the workflow puts before Done");
+    expect(text).not.toContain("no approving verdict yet");
+  });
+});
+
+/**
+ * A board whose payload CHANGES under a pending gesture — the revalidation the
+ * static `renderBoard` helper cannot express. The confirm resolves its task
+ * from the CURRENT payload on every render (F19-27), which is what keeps the
+ * disclosed PR head fresh; this is the harness for what happens when that
+ * lookup misses.
+ */
+function renderMutableBoard(
+  initial: BoardTask[],
+  opts: { action?: () => { ok: boolean; toast?: string; error?: string } } = {},
+) {
+  let set!: (next: BoardTask[]) => void;
+  const Stub = createRoutesStub([
+    {
+      path: "/projects/:slug/board",
+      Component: () => {
+        const [tasks, setTasks] = useState(initial);
+        set = setTasks;
+        return (
+          <ToastProvider>
+            <BoardPage
+              columns={columns(tasks)}
+              orphanTasks={[]}
+              canCreate
+              canTransition
+              canRescan
+            />
+          </ToastProvider>
+        );
+      },
+      ...(opts.action ? { action: opts.action } : {}),
+    },
+  ]);
+  const r = render(<Stub initialEntries={["/projects/viberr-core/board"]} />);
+  return {
+    ...r,
+    /** The revalidation: hand the board a different task payload. */
+    reproject: (next: BoardTask[]) => act(() => set(next)),
+  };
+}
+
+/**
+ * F19-27 (residual, LOW) — resolving the pending task late costs one failure
+ * mode: if the task leaves the payload between the gesture and the render
+ * (archived elsewhere, file deleted, reprojected away), the dialog rendered
+ * nothing while `pendingAccept` stayed set. No dialog, no toast, no cancel —
+ * the human's drag vanished and the state stayed wedged.
+ */
+describe("F19-27: a pending acceptance is never stranded", () => {
+  const live = task({ key: "VIB-1", stage: "impl" });
+
+  const openConfirm = (r: ReturnType<typeof renderMutableBoard>) => {
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    expect(r.container.querySelector("dialog")).not.toBeNull();
+  };
+
+  it("says so when the task leaves the board mid-gesture", async () => {
+    const r = renderMutableBoard([live]);
+    openConfirm(r);
+    r.reproject([]);
+
+    expect(r.container.querySelector("dialog")).toBeNull();
+    await waitFor(() =>
+      expect(r.container.querySelector(".toast")).not.toBeNull(),
+    );
+    const toast = r.container.querySelector(".toast")!;
+    expect(toast.textContent).toContain(
+      "VIB-1 left the board before its acceptance was confirmed",
+    );
+    expect(toast.getAttribute("data-kind")).toBe("error");
+  });
+
+  it("really clears the pending state — the dialog does not come back", async () => {
+    // The proof the gesture was ABANDONED and not merely hidden: put the task
+    // back. A still-set `pendingAccept` would re-render the confirm from a
+    // gesture the human made minutes ago.
+    const r = renderMutableBoard([live]);
+    openConfirm(r);
+    r.reproject([]);
+    r.reproject([live]);
+    expect(r.container.querySelector("dialog")).toBeNull();
+    expect(r.getByLabelText("Change stage (currently In Progress)")).toBeTruthy();
+  });
+
+  it("posts nothing — an abandoned gesture is not an acceptance", async () => {
+    const submitted: string[] = [];
+    const r = renderMutableBoard([live], {
+      action: () => {
+        submitted.push("POST");
+        return { ok: true as const, toast: "moved" };
+      },
+    });
+    openConfirm(r);
+    r.reproject([]);
+    await new Promise((res) => setTimeout(res, 50));
+    expect(submitted).toHaveLength(0);
+  });
+
+  it("keeps the dialog open and re-reads it when the task merely CHANGES", async () => {
+    // The other half of the fresh lookup: the task is still there, so the
+    // gesture stands — and the dialog now discloses the archived refusal the
+    // server would answer with (`archivedTaskBlockedReason`, the same function
+    // `acceptanceRefusalReason` calls).
+    const r = renderMutableBoard([live]);
+    openConfirm(r);
+    r.reproject([{ ...live, archived: true }]);
+    const dialog = r.container.querySelector("dialog");
+    expect(dialog).not.toBeNull();
+    expect(dialog!.textContent!.replace(/\s+/g, " ")).toContain(
+      "VIB-1 is archived — restore it before accepting the completion.",
+    );
+  });
+});
+
+/**
+ * D19 (owner ruling R19-10) — arrow-key traversal on the board.
+ *
+ * The UX spec put full arrow traversal on the Task Status Card; it was never
+ * built. Before this the file's only `onKeyDown` was the new-task dialog's
+ * Enter, so a keyboard user met 2N tab stops (a card face and a Move trigger
+ * per card) and had no sideways move at all. INTENT §4 asks for keyboard access
+ * to every packet action — "inaccessible state is untrustworthy state".
+ */
+describe("D19: arrow-key traversal over the board (R19-10)", () => {
+  const cards = (c: HTMLElement) => [
+    ...c.querySelectorAll<HTMLElement>("[data-board-card]"),
+  ];
+  const cardFor = (c: HTMLElement, key: string) =>
+    cards(c).find((el) => el.dataset.boardCard === key)!;
+  const focused = () =>
+    (document.activeElement as HTMLElement | null)?.dataset.boardCard ?? null;
+  /** Press `key` on a card face, the way the roving focus reaches it. */
+  const press = (el: HTMLElement, key: string) => {
+    el.focus();
+    fireEvent.keyDown(el, { key });
+  };
+  const pressFocused = (key: string) =>
+    press(document.activeElement as HTMLElement, key);
+
+  it("puts ONE card in the tab order, not one per card", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+      task({ key: "VIB-3", stage: "impl" }),
+    ]);
+    expect(cards(container).map((el) => el.tabIndex)).toEqual([0, -1, -1]);
+  });
+
+  it("moves the tab stop with the focus, so Tab re-enters where the human left", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowDown");
+    expect(cards(container).map((el) => el.tabIndex)).toEqual([-1, 0]);
+  });
+
+  it("walks Up and Down within a lane", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+      task({ key: "VIB-2", stage: "impl" }),
+      task({ key: "VIB-3", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowDown");
+    expect(focused()).toBe("VIB-2");
+    pressFocused("ArrowDown");
+    expect(focused()).toBe("VIB-3");
+    pressFocused("ArrowUp");
+    expect(focused()).toBe("VIB-2");
+  });
+
+  it("holds still at the ends of a lane instead of wrapping", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+      task({ key: "VIB-2", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowUp");
+    expect(focused()).toBe("VIB-1");
+    press(cardFor(container, "VIB-2"), "ArrowDown");
+    expect(focused()).toBe("VIB-2");
+  });
+
+  it("crosses lanes with Left/Right, landing at the same index", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+      task({ key: "VIB-3", stage: "impl" }),
+      task({ key: "VIB-4", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-2"), "ArrowRight");
+    expect(focused()).toBe("VIB-4");
+    pressFocused("ArrowLeft");
+    expect(focused()).toBe("VIB-2");
+  });
+
+  it("lands on the target lane's first card when that lane is shorter", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+      task({ key: "VIB-3", stage: "triage" }),
+      task({ key: "VIB-4", stage: "impl" }),
+    ]);
+    // Index 2 in Triage; In Progress holds one card, so the nearest-by-index
+    // rule falls back to that lane's first card rather than to nothing.
+    press(cardFor(container, "VIB-3"), "ArrowRight");
+    expect(focused()).toBe("VIB-4");
+  });
+
+  it("never strands the focus on an empty lane", () => {
+    // In Progress draws no card at all, so Right from Triage must reach Done.
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-9", stage: "done" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowRight");
+    expect(focused()).toBe("VIB-9");
+    pressFocused("ArrowLeft");
+    expect(focused()).toBe("VIB-1");
+  });
+
+  it("stays put when there is no lane in that direction — no wrap-around", () => {
+    // Two lanes, so a wrapping implementation would jump the leftmost card to
+    // the rightmost lane instead of holding still.
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-1"), "ArrowLeft");
+    expect(focused()).toBe("VIB-1");
+    press(cardFor(container, "VIB-2"), "ArrowRight");
+    expect(focused()).toBe("VIB-2");
+  });
+
+  it("opens the focused task on Enter and on Space", async () => {
+    for (const key of ["Enter", " "]) {
+      const { container, unmount } = renderBoard([
+        task({ key: "VIB-1", stage: "impl" }),
+      ]);
+      press(cardFor(container, "VIB-1"), key);
+      await waitFor(() =>
+        expect(container.textContent, key).toContain("task page"),
+      );
+      unmount();
+    }
+  });
+
+  it("keeps the Move menu reachable from the focused card — and only that one", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "triage" }),
+      task({ key: "VIB-2", stage: "triage" }),
+    ]);
+    const triggers = () =>
+      [
+        ...container.querySelectorAll<HTMLButtonElement>("button.stage-menu-btn"),
+      ].map((b) => b.tabIndex);
+    // Without this the board would still hold N tab stops: every card's
+    // StageMenu button stayed tabbable while its face went to -1.
+    expect(triggers()).toEqual([0, -1]);
+    press(cardFor(container, "VIB-1"), "ArrowDown");
+    expect(triggers()).toEqual([-1, 0]);
+  });
+
+  it("leaves the arrows alone on a control that is not a card face", () => {
+    // The StageMenu trigger sits inside the board and owns Arrow Up/Down for
+    // its own menu; traversal must not answer for it.
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+      task({ key: "VIB-2", stage: "impl" }),
+    ]);
+    const trigger = container.querySelector<HTMLButtonElement>(
+      "button.stage-menu-btn",
+    )!;
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("does not answer for the open Move menu's own arrows", () => {
+    // The StageMenu popover is `createPortal`ed to <body>, but React bubbles
+    // synthetic events along the REACT tree — so its Arrow Up/Down really does
+    // reach the board's handler. Two independent gates keep it the menu's:
+    // the menu preventDefaults, and the event target is not a card face.
+    const { container, getByRole } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+      task({ key: "VIB-2", stage: "impl" }),
+    ]);
+    fireEvent.click(
+      container.querySelector<HTMLButtonElement>("button.stage-menu-btn")!,
+    );
+    const item = getByRole("menuitemradio", { name: "Triage" });
+    item.focus();
+    fireEvent.keyDown(item, { key: "ArrowDown" });
+    expect(document.activeElement).not.toBe(cardFor(container, "VIB-2"));
+    expect(
+      (document.activeElement as HTMLElement).closest(".stage-menu-pop"),
+    ).not.toBeNull();
+  });
+
+  it("names each lane as a list so a reader is told where focus landed", () => {
+    const { container, getByRole } = renderBoard([
+      task({ key: "VIB-1", stage: "impl" }),
+    ]);
+    const lane = getByRole("list", { name: "In Progress tasks" });
+    expect(lane.querySelectorAll('[role="listitem"]')).toHaveLength(1);
+    // The two empty lanes draw no list role: their only child is the
+    // empty-state sentence, and a `list` without `listitem` children is what
+    // aria-required-children fails on.
+    expect(container.querySelectorAll('[role="list"]')).toHaveLength(1);
+  });
+
+  it("walks the list layout too, where the whole board is one lane", () => {
+    const { container } = renderBoard(
+      [
+        task({ key: "VIB-1", stage: "triage" }),
+        task({ key: "VIB-2", stage: "impl" }),
+      ],
+      { view: "list" },
+    );
+    press(cardFor(container, "VIB-1"), "ArrowDown");
+    expect(focused()).toBe("VIB-2");
+    // One lane — sideways has nowhere to go, and does not silently jump.
+    pressFocused("ArrowRight");
+    expect(focused()).toBe("VIB-2");
+    expect(
+      container.querySelector('[role="list"]')!.getAttribute("aria-label"),
+    ).toBe("All tasks");
+  });
+
+  it("re-anchors the tab stop when its card is filtered off the board", async () => {
+    const { container, getByLabelText } = renderBoard([
+      task({ key: "VIB-1", title: "Attach a credential", stage: "impl" }),
+      task({ key: "VIB-2", title: "Rotate the PAT", stage: "impl" }),
+    ]);
+    press(cardFor(container, "VIB-2"), "ArrowUp");
+    expect(focused()).toBe("VIB-1");
+    // A tab stop pinned to a card the board no longer draws is a board with no
+    // keyboard way in.
+    fireEvent.change(getByLabelText("Filter this board"), {
+      target: { value: "rotate" },
+    });
+    await waitFor(() => expect(cards(container)).toHaveLength(1));
+    expect(cards(container)[0]!.tabIndex).toBe(0);
+  });
+});
+
+/**
+ * UXV19-6 — the other half of F19-13. Board and List are two views of ONE
+ * surface, and the card foot draws two more pills under its actionable-state
+ * rule: a failing build, and a teammate asking for changes on the PR. The list
+ * row drew neither, so switching the segmented control made a broken build
+ * invisible — and nothing else on the row covers it (validation is task-row
+ * state with no CI input, and "Blocked or waiting" does not filter on either).
+ *
+ * Canary: delete the two pills from ListView's non-archived branch and the
+ * three list-view expectations below fail while the card ones stay green.
+ */
+describe("UXV19-6: the list row draws the ACTIONABLE PR-check/review pills the card draws", () => {
+  const broken = () =>
+    task({
+      pr: { number: 124, state: "review", title: "Attach a credential" },
+      prChecks: { total: 5, passing: 2, failing: 3, pending: 0, state: "failing" },
+      prReview: "changes_requested",
+    });
+
+  it("a failing build and a changes-requested review survive the Board→List switch", () => {
+    const card = renderBoard([broken()]);
+    expect(card.getByText("3/5 checks failing")).toBeTruthy();
+    expect(card.getByText("changes requested")).toBeTruthy();
+    cleanup();
+
+    const { container, getByText } = renderBoard([broken()], { view: "list" });
+    const row = container.querySelector(".list-row")!;
+    expect(getByText("3/5 checks failing")).toBeTruthy();
+    expect(getByText("changes requested")).toBeTruthy();
+    // Both live on the row itself, not somewhere else on the page.
+    expect(row.textContent).toContain("3/5 checks failing");
+    expect(row.textContent).toContain("changes requested");
+  });
+
+  it("stays silent when the checks pass and nobody asked for changes — same density rule as the card", () => {
+    const { container } = renderBoard(
+      [
+        task({
+          pr: { number: 124, state: "review", title: "Attach a credential" },
+          prChecks: { total: 5, passing: 5, failing: 0, pending: 0, state: "passing" },
+          prReview: "approved",
+        }),
+      ],
+      { view: "list" },
+    );
+    const row = container.querySelector(".list-row")!;
+    expect(row.textContent).not.toContain("checks");
+    expect(row.textContent).not.toContain("approved");
+  });
+
+  it("an archived row still states only that it is archived", () => {
+    const { container } = renderBoard(
+      [{ ...broken(), archived: true }],
+      { view: "list", search: "filter=archived" },
+    );
+    const row = container.querySelector(".list-row")!;
+    expect(row.textContent).toContain("archived");
+    expect(row.textContent).not.toContain("checks failing");
+    expect(row.textContent).not.toContain("changes requested");
+  });
+});
+
+/**
+ * Pass-19 gap 10 — a task that quietly stopped moving looked exactly like one
+ * being worked, right down to the pulsing "agent working" dot.
+ *
+ * `quiet` arrives resolved from the server (board-query.server.ts): it is what
+ * the chip selects on and what three surfaces draw, so it must be the SAME value
+ * in the SSR pass and in hydration. The relative TEXT beside it is the
+ * time-dependent part, and that goes through `LocalRelative`.
+ */
+describe("gap-10: the board says when a task has gone quiet", () => {
+  const quietTask = (patch: Partial<BoardTask> = {}) =>
+    task({
+      waiting: "agent",
+      lastActivityAt: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
+      quiet: true,
+      ...patch,
+    });
+
+  it("draws the cue on the card, and nothing at all on a moving task", () => {
+    const { container } = renderBoard([quietTask()]);
+    const foot = container.querySelector(".card-foot")!;
+    expect(foot.textContent).toContain("no activity");
+    // The neutral pill, not one of the loud state colours (risk/blocked/input).
+    expect(container.querySelector(".card-foot .pill.neutral")).toBeTruthy();
+    // The wait tag stays — "agent working" and "no activity 4h" together are the
+    // whole point: the badge alone was the lie.
+    expect(foot.textContent).toContain("agent working");
+    cleanup();
+
+    const moving = renderBoard([task({ waiting: "agent" })]);
+    expect(
+      moving.container.querySelector(".card-foot")!.textContent,
+    ).not.toContain("no activity");
+  });
+
+  it("draws the same cue on the list row — one board, two views, one vocabulary", () => {
+    const { container } = renderBoard([quietTask()], { view: "list" });
+    expect(container.querySelector(".list-row")!.textContent).toContain(
+      "no activity",
+    );
+  });
+
+  it("never draws it on an archived card", () => {
+    // R14-3 / F19-8: archived work is out of the flow and owes nobody anything.
+    // The server's `isQuiet` refuses archived tasks outright; this pins the
+    // second belt, so a stale annotation can never light up an archived card.
+    const { container } = renderBoard(
+      [quietTask({ archived: true })],
+      { search: "filter=archived" },
+    );
+    const card = container.querySelector(".card")!;
+    expect(card.textContent).toContain("archived");
+    expect(card.textContent).not.toContain("no activity");
+  });
+
+  it("gives the board a 'No activity' chip that selects exactly those tasks", () => {
+    const tasks = [
+      quietTask({ key: "VIB-142" }),
+      task({ key: "VIB-143", waiting: "agent" }),
+      task({ key: "VIB-144", waiting: "human" }),
+    ];
+    const chipOff = renderBoard(tasks);
+    const chip = chipOff.getByRole("button", { name: /No activity/ });
+    // The tally discloses the count before anyone clicks it.
+    expect(chip.textContent).toContain("· 1");
+    expect(chipOff.container.textContent).toContain("VIB-143");
+    cleanup();
+
+    const { container } = renderBoard(tasks, { search: "filter=quiet" });
+    expect(container.textContent).toContain("VIB-142");
+    expect(container.textContent).not.toContain("VIB-143");
+    expect(container.textContent).not.toContain("VIB-144");
+  });
+
+  it("hides the chip's tally when nothing is quiet", () => {
+    const { getByRole } = renderBoard([task({ waiting: "agent" })]);
+    expect(
+      getByRole("button", { name: /No activity/ }).textContent,
+    ).not.toContain("·");
   });
 });

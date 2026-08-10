@@ -19,7 +19,9 @@ import {
 import { countOpenPolicyViolations } from "~/server/projections/policy-violations.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
+import { roleCan } from "~/shared/rbac";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { isArchived } from "~/features/board/board-filters";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { Icon } from "~/ui/icon";
 import { SkipLink } from "~/ui/skip-link";
@@ -32,10 +34,23 @@ import { Topbar } from "~/features/shell/topbar";
  * counts + topbar + child view Outlet. Children read this loader's data via
  * useRouteLoaderData("routes/project").
  *
- * Rail counts: board = ALL tasks incl. Done (ruling 16), review = tasks in the
- * STRUCTURAL review stage (`resolveStageRoles`, not the stage literally named
- * "review"), settings = open policy violations (Phase-4 derivation — see
- * policy-violations.server.ts).
+ * Rail counts: board = ALL LIVE tasks incl. Done (ruling 16), review = LIVE
+ * tasks in the STRUCTURAL review stage (`resolveStageRoles`, not the stage
+ * literally named "review"), settings = open policy violations (Phase-4
+ * derivation — see policy-violations.server.ts).
+ *
+ * F19-9 (pass 19): "live" is the load-bearing word. `getBoard` loads with
+ * `includeArchived: true` (the board's Archived filter is the only way back to
+ * an archived task), and both badges used to count that raw list — while the
+ * two surfaces they link to exclude archived work: the board header counts
+ * `liveTasks` (board-page.tsx) and `getReviewQueue` goes through
+ * `listProjectTasks`, which appends `AND archived = 0`. So the rail said
+ * "Review 1" over a queue reading "0 tasks at the review boundary", and a
+ * supervisor chasing the badge found nothing. R14-3 is explicit that archived
+ * tasks "leave the board's default view and the review queue", and
+ * review-queue.server.ts asserts the badge/queue parity as a contract, so the
+ * archived predicate belongs here too — ONE predicate (`isArchived`), one count.
+ * Done tasks stay counted: that half is ruling 16 and deliberate.
  *
  * R15-4 (owner ruling, 2026-07-28): projects are MEMBERS-ONLY. This loader is
  * the single chokepoint for every project surface — board, task detail and the
@@ -97,7 +112,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       (r) => r.key,
     ),
   ]);
-  const annotate = (t: TaskSummary): TaskSummary => ({
+  // Gap 10: generic, so the columns keep the fields the activity projection
+  // adds (`lastActivityAt`, `quiet`). Re-typing through `TaskSummary` erased
+  // them from the type while the spread carried them at runtime — the feature
+  // worked, but nothing downstream could see it in the type system.
+  const annotate = <T extends TaskSummary>(t: T): T => ({
     ...t,
     waitingOnMe: myDecisions.has(t.key),
   });
@@ -107,26 +126,62 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     orphanTasks: raw.orphanTasks.map(annotate),
   };
   const tasks = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks];
+  // F19-9: the SAME predicate the board header and the review queue use — an
+  // archived task is a terminal disposition, not work waiting at a boundary.
+  const liveTasks = tasks.filter((t) => !isArchived(t));
   const myRole = memberRole ?? (orgAdminOverride ? ("admin" as const) : null);
   return {
     user,
     board,
     myRole,
     orgAdminOverride,
-    taskCount: tasks.length,
+    taskCount: liveTasks.length,
     reviewCount: (() => {
       const reviewId = resolveStageRoles(
         board.project.stages,
         board.project.workflow,
       ).reviewId;
       return reviewId
-        ? tasks.filter((t) => t.stage === reviewId).length
+        ? liveTasks.filter((t) => t.stage === reviewId).length
         : 0;
     })(),
     violations: countOpenPolicyViolations(db, params.slug),
     notifications: listNotifications(db, user.id, { limit: 100 }),
     unread: countUnreadNotifications(db, user.id),
   };
+}
+
+/**
+ * Pass-19 UX coherence audit, finding #15 — the archived banner used to tell
+ * EVERY reader to "restore it from Settings → Danger zone". Q-V1 (pass-18 owner
+ * ruling, project-settings/settings-page.tsx:1596) renders that panel only when
+ * the reader holds `edit-policy`, so a maintainer, contributor or viewer
+ * followed an exact named path to a panel that is not on their Settings page —
+ * and nothing anywhere told them who CAN restore it (the in-panel deny note is
+ * unreachable, since the gate and the note test the same grant). Name the route
+ * only to the reader who has it; everyone else gets the authority instead,
+ * which is the same shape the four Settings lock notes already use.
+ */
+export function ArchivedBanner({ canRestore }: { canRestore: boolean }) {
+  return (
+    <div className="archived-banner" role="status">
+      <Icon name="lock" />
+      <span>
+        This project is <strong>archived</strong> — it’s read-only. Timelines
+        and audit stay visible;{" "}
+        {canRestore ? (
+          <>
+            restore it from <strong>Settings → Danger zone</strong> to make
+            changes.
+          </>
+        ) : (
+          <>
+            a <strong>project admin</strong> can restore it to make changes.
+          </>
+        )}
+      </span>
+    </div>
+  );
 }
 
 export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
@@ -220,14 +275,9 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           onToggleRail={() => setRailOpen((open) => !open)}
         />
         {board.project.archived ? (
-          <div className="archived-banner" role="status">
-            <Icon name="lock" />
-            <span>
-              This project is <strong>archived</strong> — it’s read-only.
-              Timelines and audit stay visible; restore it from{" "}
-              <strong>Settings → Danger zone</strong> to make changes.
-            </span>
-          </div>
+          <ArchivedBanner
+            canRestore={roleCan(loaderData.myRole, "edit-policy")}
+          />
         ) : null}
         <Outlet />
       </main>

@@ -19,6 +19,7 @@ import {
   listProjectMembers,
   resolveTaskOwner,
 } from "./board-query.server";
+import { isQuiet, readTaskActivity } from "./task-activity.server";
 
 /**
  * Task-detail read models. Phase 5 loaders call these directly.
@@ -49,6 +50,12 @@ export interface TaskDetail extends TaskSummary {
   diagnostics: DiagnosticRecord[];
   /** Project stage list — the detail view renders stage names/colors. */
   stages: { id: string; name: string; color: string }[];
+  /** Gap-10: ISO of the newest timeline event; null when the timeline is empty.
+   *  Derived from `task_events.occurred_at`, NOT `updated_at` — see the essay in
+   *  task-activity.server.ts for why the file-write stamp is not activity. */
+  lastActivityAt: string | null;
+  /** Gap-10: past its threshold, no run in flight, not archived, not terminal. */
+  quiet: boolean;
 }
 
 interface DiagnosticRow {
@@ -79,6 +86,8 @@ export function getTaskSummary(
   const memberIds = new Set(listProjectMembers(db, slug).map((m) => m.userId));
   return mapTaskProjectionRow(row, {
     stages,
+    // F19-27: same graph the acceptance writers gate on.
+    workflow: project?.workflow ?? [],
     owner: resolveTaskOwner(db, row.owner_user_id, memberIds),
     accepted: isAcceptedDisplayState({
       stage: row.stage,
@@ -140,14 +149,27 @@ export function getTaskDetail(
   db: DatabaseSync,
   slug: string,
   key: string,
+  /** Gap-10: the instant "has this gone quiet?" is asked against (tests only). */
+  opts: { now?: Date } = {},
 ): TaskDetail | null {
   const summary = getTaskSummary(db, slug, key);
   if (!summary) return null;
   const project = getProject(db, slug);
+  const stageIds = project ? project.stages.map((s) => s.id) : [];
+  const facts = readTaskActivity(db, slug, key);
   return {
     ...summary,
     timeline: listTaskEvents(db, slug, key),
     diagnostics: listTaskDiagnostics(db, slug, key),
     stages: project ? project.stages.map((s) => ({ id: s.id, name: s.name, color: s.color })) : [],
+    lastActivityAt: facts.lastActivityAt,
+    quiet: isQuiet({
+      lastActivityAt: facts.lastActivityAt,
+      waiting: summary.waiting,
+      archived: summary.archived,
+      terminal: isAcceptedDisplayState({ stage: summary.stage, stageIds }),
+      runInFlight: facts.runInFlight,
+      ...(opts.now ? { now: opts.now } : {}),
+    }),
   };
 }

@@ -608,6 +608,48 @@ describe("ResourcesPanel", () => {
     ).toEqual(["deleted-craft", "gone-kb"]);
   });
 
+  it("F19-5: a missing chip announces itself as GRANTED, not as an ungranted resource", () => {
+    const orphaned: GagentView[] = [
+      {
+        ...GAGENTS[0]!,
+        skills: ["terraform-review", "deleted-craft"],
+        mcps: ["vm-memory"],
+        kbs: ["gone-kb"],
+      },
+    ];
+    const { getByLabelText, getAllByRole } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={orphaned}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Edit Developer"));
+
+    // A red chip only renders BECAUSE its id is still in the grant list, so it
+    // is by construction a pressed toggle. Its six sibling chip groups in this
+    // modal already report state; these announced nothing at all.
+    const missing = [...document.querySelectorAll(".pick-chip.missing")];
+    expect(missing.length).toBe(3);
+    for (const chip of missing) {
+      expect(chip.getAttribute("aria-pressed")).toBe("true");
+    }
+
+    // The point of the attribute: a screen reader can now tell a dangling grant
+    // apart from a live resource this profile does NOT grant. `pressed` matches
+    // on the attribute, so an element without it lands in neither list.
+    const pressed = getAllByRole("button", { pressed: true }).map((b) => b.textContent);
+    expect(pressed).toEqual(
+      expect.arrayContaining(["deleted-craft", "vm-memory", "gone-kb"]),
+    );
+    const unpressed = getAllByRole("button", { pressed: false }).map((b) => b.textContent);
+    expect(unpressed).toEqual(
+      expect.arrayContaining(["github-mcp", "Architecture notes"]),
+    );
+  });
+
   it("P14-KM-10: dropped orphans are gone from the submitted grants", async () => {
     const orphaned: GagentView[] = [
       { ...GAGENTS[1]!, skills: ["deleted-craft"], mcps: [], kbs: [] },

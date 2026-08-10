@@ -16,7 +16,10 @@ const base: NotificationView = {
   id: "n-142-packet",
   kind: "packet",
   ptype: "input",
-  title: "Completion report — waiting on your acceptance",
+  // The literal shape `operatorOpenPacket` writes for a non-blocked packet
+  // (operator-actions.server.ts) — every packet row's title is "Decision
+  // needed: …", which is what made the old "completion" treatment self-contradictory.
+  title: "Decision needed: which scope should we take?",
   text: "Workspace attach implemented, **PR #318** open, validation green.",
   projectSlug: "viberr-core",
   projectName: "Viberr Core",
@@ -40,8 +43,13 @@ describe("NotificationItem (shared bell/page row)", () => {
       "Viberr Core · VIB-142 · 09:41",
     );
     expect(container.querySelector(".unread-dot")).not.toBeNull();
-    // Packet/input → completion palette.
-    expect(container.querySelector(".pev-ico")!.classList.contains("act-completion")).toBe(true);
+    // F19-24: packet/input → the INPUT palette, not the completion one. This
+    // branch used to draw `act-completion` (a completion checkmark) on every
+    // non-blocked packet, so an operator's scoping question wore the visual
+    // vocabulary of something to accept.
+    const ico = container.querySelector(".pev-ico")!;
+    expect(ico.classList.contains("act-completion")).toBe(false);
+    expect(ico.classList.contains("act-policy")).toBe(true);
   });
 
   it("read rows get the read modifier and no dot; clicks bubble the record", () => {

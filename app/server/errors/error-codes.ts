@@ -11,6 +11,9 @@ export const ERROR_CODES = {
   CONFLICT: "conflict",
   DB_MIGRATION_FAILED: "db_migration_failed",
   SECRET_BOX_INVALID: "secret_box_invalid",
+  /** A canonical store file parsed only with fallback defaults (hardStop) —
+   *  writing to it would replace the human's content. */
+  FILE_NOT_TRUSTED: "file_not_trusted",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

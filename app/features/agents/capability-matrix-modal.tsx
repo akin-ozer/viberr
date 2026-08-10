@@ -200,6 +200,27 @@ export function CapabilityMatrixModal({
                 its persona; a Codex specialist gets the persona alone.
               </li>
               <li>
+                {/* F19-16 / ruling 51 (R18-5): the asymmetry is meant to be
+                    DISCLOSED, not silent — "Codex keeps prompt-text injection —
+                    the asymmetry is disclosed, not silent". It was disclosed
+                    nowhere in the UI, so a reader granting a long skill could
+                    only discover the Codex clipping by comparing two runs.
+                    Numbers come from `SKILL_INJECTION_BUDGET` (24 000 chars,
+                    shared across every declared skill) and the native mount in
+                    `specialist-run.server.ts` (`skills: [...]` on the SDK). */}
+                <b>Granted skills arrive differently.</b> On <b>Claude</b> they are
+                installed into the run's workspace and handed to the SDK as real
+                skills: the model sees each name and summary and loads the full
+                text only when it invokes one, with no length cap. <b>Codex</b> has
+                no such channel, so its skills are pasted into the prompt up front
+                under one shared 24,000-character budget — a long skill can arrive
+                clipped, and one that no longer fits is announced as omitted. A
+                Claude run that cannot install them (no checkout, or another live
+                run already holds this task's workspace) falls back to the same
+                prompt text. Keep a skill short if agents on both backends must
+                follow it.
+              </li>
+              <li>
                 <b>Post mid-run comments</b> has no Codex channel — granting it does
                 nothing there; a Codex agent's report always posts when the run ends.
               </li>

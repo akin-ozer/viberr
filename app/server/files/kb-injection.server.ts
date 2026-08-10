@@ -319,3 +319,35 @@ export function readKbBodies(
   }
   return { parts, unresolved };
 }
+
+/**
+ * R19-2 — the PRECEDENCE rule that ships with every knowledge-base injection.
+ *
+ * A KB is org-level context; the repository is the thing being changed. When
+ * they disagree the repo wins and the KB supplements. Live-caught this pass: a
+ * KB-granted Codex developer and a KB-less Claude writer produced two different
+ * formats for the same file family on ONE repo, because nothing ever told
+ * either run which source outranks the other. Two agents on one repo must not
+ * be able to derive two house styles from the same evidence.
+ *
+ * It lives HERE, beside {@link readKbBodies}, because it is a property of the
+ * KB injection itself — not of either runtime. Both runtimes (specialist +
+ * operator) import this one constant and push it immediately before the bodies
+ * it ranks, so the rule cannot drift between them; the operator used to import
+ * a prompt constant from the specialist runtime, which put the rule in the
+ * wrong place and made one runtime depend on the other for it.
+ *
+ * Emitted only alongside REAL KB text (`kbSet.parts.length > 0`), so a run with
+ * no knowledge base never carries a rule about a resource it does not have.
+ */
+export const KB_PRECEDENCE_NOTE =
+  "\n\n---\n# Which source wins (knowledge bases vs the repository)\n\n" +
+  "The repository's OWN documented conventions outrank the knowledge bases " +
+  "below. Where a repo file states a convention — its README, CONTRIBUTING, " +
+  "docs/, a linter or formatter config, or the established pattern of the " +
+  "files you are editing — follow the repository and treat the knowledge base " +
+  "as supplementary. Use knowledge-base guidance where the repo is silent, and " +
+  "when the two genuinely conflict, follow the repo and SAY SO in your report " +
+  "(name the file and the conflicting knowledge base) so a human can reconcile " +
+  "them. Never rewrite an existing file family into a knowledge base's style " +
+  "just because the knowledge base describes one.";

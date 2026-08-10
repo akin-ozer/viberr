@@ -10,6 +10,10 @@ import {
   nextSeq,
   patchRun,
 } from "./run-store.server";
+import {
+  REDACTED,
+  TOKEN_SHAPE_SOURCE,
+} from "~/server/secrets/git-output-redact.server";
 
 /** Terminal run states — reaching one is the run's final answer. */
 const TERMINAL_STATES: readonly RunState[] = ["finished", "error", "interrupted"];
@@ -87,8 +91,11 @@ export const LINE_LOST_TAG = "run·line_lost";
  *
  * Deliberately NOT a generic entropy heuristic: mangling ordinary output is a
  * worse failure than the leak. Nothing else is touched.
+ *
+ * `REDACTED` and the token SHAPES are the single canonical copy in
+ * `git-output-redact.server` (which scrubs git's own output the same way); this
+ * run-log path imports them so the two can never drift.
  */
-const REDACTED = "[redacted]";
 
 /**
  * Below this length a credential-shaped variable is a FLAG, not a secret
@@ -96,14 +103,6 @@ const REDACTED = "[redacted]";
  * value would scrub every digit out of every log line.
  */
 const MIN_SECRET_VALUE_LEN = 12;
-
-/** Token shapes worth redacting on sight — anchored prefixes + a length floor,
- *  so ordinary prose ("sk-1", "gh_") is never touched. */
-const TOKEN_SHAPE_SOURCE = [
-  "gh[pousr]_[A-Za-z0-9]{16,}", // ghp_/gho_/ghu_/ghs_/ghr_ GitHub tokens
-  "github_pat_[A-Za-z0-9_]{20,}", // fine-grained PAT
-  "sk-[A-Za-z0-9_-]{16,}", // sk-ant-…, sk-proj-…, OpenAI/Anthropic keys
-].join("|");
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

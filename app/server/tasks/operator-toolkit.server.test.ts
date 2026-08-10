@@ -2,7 +2,10 @@ import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { saveMcpServer } from "~/server/org/resources.server";
-import { buildOperatorToolkit } from "./operator-toolkit.server";
+import {
+  buildOperatorToolkit,
+  OPERATOR_TOOLKIT_INSTRUCTIONS,
+} from "./operator-toolkit.server";
 import type { OperatorAuthority } from "./operator-actions.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -121,6 +124,44 @@ describe("buildOperatorToolkit — deliver_for_review (R15-2)", () => {
 });
 
 /**
+ * N19-9 — nothing in the product could bring a task branch up to date with its
+ * base. The owner ruled it operator-decided, in the R15-2 shape: a capability
+ * gates the tool, the server does the git, a conflict goes to a human.
+ */
+describe("buildOperatorToolkit — update_branch_from_base (N19-9)", () => {
+  const build = (auth: OperatorAuthority) =>
+    buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: auth,
+    });
+
+  it("builds the tool with the grant ABSENT (it postdates every deployment; it follows the delivery gate)", () => {
+    expect(build(authority([])).allowedTools).toContain(
+      "mcp__viberr__update_branch_from_base",
+    );
+  });
+
+  it("withholds the tool when update-task-branch is explicitly off", () => {
+    const auth = authority([]);
+    auth.policy.set("update-task-branch", "off");
+    expect(build(auth).allowedTools).not.toContain(
+      "mcp__viberr__update_branch_from_base",
+    );
+  });
+
+  it("withholds it when DELIVERY is withheld — it is the smaller act on the same branch", () => {
+    const auth = authority([]);
+    auth.policy.set("deliver-review-pr", "off");
+    expect(build(auth).allowedTools).not.toContain(
+      "mcp__viberr__update_branch_from_base",
+    );
+  });
+});
+
+/**
  * A4 — with NO operator deployed, `resolveOperatorAuthority` returns an empty
  * policy and `deployed: false`. Every gate then denies, so the toolkit is
  * read-only. The bug: `deliverGate`'s absent-means-granted polarity fired for
@@ -146,7 +187,83 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
       taskKey: "P-1",
       authority: undeployed(),
     });
+    // R19-1: the operator reads the repository from the full read-only checkout
+    // under its cwd (Read/Grep/Glob), not from an MCP tool — so the in-process
+    // toolkit floor is just `get_task`. What "read-only" excludes is every
+    // WRITE, and that is what this asserts: the floor is exactly the one read,
+    // and nothing that changes state is reachable.
     expect(toolkit.allowedTools).toEqual(["mcp__viberr__get_task"]);
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
+    for (const write of [
+      "mcp__viberr__deliver_for_review",
+      "mcp__viberr__transition_stage",
+      "mcp__viberr__open_decision_packet",
+      "mcp__viberr__prompt_agent",
+      "mcp__viberr__post_comment",
+    ]) {
+      expect(toolkit.allowedTools).not.toContain(write);
+    }
+  });
+});
+
+/**
+ * R19-1 — the toolkit's own instructions block is a SECOND channel into the
+ * same model, and it used to contradict the first.
+ *
+ * The operator now runs with a read-only checkout of the project repository
+ * under its cwd and a system prompt requiring every packet that reasons about
+ * repository contents to be grounded in it. The instructions still said "never
+ * write code or touch the repository" — written when the operator had no
+ * working tree at all. A model told to read the repo by one channel and never
+ * to touch it by another can resolve that either way, and the way that loses is
+ * exactly F19-4: describing the empty task folder as "the repo".
+ */
+describe("OPERATOR_TOOLKIT_INSTRUCTIONS — reading is expected, writing is not (R19-1)", () => {
+  it("states the write prohibition precisely and stops forbidding reads", () => {
+    // Canary: restore the "never write code or touch the repository" sentence
+    // and every half fails.
+    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toContain("never write code");
+    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toMatch(/cannot edit, create or commit files/);
+    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toContain("READING the task's repository checkout");
+    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).not.toMatch(/touch the repository/);
+    // The claim-grounding rule the packets depend on, restated where the tools
+    // that WRITE those packets are described.
+    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toMatch(
+      /claim you make about the repository must come from reading it/,
+    );
+  });
+
+  it("does NOT claim the operator cannot push — delivery is its decision (R15-2)", () => {
+    // The over-correction that would break the product: `deliver_for_review`
+    // pushes the deliverer's committed branch, and both the operator definition
+    // and the tool description tell the model delivery is its call. A blanket
+    // "you cannot push the repository" here is a third channel contradicting
+    // them, and the careful resolution is an operator that stops delivering.
+    // Canary: put "or push the repository" back into the constant and this
+    // fails.
+    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).not.toMatch(/or push the repository/);
+    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toMatch(
+      /delivery is a decision you make and the server executes/,
+    );
+  });
+
+  it("is the string the viberr MCP server actually carries", () => {
+    // Pins the WIRING, not just the constant: a run reads the server's
+    // instructions, not this module's exports. (Reaches into the SDK server's
+    // private field — if the SDK moves it, this fails loudly rather than
+    // passing while the operator reads something else.)
+    const db = ctxDb.makeDb();
+    const toolkit = buildOperatorToolkit({
+      db,
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: authority([]),
+    });
+    const wired = (
+      toolkit.mcpServers.viberr as unknown as {
+        instance: { server: { _instructions?: string } };
+      }
+    ).instance.server._instructions;
+    expect(wired).toBe(OPERATOR_TOOLKIT_INSTRUCTIONS);
   });
 });

@@ -19,6 +19,7 @@ import {
 let tmp: string;
 const savedClaude = process.env.CLAUDE_CONFIG_DIR;
 const savedCodex = process.env.CODEX_HOME;
+const savedDataRoot = process.env.VIBERR_DATA_ROOT;
 
 /** Claude encoding: absolute cwd with every non-alphanumeric char -> '-'. */
 function encode(cwd: string): string {
@@ -38,6 +39,18 @@ beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), "viberr-export-"));
   process.env.CLAUDE_CONFIG_DIR = path.join(tmp, "claude-home");
   process.env.CODEX_HOME = path.join(tmp, "codex-home");
+  // Codex has TWO session roots (`codexSessionRoots`): the human's login dir
+  // (`CODEX_HOME`, pinned above) and the app-owned run home, which resolves off
+  // `VIBERR_DATA_ROOT`. Only the first was pinned, so the probe still consulted
+  // whatever data root the ambient env named — and `env.server`'s module-scope
+  // `loadEnvFile()` supplies one from a developer's `.env`. On a machine that
+  // had run the app, `<data root>/runtimes/codex-home/sessions` EXISTS, so the
+  // "no sessions dir ⇒ unknown" cases below answered `missing` instead: this
+  // file passed on CI and failed on a laptop — the same class of leak
+  // test-support/setup-env.ts documents for `CLAUDE_CONFIG_DIR`. Pointed at a
+  // path that does NOT exist, because "no store at all" is the state these
+  // cases assert on.
+  process.env.VIBERR_DATA_ROOT = path.join(tmp, "data-root");
   resetEnvCacheForTests();
 });
 
@@ -47,6 +60,8 @@ afterEach(() => {
   else process.env.CLAUDE_CONFIG_DIR = savedClaude;
   if (savedCodex === undefined) delete process.env.CODEX_HOME;
   else process.env.CODEX_HOME = savedCodex;
+  if (savedDataRoot === undefined) delete process.env.VIBERR_DATA_ROOT;
+  else process.env.VIBERR_DATA_ROOT = savedDataRoot;
   resetEnvCacheForTests();
 });
 

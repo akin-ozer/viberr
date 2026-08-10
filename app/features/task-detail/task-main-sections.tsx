@@ -15,10 +15,6 @@ import {
   type OwnerAction,
   type TaskMemberView,
 } from "./execution-profile";
-import {
-  OperatorRecommendations,
-  type RecommendationView,
-} from "./operator-recommendations";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
 /**
@@ -27,6 +23,16 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
  * profile. (The live-run strip, decision packet, agent logs and timeline are
  * their own modules already.) Split out of `task-detail-page.tsx` (pass 16,
  * pure structural refactor — no behaviour or copy change).
+ *
+ * RECOMMENDATIONS ARE DELIBERATELY NOT HERE. This module used to export a
+ * `RecommendationsSection` that owned its own fetcher and submitted
+ * `apply-recommendation` straight from the card. F19-3 (live-proven: one Apply
+ * click merged an unreviewed head into main) moved the apply path up into
+ * `task-detail-page.tsx`, because the click has to reach the page's confirm
+ * state — a section that owns its own fetcher structurally CANNOT ask first.
+ * The page renders `OperatorRecommendations` directly and routes Apply through
+ * `AcceptConfirm` (mode `apply-recommendation`). Do not re-add a local wrapper
+ * here: the ceremony lives at the page, and a wrapper is how it gets skipped.
  */
 
 /** Parse/inconsistency findings from the projection (tolerant-parsing
@@ -248,49 +254,9 @@ export function TaskHero({
   );
 }
 
-
-/** Operator recommendation cards plus their apply/dismiss mutations. */
-export function RecommendationsSection({
-  recommendations,
-  canApply,
-}: {
-  recommendations: RecommendationView[];
-  canApply: boolean;
-}) {
-  const csrf = useCsrfToken();
-  const recFetcher = useFetcher<ActionResult>();
-  useActionFeedback(recFetcher);
-  const recBusy = recFetcher.state !== "idle";
-
-  // Apply / dismiss an operator recommendation card (apply is admin|maintainer;
-  // server re-checks). Apply executes the recommended assign/reviewer/transition.
-  const onApplyRec = (recId: string) => {
-    if (recBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "apply-recommendation");
-    fd.set("recId", recId);
-    recFetcher.submit(fd, { method: "post" });
-  };
-  const onDismissRec = (recId: string) => {
-    if (recBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "dismiss-recommendation");
-    fd.set("recId", recId);
-    recFetcher.submit(fd, { method: "post" });
-  };
-
-  return (
-    <OperatorRecommendations
-      recommendations={recommendations}
-      canApply={canApply}
-      busy={recBusy}
-      onApply={onApplyRec}
-      onDismiss={onDismissRec}
-    />
-  );
-}
+/** UX19-10: the honest default when the page has not wired `backendAvailable`
+ *  — the pre-fix behaviour (both options live), never a silent narrowing. */
+const BOTH_BACKENDS = { claude: true, codex: true } as const;
 
 /** O-3: pending scheduled operator re-runs + a form to schedule one. Scheduling
  *  and cancelling are `run-agents` (maintainer+); the server re-checks. Hidden
@@ -299,16 +265,37 @@ export function ScheduledActions({
   schedules,
   canRunAgents,
   taskClosed,
+  backendAvailable = BOTH_BACKENDS,
+  configuredAutonomy,
 }: {
   schedules: TaskSchedule[];
   canRunAgents: boolean;
   taskClosed: boolean;
+  /** R19-A: the project's configured operator autonomy — the CEILING. A
+   *  schedule fires UNATTENDED, so offering a level the server will clamp is
+   *  worse here than on the run picker: nobody is watching to notice. */
+  configuredAutonomy: "supervised" | "full";
+  /** UX19-10: which backends this deployment actually has a credential for —
+   *  the SAME loader fact `OperatorRunControl` reads one panel down. A schedule
+   *  fires unattended, so an option that `selectAdapter` will refuse must not be
+   *  offered here either. */
+  backendAvailable?: { claude: boolean; codex: boolean };
 }) {
   const csrf = useCsrfToken();
   const fetcher = useFetcher<ActionResult>();
   useActionFeedback(fetcher);
   const busy = fetcher.state !== "idle";
   const canSchedule = canRunAgents && !taskClosed;
+  // UX19-10: same fallback formula as `OperatorRunControl` (P11-41) — the
+  // picker never starts on an option that would fail fast. It used to be a flat
+  // `defaultValue="claude"`, so on a Codex-only instance the two operator
+  // pickers on one screen defaulted to DIFFERENT backends and this one defaulted
+  // to the backend that cannot run.
+  const defaultBackend = backendAvailable.claude
+    ? "claude"
+    : backendAvailable.codex
+      ? "codex"
+      : "claude";
 
   // Nothing to show: no pending schedules AND the viewer can't create one.
   if (schedules.length === 0 && !canSchedule) return null;
@@ -380,7 +367,7 @@ export function ScheduledActions({
             submit({
               intent: "schedule-action",
               delayMinutes: String(f.get("delayMinutes") ?? "60"),
-              backend: String(f.get("backend") ?? "claude"),
+              backend: String(f.get("backend") ?? defaultBackend),
               autonomy: String(f.get("autonomy") ?? "supervised"),
               note: String(f.get("note") ?? ""),
             });
@@ -398,16 +385,30 @@ export function ScheduledActions({
             </label>
             <label className="flabel">
               Backend
-              <select name="backend" defaultValue="claude">
-                <option value="claude">Claude Code</option>
-                <option value="codex">Codex</option>
+              {/* UX19-10: the same option treatment `OperatorRunControl` gives
+                  the immediate run (execution-profile.tsx) — an unconfigured
+                  backend is disabled and says so. This picker offered both
+                  unconditionally, so a maintainer could schedule a re-run onto
+                  a backend `selectAdapter` refuses; hours later, with nobody
+                  watching, the run failed and escalated into a blocked packet
+                  the human then had to clear. A refusal knowable at click time
+                  is stated at click time. */}
+              <select name="backend" defaultValue={defaultBackend}>
+                <option value="claude" disabled={!backendAvailable.claude}>
+                  Claude Code{backendAvailable.claude ? "" : " — not configured"}
+                </option>
+                <option value="codex" disabled={!backendAvailable.codex}>
+                  Codex{backendAvailable.codex ? "" : " — not configured"}
+                </option>
               </select>
             </label>
             <label className="flabel">
               Autonomy
-              <select name="autonomy" defaultValue="supervised">
+              <select name="autonomy" defaultValue={configuredAutonomy}>
                 <option value="supervised">Supervised</option>
-                <option value="full">Full</option>
+                {configuredAutonomy === "full" && (
+                  <option value="full">Full</option>
+                )}
               </select>
             </label>
           </div>
@@ -439,6 +440,7 @@ export function ExecutionSection({
   onRelease,
   deployedSpecialists,
   operatorBackend,
+  operatorAutonomy,
   backendAvailable,
   canRunAgents,
   deliveringActive,
@@ -454,6 +456,8 @@ export function ExecutionSection({
   onRelease: () => void;
   deployedSpecialists: DeployedSpecialistView[];
   operatorBackend: "claude" | "codex";
+  /** R19-A: the project's configured operator autonomy (the run ceiling). */
+  operatorAutonomy: "supervised" | "full";
   backendAvailable: { claude: boolean; codex: boolean };
   canRunAgents: boolean;
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
@@ -546,6 +550,7 @@ export function ExecutionSection({
       onRelease={onRelease}
       deployedSpecialists={deployedSpecialists}
       operatorBackend={operatorBackend}
+      operatorAutonomy={operatorAutonomy}
       backendAvailable={backendAvailable}
       canRunAgents={canRunAgents}
       deliveringActive={deliveringActive}

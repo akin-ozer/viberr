@@ -1,7 +1,6 @@
-import { Link, useFetcher } from "react-router";
+import { Link } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import { Avatar } from "~/ui/avatar";
-import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
@@ -10,7 +9,6 @@ import { roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
-import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
 /**
  * The task-detail SIDE column, in its contracted order (spec §2): GitHub trace
@@ -21,7 +19,9 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 export function GithubTrace({
   task,
   githubHost,
+  acceptance,
   reconciledAt = null,
+  checkedAt = null,
   onCompleteMerge,
   onForceAccept,
   onDeliver,
@@ -32,13 +32,52 @@ export function GithubTrace({
   /** GitHub web host for browse links — always the loader's `githubWebHost()`
    *  (P14-UI-11: no client-side default, so the literal lives in one place). */
   githubHost: string;
-  /** UI-57: ISO of the newest `github.reconcile` for THIS task, or null when it
-   *  has never been synced. Diff/commits/PR below are a CACHE — the GitHub page
-   *  discloses its freshness and this card did not. */
+  /** UX19-2: the SAME live acceptance affordance the Current-state panel below
+   *  renders. This panel used to read the gate from `task.blockReason` — the
+   *  projection column that deliberately carries only the REVISION dimension
+   *  (rebuilder.server.ts: "the stage boundary … stays out of this column") —
+   *  so on any delivered-but-unreviewed pre-boundary task the two adjacent
+   *  panels named different gates: "Acceptance is blocked: no approving verdict
+   *  yet" here, "Not acceptable yet — at In Progress, not Review" one panel
+   *  down. One source, one sentence, no contradiction. */
+  acceptance: Pick<
+    AcceptanceAffordance,
+    "atBoundary" | "blockedReason" | "terminallyBlocked"
+  >;
+  /** UI-57: ISO of the newest `github.reconcile` PROVENANCE row for THIS task —
+   *  i.e. the last pass that actually CHANGED something, not the last pass that
+   *  ran. DG-3 (github-reconciler.server.ts: `if (changed ||
+   *  !ctx.skipUnchangedProvenance)`) deliberately skips the row on an unchanged
+   *  poller tick to bound table growth, so a healthy task whose GitHub state is
+   *  stable has no fresh row at all. Null = no change has ever been recorded.
+   *
+   *  F19-22: this used to be labelled "Synced" under a tooltip promising a
+   *  5-minute poller — live-proven contradiction (panel "Synced 1h ago" at
+   *  12:42Z while `audit_events` held successful `github.reconcile.task` passes
+   *  at 12:07 … 12:42). The row now names the quantity it actually holds, and
+   *  `checkedAt` below supplies the half it never had. */
   reconciledAt?: string | null;
-  /** Run the real merge for an accepted (merge-pending) PR (S2). */
+  /** F19-22 (second half): ISO of the newest COMPLETED reconcile pass for this
+   *  task — `MAX(occurred_at)` over the `github.reconcile.task` AUDIT rows
+   *  (`server/audit/audit-query.server.ts`). That write is unconditional and
+   *  sits after every early return in `reconcileTaskExclusive`, so a row exists
+   *  iff a pass ran to completion, changed or not: it is the only fact in the
+   *  app that can tell a human the poller is alive. Rendered as its own row
+   *  because it answers a different question from `reconciledAt` — "we looked"
+   *  vs "something moved" — and collapsing them is exactly the conflation this
+   *  finding is about.
+   *
+   *  Null = no completed pass on record (audit retention is 90 days). That is
+   *  NOT "never synced", and the copy must not say so. */
+  checkedAt?: string | null;
+  /** F19-24: OPEN the merge confirm for an accepted (merge-pending) PR (S2).
+   *  Never the submitter — completing the merge is the real, irreversible
+   *  GitHub merge and the mandatory human half of every full-autonomy operator
+   *  acceptance (R16-6), so ruling 20's dialog binds here exactly as it does on
+   *  the Accept button. */
   onCompleteMerge?: () => void;
-  /** Admin override of a stuck acceptance gate (DG-2); admin-only, undefined otherwise. */
+  /** Admin override of a stuck acceptance gate (DG-2); admin-only, undefined
+   *  otherwise. Also opens the confirm, never submits. */
   onForceAccept?: () => void;
   /** R15-2 safety net (b): perform delivery (push + review PR) by hand —
    *  maintainer+ or the task owner; undefined hides the control. */
@@ -46,24 +85,37 @@ export function GithubTrace({
   delivering?: boolean;
   merging?: boolean;
 }) {
-  // Admin escape hatch (DG-2): acceptance is wedged either by the required-reviewer
-  // gate (task.blockReason) OR by an open blocked decision packet a crashed run left
-  // behind. Surfaced for admins (onForceAccept present) regardless of branch/PR, so a
-  // no-branch pre-work wedge is still escapable.
+  // Admin escape hatch (DG-2): acceptance is wedged either by the acceptance gate
+  // itself (`acceptance.blockedReason` — the live, full-order refusal) OR by an open
+  // blocked decision packet a crashed run left behind. Surfaced for admins
+  // (onForceAccept present) regardless of branch/PR, so a no-branch pre-work wedge is
+  // still escapable.
   //
   // F18-13: but never on a task that is ALREADY terminal. Force-accept BYPASSES the
-  // verdict gate (it never satisfies it), so `blockReason` persists after the task is
+  // verdict gate (it never satisfies it), so the refusal persists after the task is
   // accepted into Done — the card kept offering "Force accept (override review gate)"
   // and "Acceptance is blocked …" on a task with nothing left to accept. A terminal
-  // task withdraws the affordance, same as R16-3 hides it while the PR is closed.
+  // task withdraws the affordance, and so does R16-3's terminal GitHub fact (a closed,
+  // unmerged PR is decided, not wedged — there is nothing to override).
   const isTerminal =
     task.displayReadiness === "accepted" || task.displayReadiness === "merged";
-  const forceAcceptReason = isTerminal
-    ? null
-    : (task.blockReason ??
-      (task.packet?.type === "blocked"
-        ? "An open blocked decision is holding this task."
-        : null));
+  const forceAcceptReason =
+    isTerminal || acceptance.terminallyBlocked
+      ? null
+      : (acceptance.blockedReason ??
+        (task.packet?.type === "blocked"
+          ? "An open blocked decision is holding this task."
+          : null));
+  // UX19-2 / R19-5: force-accept from BEFORE the review boundary really does jump
+  // the task straight to Done and merge (the stage gate is inside the block
+  // `force` skips). The owner ruled the skip LEGAL, and the silence about it the
+  // defect — so the offer STAYS off-boundary (a pre-work wedge must be escapable;
+  // there is no off-boundary hiding), and the label names the skip instead of
+  // promising only a "review gate" override. The confirm dialog enumerates the
+  // skipped stages by name; the `!acceptance.terminallyBlocked` guard (folded
+  // into `forceAcceptReason`) is the only withdrawal — a closed PR is decided
+  // (R16-3), not wedged.
+  const skipsStages = !acceptance.atBoundary;
   const forceAcceptRow =
     forceAcceptReason && onForceAccept ? (
       <div className="force-accept">
@@ -77,10 +129,16 @@ export function GithubTrace({
           className="btn ghost sm full"
           disabled={merging}
           onClick={onForceAccept}
-          title="Admin override: accept this task into Done past the review gate. Audited."
+          title={
+            skipsStages
+              ? `Admin override: accept ${task.key} into Done from here, skipping the remaining stages AND the review gate, and merge. Audited.`
+              : "Admin override: accept this task into Done past the review gate. Audited."
+          }
         >
           <Icon name="shield" />
-          Force accept (override review gate)
+          {skipsStages
+            ? "Force accept (skips the remaining stages and the review gate)"
+            : "Force accept (override review gate)"}
         </button>
       </div>
     ) : null;
@@ -152,9 +210,37 @@ export function GithubTrace({
         )}
       </div>
       <div className="gh-body">
+        {/* F19-22 (second half): the honest freshness cue is TWO facts, and the
+            panel could previously only hold one. "Checked" comes off the
+            per-tick `github.reconcile.task` audit row — the last pass that
+            completed, whether or not it found anything — so a human can tell a
+            quiet branch from a dead poller. "Last change" below stays the
+            provenance row DG-3 skips on unchanged ticks. Two rows, not one
+            merged sentence: they go stale independently, and the whole defect
+            was one number being read as the other. */}
         <div className="kv-row">
-          <span className="k">Synced</span>
-          <span className="v sub" title="Branch, diff, commits and PR state below are served from the cached projection; a background poller refreshes it every 5 minutes.">
+          <span className="k">Checked</span>
+          <span
+            className="v sub"
+            title="When a reconcile pass for this task last completed. A background poller re-checks branched tasks roughly every 5 minutes, and a pass that finds nothing new is still a check — it just records no change."
+          >
+            {checkedAt ? (
+              <time dateTime={checkedAt}>
+                <LocalRelative iso={checkedAt} />
+              </time>
+            ) : (
+              // Deliberately not "never synced": the app knows only that no
+              // completed pass is on record (audit rows are kept 90 days).
+              "no completed pass on record"
+            )}
+          </span>
+        </div>
+        <div className="kv-row">
+          <span className="k">Last change</span>
+          <span
+            className="v sub"
+            title="Branch, diff, commits and PR state below are served from the cached projection. This is when that cache last CHANGED: a background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so an older time here means a quiet branch — the Checked row above says when GitHub was last read."
+          >
             {reconciledAt ? (
               <time dateTime={reconciledAt}>
                 <LocalRelative iso={reconciledAt} />
@@ -163,9 +249,14 @@ export function GithubTrace({
               // F15-02: PR/commit facts on screen came from delivery-time
               // writes, not a reconcile pass — "not yet synced" next to a live
               // PR read as a contradiction. Say what is actually true.
-              "recorded at delivery — no background sync pass yet"
+              "recorded at delivery — nothing has changed since"
             ) : (
-              "not yet synced with GitHub"
+              // F19-22: NOT "not yet synced with GitHub". Under DG-3 an absent
+              // provenance row is silent about whether a pass ever ran — it only
+              // says none of them found anything to write. Claiming "never
+              // synced" from it is the same lie the "Synced Nh ago" label told,
+              // just in the other direction.
+              "nothing recorded yet"
             )}
           </span>
         </div>
@@ -218,13 +309,20 @@ export function GithubTrace({
               {delivering ? "Delivering…" : "Deliver branch & open PR"}
             </button>
           )}
+        {/* F19-24: this is a Done writer — it finishes the acceptance by
+            performing the irreversible merge, and it is the mandatory human half
+            of EVERY full-autonomy operator acceptance (R16-6). It used to merge
+            on a bare click while the sibling force-accept one line down was
+            already wrapped in the confirm. `onCompleteMerge` opens the same
+            ceremony now; the label names the outcome, the dialog names the PR,
+            the target branch and any commits pushed since the review. */}
         {task.pr?.state === "accepted" && onCompleteMerge && (
           <button
             type="button"
             className="btn primary sm panel-act"
             disabled={merging}
             onClick={onCompleteMerge}
-            title="Run the real GitHub merge for this accepted PR (needs a valid project credential)"
+            title={`Review and run the real GitHub merge for PR #${task.pr.number} (needs a valid project credential)`}
           >
             <Icon name="check" />
             Complete merge
@@ -323,10 +421,15 @@ export function PolicyPanel({
         <h2>Permissions</h2>
         <span className="right sub fine xs">V1 rules</span>
       </div>
+      {/* UX19-1: this cited "the owner authority R6-2 adds" — an internal
+          decisions.md ruling id in copy an end user reads, who has no way to
+          look it up and nothing to do with it. Say what the ruling MEANS. The
+          ruling-id citations in this file's CODE COMMENTS (above, and on the
+          `ownsTask` prop) are the right place for them and stay. */}
       <p className="fine xs perm-intro">
         Platform rules as they apply to <b>you on this task</b> — role grants,
-        plus the owner authority R6-2 adds. This task's live stage, owner and
-        waiting-on are in <b>Current state</b> above.
+        plus the authority that comes with owning this task. This task's live
+        stage, owner and waiting-on are in <b>Current state</b> above.
       </p>
       {rows.map((r) => (
         <div className="policy-line" key={r.k}>
@@ -363,6 +466,8 @@ export function CurrentStatePanel({
   onRelease,
   onArchive,
   onAccept,
+  onTransition,
+  transitionBusy,
   acceptBusy: acceptSubmitting,
   dispositionBusy,
 }: {
@@ -383,19 +488,26 @@ export function CurrentStatePanel({
   /** F15-10: opens the accept CONFIRM dialog (the page owns the submission —
    *  accepting merges the PR, so it never fires on a bare click any more). */
   onAccept: () => void;
+  /** F19-37: pick a stage from the menu. Page-owned for the same reason
+   *  `onAccept` is — a HUMAN move into the LAST stage IS an acceptance
+   *  (task-actions.server.ts: "A HUMAN manually moving a task INTO the final
+   *  stage IS accepting completion" → acceptCompletion → the real PR merge), so
+   *  the terminal pick has to reach the page's confirm state instead of
+   *  submitting from inside this panel. Every other stage still submits
+   *  straight through. */
+  onTransition: (toStageId: string) => void;
+  /** A stage transition is in flight (page-owned fetcher) — locks the menu. */
+  transitionBusy: boolean;
   /** The accept submission is in flight (page-owned fetcher). */
   acceptBusy: boolean;
   /** An accept / archive / restore submission is in flight. */
   dispositionBusy: boolean;
 }) {
-  const csrf = useCsrfToken();
-  const transitionFetcher = useFetcher<ActionResult>();
-  useActionFeedback(transitionFetcher);
-
   // Manual stage change from the Current-state dropdown (admin|maintainer; the
   // server re-checks). Goes through the same governed transition that an applied
   // operator recommendation does, so it posts the **Transition:** timeline
-  // comment and hands the task to the operator at its new stage.
+  // comment and hands the task to the operator at its new stage. The submission
+  // itself is the page's (`onTransition`) — see F19-37 on the prop.
   const canTransition = roleCan(myRole as ProjectRole | null, "approve-transition");
   const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
   // E3: releasing SOMEONE ELSE's seat is `release-any-ownership`, which is what
@@ -405,16 +517,6 @@ export function CurrentStatePanel({
     myRole as ProjectRole | null,
     "release-any-ownership",
   );
-  const transitionBusy = transitionFetcher.state !== "idle";
-  const onTransition = (toStageId: string) => {
-    if (transitionBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "transition");
-    fd.set("to", toStageId);
-    transitionFetcher.submit(fd, { method: "post" });
-  };
-
   const owner = task.owner && task.owner.kind === "human" ? task.owner : null;
   const ownerMine = !!(owner && owner.userId === meId);
   const acceptBusy = acceptSubmitting || dispositionBusy;
@@ -478,6 +580,31 @@ export function CurrentStatePanel({
             )}
           </span>
         </div>
+        {/* Gap-10 — last activity, ALWAYS on, unlike the board's threshold-gated
+            cue. This is the detail surface; a supervisor who has opened the task
+            is asking history questions, and "when did anything last happen here"
+            had no answer anywhere in the app.
+            The stamp is `task.lastActivityAt` — the newest TIMELINE event
+            (`occurred_at`), not `task.updatedAt`. `updatedAt` is a file-write
+            stamp bumped by bookkeeping nobody performed (the 5-minute GitHub
+            reconcile poller re-stamps every branched task), so a dead task with
+            an open PR would read "4m ago" forever. The full argument is on
+            app/server/projections/task-activity.server.ts. */}
+        <div className="kv-row">
+          <span className="k">Last activity</span>
+          <span
+            className="v sub"
+            title="The newest event on this task's timeline. Not the last time the task file changed — a background GitHub sync rewrites that without anything happening."
+          >
+            {task.lastActivityAt ? (
+              <time dateTime={task.lastActivityAt}>
+                <LocalRelative iso={task.lastActivityAt} />
+              </time>
+            ) : (
+              "Nothing on the timeline yet"
+            )}
+          </span>
+        </div>
         <div className="kv-row">
           <span className="k">Owner</span>
           <span className="v">
@@ -530,6 +657,18 @@ export function CurrentStatePanel({
           <span className="v mono">{task.repo}</span>
         </div>
       </div>
+      {/* Gap-10: the cue, once the stamp above has crossed its threshold. Stated
+          as the two facts the detector actually has — an empty timeline and an
+          empty run registry — and then the two real ways forward, because a
+          quiet task is not broken, it is unattended. Archived and terminal tasks
+          never reach here: `isQuiet` refuses them outright (R14-3 / UXO-1). */}
+      {task.quiet && (
+        <p className="hint">
+          No activity — nothing has been recorded on this task since then, and no
+          run is in flight. It stays here until someone engages an agent or
+          schedules an operator re-run.
+        </p>
+      )}
       {/* P14-LV-06: the acceptance the review queue promises. It renders for a
           viewer who HOLDS acceptance authority here (maintainer+, or this task's
           own owner per R6-2/R14-2) once the task stands at the boundary a
@@ -553,6 +692,17 @@ export function CurrentStatePanel({
                   ? "Accepting — merging the review PR…"
                   : `Accept completion → ${terminalName}`}
               </button>
+            )}
+            {/* R19-B: the R15-1 verdict gate can be satisfied by a HUMAN's
+                GitHub approval instead of an agent verdict. Name the person and
+                the commit they approved — a gate a human cleared cannot just go
+                green, or whoever accepts has no idea whose judgement they stand
+                on (ruling 19). */}
+            {acceptance.verdictSatisfiedBy && (
+              <p className="hint">
+                <Icon name="check" />
+                {acceptance.verdictSatisfiedBy}
+              </p>
             )}
             {acceptance.blockedReason && (
               // The reason has to be TEXT, not a `title`: a disabled control gets

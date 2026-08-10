@@ -259,6 +259,28 @@ function ResGroup({
 
 // -------------------------------------------------------- delete confirm
 
+/**
+ * UX19-11 — the last guardrail before an irreversible policy change says what
+ * actually happens.
+ *
+ * It used to read "those threads keep running until the operator reassigns
+ * them", and both halves were false:
+ *
+ *  - `activeCount` counts ENGAGEMENTS on every non-archived, non-terminal task
+ *    (`agent-deployments.server.ts`), most of them idle — "keep running"
+ *    describes only a run already in flight. What the next run gets is ruling
+ *    26 (R15-7): a profile that can no longer be resolved is FULLY conservative
+ *    — `resolveUndeployedDisallowedTools()` and `withheldAgentGrants()`
+ *    (`specialist-run.server.ts:760`, `:833`), i.e. no delivery, no comments,
+ *    no ask-human, no evidence. The thread runs and produces nothing anyone can
+ *    act on, which is the opposite of the continuity the copy promised.
+ *  - "until the operator reassigns them" describes an automatic recovery that
+ *    nothing initiates. `deleteAgentProfile`
+ *    (`agent-profile-actions.server.ts:605-650`) edits `project.md`, reprojects
+ *    and audits — it queues no operator run, writes no task timeline event and
+ *    sends no notification. Reassignment is real (`assignSpecialist`), but only
+ *    if a human goes and does it, so the dialog names it as their next step.
+ */
 function DeleteConfirm({
   a,
   projectName,
@@ -295,8 +317,11 @@ function DeleteConfirm({
             It is currently engaged on{" "}
             <strong>
               {activeCount} active task{activeCount > 1 ? "s" : ""}
-            </strong>{" "}
-            — those threads keep running until the operator reassigns them.
+            </strong>
+            . Those engagements stay on the tasks, and nothing reassigns them
+            for you — until someone assigns a replacement from each task's
+            Execution profile, runs there can't deliver, comment, ask a question
+            or attach evidence.
           </>
         ) : (
           <> The global base definition is unaffected.</>

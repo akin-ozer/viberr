@@ -5,6 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { authoredPacketOptions, buildOperatorSystemPrompt } from "./operator-run.server";
+import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -50,6 +51,139 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     expect(prompt).not.toContain("does-not-exist (knowledge base)");
     // C1: it is not injected AND it is not silent — see the section below.
     expect(prompt).toContain("Attached resources that did NOT reach this run");
+  });
+
+  it("R19-2: the operator gets the SAME repo-wins precedence rule the specialists get", () => {
+    // The owner ruled that repo-documented conventions outrank KB guidance and
+    // that the rule ships with EVERY KB injection. The operator coordinates the
+    // agents that write the files, so it must not be told a different story
+    // than they are — one exported constant, injected by both runtimes.
+    //
+    // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildOperatorSystemPrompt
+    // and the first two assertions fail.
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-kb-prec-"));
+    const kbDir = path.join(dataRoot, "kb", "house-style");
+    mkdirSync(kbDir, { recursive: true });
+    writeFileSync(path.join(kbDir, "style.md"), "# House\n\nKB-MARKER-HOUSE.", "utf8");
+
+    const prompt = buildOperatorSystemPrompt(authorityWith(["house-style"]), dataRoot);
+    expect(prompt).toContain(KB_PRECEDENCE_NOTE.trim());
+    // Stated once, and BEFORE the bodies it governs.
+    expect(prompt.split("Which source wins (knowledge bases vs the repository)").length - 1).toBe(1);
+    expect(prompt.indexOf("Which source wins")).toBeLessThan(
+      prompt.indexOf("house-style (knowledge base)"),
+    );
+
+    // …and an operator with no KB carries no rule about one.
+    expect(buildOperatorSystemPrompt(authorityWith([]), dataRoot)).not.toContain(
+      "Which source wins",
+    );
+  });
+
+  it("R19-2: with MANY KBs the note is STILL pushed once, before them all", () => {
+    // The test above proves the rule ships and precedes the body — with ONE KB,
+    // where "once per prompt" and "once per KB" are the same number. The ruling
+    // says once, and the failure it forbids only appears with two: the rule
+    // restated between every pair of bodies reads as if it ranked just the one
+    // that follows it.
+    //
+    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the
+    // `for (const part of kbSet.parts)` loop in buildOperatorSystemPrompt and
+    // the count assertion fails.
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-prec2-"));
+    for (const [name, marker] of [
+      ["house-style", "KB-MARKER-HOUSE"],
+      ["team-facts", "KB-MARKER-TEAM"],
+    ] as const) {
+      mkdirSync(path.join(dataRoot, "kb", name), { recursive: true });
+      writeFileSync(path.join(dataRoot, "kb", name, "style.md"), `# ${name}\n\n${marker}.`, "utf8");
+    }
+
+    const prompt = buildOperatorSystemPrompt(
+      authorityWith(["house-style", "team-facts"]),
+      dataRoot,
+    );
+
+    expect(prompt).toContain(KB_PRECEDENCE_NOTE);
+    expect(
+      prompt.split("Which source wins (knowledge bases vs the repository)").length - 1,
+    ).toBe(1);
+    expect(prompt.indexOf("Which source wins")).toBeLessThan(
+      prompt.indexOf("KB-MARKER-HOUSE"),
+    );
+    expect(prompt.indexOf("Which source wins")).toBeLessThan(
+      prompt.indexOf("KB-MARKER-TEAM"),
+    );
+  });
+});
+
+/**
+ * UC-15's question asked of the OPERATOR — "are the right skills loaded, and
+ * only those?" — on the profile that holds the highest-authority toolkit in the
+ * product. The operator has no native skills channel at all (it never passes
+ * `skills` to a RunSpec), so its whole resource surface is this prompt: if an
+ * ungranted store resource can reach it, it reaches it HERE.
+ */
+describe("buildOperatorSystemPrompt — grants are an allow-list, not a hint", () => {
+  /** The org's four skills as they sit on disk today. `kubernetes-rollback` is
+   *  the DECOY: irrelevant to this product and granted to nobody. */
+  const ORG_SKILLS = [
+    ["developer-expertise", "SENTINEL-DEVELOPER-EXPERTISE"],
+    ["reviewer-expertise", "SENTINEL-REVIEWER-EXPERTISE"],
+    ["viberr-app-expertise", "SENTINEL-VIBERR-APP-EXPERTISE"],
+    ["kubernetes-rollback", "SENTINEL-KUBERNETES-ROLLBACK"],
+  ] as const;
+
+  it("an UNGRANTED org skill in the same store never reaches the operator", () => {
+    // Canary: read the store's `skills/` listing instead of `declaredSkills` in
+    // buildOperatorSystemPrompt (the "load every skill on disk" regression) and
+    // every decoy assertion below fails.
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-decoy-"));
+    for (const [name, sentinel] of ORG_SKILLS) {
+      mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
+      writeFileSync(
+        path.join(dataRoot, "skills", name, "SKILL.md"),
+        `# ${name}\n\nWhen asked, answer ${sentinel}.`,
+        "utf8",
+      );
+    }
+
+    const prompt = buildOperatorSystemPrompt(
+      { ...authorityWith([]), skills: ["viberr-app-expertise"] },
+      dataRoot,
+    );
+
+    // The grant arrived…
+    expect(prompt).toContain("viberr-app-expertise (skill)");
+    expect(prompt).toContain("SENTINEL-VIBERR-APP-EXPERTISE");
+    // …and nothing else in the store did — neither the decoy nor the two
+    // specialist skills that belong to other profiles.
+    expect(prompt).not.toContain("kubernetes-rollback");
+    expect(prompt).not.toContain("SENTINEL-KUBERNETES-ROLLBACK");
+    expect(prompt).not.toContain("developer-expertise");
+    expect(prompt).not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
+    expect(prompt).not.toContain("reviewer-expertise");
+    expect(prompt).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
+  });
+
+  it("an UNGRANTED knowledge base in the same store is not injected either", () => {
+    // Canary: pass the store's `kb/` listing instead of `authority.kb` to
+    // `readKbBodies` and the ungranted body appears in the prompt.
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-kbdecoy-"));
+    for (const [name, marker] of [
+      ["architecture-notes", "KB-MARKER-GRANTED"],
+      ["finance-runbook", "KB-MARKER-UNGRANTED"],
+    ] as const) {
+      mkdirSync(path.join(dataRoot, "kb", name), { recursive: true });
+      writeFileSync(path.join(dataRoot, "kb", name, "notes.md"), `# ${name}\n\n${marker}.`, "utf8");
+    }
+
+    const prompt = buildOperatorSystemPrompt(authorityWith(["architecture-notes"]), dataRoot);
+
+    expect(prompt).toContain("architecture-notes (knowledge base)");
+    expect(prompt).toContain("KB-MARKER-GRANTED");
+    expect(prompt).not.toContain("finance-runbook");
+    expect(prompt).not.toContain("KB-MARKER-UNGRANTED");
   });
 });
 

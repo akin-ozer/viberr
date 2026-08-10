@@ -10,8 +10,17 @@
  *   npm run seed -- --reset  — wipe projects/, agents/profiles, runtime
  *                              transcripts and all derived tables first
  *                              (users/auth + runtime credential homes survive)
+ *
+ * Takes the data-root WRITER lock first (B-FD1) and refuses to run while
+ * another Viberr process holds it. There is NO in-app equivalent of this
+ * command, so the safe ordering is: seed BEFORE starting the app (as the
+ * README quickstart does), or stop the app and seed. `docker compose exec app
+ * npm run seed` against a RUNNING container is exactly the two-writers-on-one-
+ * root shape that has already cost this project a WAL — it is now refused
+ * rather than silently corrupting.
  */
 import { getEnv } from "../app/server/config/env.server";
+import { runWithDataRootWriterLock } from "../app/server/db/cli-lock.server";
 import { getDb } from "../app/server/db/sqlite.server";
 import { seedOrgResources } from "../app/server/org/org-seed.server";
 import { runSeed, SEED_DEFAULT_PASSWORD } from "../app/server/seed/seed.server";
@@ -19,35 +28,45 @@ import { runSeed, SEED_DEFAULT_PASSWORD } from "../app/server/seed/seed.server";
 const env = getEnv();
 const reset = process.argv.includes("--reset");
 
-const summary = await runSeed(getDb(), {
-  dataRoot: env.VIBERR_DATA_ROOT,
-  reset,
-  admin: {
-    ...(env.VIBERR_SEED_ADMIN_EMAIL ? { email: env.VIBERR_SEED_ADMIN_EMAIL } : {}),
-    password: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,
+await runWithDataRootWriterLock(
+  "`npm run seed`",
+  async () => {
+    const summary = await runSeed(getDb(), {
+      dataRoot: env.VIBERR_DATA_ROOT,
+      reset,
+      admin: {
+        ...(env.VIBERR_SEED_ADMIN_EMAIL ? { email: env.VIBERR_SEED_ADMIN_EMAIL } : {}),
+        password: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,
+      },
+    });
+
+    // Org resources: KBs with real files, skills, domain allowlist. No MCP
+    // servers and no GitHub connection are fabricated (honest empty slate).
+    const org = seedOrgResources(getDb(), {
+      dataRoot: env.VIBERR_DATA_ROOT,
+      reset,
+    });
+
+    console.log(
+      [
+        "viberr seed complete (clean sheet — no demo board data):",
+        `  agent profiles ${summary.agentProfiles}`,
+        `  projections changed ${summary.rescanChanged}`,
+        `  org kbs        ${org.kbs} (${org.kbFiles} files)`,
+        `  org skills     ${org.skills}`,
+        `  org mcps       ${org.mcps}`,
+        `  org domains    ${org.domains}`,
+        `  gh connections ${org.connections}`,
+        "",
+        summary.adminCreated
+          ? `Sign in: ${summary.adminEmail} / ${env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD}`
+          : `Admin untouched (users already exist) — bootstrap admin only applies to an empty users table.`,
+      ].join("\n"),
+    );
   },
-});
-
-// Org resources: KBs with real files, skills, domain allowlist. No MCP
-// servers and no GitHub connection are fabricated (honest empty slate).
-const org = seedOrgResources(getDb(), {
-  dataRoot: env.VIBERR_DATA_ROOT,
-  reset,
-});
-
-console.log(
-  [
-    "viberr seed complete (clean sheet — no demo board data):",
-    `  agent profiles ${summary.agentProfiles}`,
-    `  projections changed ${summary.rescanChanged}`,
-    `  org kbs        ${org.kbs} (${org.kbFiles} files)`,
-    `  org skills     ${org.skills}`,
-    `  org mcps       ${org.mcps}`,
-    `  org domains    ${org.domains}`,
-    `  gh connections ${org.connections}`,
-    "",
-    summary.adminCreated
-      ? `Sign in: ${summary.adminEmail} / ${env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD}`
-      : `Admin untouched (users already exist) — bootstrap admin only applies to an empty users table.`,
-  ].join("\n"),
+  {
+    dataRoot: env.VIBERR_DATA_ROOT,
+    alternative:
+      "There is no in-app equivalent of the product seed: stop the app, seed, then start it (or seed a fresh data root before the first start).",
+  },
 );

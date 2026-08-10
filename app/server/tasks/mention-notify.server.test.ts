@@ -1,13 +1,37 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore, type TestStore } from "../../../test-support/test-store";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeProject,
+  writeTask,
+  type TestStore,
+} from "../../../test-support/test-store";
 import { insertUser } from "~/server/auth/user-store.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   ambiguousMentionNote,
   fanOutMentions,
   notifyMentionedUsers,
   resolveMentionTargets,
 } from "./mention-notify.server";
+import { postAgentComment } from "./agent-toolkit.server";
+import {
+  operatorAssignSpecialist,
+  operatorPostComment,
+  resolveOperatorAuthority,
+} from "./operator-actions.server";
+import {
+  appendComment,
+  operatorPromptAgent,
+  postAgentReplyComment,
+  recordAgentCompletion,
+} from "./task-actions.server";
+import type { FileActorRef } from "~/schemas/task-file.schema";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 
 /**
@@ -231,5 +255,318 @@ describe("mention disambiguation (B-FD2)", () => {
     expect(note).toContain("@arda");
     expect(note).toContain("nobody was notified");
     expect(note).toContain("email handle");
+  });
+});
+
+/* ------------------------------------------------ the writers, enumerated */
+
+/**
+ * NEW-4 is not "the helper works" — it is "**every** comment writer uses it".
+ * The convention exists because the fan-out was wired into ONE writer (the human
+ * `appendComment`) while the agents were being instructed to "@tag the human you
+ * answer"; every machine-authored tag was decoration. It has since regressed
+ * exactly this way twice more on writers nobody had counted — P14-GV-06
+ * (`operatorPromptAgent` wrote the timeline directly) and P13-RT-01 (the FINISHED
+ * completion path, i.e. the majority of all agent tags, on BOTH backends).
+ *
+ * So this drives every writer through its real seam and asserts the ping lands.
+ * A writer that forgets the helper fails HERE, in one place, with its own name
+ * on the failure — and {@link COMMENT_WRITER_SITES} below fails when a writer is
+ * ADDED that this table does not cover.
+ */
+describe("every comment writer notifies the human it @tags (NEW-4)", () => {
+  const AGENT: FileActorRef = {
+    kind: "agent",
+    backend: "claude",
+    profileId: "developer",
+    roleHint: "Implementation",
+  };
+
+  /** A task owned by Arda, plus the roster the operator writers need. */
+  function seed(store: TestStore, withRoster: boolean): void {
+    if (withRoster) {
+      const file = readProjectFile({
+        projectSlug: store.slug,
+        dataRoot: store.dataRoot,
+      })!;
+      writeProject(store.dataRoot, {
+        ...file.parsed.frontmatter,
+        repo: null,
+        agents: [
+          {
+            profileId: "operator",
+            capabilities: [
+              { capabilityId: "append-typed-events", mode: "direct" },
+              // `recommend` is what routes operatorAssignSpecialist into
+              // addRecommendation — the writer under test in that row.
+              { capabilityId: "assign-primary-specialist", mode: "recommend" },
+            ],
+            extras: [],
+            definition: {
+              kind: "operator",
+              name: "Operator",
+              backends: ["claude"],
+              model: "sonnet",
+            },
+          },
+          {
+            profileId: "developer",
+            capabilities: [],
+            extras: [],
+            definition: {
+              kind: "specialist",
+              name: "Dev",
+              role: "Implementation",
+              backends: ["claude"],
+              model: "sonnet",
+            },
+          },
+        ] as never,
+      });
+    }
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  /**
+   * Every writer that appends a `comment` timeline event, each driven through the
+   * function a run/route actually calls. `roster` is only about what the writer
+   * needs to exist, never about the fan-out.
+   */
+  const WRITERS: {
+    name: string;
+    roster: boolean;
+    write: (store: TestStore, tag: string) => Promise<void>;
+  }[] = [
+    {
+      name: "appendComment (a human comment)",
+      roster: false,
+      // Authored by Selin so the tag is not the author's own (never self-notify).
+      write: async (store, tag) => {
+        await appendComment(
+          store.db,
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            text: `${tag} can you take the acceptance gate?`,
+          },
+          { userId: store.users.selin.id, label: store.users.selin.email },
+          { dataRoot: store.dataRoot },
+        );
+      },
+    },
+    {
+      name: "postAgentReplyComment (an interrupted/errored agent reply)",
+      roster: false,
+      write: async (store, tag) => {
+        await postAgentReplyComment(
+          store.db,
+          { dataRoot: store.dataRoot },
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            runId: "run_reply",
+            actorRef: AGENT,
+            replyText: `${tag} I stopped at the migration — your call on the schema.`,
+          },
+        );
+      },
+    },
+    {
+      name: "recordAgentCompletion (the FINISHED run — the common case)",
+      roster: false,
+      write: async (store, tag) => {
+        await recordAgentCompletion(
+          store.db,
+          { dataRoot: store.dataRoot },
+          store.slug,
+          "VIB-1",
+          {
+            actorRef: AGENT,
+            runId: "run_done",
+            replyText: `${tag} implemented and self-checked; over to you.`,
+            verdict: null,
+            question: null,
+          },
+        );
+      },
+    },
+    {
+      name: "operatorPromptAgent (the operator's directive comment)",
+      roster: false,
+      write: async (store, tag) => {
+        // No specialist is deployed, so the RUN cannot start — but the directive
+        // COMMENT is written (and fanned out) before that, which is the writer
+        // under test. This is the P14-GV-06 shape verbatim.
+        await operatorPromptAgent(
+          store.db,
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            role: "developer",
+            backend: "claude",
+            directive: `Implement the fix and coordinate with ${tag} on the copy.`,
+            kind: "primary",
+            handle: "dev",
+          },
+          { dataRoot: store.dataRoot },
+        ).catch(() => {});
+      },
+    },
+    {
+      name: "operatorPostComment (operator narration)",
+      roster: true,
+      write: async (store, tag) => {
+        const result = await operatorPostComment(
+          store.db,
+          { dataRoot: store.dataRoot },
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            text: `${tag} the reviewer approved — acceptance is yours.`,
+          },
+          resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+            autonomy: "supervised",
+          }),
+        );
+        // Guard the setup, not the behavior: a denied write would fan nothing
+        // out for a reason that has nothing to do with NEW-4.
+        expect(result.outcome).toBe("done");
+      },
+    },
+    {
+      name: "addRecommendation (the operator's recommendation reasoning)",
+      roster: true,
+      write: async (store, tag) => {
+        const result = await operatorAssignSpecialist(
+          store.db,
+          { dataRoot: store.dataRoot },
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            profileId: "developer",
+            reason: `${tag} I want the Dev on this — confirm and I'll engage.`,
+          },
+          resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+            autonomy: "supervised",
+          }),
+        );
+        expect(result.outcome).toBe("recommended");
+      },
+    },
+    {
+      name: "postAgentComment (an agent's mid-run comment tool)",
+      roster: false,
+      write: async (store, tag) => {
+        await postAgentComment(
+          store.db,
+          { dataRoot: store.dataRoot },
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            actorRef: AGENT,
+            text: `${tag} heads-up mid-run: the fixture data is stale.`,
+          },
+        );
+      },
+    },
+  ];
+
+  for (const writer of WRITERS) {
+    it(`${writer.name} fans the mention out`, async () => {
+      const store = setupTestStore(ctx);
+      seed(store, writer.roster);
+      // The email local-part is the unambiguous tier of the routing ladder, so
+      // this test measures the fan-out and not name collisions in the fixture.
+      const tag = `@${store.users.arda.email.split("@")[0]}`;
+
+      await writer.write(store, tag);
+
+      const mentions = notificationRows(store).filter(
+        (r) => r.kind === "mention",
+      );
+      expect(mentions).toHaveLength(1);
+      expect(mentions[0]!.user_id).toBe(store.users.arda.id);
+      expect(mentions[0]!.text).toContain("mentioned you");
+      // …and it says WHO tagged them: a bare row with no author is how a
+      // machine-authored ping reads as a system notice instead of an answer.
+      expect(mentions[0]!.actor_json).toBeTruthy();
+    });
+  }
+
+  /**
+   * The completeness half. The table above is hand-written, so it can only fail
+   * for a writer someone remembered to add to it — which is precisely NOT the
+   * failure mode NEW-4 exists for (three separate writers were each missed by
+   * everyone who touched them). This pins the SOURCE sites that append a
+   * `comment` timeline event: a new one fails here until its author both wires
+   * the fan-out and adds a row above.
+   *
+   * `task-actions.server.ts` has 3 sites serving 4 writers — `postAgentReplyComment`
+   * and `recordAgentCompletion` share `prepareAgentReplyEvent`'s single
+   * construction and fan out separately, which is exactly why site count and
+   * writer count are pinned apart.
+   */
+  const COMMENT_WRITER_SITES: Readonly<Record<string, number>> = {
+    "server/tasks/task-actions.server.ts": 3,
+    "server/tasks/operator-actions.server.ts": 2,
+    "server/tasks/agent-toolkit.server.ts": 1,
+    // The ONE site that must NOT fan out: the compaction marker is synthesized
+    // FROM events already on the timeline (whose mentions were fanned out when
+    // they were written). Re-notifying on a fold would ping people for a
+    // housekeeping pass.
+    "server/tasks/timeline-compaction.server.ts": 1,
+  };
+  const NO_FANOUT_BY_DESIGN = new Set([
+    "server/tasks/timeline-compaction.server.ts",
+  ]);
+
+  const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+  function sourceFiles(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of readdirSync(dir)) {
+      if (entry.startsWith(".")) continue;
+      const full = path.join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        out.push(...sourceFiles(full));
+        continue;
+      }
+      if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
+      out.push(full);
+    }
+    return out;
+  }
+
+  it("no comment writer exists that this file does not account for", () => {
+    const found: Record<string, number> = {};
+    for (const file of sourceFiles(APP)) {
+      // The object-literal shape every timeline-event construction uses;
+      // `e.type === "comment"` comparisons are a different shape and out of scope.
+      const hits = readFileSync(file, "utf8").match(/\btype:\s*"comment"/g);
+      if (hits) found[path.relative(APP, file)] = hits.length;
+    }
+    expect(found).toEqual(COMMENT_WRITER_SITES);
+
+    for (const file of Object.keys(COMMENT_WRITER_SITES)) {
+      if (NO_FANOUT_BY_DESIGN.has(file)) continue;
+      const src = readFileSync(path.join(APP, file), "utf8");
+      expect(
+        /\b(notifyMentionedUsers|fanOutMentions)\s*\(/.test(src),
+        `${file} appends comments but never calls the shared mention fan-out`,
+      ).toBe(true);
+    }
+    // Every writer the table drives is covered; the counts differ on purpose
+    // (see the doc comment) so this asserts the direction that matters.
+    expect(WRITERS.length).toBeGreaterThanOrEqual(
+      Object.entries(COMMENT_WRITER_SITES)
+        .filter(([f]) => !NO_FANOUT_BY_DESIGN.has(f))
+        .reduce((n, [, c]) => n + c, 0),
+    );
   });
 });

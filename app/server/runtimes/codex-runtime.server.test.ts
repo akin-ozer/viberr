@@ -1003,3 +1003,122 @@ describe("D5 — the verified SDK version is a fact, not a claim", () => {
     expect(header).toContain(`v${CODEX_SDK_VERIFIED_VERSION}`);
   });
 });
+
+/**
+ * UC-16 — the Codex half of the two DISCLOSED MCP/skills asymmetries.
+ *
+ * The capability-matrix modal tells an admin two things about this backend:
+ * "Org MCP credentials are sent on Claude runs only — Codex mounts a declared
+ * server unauthenticated, because its MCP config travels in argv", and that
+ * granted skills arrive as prompt text here because there is no native channel.
+ * A disclosure that drifts from the adapter is worse than none, so both claims
+ * are pinned against what the adapter actually hands the SDK. The Claude halves
+ * live in `claude-runtime.server.test.ts`; the paired assertions in
+ * `runtime-registry.server.test.ts`.
+ */
+describe("UC-16 disclosed asymmetries — the Codex side", () => {
+  const SECRET = "sentinel-org-mcp-credential";
+
+  /** The exact shapes `resolveSpecialistMcpServers` builds for a granted org
+   *  MCP server that carries a credential (specialist-mcp.server.ts). */
+  const CREDENTIALED_SERVERS = {
+    "everything-http": {
+      type: "http",
+      url: "https://mcp.example.test/mcp",
+      headers: { Authorization: `Bearer ${SECRET}` },
+    },
+    "everything-stdio": {
+      command: "npx",
+      args: ["-y", "example-mcp"],
+      env: { MCP_CREDENTIAL: SECRET },
+    },
+    // The in-process toolkit (post_comment / ask_human / report_outcome).
+    viberr_agent: { type: "sdk", instance: {} },
+  };
+
+  async function configWith(
+    spec: Partial<RunSpec>,
+  ): Promise<CodexOptions["config"]> {
+    const run = fakeCodex([
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ]);
+    createCodexAdapter({ codexFactory: run.factory }).start(
+      { ...SPEC, ...spec },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    return run.factoryOptions()?.config;
+  }
+
+  it("mounts a credentialed org MCP server UNAUTHENTICATED — the token is dropped, not the server", async () => {
+    const config = await configWith({ mcpServers: CREDENTIALED_SERVERS });
+    const servers = (config?.mcp_servers ?? {}) as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    // The server still mounts (dropping it silently would be the dishonest fix).
+    expect(Object.keys(servers).sort()).toEqual([
+      "everything-http",
+      "everything-stdio",
+    ]);
+    expect(servers["everything-http"]).toEqual({
+      url: "https://mcp.example.test/mcp",
+      default_tools_approval_mode: "approve",
+    });
+    expect(servers["everything-stdio"]).toEqual({
+      command: "npx",
+      args: ["-y", "example-mcp"],
+      default_tools_approval_mode: "approve",
+    });
+    // …with NO credential carrier of any kind, on either transport.
+    expect(servers["everything-http"]).not.toHaveProperty("headers");
+    expect(servers["everything-stdio"]).not.toHaveProperty("env");
+    // The reason it is dropped rather than translated: this config becomes
+    // `--config key=value` argv on the spawned codex binary, where a literal
+    // secret is readable in `ps auxww`. Nothing in the config may echo it.
+    expect(JSON.stringify(config)).not.toContain(SECRET);
+  });
+
+  it("has no in-process tool channel: the mid-run comment/ask-human toolkit is dropped, never serialized", async () => {
+    const config = await configWith({ mcpServers: CREDENTIALED_SERVERS });
+    // `{ type: "sdk" }` is a live JS object with no CLI equivalent — serializing
+    // it would produce invalid config instead of an honest omission. This is why
+    // "Post mid-run comments" is disclosed as having no Codex channel: a Codex
+    // agent's report posts when the run ENDS, through the outcome envelope.
+    expect(config?.mcp_servers).not.toHaveProperty("viberr_agent");
+    expect(JSON.stringify(config)).not.toContain("viberr_agent");
+  });
+
+  it("passes the DECLARED server name through unchanged (the rename is the CLI's, not Viberr's)", async () => {
+    // P13-LV-15: the codex binary lowercases hyphens to underscores when it
+    // derives a tool prefix (`mcp__everything_http__…`). Viberr must not
+    // pre-normalize to match it — the same declaration has to keep working on
+    // Claude, where the hyphen survives. The disclosure tells personas never to
+    // name an MCP tool literally; this pins that Viberr itself stays neutral.
+    const config = await configWith({ mcpServers: CREDENTIALED_SERVERS });
+    expect(Object.keys(config?.mcp_servers ?? {})).toContain("everything-http");
+    expect(Object.keys(config?.mcp_servers ?? {})).not.toContain(
+      "everything_http",
+    );
+  });
+
+  it("has no native skills channel — `spec.skills` changes nothing about the run", async () => {
+    // R18-5: granted skills reach a CLAUDE run through the SDK's native skills
+    // mechanism. Codex has no equivalent to switch on, so its whole skills
+    // channel stays severed and the grants ride the system prompt as text
+    // (built upstream in `buildSpecialistPersona`). If a future edit forwarded
+    // `spec.skills` into this config it would be re-opening the channel that
+    // re-installs the CLI's own five bundled `.system` skills into any home.
+    const withSkills = await configWith({
+      skills: ["developer-expertise", "conventional-commits"],
+    });
+    const without = await configWith({});
+    expect(withSkills).toEqual(without);
+    expect(withSkills?.skills).toEqual({
+      include_instructions: false,
+      bundled: { enabled: false },
+    });
+    expect(JSON.stringify(withSkills)).not.toContain("developer-expertise");
+  });
+});

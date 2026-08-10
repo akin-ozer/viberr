@@ -15,6 +15,7 @@ import {
 } from "~/server/files/project-file.server";
 import { rebuildAll } from "./rebuilder.server";
 import { decisionsRequiring } from "./decisions.server";
+import { getReviewQueue } from "./review-queue.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 
 const ctx = createTestDbContext();
@@ -401,5 +402,99 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
     const result = decisionsRequiring(store.db, admin.id);
     expect(result.mine).toHaveLength(0);
     expect(result.overrideEligible.map((d) => d.kind)).toEqual(["acceptance"]);
+  });
+
+  /**
+   * UX19-3 — the two readers of the acceptance gate, asserted TOGETHER.
+   *
+   * `acceptanceRows` filtered on `validation_block_reason` and `pr.state` only,
+   * and the projected column left the open-blocked-packet and conflicting-PR
+   * refusals to each reader. The review queue re-derived them locally; this inbox
+   * re-derived neither, so the same task was "Still in review" on one surface and
+   * a `kind: "acceptance"` decision on the other — an acceptance the server
+   * refuses. Both surfaces are checked in one test on purpose: a future scoped
+   * fix to one of them fails here instead of shipping a fresh divergence.
+   */
+  describe("parity with the review queue on the gates the column used to omit", () => {
+    const queue = (store: ReturnType<typeof setupTestStore>) =>
+      getReviewQueue(store.db, store.slug, {
+        viewerUserId: store.users.murat.id,
+      });
+
+    it("a CONFLICTING PR: no acceptance decision, and NOT in the queue's ready panel", () => {
+      const store = setupTestStore(ctx);
+      // Baseline: approved, mergeable PR → both surfaces promise the acceptance.
+      seedAcceptanceReady(store, "VIB-320");
+      expect(
+        decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.kind),
+      ).toEqual(["acceptance"]);
+      expect(queue(store).ready.map((r) => r.key)).toEqual(["VIB-320"]);
+
+      // Same task, GitHub now reports the head conflicts with the base branch.
+      seedAcceptanceReady(store, "VIB-320", {
+        pr: {
+          number: 300,
+          state: "review",
+          title: "Task VIB-320",
+          mergeable: "conflicting",
+        },
+      });
+      expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
+      const after = queue(store);
+      expect(after.ready).toHaveLength(0);
+      expect(after.working.map((r) => r.key)).toEqual(["VIB-320"]);
+      // And the projected reason NAMES the conflict on both surfaces.
+      expect(after.working[0]!.blockReason).toContain(
+        "conflicts with the base branch",
+      );
+    });
+
+    it("an OPEN BLOCKED PACKET: the decision is the PACKET, never an acceptance", () => {
+      const store = setupTestStore(ctx);
+      seedAcceptanceReady(store, "VIB-321");
+      // Re-write the same acceptance-ready task with an operator-raised blocked
+      // decision open on it. Packets set `waiting: human`, so nothing else about
+      // the acceptance shape changes.
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-321", {
+          stage: "review",
+          waiting: "human",
+          readiness: "blocked",
+          branch: REVISION.branch,
+          pr: { number: 300, state: "review", title: "Task VIB-321" },
+          workRevision: REVISION,
+          engagements: [
+            {
+              profileId: "reviewer",
+              backend: "claude",
+              role: "Review",
+              delivers: false,
+              verdictCapable: true,
+            },
+          ],
+          verdicts: [
+            {
+              profileId: "reviewer",
+              revisionId: REVISION.id,
+              headSha: REVISION.headSha,
+              result: "approve",
+              reason: "looks good",
+              at: "2026-07-04T01:00:00.000Z",
+            },
+          ],
+        }),
+        packet: { ...PACKET, type: "blocked", kind: "Blocked decision" },
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      // Still exactly one decision — but it is the packet the human must resolve,
+      // not an acceptance the accept action would refuse.
+      const mine = decisionsRequiring(store.db, store.users.murat.id).mine;
+      expect(mine.map((d) => [d.taskKey, d.kind])).toEqual([["VIB-321", "packet"]]);
+      // The queue agrees: not acceptance-ready.
+      const after = queue(store);
+      expect(after.ready).toHaveLength(0);
+      expect(after.working.map((r) => r.key)).toEqual(["VIB-321"]);
+    });
   });
 });

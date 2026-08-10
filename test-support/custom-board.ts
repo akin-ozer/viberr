@@ -30,7 +30,7 @@ export const CUSTOM_3_STAGE_BOARD: {
       from: "todo",
       to: "doing",
       boundary: "auto",
-      by: "Operator, when a primary specialist is assigned",
+      by: "Operator, when a delivering agent is assigned",
       locked: false,
     },
     {

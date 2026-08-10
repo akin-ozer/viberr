@@ -48,10 +48,16 @@ it is regenerated from the filesystem rather than restated here.
 
 ## Data & naming
 
-- **SQLite:** plural snake_case tables (`users`, `sessions`, `task_projections`,
-  `audit_events`), snake_case columns, `<entity>_id` FKs, `idx_<table>__<cols>` indexes. DB
+- **SQLite:** plural snake_case tables (`users`, `task_projections`, `audit_events`,
+  `notifications`), snake_case columns, `<entity>_id` FKs, `idx_<table>__<cols>` indexes. DB
   rows map to camelCase through the centralized mapping modules in `app/shared/mapping/` —
   never ad hoc at a call site.
+  **Exception, and it is not ours to rename:** better-auth owns four tables and names them
+  in the SINGULAR with camelCase columns — `user`, `session`, `account`, `verification`
+  (`db/migrations/0001_baseline.sql`). Its adapter generates the SQL, so the convention
+  above applies to Viberr's own tables only. *(Corrected 2026-08-06, pass 19 — the example
+  list here said `sessions`, a table that does not exist. That invented name had already
+  propagated into `docs/operations/runbook.md`, which described a sweep of it; F19-17.)*
 - **TS/JSON:** camelCase. Timestamps are UTC ISO 8601 strings at all boundaries and in
   files. Booleans stay booleans; null stays null.
 - **Readiness values** are exactly `ready` | `input_required` |
@@ -104,6 +110,13 @@ it is regenerated from the filesystem rather than restated here.
 - Keep `viberr.css` classes and CSS variables exactly; add new CSS only in clearly-marked
   appended sections of `app/app.css`. No Tailwind, no inline hex colors — use the existing
   tokens. A `var(--x)` that is not defined in `:root` is a bug, not a style choice.
+  *(Clarified 2026-08-06, pass 19 — N19-4.)* "Exactly" bound the class names and the naming
+  convention (flat, unprefixed), and those held. It does **not** make the mock's VALUES
+  authoritative, and several have deliberately diverged: shipped `--radius-card` is 16px and
+  `--radius-panel` 22px against the mock's 18/28, there is no canvas/large radius token, the
+  display face is Manrope not Roobert PRO, and `--pink` / `--dark-red` / `--radius-large`
+  exist in `design/*.html` and nowhere in the app. `app/app.css`'s `:root` is the ONLY token
+  source; read a value there, never out of the mock.
 - Icons: one ported `Icon` component in `app/ui/icon.tsx`, reused everywhere.
 - Theme: light/dark/system, persisted per user (profile) plus a cookie for SSR-safe first
   paint.
@@ -371,7 +384,9 @@ it is regenerated from the filesystem rather than restated here.
     Force-accept and Archive are no longer the only exits for a zero-diff task, and refusal
     copy stops claiming "delivered work" for a 0-diff. Gated on: task at the review boundary,
     verified empty diff, reviewer verdict optional; it merges nothing. (Owner ruling gathered
-    pass 17; on this pass's implementation backlog.)
+    pass 17; on this pass's implementation backlog.) **Amended 2026-08-08 by ruling 62 — the
+    "reviewer verdict optional" clause is SUPERSEDED: a no-change completion now passes the
+    same verdict gate as every other acceptance.** Implemented pass 19 (F19-21).
 44. **R17-3 (2026-08-04): rulings live in `decisions.md`; a docs-canon re-read is a required
     closing step of every pass.** A ruling a code comment cites but no canon file records is a
     ruling that gets reversed — D-17's failure mode, and pass-15's unanswered Q9. Every owner
@@ -408,7 +423,12 @@ it is regenerated from the filesystem rather than restated here.
     as unsubstantiated because it never saw the KB. The union is deduped (a KB both grant never
     double-charges the shared injection budget), applies only to non-delivering runs, and is
     tolerant of an undeployed deliverer. Same on the resumed/@mention review path.
-    (`app/server/tasks/specialist-run.server.ts` — `deliveringKbGrants`/`withDeliveringKb`)
+    (`app/server/tasks/specialist-run.server.ts` — `deliveringContextGrants`/`withDeliveringGrants`;
+    the pair was renamed from `deliveringKbGrants`/`withDeliveringKb` after this ruling. Names
+    corrected 2026-08-06, pass 19.)
+    *(Re-affirmed 2026-08-06, pass 19 — owner ruling; see ruling 57 / R19-3. The
+    inheritance is KBs and ONLY KBs: the docstring claiming it had been "widened to
+    skills by LV-F3" described a widening that never shipped.)*
 
 48. **R18-2 (2026-08-05): a full-autonomy delivery re-queues the operator.** Opening the review
     PR is delivery, NOT a stage transition, so the P11-70 every-transition re-trigger (and the
@@ -476,16 +496,339 @@ it is regenerated from the filesystem rather than restated here.
     introduced the over-granting it warned about. Recorded as a class: a finding taken from a UI
     impression and never re-verified in code can survive several passes as fact.
 
+55. **R19-1 (2026-08-06): the operator gets a FULL read-only clone of the project repo
+    before it triages.** Live (F19-4): at triage the operator's cwd is the task's canonical
+    folder, which holds exactly `task.md` — and the model wrote a decision packet reporting
+    "Repo contents visible to operator: only task.md — no docs/ or README found" about a
+    repository that has both, then invented scoping options from that emptiness ("add a
+    README" for a repo that has one). A packet must be grounded in the REAL repository. The
+    owner ruled for a full clone over the two cheaper fixes that were offered and rejected: a
+    summary-only view (a file listing the model would still have to guess from) and a
+    persona-only fix (telling the model not to claim things it cannot see, which leaves it
+    blind and merely quieter). The clone is the SAME per-task checkout a specialist run uses,
+    so the delivering agent that runs later reuses it rather than paying for a second one, and
+    an EXISTING checkout is returned untouched (re-sanitizing or re-stripping it mid-run is
+    the F19-15 hazard). Read-only is the operator's posture, not a filesystem mode: the
+    operator has no delivery capability, and R18-3's `.claude` strip still applies to the
+    clone. A clone failure is a FIRST-CLASS `unavailable` arm carrying git's own redacted
+    complaint — never an error that strands the drive, and never silence, because a run that
+    does not KNOW it is blind falls straight back into describing the task folder. Closes
+    Q19-1, extends F19-4. (`operatorWorkspaceView` in
+    `app/server/runtimes/operator-run.server.ts`)
+    *(History, pass 19 — a cheaper READ-ONLY VIEW was offered as the alternative: let the
+    operator list and read the default branch at triage without a working clone. The owner
+    rejected it along with the summary-only file listing, ruling for the full clone above; the
+    view-only option is recorded here only so a reader knows it was weighed and declined.)*
+
+56. **R19-2 (2026-08-06): repo-documented conventions OUTRANK knowledge bases; the KB
+    supplements.** Live (Q19-2): a KB-granted Codex developer followed its KB's pass-note
+    format while a KB-less Claude doc writer followed the repo's own `qa/smoke/README.md` and
+    flagged the KB-shaped files as non-conforming. Both behaved reasonably — nothing had ever
+    told either run which source wins, so one repo grew two house styles. The rule: where a
+    repo file states a convention (README, CONTRIBUTING, `docs/`, a linter/formatter config,
+    or the established pattern of the files being edited) the repository wins; KB guidance
+    applies where the repo is silent; a genuine conflict is followed *repo-first and reported
+    by name* — surfaced as a typed context-conflict event and never silently resolved in either
+    direction — so a human can reconcile it; and an existing file family is never rewritten into
+    a KB's style just because the KB describes one. It ships as ONE constant emitted
+    immediately before the KB bodies it ranks, imported by both runtimes so it cannot drift
+    between them, and emitted only when real KB text is present — a run with no knowledge base
+    never carries a rule about a resource it does not have. Closes Q19-2.
+    (`KB_PRECEDENCE_NOTE` in `app/server/files/kb-injection.server.ts`)
+
+57. **R19-3 (2026-08-06): reviewer inheritance stays KBs only — ruling 47 (R18-1) stands.**
+    F19-2 found `specialist-run.server.ts` documenting that the inheritance had been "widened
+    to SKILLS by LV-F3". It never was: both call sites union `kb` only, the fresh and resume
+    paths each mount the reviewer's OWN skills, and the string "LV-F3" existed nowhere in the
+    repo except that one sentence. Offered the widening as a real option, the owner declined
+    it — a reviewer's craft is its own profile's grant; what deliverer and reviewer must share
+    is the CONVENTIONS they judge against, which is exactly what R18-1's KB union gives them.
+    So skills are DELIBERATELY not inherited, the absence is pinned by a test, and the false
+    docstring is corrected. Recorded as the same class as ruling 54: a claim that lives only
+    in a comment is a claim nobody re-derives. Closes F19-2.
+    (`deliveringContextGrants` in `app/server/tasks/specialist-run.server.ts`)
+
+58. **R19-4 (2026-08-06): a SUPERVISED delivery must leave an actionable next step, and the
+    SERVER guarantees it.** Live (F19-1, VC-1): a supervised operator delivered, narrated "the
+    task will move to Review; no further action needed", and recorded nothing — the task
+    settled `waiting: human` with no recommendation, no packet and no chip, so the human had
+    nothing to act on anywhere in the product. Delivery is not a stage transition (R15-2), so
+    neither the every-transition operator re-trigger nor the auto-boundary stranded backstop
+    covers this moment, and ruling 48 (R18-2) deliberately skips the re-queue at supervised
+    autonomy because the human is the driver. The invariant therefore rested entirely on the
+    model remembering. `performDelivery` now ensures a "Move to \<review\>" recommendation (or
+    equivalent packet) exists whenever an operator-authorized supervised delivery recorded
+    none. Deliberately conservative — it adds nothing when an open packet already IS the next
+    step, when the task is already at or past the review stage, or when the workflow declares
+    no edge from here to review — and idempotent: `addRecommendation` dedupes per
+    (kind, profileId, target), any stage move prunes pending transition cards, and acceptance
+    consumes every card, so the synthesized card can neither double up with the operator's own
+    nor outlive its moment. Ruling 48's full-autonomy re-queue is unchanged. Closes F19-1.
+    (`ensureDeliveredNextStep` in `app/server/tasks/operator-actions.server.ts`, called from
+    `performDelivery` in `app/server/tasks/task-actions.server.ts`)
+
+59. **R19-5 (2026-08-06): force-accept MAY skip the remaining stages AND the review gate — but
+    it must SAY so.** A pass-19 implementer read F19-25 as "force-accept must not jump the
+    workflow graph" and added a server 409 refusing an off-boundary force ("move the task to
+    the boundary first"); the owner REVERTED it. Force-accept exists precisely to get a wedged
+    board unstuck, and a server refusal would have turned the one escape hatch into another
+    wall. The burden the override carries is HONESTY, not refusal: the affordance is labeled
+    with what it does ("skips the remaining stages and the review gate") and its confirm dialog
+    ENUMERATES the stages being skipped, alongside ruling 42's merge-head/divergence
+    disclosure. What force does NOT bypass is unchanged and non-negotiable: the ruling-37
+    terminal GitHub fact (F19-25's real defect — a closed, unmerged PR still refuses, now
+    server-side and not only by hiding the button client-side) and ruling 20's PR-head
+    containment check. Narrows ruling 20, extends rulings 37 and 42.
+    (`forceIrreducibleRefusal` in `app/server/tasks/task-actions.server.ts`;
+    `app/features/task-detail/accept-confirm.tsx`)
+
+60. **R19-6 (2026-08-06): a capability set to `off` is a HARD REFUSE by every route — no card,
+    no audit row.** The leak: with `completion-for-acceptance: off`, an operator that could not
+    recommend accepting a completion still produced an `accept_completion` card and a
+    `task.operator.recommended_completion` audit row by rerouting through a plain terminal-stage
+    transition (F19-26's target-not-kind hole). `off` is a withheld capability, not a routing
+    hint — so the gate is checked FIRST, before any read, card or audit row, on every path that
+    reaches the action including the terminal-target reroute, and `human` refuses the same way
+    while saying the decision is reserved for a human. The operator refuses OUT LOUD and
+    narrates the refusal rather than silently finding another door: a silent reroute is worse
+    than a refusal because the human sees a card whose authority does not exist. Extends
+    ruling 2's capability model and ruling 39's honesty posture.
+    (`app/server/tasks/operator-actions.server.ts`)
+
+61. **R19-7 (2026-08-06): the Activity audit column compacts consecutive
+    runtime-session-open rows.** Live (UX19-5), 8 of the 9 rows a 1440px viewport had room for
+    in the "policy & access · all actors" column read "operator opened the \<role\> runtime
+    session" — routine agent bookkeeping burying the events the column exists for (credential
+    assigned, scopes re-checked, role changed, project created). Audit policy requires the
+    event, so it is not dropped: consecutive runs of it fold into ONE expandable "N runtime
+    sessions opened" row, reusing the timeline's existing compaction shape (a pure walk over a
+    newest-first list, including its "a run too short to be worth a marker stays verbatim"
+    rule). The one deliberate difference from the timeline's version is that nothing is
+    deleted — the entries are kept and handed back on expand, with their real per-row
+    timestamps. **The recognizer is anchored at the END of the projection's sentence, and that
+    anchoring is load-bearing (F19-40):** `entry.text` OPENS with the actor's display name,
+    which any member sets for themselves, so an unanchored matcher let a member named
+    `Mallory (opened the dev runtime session)` fold their own `task.acceptance.forced` and
+    `project.org_admin.override` rows behind the summary — a fold the actor picks is a fold
+    that hides the row from the reader who never expands it. Closes UX19-5 and F19-40.
+    (`app/features/activity/activity-page.tsx`)
+
+62. **R19-8 (2026-08-08): a "Completed — no changes required" task passes the SAME verdict gate
+    as every other acceptance — ruling 43's "reviewer verdict optional" clause is superseded.**
+    Making the outcome reachable (F19-21) meant minting a `workRevision` anchored to the real
+    default-branch head, because a verdict has nothing to bind to without one — that missing
+    subject was the actual wedge that left VC-5 unable to close ("No reviewed revision yet —
+    nothing for the required reviewers to approve"). With a subject in hand the question became
+    whether the required reviewers must approve it. They must: "nothing needed changing" is a
+    CLAIM about the repository, and it is exactly the claim worth a second pair of eyes —
+    a wrong one closes a task that still needed work, silently and with no diff to review later.
+    So the no-change path keeps the ceremony and only loses the PR: no branch, no merge, its own
+    timeline event, still operator-recommendable. Consistent with ruling 20 (R15-1) rather than
+    an exception to it. **The counterpart honesty rule:** "verified" must mean the server
+    actually looked — a no-change outcome requires `defaultBranchEvidence.verified` from
+    push-workspace on BOTH doors (`no_branch` and `no_commits`), so a dirty tree, local commits
+    on the default branch, an abandoned task branch, a history git could not compare, or a
+    swallowed auto-commit failure all stay a genuine delivery failure. A developer who edits
+    files and forgets `git checkout -B` leaves exactly the frontmatter of a verify-only task,
+    and frontmatter cannot see a checkout.
+    (`app/server/tasks/task-actions.server.ts`, `app/server/github/push-workspace.server.ts`)
+    *(Provenance, pass 19 — VC-5 live evidence: a reviewer approved on `main`, no branch was ever
+    created, and `accept_completion` returned `[noop] No reviewed revision yet — nothing for the
+    required reviewers to approve`, forcing the operator to open a packet asking a human how to
+    close the task out — the exact wedge this ruling removes. The consuming machinery — the live
+    fail-closed no-change probe at every writer to Done, the in-lock re-proof, and the shared
+    "Completed — no changes" timeline-event builder — lives in
+    `app/server/tasks/no-change-completion.server.ts`.)*
+
+63. **R19-9 (2026-08-08): the numeric NFR1–NFR5 performance targets are DROPPED from canon —
+    a target nobody measures is a claim, not a requirement.** *(NFR5's slot survives; what it
+    loses is the timing framing, not the constraint — see below.)* The PRD asserted a 200-card board
+    in ≤2 s, task detail ≤2 s p95, a state-changing action reflected ≤3 s p95, and cross-user
+    propagation ≤5 s. None of the four was ever measured, in any pass: there is no performance
+    harness, nothing records a p95, and no test goes red when a figure is missed — which is why
+    the gap kept resurfacing verbatim (D17, "asserted, not verified", carried since pass 17;
+    pass 19 filed it as G19-g, the one gap whose own table offered two branches and took
+    neither). The damage is not the missing milliseconds, it is the precision: a requirements
+    document that prints an unenforced number teaches its reader that the enforced ones — NFR7,
+    NFR10, NFR15, NFR16 and NFR17 each have real guards in the tree — might be decorative too.
+    (NFR6, TLS in transit, is honestly the deployment's job and says so.) So the figures are struck
+    and replaced by qualitative requirements the product can honestly be held to — the board
+    hides nothing to save render time and names its unbounded-query scaling limit out loud,
+    a task surfaces decision-relevant truth ahead of its depth, every state-changing action
+    acknowledges itself rather than completing or failing in silence, and shared state reaches
+    other connected users without a manual refresh. **NFR5 is kept**, re-cast from a timing
+    requirement into a behavioural one, because unlike the other four it is real and enforced:
+    the loader ships a bounded newest-first timeline slice and a bounded run-log window and the
+    console pages backwards on demand. The standing rule for anyone tempted to restore a
+    number: a latency budget lands in the SAME change as the harness that measures it, never
+    before it. Applies ruling 44 to the non-functional half of the PRD.
+    (`planning/planning-artifacts/prd.md` §Responsiveness + its mirror `design/prd.md`;
+    the NFR5 machinery at `app/features/task-detail/timeline-slice.ts`,
+    `app/routes/project.task.tsx`, `app/routes/resources.run-log.ts`)
+
+64. **R19-10 (2026-08-08): the two unshipped spec'd components — the Continuity Recovery Panel
+    (D18) and board arrow-key traversal (D19) — get BUILT; they stop being debt.** Both were
+    named in the UX specification (the Panel is a Phase-3 workflow component and the named
+    home of the Murat continuity journey; traversal is the Task Status Card's "support keyboard
+    navigation across board lanes"), both had been carried as open questions for several passes,
+    and pass 19's audit found them at zero and near-zero: the Panel did not exist in the tree
+    at all — pass 18's warning-toned `continuity` typed event was its only partial — and the
+    board's only `onKeyDown` belonged to the new-task dialog. The choice was ship or convert them
+    into deliberate divergences, and the owner ruled ship, on the grounds that both sit on the
+    product's trust story rather than its feature list: continuity degradation is precisely the
+    moment the product must explain itself instead of going quiet, and a supervision board a
+    keyboard cannot cross is a board that only half-honours the accessibility posture the spec
+    calls baseline. Recorded here alongside the build rather than after it, so the ruling
+    survives independently of whether any single implementation attempt does — a rule this
+    document knows only as an unbuilt spec line is a rule the next pass re-files as a gap.
+    Closes D18 and D19 as open questions; the UX spec's descriptions of both components stand
+    unchanged as the build target. Extends ruling 44 (a ruling no canon file records is a
+    ruling that gets reversed).
+    (`app/features/task-detail/continuity-recovery.tsx` for D18;
+    `app/features/board/board-page.tsx` for D19's roving tab stop)
+
+65. **R19-11 (2026-08-08): a read-only Viewer does not see the project credential card — the
+    PAT half of Q-V1 is implemented, not deferred.** Q-V1 had two halves. The Danger-zone half
+    shipped and was listed as closed; the PAT half was recorded only in a pass-19 reference doc
+    and quietly never built, so the question read "ruled + shipped" while half of it was
+    neither. The principle is the one that decided the first half: a surface shows a role what
+    it may act on, and the credential card is not a status readout — it advertises a secret's
+    existence, its token fingerprint, its scope verdicts and its rotate/remove controls to
+    someone whose role cannot touch any of it. A Viewer reading it learns only that the project
+    holds a credential they are not trusted with, which is disclosure without capability. Three
+    consequences the ruling carries: the card is **withdrawn, not disabled** (ruling 37's
+    precedent — a withdrawn affordance is honest, a disabled one invites a support question);
+    the predicate is the SAME `ACTION_ROLES` entry the route's action guard already enforces
+    (`grant-github-scope`, covering grant-scope, set-credential and clear-credential alike), so
+    a role can never be shown a control it may not use nor hidden from one it may; and the
+    **loader redacts on that same rule**, because a client-only gate leaves the token tail
+    sitting in the HTML. Because pass 19's audit caught the Danger-zone half sitting on an owner
+    ruling with **no test that could fail** (the suite rendered the section component directly
+    and its only full-page render hardcoded an admin), this ruling also requires a full-page
+    render at Viewer asserting the card is ABSENT, canaried by removing the gate: an owner
+    ruling whose guard cannot go red is a ruling that gets reverted in silence. Completes Q-V1;
+    extends ruling 25's members-only posture from "may you open it" to "may you see what is
+    inside it".
+    (`app/features/github/github-view.tsx`, `app/routes/project.github.tsx`; the already-shipped
+    Danger-zone half at `app/features/project-settings/settings-page.tsx`)
+
+66. **R19-12 (2026-08-08): both accessibility gates get built — a systematic both-theme WCAG AA
+    contrast sweep, and a check that enforces the spec's "no control is hidden or disabled at
+    any width" contract.** Today's coverage is enumerated, not systematic: `app.css.test.ts`
+    pins contrast for a hand-listed set of pairs and breakpoint discipline for a hand-listed set
+    of patterns, which verifies exactly the cases someone already thought of and says nothing
+    about the next token pair or the next media query. Both contracts are load-bearing rather
+    than cosmetic. Contrast is: the spec makes WCAG 2.2 AA the baseline in **both** themes, and
+    a single stylesheet serving light and dark from one token block is the exact shape where a
+    value tuned for one theme is legible and its counterpart is not — the failure is invisible
+    to whoever is not looking at that theme. The width contract is stronger still, and is a
+    correctness rule wearing accessibility clothing: hiding a control below a breakpoint makes
+    the surface **dishonest about what the user may do**, so a narrow window must reflow the
+    same interface rather than switch into a reduced one, and nothing may be gated on
+    `matchMedia`. Neither contract survives as prose alone — the responsive amendment has said
+    "nothing is gated on viewport size, and nothing should be" since 2026-07-25 with no check
+    behind it, which is exactly how long it could have been broken unnoticed. So both
+    become gates that fail the suite, on the same footing as the no-undeclared-token rule the
+    stylesheet already enforces with no allowlist. Extends §UI porting rules' "a `var(--x)` that
+    is not defined in `:root` is a bug, not a style choice" — the one styling contract this
+    project already enforces mechanically — to the two the spec calls baseline.
+    (`app/app.css`, `app/app.css.test.ts`; the spec contract at
+    `planning/planning-artifacts/ux-design-specification.md` §Breakpoint Strategy)
+67. **R19-A (2026-08-06): a run may never exceed the project's configured operator autonomy —
+    the per-run level is a CEILING, not a pin.** `resolveOperatorAuthority` used to return
+    `overrides.autonomy ?? configured` verbatim, so any `run-agents` role (maintainer+) could
+    launch ONE turn at `full` on a project whose operator is deployed `supervised` — promoting
+    every `recommend` capability (stage transitions, packets, typed events, `deliver-review-pr`)
+    to direct execution with no confirm, no distinct audit row, only a toast. The Policy page
+    presents operator autonomy as PROJECT configuration (ruling 2); a per-run dropdown that
+    silently outranks it makes that page a lie. So the configured autonomy is a ceiling the run
+    is clamped to. Choosing LESS autonomy for a single run stays allowed and is not a clamp (a
+    maintainer may always ask for more supervision than the project demands); omitting the
+    override means "run at the configured level", also not a clamp. The clamp is audited only
+    WHEN IT ACTUALLY BITES — a silently-reduced run is made visible with the typed
+    `task.operator.autonomy_clamped` fact rather than left mysterious — and the selector and the
+    schedule surface offer exactly the options that will really run. Extends ruling 2's
+    capability model. (`clampAutonomy` / `auditAutonomyClamp` / `operatorAutonomyFor` in
+    `app/server/tasks/operator-actions.server.ts`)
+
+68. **R19-B (2026-08-06): a project member's GitHub approval on the PR counts as the approving
+    verdict.** The asymmetry this closes: a human's DISAPPROVAL already binds the gate (closing
+    the PR unmerged is a terminal fact that outranks every process gate — ruling 37 / R16-3),
+    while their APPROVAL was inert — the review state was "a status pill, not the merge gate". So
+    on a project running no verdict-capable agent, EVERY acceptance had to be an admin
+    force-accept, permanently audited as bypassing a gate nobody could satisfy, even though FR37
+    names the task owner "reviewer + acceptance authority". Four things make the approval evidence
+    rather than a rubber stamp: (1) it is BOUND TO THE DELIVERED REVISION — the approval's
+    `commit_id` must equal the delivered head, checked when recorded AND on every read, so a
+    re-delivery invalidates it instantly (the same contract an agent verdict has with
+    `workRevision.id`); (2) the approver must be a PROJECT MEMBER, resolved from the GitHub login
+    through `users.github_handle`; (3) it FAILS CLOSED — an approval that cannot be confidently
+    mapped (no linked handle, two claimants, a non-member) does not count and the reason is
+    recorded; (4) it is NEVER SILENT — a gate satisfied this way names the human, their handle
+    and the commit. **Composes with, and is no exception to, rulings 20 and 62:** because it
+    binds to a *delivered* revision it cannot fire on a no-change verification revision (which
+    has no delivery to approve), and ruling 62's no-change path is not an exception to the
+    verdict gate either — neither reads as a carve-out of the other. Extends ruling 20 (R15-1) and
+    FR37. (`humanVerdictApproval` in `app/server/github/pr-human-approval.server.ts`; threaded
+    through `verdictGateReason` and the rebuilder's acceptance-block derivation)
+
+69. **R19-13 (2026-08-08): git's own failure text is SURFACED to the human,
+    redacted, where it used to be dropped whole.** Clone and push failures used to scrub git's
+    `stderr`/`message` entirely for credential safety (`cloneFailureLogDetails` dropped both), so
+    a failed delivery or checkout recorded its reason NOWHERE (F19-6, F19-18): the operator opened
+    an honest blocked packet, but no human — and no agent — could act on it, because nothing said
+    why. The reversal: the credential lives in the askpass env, never in argv or the URL, so a
+    token-SHAPE backstop redaction plus ANSI/C0 control-character stripping is sufficient to make
+    the text safe, and git's redacted complaint (e.g. `fatal: could not read Username…`) is now
+    surfaced in the run log, in fenced "What the checkout/push reported:" timeline blocks, and in
+    a ≤240-char one-line delivery reason. One redactor module owns the scrub, at one choke point.
+    Owner-confirmed 2026-08-08 as ruling 69 / R19-13. (B's `spec-failure-diagnostics.md` instruction
+    to record it as "ruling 59" is VOID — 59 is taken by R19-5.)
+    (`app/server/secrets/git-output-redact.server.ts`; the timeline rendering in
+    `specialist-run.server.ts` / `operator-run.server.ts` / `push-workspace.server.ts`)
+
+70. **R19-14 (2026-08-10): new tasks are created at the ENTRY stage only.** Every non-terminal
+    lane used to carry its own "New task in this stage" button, so a human could drop a
+    brand-new task straight into Review — a stage whose semantics (something delivered, something
+    to judge) presuppose work that does not exist yet — and skip the triage quality gate (FR15)
+    entirely. The owner ruled the flexibility out: `createTask` refuses any non-entry `stageId`
+    (naming the entry stage in the refusal), the board offers the per-lane button on the entry
+    lane alone, and the "operator assigned unless the task starts in triage" special case
+    collapses — a task can no longer start anywhere else. Existing tasks are unaffected;
+    file-level fixtures (`createTaskFile`) that seed mid-stage tasks are the projection/test
+    surface, not the human create path, and stay as they are. (`createTask` in
+    `app/server/tasks/task-actions.server.ts`; the `Column` header in
+    `app/features/board/board-page.tsx`)
+
+71. **R19-15 (2026-08-10): notifications are auto-read on VIEWING their target.** A notification
+    only became read when clicked in the bell popover or the `/notifications` inbox — a user who
+    reached the task from the board left that task's notifications unread forever, so the badge
+    grew into steady-state noise (27 unread against 5 live decisions) and stopped meaning
+    "something you have not seen". The owner ruled for view-marking: loading a task page marks
+    ALL of that user's unread notifications for that task read (every kind — the per-user view
+    event, distinct from `markTaskPacketApprovalRead`'s all-user resolution side-effect). The
+    write lives in the task route's loader deliberately: the app uses no link prefetch, the
+    update is idempotent and monotonic (`read_at IS NULL` guard), the emitted
+    `notification.read` event converges (a second pass marks nothing and emits nothing), and it
+    runs only after authorization so the members-only 404 path (ruling 22 / R15-4) stays pure.
+    (`markTaskNotificationsSeen` in `app/server/projections/notifications.server.ts`; called from
+    `app/routes/project.task.tsx`)
+
 ## Route map
 
 ```
 /login  /logout  /api/auth/*            (better-auth, incl. OAuth callbacks)
 /                                       → home (project list)
+/projects                               → home (bare /projects is not a 404 — N5)
 /projects/:slug                         → redirect to board
 /projects/:slug/board  /review  /agents  /policy  /github  /activity  /settings
 /projects/:slug/tasks/:key
 /org/settings                           (org admin, tabbed)
-/profile   /notifications
+/profile   /notifications   /notifications/read   /prefs/theme
 /resources/events  (SSE)   /resources/health   /resources/run-log
-/resources/session-export   /resources/model-catalog
+/resources/search   /resources/session-export   /resources/model-catalog
 ```
+
+*(Corrected 2026-08-06, pass 19, against `app/routes.ts`: `/projects`, `/notifications/read`,
+`/prefs/theme` and `/resources/search` — the ⌘K palette query from ruling 23 / R15-5 — ship but
+were never added here.)*

@@ -24,6 +24,8 @@ import { type RbacAction, ROLE_LABEL, rolesForAction } from "~/shared/rbac";
  *    and EVERY such grant writes a `project.org_admin.override` audit row
  *    naming the action and project, so the override is visible, never silent.
  *    An org admin whose own membership suffices is NOT an override (no row).
+ *    The `"any-member"` gate is rate-collapsed rather than exempt (F19-30 —
+ *    see the override branch): it authorizes real mutations, not just reads.
  *
  * 3. DENIAL (P13-D-8): every refusal writes a `project.authority.denied` row —
  *    NFR10's "unauthorized action attempts" category, previously the only one
@@ -86,33 +88,31 @@ export interface AuthorityAudit {
  * the app funnels through `resolveProjectAuthority`, so one write here covers
  * denied task mutations, runtime starts, policy edits and merges.
  *
- * Identical (actor, project, action) denials collapse inside this window: the
- * membership gate also guards POLLED resource routes (run-log, session-export)
- * and a client that keeps retrying a 403 would otherwise write a row per poll,
- * burying the single deliberate probe this row exists to make visible. Keyed
- * per database handle so parallel test DBs never share state.
+ * Identical denials collapse inside this window: the membership gate also
+ * guards POLLED resource routes (run-log, session-export) and a client that
+ * keeps retrying a 403 would otherwise write a row per poll, burying the single
+ * deliberate probe this row exists to make visible. F19-30 reuses the same
+ * window for the `"any-member"` ORG-ADMIN OVERRIDE row (see the override
+ * branch), which is why the key is caller-supplied and prefixed by kind.
+ * Keyed per database handle so parallel test DBs never share state.
  */
-const DENY_AUDIT_DEDUPE_MS = 60_000;
-const MAX_TRACKED_DENIALS = 500;
-const denyAuditSeen = new WeakMap<DatabaseSync, Map<string, number>>();
+const AUDIT_DEDUPE_MS = 60_000;
+const MAX_TRACKED_AUDIT_KEYS = 500;
+const auditSeen = new WeakMap<DatabaseSync, Map<string, number>>();
 
-function shouldRecordDenial(
-  db: DatabaseSync,
-  key: string,
-  now: number,
-): boolean {
-  let seen = denyAuditSeen.get(db);
+function shouldRecordOnce(db: DatabaseSync, key: string, now: number): boolean {
+  let seen = auditSeen.get(db);
   if (!seen) {
     seen = new Map();
-    denyAuditSeen.set(db, seen);
+    auditSeen.set(db, seen);
   }
   const last = seen.get(key);
-  if (last !== undefined && now - last < DENY_AUDIT_DEDUPE_MS) return false;
-  if (seen.size >= MAX_TRACKED_DENIALS) {
+  if (last !== undefined && now - last < AUDIT_DEDUPE_MS) return false;
+  if (seen.size >= MAX_TRACKED_AUDIT_KEYS) {
     for (const [k, at] of seen) {
-      if (now - at >= DENY_AUDIT_DEDUPE_MS) seen.delete(k);
+      if (now - at >= AUDIT_DEDUPE_MS) seen.delete(k);
     }
-    if (seen.size >= MAX_TRACKED_DENIALS) seen.clear();
+    if (seen.size >= MAX_TRACKED_AUDIT_KEYS) seen.clear();
   }
   seen.set(key, now);
   return true;
@@ -159,7 +159,9 @@ export function isOrgAdmin(db: DatabaseSync, userId: string): boolean {
  *   is granted under their OWN role — never marked as an override.
  * - Otherwise an ORG admin is granted project-admin authority as the D2
  *   emergency override, and the grant is audited (`project.org_admin.override`
- *   with details {action, what, projectSlug}) — EVERY use leaves a row.
+ *   with details {action, what, projectSlug}) — EVERY use leaves a row, with
+ *   repeats of the same `"any-member"` gate collapsed into one row per minute
+ *   (F19-30; the RbacAction gates are never collapsed).
  * - Everyone else is denied; the caller formats its own 403 copy from
  *   `memberRole` (null = not a member). The denial is audited
  *   (`project.authority.denied`, P13-D-8) unless the caller sets `silentDeny`.
@@ -179,13 +181,34 @@ export function resolveProjectAuthority(
     return { allowed: true, role: memberRole, isOrgAdminOverride: false };
   }
   if (isOrgAdmin(db, actor.userId)) {
-    // Audit the override for governance MUTATIONS only. The `"any-member"` gate
-    // is the config-surface route READ (Policy/Settings/Agents/GitHub loaders)
-    // plus a couple of idempotent no-op paths (auto-boundary, owner-release with
-    // no owner) — auditing an override there wrote a row on every page load an
-    // org-admin non-member opened (F7-pass7 audit-noise). Every real governed
-    // mutation the override enables names a concrete RbacAction and IS audited.
-    if (audit.action !== "any-member") {
+    // F19-30: the `"any-member"` gate used to be exempt from the override row,
+    // justified as "config-surface route READs plus a couple of idempotent
+    // no-ops — every real mutation the override enables names a concrete
+    // RbacAction and IS audited". That claim was false. COMMENTING is a real,
+    // visible, deliberately role-free mutation: `appendComment` never calls
+    // `requireAction`, so its ONLY authority is this gate (reached through
+    // `requireVisibleProject`). An org-admin NON-MEMBER could therefore write
+    // into a members-only project and leave no `project.org_admin.override` row
+    // at all — a direct contradiction of D2's "EVERY such grant leaves a row"
+    // invariant at the top of this file.
+    //
+    // So the any-member override is audited now, and the F7-pass7 complaint it
+    // was exempted for ("a row on every page load an org-admin non-member
+    // opened") is answered by collapsing repeats inside the same 60s window the
+    // denial rows use — NOT by silence. The key carries the caller's `what`, so
+    // a READ gate ("view this project's policy", "read this project") can never
+    // mask a WRITE gate ("act on this project"): the comment leaves its own row
+    // even when the same admin loaded the page a second earlier. Residual: two
+    // comments inside one window share one row — the row still names the actor,
+    // the project and the write intent, which is what D2 exists to surface.
+    const record =
+      audit.action !== "any-member" ||
+      shouldRecordOnce(
+        db,
+        `ovr|${actor.userId}|${project.slug}|${audit.what}`,
+        Date.now(),
+      );
+    if (record) {
       recordAudit(db, {
         action: "project.org_admin.override",
         actor: { userId: actor.userId, label: actor.label },
@@ -207,9 +230,9 @@ export function resolveProjectAuthority(
   // which is what "who probed above their role, and at what" needs.
   if (
     !audit.silentDeny &&
-    shouldRecordDenial(
+    shouldRecordOnce(
       db,
-      `${actor.userId}|${project.slug}|${audit.action}`,
+      `deny|${actor.userId}|${project.slug}|${audit.action}`,
       Date.now(),
     )
   ) {

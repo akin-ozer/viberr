@@ -2,7 +2,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { AgentLogsPanel, LiveRunPanel } from "./runs-panels";
-import { runBoundaryLine, type RunView } from "./runtime-types";
+import {
+  runBoundaryLine,
+  RUN_INPUTS_TAG,
+  type RunInputs,
+  type RunView,
+} from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
 
 afterEach(cleanup);
@@ -435,6 +440,77 @@ describe("P13-D-11: the console pages backwards", () => {
  * did nothing and the only way out was a click elsewhere. The hook gives it the
  * same Escape every other popover in the app has.
  */
+/**
+ * UXV19-3 + UXV19-5: the run picker is the surface a user reads FIRST to choose
+ * which stream to inspect, and it was the one place in the panel that spoke
+ * neither the product's engagement vocabulary nor ruling 11's run lifecycle.
+ */
+describe("the run picker speaks the same vocabulary as the panel around it", () => {
+  const interruptedDev = () =>
+    mkRun({
+      id: "primary",
+      kind: "primary",
+      who: { kind: "agent", backend: "claude", name: "dev", role: "Developer" },
+      state: "idle",
+      lifecycle: "interrupted",
+      interruptedBy: { userId: "u1", label: "Arda Kaya" },
+    });
+  const queuedReviewer = () =>
+    mkRun({
+      id: "c0",
+      kind: "reviewer",
+      who: { kind: "agent", backend: "codex", name: "rev", role: "Reviewer" },
+      backend: "codex",
+      state: "idle",
+      lifecycle: "queued",
+    });
+
+  it("UXV19-3: the trigger names the engagement (delivering/supporting), never the RunKind literal", () => {
+    // Canary: restore `kind === "primary" ? "primary" : "reviewer"` in
+    // roleShort and both assertions below fail.
+    const runs = [interruptedDev(), queuedReviewer()];
+    const { container, rerender } = render(
+      <AgentLogsPanel runtime={runs} sel="primary" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,
+    );
+    const role = () => container.querySelector(".rsel-role")!.textContent!;
+    expect(role()).toContain("delivering");
+    // "primary" is the internal kind literal — a THIRD name for the agent the
+    // Execution profile on this same page calls "Delivering agent".
+    expect(role()).not.toContain("primary");
+    rerender(
+      <AgentLogsPanel runtime={runs} sel="c0" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,
+    );
+    expect(role()).toContain("supporting");
+  });
+
+  it("UXV19-5: an option carries its run's LIFECYCLE, so the list, the pill and the footer agree", () => {
+    // Canary: put `RUN_STATE[r.state].label` back in the option and the
+    // interrupted/queued expectations below fail on "idle".
+    const { container } = render(
+      <AgentLogsPanel
+        runtime={[interruptedDev(), queuedReviewer()]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: [], c0: [] }}
+      />,
+    );
+    fireEvent.click(container.querySelector(".rsel-btn")!);
+    const states = [...container.querySelectorAll('[role="option"] .ri-state')].map(
+      (n) => n.textContent,
+    );
+    expect(states).toEqual(["interrupted · by Arda", "queued"]);
+    expect(states.some((s) => s?.includes("idle"))).toBe(false);
+    // …and four lines of markup below, the pill and the footer for the SAME
+    // run say exactly that.
+    expect(container.querySelector(".logs-bar .pill")!.textContent).toBe(
+      "interrupted · by Arda",
+    );
+    expect(container.textContent).toContain(
+      "interrupted by Arda — the thread stays resumable",
+    );
+  });
+});
+
 describe("AgentPicker dismissal (shared useDismiss)", () => {
   function openPicker() {
     const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });
@@ -466,5 +542,99 @@ describe("AgentPicker dismissal (shared useDismiss)", () => {
     const { container } = openPicker();
     fireEvent.mouseDown(container.querySelector('[role="listbox"]')!);
     expect(container.querySelector('[role="listbox"]')).not.toBeNull();
+  });
+});
+
+// ------------------------------------------------------------------- P19-G11
+
+/**
+ * P19-G11 — the console shows what a run was GIVEN, not only what it produced.
+ *
+ * Every other line here comes from a provider. This one is written by viberr at
+ * run start and is the only in-app answer to "which knowledge bases, skills and
+ * MCP servers actually resolved for this run, and what canonical task state was
+ * it re-anchored on" — questions a human previously could only answer by
+ * exporting the session and resuming it on their own machine.
+ */
+describe("AgentLogsPanel — run inputs (P19-G11)", () => {
+  const inputs: RunInputs = {
+    cwd: "/data/projects/p/tasks/VIB-1/workspace/widgets",
+    repo: "acme/widgets",
+    cloned: true,
+    delivers: true,
+    personaChars: 4210,
+    promptChars: 5684,
+    anchor: "## Canonical task state\nSENTINEL-ANCHOR-TEXT",
+    skills: { granted: ["commits"], native: ["commits"], injected: [] },
+    knowledge: [],
+    mcp: { mounted: ["github"], unresolved: ["vm-memory"], unhealthy: [] },
+    unresolvedResources: [{ name: "house-style", reason: "no such knowledge base" }],
+    tools: { denied: ["Edit", "Write"], toolkit: ["post_comment"] },
+    directive: { from: "Deniz", chars: 88 },
+  };
+  const rawEnvelope = '{"type":"run_inputs","source":"viberr","run_id":"run_1"}';
+  const line: StreamedLine = {
+    display: {
+      t: "10:00:00",
+      ev: "meta",
+      tag: RUN_INPUTS_TAG,
+      text: "Run inputs — delivering engagement · canonical anchor 42 chars",
+      inputs,
+    },
+    raw: rawEnvelope,
+  };
+
+  function renderConsole(lines: StreamedLine[]) {
+    const run = mkRun({ state: "idle", lifecycle: "finished" });
+    return render(
+      <AgentLogsPanel
+        runtime={[run]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: lines }}
+      />,
+    );
+  }
+
+  it("summarises the inputs on one row and reveals the anchor + resolved resources on demand", () => {
+    // Canary: drop the `isRunInputsLine` branch from the console map and the
+    // row renders as a bare meta line — the toggle and every detail row vanish.
+    const { getByText, queryByText, container } = renderConsole([line]);
+    expect(getByText(line.display.text)).toBeTruthy();
+    // Collapsed by default: reference material, not part of the run's story.
+    expect(queryByText(/SENTINEL-ANCHOR-TEXT/)).toBeNull();
+
+    const toggle = getByText("show what this run was given");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+
+    expect(container.textContent).toContain("SENTINEL-ANCHOR-TEXT");
+    // The two facts nothing in the app carried before: a granted MCP that
+    // mounted nowhere, and a granted KB whose content never arrived.
+    expect(container.textContent).toContain("vm-memory");
+    expect(container.textContent).toContain("house-style");
+    // …and the confinement the run actually ran under.
+    expect(container.textContent).toContain("Edit, Write");
+    expect(getByText("hide what this run was given").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("hoists the disclosure above the provider lines of its own run", () => {
+    const provider: StreamedLine = {
+      display: { t: "10:00:01", ev: "init", tag: "system·init", text: "session x" },
+      raw: "{}",
+    };
+    const { container } = renderConsole([provider, line]);
+    const tags = [...container.querySelectorAll(".log-line .ltag")].map((n) => n.textContent);
+    expect(tags[0]).toBe(RUN_INPUTS_TAG);
+    expect(tags[1]).toBe("system·init");
+  });
+
+  it("yields to the raw toggle like every other line", () => {
+    // The `{ } raw` contract is "the stored envelope, verbatim" — a viberr line
+    // does not get to keep its friendly rendering there.
+    const { getByText, queryByText, container } = renderConsole([line]);
+    fireEvent.click(getByText("{ } raw"));
+    expect(container.textContent).toContain(rawEnvelope);
+    expect(queryByText("show what this run was given")).toBeNull();
   });
 });

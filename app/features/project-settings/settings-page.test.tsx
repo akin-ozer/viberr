@@ -502,6 +502,46 @@ describe("MembersPanel", () => {
     expect(emailInput.value).toBe("");
   });
 
+  /**
+   * Pass-19 UX coherence audit, finding #22 (a11y).
+   *
+   * This was the only invite form in the product without persistent field
+   * labels: two bare `<input>`s whose sole name was a placeholder that leaves
+   * the screen on the first keystroke. The org-level twin of the very same
+   * action (`org-settings/users-panel.tsx`) labels "Full name" and "Email" over
+   * inputs carrying those identical placeholders, and this page's own identity
+   * fields use the same `.field` + `.flabel` idiom. It bites hardest under
+   * 1300px, where `.invite-row` collapses to one column and the two
+   * same-looking boxes stack.
+   */
+  it("#22: both invite fields keep a real label, not just a vanishing placeholder", () => {
+    const { container, getByLabelText } = render(
+      <MembersPanel {...base} onInvite={() => {}} onRemove={() => {}} />,
+    );
+    const inputs = [
+      ...container.querySelectorAll<HTMLInputElement>(".invite-row input"),
+    ];
+    expect(inputs).toHaveLength(2);
+    for (const input of inputs) {
+      expect(input.id).not.toBe("");
+      const label = container.querySelector(`label[for="${input.id}"]`);
+      expect(label).not.toBeNull();
+      expect(label!.textContent!.trim()).not.toBe("");
+    }
+
+    // The whole point: the name is still on screen once the field is filled.
+    const name = getByLabelText(/Full name/) as HTMLInputElement;
+    const email = getByLabelText(/Email/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Deniz Şahin" } });
+    fireEvent.change(email, { target: { value: "deniz@viberr.dev" } });
+    expect(
+      container.querySelector(`label[for="${name.id}"]`)!.textContent,
+    ).toContain("Full name");
+    expect(
+      container.querySelector(`label[for="${email.id}"]`)!.textContent,
+    ).toContain("Email");
+  });
+
   it("hides invite + remove for non-admins", () => {
     const { container, queryByPlaceholderText } = render(
       <MembersPanel {...base} canManage={false} onInvite={() => {}} onRemove={() => {}} />,
@@ -518,6 +558,60 @@ describe("MembersPanel", () => {
     );
     expect(container.textContent).toContain("Read-only");
     expect(container.textContent).toContain("Manage members & roles");
+  });
+});
+
+/* F19-33: both panels below styled their head count with a private
+   `PANEL_COUNT_STYLE` (a byte copy of `.fine`, app.css:230) and their trailing
+   note with a private `POL_NOTE_STYLE` (a copy of `.pol-note.after` +
+   `.pol-note.last`, app.css:3844-3846). github-view.tsx and policy-page.tsx kept
+   their own copies of the same two objects, and the note copies had already
+   drifted three ways — .8rem here, .9rem in github-view, .85rem in the sheet.
+   app.css.test.ts holds the structural gate (no style object, hoisted or inline,
+   may restate a utility rule); these assert what this surface renders.
+   Ruling 14: shared single implementations, never fork per surface. */
+describe("settings panels take count + note styling from the sheet (F19-33)", () => {
+  const expectSheetStyled = (container: HTMLElement) => {
+    const count = container.querySelector(".panel-head .right")!;
+    expect(count.className.split(/\s+/)).toEqual(["right", "sub", "fine"]);
+    expect(count.getAttribute("style")).toBeNull();
+    const note = container.querySelector(".pol-note")!;
+    expect(note.className.split(/\s+/)).toEqual(["pol-note", "after", "last"]);
+    expect(note.getAttribute("style")).toBeNull();
+  };
+
+  it("Workflow stages", () => {
+    const { container } = render(
+      <StagesPanel
+        stages={STAGES}
+        counts={{ triage: 2 }}
+        canManage
+        editingId={null}
+        setEditingId={() => {}}
+        onReorder={() => {}}
+        onAdd={() => {}}
+        onNavPolicy={() => {}}
+        onRename={() => {}}
+        onRemove={() => {}}
+      />,
+    );
+    expectSheetStyled(container);
+  });
+
+  it("Members", () => {
+    const { container } = render(
+      <MembersPanel
+        members={MEMBERS}
+        meId="u_arda"
+        projectName="Viberr Core"
+        canManage
+        busy={false}
+        onNavPolicy={() => {}}
+        onInvite={() => {}}
+        onRemove={() => {}}
+      />,
+    );
+    expectSheetStyled(container);
   });
 });
 
@@ -909,6 +1003,26 @@ describe("SettingsPage — each panel gates on the action its own server guard c
     };
   }
 
+  /**
+   * Q-V1 (owner ruling, pass 18) shipped with no test — the one gap pass 19's
+   * doc verification called out. A read-only member must not see the Danger
+   * zone AT ALL: it used to render for every member with the buttons disabled,
+   * which showed a stakeholder a destructive surface they can never use and
+   * named archive/delete as if they were on the table. The gate is
+   * `edit-policy` — the same id the archive/delete server guards check — so
+   * drive it with `grantOnly` like every other panel gate here.
+   */
+  it("Q-V1: the Danger zone renders only under edit-policy — any other grant hides it entirely", () => {
+    grantOnly.action = "manage-members";
+    const withoutGrant = renderPage();
+    expect(withoutGrant.container.textContent).not.toContain("Danger zone");
+    cleanup();
+
+    grantOnly.action = "edit-policy";
+    const withGrant = renderPage();
+    expect(withGrant.container.textContent).toContain("Danger zone");
+  });
+
   it("grants ONLY edit-policy → identity, stages and repo repair; members and credentials stay shut", () => {
     grantOnly.action = "edit-policy";
     const { container } = renderPage();
@@ -962,5 +1076,105 @@ describe("SettingsPage — each panel gates on the action its own server guard c
       '.kv-row input[type="checkbox"]',
     ) as HTMLInputElement;
     expect(open.disabled).toBe(false);
+  });
+});
+
+// N19-5 / owner ruling Q-V1: a read-only viewer — and any member without the
+// lifecycle grant — must not SEE the Danger zone at all, not merely find its
+// buttons disabled. Showing a stakeholder a destructive surface they can never
+// use names archive/delete as if they were on the table.
+//
+// The gate that implements the ruling lives on the PAGE
+// (`{canEditPolicy && <DangerZone …>}` in SettingsPage), which is exactly why
+// the two `DangerZone` tests above cannot defend it: they mount the panel
+// directly, i.e. past the gate, so they keep passing with the gate deleted. The
+// only other full-page render in this file hardcodes `myRole="admin"`, the one
+// role for which the gate is a no-op. So these render the REAL page per role.
+// The admin case is what makes the absences mean something: it proves the panel
+// exists and is reachable, so "not rendered" is a gate and not a dead feature.
+describe("SettingsPage — the Danger zone is withheld from members who cannot act on it", () => {
+  const DATA: SettingsViewData = {
+    project: PROJECT,
+    stages: STAGES,
+    stageCounts: { triage: 2, review: 2 },
+    members: MEMBERS,
+    credential: CREDENTIAL,
+    repoFootprintTasks: 0,
+    branchCleanupOnMerge: true,
+  };
+
+  function renderPageAs(myRole: ProjectRole) {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => <SettingsPage data={DATA} meId="u_arda" myRole={myRole} />,
+      },
+    ]);
+    return render(<Stub initialEntries={["/"]} />).container;
+  }
+
+  /** The panel's own heading — the thing a member either sees or doesn't. */
+  const dangerHeading = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll("h2")).find(
+      (h) => h.textContent?.trim() === "Danger zone",
+    ) ?? null;
+
+  /** A page that failed to render would also be missing the heading. */
+  const pageRendered = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll("h2")).map((h) => h.textContent?.trim());
+
+  it("a read-only viewer gets no Danger zone — heading, panel and copy all absent", () => {
+    // Guard the premise: if `edit-policy` is ever re-tiered to include viewers
+    // this test would silently become vacuous, so state what it assumes.
+    expect(roleCan("viewer", "edit-policy")).toBe(false);
+
+    const container = renderPageAs("viewer");
+    expect(dangerHeading(container)).toBeNull();
+    expect(container.querySelector(".danger-panel")).toBeNull();
+    // Nothing leaks the destructive vocabulary by another route.
+    expect(container.textContent).not.toContain("Delete project");
+    expect(container.textContent).not.toContain("Archive Viberr Core");
+    // …and the rest of the page really did render, so the absence above is the
+    // gate doing its job rather than a blank component tree.
+    expect(pageRendered(container)).toEqual([
+      "Project",
+      "Workflow stages",
+      "Members",
+      "Repository & credentials",
+    ]);
+  });
+
+  it("a contributor — full task authority, no project lifecycle — gets none either", () => {
+    expect(roleCan("contributor", "edit-policy")).toBe(false);
+
+    const container = renderPageAs("contributor");
+    expect(dangerHeading(container)).toBeNull();
+    expect(container.querySelector(".danger-panel")).toBeNull();
+    expect(container.textContent).not.toContain("Delete project");
+  });
+
+  it("an admin still gets it, with both controls live", () => {
+    const container = renderPageAs("admin");
+    expect(dangerHeading(container)).not.toBeNull();
+    expect(container.querySelector(".danger-panel")).not.toBeNull();
+    const archive = container.querySelector(".dz-row .btn.ghost") as HTMLButtonElement;
+    const del = container.querySelector(".dz-row .btn.danger") as HTMLButtonElement;
+    expect(archive.disabled).toBe(false);
+    expect(del.disabled).toBe(false);
+  });
+
+  // The gate and the panel's own control gate must ask the SAME question. If
+  // `edit-policy`'s role set ever changes, the render gate has to follow it —
+  // a role that renders the panel but finds it dead is the pre-ruling state.
+  it("rendering tracks roleCan(edit-policy) for every project role", () => {
+    const roles: ProjectRole[] = ["admin", "maintainer", "contributor", "viewer"];
+    for (const role of roles) {
+      const container = renderPageAs(role);
+      expect({ role, danger: dangerHeading(container) !== null }).toEqual({
+        role,
+        danger: roleCan(role, "edit-policy"),
+      });
+      cleanup();
+    }
   });
 });

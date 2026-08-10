@@ -1,4 +1,11 @@
-import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -96,5 +103,100 @@ describe("updateTaskFile stale-read repair", () => {
     expect(texts).toContain("app write (hand-edited)");
     expect(texts).toContain("after external edit");
     expect(texts).not.toContain("app write");
+  });
+});
+
+/**
+ * Gap 22 — a hand-edited task.md that no longer parses used to be DESTROYED by
+ * the next app write. Parsing is tolerant by design (a broken file must never
+ * crash the app or drop a task), so `readTaskFile` returns fallback defaults —
+ * and `updateTaskFile` is a read-modify-write, so appending a single comment
+ * serialized those defaults over the human's file. With an unterminated `---`
+ * fence the parsed body is empty, so the goal and the whole timeline went with
+ * it. The store is DESIGNED to be hand-edited (FR10); a truncated editor write
+ * is an expected event, not an exotic one.
+ */
+describe("updateTaskFile refuses to write an untrusted file", () => {
+  const TRUNCATED = `---
+key: VIB-7
+title: Truncated by an editor
+stage: impl
+`;
+
+  const BROKEN_YAML = `---
+key: VIB-8
+title: Botched
+\tstage: impl
+---
+
+## Goal
+
+Do not lose me.
+
+## Timeline
+
+### 2026-08-01T10:00:00.000Z · comment · human:u_arda
+
+Context nobody wants to lose.
+`;
+
+  it("refuses — and leaves the bytes untouched — when the fence is truncated", async () => {
+    const store = setupTestStore(ctx);
+    const ref = { projectSlug: store.slug, taskKey: "VIB-7", dataRoot: store.dataRoot };
+    const absPath = resolveTaskFilePath(ref);
+    mkdirSync(path.dirname(absPath), { recursive: true });
+    writeFileSync(absPath, TRUNCATED, "utf8");
+
+    await expect(
+      updateTaskFile(ref, (parsed) => {
+        parsed.timeline.unshift(comment("this write must not land"));
+      }),
+    ).rejects.toMatchObject({ code: "file_not_trusted", status: 409 });
+
+    // The human's bytes are exactly as they were — nothing was rewritten.
+    expect(readFileSync(absPath, "utf8")).toBe(TRUNCATED);
+  });
+
+  it("refuses on unparseable frontmatter, keeping the goal and the timeline", async () => {
+    const store = setupTestStore(ctx);
+    const ref = { projectSlug: store.slug, taskKey: "VIB-8", dataRoot: store.dataRoot };
+    const absPath = resolveTaskFilePath(ref);
+    mkdirSync(path.dirname(absPath), { recursive: true });
+    writeFileSync(absPath, BROKEN_YAML, "utf8");
+
+    let thrown: unknown;
+    try {
+      await updateTaskFile(ref, (parsed) => {
+        parsed.timeline.unshift(comment("this write must not land"));
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    // The refusal names the task and the parse error, and points at the doctor.
+    expect((thrown as { code?: string }).code).toBe("file_not_trusted");
+    const userMessage = (thrown as { userMessage?: string }).userMessage ?? "";
+    expect(userMessage).toContain("VIB-8");
+    expect(userMessage).toMatch(/unparseable/i);
+    expect(userMessage).toContain("npm run store:check");
+
+    expect(readFileSync(absPath, "utf8")).toBe(BROKEN_YAML);
+  });
+
+  it("still writes a file whose problems the parser genuinely round-trips", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { title: "Odd but readable" }),
+      extraSections: [{ title: "Scratch", raw: "hand-written notes" }],
+    });
+    const ref = { projectSlug: store.slug, taskKey: "VIB-9", dataRoot: store.dataRoot };
+
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline.unshift(comment("ordinary write"));
+    });
+
+    const after = readTaskFile(ref)!;
+    expect(after.parsed.timeline.map((e) => e.text)).toContain("ordinary write");
+    // Unknown sections are round-trip safe, so they are not a write blocker.
+    expect(after.parsed.extraSections.map((s) => s.title)).toContain("Scratch");
   });
 });

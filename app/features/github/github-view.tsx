@@ -34,20 +34,34 @@ import type {
 
 type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
 
-const PANEL_COUNT_STYLE = {
-  fontSize: ".76rem",
-  color: "var(--faint)",
-} as const;
-const POL_NOTE_STYLE = { marginBottom: 0, marginTop: ".9rem" } as const;
+/* F19-33: the panel-head count and the trailing policy note used to be hoisted
+   inline-style constants here, in policy-page.tsx and in settings-page.tsx —
+   three private copies of two declarations the sheet already owns (`.fine`,
+   app.css:230; `.pol-note.after` / `.pol-note.last`, app.css:3844-3846), and
+   they had already drifted (this file's note sat at .9rem, settings' at .8rem,
+   the sheet's at .85rem). Ruling 14: shared single implementations, never fork
+   per surface. The count is `right sub fine`, the same three classes seven
+   other panel heads use; the note is `pol-note after last`. */
 
 export function RepositoryPanel({
   data,
   onOpenTask,
+  canSeeCredential,
   warnActions,
   manageActions,
 }: {
   data: Pick<GithubViewData, "project" | "connection" | "credential">;
   onOpenTask: (taskKey: string) => void;
+  /**
+   * R19-11 (Q-V1, PAT half) — does this reader hold the credential grant?
+   *
+   * Required, not optional: a caller that forgets it would silently go back to
+   * showing every member the token fingerprint, which IS the finding. The
+   * decision itself is `roleCan(myRole, "grant-github-scope")` in
+   * {@link GithubViewPage} — the same ACTION_ROLES entry the route's action
+   * guard enforces, never a role literal.
+   */
+  canSeeCredential: boolean;
   warnActions?: React.ReactNode;
   manageActions?: React.ReactNode;
 }) {
@@ -57,8 +71,14 @@ export function RepositoryPanel({
   // states they can disagree (pill "no credential" above a PAT card with
   // scopes). When they diverge, add a one-line note so the two surfaces read as
   // measuring different things rather than contradicting each other.
+  //
+  // R19-11: the note points AT the card ("shown below"), so it goes when the
+  // card goes — a reader without the grant must not be told to look at
+  // something that is not there.
   const showProbeNote =
-    conn.kind !== "ready" && data.credential.source !== "none";
+    canSeeCredential &&
+    conn.kind !== "ready" &&
+    data.credential.source !== "none";
   return (
     <div className="panel">
       <div className="panel-head">
@@ -113,17 +133,40 @@ export function RepositoryPanel({
         </div>
       </div>
 
-      <CredentialCard
-        credential={data.credential}
-        onOpenTask={onOpenTask}
-        warnActions={warnActions}
-        manageActions={manageActions}
-        connectionAuth={
-          data.connection.status === "auth_failed"
-            ? data.connection.reason
-            : "ok"
-        }
-      />
+      {/* R19-11 (owner ruling, Q-V1 PAT half): the credential card is the
+          project's token fingerprint, its scope verdicts and its rotate/remove
+          controls. Server-side, every one of those actions gates on
+          `grant-github-scope` (routes/project.github.tsx), so the card is
+          WITHDRAWN below that tier rather than rendered read-only — ruling 37's
+          precedent: a withdrawn affordance is honest, a disabled one invites a
+          support question. What stays is the Connection row above, which is the
+          only credential fact a reader of the board legitimately needs ("can
+          this repository be reached?"), plus a line naming the grant so the gap
+          is explained rather than blank. The loader redacts the same fields it
+          hides, so the withheld tail is not merely unrendered — it never
+          reaches the browser. */}
+      {canSeeCredential ? (
+        <CredentialCard
+          credential={data.credential}
+          onOpenTask={onOpenTask}
+          warnActions={warnActions}
+          manageActions={manageActions}
+          connectionAuth={
+            data.connection.status === "auth_failed"
+              ? data.connection.reason
+              : "ok"
+          }
+        />
+      ) : (
+        <div className="pol-note after last">
+          <Icon name="lock" />
+          <span>
+            Credential details need the <strong>Grant GitHub scope</strong>{" "}
+            grant (project admin or maintainer). The Connection row above still
+            shows whether this repository is reachable.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -142,7 +185,7 @@ export function PullRequestsPanel({
       <div className="panel-head">
         <Icon name="pr" />
         <h2>Pull requests</h2>
-        <span className="right sub" style={PANEL_COUNT_STYLE}>
+        <span className="right sub fine">
           {prs.length} linked to tasks
         </span>
       </div>
@@ -204,12 +247,18 @@ export function PullRequestsPanel({
           );
         })}
       </div>
-      <div className="pol-note" style={POL_NOTE_STYLE}>
+      {/* F19-34: this used to say "accepting a completion in the review queue".
+          The queue performs zero mutations — it is a read-only triage list whose
+          rows navigate to task detail, which is exactly why ruling 30 (R15-11)
+          labels its row "Review" and not "Accept". Acceptance happens on the
+          task page, next to the evidence it is judged against, so the note names
+          that surface. */}
+      <div className="pol-note after last">
         <Icon name="lock" />
         <span>
-          Merging stays reserved for humans — accepting a completion in the
-          review queue merges its PR when GitHub is reachable; otherwise it
-          records accepted (merge pending).
+          Merging stays reserved for humans — accepting a completion on its task
+          page merges its PR when GitHub is reachable; otherwise it records
+          accepted (merge pending).
         </span>
       </div>
     </div>
@@ -228,7 +277,7 @@ export function BranchesPanel({
       <div className="panel-head">
         <Icon name="branch" />
         <h2>Execution branches</h2>
-        <span className="right sub" style={PANEL_COUNT_STYLE}>
+        <span className="right sub fine">
           {branches.length} task-key branch{branches.length === 1 ? "" : "es"}
         </span>
       </div>
@@ -314,7 +363,7 @@ export function BranchesPanel({
           })}
         </div>
       </div>
-      <div className="pol-note" style={POL_NOTE_STYLE}>
+      <div className="pol-note after last">
         <Icon name="branch" />
         <span>
           Branch names and commit messages carry the task key — task → branch →
@@ -325,11 +374,33 @@ export function BranchesPanel({
   );
 }
 
+/**
+ * F19-22: "when did a reconcile pass last COMPLETE?", computed in the route
+ * loader (`routes/project.github.tsx`) off the per-tick `github.reconcile.task`
+ * audit row. Same shape as `data.reconcile` — which answers the different
+ * question "when did the cached state last CHANGE?" — and deliberately a
+ * separate value: the chip renders both, because one of them going quiet is
+ * normal and the other going quiet means the poller or the credential is down.
+ */
+export interface ReconcileCheckView {
+  /** ISO of the newest completed pass, or null when none is on record. */
+  at: string | null;
+  /** Server-rendered relative label ("2m ago"), null when `at` is. */
+  label: string | null;
+  /** `at` is missing or older than the staleness threshold. */
+  stale: boolean;
+}
+
 export function GithubViewPage({
   data,
+  reconcileCheck,
   myRole,
 }: {
   data: GithubViewData;
+  /** F19-22 — see {@link ReconcileCheckView}. Required, not optional: a caller
+   *  that forgets it would silently go back to rendering the last CHANGE as
+   *  though it were the last check, which is the defect. */
+  reconcileCheck: ReconcileCheckView;
   myRole: string | null;
 }) {
   const navigate = useNavigate();
@@ -371,8 +442,14 @@ export function GithubViewPage({
     );
   };
 
-  // Grant scope stays a governed credential action (conventions: PAT/policy
-  // changes are admin-shaped; project roles admin|maintainer hold it).
+  // The ONE credential-authority decision on this page (R19-11): `roleCan` over
+  // the same `grant-github-scope` ACTION_ROLES entry the route's action guard
+  // enforces for grant-scope, set-credential and clear-credential alike. It
+  // decides all three things that ARE that action — whether the credential card
+  // is disclosed, whether Grant scope is offered, and whether the
+  // attach/rotate/remove row renders — so a role can never be shown a control
+  // it may not use, nor hidden from one it may. The loader redacts the payload
+  // on the same rule; a client-only gate would leave the token tail in the HTML.
   const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
   // Grant scope RE-CHECKS an existing PAT's scopes — meaningless when no
   // credential is configured (F6). Only offer it once a PAT is bound; the
@@ -436,7 +513,37 @@ export function GithubViewPage({
   // project's FIRST impression of this page was a warning about nothing being
   // wrong. Only a genuinely old cache warns; never-synced reads neutral with a
   // nudge to run the first sync.
-  const staleCache = data.reconcile.stale && data.reconcile.at !== null;
+  const changeStale = data.reconcile.stale && data.reconcile.at !== null;
+  // F19-22: with a completed pass on record the warn tone tracks THAT, not the
+  // last change. An hour without a change is what a quiet repository looks like
+  // and must not shout; an hour without a CHECK means the poller or the
+  // credential is down, which is the only case here worth a warning — and the
+  // case the old chip could not see (`reconcileTaskExclusive` returns BEFORE the
+  // `github.reconcile.task` audit write on `auth_failed` / `network_unavailable`,
+  // so a poller running against a dead PAT stops this clock while the change
+  // clock, frozen anyway, looks no different than on a quiet day).
+  //
+  // With no check on record `reconcileCheck.stale` is meaningless — the loader
+  // derives it from a null instant — so the last change is the only evidence a
+  // pass ever ran and the R17-5 rule above still decides.
+  const staleCache = reconcileCheck.at ? reconcileCheck.stale : changeStale;
+  const changeLabel = data.reconcile.at
+    ? `last change ${data.reconcile.label}`
+    : "no changes recorded";
+  const freshnessText = reconcileCheck.at
+    ? `Checked ${reconcileCheck.label} · ${changeLabel}`
+    : data.reconcile.at
+      ? `Last change ${data.reconcile.label}`
+      : "No changes recorded";
+  const freshnessTitle = reconcileCheck.at
+    ? staleCache
+      ? "No reconcile pass has completed for over an hour, though the background poller re-checks GitHub every 5 minutes. Either every branched task here is finished — the poller skips terminal tasks, so a wrapped-up project goes quiet legitimately — or the poller or credential is down and the branch and PR state below is out of date. Update status checks now."
+      : "When a reconcile pass last completed, and when one last found a change. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so a much older last change means a quiet repository — Update status forces a check now."
+    : staleCache
+      ? "No branch or PR change has been recorded for over an hour. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so this is also what a quiet repository looks like — Update status forces a check now."
+      : data.reconcile.at
+        ? "When the cached branch/PR state last CHANGED. A background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new — Update status forces a check now."
+        : "No branch or PR change has been recorded yet — nothing is wrong. Update status checks GitHub now.";
 
   return (
     <div className="board-wrap" data-screen-label="GitHub">
@@ -457,19 +564,26 @@ export function GithubViewPage({
         <div className="board-tools">
           {/* P11-14: GitHub state is served from cache; a background poller
               refreshes it every 5 minutes, and "Update status" refreshes it now.
-              Show how fresh it is so stale state can't look current. */}
+              Show how fresh it is so stale state can't look current.
+
+              F19-22: `data.reconcile.at` is `MAX(observed_at)` over
+              `github.reconcile` PROVENANCE, and DG-3 skips that row on an
+              unchanged poller tick — so it is the last pass that CHANGED
+              something, never the last pass that ran. Labelled "Updated Nm ago"
+              it claimed the second while holding the first, and contradicted its
+              own tooltip's "every 5 minutes" (live-proven on the task panel:
+              "Synced 1h ago" over seven successful passes in the same hour).
+              The second half now arrives as `reconcileCheck` (the per-tick
+              `github.reconcile.task` audit row, unioned with the human sweep's
+              project row) and the chip renders both: "Checked 2m ago · last
+              change 40m ago" says in one line what neither number could say
+              alone. */}
           <span
             className={"gh-freshness" + (staleCache ? " stale" : "")}
-            title={
-              data.reconcile.at
-                ? "Branch/PR state auto-refreshes every 5 minutes — click Update status to refresh now."
-                : "Branch/PR state hasn't been synced with GitHub yet — nothing is wrong. Update status runs the first sync."
-            }
+            title={freshnessTitle}
           >
             <Icon name={staleCache ? "alert" : "clock"} />
-            {data.reconcile.at
-              ? `Updated ${data.reconcile.label}`
-              : "Not synced yet"}
+            {freshnessText}
           </span>
           {canReconcile && (
             <button
@@ -502,6 +616,7 @@ export function GithubViewPage({
           <RepositoryPanel
             data={data}
             onOpenTask={openTask}
+            canSeeCredential={canGrant}
             warnActions={warnActions}
             manageActions={manageActions}
           />

@@ -103,10 +103,19 @@ describe("getMentionables", () => {
   it("returns the reserved role handles, and names the profile each backend handle reaches", () => {
     expect(call().reserved).toEqual([
       { handle: "operator", label: "Operator" },
-      { handle: "agent", label: "Primary specialist" },
+      // F19-12: the @-mention picker's subline is rendered copy and must use the
+      // SHIPPED vocabulary. "Primary specialist" is retired (D9/Q17-5) — reading
+      // "primary" as the DELIVERING engagement is exactly what `@agent` resolves
+      // to. This assertion is the pin: restoring the old label fails it.
+      { handle: "agent", label: "Delivering agent" },
       { handle: "claude", label: "Claude specialist — dev" },
       { handle: "codex", label: "Codex specialist — qa" },
     ]);
+    // Belt and braces on the whole directory, not just this row: no reserved
+    // subline may reintroduce the retired phrase.
+    for (const r of call().reserved) {
+      expect(r.label).not.toMatch(/primary specialist/i);
+    }
   });
 
   /**

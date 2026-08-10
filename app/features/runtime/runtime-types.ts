@@ -38,6 +38,10 @@ export interface LogLine {
   tag: string;
   /** Main content rendered in `.lx`. */
   text: string;
+  /** P19-G11: the viberr-authored `run·inputs` line's structured payload — what
+   *  the run was GIVEN, as opposed to what it produced. Present only on that one
+   *  line (tag `RUN_INPUTS_TAG`); every provider line leaves it undefined. */
+  inputs?: RunInputs;
   /** Claude tool name (`Bash`, `Read`…) / codex `exec`; bold before text. */
   name?: string;
   /** Claude tool input for the raw view (null → synthesized from text). */
@@ -63,6 +67,86 @@ export interface LogLine {
   } | null;
   /** Codex file_change changes → raw `file_change.changes`. */
   changes?: { path: string; kind: "add" | "update" | "delete" }[] | null;
+}
+
+/**
+ * P19-G11 — what a run was GIVEN, recorded as one console line at run start.
+ *
+ * The console has always been output-only: a human could read every token an
+ * agent produced and still not know which knowledge bases, skills or MCP
+ * servers actually resolved for it, what canonical task state it was anchored
+ * on, or how its tools were confined. That blind spot sits under a whole class
+ * of recurring problem — a KB grant that resolves to nothing, the Claude/Codex
+ * skills asymmetry the product promises to DISCLOSE rather than hide, the
+ * KB-vs-repository precedence rule — every one of which is a claim about what an
+ * agent was given.
+ *
+ * Deliberately NAMES and SIZES, not bodies: the persona (with its KB and skill
+ * text inlined) can be tens of KB and is already authored and readable on the
+ * Agents page, so duplicating it into every run log would be storage without
+ * information. The one body carried verbatim is the canonical anchor, because
+ * it exists nowhere else — it is composed for a single turn and thrown away, so
+ * "which goal text did this turn actually receive" is otherwise unanswerable
+ * exactly when it matters (the goal was edited between turns).
+ */
+export interface RunInputs {
+  /** The run's working directory — always the isolated task workspace. */
+  cwd: string | null;
+  /** The repository the workspace was to hold, when the project has one. */
+  repo: string | null;
+  /** A checkout actually landed in `cwd`. False → the agent ran on an empty dir. */
+  cloned: boolean;
+  /** This engagement DELIVERS (vs a supporting, read-only engagement). */
+  delivers: boolean;
+  /** Characters of persona (Claude systemPrompt / Codex developer instructions). */
+  personaChars: number;
+  /** Characters of the turn prompt actually sent to the provider. */
+  promptChars: number;
+  /** The canonical task-state block this run was anchored on, verbatim. */
+  anchor: string | null;
+  /** Granted skills, split by the channel each one actually took. */
+  skills: {
+    /** Every skill the profile grants. */
+    granted: string[];
+    /** Mounted into the workspace for the SDK's native skills mechanism. */
+    native: string[];
+    /** Not mountable on this run — their bodies rode the persona as text. */
+    injected: string[];
+  };
+  /** Knowledge bases whose bodies were assembled into the persona. */
+  knowledge: string[];
+  /** MCP grants by what actually happened to them. */
+  mcp: {
+    /** Servers mounted on the run (profile grants + the viberr toolkit). */
+    mounted: string[];
+    /** Granted, but no such server is in the org registry — mounted nowhere. */
+    unresolved: string[];
+    /** Mounted, but the last connection check failed. */
+    unhealthy: string[];
+  };
+  /** Skill / knowledge-base grants whose CONTENT never reached the run. */
+  unresolvedResources: { name: string; reason: string }[];
+  /** Tool confinement, both directions. */
+  tools: {
+    /** Built-ins denied by the profile's capability grants. */
+    denied: string[];
+    /** Viberr collaboration tools mounted for this run. */
+    toolkit: string[];
+  };
+  /** The turn's directive and who wrote it (null → no directive this turn). */
+  directive: { from: string | null; chars: number } | null;
+}
+
+/**
+ * P19-G11: the tag of the viberr-authored line carrying `RunInputs`. Written by
+ * the run starter, never by a provider — so a reader can always tell the run's
+ * declared inputs from its stream.
+ */
+export const RUN_INPUTS_TAG = "run·inputs";
+
+/** True for the run-inputs disclosure line rather than a provider event. */
+export function isRunInputsLine(line: LogLine): boolean {
+  return line.tag === RUN_INPUTS_TAG && !!line.inputs;
 }
 
 /**

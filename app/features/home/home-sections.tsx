@@ -396,8 +396,8 @@ export function ProjectSections({
             <span className="ct">{archivedList.length}</span>
           </div>
           <p className="sub sec-lede">
-            Hidden from the active workspace. Open a project and use
-            Settings → Danger zone to restore it.
+            Hidden from the active workspace. A project admin can restore one
+            from its Settings → Danger zone.
           </p>
           <div className="pj-list">
             {archivedList.map((p) => (

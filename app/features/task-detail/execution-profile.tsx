@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router";
 import { useDismiss } from "~/ui/use-dismiss";
 import { type ProjectRole, roleCan } from "~/shared/rbac";
@@ -65,6 +65,128 @@ export function reviewingAgentsLabel(
   return allSupporting ? "Supporting agents" : "Reviewing agents";
 }
 
+/**
+ * The vocabulary the whole engagements cell speaks.
+ *
+ * UX19-4: UC-13 renamed the cell heading to "Supporting agents" when nothing
+ * engaged holds a verdict grant, and stopped there — every control inside kept
+ * saying "reviewer". The add button read "Engage reviewer", its panel was
+ * labelled "Engage a reviewer", the release control "Release reviewer", and the
+ * empty state flatly contradicted the heading: a cell headed "Supporting
+ * agents" also said *"All deployed agents are already reviewing."* "Supporting
+ * agents" is the only place in the product that uses that word, so the reader
+ * had no way to map it back to any control on the page.
+ *
+ * One predicate, one vocabulary: the heading and the verbs are derived together
+ * and passed down, so they cannot drift apart again.
+ */
+export interface EngagementVocabulary {
+  heading: "Reviewing agents" | "Supporting agents";
+  /** The add button's label. */
+  add: string;
+  /** The add panel's aria-label. */
+  panel: string;
+  /** Empty state inside the add panel. */
+  allEngaged: string;
+  /** What the cell says instead of the add control on a closed task. */
+  closed: string;
+  /** The release (×) control's tooltip. */
+  release: string;
+  /** The release (×) control's aria-label, per engagement. */
+  releaseOf: (role: string) => string;
+}
+
+export function engagementVocabulary(
+  engaged: readonly { profileId: string }[],
+  deployed: readonly DeployedSpecialistView[],
+): EngagementVocabulary {
+  const heading = reviewingAgentsLabel(engaged, deployed);
+  return heading === "Supporting agents"
+    ? {
+        heading,
+        add: "Engage agent",
+        panel: "Engage an agent",
+        allEngaged: "All deployed agents are already engaged.",
+        closed: "Task closed — no new engagements.",
+        release: "Release agent",
+        releaseOf: (role) => `Release ${role} agent`,
+      }
+    : {
+        heading,
+        add: "Engage reviewer",
+        panel: "Engage a reviewer",
+        allEngaged: "All deployed agents are already reviewing.",
+        closed: "Task closed — no new reviewer engagements.",
+        release: "Release reviewer",
+        releaseOf: (role) => `Release ${role} reviewer`,
+      };
+}
+
+/**
+ * UX19-12 — an engagement whose profile is no longer deployed.
+ *
+ * The name is the Agents live table's own wording (`agents-page.tsx:927`), used
+ * verbatim so one state does not read two ways on two surfaces, and the note
+ * states the consequence R15-7 (ruling 26) imposes on such a run: it may read
+ * and validate, and it is withheld from delivering, commenting, asking or
+ * recording evidence. It is rendered copy, not a `title`, because the control it
+ * explains is DISABLED — the P14 ruling this file already applies to the closed
+ * operator control (`:513-519`).
+ */
+const GHOST_NAME = "profile no longer here";
+const GHOST_DELIVERING_NOTE =
+  "Not deployed on this project any more — a run would start and produce no branch, PR, comment or verdict.";
+const GHOST_REVIEWING_NOTE =
+  "Not deployed on this project any more — a run would start and record no verdict, comment or evidence.";
+
+/**
+ * UX19-18 — the keyboard contract for this panel's three popovers.
+ *
+ * "Manage" (ownership), "Assign delivering agent" and "Engage reviewer" all
+ * declared `role="menu"` with `role="menuitem"` children and implemented none
+ * of what those roles promise: no Arrow/Home/End traversal, and no focus
+ * management, so activating an item (or Escape) unmounted the focused element
+ * and dropped the keyboard user at `<body>` mid-workflow.
+ *
+ * The product has already ruled on this exact shape twice, in opposite but
+ * equally acceptable directions: implement the contract (`ui/stage-menu.tsx`,
+ * `project-settings/settings-page.tsx`) or DROP the roles (`shell/user-menu.tsx`,
+ * UI-45). These three take UI-45's path for UI-45's reason — they are small
+ * groups of buttons interleaved with group labels, separators and a disabled
+ * empty-state line, and plain Tab order is a contract the code actually
+ * honours. What the roles were papering over is fixed either way: focus moves
+ * into the panel on open, and Escape or picking an item returns it to the
+ * trigger (F10-25's rule, which `stage-menu.tsx:90-95` states).
+ */
+function usePopoverFocus(open: boolean, setOpen: (open: boolean) => void) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The shared dismiss hook still owns outside-press and document-level Escape.
+  // It deliberately does NOT reclaim focus: on an outside press the press
+  // itself decides where focus lands, and stealing it back to the trigger would
+  // fight the user.
+  const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+
+  useEffect(() => {
+    if (open) panelRef.current?.focus();
+  }, [open]);
+
+  const closeAndReturnFocus = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  // Escape from anywhere inside the popover (the trigger included — the handler
+  // sits on the wrapper both live in).
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (!open || event.key !== "Escape") return;
+    event.preventDefault();
+    closeAndReturnFocus();
+  };
+
+  return { wrapRef, triggerRef, panelRef, closeAndReturnFocus, onKeyDown };
+}
+
 export interface TaskMemberView {
   userId: string;
   role: string;
@@ -102,10 +224,14 @@ function OwnerControl({
     "release-any-ownership",
   );
   const [open, setOpen] = useState(false);
-  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const { wrapRef, triggerRef, panelRef, closeAndReturnFocus, onKeyDown } =
+    usePopoverFocus(open, setOpen);
 
   if (!o) {
     // Only contributor+ may take ownership (Q5) — hide from viewers/non-members.
+    // F19-11: the eligibility sentence now lives in the cell's VALUE (it was
+    // the half that misdescribed the matrix), stated once for every role — so
+    // this control renders the affordance or nothing, never a second copy.
     return canOwn ? (
       <button
         type="button"
@@ -117,9 +243,7 @@ function OwnerControl({
         <Icon name="plus" />
         Assign me
       </button>
-    ) : (
-      <span className="sub">Unowned — a contributor or above can take it</span>
-    );
+    ) : null;
   }
 
   // Hand-off requires being the current owner or holding the manage-others tier
@@ -145,26 +269,31 @@ function OwnerControl({
   }
 
   return (
-    <div className="own-wrap" ref={ref}>
+    <div className="own-wrap" ref={wrapRef} onKeyDown={onKeyDown}>
       <button
         type="button"
+        ref={triggerRef}
         className={"own-btn" + (open ? " open" : "")}
         onClick={() => setOpen(!open)}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
       >
         Manage
         <Icon name="chevron" />
       </button>
       {open && (
-        <div className="own-menu" role="menu" aria-label="Manage task ownership">
+        <div
+          className="own-menu"
+          ref={panelRef}
+          tabIndex={-1}
+          aria-label="Manage task ownership"
+        >
           {!mine && canOwn && (
             <button
               type="button"
               className="menu-item"
-              role="menuitem"
               onClick={() => {
-                setOpen(false);
+                closeAndReturnFocus();
                 onOwner("take");
               }}
             >
@@ -177,10 +306,9 @@ function OwnerControl({
             <button
               type="button"
               className="menu-item"
-              role="menuitem"
               key={m.userId}
               onClick={() => {
-                setOpen(false);
+                closeAndReturnFocus();
                 onOwner("assign", m);
               }}
             >
@@ -195,9 +323,8 @@ function OwnerControl({
               <button
                 type="button"
                 className="menu-item danger"
-                role="menuitem"
                 onClick={() => {
-                  setOpen(false);
+                  closeAndReturnFocus();
                   onRelease();
                 }}
               >
@@ -212,9 +339,8 @@ function OwnerControl({
               <button
                 type="button"
                 className="menu-item danger"
-                role="menuitem"
                 onClick={() => {
-                  setOpen(false);
+                  closeAndReturnFocus();
                   onRelease();
                 }}
               >
@@ -251,7 +377,8 @@ function SpecialistControl({
   onAssign: (profileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const { wrapRef, triggerRef, panelRef, closeAndReturnFocus, onKeyDown } =
+    usePopoverFocus(open, setOpen);
 
   // P14-WL-07: G9 disabled the RUN buttons on a closed task but left the two
   // engage menus fully live, so a Done+merged task still offered to assign a
@@ -275,20 +402,26 @@ function SpecialistControl({
   }
 
   return (
-    <div className="own-wrap" ref={ref}>
+    <div className="own-wrap" ref={wrapRef} onKeyDown={onKeyDown}>
       <button
         type="button"
+        ref={triggerRef}
         className={"own-btn" + (open ? " open" : "")}
         disabled={busy}
         onClick={() => setOpen(!open)}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
       >
         Assign delivering agent
         <Icon name="chevron" />
       </button>
       {open && (
-        <div className="own-menu" role="menu" aria-label="Assign a delivering agent">
+        <div
+          className="own-menu"
+          ref={panelRef}
+          tabIndex={-1}
+          aria-label="Assign a delivering agent"
+        >
           <div className="own-lbl">Deployed agents</div>
           {/* UI-39: an agent with no repo-write grant cannot deliver — its run
               starts, streams, and produces no branch or PR. Say so on the chip
@@ -299,7 +432,6 @@ function SpecialistControl({
               <button
                 type="button"
                 className="menu-item"
-                role="menuitem"
                 key={s.id}
                 title={
                   cannotDeliver
@@ -307,7 +439,7 @@ function SpecialistControl({
                     : undefined
                 }
                 onClick={() => {
-                  setOpen(false);
+                  closeAndReturnFocus();
                   onAssign(s.id);
                 }}
               >
@@ -332,6 +464,10 @@ function SpecialistControl({
  * task; picking one submits `assign-reviewer`. When every deployed specialist
  * is already a reviewer the menu says so; when none are deployed it links to
  * the Agents page. Only rendered for admin|maintainer (caller gates).
+ *
+ * UX19-4: every string here comes from the cell's own `EngagementVocabulary`,
+ * so the control never says "reviewer" under a heading that says "Supporting
+ * agents" — one predicate decides for the whole cell.
  */
 function ReviewerControl({
   projectSlug,
@@ -339,6 +475,7 @@ function ReviewerControl({
   hasAnyDeployed,
   busy,
   closed = false,
+  vocab,
   onAssign,
 }: {
   projectSlug: string;
@@ -349,19 +486,18 @@ function ReviewerControl({
   busy: boolean;
   /** G9/P14-WL-07: the task is at the terminal stage. */
   closed?: boolean;
+  /** The vocabulary the whole engagements cell speaks (UX19-4). */
+  vocab: EngagementVocabulary;
   onAssign: (profileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const { wrapRef, triggerRef, panelRef, closeAndReturnFocus, onKeyDown } =
+    usePopoverFocus(open, setOpen);
 
   // P14-WL-07: same reason as SpecialistControl — a closed task must not offer
   // to engage a reviewer whose Run button would then render disabled.
   if (closed) {
-    return (
-      <span className="sub">
-        Task closed — no new reviewer engagements.
-      </span>
-    );
+    return <span className="sub">{vocab.closed}</span>;
   }
 
   if (!hasAnyDeployed) {
@@ -375,24 +511,30 @@ function ReviewerControl({
   }
 
   return (
-    <div className="own-wrap" ref={ref}>
+    <div className="own-wrap" ref={wrapRef} onKeyDown={onKeyDown}>
       <button
         type="button"
+        ref={triggerRef}
         className={"rev-add" + (open ? " open" : "")}
         disabled={busy}
         onClick={() => setOpen(!open)}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
       >
         <Icon name="plus" />
-        Engage reviewer
+        {vocab.add}
       </button>
       {open && (
-        <div className="own-menu" role="menu" aria-label="Engage a reviewer">
+        <div
+          className="own-menu"
+          ref={panelRef}
+          tabIndex={-1}
+          aria-label={vocab.panel}
+        >
           <div className="own-lbl">Deployed agents</div>
           {specialists.length === 0 ? (
             <div className="menu-item" aria-disabled>
-              <span className="sub">All deployed agents are already reviewing.</span>
+              <span className="sub">{vocab.allEngaged}</span>
             </div>
           ) : (
             // UI-39: badge the reviewers whose verdict actually GATES
@@ -402,7 +544,6 @@ function ReviewerControl({
               <button
                 type="button"
                 className="menu-item"
-                role="menuitem"
                 key={s.id}
                 title={
                   s.capabilities?.verdict
@@ -412,7 +553,7 @@ function ReviewerControl({
                       : undefined
                 }
                 onClick={() => {
-                  setOpen(false);
+                  closeAndReturnFocus();
                   onAssign(s.id);
                 }}
               >
@@ -441,6 +582,7 @@ function OperatorRunControl({
   busy,
   disabled,
   defaultBackend,
+  configuredAutonomy,
   backendAvailable,
   onRun,
 }: {
@@ -449,6 +591,11 @@ function OperatorRunControl({
   disabled?: boolean;
   /** The operator profile's configured backend — the picker's default (P11-76). */
   defaultBackend: "claude" | "codex";
+  /** R19-A: the project's configured operator autonomy — the CEILING a run may
+   *  not exceed. The selector offers only what will actually run: a dropdown
+   *  that lists an option the server silently clamps is the dishonest
+   *  affordance this ruling exists to remove. */
+  configuredAutonomy: "supervised" | "full";
   /** Which backends are configured — unavailable ones are disabled (P11-41). */
   backendAvailable: { claude: boolean; codex: boolean };
   onRun: (backend: string, autonomy: string) => void;
@@ -465,7 +612,7 @@ function OperatorRunControl({
           ? "codex"
           : defaultBackend;
   const [backend, setBackend] = useState<string>(initialBackend);
-  const [autonomy, setAutonomy] = useState("supervised");
+  const [autonomy, setAutonomy] = useState<string>(configuredAutonomy);
   const off = busy || disabled;
   return (
     <span className="op-run">
@@ -491,8 +638,17 @@ function OperatorRunControl({
         disabled={off}
       >
         <option value="supervised">Supervised</option>
-        <option value="full">Full autonomy</option>
+        {configuredAutonomy === "full" && (
+          <option value="full">Full autonomy</option>
+        )}
       </select>
+      {configuredAutonomy === "supervised" && (
+        // Explain the option that is NOT there. An absent control with no
+        // reason reads as a bug; naming the policy makes it a decision.
+        <span className="sub xs dim">
+          Project policy: supervised — raise it on the operator profile.
+        </span>
+      )}
       {/* The operator coordinates ongoing work, so it stays runnable even while
           a specialist run streams — only its own in-flight run disables it.
           A closed (terminal-stage) task disables it too (G9). */}
@@ -531,6 +687,7 @@ export function ExecutionProfile({
   onRelease,
   deployedSpecialists,
   operatorBackend,
+  operatorAutonomy,
   backendAvailable,
   canRunAgents,
   deliveringActive,
@@ -557,6 +714,8 @@ export function ExecutionProfile({
   deployedSpecialists: DeployedSpecialistView[];
   /** The operator's configured backend — the run picker's default (P11-76). */
   operatorBackend: "claude" | "codex";
+  /** R19-A: the project's configured operator autonomy (the run ceiling). */
+  operatorAutonomy: "supervised" | "full";
   /** Which backends are configured — unavailable ones are disabled (P11-41). */
   backendAvailable: { claude: boolean; codex: boolean };
   /** admin|maintainer — gates the assign/run affordances (server re-checks). */
@@ -595,10 +754,19 @@ export function ExecutionProfile({
   );
   // Resolve an agent's display NAME by profile id. The AgentRef stored on the
   // task carries only profileId/backend/role (its `name` is the backend label),
-  // so the real name comes from the deployed profile; fall back to `role` when
-  // the agent is no longer deployed.
-  const agentNameOf = (profileId: string, fallback: string) =>
-    deployedSpecialists.find((s) => s.id === profileId)?.name ?? fallback;
+  // so the real name comes from the deployed profile.
+  //
+  // UX19-12: when the profile is NOT deployed any more this fell back to the
+  // engagement's `role`, which printed the row as "Implementation" over
+  // "Implementation · Codex" — undisclosed, not merely terse. The engagement had
+  // outlived its profile (deleted, or deployed on another project), and the run
+  // its still-live "Run" button would start takes the fully-withheld posture
+  // (R15-7 / ruling 26): it streams and produces no branch, PR, comment or
+  // verdict. The Agents live table already names this exact condition rather
+  // than printing the raw id (`agents-page.tsx:924-927`); the surface that
+  // OFFERS the action was the one still hiding it.
+  const deployedById = new Map(deployedSpecialists.map((s) => [s.id, s]));
+  const agentNameOf = (profileId: string) => deployedById.get(profileId)?.name;
   // UC-13: the cell was headed "Reviewing agents" whatever was engaged, so a
   // task whose only engagements are SUPPORTING agents (no
   // `report-validation-verdict` grant — they can read, validate and comment but
@@ -606,9 +774,11 @@ export function ExecutionProfile({
   // acceptance gate. Label by what the engagements actually are, and only
   // downgrade on positive evidence: an engaged profile whose capabilities are
   // unknown here (no longer deployed, older loader payload) keeps the
-  // review framing rather than being silently demoted.
-  const reviewersLabel = reviewingAgentsLabel(task.reviewers, deployedSpecialists);
+  // review framing rather than being silently demoted. UX19-4: the cell's
+  // controls take their words from the same call, so heading and verbs agree.
+  const vocab = engagementVocabulary(task.reviewers, deployedSpecialists);
   const sp = task.specialist;
+  const spGhost = !!sp && !deployedById.has(sp.profileId);
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
   // G9: a task at the terminal (Done) stage is closed — its runtime action
@@ -661,6 +831,7 @@ export function ExecutionProfile({
                 busy={operatorBusy}
                 disabled={closed}
                 defaultBackend={operatorBackend}
+                configuredAutonomy={operatorAutonomy}
                 backendAvailable={backendAvailable}
                 onRun={onRunOperator}
               />
@@ -674,24 +845,30 @@ export function ExecutionProfile({
               <>
                 <AgentGlyph backend={sp.backend} />
                 <span>
-                  <div className="nm">{agentNameOf(sp.profileId, sp.role)}</div>
+                  <div className="nm">
+                    {spGhost ? GHOST_NAME : agentNameOf(sp.profileId)}
+                  </div>
                   <div className="sub">
                     {sp.role} · {sp.backend === "claude" ? "Claude Code" : "Codex"}
                   </div>
+                  {/* UX19-12: the row that offers the action names the state. */}
+                  {spGhost && <div className="sub">{GHOST_DELIVERING_NOTE}</div>}
                 </span>
                 {canRunAgents && (
                   <span className="right">
                     <button
                       type="button"
                       className="btn primary sm"
-                      disabled={runBusy || deliveringActive || closed}
+                      disabled={runBusy || deliveringActive || closed || spGhost}
                       onClick={onRunSpecialist}
                       title={
-                        closed
-                          ? "Task is closed (terminal stage) — no runs needed"
-                          : deliveringActive
-                            ? "A delivering run is already streaming for this task"
-                            : "Start an agent run for the delivering agent"
+                        spGhost
+                          ? GHOST_DELIVERING_NOTE
+                          : closed
+                            ? "Task is closed (terminal stage) — no runs needed"
+                            : deliveringActive
+                              ? "A delivering run is already streaming for this task"
+                              : "Start an agent run for the delivering agent"
                       }
                     >
                       <Icon name="bolt" />
@@ -721,35 +898,44 @@ export function ExecutionProfile({
           </div>
         </div>
         <div className="profile-cell">
-          <div className="lbl">{reviewersLabel}</div>
+          <div className="lbl">{vocab.heading}</div>
           {/* Each reviewer renders as a row identical to the delivering agent
               above (glyph · name / role·backend · Run), with a release (×). */}
           <div className="val revs">
             {task.reviewers.length ? (
               task.reviewers.map((c) => {
                 const running = activeReviewerIds.includes(c.profileId);
+                const ghost = !deployedById.has(c.profileId);
                 return (
                   <div className="rev-agent" key={c.profileId}>
                     <AgentGlyph backend={c.backend} />
                     <span>
-                      <div className="nm">{agentNameOf(c.profileId, c.role)}</div>
+                      <div className="nm">
+                        {ghost ? GHOST_NAME : agentNameOf(c.profileId)}
+                      </div>
                       <div className="sub">
                         {c.role} · {c.backend === "claude" ? "Claude Code" : "Codex"}
                       </div>
+                      {/* UX19-12: same disclosure as the delivering row — and
+                          the release (×) beside it stays live, because letting
+                          go of a dead engagement is the recovery. */}
+                      {ghost && <div className="sub">{GHOST_REVIEWING_NOTE}</div>}
                     </span>
                     {canRunAgents && (
                       <span className="right">
                         <button
                           type="button"
                           className="btn primary sm"
-                          disabled={reviewerBusy || running || closed}
+                          disabled={reviewerBusy || running || closed || ghost}
                           onClick={() => onRunReviewer(c.profileId)}
                           title={
-                            closed
-                              ? "Task is closed (terminal stage) — no runs needed"
-                              : running
-                                ? "A run for this reviewer is already streaming"
-                                : "Start a run for this reviewer"
+                            ghost
+                              ? GHOST_REVIEWING_NOTE
+                              : closed
+                                ? "Task is closed (terminal stage) — no runs needed"
+                                : running
+                                  ? "A run for this reviewer is already streaming"
+                                  : "Start a run for this reviewer"
                           }
                         >
                           <Icon name="bolt" />
@@ -759,8 +945,8 @@ export function ExecutionProfile({
                           type="button"
                           className="rev-x"
                           disabled={reviewerBusy}
-                          aria-label={`Release ${c.role} reviewer`}
-                          title="Release reviewer"
+                          aria-label={vocab.releaseOf(c.role)}
+                          title={vocab.release}
                           onClick={() => onRemoveReviewer(c.profileId)}
                         >
                           <Icon name="x" />
@@ -780,6 +966,7 @@ export function ExecutionProfile({
                 hasAnyDeployed={deployedSpecialists.length > 0}
                 busy={reviewerBusy}
                 closed={closed}
+                vocab={vocab}
                 onAssign={onAssignReviewer}
               />
             )}
@@ -798,8 +985,19 @@ export function ExecutionProfile({
                   </span>
                 </span>
               )}
+              {/* F19-11: said "open to any project member" beside a Permissions
+               *  row reading "contributor+ to own" — a viewer read one line as
+               *  an invitation and the other as a refusal. Name the real tier. */}
               {!o && (
-                <span className="sub">Unowned — open to any project member</span>
+                // F19-11: this read "open to any project member", which the
+                // RBAC matrix contradicts on the very next line of the same
+                // row — `own-task` is admin/maintainer/contributor (rbac.ts:65),
+                // and a viewer IS a project member. The sibling copy inside
+                // OwnerControl had it right, so the two disagreed in one cell.
+                // Ownership eligibility is stated here, once, for every role.
+                <span className="sub">
+                  Unowned — any contributor or above can take it
+                </span>
               )}
               <OwnerControl
                 task={task}

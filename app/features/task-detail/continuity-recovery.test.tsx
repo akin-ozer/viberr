@@ -1,0 +1,537 @@
+// @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { createRoutesStub } from "react-router";
+import type { TaskDetail } from "~/server/projections/task-query.server";
+import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
+import type { LogLine, RunView } from "~/features/runtime/runtime-types";
+import { ToastProvider } from "~/ui/toast";
+import {
+  CONTINUITY_EVENT_TYPE,
+  ContinuityRecoveryPanel,
+  EXECUTION_PANEL_LABEL,
+  deriveContinuityLoss,
+} from "./continuity-recovery";
+import { TaskDetailPage } from "./task-detail-page";
+
+afterEach(cleanup);
+
+/**
+ * D18 — the Continuity Recovery Panel, the fifth custom component and the only
+ * one the product never had. What these tests hold down:
+ *
+ *  - it appears ONLY when there is a real break to report (no permanent empty
+ *    panel), and it reports one from EITHER canonical source alone;
+ *  - the identity it names comes from structured data — the run group and the
+ *    stored wire envelope — never from scraping display text;
+ *  - it leads with what survived, then what was lost (spec content guideline);
+ *  - warning and recovery stay distinguishable in TEXT, not colour alone;
+ *  - the consequential state change is announced to a screen reader;
+ *  - it points at controls that exist, and at NO control that does not.
+ */
+
+/* ------------------------------------------------------------- fixtures */
+
+const DEAD_SESSION = "0f8b2b1e-9a44-4a1d-bb2f-7d9c2f1a55c1";
+
+/** The exact envelope `recordSessionMissing` persists for a vanished session. */
+function missingRaw(sessionId: string | null = DEAD_SESSION): string {
+  return JSON.stringify({
+    type: "error",
+    source: "viberr",
+    reason: "session_missing",
+    ...(sessionId ? { session_id: sessionId } : {}),
+    message: "The Claude Code session no longer exists on this machine.",
+  });
+}
+
+/** The err line `recordSessionMissing` projects onto the dead run. */
+const missingLine: LogLine = {
+  t: "09:41:02",
+  ev: "err",
+  tag: "run·session_missing",
+  text: "The Claude Code session no longer exists on this machine.",
+};
+
+const plainLine: LogLine = {
+  t: "09:40:00",
+  ev: "text",
+  tag: "assistant",
+  text: "Reading the task file.",
+};
+
+function run(patch: Partial<RunView> = {}): RunView {
+  return {
+    id: "primary",
+    serverRunId: "r_1",
+    role: "developer",
+    kind: "primary",
+    profileId: "dev-1",
+    who: { kind: "agent", backend: "claude", name: "Dana", role: "developer" },
+    backend: "claude",
+    sdk: "claude-code",
+    model: "claude-opus-5",
+    sid: "fresh-session-id",
+    exportable: true,
+    state: "done",
+    lifecycle: "finished",
+    phase: null,
+    step: null,
+    startedAt: "2026-08-06T09:40:00.000Z",
+    finished: "9:41",
+    turns: 3,
+    tokens: 1200,
+    lines: [plainLine],
+    raw: ["{}"],
+    lineCount: 1,
+    logWindow: {
+      totalLines: 1,
+      hasMore: false,
+      runIds: ["r_1"],
+      oldest: null,
+      headSeq: 0,
+    },
+    ...patch,
+  };
+}
+
+/** A run group that carries the dead-session marker (dead run + fresh run). */
+function brokenRun(patch: Partial<RunView> = {}): RunView {
+  return run({
+    lines: [plainLine, missingLine, plainLine],
+    raw: ["{}", missingRaw(), "{}"],
+    lineCount: 3,
+    ...patch,
+  });
+}
+
+function ev(patch: Partial<TimelineEventRender> = {}): TimelineEventRender {
+  return {
+    id: 1,
+    type: "comment",
+    occurredAt: "2026-08-06T09:41:00.000Z",
+    actor: { kind: "human", userId: "u1", name: "Murat Deniz", initials: "MD", tone: "" },
+    title: null,
+    text: "looking into it",
+    toAgent: false,
+    evidence: null,
+    ...patch,
+  };
+}
+
+const continuityEvent = ev({
+  id: 9,
+  type: CONTINUITY_EVENT_TYPE,
+  occurredAt: "2026-08-06T09:41:05.000Z",
+  actor: { kind: "system", name: "Viberr" },
+  text: "Runtime continuity was lost: the Claude Code session behind Dana's thread no longer has a provider transcript.",
+});
+
+/* -------------------------------------------------- deriveContinuityLoss */
+
+describe("deriveContinuityLoss", () => {
+  it("returns null when nothing was lost — the panel is never a standing empty card", () => {
+    expect(
+      deriveContinuityLoss({ timeline: [ev()], runtime: [run()] }),
+    ).toBeNull();
+    expect(deriveContinuityLoss({ timeline: [], runtime: [] })).toBeNull();
+  });
+
+  it("names the affected thread from the run group and the session from the WIRE envelope", () => {
+    const loss = deriveContinuityLoss({
+      timeline: [continuityEvent],
+      runtime: [run({ id: "op", kind: "operator", op: true }), brokenRun()],
+    });
+    expect(loss).not.toBeNull();
+    expect(loss!.occurredAt).toBe("2026-08-06T09:41:05.000Z");
+    expect(loss!.agents).toHaveLength(1);
+    expect(loss!.agents[0]).toMatchObject({
+      threadId: "primary",
+      name: "Dana",
+      roleLabel: "Delivering agent",
+      backendLabel: "Claude Code",
+      sessionId: DEAD_SESSION,
+    });
+  });
+
+  it("says nothing about a session the envelope does not carry (no text scraping)", () => {
+    const noId = deriveContinuityLoss({
+      timeline: [],
+      runtime: [brokenRun({ raw: ["{}", missingRaw(null), "{}"] })],
+    });
+    expect(noId!.agents[0]!.sessionId).toBeNull();
+    const unparseable = deriveContinuityLoss({
+      timeline: [],
+      runtime: [brokenRun({ raw: ["{}", "not json", "{}"] })],
+    });
+    expect(unparseable!.agents[0]!.sessionId).toBeNull();
+    // …and it still reports the break: the id is a detail, the loss is the fact.
+    expect(unparseable!.agents[0]!.name).toBe("Dana");
+  });
+
+  it("matches every writer's marker tag by its shared suffix", () => {
+    for (const tag of ["run·session_missing", "run·error·session_missing", "error·session_missing"]) {
+      const loss = deriveContinuityLoss({
+        timeline: [],
+        runtime: [brokenRun({ lines: [{ ...missingLine, tag }], raw: [missingRaw()] })],
+      });
+      expect(loss, tag).not.toBeNull();
+    }
+  });
+
+  it("labels the engagement the way the UI names it", () => {
+    const roleOf = (patch: Partial<RunView>) =>
+      deriveContinuityLoss({ timeline: [], runtime: [brokenRun(patch)] })!.agents[0]!
+        .roleLabel;
+    expect(roleOf({ kind: "operator", op: true })).toBe("Operator");
+    expect(roleOf({ kind: "reviewer" })).toBe("Reviewer");
+    expect(roleOf({ kind: "primary" })).toBe("Delivering agent");
+  });
+
+  it("reads where recovery stands off the group's representative run", () => {
+    const progressOf = (lifecycle: RunView["lifecycle"]) =>
+      deriveContinuityLoss({ timeline: [], runtime: [brokenRun({ lifecycle })] })!
+        .agents[0]!.progress;
+    expect(progressOf("running")).toBe("running");
+    expect(progressOf("queued")).toBe("running");
+    expect(progressOf("finished")).toBe("recovered");
+    expect(progressOf("error")).toBe("stalled");
+    expect(progressOf("interrupted")).toBe("stalled");
+  });
+
+  it("reports from either source alone — neither is the sole trigger", () => {
+    // Canonical event only (the console window has paged the marker out).
+    const eventOnly = deriveContinuityLoss({
+      timeline: [continuityEvent],
+      runtime: [run()],
+    });
+    expect(eventOnly!.agents).toEqual([]);
+    expect(eventOnly!.occurredAt).toBe("2026-08-06T09:41:05.000Z");
+    // Run marker only (the 30-event timeline slice has scrolled past it).
+    const runOnly = deriveContinuityLoss({ timeline: [ev()], runtime: [brokenRun()] });
+    expect(runOnly!.occurredAt).toBeNull();
+    expect(runOnly!.agents).toHaveLength(1);
+  });
+
+  it("takes the NEWEST continuity event — the slice is newest-first", () => {
+    const older = { ...continuityEvent, id: 2, occurredAt: "2026-08-01T00:00:00.000Z" };
+    const loss = deriveContinuityLoss({
+      timeline: [continuityEvent, ev(), older],
+      runtime: [],
+    });
+    expect(loss!.occurredAt).toBe("2026-08-06T09:41:05.000Z");
+  });
+});
+
+/* ------------------------------------------------- ContinuityRecoveryPanel */
+
+function renderPanel(props: Partial<Parameters<typeof ContinuityRecoveryPanel>[0]> = {}) {
+  return render(
+    <ContinuityRecoveryPanel
+      timeline={[continuityEvent]}
+      runtime={[brokenRun()]}
+      {...props}
+    />,
+  );
+}
+
+describe("ContinuityRecoveryPanel", () => {
+  it("renders nothing when there is no degradation to report", () => {
+    const { container } = render(
+      <ContinuityRecoveryPanel timeline={[ev()]} runtime={[run()]} />,
+    );
+    expect(container.querySelector(".continuity-panel")).toBeNull();
+    expect(container.textContent).toBe("");
+  });
+
+  it("leads with what remains authoritative, then what was lost", () => {
+    const { container } = renderPanel();
+    const panel = container.querySelector(".continuity-panel")!;
+    expect(panel.querySelector("h2")!.textContent).toBe("Continuity recovery");
+    // The lede is the FIRST prose, and it is about the record, not the provider.
+    expect(panel.querySelector(".packet-lede")!.textContent).toContain(
+      "This task record is still the authority",
+    );
+    const rows = Array.from(panel.querySelectorAll(".packet-obs .obs"));
+    const keys = rows.map((r) => r.querySelector(".k")!.textContent);
+    expect(keys[0]).toBe("still authoritative");
+    expect(keys[1]).toBe("lost");
+    // What was lost is named concretely: engagement, agent, backend, session.
+    expect(rows[1]!.textContent).toContain("Delivering agent");
+    expect(rows[1]!.textContent).toContain("Dana");
+    expect(rows[1]!.textContent).toContain("Claude Code");
+    expect(rows[1]!.querySelector("code")!.textContent).toBe(DEAD_SESSION);
+    // …and the panel is honest that the run log it already produced survives.
+    expect(rows[1]!.textContent).toContain("run log it already produced is unchanged");
+    expect(panel.textContent).toContain("continuity lost");
+  });
+
+  it("carries the state in TEXT, distinguishing recovery from failure", () => {
+    const label = (lifecycle: RunView["lifecycle"]) => {
+      const { container } = renderPanel({ runtime: [brokenRun({ lifecycle })] });
+      const pill = container.querySelector(".continuity-panel .panel-head .pill")!;
+      const text = container.querySelector(".continuity-panel")!.textContent!;
+      const out = { pill: pill.textContent, ready: pill.classList.contains("ready"), text };
+      cleanup();
+      return out;
+    };
+    const recovered = label("finished");
+    expect(recovered.pill).toBe("re-anchored · recovered");
+    expect(recovered.ready).toBe(true);
+    expect(recovered.text).toContain("Dana has completed a run since");
+
+    const running = label("running");
+    expect(running.pill).toBe("re-anchored · running");
+    expect(running.ready).toBe(false);
+    expect(running.text).toContain("Dana is running again now");
+
+    const stalled = label("error");
+    expect(stalled.pill).toBe("re-anchored · no run since");
+    expect(stalled.ready).toBe(false);
+    expect(stalled.text).toContain("Dana has not completed a run since");
+  });
+
+  it("still reports the break when only the canonical event survives", () => {
+    const { container } = renderPanel({ timeline: [continuityEvent], runtime: [run()] });
+    const panel = container.querySelector(".continuity-panel")!;
+    expect(panel.querySelector(".panel-head .pill")!.textContent).toBe("context lost");
+    expect(panel.textContent).toContain("An agent thread lost its provider-side");
+    expect(panel.textContent).toContain("One agent thread");
+    // Nothing to open a console for, so no console button is offered.
+    const labels = Array.from(panel.querySelectorAll("button")).map((b) => b.textContent!);
+    expect(labels.some((l) => l.includes("console"))).toBe(false);
+  });
+
+  it("announces the state change through a live region that mounts empty", async () => {
+    const { container } = renderPanel();
+    const live = container.querySelector(".cont-live")!;
+    expect(live.getAttribute("role")).toBe("status");
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    // The region has to EXIST before it carries text or nothing is spoken —
+    // so it mounts EMPTY and is filled on a later frame. Text rendered
+    // synchronously into a fresh live region is not reliably announced.
+    expect(live.textContent).toBe("");
+    await waitFor(() =>
+      expect(live.textContent).toContain("Continuity notice: Dana's runtime history was lost"),
+    );
+    expect(live.textContent).toContain("The task record is intact.");
+  });
+
+  it("names the region for assistive tech", () => {
+    const { container } = renderPanel();
+    const panel = container.querySelector(".continuity-panel")!;
+    const labelledBy = panel.getAttribute("aria-labelledby")!;
+    expect(panel.querySelector(`#${labelledBy}`)!.textContent).toBe("Continuity recovery");
+  });
+
+  it("routes to the console and to the operator — both real buttons, both keyboard reachable", () => {
+    const opened: string[] = [];
+    let asked = 0;
+    const { container } = renderPanel({
+      onOpenConsole: (id) => opened.push(id),
+      onAsk: () => (asked += 1),
+    });
+    const buttons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".continuity-panel button"),
+    );
+    // `button` elements, not click-handling divs: keyboard reach is structural.
+    expect(buttons.every((b) => b.tagName === "BUTTON" && b.type === "button")).toBe(true);
+    const console_ = buttons.find((b) => b.textContent!.includes("console"))!;
+    expect(console_.textContent).toContain("Open Dana’s console");
+    fireEvent.click(console_);
+    expect(opened).toEqual(["primary"]);
+    const ask = buttons.find((b) => b.textContent!.includes("Ask operator"))!;
+    fireEvent.click(ask);
+    expect(asked).toBe(1);
+  });
+
+  it("withholds the console door from a non-member, and still reports the break", () => {
+    const { container } = renderPanel({
+      runsVisible: false,
+      onOpenConsole: () => {},
+      onAsk: () => {},
+    });
+    const panel = container.querySelector(".continuity-panel")!;
+    expect(panel).not.toBeNull();
+    const labels = Array.from(panel.querySelectorAll("button")).map((b) => b.textContent);
+    expect(labels.some((l) => l!.includes("console"))).toBe(false);
+    expect(labels.some((l) => l!.includes("Ask operator"))).toBe(true);
+  });
+
+  it("names the continuation path in text, and only the one the viewer has", () => {
+    const { container } = renderPanel({ canRunAgents: false });
+    const hint = container.querySelector(".continuity-panel .hint")!;
+    expect(hint.textContent).toContain("@mention");
+    expect(hint.textContent).toContain("Dana");
+    expect(hint.textContent).toContain("The lost conversation is not restored");
+    expect(hint.textContent).not.toContain(EXECUTION_PANEL_LABEL);
+    cleanup();
+
+    const runner = renderPanel({ canRunAgents: true });
+    expect(
+      runner.container.querySelector(".continuity-panel .hint")!.textContent,
+    ).toContain(EXECUTION_PANEL_LABEL);
+  });
+
+  it("the panel it names by heading is really called that (UX19-4)", () => {
+    // Naming a control a reader then cannot find is worse than naming none, so
+    // the string is not allowed to drift out from under this note.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = readFileSync(path.join(here, "execution-profile.tsx"), "utf8");
+    expect(src).toContain(`<h2>${EXECUTION_PANEL_LABEL}</h2>`);
+  });
+
+  it("offers no control the server cannot honour — there is no resume door", () => {
+    // `resumeRun` probes the session and, on `missing`, does the fresh start
+    // ITSELF; no route intent asks a human to choose. A "Resume session" button
+    // here would name an outcome nothing can deliver.
+    const { container } = renderPanel({ onOpenConsole: () => {}, onAsk: () => {} });
+    const labels = Array.from(container.querySelectorAll("button"))
+      .map((b) => b.textContent!.toLowerCase())
+      .join(" | ");
+    expect(labels).not.toContain("resume");
+    expect(labels).not.toContain("restore");
+    expect(labels).not.toContain("start fresh");
+  });
+});
+
+/* ------------------------------------------------------------ page wiring */
+
+const STAGES = [
+  { id: "triage", name: "Triage", color: "#a5a8b5" },
+  { id: "review", name: "Review", color: "#5b76fe" },
+  { id: "done", name: "Done", color: "#00b473" },
+];
+
+const ACCEPTANCE: AcceptanceAffordance = {
+  hasAuthority: true,
+  atBoundary: true,
+  blockedReason: null,
+  blockedReasonViaPacket: null,
+  canAccept: true,
+  terminallyBlocked: false,
+};
+
+function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
+  return {
+    projectSlug: "viberr-core",
+    key: "VIB-160",
+    title: "Rehydrate a specialist after a lost session",
+    stage: "review",
+    readiness: "in_review",
+    displayReadiness: "in_review",
+    waiting: "human",
+    urgent: false,
+    validation: "healthy",
+    blockReason: null,
+    owner: null,
+    specialist: null,
+    reviewers: [],
+    operator: null,
+    branch: "vib-160",
+    repo: "akin-ozer/viberr",
+    pr: null,
+    prChecks: null,
+    prReview: null,
+    commits: [],
+    changed: null,
+    goal: "Keep going from the record.",
+    packet: {
+      type: "input",
+      kind: "Completion report",
+      from: "Operator",
+      title: "Accept completion?",
+      body: "The specialist reports done.",
+      observations: [],
+      options: [
+        { kind: "request_edit", t: "Request one edit", d: "Ask again.", rec: true },
+      ],
+    },
+    eventCount: 1,
+    commentCount: 0,
+    diagnosticCount: 0,
+    createdAt: null,
+    updatedAt: null,
+    boardRank: null,
+    filePath: "projects/viberr-core/tasks/VIB-160/task.md",
+    timeline: [continuityEvent],
+    diagnostics: [],
+    stages: STAGES,
+    ...patch,
+  } as unknown as TaskDetail;
+}
+
+function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [brokenRun()]) {
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => (
+        <ToastProvider>
+          <TaskDetailPage
+            task={detail(task)}
+            runtime={runtime}
+            deployedSpecialists={[]}
+            operatorBackend="claude"
+            operatorAutonomy="supervised"
+            backendAvailable={{ claude: true, codex: true }}
+            deliveringActive={false}
+            activeReviewerIds={[]}
+            timelineHasMore={false}
+            timelineRemaining={0}
+            timelineNextLimit={50}
+            tlDefault="all"
+            members={[]}
+            me={{ id: "u-arda", name: "Arda Kaya" }}
+            myRole="admin"
+            mentionables={{ agents: [], users: [], reserved: [] }}
+            recommendations={[]}
+            schedules={[]}
+            acceptance={ACCEPTANCE}
+            githubHost="https://github.com"
+          />
+        </ToastProvider>
+      ),
+      action: async () => ({ ok: true }),
+    },
+  ]);
+  return render(<Stub initialEntries={["/"]} />);
+}
+
+describe("task detail wiring", () => {
+  it("puts the panel above the decision packet and above the timeline", () => {
+    const { container } = renderPage();
+    const panel = container.querySelector(".continuity-panel")!;
+    const packet = container.querySelector(".packet")!;
+    // The timeline's own rows — the "history" half of "status before history".
+    const firstEventRow = container.querySelector(".tl-item")!;
+    expect(panel).not.toBeNull();
+    expect(packet).not.toBeNull();
+    expect(firstEventRow).not.toBeNull();
+    // Execution TRUTH before the decision it may well explain, and both before
+    // history — "status before history / decisions before discussion".
+    expect(
+      panel.compareDocumentPosition(packet) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      panel.compareDocumentPosition(firstEventRow) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("stays away when the task has no continuity break", () => {
+    const { container } = renderPage({ timeline: [ev()] }, [run()]);
+    expect(container.querySelector(".continuity-panel")).toBeNull();
+  });
+
+  it("hands the panel the page's own console selector and Ask-operator signal", () => {
+    const { container } = renderPage();
+    const buttons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".continuity-panel button"),
+    ).map((b) => b.textContent);
+    expect(buttons.some((b) => b!.includes("Open Dana’s console"))).toBe(true);
+    expect(buttons.some((b) => b!.includes("Ask operator"))).toBe(true);
+  });
+});

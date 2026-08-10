@@ -16,6 +16,7 @@ import {
   resolveTaskFilePath,
 } from "~/server/files/task-writer.server";
 import { storeRelativePath } from "~/server/files/file-store-root.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   findOpenScopeViolation,
 } from "~/server/projections/policy-violations.server";
@@ -35,6 +36,12 @@ import {
 import { branchCleanupOnMerge } from "./branch-cleanup.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 import { deriveMergeable, findPrForBranch, type PrFacts } from "./pr-linker.server";
+import {
+  derivePrHumanApproval,
+  readPrHumanApproval,
+  PR_HUMAN_APPROVAL_KEY,
+  type PrHumanApproval,
+} from "./pr-human-approval.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import {
@@ -154,11 +161,80 @@ const POLICY_ENGINE_NOTIFY_FROM = {
 };
 
 /**
- * Reconciles ONE task with GitHub. Idempotent: unchanged facts produce no
- * file write and no reprojection (`changed: false`), but always record a
- * provenance row for the observation.
+ * F19-19: ONE reconcile pass per task at a time.
+ *
+ * `reconcileTask` reads task.md, then awaits two to four GitHub round trips
+ * before it writes. Every out-of-band transition guard below —
+ * `prJustMerged`, `prJustClosed`, `prJustReopened`, `acceptedClosedExternally`
+ * — compares the LIVE PR against that PRE-AWAIT snapshot, and nothing
+ * serialized two passes: the poller runs a boot pass plus a 5-minute interval,
+ * `runReconcile` takes no lock, and the "Update status" button's disabled state
+ * is per-fetcher, so two tabs (or a maintainer clicking during the boot pass)
+ * race. Both passes then read `pr.state: review`, both learn GitHub says
+ * merged, and one merge produces two divergence notes and two identical inbox
+ * alerts for every supervisor — which is exactly the chatter NFR16 forbids.
+ *
+ * A QUEUE, not a coalescer. The second pass runs its own read AFTER the first
+ * has written, so it sees the new `fm.pr` and correctly reports nothing new.
+ * Coalescing would hand whoever pressed "Update status" the answer computed
+ * before they pressed it — a freshness lie on the one surface whose entire job
+ * is freshness.
+ *
+ * Not `runSingleFlight`: that is a synchronous per-key COOLDOWN whose stated
+ * contract is "a skipped run is acceptable", and a reconcile dropped right
+ * after a real merge is precisely the one that must not be skipped.
+ *
+ * In-process, matching the single-node deployment (the same scope as the
+ * operator lease). Keyed per task, so `reconcileProject`'s fan-out is
+ * unaffected: different tasks never wait on each other.
  */
-export async function reconcileTask(
+const taskReconcileChain = new Map<string, Promise<void>>();
+
+function withTaskReconcileLock<T>(
+  key: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  // Whatever is in the map is a `tail` (below), which by construction NEVER
+  // rejects — so waiting on it needs no rejection handler.
+  const previous = taskReconcileChain.get(key) ?? Promise.resolve();
+  const run = previous.then(work);
+  // The failure is absorbed HERE, in the link the successor waits on. One
+  // task's failed reconcile — the network drops mid-pass — must not strand
+  // every later pass on that task, which is exactly what a rejected chain link
+  // would do: the poller and the "Update status" button would both go quiet
+  // forever, with nothing but an unhandled rejection to say why. The caller
+  // still gets `run`, so the failure itself is never swallowed.
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  taskReconcileChain.set(key, tail);
+  void tail.then(() => {
+    // Only the CURRENT tail may clear the entry; a later pass that already
+    // replaced it owns the key now.
+    if (taskReconcileChain.get(key) === tail) taskReconcileChain.delete(key);
+  });
+  return run;
+}
+
+/**
+ * R19-B — the project's member user ids, from the CANONICAL project file (the
+ * same source `loadProjectContext` reads for every RBAC decision), so "a
+ * project member approved it" can never be answered from a stale projection.
+ * `db` is unused here on purpose: membership is file truth.
+ */
+function projectMemberIds(
+  _db: DatabaseSync,
+  projectSlug: string,
+  dataRoot: string | undefined,
+): ReadonlySet<string> {
+  const file = readProjectFile({ projectSlug, dataRoot });
+  if (!file) return new Set();
+  return new Set(file.parsed.frontmatter.members.map((m) => m.userId));
+}
+
+/** Body of `reconcileTask` — only ever entered through the per-task lock. */
+async function reconcileTaskUnlocked(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: AuditActor,
@@ -328,6 +404,30 @@ export async function reconcileTask(
       revisionDrift = { aheadBy: driftCompare.compare.aheadBy, headSha: pr.headSha };
     }
   }
+  // R19-B (owner ruling): a project member's GitHub approval on the PR IS the
+  // approving verdict. Derived from the SAME `/reviews` payload the pill
+  // already costs, mapped to a Viberr member through `users.github_handle`, and
+  // bound to the DELIVERED revision.
+  //
+  // The unknown/stale rule is the same one `checks`, `review` and `mergeable`
+  // follow above, and it is what keeps an unreachable GitHub from flipping a
+  // satisfied gate red: `approvals` ABSENT means the reviews call did not run
+  // (terminal PR, failed request), so the last-known record is carried forward
+  // for the SAME PR rather than erased. A re-delivery still revokes it
+  // instantly — `humanVerdictApproval` re-checks the binding against the
+  // current `workRevision` on every read, with no GitHub round-trip.
+  let humanApproval: PrHumanApproval | null = null;
+  if (pr && ownsAPr) {
+    humanApproval =
+      pr.approvals !== undefined
+        ? derivePrHumanApproval({
+            approvals: pr.approvals,
+            deliveredSha: reviewedSha,
+            memberUserIds: projectMemberIds(db, input.projectSlug, ctx.dataRoot),
+            db,
+          })
+        : readPrHumanApproval(cachedPr);
+  }
   const newPr: PrRef | null =
     pr && ownsAPr
       ? {
@@ -338,6 +438,7 @@ export async function reconcileTask(
           ...(review ? { review } : {}),
           ...(mergeable ? { mergeable } : {}),
           ...(revisionDrift ? { revisionDrift } : {}),
+          ...(humanApproval ? { [PR_HUMAN_APPROVAL_KEY]: humanApproval } : {}),
         }
       : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
 
@@ -623,6 +724,26 @@ export async function reconcileTask(
   };
 }
 
+/**
+ * Reconciles ONE task with GitHub. Idempotent: unchanged facts produce no
+ * file write and no reprojection (`changed: false`), but always record a
+ * provenance row for the observation. Serialized per task — see
+ * `withTaskReconcileLock` (F19-19).
+ */
+export function reconcileTask(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: AuditActor,
+  ctx: GithubActionContext = {},
+): Promise<TaskReconcileResult> {
+  return withTaskReconcileLock(
+    // The data root is part of the key so two test stores that happen to share
+    // a project slug do not serialize against each other.
+    `${ctx.dataRoot ?? ""}::${input.projectSlug}/${input.taskKey}`,
+    () => reconcileTaskUnlocked(db, input, actor, ctx),
+  );
+}
+
 export interface ProjectReconcileSummary {
   status: "ok" | "no_pat_configured" | "no_repo_configured";
   /** Per-task results for every task that has a branch. */
@@ -663,6 +784,10 @@ const reconcileCursors = new Map<string, string>();
  *  would otherwise inherit the first one's resume point. */
 export function resetReconcileCursorsForTests(): void {
   reconcileCursors.clear();
+  // F19-19: the per-task lock keys off the data root, which is unique per test
+  // store — but a leaked chain would still hold a settled promise, so drop them
+  // with the cursors.
+  taskReconcileChain.clear();
 }
 
 /**

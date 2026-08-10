@@ -33,10 +33,12 @@ export function meta({ params }: Route.MetaArgs) {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const db = getDb();
-  // Members only (R4): the activity stream + audit log expose member actions,
-  // policy changes, and access events — project-scoped like the other config
-  // surfaces, not app-wide like the board. Guard membership FIRST (matching the
-  // sibling config loaders), then the 404 (WI-13).
+  // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a
+  // client-supplied `?_routes=` filter, so
+  // `GET /projects/<slug>/activity.data?_routes=routes/project.activity` runs
+  // this loader ALONE and the layout's membership refusal never executes. The
+  // guard answers a non-member with the byte-identical unknown-slug 404 — a 403
+  // here would confirm the project exists (WI-13).
   await requireProjectMember(request, params.slug, "view project activity");
   const project = getProject(db, params.slug);
   if (!project) {

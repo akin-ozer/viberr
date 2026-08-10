@@ -23,6 +23,7 @@ import {
   listNotifications,
   markAllNotificationsRead,
   markNotificationsRead,
+  markTaskNotificationsSeen,
   markTaskPacketApprovalRead,
 } from "./notifications.server";
 
@@ -197,6 +198,57 @@ describe("notifications", () => {
     expect(rows.find((r) => r.id === "ap")?.read_at).not.toBeNull();
     expect(rows.find((r) => r.id === "m")?.read_at).toBeNull();
     expect(rows.find((r) => r.id === "othertask")?.read_at).toBeNull();
+  });
+});
+
+/**
+ * R19-15: viewing a task auto-reads its notifications — for the VIEWER only.
+ * The inverse scoping of `markTaskPacketApprovalRead`: every kind (a view sees
+ * the mention and the policy row too, not just the decision kinds), one user
+ * (nobody else's rows are proven seen by someone else's page view).
+ */
+describe("R19-15: markTaskNotificationsSeen — viewing a task auto-reads its rows", () => {
+  /** Every kind for the viewer on the viewed task, plus the two rows that must
+   *  survive: another USER's on the same task, the viewer's on ANOTHER task. */
+  function seedViewRows(db: DatabaseSync): void {
+    createNotification(db, { id: "s_p", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(db, { id: "s_a", userId: "u_1", kind: "approval", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(db, { id: "s_m", userId: "u_1", kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(db, { id: "s_q", userId: "u_1", kind: "quality", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(db, { id: "s_pol", userId: "u_1", kind: "policy", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(db, { id: "s_other_user", userId: "u_2", kind: "packet", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(db, { id: "s_other_task", userId: "u_1", kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-160" });
+  }
+
+  it("marks EVERY kind for that user+task — nobody else's rows, no other task's", () => {
+    const db = ctx.makeDb();
+    seedViewRows(db);
+    expect(markTaskNotificationsSeen(db, "u_1", "viberr-core", "VIB-142")).toBe(5);
+    const read = (
+      db
+        .prepare(`SELECT id FROM notifications WHERE read_at IS NOT NULL`)
+        .all() as { id: string }[]
+    )
+      .map((r) => r.id)
+      .sort();
+    expect(read).toEqual(["s_a", "s_m", "s_p", "s_pol", "s_q"]);
+  });
+
+  it("second view marks 0 rows and emits NO event — the convergence the loader call relies on", () => {
+    const db = ctx.makeDb();
+    seedViewRows(db);
+    const events: ProjectionEvent[] = [];
+    const off = onProjectionEvent((e) => {
+      if (e.type === "notification.read") events.push(e);
+    });
+    markTaskNotificationsSeen(db, "u_1", "viberr-core", "VIB-142");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "notification.read", userId: "u_1" });
+    // The revalidation the first event triggers re-runs the loader → this
+    // second pass. It must change nothing and stay silent, or the loop sustains.
+    expect(markTaskNotificationsSeen(db, "u_1", "viberr-core", "VIB-142")).toBe(0);
+    expect(events).toHaveLength(1);
+    off();
   });
 });
 

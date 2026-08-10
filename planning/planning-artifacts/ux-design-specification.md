@@ -246,6 +246,15 @@ A token-driven system built on low-opinion primitives gives Viberr the right mid
 
 The design system should begin with a small, disciplined foundation rather than an ambitious UI catalog. Start with semantic tokens for color, typography, spacing, radius, elevation, border treatment, motion, and workflow-state semantics. Then build a compact first-party component layer for Viberr’s core supervision workflow.
 
+> **Amended 2026-08-06 (pass 19, N19-4) — `app/app.css`'s `:root` is the ONLY token source, and it has drifted from the design-system mock in both directions.** The token *naming convention* held (flat, unprefixed: `--bg`, `--fg`, `--blue`), but the values did not, and `design/design-system.html` is a build input that was never updated to match. What actually ships:
+>
+> - **Radius scale is smaller.** Shipped: `--radius-button: 8px`, `--radius-chip: 999px`, `--radius-card: **16px**`, `--radius-panel: **22px**`. The mock documents card **18** / panel **28** and a **44px** canvas radius; there is no canvas or large radius token in the app at all.
+> - **Documented-but-undefined tokens.** `--pink`, `--dark-red` and `--radius-large` appear in the mock and in nothing else. Using one in app code yields an empty value, not a colour — they are not part of the system.
+> - **Tokens the app added that no spec records:** `--agent` / `--agent-dark` / `--agent-soft` (the violet agent-identity tint), `--cta-*`, `--faint`, `--hairline`, `--shadow-ring` / `--shadow-card` / `--shadow-pop`, `--ease-out`, `--rail-w`, `--topbar-h`, `--radius-chip`.
+> - **No spacing scale and no elevation scale.** The "start with tokens for spacing … elevation" instruction above was only partly taken: spacing is per-component rem values (see the Spacing note below), and elevation is three named shadow tokens rather than a scale.
+>
+> The app is deliberately right here and the documents are the ones being corrected (`planning/README.md`'s canon rule). The integrity gate is `app/app.css.test.ts`, which checks token integrity and contrast against the real stylesheet. Never copy a value out of `design/*.html`; read the `:root` block.
+
 The initial component inventory should be intentionally narrow and tied directly to real product surfaces: buttons, inputs, filters, command surfaces, badges, cards, panels, tabs, tables, drawers, dialogs, timeline blocks, decision packets, task-health indicators, and execution-profile displays. The system should avoid rebuilding a full generic component library before those core surfaces are proven.
 
 Because Viberr is a browser-based web application optimized for desktop workflows and screen sizes, the system should support compact layouts, strong keyboard behavior, clear focus handling, and progressive disclosure. These interaction rules are part of the design-system foundation, not implementation detail.
@@ -345,7 +354,19 @@ A practical palette direction is:
 
 Both light and dark themes should be supported, but semantic meaning must remain consistent across modes. Core workflow views should avoid decorative gradients, glow effects, or ornamental color treatments. If atmospheric visual treatments are used at all, they should stay outside the main operational surfaces.
 
-> **Superseded — the concrete palette above is advisory and the build did not take it.** The shipped palette is `design/design-system.html` (a bright Miro-inspired canvas): a `#5b76fe` blue accent rather than steel blue, pastel semantic surfaces, a violet agent-identity tint distinct from human blue, and two heavily transparent radial gradients washing the page background behind opaque surfaces. `app/app.css`'s `:root` block is the single source of the real tokens; use those names, never a literal hex. The *principles* in this section still hold and are enforced — color never operates alone, semantic meaning stays consistent across light and dark, and the light theme's secondary text ladder is contrast-constrained rather than free.
+> **Superseded — the concrete palette above is advisory and the build did not take it.** The shipped palette *direction* is `design/design-system.html` (a bright Miro-inspired canvas): a `#5b76fe` blue accent rather than steel blue, pastel semantic surfaces, a violet agent-identity tint distinct from human blue, and two heavily transparent radial gradients washing the page background behind opaque surfaces. `app/app.css`'s `:root` block is the single source of the real tokens; use those names, never a literal hex. The *principles* in this section still hold and are enforced — color never operates alone, semantic meaning stays consistent across light and dark, and the light theme's secondary text ladder is contrast-constrained rather than free.
+
+> **`design/design-system.html` is a reference MOCK, not the token source — and it has itself drifted.** *(Recorded 2026-08-06, pass 19 — N19-4.)* The note above and the one under Typography both cited the mock as "the shipped X", which reads as an authority claim it cannot support: the mock is a static prototype nobody re-renders, while `app/app.css` is compiled into the product on every build. Where they disagree the **app is right and the doc is what gets corrected**. Five values verified against `app/app.css` on 2026-08-06:
+>
+> | `design/design-system.html` `:root` | `app/app.css` `:root` (shipped) |
+> |---|---|
+> | `--radius-card: 18px` | `--radius-card: 16px` |
+> | `--radius-panel: 28px` | `--radius-panel: 22px` |
+> | `--radius-large: 44px` (the large `.system-card` canvas radius) | **not ported** — no such token. The shipped radius vocabulary is exactly four: button `8px`, chip `999px`, card `16px`, panel `22px`. |
+> | `--pink: #fde0f0`, `--dark-red: #e3c5c5` | **not ported** — neither is ever declared. Pink-adjacent surfaces use `--rose-light` / `--red-light`, which both files define. |
+> | `--font-display: "Roobert PRO Medium", …` | `--font-display: "Manrope", …` — see the Typography note below. |
+>
+> The two radius tightenings were deliberate at port time; the rest are simply tokens the port did not take. Nothing in the product can reach for the unported four by accident: the porting rule is **a `var(--x)` that is not defined in `:root` is a bug, not a style choice**, and `app/app.css.test.ts` enforces it with no allowlist ("every var(--x) reference resolves to a declared token"). So the drift is a *documentation* hazard only — nobody's build breaks, a reader is just told the wrong number. Which is exactly why it is written down here instead of left for the next reader to re-derive: the mock stays as the visual reference it is good at being, and the token values are read from the stylesheet.
 
 ### Typography System
 
@@ -370,7 +391,9 @@ A practical type strategy:
 - moderate body line-height
 - tighter spacing for labels, metadata, and compact operational blocks
 
-> **Superseded — the named typefaces are advisory and the build did not take them.** The shipped stack comes from `design/design-system.html`: Roobert PRO Medium for display, Noto Sans for body, JetBrains Mono for the technical/reference role. The mono-used-intentionally rule and the scan-first hierarchy above are honoured; only the family names changed.
+> **Superseded — the named typefaces are advisory and the build did not take them.** The shipped stack is `app/app.css`'s `:root`: **Manrope** for display (`--font-display`), **Noto Sans** for body (`--font-body`), **JetBrains Mono** for the technical/reference role (`--font-mono`) — all three bundled and self-hosted (`@fontsource/manrope` 500/600/700/800, `@fontsource/noto-sans` 400–700, `@fontsource/jetbrains-mono` 400–600, imported in `app/root.tsx`). The mono-used-intentionally rule and the scan-first hierarchy above are honoured; only the family names changed.
+>
+> *(Corrected 2026-08-06, pass 19 — N19-2. This note previously named **Roobert PRO Medium** for display and cited `design/design-system.html` as the shipped stack. Roobert PRO is not web-available and has never shipped anywhere in the product: the mock declares it, the app does not, and no Roobert font file is bundled. Manrope was chosen as the geometric-humanist stand-in. The app once carried the mock's Roobert-first stack in its token block while a second `:root` 2600 lines further down silently overrode it with Manrope — P16-UI-04 deleted the duplicate, so `--font-display` is now declared exactly once, at the token block, and `app/app.css.test.ts` pins that count. A superseding note that has itself gone stale is worse than the advisory text it supersedes, because it is the line a reader trusts instead of checking; so the citation now points at the stylesheet, the one source that cannot drift from itself.)*
 
 ### Spacing & Layout Foundation
 
@@ -619,6 +642,8 @@ The number of truly first-party workflow components should remain small. Most of
 **Content Guidelines:** Prioritize current truth over secondary metadata.  
 **Interaction Behavior:** Open task detail on select; support keyboard navigation across board lanes.
 
+> **Ruled, not deferred — the "keyboard navigation across board lanes" clause is being built.** *(Recorded 2026-08-08, pass 19 — owner ruling R19-10, `docs/architecture/decisions.md` 64.)* This clause had been open as **D19** for several passes; pass 19's audit found the board's only `onKeyDown` was the new-task dialog's Enter handler, so the cards were reachable but the lanes were not crossable. The owner ruled it **built** rather than converted into a deliberate divergence — a supervision board a keyboard cannot cross only half-honours the WCAG 2.2 AA baseline this document sets, and the board is the surface the product asks people to live on. The line above stands as the build target and is no longer a carried question. This note records the **ruling**, which stands independently of any single implementation attempt; the implementation lands in the same pass-19 wave (`app/features/board/board-page.tsx`) and this document does not certify it — read the tree.
+
 ### Decision Packet
 
 **Purpose:** Present blocking, transition, or completion decisions in a compact, trusted structure.  
@@ -662,6 +687,8 @@ The number of truly first-party workflow components should remain small. Most of
 **Accessibility:** Must clearly distinguish warning from failure and present recovery options in text.  
 **Content Guidelines:** Lead with authoritative task truth, not provider failure detail.  
 **Interaction Behavior:** Guide users toward safe continuation, deeper inspection, or escalation.
+
+> **Ruled, not deferred — this component is being built.** *(Recorded 2026-08-08, pass 19 — owner ruling R19-10, `docs/architecture/decisions.md` 64.)* The Panel had been carried as open question **D18** for several passes and pass 19's audit found it at zero: no such component existed anywhere in the tree, and pass 18's warning-toned `continuity` typed event was its only partial. The owner ruled build rather than retire, because this component sits on the product's trust story rather than its feature list — degraded runtime continuity is exactly the moment the interface must explain itself instead of going quiet, and the Murat journey above has no other home. The anatomy, states, and content guidance above stand as the build target. This note records the **ruling**, which stands independently of any single implementation attempt; the implementation lands in the same pass-19 wave (`app/features/task-detail/continuity-recovery.tsx`) and this document does not certify it — read the tree.
 
 ### Component Implementation Strategy
 
@@ -887,6 +914,8 @@ Viberr uses a desktop-first breakpoint model whose breakpoints are **layout refl
 - no control is hidden or disabled, and no behavior is gated on `matchMedia`
 
 Wide screens should use extra space to keep related context visible, reduce unnecessary navigation, and improve stability. Extra width should not justify more simultaneous panels unless they directly preserve task clarity.
+
+> **Two contracts in this part of the document become enforced checks rather than prose.** *(Recorded 2026-08-08, pass 19 — owner ruling R19-12, `docs/architecture/decisions.md` 66. This is the single authoritative note for both; nothing else in this document restates it.)* The two are **"no control is hidden or disabled, and no behavior is gated on `matchMedia`"** (the last bullet above) and the **both-theme WCAG AA contrast** baseline stated immediately below. Until now each was verified only for a hand-listed set of cases — `app/app.css.test.ts` pins contrast for enumerated token pairs and breakpoint discipline for enumerated patterns, which checks exactly the cases someone already thought of and says nothing about the next token or the next media query. Both contracts deserve better than that, for the same reason: a single stylesheet serving light and dark from one token block is the exact shape where a value tuned for one theme is legible and its counterpart is not, invisible to whoever is not looking at that theme; and hiding a control below a breakpoint is not a layout choice at all but a **correctness** failure wearing accessibility clothing — it makes the surface dishonest about what the user may do, which is why the amendment above has said "nothing is gated on viewport size, and nothing should be" since 2026-07-25. The ruling is that both become systematic gates that fail the suite, on the same footing as the no-undeclared-token rule the stylesheet already enforces with no allowlist. This note records the **ruling**; the checks are a separate change and this document does not assert their shipped state.
 
 ### Accessibility Strategy
 

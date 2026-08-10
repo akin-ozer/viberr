@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AgentGlyph } from "~/ui/identity";
 import { Icon } from "~/ui/icon";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
@@ -18,15 +18,16 @@ import { Pill } from "~/ui/pill";
 import {
   fmtClock,
   fmtTok,
+  hoistRunInputs,
   roleShort,
-  RUN_STATE,
+  runInputRows,
   runLabel,
   runStatePill,
   useElapsed,
 } from "./runs-helpers";
 import { localLogClock } from "./log-clock";
 import { collapseTelemetry, telemetryLabel } from "./log-noise";
-import { isRunBoundary, type RunView } from "./runtime-types";
+import { isRunBoundary, isRunInputsLine, type RunView } from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
 
 /**
@@ -127,9 +128,20 @@ function AgentPicker({
                   {r.role} · {r.sdk}
                 </span>
               </span>
+              {/* UXV19-5: the option used to print `RUN_STATE[r.state].label`,
+                  the four-value RENDER projection, in which `renderStateOf`
+                  collapses both `interrupted` and `queued` to "idle". So the
+                  list a user reads FIRST to choose a stream called a run
+                  "idle" while the pill and footer four lines below — which do
+                  apply ruling 11's lifecycle mapping — read "interrupted · by
+                  Arda" / "queued". One panel, one vocabulary: the label comes
+                  from `runStatePill`, the module written for that ruling. The
+                  DOT keeps the render-state class: it is a CSS state name, and
+                  every lifecycle `runStatePill` re-labels is idle-shaped
+                  (neutral) anyway, so tone never disagrees with the word. */}
               <span className={"ri-state " + r.state}>
                 <span className={"rdot " + r.state} />
-                {RUN_STATE[r.state].label}
+                {runStatePill(r).label}
               </span>
             </button>
           ))}
@@ -342,7 +354,7 @@ export function AgentLogsPanel({
   sel: string | null;
   onSel: (id: string | null) => void;
   linesByThread: Record<string, StreamedLine[]>;
-  /** Retry the failed run's agent (primary specialist or reviewer) on the
+  /** Retry the failed run's agent (delivering agent or reviewer) on the
    *  other backend (D4). Receives the failed run so the caller can route the
    *  right intent (run-specialist vs run-reviewer + profileId). */
   onRetryBackend?: (backend: "claude" | "codex", run: RunView) => void;
@@ -359,6 +371,12 @@ export function AgentLogsPanel({
 }) {
   const [follow, setFollow] = useState(true);
   const [raw, setRaw] = useState(false);
+  /**
+   * P19-G11: which run-input disclosures are expanded, keyed by the stored
+   * envelope (it carries the run id, so the key survives streaming, folding and
+   * backward paging — an array index does not).
+   */
+  const [openInputs, setOpenInputs] = useState<string[]>([]);
   const hydrated = useHydrated();
   const boxRef = useRef<HTMLDivElement>(null);
   /**
@@ -385,7 +403,10 @@ export function AgentLogsPanel({
   // P14-WL-02: what the console actually draws — telemetry runs folded into one
   // row each, unless the raw toggle is on. `shown` stays the counting basis, so
   // the footer's event total is unaffected by the folding.
-  const entries = collapseTelemetry(shown, raw);
+  // P19-G11: each run's `run·inputs` disclosure is restored to the head of its
+  // own block first (see `hoistRunInputs`) — what the run was GIVEN reads before
+  // what it produced.
+  const entries = collapseTelemetry(hoistRunInputs(shown), raw);
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -574,40 +595,89 @@ export function AgentLogsPanel({
         ) : null}
         {/* P14-WL-02: telemetry blocks fold into one dim row; `raw` renders the
             stored stream untouched (`collapseTelemetry` is a no-op there). */}
-        {entries.map((entry, i) =>
-          entry.kind === "telemetry" ? (
-            <div className="log-line meta" key={i}>
-              <span className="lt" />
-              <span className="ltag">telemetry</span>
-              <span className="lx">{telemetryLabel(entry)}</span>
-            </div>
-          ) : (
-            <div className={"log-line " + entry.line.display.ev} key={i}>
-              {/* F15-08: the stored `t` is a UTC wall clock; the timeline on
-                  the same page is local. One story per page. Until hydration
-                  the raw UTC clock renders — reprojecting into the viewer's
-                  zone during SSR is a hydration text mismatch (React #418). */}
-              <span className="lt">
-                {hydrated
-                  ? localLogClock(entry.line.display.t, cur!.startedAt)
-                  : entry.line.display.t}
-              </span>
-              <span className="ltag">{entry.line.display.tag}</span>
+        {entries.map((entry, i) => {
+          if (entry.kind === "telemetry") {
+            return (
+              <div className="log-line meta" key={i}>
+                <span className="lt" />
+                <span className="ltag">telemetry</span>
+                <span className="lx">{telemetryLabel(entry)}</span>
+              </div>
+            );
+          }
+          const display = entry.line.display;
+          // F15-08: the stored `t` is a UTC wall clock; the timeline on the
+          // same page is local. One story per page. Until hydration the raw UTC
+          // clock renders — reprojecting into the viewer's zone during SSR is a
+          // hydration text mismatch (React #418).
+          const clock = hydrated
+            ? localLogClock(display.t, cur!.startedAt)
+            : display.t;
+          // P19-G11: the run's own disclosure of what it was GIVEN — the one
+          // line the console did not receive from a provider. Expandable rather
+          // than always-open: it is reference material a reader goes looking
+          // for, not part of the run's narrative. `raw` still wins, as it does
+          // for every other line: that toggle's contract is the stored envelope.
+          if (!raw && isRunInputsLine(display)) {
+            const key = entry.line.raw;
+            const open = openInputs.includes(key);
+            return (
+              <Fragment key={i}>
+                <div className="log-line meta">
+                  <span className="lt">{clock}</span>
+                  <span className="ltag">{display.tag}</span>
+                  <span className="lx">
+                    {display.text}
+                    <span className="log-more-note"> · </span>
+                    <button
+                      type="button"
+                      className="log-more"
+                      aria-expanded={open}
+                      onClick={() =>
+                        setOpenInputs((prev) =>
+                          prev.includes(key)
+                            ? prev.filter((k) => k !== key)
+                            : [...prev, key],
+                        )
+                      }
+                    >
+                      {open ? "hide what this run was given" : "show what this run was given"}
+                    </button>
+                  </span>
+                </div>
+                {open &&
+                  runInputRows(display.inputs!).map((row) => (
+                    <div className="log-line meta" key={row.tag}>
+                      <span className="lt" />
+                      <span className="ltag">{row.tag}</span>
+                      <span
+                        className="lx"
+                        {...(row.pre ? { style: { whiteSpace: "pre-wrap" as const } } : {})}
+                      >
+                        {row.text}
+                      </span>
+                    </div>
+                  ))}
+              </Fragment>
+            );
+          }
+          return (
+            <div className={"log-line " + display.ev} key={i}>
+              <span className="lt">{clock}</span>
+              <span className="ltag">{display.tag}</span>
               <span className="lx">
                 {raw ? (
                   entry.line.raw
                 ) : (
                   <>
-                    {entry.line.display.name ? (
-                      <b className="ln">{entry.line.display.name} </b>
-                    ) : null}
-                    {entry.line.display.text}
+                    {display.name ? <b className="ln">{display.name} </b> : null}
+                    {display.text}
                   </>
                 )}
               </span>
             </div>
-          ),
-        )}
+          );
+        })}
         {cur!.state === "running" && (
           <div className="log-line cursor">
             <span className="lt"></span>

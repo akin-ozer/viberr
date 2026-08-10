@@ -3,6 +3,7 @@ import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-gi
 import { createGithubClient } from "./github-client.server";
 import {
   deriveMergeable,
+  deriveApprovals,
   deriveReviewState,
   findPrForBranch,
   mapPrToCacheState,
@@ -479,5 +480,124 @@ describe("findPrForBranch mergeability (P14-LV-07)", () => {
     });
     const result = await findPrForBranch(c, REPO, "vib-139-store-scan");
     if (result.status === "found") expect("mergeable" in result.pr).toBe(false);
+  });
+});
+
+/**
+ * R19-B — the identities and commits behind the review pill. `deriveApprovals`
+ * reduces the SAME `/reviews` event log `deriveReviewState` reads (no second
+ * API call), keeping what the pill throws away: WHO approved and WHAT commit
+ * they approved. Without the commit, "approved" says nothing about the
+ * delivered revision — GitHub keeps an approval standing after new pushes.
+ */
+describe("deriveApprovals (R19-B)", () => {
+  const review = (login: string, state: string, commit?: string, at?: string) => ({
+    user: { login },
+    state,
+    ...(commit !== undefined ? { commit_id: commit } : {}),
+    ...(at !== undefined ? { submitted_at: at } : {}),
+  });
+
+  it("returns each standing approver with the commit they approved", () => {
+    expect(
+      deriveApprovals([review("ayse", "APPROVED", "abc123", "2026-08-08T09:00:00Z")]),
+    ).toEqual([{ login: "ayse", commitSha: "abc123", at: "2026-08-08T09:00:00Z" }]);
+  });
+
+  it("uses the reviewer's LATEST entry — a re-approval on a newer commit wins", () => {
+    expect(
+      deriveApprovals([
+        review("ayse", "APPROVED", "old111"),
+        review("ayse", "APPROVED", "new222"),
+      ]),
+    ).toEqual([{ login: "ayse", commitSha: "new222", at: null }]);
+  });
+
+  it("drops a reviewer whose latest state is CHANGES_REQUESTED or DISMISSED", () => {
+    expect(
+      deriveApprovals([review("ayse", "APPROVED", "abc"), review("ayse", "DISMISSED")]),
+    ).toEqual([]);
+    expect(
+      deriveApprovals([
+        review("ayse", "APPROVED", "abc"),
+        review("ayse", "CHANGES_REQUESTED", "abc"),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("ignores COMMENTED / PENDING entries — they are not verdicts", () => {
+    expect(
+      deriveApprovals([review("ayse", "APPROVED", "abc"), review("ayse", "COMMENTED")]),
+    ).toEqual([{ login: "ayse", commitSha: "abc", at: null }]);
+  });
+
+  it("carries the approvals onto PrFacts from the reviews call already made", async () => {
+    const { client: c } = client({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [
+          {
+            number: 401,
+            title: "Human-approved delivery",
+            state: "open",
+            merged_at: null,
+            head: { sha: "sha401" },
+          },
+        ],
+      },
+      [`GET ${REPO_PATH}/pulls/401`]: {
+        body: {
+          number: 401,
+          title: "Human-approved delivery",
+          state: "open",
+          merged: false,
+          merged_at: null,
+          head: { sha: "sha401" },
+        },
+      },
+      [`GET ${REPO_PATH}/commits/sha401/check-runs`]: {
+        body: { total_count: 0, check_runs: [] },
+      },
+      [`GET ${REPO_PATH}/pulls/401/reviews`]: {
+        body: [{ user: { login: "murat" }, state: "APPROVED", commit_id: "sha401" }],
+      },
+    });
+    const result = await findPrForBranch(c, REPO, "vib-401");
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    expect(result.pr.review).toBe("approved");
+    expect(result.pr.approvals).toEqual([
+      { login: "murat", commitSha: "sha401", at: null },
+    ]);
+  });
+
+  it("leaves `approvals` ABSENT on a terminal PR — unread is UNKNOWN, not 'nobody approved'", async () => {
+    const { client: c } = client({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [
+          {
+            number: 402,
+            title: "Merged",
+            state: "closed",
+            merged_at: "2026-08-01T00:00:00Z",
+            head: { sha: "sha402" },
+          },
+        ],
+      },
+      [`GET ${REPO_PATH}/pulls/402`]: {
+        body: {
+          number: 402,
+          title: "Merged",
+          state: "closed",
+          merged: true,
+          merged_at: "2026-08-01T00:00:00Z",
+          head: { sha: "sha402" },
+        },
+      },
+      [`GET ${REPO_PATH}/commits/sha402/check-runs`]: {
+        body: { total_count: 0, check_runs: [] },
+      },
+    });
+    const result = await findPrForBranch(c, REPO, "vib-402");
+    if (result.status === "found") expect("approvals" in result.pr).toBe(false);
   });
 });

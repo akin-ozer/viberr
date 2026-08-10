@@ -68,8 +68,8 @@ async function callLoader(
     return { status: res.status, body: await res.text() };
   } catch (thrown) {
     // requireProjectMember throws react-router's `data(message, {status})`,
-    // which is a DataWithResponseInit — not a Response. A thrown 403 is still
-    // a 403: the route must not fall through to content either way.
+    // which is a DataWithResponseInit — not a Response. A thrown refusal is
+    // still a refusal: the route must not fall through to content either way.
     const wrapped = thrown as { data?: unknown; init?: { status?: number } };
     if (typeof wrapped?.init?.status === "number") {
       return { status: wrapped.init.status, body: String(wrapped.data ?? "") };
@@ -87,7 +87,15 @@ describe("F10-06/F10-33: raw run artifacts require project membership", () => {
       `/resources/run-log?runId=${RUN_ID}`,
       ids.deniz,
     );
-    expect(res.status).toBe(403);
+    // F19-28: was 403 ("Only project members can view raw run logs") — a
+    // project-existence oracle R15-4 forbids. The refusal is now the same 404
+    // an unknown slug produces, and because this route is addressed by RUN id
+    // (not by slug) the body must not name the project either: echoing it would
+    // hand a non-member the name of a project they never asked about.
+    expect(res.status).toBe(404);
+    expect(res.body).toBe("Not found.");
+    expect(res.body).not.toContain("viberr-core");
+    expect(res.body).not.toMatch(/member/i);
     // The denial must not carry the payload it refused to serve.
     expect(res.body).not.toContain("thread_authfixture");
     expect(res.body).not.toContain('"lines"');
@@ -109,22 +117,27 @@ describe("F10-06/F10-33: raw run artifacts require project membership", () => {
       `/resources/session-export?run=${RUN_ID}`,
       ids.deniz,
     );
-    expect(res.status).toBe(403);
+    // F19-28: was 403 — see the run-log case above.
+    expect(res.status).toBe(404);
+    expect(res.body).toBe("Not found.");
+    expect(res.body).not.toContain("viberr-core");
     // Must not hand back the installer script under any status.
     expect(res.body).not.toContain("#!/");
   });
 
-  it("session-export: a member gets past the gate (404 here — no real session)", async () => {
+  it("session-export: a member gets past the gate (its own 404 — no real session)", async () => {
     const res = await callLoader(
       "resources.session-export",
       `/resources/session-export?run=${RUN_ID}`,
       ids.arda,
     );
     // The fixture has no provider session, so a member is refused for a
-    // non-authorization reason. The distinct status proves the gate opened.
+    // non-authorization reason. Since F19-28 collapsed the non-member refusal
+    // to 404 too, the BODY is what proves the gate opened — the member reads
+    // the route's own reason, never the guard's bare "Not found.".
     expect(res.status).toBe(404);
-    expect(res.status).not.toBe(403);
     expect(res.body).toContain("never opened an exportable provider session");
+    expect(res.body).not.toBe("Not found.");
   });
 
   it("the gate keys on the RUN's project, not a project the caller happens to be in", async () => {
@@ -165,6 +178,10 @@ describe("F10-06/F10-33: raw run artifacts require project membership", () => {
       `/resources/run-log?runId=${foreignRun}`,
       ids.deniz,
     );
-    expect(res.status).toBe(403);
+    // F19-28: refused as an unknown slug (404), and the body must not name
+    // `billing-service` — the caller addressed a RUN, not that project.
+    expect(res.status).toBe(404);
+    expect(res.body).toBe("Not found.");
+    expect(res.body).not.toContain("billing-service");
   });
 });

@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
+import { useDialog } from "~/ui/use-dialog";
 
 /**
  * Decision packet card — 1:1 port of DecisionPacket (task.jsx, spec §4.2).
@@ -9,6 +10,12 @@ import { Pill } from "~/ui/pill";
  * label is the SELECTED option's title; resolution dispatches by option
  * INDEX (the server re-reads the packet and dispatches on the option's
  * stable `kind` — ruling 7, never the English title).
+ *
+ * F19-7: `onResolve` is NOT always a submit. An `accept_completion` option runs
+ * the full acceptance contract including the real, irreversible PR merge, so the
+ * page interposes the shared `AcceptConfirm` ceremony (ruling 20) on that one
+ * kind and replays this call's index + note only if the human confirms. Nothing
+ * on this card should assume the click wrote anything.
  *
  * Port additions (sanctioned): arrow-key roving on the radiogroup
  * (spec §7 accessibility inventory), busy-disable while the resolve action
@@ -22,6 +29,15 @@ import { Pill } from "~/ui/pill";
 /** Ties the Confirm button to its visible refusal reason (E4). */
 const BLOCK_REASON_ID = "pkt-block-reason";
 const DENY_NOTE_STYLE = { marginTop: ".75rem" } as const;
+const REDELIVER_NOTE_STYLE = { marginTop: ".85rem" } as const;
+/**
+ * UX19-4 — the exact label of the GitHub panel's delivery button
+ * (`task-side-panels.tsx`). The note below points a human at a control BY NAME,
+ * so it is exported and the co-located test renders `GithubTrace` beside this
+ * card and asserts the panel's button carries this very string — two files that
+ * cannot drift apart into a note pointing at a control nobody can find.
+ */
+export const DELIVER_LABEL = "Deliver branch & open PR";
 /** `.btn:disabled` in the sheet is what dims a refused control; an
  *  `aria-disabled` button is not `:disabled`, so it carries the dim itself —
  *  the same inline treatment the blocked option radios below already use. */
@@ -68,6 +84,187 @@ export function observationValue(key: string, value: string): string {
   return /owner|assignee/i.test(key) ? "unassigned" : "—";
 }
 
+/**
+ * What an `archive_task` resolution destroys, for the confirm below. The packet
+ * render carries none of it (it is the operator's authored prose plus option
+ * kinds), so the task page supplies it — the same way `ArchiveConfirm` is handed
+ * `task` and `pendingRecommendations` for the Current-state Archive button.
+ */
+export interface PacketArchiveDisclosure {
+  /** Task key, for the dialog's subject line. */
+  taskKey: string;
+  /** The task's delivery branch (`task.branch`) — null before any delivery. */
+  branch: string | null;
+  /** Pending operator recommendations this archive withdraws. */
+  pendingRecommendations: number;
+}
+
+/**
+ * UX19-9 — an `archive_task` packet option asks first, like its sibling does.
+ *
+ * Ruling 17 makes this packet the ONLY place in the product that deletes a
+ * remote branch ("Remote-branch deletion exists only as that packet
+ * resolution"), and ruling 20 (R15-1) / ruling 53 (R18-7) established the
+ * standard the rest of this page already meets: a one-way write states what it
+ * destroys and offers a way out, at EVERY entry point — never from a generic
+ * button. The task page confirmed the *reversible* archive (`ArchiveConfirm`,
+ * which enumerates the open decision and the pending recommendations it
+ * withdraws) and not the irreversible one, which committed a permanent GitHub
+ * branch deletion from a button whose whole promise is "Confirm decision" and
+ * announced the outcome only afterwards, as a timeline note. That inverts the
+ * app's own escalation of ceremony with destructiveness.
+ *
+ * It is a local dialog rather than a second `AcceptDisclosureProvider`: that
+ * context exists because FOUR surfaces can reach `acceptCompletion` and were
+ * drifting apart (F19-3/F19-7). Ruling 17 gives branch deletion exactly one
+ * surface — this card — so there is nothing to keep in sync.
+ */
+function PacketArchiveConfirm({
+  option,
+  packetTitle,
+  disclosure,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  option: PacketRender["options"][number];
+  packetTitle: string;
+  /** Absent when the page has not wired it: the dialog then names the branch
+   *  generically and states no withdrawal it cannot verify. It never invents
+   *  facts to fill the slots. */
+  disclosure?: PacketArchiveDisclosure;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { ref: panelRef, close } = useDialog(onCancel);
+  const deletesBranch = option.deleteBranch === true;
+  const branch = disclosure?.branch ?? null;
+  const pending = disclosure?.pendingRecommendations ?? 0;
+  const subject = disclosure?.taskKey ?? "this task";
+  const withdrawn = [
+    `the open “${packetTitle}” decision`,
+    ...(pending > 0
+      ? [
+          `${pending} pending operator recommendation${
+            pending === 1 ? "" : "s"
+          }`,
+        ]
+      : []),
+  ];
+  return (
+    <dialog
+      className="modal-card release-card"
+      role="alertdialog"
+      aria-label={
+        (deletesBranch ? "Archive and delete the branch for " : "Archive ") +
+        subject
+      }
+      data-screen-label="Packet archive dialog"
+      ref={panelRef}
+    >
+      <div className="modal-head">
+        <span className="agent-glyph lg warn">
+          <Icon name={deletesBranch ? "alert" : "lock"} />
+        </span>
+        <div className="mh-main">
+          <h2>
+            {deletesBranch
+              ? "Archive this task and delete its branch?"
+              : "Archive this task?"}
+          </h2>
+          <div className="mh-sub">
+            {disclosure ? (
+              <>
+                <span className="mono">{disclosure.taskKey}</span> ·{" "}
+              </>
+            ) : null}
+            {option.t}
+          </div>
+        </div>
+        <button
+          type="button"
+          className="icon-btn modal-close"
+          onClick={close}
+          aria-label="Close"
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-body tight">
+        <div className="packet-obs flush">
+          {/* The human pressed "Confirm decision" — a label that names no
+              outcome. Say which decision option this dialog is about, the way
+              the acceptance dialog names its own entry point (F19-7). */}
+          <div className="obs">
+            <span className="k">Decision</span>
+            <span>“{option.t}” — confirming it archives {subject}.</span>
+          </div>
+          {deletesBranch && (
+            <div className="obs warn">
+              <span className="k">Deletes</span>
+              <span>
+                {branch ? (
+                  <>
+                    The remote branch <span className="mono">{branch}</span> on
+                    GitHub,
+                  </>
+                ) : (
+                  <>This task's remote branch on GitHub,</>
+                )}{" "}
+                and every commit that exists only there.{" "}
+                <strong>Deleting it cannot be undone</strong> — restoring the
+                task later does not bring the branch back.
+              </span>
+            </div>
+          )}
+          <div className="obs">
+            <span className="k">After</span>
+            <span>
+              Off the board and out of the review queue. The task file, its
+              timeline and its audit trail are kept exactly as they are — the
+              archive itself is a disposition, not a delete, and a maintainer
+              can restore it.
+            </span>
+          </div>
+          <div className="obs">
+            <span className="k">Withdrawn</span>
+            <span>
+              {withdrawn.join(" and ")} — restoring the task reopens the
+              question.
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <span className="foot-hint">
+          {deletesBranch
+            ? "The archive is reversible. Deleting the branch on GitHub is not."
+            : "Recorded as a timeline note and an audit row."}
+        </span>
+        <div className="foot-actions">
+          <button type="button" className="btn ghost" onClick={close}>
+            Not yet
+          </button>
+          <button
+            type="button"
+            className="btn danger"
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            <Icon name={deletesBranch ? "alert" : "lock"} />
+            {deletesBranch
+              ? branch
+                ? `Archive & delete ${branch}`
+                : "Archive & delete the branch"
+              : `Archive ${subject}`}
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
 export function DecisionPacket({
   packet,
   busy,
@@ -75,6 +272,7 @@ export function DecisionPacket({
   canResolveCompletion,
   canEditGoal,
   canArchive,
+  archiveDisclosure,
   onResolve,
   onAsk,
 }: {
@@ -100,6 +298,8 @@ export function DecisionPacket({
    *  `archive_task` option re-checks server-side. Same block-with-reason
    *  treatment as the two flags above. */
   canArchive: boolean;
+  /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
+  archiveDisclosure?: PacketArchiveDisclosure;
   onResolve: (optionIndex: number, note: string) => void;
   onAsk: () => void;
 }) {
@@ -112,7 +312,50 @@ export function DecisionPacket({
   // for (e.g. "specify the expected behavior") instead of resolving with an
   // unstated reading. Recorded on the decision event.
   const [note, setNote] = useState("");
+  // UX19-9: the archive_task option index awaiting its confirm (null = none).
+  const [pendingArchive, setPendingArchive] = useState<number | null>(null);
   const isBlocked = p.type === "blocked";
+
+  /**
+   * UX19-4 — the closed-PR recovery packet enumerated rework / archive /
+   * archive-and-delete-the-branch and told the reader that reopening the PR on
+   * GitHub was "also a valid path", while the one-click in-app path sat
+   * directly ABOVE the card: the GitHub panel's "Deliver branch & open PR". A
+   * human was sent to GitHub for something this page does. Traced end-to-end
+   * first, because naming a control that then refuses is worse than naming none:
+   *
+   *  - the panel renders that button whenever no LIVE pr stands
+   *    (`task-side-panels.tsx`: `!task.pr || state === "closed" | "merged"`) —
+   *    a closed PR satisfies it;
+   *  - authority is `run-agents` OR this task's own owner
+   *    (`manualDeliverForReview`), which is exactly the set `canResolve`
+   *    carries here (`task-detail-page.tsx`: `canRunAgents || isOwner`), so the
+   *    note is shown only to a viewer who has the button;
+   *  - `manualDeliverForReview` gates on exactly that authority and nothing
+   *    else — no packet check, no stage check — then calls `performDelivery`;
+   *  - `performDelivery` → `openTaskPr` treats a CLOSED cached PR as terminal
+   *    and falls through to the create path (`pr-open.server.ts`): it opens a
+   *    FRESH review PR and never reopens the closed one. Re-pushing a branch
+   *    with nothing new still reports `pushed` (`push-workspace.server.ts`), so
+   *    a PR closed by mistake really does come back through this door.
+   *  - and NOTHING on that path touches the packet — `recordDeliveredNextStep`
+   *    returns early (via `alreadyActionable`) precisely because a packet is
+   *    open. So the last clause is
+   *    not politeness: the packet body (authored from `operator-run.server.ts`)
+   *    promises that reopening on GitHub is "detected automatically" and
+   *    withdraws the packet, and a reader would otherwise carry that promise
+   *    over to the in-app door, where it is false.
+   *
+   * Keyed on the `archive_task` + `deleteBranch` option because that is the
+   * closed-PR signature the schema itself names ("the discard-entirely path for
+   * work whose PR a human closed without merging"), the operator only authors
+   * it when the task HAS a branch (so there is something to push), and branch
+   * deletion is refused while a PR is open (`deleteTaskRemoteBranch`) — so its
+   * presence also means no live PR stands in the button's way.
+   */
+  const branchDiscardOffered = p.options.some(
+    (o) => o.kind === "archive_task" && o.deleteBranch === true,
+  );
 
   // E4: the reason the Confirm button can't be pressed. It used to live ONLY in
   // `title` on a `disabled` button — the one place a browser guarantees nobody
@@ -273,6 +516,21 @@ export function DecisionPacket({
           })}
         </div>
 
+        {canResolve && branchDiscardOffered && (
+          // Body copy, not a footnote: it is a recovery path the options list
+          // left out, and the last clause is decision-relevant to the option
+          // sitting right above it.
+          <p className="packet-lede" style={REDELIVER_NOTE_STYLE}>
+            Not in this list: the GitHub panel on this page still offers{" "}
+            <strong>{DELIVER_LABEL}</strong>. It pushes this task&rsquo;s branch
+            again and opens a new review pull request — Viberr never reopens a
+            closed one — so a pull request closed by mistake is recovered from
+            here, with no trip to GitHub. Delivering does not resolve this
+            packet, and the archive option that deletes the branch ends that
+            path.
+          </p>
+        )}
+
         {canResolve && (
           // The one input on the app's highest-stakes card wears the same
           // form language as every other input: `.field` + uppercase label +
@@ -326,6 +584,17 @@ export function DecisionPacket({
               style={blockReason ? BLOCKED_BTN_STYLE : undefined}
               onClick={() => {
                 if (blockReason) return;
+                // UX19-9: `archive_task` is the packet's one-way half — it
+                // archives the task and, with `deleteBranch`, permanently
+                // deletes the remote branch (ruling 17: the product's only
+                // remote-branch deletion). Rulings 20/53 put a confirm on
+                // every one-way write; this one committed from a generic
+                // "Confirm decision" while the *reversible* Archive button
+                // beside it asked first.
+                if (selected?.kind === "archive_task") {
+                  setPendingArchive(sel);
+                  return;
+                }
                 onResolve(sel, note);
               }}
             >
@@ -344,6 +613,21 @@ export function DecisionPacket({
           </button>
         </div>
       </div>
+
+      {pendingArchive !== null && p.options[pendingArchive] && (
+        <PacketArchiveConfirm
+          option={p.options[pendingArchive]!}
+          packetTitle={p.title}
+          {...(archiveDisclosure ? { disclosure: archiveDisclosure } : {})}
+          busy={busy}
+          onCancel={() => setPendingArchive(null)}
+          onConfirm={() => {
+            const index = pendingArchive;
+            setPendingArchive(null);
+            onResolve(index, note);
+          }}
+        />
+      )}
     </div>
   );
 }

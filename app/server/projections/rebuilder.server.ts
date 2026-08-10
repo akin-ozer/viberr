@@ -6,11 +6,14 @@ import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   acceptanceBlockedReason,
   closedPrBlockedReason,
+  conflictingPrBlockedReason,
   deliveringEngagement,
   deriveValidation,
   supportingEngagements,
   type TaskFrontmatter,
+  type Validation,
 } from "~/schemas/task-file.schema";
+import { verdictGateReason } from "~/server/github/pr-human-approval.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
   getDataRoot,
@@ -273,8 +276,8 @@ function listTaskDirs(slug: string, dataRoot?: string): string[] {
 }
 
 /**
- * Why the CURRENT revision cannot be accepted, or null — the whole revision
- * dimension of the acceptance gate, projected into `validation_block_reason`.
+ * Why the CURRENT revision cannot be accepted, or null — the acceptance gate as
+ * every READ MODEL sees it, projected into `validation_block_reason`.
  *
  * That column is what every acceptance-readiness surface reads: the review
  * queue's "Waiting on your acceptance" panel, `decisionsRequiring`'s acceptance
@@ -287,40 +290,55 @@ function listTaskDirs(slug: string, dataRoot?: string): string[] {
  * is the dead end R14-2/P14-LV-06 exist to abolish.
  *
  * Mirrors `acceptanceRefusalReason` (task-actions.server.ts) in the same order,
- * and must move with it. The remaining gates there — archived, stage boundary,
- * open blocked packet, conflicting PR — are per-reader state the consumers
- * already filter on, so they stay out of this column.
+ * and must move with it. Only two of its gates stay out: `archived` and the
+ * STAGE boundary. Those really are per-reader state — every consumer filters
+ * rows on `archived = 0` and on the resolved review stage before it ever looks
+ * at this column.
+ *
+ * UX19-3: the OPEN BLOCKED PACKET and CONFLICTING PR gates used to be excluded
+ * under that same "per-reader state" heading, and that was false — both are task
+ * facts sitting in the very file this projection reads. The consequence was a
+ * SPLIT gate: the review queue re-derived them locally (`gateBlockedByKey`),
+ * `decisionsRequiring`'s acceptance query re-derived NEITHER, so a review-stage,
+ * human-waiting, packet-less task whose PR was `mergeable: "conflicting"` was
+ * filed under "Still in review" by the queue and emitted as a `kind:"acceptance"`
+ * decision by the inbox — an acceptance the server then refuses. One column, one
+ * gate, both readers.
  */
-function acceptanceBlockReason(fm: TaskFrontmatter): string | null {
-  // R16-3 (owner ruling 2026-08-04): a TERMINAL GitHub fact outranks every
-  // process gate below it, so it is named FIRST here exactly as it is in
-  // `acceptanceRefusalReason`. This gate used to be excluded as "per-reader
-  // state the consumers already filter on" — and they do filter the ROW out
-  // (review queue `isReady`, `decisionsRequiring`), while still rendering this
-  // SENTENCE next to it: a closed-PR task read "…no approving verdict yet — run
-  // a review for a verdict, or an admin can force-accept", naming the process
-  // gate over the terminal fact and offering the one override the task page
-  // withholds once the PR is gone (`acceptanceTerminallyBlocked`). The PR's
-  // last-reconciled state is in the very frontmatter this projection is built
-  // from, so naming it here fabricates nothing the file does not already say.
-  const closedPr = closedPrBlockedReason(fm, fm.key);
-  if (closedPr) return closedPr;
-  // F10-15: every required reviewer must have approved the current revision.
-  const reviewerBlock = acceptanceBlockedReason(fm);
-  if (reviewerBlock) return reviewerBlock;
-  // R15-1: delivered work needs a healthy verdict. No revision = planning /
-  // non-repo work, which stays acceptable.
-  if (!fm.workRevision) return null;
-  if (!fm.pr) {
-    // R17-2 (F17-L9): a verified empty branch is a "Completed, no changes"
-    // completion — acceptable without a PR (mirror of verdictGateReason).
-    if (fm.noChanges) return null;
-    return `${fm.key} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
-  }
-  const validation = deriveValidation(fm);
-  // `healthy` clears the gate; `failing` was already named precisely above.
-  if (validation === "healthy" || validation === "failing") return null;
-  return `${fm.key}'s delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.`;
+function acceptanceBlockReason(
+  fm: TaskFrontmatter,
+  ctx: {
+    /** The FRESH derivation for this same `fm` — never the stored cache. */
+    validation: Validation;
+    /** The writers' `blockedPacket` predicate, computed by the caller because
+     *  the packet lives in the task file's BODY, not its frontmatter. */
+    blockedPacket: boolean;
+  },
+): string | null {
+  return (
+    // R16-3 (owner ruling 2026-08-04): a TERMINAL GitHub fact outranks every
+    // process gate below it, so it is named FIRST here exactly as it is in
+    // `acceptanceRefusalReason`. This gate used to be excluded as "per-reader
+    // state the consumers already filter on" — and they do filter the ROW out
+    // (review queue `isReady`, `decisionsRequiring`), while still rendering this
+    // SENTENCE next to it: a closed-PR task read "…no approving verdict yet — run
+    // a review for a verdict, or an admin can force-accept", naming the process
+    // gate over the terminal fact and offering the one override the task page
+    // withholds once the PR is gone (`acceptanceTerminallyBlocked`). The PR's
+    // last-reconciled state is in the very frontmatter this projection is built
+    // from, so naming it here fabricates nothing the file does not already say.
+    closedPrBlockedReason(fm, fm.key) ??
+    // F10-15: every required reviewer must have approved the current revision.
+    acceptanceBlockedReason(fm) ??
+    verdictGateReason(fm, ctx.validation, fm.key) ??
+    // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
+    // accepting would bury it. Same sentence the writers refuse with.
+    (ctx.blockedPacket
+      ? "This task has an open blocked decision — resolve the operator's packet before accepting it."
+      : null) ??
+    // P14-LV-07: a PR GitHub cannot merge cannot be accepted.
+    conflictingPrBlockedReason(fm, fm.key)
+  );
 }
 
 export function rebuildTaskFile(
@@ -374,6 +392,19 @@ export function rebuildTaskFile(
     fallbackKey: key,
   });
   const fm = parsed.frontmatter;
+
+  // UX19-3: ONE derivation feeds BOTH the `validation` column and the acceptance
+  // gate beside it. The column used to carry `fm.validation` — a CACHE the schema
+  // itself calls derived and "no longer written as a source of truth" — while the
+  // gate one argument away re-derived from the same `fm`. A cache writer that
+  // skipped its recompute (or a hand-edited `validation:` line, which files-are-
+  // canonical-truth lets through) therefore put "validation healthy" on the review
+  // queue card and the task hero pill at the same instant the gate underneath read
+  // "no approving verdict yet". A projection row must not contradict itself.
+  const derivedValidation = deriveValidation(fm);
+  // The writers' `blockedPacket` predicate, verbatim (task-actions.server.ts):
+  // the file's STORED readiness plus a packet whose type is `blocked`.
+  const blockedPacket = fm.readiness === "blocked" && parsed.packet?.type === "blocked";
 
   // Project context (already-projected row): stages for reference checks,
   // default repo, member ids for guest flags.
@@ -471,8 +502,11 @@ export function rebuildTaskFile(
     projectedWaiting,
     fm.urgent ? 1 : 0,
     fm.archived ? 1 : 0,
-    fm.validation,
-    acceptanceBlockReason(fm),
+    derivedValidation,
+    acceptanceBlockReason(fm, {
+      validation: derivedValidation,
+      blockedPacket,
+    }),
     fm.ownerUserId,
     // Derived legacy projection shapes (G1): the delivering engagement fills
     // the `specialist` column, the supporting engagements fill `reviewers`.

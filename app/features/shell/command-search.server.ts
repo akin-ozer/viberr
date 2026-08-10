@@ -47,6 +47,24 @@ interface TaskRow {
   title: string;
   stage: string;
   branch: string | null;
+  /** 0/1 — see `archivedSub` below. */
+  archived: number;
+}
+
+/**
+ * F19-8/R14-3: an archived task is a terminal disposition that "leaves every
+ * default view" — the board card and list row swap their live state for a
+ * neutral `archived` pill, home/decisions/review drop it via `listProjectTasks`
+ * (board-query.server.ts:164), and db/migrations/0001_baseline.sql states the
+ * contract outright ("each of them has to hide archived tasks"). This is the
+ * one reader that goes straight to `task_projections`, so it inherited none of
+ * it and ranked a just-archived task FIRST (updated_at DESC), indistinguishable
+ * from live work. It is not excluded — the palette is a legitimate way back to
+ * archived work, the same reason the board keeps its Archived filter
+ * (board-page.tsx:820-822) — it is LABELLED, with the board's own word.
+ */
+function archivedSub(sub: string, row: TaskRow): string {
+  return row.archived ? `${sub} · archived` : sub;
 }
 
 export function searchWorkspace(
@@ -84,7 +102,7 @@ export function searchWorkspace(
   const term = likeTerm(q);
   const rows = db
     .prepare(
-      `SELECT project_slug, task_key, title, stage, branch
+      `SELECT project_slug, task_key, title, stage, branch, archived
          FROM task_projections
         WHERE project_slug IN (${placeholders})
           AND ( LOWER(task_key) LIKE ? ESCAPE '\\'
@@ -108,7 +126,7 @@ export function searchWorkspace(
         kind: "task",
         id: `task:${row.project_slug}/${row.task_key}`,
         label: `${row.task_key} · ${row.title}`,
-        sub: project,
+        sub: archivedSub(project, row),
         href,
       });
       continue;
@@ -125,7 +143,7 @@ export function searchWorkspace(
         kind: "branch",
         id: `branch:${row.project_slug}/${row.task_key}`,
         label: row.branch,
-        sub: `${row.task_key} · ${project}`,
+        sub: archivedSub(`${row.task_key} · ${project}`, row),
         href,
       });
     }
@@ -147,7 +165,16 @@ export function searchWorkspace(
         id: `agent:${project.slug}/${agent.id}`,
         label: agent.name,
         sub: `${agent.role} · ${project.name}`,
-        href: `/projects/${project.slug}/agents`,
+        // F19-16: this used to link to the bare roster, so picking "Reviewer
+        // Bot" landed on the Agents page with the OPERATOR's detail pane open
+        // (`sel = searchParams.get("profile") ?? "operator"`, agents-page.tsx)
+        // and nothing naming what was searched for — deterministically the
+        // wrong agent, on every agent hit. `agent.id` is `resolved.profileId`
+        // (specialist-run.server.ts:2162), the same key the roster resolves
+        // against and the same deep link "open this profile" already uses from
+        // the Policy page (policy-page.tsx:611). The agent hit was the only
+        // hit kind that threw away identity its destination can consume.
+        href: `/projects/${project.slug}/agents?profile=${encodeURIComponent(agent.id)}`,
       });
     }
   }

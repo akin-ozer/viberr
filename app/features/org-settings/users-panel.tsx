@@ -309,8 +309,12 @@ function InviteModal({
           </button>
         </span>
       </div>
+      {/* Pass-19 UX coherence audit, finding #20 — see the note on the Edit
+          modal's slot below: this is the invite half of the same asymmetry
+          ("A user with email … already exists.", an invalid handle, an
+          already-whitelisted account). */}
       {err && (
-        <div className="cred-warn">
+        <div className="cred-warn" role="alert">
           <Icon name="alert" />
           {err}
         </div>
@@ -500,8 +504,19 @@ function EditUserModal({
           </div>
         </div>
       )}
+      {/* Pass-19 UX coherence audit, finding #20: this panel gave one server
+          guard two different feedback semantics. The member row's role toggle
+          routes its refusal through `useOrgAction`'s default handler and toasts
+          it (ui/toast.tsx — role="status", "the app's ONE announcer"), and the
+          client-side refusal on THIS button ("You can't demote yourself") also
+          toasts; only the server's "no" — the duplicate-email guard and the
+          last-admin guard in org-users.server.ts — landed in a roleless div, so
+          a screen-reader user pressed Save changes and heard nothing at all.
+          Rendering a refusal in place is right; it just has to ALSO be
+          announced. `role="alert"` is what login.tsx and profile-page.tsx
+          already use for exactly this. */}
       {err && (
-        <div className="cred-warn">
+        <div className="cred-warn" role="alert">
           <Icon name="alert" />
           {err}
         </div>

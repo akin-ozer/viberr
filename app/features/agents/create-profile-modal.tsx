@@ -1,8 +1,10 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
+import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
+import { rovingRadioKeyDown } from "~/ui/roving-radio";
 import { useDialog } from "~/ui/use-dialog";
 import type { AgentProfileView } from "./agent-types";
 import {
@@ -80,6 +82,37 @@ function effortLabel(id: string): string {
   return EFFORT_LABEL[id] ?? id;
 }
 
+/**
+ * F19 UX-13 — the modes the SERVER refuses to store as submitted.
+ *
+ * Two rewrites happen unconditionally in `agent-profile-actions.server.ts`:
+ *  - `:185` (edit) / `:239` (create) — every id in `ALWAYS_HUMAN_CAPABILITY_IDS`
+ *    is coerced to `human` "whatever the submitted form says";
+ *  - `:180` (edit) / `:249` (create) — `report-validation-verdict` persists
+ *    `direct` iff the form said `direct`, and `off` for every other value.
+ *
+ * The picker used to offer the rewritten modes anyway: an admin could set
+ * "Merge a pull request" to Allowed, get a success toast, and find it back on
+ * Human-only; picking "Human-only" for the verdict silently stored `off`, which
+ * the policy surfaces then count in a different bucket than the one chosen. The
+ * control now refuses what the server refuses instead of accepting and
+ * discarding it — the same locked treatment (`.cap-seg.locked`) the Policy sheet
+ * already uses for its human-authorized boundary (policy-page.tsx:471).
+ */
+const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
+const VERDICT_CAP_ID = "report-validation-verdict";
+
+/** Dot class + fallback word per mode for the collapsed group summary.
+ *  `off` uses the SAME `.d.off` swatch as the capability matrix's "Not granted"
+ *  legend entry (capability-matrix-modal.tsx:118) — the modal used to draw it in
+ *  a `.d.none` grey the one legend in the product never showed. */
+const SUMMARY_MODES: readonly { id: CapMode; word: string }[] = [
+  { id: "direct", word: "Direct" },
+  { id: "recommend", word: "Recommend" },
+  { id: "human", word: "Human" },
+  { id: "off", word: "Off" },
+];
+
 // Repo-write grants that mark a profile as a DELIVERING builder (mirrors
 // listDeployedSpecialists' delivery heuristic) — used to seed the verdict
 // toggle from its RUNTIME-effective mode below.
@@ -95,13 +128,17 @@ function seedCaps(
   // `report-validation-verdict` grant stays OFF; the old code fabricated a
   // `direct` verdict for a non-delivering profile from the delivers-dependent
   // runtime default, and saving any unrelated field then PERSISTED that `direct`
-  // — silently arming verdict veto. A legacy `recommend` (runtime-treats-as-off)
-  // also seeds OFF so a lossless round-trip can only preserve or narrow
-  // authority, never widen it.
+  // — silently arming verdict veto. Any non-`direct` stored mode (a legacy
+  // `recommend`, or a `human` written by some other path) also seeds OFF: it is
+  // exactly what the save layer persists for this id
+  // (`agent-profile-actions.server.ts:180` — `mode = mode === "direct" ?
+  // "direct" : "off"`, create path :249), so seeding it any other way would
+  // show the admin a mode the next save silently rewrites (F19 UX-13). A
+  // lossless round-trip can only preserve or narrow authority, never widen it.
   for (const grant of initial.capabilities) {
     if (grant.capabilityId in caps) {
       caps[grant.capabilityId] =
-        grant.mode === "recommend" && grant.capabilityId === "report-validation-verdict"
+        grant.capabilityId === VERDICT_CAP_ID && grant.mode !== "direct"
           ? "off"
           : grant.mode;
     }
@@ -524,86 +561,140 @@ function CapabilityGrants({
         </span>
       </span>
       <div className="cap-matrix">
-        {capCatalog.map((g) => {
+        {capCatalog.map((g, gi) => {
           const open = !!openGroups[g.group];
+          const bodyId = `${capId}-cap-${gi}`;
           const c = { direct: 0, recommend: 0, human: 0, off: 0 };
           g.caps.forEach((x) => {
             c[caps[x.id] ?? "off"] += 1;
           });
+          const anyLocked = g.caps.some((x) => ALWAYS_HUMAN.has(x.id));
           return (
             <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
+              {/* F19-35: the disclosure state lived in the `open` CSS class
+                  alone — the chevron rotates, and a screen reader learns
+                  nothing. `aria-expanded` is the house pattern for every other
+                  collapsible trigger in the app (settings-page.tsx:450,
+                  runs-panels.tsx:98, timeline.tsx:93). */}
               <button
                 type="button"
                 className={"cap-mghead" + (open ? " open" : "")}
+                // UX-21: every other custom disclosure in the product reports
+                // its state; these two accordions carried it in a CSS class
+                // (`.cap-mghead.open .cap-chev` rotation) alone, so a screen
+                // reader could not tell a collapsed group from an expanded one
+                // — and all groups after the first START collapsed. A dangling
+                // `aria-controls` is worse than none (command-palette.tsx:153),
+                // so it is set only while the body exists.
+                aria-expanded={open}
+                aria-controls={open ? bodyId : undefined}
                 onClick={() =>
                   setOpenGroups((p) => ({ ...p, [g.group]: !p[g.group] }))
                 }
               >
                 <Icon name="chevron" className="cap-chev" />
                 <span className="cap-mglabel">{g.group}</span>
+                {/* UX-23: the counts used to be bare digits ("3 2 1") told
+                    apart by dot colour alone — no text, no accessible name,
+                    and position did not disambiguate either because a zero
+                    count renders nothing. Each count now carries the SAME word
+                    the expanded segment below uses for that mode on this
+                    profile kind (Allowed/Human-only/Off for a specialist,
+                    Direct/Recommend/Human/Off for the operator), the way the
+                    Policy page's identical strip already reads
+                    (policy-page.tsx:309-322). */}
                 <span className="cap-msum">
-                  {c.direct > 0 && (
-                    <span className="cs">
-                      <span className="d direct" />
-                      {c.direct}
+                  {SUMMARY_MODES.filter((m) => c[m.id] > 0).map((m) => (
+                    <span className="cs" key={m.id}>
+                      <span className={"d " + m.id} />
+                      {c[m.id]} {capModes.find((x) => x.id === m.id)?.label ?? m.word}
                     </span>
-                  )}
-                  {c.recommend > 0 && (
-                    <span className="cs">
-                      <span className="d recommend" />
-                      {c.recommend}
-                    </span>
-                  )}
-                  {c.human > 0 && (
-                    <span className="cs">
-                      <span className="d human" />
-                      {c.human}
-                    </span>
-                  )}
-                  {c.off > 0 && (
-                    <span className="cs">
-                      <span className="d none" />
-                      {c.off}
-                    </span>
-                  )}
+                  ))}
                 </span>
               </button>
               {open && (
-                <div className="cap-mbody">
-                  {g.caps.map((capDef) => (
-                    <div className="cap-mrow" key={capDef.id}>
-                      <span className="cap-mname">{capDef.label}</span>
-                      {/* UXA-4: the Direct/Recommend/Human/Off control is a
-                          single-select whose state was carried by CSS alone.
-                          The SAME control on the Policy sheet (the workflow
-                          boundary seg) is a proper radiogroup — this one was
-                          simply never brought along, so the capability policy,
-                          the most consequential setting in the product, was the
-                          one a screen reader could not read. */}
-                      <div
-                        className="cap-seg"
-                        role="radiogroup"
-                        aria-label={`Policy for ${capDef.label}`}
-                      >
-                        {capModes.map((m) => (
-                          <button
-                            type="button"
-                            key={m.id}
-                            role="radio"
-                            aria-checked={caps[capDef.id] === m.id}
-                            className={
-                              m.id + (caps[capDef.id] === m.id ? " on" : "")
-                            }
-                            onClick={() =>
-                              setCaps((p) => ({ ...p, [capDef.id]: m.id }))
-                            }
-                          >
-                            {m.label}
-                          </button>
-                        ))}
+                <div className="cap-mbody" id={bodyId}>
+                  {anyLocked && (
+                    <p className="deny-note before">
+                      <Icon name="lock" />
+                      <span>
+                        <strong>The locked rows can&apos;t be granted here.</strong>{" "}
+                        They stay reserved for humans on every profile — saving
+                        stores <strong>Human-only</strong> whatever this form
+                        sends.
+                      </span>
+                    </p>
+                  )}
+                  {g.caps.map((capDef) => {
+                    // UX-13: the server rewrites these two classes of row
+                    // unconditionally, so the picker no longer offers what it
+                    // will discard. Always-human ids get the locked seg the
+                    // Policy sheet uses (policy-page.tsx:471); the verdict row
+                    // drops "Human-only", which persists `off` — it is an
+                    // explicit-`direct`-or-nothing grant.
+                    const locked = ALWAYS_HUMAN.has(capDef.id);
+                    const rowModes =
+                      capDef.id === VERDICT_CAP_ID
+                        ? capModes.filter((m) => m.id !== "human")
+                        : capModes;
+                    // Roving tabindex: the checked option is the group's single
+                    // tab stop. A stored mode this picker does not offer (a
+                    // legacy specialist `recommend`) leaves nothing checked, so
+                    // the first option holds the tab stop rather than the group
+                    // becoming unreachable.
+                    const checkedIdx = rowModes.findIndex(
+                      (m) => m.id === caps[capDef.id],
+                    );
+                    const tabIdx = checkedIdx < 0 ? 0 : checkedIdx;
+                    return (
+                      <div className="cap-mrow" key={capDef.id}>
+                        <span className="cap-mname">{capDef.label}</span>
+                        {/* UXA-4: the Direct/Recommend/Human/Off control is a
+                            single-select whose state was carried by CSS alone.
+                            The SAME control on the Policy sheet (the workflow
+                            boundary seg) is a proper radiogroup — this one was
+                            simply never brought along, so the capability policy,
+                            the most consequential setting in the product, was the
+                            one a screen reader could not read.
+                            UX-19: it was brought along as far as the ROLE and
+                            stopped there. A radiogroup promises arrow-key
+                            traversal (roving-radio.ts), which UXA-7 wired into
+                            the twin at policy-page.tsx:158/:474 and not into
+                            this one — so the group announced an interaction
+                            model it did not have, and every radio was its own
+                            tab stop (15 instead of 5 for Collaboration). */}
+                        <div
+                          className={"cap-seg" + (locked ? " locked" : "")}
+                          role="radiogroup"
+                          aria-label={
+                            locked
+                              ? `Policy for ${capDef.label} — locked, reserved for humans`
+                              : `Policy for ${capDef.label}`
+                          }
+                          onKeyDown={rovingRadioKeyDown}
+                        >
+                          {rowModes.map((m, mi) => (
+                            <button
+                              type="button"
+                              key={m.id}
+                              role="radio"
+                              aria-checked={caps[capDef.id] === m.id}
+                              tabIndex={mi === tabIdx ? 0 : -1}
+                              disabled={locked}
+                              className={
+                                m.id + (caps[capDef.id] === m.id ? " on" : "")
+                              }
+                              onClick={() =>
+                                setCaps((p) => ({ ...p, [capDef.id]: m.id }))
+                              }
+                            >
+                              {m.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -637,8 +728,9 @@ function ResourcePicker({
         </span>
       </span>
       <div className="cap-matrix">
-        {resCatalog.map((g) => {
+        {resCatalog.map((g, gi) => {
           const open = !!openRes[g.group];
+          const bodyId = `${capId}-res-${gi}`;
           const sel = res[g.key];
           const selSet = new Set(sel);
           const catalogIds = new Set(g.items.map((it) => it.id));
@@ -655,9 +747,15 @@ function ResourcePicker({
           ];
           return (
             <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
+              {/* F19-35: same disclosure gap as the capability groups above. */}
               <button
                 type="button"
                 className={"cap-mghead" + (open ? " open" : "")}
+                // UX-21: same omission as the capability accordion above —
+                // state lived in the chevron's CSS rotation and nowhere an
+                // assistive technology could read it.
+                aria-expanded={open}
+                aria-controls={open ? bodyId : undefined}
                 onClick={() =>
                   setOpenRes((p) => ({ ...p, [g.group]: !p[g.group] }))
                 }
@@ -672,9 +770,17 @@ function ResourcePicker({
                 </span>
               </button>
               {open && (
-                <div className="cap-mbody">
+                <div className="cap-mbody" id={bodyId}>
                   <div className="pick-chips">
                     {displayItems.map((it) => (
+                      /* F19-5: a grant chip is a toggle, and its granted state
+                         was carried by the `on` class + a check glyph only —
+                         so a screen reader announced a granted skill/MCP/KB
+                         exactly like an ungranted one. Every sibling chip group
+                         in this file already reports it (backend :243, autonomy
+                         :304, stages :430). A `missing` chip is a GRANT too (it
+                         comes from `sel`), so it reports pressed and clicking
+                         it removes the grant. */
                       <button
                         type="button"
                         key={it.id}
@@ -689,6 +795,11 @@ function ResourcePicker({
                             ? "No longer in the store — click to remove this grant"
                             : undefined
                         }
+                        // F19-5: these grant chips are toggles like the backend,
+                        // autonomy and stage chips above, but were the one family
+                        // left carrying their state in CSS only — a screen reader
+                        // could not tell a granted resource from a withheld one.
+                        aria-pressed={selSet.has(it.id)}
                         onClick={() => toggleRes(g.key, it.id)}
                       >
                         {selSet.has(it.id) && <Icon name="check" />}

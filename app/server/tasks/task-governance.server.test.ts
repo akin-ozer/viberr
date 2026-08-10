@@ -897,7 +897,9 @@ describe("resolvePacket kind matrix", () => {
     );
   });
 
-  it("retry_other_backend: packet cleared, run restarts on the target backend, switch persists to the snapshot", async () => {
+  // 20s (see the routing tests): resolving this packet starts a real run through
+  // the fake adapter, which under full-suite parallelism can exceed the 5s default.
+  it("retry_other_backend: packet cleared, run restarts on the target backend, switch persists to the snapshot", { timeout: 20_000 }, async () => {
     const { interruptRun } = await import(
       "~/server/runtimes/run-service.server"
     );

@@ -901,33 +901,166 @@ describe("app.css palette reachability on touch (P16-G3)", () => {
 
 /* ------------------------------------------------ W5: F3, inline styles */
 
+/** Markup files only: this file and the component tests quote the attribute as
+ *  prose. */
+function markupFiles(): string[] {
+  return sourceFiles(APP_DIR).filter(
+    (f) => f.endsWith(".tsx") && !f.includes(".test."),
+  );
+}
+
+/** Is this offset inside a `/* … *\/` comment? A fix note that NAMES the idiom
+ *  it removed ("`PANEL_COUNT_STYLE` was a copy of `.fine`") is documentation,
+ *  not a site — F19-33's own comments pushed the ceiling below from 20 to 22
+ *  without a pixel changing. */
+function inBlockComment(src: string, index: number): boolean {
+  const open = src.lastIndexOf("/*", index);
+  return open !== -1 && src.lastIndexOf("*/", index) < open;
+}
+
+/** The balanced `{…}` body starting at `open` (the index OF the brace). */
+function balanced(src: string, open: number): { body: string; end: number } {
+  let depth = 0;
+  let i = open;
+  for (; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}" && --depth === 0) break;
+  }
+  return { body: src.slice(open + 1, i), end: i };
+}
+
+const lineAt = (src: string, index: number) =>
+  src.slice(0, index).split("\n").length;
+
 /** Every `style={{ … }}` expression in `app/`, as `file:line` → object body. */
 function inlineStyleSites(): { at: string; body: string }[] {
   const out: { at: string; body: string }[] = [];
-  // Markup only: this file and the component tests quote `style={{` as prose.
-  const markup = sourceFiles(APP_DIR).filter(
-    (f) => f.endsWith(".tsx") && !f.includes(".test."),
-  );
-  for (const file of markup) {
+  for (const file of markupFiles()) {
     const src = readFileSync(file, "utf8");
     const rel = path.relative(path.dirname(APP_DIR), file);
     const re = /style\s*=\s*\{\{/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(src))) {
-      let depth = 1;
-      let i = m.index + m[0].length;
-      for (; i < src.length && depth > 0; i++) {
-        if (src[i] === "{") depth++;
-        else if (src[i] === "}") depth--;
-      }
-      out.push({
-        at: `${rel}:${src.slice(0, m.index).split("\n").length}`,
-        body: src.slice(m.index + m[0].length, i - 1),
-      });
+      if (inBlockComment(src, m.index)) continue;
+      const { body } = balanced(src, m.index + m[0].length - 1);
+      out.push({ at: `${rel}:${lineAt(src, m.index)}`, body });
     }
   }
   return out;
 }
+
+/** Every `style={NAME}` whose NAME is a module const bound to an object literal
+ *  — the HOISTED twin of `style={{…}}`. Same declarations, same distance from
+ *  the sheet; the only difference is that P16-F3's scan above cannot see it,
+ *  which is how three surfaces kept a private copy of `.fine` (F19-33). */
+function hoistedStyleSites(): { at: string; body: string; name: string }[] {
+  const out: { at: string; body: string; name: string }[] = [];
+  for (const file of markupFiles()) {
+    const src = readFileSync(file, "utf8");
+    const rel = path.relative(path.dirname(APP_DIR), file);
+    const re = /style\s*=\s*\{([A-Za-z_$][\w$]*)\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      if (inBlockComment(src, m.index)) continue;
+      const name = m[1];
+      const decl = new RegExp(
+        `\\bconst\\s+${name}\\b[^=;]*=\\s*\\{`,
+      ).exec(src);
+      if (!decl) continue; // a prop, a hook result — nothing static to move.
+      const { body } = balanced(src, decl.index + decl[0].length - 1);
+      out.push({ at: `${rel}:${lineAt(src, m.index)}`, body, name });
+    }
+  }
+  return out;
+}
+
+/** A style object's declarations spelled the way CSS spells them, or null when
+ *  any value is one the sheet could not hold: an identifier, a template, a
+ *  ternary, or a bare non-zero number (React appends `px` — comparing those to
+ *  a rem rule would be noise). */
+function styleObjectDecls(body: string): Map<string, string> | null {
+  const code = body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  if (!code.trim()) return null;
+  const decls = new Map<string, string>();
+  const re = /(?:^|,)\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z][\w-]*))\s*:\s*([^,]+)/g;
+  let m: RegExpExecArray | null;
+  let seen = 0;
+  while ((m = re.exec(code))) {
+    seen++;
+    const prop = (m[1] ?? m[2] ?? m[3]!).replace(
+      /[A-Z]/g,
+      (c) => `-${c.toLowerCase()}`,
+    );
+    const raw = m[4].trim().replace(/\s*as const\s*$/, "");
+    const literal = /^(["'])(.*)\1$/.exec(raw);
+    if (literal) decls.set(prop, literal[2].trim().replace(/^0\./, "."));
+    else if (/^0$/.test(raw)) decls.set(prop, "0");
+    else return null;
+  }
+  return seen > 0 && decls.size === seen ? decls : null;
+}
+
+/** A rule body with any NESTED block removed, its selector with it. Walking
+ *  top-level blocks means a body can now contain CSS nesting, and a nested
+ *  block's declarations belong to the nested selector — splitting them in with
+ *  the rest would both invent properties (`&:hover { color`) and let a hover
+ *  value overwrite the base one. Runs to a fixpoint, so nesting can be deep. */
+function flatBody(body: string): string {
+  let out = body;
+  for (let prev = ""; out !== prev; ) {
+    prev = out;
+    out = out.replace(/(?:^|;)[^;{}]*\{[^{}]*\}/g, ";");
+  }
+  return out;
+}
+
+/** Every TOP-LEVEL rule whose selector is a SINGLE bare class — the sheet's
+ *  shared idioms, the ones any surface opts into by name (`.fine`, `.push`,
+ *  `.full`). Chains and descendant selectors are component rules, not
+ *  utilities: a style object that happens to match `.field.packet-note-field`
+ *  is a coincidence, not a fork.
+ *
+ *  Top-level is the other half of "utility". An innermost-brace scan
+ *  (`/([^{}]*)\{([^{}]*)\}/g`) cannot see the `@media` wrapper, so it handed
+ *  back all 40 of this sheet's breakpoint-scoped single-class rules as if they
+ *  were unconditional — three of them (`.login-wrap-2col`, `.login-aside-mark`,
+ *  `.login-aside-points`) exist ONLY inside `@media (min-width: 900px)`, and
+ *  the other 37 are overrides of a name that also has a global rule, so the
+ *  same selector came back twice with different declarations. Both are wrong
+ *  for the fork check below: a style object cannot "restate" a rule that only
+ *  applies inside a query — swapping the object for that class would change
+ *  how the surface renders everywhere ELSE, which is the opposite of the fix
+ *  the failure asks for. And with a selector appearing twice, "the rule named
+ *  `.x`" stops being a question `.find` can answer — today the global rule
+ *  happens to come first in every one of the 37, which is source order, not a
+ *  guarantee. Walking blocks with `balanced()` steps over a nested rule along
+ *  with its wrapper, so `@media` / `@supports` / `@container` bodies are out of
+ *  scope by construction. */
+function utilityRules(css: string): { selector: string; decls: Map<string, string> }[] {
+  const out: { selector: string; decls: Map<string, string> }[] = [];
+  for (let at = 0; ; ) {
+    const open = css.indexOf("{", at);
+    if (open < 0) break;
+    const selector = css.slice(at, open).trim();
+    const { body, end } = balanced(css, open);
+    at = end + 1;
+    if (!/^\.[-\w]+$/.test(selector)) continue;
+    const decls = new Map<string, string>();
+    for (const decl of flatBody(body).split(";")) {
+      const colon = decl.indexOf(":");
+      if (colon < 0) continue;
+      decls.set(
+        decl.slice(0, colon).trim(),
+        decl.slice(colon + 1).trim().replace(/^0\./, "."),
+      );
+    }
+    if (decls.size > 0) out.push({ selector, decls });
+  }
+  return out;
+}
+
+const sameDecls = (a: Map<string, string>, b: Map<string, string>) =>
+  a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
 
 /** A property value the stylesheet could have held: a bare literal. Anything
  *  else — an identifier, a template literal, a ternary, a concatenation — reads
@@ -954,6 +1087,27 @@ describe("app.css draws a task key the same way everywhere (P16-F3 follow-on)", 
         value(grid),
       );
     }
+  });
+});
+
+/**
+ * The acceptance dialog's fact rows (`.obs`) put a label and a value in one
+ * grid. The label column was a fixed 92px, which held until F19-3 added a
+ * label wider than it — "RECOMMENDATION" — whose text then spilled across the
+ * gap and printed over the value beside it (seen live in the acceptance
+ * dialog on VC-6). A fixed column silently assumes every future label is
+ * short; `minmax` keeps the shared alignment the fixed value was there for
+ * and lets the widest label decide the width.
+ */
+describe("app.css .obs label column fits its longest label (F19-3 follow-on)", () => {
+  it("sizes the label column with minmax, not a bare fixed width", () => {
+    const rule = /^\.obs \{([^}]*)\}/m.exec(CODE)?.[1];
+    expect(rule).toBeTruthy();
+    const cols = /grid-template-columns:\s*([^;]+);/.exec(rule!)?.[1]?.trim();
+    expect(cols).toBeTruthy();
+    // Canary: restore `92px 1fr` and this fails.
+    expect(cols).toMatch(/minmax\(/);
+    expect(cols).not.toMatch(/^92px\s/);
   });
 });
 
@@ -989,6 +1143,140 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
   });
 });
 
+/* --------------------------------------------- F19-33: hoisting is no escape */
+
+/**
+ * P16-F3 moved literal `style={{…}}` objects into the sheet. Three surfaces
+ * kept theirs by lifting them one scope — `const PANEL_COUNT_STYLE = { fontSize:
+ * ".76rem", color: "var(--faint)" }` in github-view.tsx, policy-page.tsx and
+ * settings-page.tsx, a byte copy of `.fine` that seven other panel heads already
+ * write as `className="right sub fine"`. Nothing rendered differently, which is
+ * the point: the copies drifted instead (the sibling note const sat at .8rem in
+ * settings, .9rem in github-view and .85rem in the sheet), and a theme or
+ * density pass reaches none of them. Ruling 14 — one shared implementation, no
+ * per-surface forks.
+ */
+describe("app.css lets a container-sized button wrap (F19-42)", () => {
+  // HALF THE GATE. This block binds the RULE and nothing else: a sheet test
+  // cannot know whether any element still carries `full`, so dropping the class
+  // from the force-accept button re-opens the live defect with every assertion
+  // here green (audit §2.4). The CONSUMER half lives in
+  // `features/task-detail/task-disposition.test.tsx`
+  // ("F19-42: the force-accept button is container-sized"), which renders the
+  // button and asserts its className. Both are required; neither is sufficient.
+  const btn = CODE.match(/(?:^|[};])\s*\.btn\s*\{([^}]*)\}/);
+  const full = CODE.match(/(?:^|[};])\s*\.btn\.full\s*\{([^}]*)\}/);
+
+  it("keeps nowrap on ordinary buttons", () => {
+    // Content-sized buttons should never break mid-label; that is what the
+    // base rule protects and it stays.
+    expect(btn![1]).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it("releases it for `.full`, whose width comes from the container", () => {
+    // Live defect: R19-5's honest force-accept label
+    // ("Force accept (skips the remaining stages and the review gate)")
+    // measured scrollWidth 351 against clientWidth 299 and painted 52px
+    // outside the GitHub card. A governance affordance is exactly the kind
+    // whose label must state the whole consequence, so the button wraps.
+    expect(full, ".btn.full must exist to override the base nowrap").not.toBeNull();
+    expect(full![1]).toMatch(/white-space:\s*normal/);
+    expect(full![1], "a wrapped label needs a readable line-height").toMatch(
+      /line-height:\s*[\d.]+/,
+    );
+  });
+});
+
+describe("app.css owns the shared idioms — hoisting is not an escape hatch (F19-33)", () => {
+  const utilities = utilityRules(CODE);
+  const objects = [
+    ...inlineStyleSites().map((s) => ({ ...s, name: "inline" })),
+    ...hoistedStyleSites(),
+  ];
+
+  it("scanned real utilities and real style objects", () => {
+    // A scanner that silently matches nothing turns every assertion green.
+    const named = new Set(utilities.map((u) => u.selector));
+    for (const selector of [".fine", ".push", ".full", ".tally"]) {
+      expect(named.has(selector), `${selector} must be scanned`).toBe(true);
+    }
+    expect(objects.length).toBeGreaterThan(10);
+    expect(objects.some((o) => o.name !== "inline")).toBe(true);
+  });
+
+  it("scans UNCONDITIONAL rules only — an @media override is not a utility", () => {
+    // A conditional rule cannot be the shared implementation a style object
+    // forks: swapping the object for the class would change how the surface
+    // renders OUTSIDE the query. `.login-wrap-2col` exists only inside
+    // `@media (min-width: 900px)`, and `.rail-toggle` has a global rule plus a
+    // `max-width: 720px` override that takes it from one property to nine.
+    const named = utilities.filter((u) => u.selector === ".login-wrap-2col");
+    expect(named, "media-only rules are not utilities").toEqual([]);
+    expect(CODE).toContain(".login-wrap-2col");
+
+    const toggles = utilities.filter((u) => u.selector === ".rail-toggle");
+    expect(toggles).toHaveLength(1);
+    expect([...toggles[0]!.decls]).toEqual([["display", "none"]]);
+    // The nested body is genuinely skipped, not merged into the global rule.
+    expect(toggles[0]!.decls.has("place-items")).toBe(false);
+  });
+
+  it("keeps the declarations the three surfaces now depend on", () => {
+    // Delete these and the counts/notes lose their type scale and spacing with
+    // nothing in the markup to fall back on.
+    const fine = utilities.find((u) => u.selector === ".fine")!.decls;
+    expect(fine.get("font-size")).toBe(".76rem");
+    expect(fine.get("color")).toBe("var(--faint)");
+    expect(CODE).toMatch(/\.pol-note\.after\s*\{[^}]*margin-top:\s*\.85rem/);
+    expect(CODE).toMatch(/\.pol-note\.last\s*\{[^}]*margin-bottom:\s*0/);
+  });
+
+  it("no style object restates a utility class's declarations", () => {
+    const forks: string[] = [];
+    for (const site of objects) {
+      const decls = styleObjectDecls(site.body);
+      if (!decls) continue; // dynamic, or a value the sheet cannot hold.
+      for (const util of utilities) {
+        if (sameDecls(decls, util.decls)) {
+          forks.push(
+            `${site.at} — ${site.name} restates ${util.selector} { ${[...decls]
+              .map(([k, v]) => `${k}: ${v}`)
+              .join("; ")} }`,
+          );
+        }
+      }
+    }
+    expect(forks.sort()).toEqual([]);
+  });
+
+  it("every panel note takes its spacing from the sheet", () => {
+    // `.pol-note` ships `before` / `after` / `last` spacing modifiers, so an
+    // inline margin on one is always a fork — that is how the same note ended up
+    // three different distances from the panel above it on three surfaces.
+    const styled: string[] = [];
+    for (const file of markupFiles()) {
+      const src = readFileSync(file, "utf8");
+      const rel = path.relative(path.dirname(APP_DIR), file);
+      for (const m of src.matchAll(/pol-note/g)) {
+        if (inBlockComment(src, m.index)) continue;
+        const open = src.lastIndexOf("<", m.index);
+        if (open < 0) continue;
+        let depth = 0;
+        let end = open;
+        for (; end < src.length; end++) {
+          if (src[end] === "{") depth++;
+          else if (src[end] === "}") depth--;
+          else if (src[end] === ">" && depth === 0) break;
+        }
+        if (/\sstyle\s*=/.test(src.slice(open, end))) {
+          styled.push(`${rel}:${lineAt(src, m.index)}`);
+        }
+      }
+    }
+    expect(styled.sort()).toEqual([]);
+  });
+});
+
 /** sRGB linear-channel-free approximation of `color-mix(in srgb, a, b p%)`,
  *  which the browser performs on the raw channel values. */
 function mixHex(a: string, b: string, ratioB: number): string {
@@ -1004,3 +1292,1082 @@ function mixHex(a: string, b: string, ratioB: number): string {
       .join("")
   );
 }
+
+/* ================================================== R19-12 · the two gates */
+
+/**
+ * Both gates below exist because the two contracts they check were, until now,
+ * verified by REVIEW rather than by a gate — and the enumerated tests that
+ * looked like gates were hand-lists:
+ *
+ *   Contrast. `describe("app.css secondary text tokens meet WCAG AA")` above
+ *     measures the seven pairs P13-D-12 happened to find. A NEW token, or an
+ *     old token used on a new fill, is checked by nobody. INTENT §4 promises
+ *     "WCAG 2.2 AA baseline for core workflows in BOTH themes", and the sheet
+ *     is the only place that promise can be kept or broken.
+ *   Responsive. `BREAKPOINTS` above pins which widths exist; nothing pins what
+ *     a breakpoint is allowed to DO. INTENT §4: "No control is hidden or
+ *     disabled at any width, and nothing is gated on `matchMedia`" — because
+ *     dropping a decision control on a small screen makes the surface
+ *     dishonest about what the viewer may do.
+ *
+ * Both sweeps derive their inputs from the sheet and the markup, so a new rule
+ * is in scope the moment it is written. Both carry small exemption maps in
+ * which every entry states a reason and an unused entry FAILS — the
+ * `ALLOW_SUBSTRINGS` lesson: an escape hatch that nobody has to justify is how
+ * a gate rots back into the hand-list it replaced.
+ */
+
+type CssRule = { selector: string; decls: Map<string, string>; at: string[] };
+
+/**
+ * Every rule in the sheet: selector resolved through CSS nesting, declarations
+ * separated from nested blocks, and the at-rule context it sits under.
+ * `@keyframes` / `@font-face` bodies are not rules and are skipped.
+ */
+function cssRules(css: string, parent = "", at: string[] = []): CssRule[] {
+  const out: CssRule[] = [];
+  for (let i = 0; ; ) {
+    const open = css.indexOf("{", i);
+    if (open < 0) break;
+    const head = css.slice(i, open).trim();
+    const { body, end } = balanced(css, open);
+    i = end + 1;
+    if (!head || head.startsWith("@keyframes") || head.startsWith("@font-face")) continue;
+    if (head.startsWith("@")) {
+      out.push(...cssRules(body, parent, [...at, head]));
+      continue;
+    }
+    const selector = head
+      .split(",")
+      .map((s) => s.trim())
+      .map((s) => (parent ? (s.includes("&") ? s.replace(/&/g, parent) : `${parent} ${s}`) : s))
+      .join(", ");
+    let rest = body;
+    for (;;) {
+      const nested = rest.indexOf("{");
+      if (nested < 0) break;
+      const cut = rest.lastIndexOf(";", nested);
+      const { body: nb, end: ne } = balanced(rest, nested);
+      out.push(...cssRules(`${rest.slice(cut + 1, nested).trim()}{${nb}}`, selector, at));
+      rest = rest.slice(0, cut + 1) + rest.slice(ne + 1);
+    }
+    const decls = new Map<string, string>();
+    for (const d of rest.split(";")) {
+      const colon = d.indexOf(":");
+      if (colon < 0) continue;
+      const prop = d.slice(0, colon).trim();
+      if (!/^[a-z-]+$/i.test(prop)) continue;
+      decls.set(prop, d.slice(colon + 1).trim());
+    }
+    if (decls.size) out.push({ selector, decls, at });
+  }
+  return out;
+}
+
+const RULES = cssRules(CODE);
+
+/* ----------------------------------------------------- colour resolution */
+
+type Rgba = { rgb: [number, number, number]; alpha: number };
+
+/** Split a function's argument list on TOP-LEVEL commas. */
+function splitArgs(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+/**
+ * A CSS colour, resolved against one theme's token map. Handles the four forms
+ * the sheet uses — hex, `var()` (recursively, with fallbacks), `rgb[a]()` and
+ * `color-mix(in srgb, …)` — and returns null for anything else (gradients,
+ * `currentColor`, keywords), which the sweep reports rather than skips
+ * silently.
+ */
+function resolveColor(value: string, tokens: Map<string, string>, depth = 0): Rgba | null {
+  if (depth > 8) return null;
+  const v = value.trim();
+  if (!v) return null;
+  if (v === "transparent") return { rgb: [0, 0, 0], alpha: 0 };
+  if (/^#[0-9a-f]{3}$/i.test(v)) {
+    const [r, g, b] = [...v.slice(1)].map((c) => parseInt(c + c, 16));
+    return { rgb: [r, g, b], alpha: 1 };
+  }
+  if (/^#[0-9a-f]{6}$/i.test(v)) {
+    const rgb = [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16)) as [number, number, number];
+    return { rgb, alpha: 1 };
+  }
+  const ref = /^var\(\s*(--[\w-]+)\s*(?:,([\s\S]*))?\)$/.exec(v);
+  if (ref) {
+    const declared = tokens.get(ref[1]);
+    if (declared) return resolveColor(declared, tokens, depth + 1);
+    return ref[2] ? resolveColor(ref[2], tokens, depth + 1) : null;
+  }
+  const rgbFn = /^rgba?\(([^)]*)\)$/i.exec(v);
+  if (rgbFn) {
+    const parts = rgbFn[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+    if (parts.length < 3 || parts.slice(0, 3).some(Number.isNaN)) return null;
+    return {
+      rgb: parts.slice(0, 3) as [number, number, number],
+      alpha: parts.length > 3 && !Number.isNaN(parts[3]) ? parts[3] : 1,
+    };
+  }
+  const mix = /^color-mix\(\s*in\s+srgb\s*,([\s\S]*)\)$/i.exec(v);
+  if (mix) {
+    const args = splitArgs(mix[1]);
+    if (args.length !== 2) return null;
+    const stops = args.map((arg) => {
+      const pct = /^([\s\S]*?)\s+(\d+(?:\.\d+)?)%$/.exec(arg);
+      const colour = resolveColor(pct ? pct[1] : arg, tokens, depth + 1);
+      return colour ? { colour, weight: pct ? Number(pct[2]) : null } : null;
+    });
+    if (stops.some((s) => s === null)) return null;
+    const [a, b] = stops as { colour: Rgba; weight: number | null }[];
+    let wa = a.weight;
+    let wb = b.weight;
+    if (wa === null && wb === null) [wa, wb] = [50, 50];
+    else if (wa === null) wa = 100 - (wb as number);
+    else if (wb === null) wb = 100 - wa;
+    const total = wa + (wb as number);
+    if (!total) return null;
+    const pa = wa / total;
+    const pb = (wb as number) / total;
+    const alpha = a.colour.alpha * pa + b.colour.alpha * pb;
+    if (alpha === 0) return { rgb: [0, 0, 0], alpha: 0 };
+    // Premultiplied, the way the browser mixes: a fully transparent stop must
+    // not drag the result toward its (meaningless) channel values.
+    const rgb = [0, 1, 2].map(
+      (i) =>
+        (a.colour.rgb[i] * a.colour.alpha * pa + b.colour.rgb[i] * b.colour.alpha * pb) / alpha,
+    ) as [number, number, number];
+    return { rgb, alpha };
+  }
+  return null;
+}
+
+const asHex = (rgb: [number, number, number]) =>
+  "#" +
+  rgb
+    .map((c) => Math.round(Math.max(0, Math.min(255, c))).toString(16).padStart(2, "0"))
+    .join("");
+
+/** Composite a (possibly translucent) colour over an opaque backdrop. */
+function over(c: Rgba, backdrop: [number, number, number]): [number, number, number] {
+  if (c.alpha >= 1) return c.rgb;
+  return [0, 1, 2].map((i) => c.rgb[i] * c.alpha + backdrop[i] * (1 - c.alpha)) as [
+    number,
+    number,
+    number,
+  ];
+}
+
+/* -------------------------------------------------------- what sits on what */
+
+/** One theme's token table: `:root` plus, for dark, its override block. */
+function themeTokens(dark: boolean): Map<string, string> {
+  const table = new Map<string, string>();
+  for (const rule of RULES) {
+    if (rule.selector !== ":root" && !(dark && rule.selector === ':root[data-theme="dark"]')) {
+      continue;
+    }
+    for (const [prop, value] of rule.decls) if (prop.startsWith("--")) table.set(prop, value);
+  }
+  return table;
+}
+
+const THEMES = [
+  ["light", themeTokens(false)],
+  ["dark", themeTokens(true)],
+] as const;
+
+/** A selector part with its state pseudo-classes and pseudo-elements dropped —
+ *  `.card:hover` and `.card` paint the same box, and `.top-search input` is
+ *  where `.top-search input::placeholder` sits. */
+const bareSelector = (part: string) =>
+  part.replace(/::[\w-]+(\([^)]*\))?/g, "").replace(/:[\w-]+(\([^)]*\))?/g, "").trim();
+
+/** The compounds of a selector, outermost first. `>`, `+` and `~` are dropped:
+ *  for "what is behind this text" the combinator does not matter, only the
+ *  nesting. */
+const compounds = (part: string) =>
+  bareSelector(part)
+    .split(/\s*[>+~]\s*|\s+/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+
+const DARK_SCOPE = ':root[data-theme="dark"] ';
+
+/**
+ * Selector → the background it paints, per theme. Built from every rule in the
+ * sheet, so it answers "what is behind `.toast .ico`" without anyone writing
+ * `.toast` down. First declaration wins (the base rule precedes its `:hover`);
+ * the dark theme's selector-scoped fixups override.
+ */
+function paintMap(dark: boolean): Map<string, string> {
+  const paints = new Map<string, string>();
+  const scoped = new Map<string, string>();
+  for (const rule of RULES) {
+    const bg = rule.decls.get("background") ?? rule.decls.get("background-color");
+    if (!bg) continue;
+    for (const part of rule.selector.split(",")) {
+      const key = bareSelector(part);
+      if (!key) continue;
+      if (key.startsWith(DARK_SCOPE)) {
+        if (dark) scoped.set(key.slice(DARK_SCOPE.length), bg);
+      } else if (!paints.has(key)) paints.set(key, bg);
+    }
+  }
+  return new Map([...paints, ...scoped]);
+}
+
+/**
+ * Elements whose painting ancestor is NOT in their own selector, because the
+ * markup nests them somewhere the sheet never names. Not an exemption — the
+ * pair is still measured, just against the right backdrop. An entry that stops
+ * being consulted fails below.
+ */
+const RENDERED_INSIDE: Record<string, { container: string; why: string }> = {
+  "log-line": {
+    container: ".console",
+    why: "runs-panels.tsx renders every log row inside `div.console`, which paints a fixed near-black fill in BOTH themes (that is why these rules use literal hex rather than tokens — see the .log-more comment). Measured against --bg/--surface they would read as failures in light and the console's real contrast would go unchecked.",
+  },
+  lcaret: {
+    container: ".console",
+    why: "the tail caret is the last child of `div.console` (runs-panels.tsx) — same fixed dark fill as the log rows it marks the end of.",
+  },
+  "log-more": {
+    container: ".console",
+    why: "the `load older lines` button is rendered inside a `.log-line` inside `div.console`, so it follows the console ladder, not the theme tokens.",
+  },
+  "log-more-note": {
+    container: ".console",
+    why: "the withheld-line count sits next to `.log-more` in the same console row.",
+  },
+};
+
+/** Rules whose `color` paints a GLYPH, not text. WCAG 1.4.11 asks 3:1 of a
+ *  meaningful non-text element, not 1.4.3's 4.5:1 — checked, at the right bar. */
+const GLYPH_NOT_TEXT: Record<string, string> = {
+  ".stage-menu-pop .sm-check": "a 14×14 check mark marking the current stage in the stage menu; the row's selected state is also carried by `aria-checked` on the menuitemradio.",
+};
+
+/**
+ * Pairs that are deliberately below AA and stay that way. Each says why in
+ * WCAG's own terms; an entry nobody hits fails the rot guard below.
+ */
+const BELOW_AA_BY_DESIGN: Record<string, string> = {
+  ".pj-star.on": "the pinned-project star. --pin-star is a decorative accent on a glyph whose IDENTITY and STATE are carried elsewhere: `StarIco` swaps outline for filled, and the button's accessible name flips between `Pin <project>` and `Unpin <project>`. 1.4.11 exempts a graphic that is not required to understand the content, which is exactly the case when shape and name already carry it.",
+  ".log-more:disabled": "`load older lines` while a fetch is in flight. WCAG 1.4.3 exempts text in an INACTIVE user-interface component by name, and the button also swaps its label to `loading older lines…`, so the state is not carried by contrast.",
+};
+
+/**
+ * Pairs that fail today and are NOT by design — the sweep's first catch, with
+ * the themes each one fails in. This is a BASELINE, asserted as an exact SET:
+ * adding a violation fails, and so does FIXING one without deleting its line
+ * here, which is what keeps the list shrinking instead of becoming the
+ * suppression file every such list becomes. `app/app.css` belongs to another
+ * workstream this pass, so these are recorded rather than edited.
+ */
+const UNFIXED_BELOW_AA: Record<string, { themes: readonly string[]; why: string }> = {
+  ".goal-edit-btn": {
+    themes: ["light"],
+    why: "the board goal's `edit` control puts --blue on the page at .75rem — 3.84:1. --blue is the ACCENT token (borders, rings, washes); --blue-pressed (8.30:1) is the one that carries text, and 30 other rules already use it that way. Dark's lighter --blue clears the bar, so this is a light-theme-only fix.",
+  },
+  ".rq-row:hover .rq-go": {
+    themes: ["light"],
+    why: "the review queue row's `open` label turns --blue on hover at .78rem/700 — 3.84:1. The resting state (--muted, 6.87:1) is fine, so hovering a row makes its own call-to-action HARDER to read. Same fix: --blue-pressed.",
+  },
+  ".mx-scope": {
+    themes: ["light", "dark"],
+    why: "the capability-matrix scope chip is --blue text on a 12% --blue wash at .6rem/800 uppercase — 3.34:1 light, 4.45:1 dark. Small uppercase on a tint of its own colour is the least legible combination in the sheet.",
+  },
+  ".rbac-no": {
+    themes: ["light", "dark"],
+    why: "the RBAC matrix writes `—` in --ring for every action a role may NOT take: 1.30:1 light, 1.24:1 dark. The absence marker is invisible, so a denied cell reads as an empty cell — on the two surfaces (policy, profile) whose whole job is saying what you may and may not do.",
+  },
+  ".login-aside-mark": {
+    themes: ["dark"],
+    why: "the login brand mark is `#fff` on --teal-dark, which dark flips from #187574 to the LIGHT cyan #6ce4dc: white-on-cyan at 1.53:1. WCAG 1.4.3 exempts logotypes, so this is not an AA failure — it is a legibility one the token flip introduced, and exempting the element outright would teach the gate to ignore a whole element.",
+  },
+  ".log-line .lt": {
+    themes: ["light", "dark"],
+    why: "the run console's per-line timestamp, #4d566b on the console's fixed #0e1117 — 2.57:1, the worst text pair in the sheet. The console ladder was drawn to look like a terminal and never measured; its dim end is below AA in both themes because the surface does not change with the theme.",
+  },
+  ".log-line .ltag": {
+    themes: ["light", "dark"],
+    why: "the event-kind tag column of the run console, #6b7590 on #0e1117 — 4.11:1. Same fixed console fill, same unmeasured ladder.",
+  },
+  ".log-line.meta .ltag": {
+    themes: ["light", "dark"],
+    why: "the dimmest console tier, used for telemetry and history rows, #5f6a85 on #0e1117 — 3.50:1.",
+  },
+  ".log-line.meta .lx": {
+    themes: ["light", "dark"],
+    why: "the body half of the same dim console tier — 3.50:1, and this one carries the withheld-line sentence a reader has to act on.",
+  },
+  ".log-more-note": {
+    themes: ["light", "dark"],
+    why: "` · N earlier lines not loaded` next to the load-older button, #5f6a85 on #0e1117 — 3.50:1. It is the console's only statement about what the reader is NOT seeing, so dimness costs more here than anywhere else in the ladder.",
+  },
+};
+
+/** `${theme} ${selector}` for every pair the baseline records. */
+const UNFIXED_KEYS = Object.entries(UNFIXED_BELOW_AA).flatMap(([selector, entry]) =>
+  entry.themes.map((theme) => `${theme} ${selector}`),
+);
+
+/** WCAG 2.2: 24px, or 18.66px at 700+, is "large text" and drops to 3:1. */
+function largeText(decls: Map<string, string>): boolean {
+  const size = decls.get("font-size");
+  const px = size ? /^([\d.]+)rem$/.exec(size.trim()) : null;
+  if (!px) return false;
+  const value = Number(px[1]) * 16;
+  const weight = Number(decls.get("font-weight") ?? "400");
+  return value >= 24 || (value >= 18.66 && weight >= 700);
+}
+
+type Pair = {
+  key: string;
+  theme: string;
+  selector: string;
+  fg: string;
+  bg: string;
+  ratio: number;
+  need: number;
+  where: string;
+};
+
+/** The sweep. For every rule that sets a text colour, in both themes: resolve
+ *  the colour, work out what is behind it, and measure. */
+function sweep(): { pairs: Pair[]; unresolved: string[]; containerHits: Set<string> } {
+  const pairs: Pair[] = [];
+  const unresolved: string[] = [];
+  const containerHits = new Set<string>();
+  for (const [theme, tokens] of THEMES) {
+    const paints = paintMap(theme === "dark");
+    const ambient = (["--bg", "--surface"] as const).map(
+      (t) => [t, resolveColor(`var(${t})`, tokens)!.rgb] as const,
+    );
+    const opaquePaint = (key: string): [number, number, number] | null => {
+      const value = paints.get(key);
+      if (!value || /^(none|transparent)$/i.test(value) || /gradient\(/i.test(value)) return null;
+      const c = resolveColor(value, tokens);
+      return c && c.alpha >= 1 ? c.rgb : null;
+    };
+    // One entry per selector, carrying what the CASCADE leaves it — not one per
+    // rule. Two reasons. `:root[data-theme="dark"] .toast { color: var(--surface) }`
+    // is not a rule about a `.toast` inside a root, it is an OVERRIDE of
+    // `.toast`, and read standalone it loses the background the base rule
+    // paints. And `.toast` appears in a `prefers-reduced-motion` rule that sets
+    // only `animation` — a per-rule reading pairs that rule's inherited colour
+    // with no background at all and invents a failure.
+    const effective = new Map<string, Map<string, string>>();
+    for (const rule of RULES) {
+      for (const rawPart of rule.selector.split(",")) {
+        const part = rawPart.trim();
+        if (!part) continue;
+        let target = part;
+        if (part.startsWith(DARK_SCOPE)) {
+          if (theme !== "dark") continue;
+          target = part.slice(DARK_SCOPE.length);
+        } else if (part.startsWith(":root")) continue;
+        const acc = effective.get(target) ?? new Map<string, string>();
+        for (const prop of ["color", "background", "background-color", "font-size", "font-weight"]) {
+          const value = rule.decls.get(prop);
+          if (value !== undefined) acc.set(prop, value);
+        }
+        if (acc.size) effective.set(target, acc);
+      }
+    }
+    for (const [part, decls] of effective) {
+      const colour = decls.get("color");
+      if (!colour || /^(inherit|currentcolor|unset|initial)$/i.test(colour.trim())) continue;
+      const fg = resolveColor(colour, tokens);
+      if (!fg) {
+        unresolved.push(`${theme} ${part} { color: ${colour} }`);
+        continue;
+      }
+      const chain = compounds(part);
+      const atomPaint = (compound: string) =>
+        opaquePaint(compound) ??
+        [...compound.matchAll(/\.([-\w]+)/g)].map((m) => opaquePaint(`.${m[1]}`)).find(Boolean) ??
+        null;
+      // Behind the text, in order: the element's own fill (`.pill.done` takes
+      // `.pill`'s), the nearest ancestor in the selector that paints, the
+      // container the markup nests it in, and finally the page itself.
+      let behind: readonly (readonly [string, [number, number, number]])[] = ambient;
+      for (let i = chain.length - 1; i >= 0; i--) {
+        const paint = atomPaint(chain[i]);
+        if (paint) {
+          behind = [[chain[i], paint]];
+          break;
+        }
+      }
+      if (behind === ambient) {
+        for (const atom of [...part.matchAll(/\.([-\w]+)/g)].map((m) => m[1])) {
+          const nest = RENDERED_INSIDE[atom];
+          const paint = nest ? opaquePaint(nest.container) : null;
+          if (nest && paint) {
+            containerHits.add(atom);
+            behind = [[`${nest.container} (${atom})`, paint]];
+            break;
+          }
+        }
+      }
+      const own = decls.get("background") ?? decls.get("background-color");
+      if (own && !/^none$/i.test(own.trim())) {
+        if (/gradient\(/i.test(own)) {
+          unresolved.push(`${theme} ${part} { background: ${own.split("(")[0]}(…) }`);
+          continue;
+        }
+        const bg = resolveColor(own, tokens);
+        if (!bg) {
+          unresolved.push(`${theme} ${part} { background: ${own} }`);
+          continue;
+        }
+        behind = bg.alpha >= 1
+          ? [[own, bg.rgb]]
+          : behind.map(([name, base]) => [`${own} over ${name}`, over(bg, base)] as const);
+      }
+      const need = GLYPH_NOT_TEXT[part] || largeText(decls) ? 3 : 4.5;
+      for (const [name, backdrop] of behind) {
+        pairs.push({
+          key: `${theme} ${part}`,
+          theme,
+          selector: part,
+          fg: asHex(over(fg, backdrop)),
+          bg: asHex(backdrop),
+          ratio: contrastRatio(asHex(over(fg, backdrop)), asHex(backdrop)),
+          need,
+          where: name,
+        });
+      }
+    }
+  }
+  return { pairs, unresolved, containerHits };
+}
+
+const SWEEP = sweep();
+
+describe("app.css: every pair it paints clears WCAG AA, in both themes (R19-12)", () => {
+  const { pairs, unresolved, containerHits } = SWEEP;
+  const below = pairs.filter((p) => p.ratio < p.need);
+  const describePair = (p: Pair) =>
+    `${p.key} — ${p.fg} on ${p.bg} (${p.where}) = ${p.ratio.toFixed(2)}:1, needs ${p.need}:1`;
+
+  it("swept the whole sheet in both themes, not a hand-list", () => {
+    // A scanner that silently matches nothing turns every assertion below
+    // green, which is the failure mode this pass caught four times.
+    expect(pairs.length).toBeGreaterThan(400);
+    for (const theme of ["light", "dark"]) {
+      expect(pairs.some((p) => p.theme === theme), `${theme} must be swept`).toBe(true);
+    }
+    // The pairs the enumerated P13-D-12 tests above check by hand must be in
+    // here too — that is the proof this SUPERSEDES them rather than sitting
+    // next to them.
+    for (const selector of [".fine", ".btn.primary", ".muted", ".hint"]) {
+      expect(
+        pairs.some((p) => p.selector === selector),
+        `${selector} must be swept`,
+      ).toBe(true);
+    }
+  });
+
+  it("resolves every colour it meets, or names the ones it cannot", () => {
+    // Silent skips are how a sweep becomes decoration. The only unresolvable
+    // paint in the sheet is the home canvas's two-blob radial gradient, whose
+    // stops are near-transparent tints over --bg.
+    expect([...new Set(unresolved)].sort()).toEqual([
+      "dark body { background: radial-gradient(…) }",
+      "light body { background: radial-gradient(…) }",
+    ]);
+  });
+
+  it("clears 4.5:1 for text and 3:1 for large text and meaningful glyphs", () => {
+    const unexplained = below
+      .filter((p) => !(p.selector in BELOW_AA_BY_DESIGN) && !UNFIXED_KEYS.includes(p.key))
+      .map(describePair)
+      .sort();
+    // Named with their ratios, not counted: the fix is a token swap and the
+    // reader needs to know which pair and by how much.
+    expect(unexplained).toEqual([]);
+  });
+
+  it("holds the not-yet-fixed pairs as an exact, shrinking list", () => {
+    // Asserted as a SET, so fixing one of these fails until its line is
+    // deleted. A `toBeLessThanOrEqual` ceiling would let a fix be swallowed by
+    // a new violation, which is how a baseline becomes a suppression file.
+    const found = [...new Set(below.filter((p) => UNFIXED_KEYS.includes(p.key)).map((p) => p.key))];
+    expect(found.sort()).toEqual([...UNFIXED_KEYS].sort());
+  });
+
+  it("keeps every exemption load-bearing", () => {
+    // An entry that no longer changes an outcome is a stale claim about the
+    // sheet. `ALLOW_SUBSTRINGS` taught this file that lesson once already.
+    const dead: string[] = [];
+    for (const selector of Object.keys(GLYPH_NOT_TEXT)) {
+      const mine = pairs.filter((p) => p.selector === selector);
+      if (!mine.length) dead.push(`GLYPH_NOT_TEXT ${selector}: matches no rule`);
+      else if (mine.every((p) => p.ratio >= 4.5)) {
+        dead.push(`GLYPH_NOT_TEXT ${selector}: clears 4.5:1 unaided`);
+      }
+    }
+    for (const selector of Object.keys(BELOW_AA_BY_DESIGN)) {
+      const mine = pairs.filter((p) => p.selector === selector);
+      if (!mine.length) dead.push(`BELOW_AA_BY_DESIGN ${selector}: matches no rule`);
+      else if (mine.every((p) => p.ratio >= p.need)) {
+        dead.push(`BELOW_AA_BY_DESIGN ${selector}: passes now — delete it`);
+      }
+    }
+    for (const atom of Object.keys(RENDERED_INSIDE)) {
+      if (!containerHits.has(atom)) dead.push(`RENDERED_INSIDE ${atom}: never consulted`);
+    }
+    expect(dead.sort()).toEqual([]);
+  });
+
+  it("makes every exemption say why, in the sheet's own terms", () => {
+    const entries = [
+      ...Object.entries(GLYPH_NOT_TEXT),
+      ...Object.entries(BELOW_AA_BY_DESIGN),
+      ...Object.entries(UNFIXED_BELOW_AA).map(([k, v]) => [k, v.why] as const),
+      ...Object.entries(RENDERED_INSIDE).map(([k, v]) => [k, v.why] as const),
+    ];
+    for (const [name, why] of entries) {
+      expect(why.length, `${name} needs a real reason, not a label`).toBeGreaterThan(60);
+    }
+  });
+
+  it("reads the console's own fill, not the page's, for its log ladder", () => {
+    // The regression this guards: drop `RENDERED_INSIDE` and eleven literal-hex
+    // log colours get measured against white, which reports nine failures on a
+    // surface that is near-black in both themes — and hides whether the real
+    // console contrast is any good. `.log-line .lx` is #c9d1e3 on #0e1117.
+    const lx = pairs.filter((p) => p.selector === ".log-line .lx");
+    expect(lx.length).toBe(2);
+    for (const p of lx) {
+      expect(p.bg, `${p.theme} console fill`).toMatch(/^#0[be]/);
+      expect(p.ratio, describePair(p)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+/* ================================================================== GATE 2
+ *
+ * "No control is hidden or disabled at any width, and nothing is gated on
+ * `matchMedia`" (INTENT §4). The reason it is load-bearing is in the same
+ * sentence: a decision surface that drops an action on a narrow window is
+ * lying about what the viewer may do — and the viewer cannot tell, because
+ * what is missing leaves nothing behind.
+ *
+ * `BREAKPOINTS` above pins WHICH widths the sheet may use. This pins what a
+ * width is allowed to DO: reflow, never remove. Both halves are checked —
+ * every hiding rule under a width query in `app.css`, resolved against the
+ * markup that renders it, and every viewport read in `app/`.
+ */
+
+/** TS/TSX with comments removed, so a fix note that QUOTES markup ("was an
+ *  anonymous `<div>` with a `<span class="cur">`" — topbar.tsx) cannot push a
+ *  phantom element onto the nesting stack. Strings and regex literals are
+ *  stepped over rather than scanned. */
+function stripComments(src: string): string {
+  let out = "";
+  let prev = "";
+  for (let i = 0; i < src.length; ) {
+    const two = src.slice(i, i + 2);
+    if (two === "//") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    if (two === "/*") {
+      const end = src.indexOf("*/", i + 2);
+      i = end < 0 ? src.length : end + 2;
+      out += " ";
+      continue;
+    }
+    const c = src[i];
+    if (c === '"' || c === "'" || c === "`") {
+      out += c;
+      i++;
+      while (i < src.length) {
+        if (src[i] === "\\") {
+          out += src.slice(i, i + 2);
+          i += 2;
+          continue;
+        }
+        out += src[i];
+        i++;
+        if (src[i - 1] === c) break;
+      }
+      prev = c;
+      continue;
+    }
+    // A `/` after an operator or an opening bracket starts a regex literal, not
+    // a division — a regex containing `//` would otherwise read as a line
+    // comment. The closing brackets are deliberately NOT in this set: `</nav>`
+    // and `<Icon name={x} />` put a `/` right after `<` and `}`, and reading
+    // either as a regex swallows the markup up to the next slash — which is
+    // exactly the corruption this function exists to prevent.
+    if (c === "/" && (prev === "" || "(,=:[!&|?{;+-*%~^".includes(prev))) {
+      out += c;
+      i++;
+      while (i < src.length) {
+        if (src[i] === "\\") {
+          out += src.slice(i, i + 2);
+          i += 2;
+          continue;
+        }
+        if (src[i] === "[") {
+          while (i < src.length && src[i] !== "]") {
+            out += src[i];
+            i += src[i] === "\\" ? 2 : 1;
+          }
+        }
+        out += src[i];
+        i++;
+        if (src[i - 1] === "/") break;
+      }
+      prev = "/";
+      continue;
+    }
+    out += c;
+    if (!/\s/.test(c)) prev = c;
+    i++;
+  }
+  return out;
+}
+
+type Frame = { id: number; tag: string; classes: Set<string> };
+type Element = Frame & { interactive: boolean; file: string; line: number; chain: Frame[] };
+
+const INTERACTIVE_TAG = /^(button|a|input|select|textarea|summary|label)$/;
+const INTERACTIVE_ROLE =
+  /^(button|link|menuitem|menuitemradio|menuitemcheckbox|option|switch|tab|checkbox|radio|combobox|textbox|slider|searchbox)$/;
+
+/** Every JSX element in `app/` with a class list, plus the ancestor chain it
+ *  sits in inside its own file. Cross-component nesting is invisible here by
+ *  construction — the sweep below handles that two ways: a selector that
+ *  matches nothing is widened, never assumed harmless, and a COMPONENT child
+ *  is treated as opaque (see `mayHoldControl`), never assumed empty. */
+function jsxElements(): Element[] {
+  const out: Element[] = [];
+  let id = 0;
+  for (const file of markupFiles()) {
+    const src = stripComments(readFileSync(file, "utf8"));
+    const rel = path.relative(path.dirname(APP_DIR), file);
+    const stack: Frame[] = [];
+    // The lookbehind keeps TypeScript generics out: `useRef<HTMLDivElement>`
+    // and `Record<string, string>` are not elements.
+    const re = /(?<![\w$)\]])<(\/?)([A-Za-z][\w.]*)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      const tag = m[2];
+      if (m[1] === "/") {
+        for (let i = stack.length - 1; i >= 0; i--) {
+          if (stack[i].tag === tag) {
+            stack.length = i;
+            break;
+          }
+        }
+        const gt = src.indexOf(">", m.index);
+        re.lastIndex = gt < 0 ? src.length : gt + 1;
+        continue;
+      }
+      let i = m.index + m[0].length;
+      for (let depth = 0; i < src.length; i++) {
+        if (src[i] === "{") depth++;
+        else if (src[i] === "}") depth--;
+        else if (src[i] === ">" && depth === 0) break;
+      }
+      const attrs = src.slice(m.index, i);
+      const classes = new Set<string>();
+      const className = /className\s*=\s*(?:"([^"]*)"|\{)/.exec(attrs);
+      if (className) {
+        const text = className[1] !== undefined ? `"${className[1]}"` : attrs.slice(className.index);
+        for (const literal of text.matchAll(/["'`]([^"'`]*)["'`]/g)) {
+          for (const token of literal[1].split(/\s+/)) if (/^[-\w]+$/.test(token)) classes.add(token);
+        }
+      }
+      const role = /\brole\s*=\s*"([^"]*)"/.exec(attrs);
+      const frame: Frame = { id: id++, tag, classes };
+      out.push({
+        ...frame,
+        interactive:
+          INTERACTIVE_TAG.test(tag.toLowerCase()) ||
+          /\bonClick\b|\bonKeyDown\b|\bhref\b|\bto=/.test(attrs) ||
+          (role ? INTERACTIVE_ROLE.test(role[1]) : false),
+        file: rel,
+        line: src.slice(0, m.index).split("\n").length,
+        chain: stack.slice(),
+      });
+      if (!/\/\s*$/.test(attrs)) stack.push(frame);
+      re.lastIndex = i + 1;
+    }
+  }
+  return out;
+}
+
+const ELEMENTS = jsxElements();
+
+/**
+ * Components PROVEN to render no control, so an opaque-boundary flag on them
+ * would be noise (`<Icon>` is the breadcrumb separator the 1080 tier hides).
+ * NOT trusted prose: `re-proves the renders-no-control claims` below re-reads
+ * each component's defining file on every run and fails the moment any element
+ * in it turns interactive or reaches for a component outside this map — and an
+ * entry no width-hidden scope consults fails the rot guard.
+ */
+const RENDERS_NO_CONTROL: Record<string, { file: string; why: string }> = {
+  Icon: {
+    file: "app/ui/icon.tsx",
+    why: "renders exactly one `aria-hidden=\"true\"` <svg> whose body is a path string from ICON_PATHS — a glyph by construction, with no handler, no href and no children of its own.",
+  },
+  Pill: {
+    file: "app/ui/pill.tsx",
+    why: "renders one status <span class=\"pill …\"> (plus an optional dot <span>). The interactive pills elsewhere in the app (`button.pill` — the notification filter, the live-paused retry) are plain DOM buttons, not this component, so the sweep still sees them as controls.",
+  },
+};
+
+/** A component boundary is OPAQUE to a file-local scan: `<StageMenu>` inside
+ *  board-page.tsx's `.card-move` renders its <button> over in stage-menu.tsx,
+ *  where no ancestor chain built here can see it. So a capitalized descendant
+ *  counts as a control unless its component is PROVEN empty of them — the
+ *  gate's own canary proved the alternative: with components assumed empty,
+ *  hiding `.card-move` (whose ONLY child is the keyboard stage-move menu, the
+ *  board's drag fallback) passed this whole block green. */
+const mayHoldControl = (el: Element) =>
+  el.interactive || (/^[A-Z]/.test(el.tag) && !(el.tag in RENDERS_NO_CONTROL));
+
+/** `.a.b`, `input`, `a.card` — the tag and classes one element must carry. */
+const compoundOf = (text: string) => ({
+  tag: /^([a-zA-Z][\w-]*)/.exec(text)?.[1]?.toLowerCase() ?? null,
+  classes: [...text.matchAll(/\.([-\w]+)/g)].map((m) => m[1]),
+});
+
+const carries = (el: { tag: string; classes: Set<string> }, part: string) => {
+  const want = compoundOf(part);
+  if (want.tag && el.tag.toLowerCase() !== want.tag) return false;
+  return want.classes.every((c) => el.classes.has(c));
+};
+
+/** Does this element match a class/tag selector with descendant and `>`
+ *  combinators? Ancestors are matched against the in-file nesting stack. */
+function matchesSelector(el: Element, selector: string): boolean {
+  const tokens = bareSelector(selector).replace(/\s*>\s*/g, " > ").split(/\s+/).filter(Boolean);
+  const last = tokens.pop();
+  if (!last || !carries(el, last)) return false;
+  let at = el.chain.length - 1;
+  for (let t = tokens.length - 1; t >= 0; t--) {
+    let child = false;
+    if (tokens[t] === ">") {
+      child = true;
+      t--;
+      if (t < 0) return false;
+    }
+    let found = false;
+    for (; at >= 0; at--) {
+      if (carries(el.chain[at], tokens[t])) {
+        found = true;
+        at--;
+        break;
+      }
+      if (child) return false;
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
+/** Declarations that take an element's capability away, as opposed to moving
+ *  or resizing it. `opacity: 0` is here because P16-F7 found the invisible
+ *  element still hit-testing under a finger. */
+function removesTheElement(decls: Map<string, string>): string | null {
+  for (const [prop, expected] of [
+    ["display", "none"],
+    ["visibility", "hidden"],
+    ["content-visibility", "hidden"],
+    ["pointer-events", "none"],
+  ] as const) {
+    if ((decls.get(prop) ?? "").trim() === expected) return `${prop}: ${expected}`;
+  }
+  for (const prop of ["width", "height"] as const) {
+    if (/^0(px|rem|em|%)?$/.test((decls.get(prop) ?? "").trim())) return `${prop}: 0`;
+  }
+  if (/^0(\.0+)?$/.test((decls.get("opacity") ?? "").trim())) return "opacity: 0";
+  return null;
+}
+
+/**
+ * Width-scoped hiding that costs the viewer nothing, because the capability is
+ * reachable another way at that width. Every entry says HOW — "it is only a
+ * label" is a claim about the markup that the reader can check.
+ */
+const HIDDEN_BY_DESIGN: Record<string, string> = {
+  ".crumbs .crumb-root": "topbar tier 1 drops the project crumb at 1080px. The destination is the board, which the project rail links from every width — INTENT §4 keeps the rail's width at every breakpoint precisely so the crumbs can truncate. Navigation duplicated, not removed.",
+  ".crumbs .crumb-mid": "topbar tier 2 drops the middle crumb at 760px. Same duplication: the view it links to is a rail item, and at 720px the rail becomes an overlay that still lists all of them.",
+  ".home-top .top-search input": "P16-G3. At 900px Home's finder collapses to its `.kbd` BUTTON, which becomes the whole 36×36 box and opens the command palette — the same search over the same projects. The capability moves to a control a phone can actually use; it is not withdrawn. The three tests in `app.css palette reachability on touch` pin the replacement.",
+  ".pj-row .pj-stats .pill": "the 1100px tier drops the least load-bearing stat from a Home project ROW. `.pill` is a shared chip class that is a <button> elsewhere (the notification filter, the topbar's live-paused retry), and the ancestors here live in a different component from the pills, so the sweep widens to every `.pill` and picks those buttons up. The pills this rule reaches are project-cards.tsx spans inside `.pj-stats`, and the same numbers stay on the project's own page.",
+};
+
+/**
+ * Width-scoped hiding that DOES cost the viewer a control. Recorded exactly,
+ * for the same reason as the contrast baseline: a fix that leaves the entry
+ * behind fails. EMPTY as of this pass — the one entry it held
+ * (`.profile-list .ag-group-label`, whose row contained the `New specialist
+ * profile` button) was fixed in `app.css` by deleting the 1100px
+ * `display: none`, so the labels now ride along in the horizontal strip and
+ * the button stays reachable at every width.
+ */
+const UNFIXED_HIDDEN: Record<string, string> = {};
+
+/** Files allowed to read the viewport, and what they do with it. A read that
+ *  changes WHAT IS RENDERED is the thing the contract bans; these move things
+ *  that are already there. */
+const VIEWPORT_READS: Record<string, string> = {
+  "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
+};
+
+type Hidden = {
+  selector: string;
+  query: string;
+  how: string;
+  resolved: boolean;
+  self: Element[];
+  inside: Element[];
+};
+
+/** Every width-scoped rule that removes an element, with the controls it takes
+ *  with it — plus which RENDERS_NO_CONTROL entries a hidden scope actually
+ *  consulted, so an entry that suppresses nothing can fail the rot guard. */
+function hiddenControls(): { rules: Hidden[]; suppressed: Set<string> } {
+  const out: Hidden[] = [];
+  const suppressed = new Set<string>();
+  for (const rule of RULES) {
+    const query = rule.at.filter((q) => /\((?:min|max)-width/.test(q)).join(" ");
+    if (!query) continue;
+    const how = removesTheElement(rule.decls);
+    if (!how) continue;
+    for (const raw of rule.selector.split(",")) {
+      const selector = raw.trim();
+      if (!selector) continue;
+      const matched = ELEMENTS.filter((el) => matchesSelector(el, selector));
+      // A selector whose ancestors live in a different component resolves to
+      // nothing here. Widen to the target compound rather than conclude the
+      // rule is harmless — over-reporting costs an exemption with a reason;
+      // under-reporting costs a control nobody notices is gone.
+      const target = bareSelector(selector).replace(/\s*[>+~]\s*/g, " ").split(/\s+/).pop()!;
+      const scope = matched.length
+        ? matched
+        : compoundOf(target).classes.length
+          ? ELEMENTS.filter((el) => carries(el, target))
+          : [];
+      const inScope = (el: Element) =>
+        scope.some((host) => host.id === el.id || el.chain.some((f) => f.id === host.id));
+      for (const el of ELEMENTS) {
+        if (el.tag in RENDERS_NO_CONTROL && inScope(el)) suppressed.add(el.tag);
+      }
+      const inside = ELEMENTS.filter(
+        (el) => mayHoldControl(el) && scope.some((host) => el.chain.some((f) => f.id === host.id)),
+      );
+      out.push({
+        selector,
+        query,
+        how,
+        resolved: matched.length > 0,
+        self: scope.filter(mayHoldControl),
+        inside,
+      });
+    }
+  }
+  return { rules: out, suppressed };
+}
+
+const { rules: HIDDEN, suppressed: SUPPRESSED_COMPONENTS } = hiddenControls();
+
+describe("app.css hides no control at any width (R19-12)", () => {
+  const costly = HIDDEN.filter((h) => h.self.length > 0 || h.inside.length > 0);
+  const describeHide = (h: Hidden) =>
+    `${h.query} { ${h.selector} { ${h.how} } } takes ` +
+    [...h.self, ...h.inside]
+      .slice(0, 4)
+      .map((el) => `<${el.tag}> ${el.file}:${el.line}`)
+      .join(", ");
+
+  it("read both sides — the sheet's width queries and the markup they land on", () => {
+    // Either scanner silently matching nothing turns this whole block green.
+    expect(ELEMENTS.length).toBeGreaterThan(2000);
+    expect(ELEMENTS.filter((el) => el.interactive).length).toBeGreaterThan(300);
+    expect(HIDDEN.length).toBeGreaterThan(5);
+    expect(HIDDEN.every((h) => h.query.includes("width"))).toBe(true);
+    // The stripper is what makes the nesting stack trustworthy: topbar.tsx's
+    // P13-D-37 note quotes `<div>` and `<span class="cur">` inside a comment,
+    // and an unbalanced phantom `<div>` corrupts every chain after it.
+    const topbar = ELEMENTS.filter((el) => el.file.endsWith("shell/topbar.tsx"));
+    const kbd = topbar.find((el) => el.classes.has("kbd"));
+    expect(kbd, "topbar's ⌘K chip must be found").toBeTruthy();
+    expect(
+      kbd!.chain.map((f) => [...f.classes]).flat(),
+      "and must be seen inside .topbar > .top-search",
+    ).toEqual(expect.arrayContaining(["topbar", "top-search"]));
+  });
+
+  it("removes no interactive element under a width query", () => {
+    const unexplained = costly
+      .filter((h) => !(h.selector in HIDDEN_BY_DESIGN) && !(h.selector in UNFIXED_HIDDEN))
+      .map(describeHide)
+      .sort();
+    // Named with the file and line of the control that disappears — "3
+    // violations" would send the next reader back to resizing the window.
+    expect(unexplained).toEqual([]);
+  });
+
+  it("holds the controls it still drops as an exact, shrinking list", () => {
+    const found = [...new Set(costly.filter((h) => h.selector in UNFIXED_HIDDEN).map((h) => h.selector))];
+    expect(found.sort()).toEqual(Object.keys(UNFIXED_HIDDEN).sort());
+  });
+
+  it("does not let `.topbar > .top-search .kbd` stand in for Home's palette button", () => {
+    // The scoping P16-G3 fought for, checked from the markup rather than from
+    // the selector text: the chip the 1080 tier hides is topbar.tsx's <span>,
+    // and home-sections.tsx's <button className="kbd"> — the only other caller
+    // of `onOpenPalette` — is NOT matched by it.
+    const rule = HIDDEN.find((h) => h.selector === ".topbar > .top-search .kbd");
+    expect(rule, "the scoped chip rule must be seen by the sweep").toBeTruthy();
+    expect(rule!.resolved, "and must resolve against the markup").toBe(true);
+    expect(rule!.self).toEqual([]);
+    expect(rule!.inside).toEqual([]);
+    const homeButton = ELEMENTS.find(
+      (el) => el.file.endsWith("home/home-sections.tsx") && el.classes.has("kbd"),
+    );
+    expect(homeButton?.tag).toBe("button");
+    expect(matchesSelector(homeButton!, ".topbar > .top-search .kbd")).toBe(false);
+  });
+
+  it("treats a component boundary as opaque — a control can hide behind it", () => {
+    // THE hole the canary found: board-page.tsx's `.card-move` is a plain
+    // <div> whose only child is <StageMenu>, and StageMenu's <button> lives in
+    // stage-menu.tsx where no in-file ancestor chain can see it. With
+    // components assumed empty, `@media (max-width: 720px) { .card-move {
+    // display: none } }` — deleting the board's only keyboard stage-move at
+    // phone widths — left every test in this block green.
+    const host = ELEMENTS.find(
+      (el) => el.file.endsWith("board/board-page.tsx") && el.classes.has("card-move"),
+    );
+    expect(host, "the board's .card-move host must be found").toBeTruthy();
+    expect(host!.interactive, "the host div itself is NOT interactive — that is the trap").toBe(false);
+    const menu = ELEMENTS.find(
+      (el) => el.tag === "StageMenu" && el.chain.some((f) => f.id === host!.id),
+    );
+    expect(menu, "<StageMenu> must be seen inside it").toBeTruthy();
+    expect(
+      mayHoldControl(menu!),
+      "an unproven component counts as a control — reverting this re-opens the hole",
+    ).toBe(true);
+  });
+
+  it("re-proves the renders-no-control claims against each component's own file", () => {
+    // The map is a claim about ANOTHER file, so it is re-checked here rather
+    // than trusted: give Pill an onClick, or render some new component inside
+    // Icon, and this fails before the weakened exemption can hide anything.
+    for (const [name, entry] of Object.entries(RENDERS_NO_CONTROL)) {
+      const src = readFileSync(path.join(path.dirname(APP_DIR), entry.file), "utf8");
+      expect(src, `${entry.file} must define ${name}`).toMatch(
+        new RegExp(`(?:function|const)\\s+${name}\\b`),
+      );
+      const rendered = ELEMENTS.filter((el) => el.file === entry.file);
+      expect(rendered.length, `${entry.file} must render something`).toBeGreaterThan(0);
+      for (const el of rendered) {
+        expect(
+          el.interactive,
+          `${entry.file}:${el.line} <${el.tag}> is interactive — ${name} no longer renders no control`,
+        ).toBe(false);
+        expect(
+          /^[A-Z]/.test(el.tag) && !(el.tag in RENDERS_NO_CONTROL),
+          `${entry.file}:${el.line} <${el.tag}> is an unproven component — the ${name} claim no longer holds transitively`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("keeps every responsive exemption load-bearing and explained", () => {
+    const flagged = new Set(costly.map((h) => h.selector));
+    const dead = [
+      ...Object.keys(HIDDEN_BY_DESIGN),
+      ...Object.keys(UNFIXED_HIDDEN),
+    ]
+      .filter((selector) => !flagged.has(selector))
+      .map((selector) => `${selector}: hides no control any more — delete it`)
+      .sort();
+    // A proven-empty component no width-hidden scope contains is the same kind
+    // of rot: the exemption gates nothing, so it must go before it can excuse
+    // some future component that DOES hold a control.
+    for (const name of Object.keys(RENDERS_NO_CONTROL)) {
+      if (!SUPPRESSED_COMPONENTS.has(name)) {
+        dead.push(`RENDERS_NO_CONTROL ${name}: no width-hidden scope contains one — delete it`);
+      }
+    }
+    expect(dead.sort()).toEqual([]);
+    for (const [name, why] of [
+      ...Object.entries(HIDDEN_BY_DESIGN),
+      ...Object.entries(UNFIXED_HIDDEN),
+      ...Object.entries(VIEWPORT_READS),
+      ...Object.entries(RENDERS_NO_CONTROL).map(([k, v]) => [k, v.why] as const),
+    ]) {
+      expect(why.length, `${name} needs a real reason, not a label`).toBeGreaterThan(60);
+    }
+  });
+});
+
+describe("app/ gates no rendering on the viewport (R19-12)", () => {
+  const sources = sourceFiles(APP_DIR).filter((f) => !f.includes(".test."));
+
+  it("uses matchMedia for user PREFERENCES only, never for width", () => {
+    // A width-driven matchMedia is how "no control is hidden at any width"
+    // gets broken in a place `app.css` cannot be read to find out. Both live
+    // uses ask the OS for a colour-scheme preference.
+    const queries: string[] = [];
+    for (const file of sources) {
+      const src = readFileSync(file, "utf8");
+      const rel = path.relative(path.dirname(APP_DIR), file);
+      for (const m of src.matchAll(/matchMedia\(\s*["'`]([^"'`]*)/g)) {
+        queries.push(`${rel} — ${m[1]}`);
+      }
+    }
+    // Three sites: the SSR-safe first-paint script inlined in root.tsx, the
+    // listener that keeps `system` live, and `theme-preference.ts`.
+    expect(queries.length, "the scan must find the three colour-scheme reads").toBe(3);
+    for (const q of queries) {
+      expect(q, "matchMedia may only ask about a preference").toMatch(/\(prefers-[\w-]+:/);
+      expect(q, "a width query here is the banned form").not.toMatch(/width/);
+    }
+  });
+
+  it("reads the viewport in exactly the places that only POSITION things", () => {
+    const readers = new Map<string, number>();
+    for (const file of sources) {
+      const src = stripComments(readFileSync(file, "utf8"));
+      const rel = path.relative(path.dirname(APP_DIR), file);
+      const count = [
+        ...src.matchAll(/window\.(?:innerWidth|innerHeight|outerWidth|screen)\b/g),
+        ...src.matchAll(/documentElement\.client(?:Width|Height)\b/g),
+      ].length;
+      if (count) readers.set(rel, count);
+    }
+    const unexpected = [...readers.keys()].filter((f) => !(f in VIEWPORT_READS)).sort();
+    expect(unexpected, "a new viewport read must say what it does with it").toEqual([]);
+    const stale = Object.keys(VIEWPORT_READS).filter((f) => !readers.has(f)).sort();
+    expect(stale, "an entry for a file that no longer reads the viewport").toEqual([]);
+  });
+});

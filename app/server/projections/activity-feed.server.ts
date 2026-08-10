@@ -137,6 +137,7 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "github.credential.revalidated": "change",
   "github.pr.merge_refused": "blockedact",
   "task.ownership.admin_released": "audit",
+    "task.operator.autonomy_clamped": "audit",
   "runtime.run.started": "audit",
   "runtime.run.interrupted": "audit",
   // P13-D-7: the two governance overrides that were RECORDED but surfaced
@@ -260,13 +261,24 @@ function auditText(
     }
     case "runtime.run.interrupted":
       return `${actor} interrupted an agent run — recorded per audit policy on`;
-    // P13-D-7: the admin override that bypasses the review gate. `bypassed`
-    // names the gate that was in force (or "no gate (already acceptable)").
+    // P13-D-7: the admin override that bypasses the review gate.
+    //
+    // `bypassed` is NOT a gate NAME, whatever the old comment here claimed: the
+    // writer stores `acceptanceRefusalReason(...)`, i.e. the full refusal
+    // SENTENCE the human was shown, remediation clause and all. Interpolating
+    // that after "bypassing" produced live nonsense in the audit column —
+    // "bypassing VC-8's delivered revision has no approving verdict yet — run a
+    // review for a verdict, or an admin can force-accept." Read it as the quoted
+    // reason it is, and drop the remediation half: the reader is looking at a
+    // record of an override that already happened, so "or an admin can
+    // force-accept" is advice for a decision nobody still has to make.
     case "task.acceptance.forced": {
       const bypassed = str(d.bypassed);
-      return bypassed && !bypassed.startsWith("no gate")
-        ? `${actor} force-accepted the completion, bypassing ${bypassed} — on`
-        : `${actor} force-accepted the completion — on`;
+      if (!bypassed || bypassed.startsWith("no gate")) {
+        return `${actor} force-accepted the completion — on`;
+      }
+      const reason = bypassed.split(" — ")[0]!.replace(/\.$/, "");
+      return `${actor} force-accepted the completion, overriding the acceptance gate (${reason}) — on`;
     }
     // P13-D-7: the D2 emergency override — an org admin acting above (or
     // without) their project membership. `what` is the guard's own copy.

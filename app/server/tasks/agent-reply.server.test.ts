@@ -240,6 +240,12 @@ describe("resolveMentionedAgent", () => {
     const note = ambiguousBackendHandleNote(ambiguous);
     expect(note).toContain("@docs-writer");
     expect(note).toContain("@security-reviewer");
+    // F19-12: this note is posted into the task timeline, so it is rendered
+    // copy — it must name the SHIPPED role ("delivering agent"), never the
+    // retired "primary specialist" (D9/Q17-5). Nothing pinned the tail of this
+    // sentence before, which is how the retired phrase survived here.
+    expect(note).toContain("@agent for this task's delivering agent");
+    expect(note).not.toMatch(/primary specialist/i);
 
     // Naming one still works, and so does the generic primary handle.
     expect(call("@security-reviewer take a look")).toMatchObject({
@@ -1359,5 +1365,250 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
     expect(existsSync(path.join(ws, ".claude", "skills", "conventional-commits"))).toBe(
       true,
     );
+  }, 20_000);
+});
+
+/* ------------------------- UC-09: the agent side vs the human side of a @tag */
+
+/**
+ * One comment box addresses two populations, and the routing decision is made
+ * from the handle alone. Both directions are load-bearing and neither is
+ * self-evident from the other:
+ *
+ *  · an AGENT handle (`@operator`, `@codex`/`@claude`, a profile handle) engages
+ *    that agent — and `@operator` engages the OPERATOR, never the task's primary
+ *    specialist, which is the distinction R15-14's fallback also leans on;
+ *  · a TEAMMATE handle engages nobody. It is the half nothing else pins: a
+ *    resolver that fell through to "the primary specialist" for any unmatched
+ *    handle would still notify the human correctly, so the only visible symptom
+ *    is a provider run — and a bill — for saying "@selin what do you think?".
+ */
+describe("comment routing: agent handles engage agents, teammate handles never do (UC-09)", () => {
+  /** Deploy the operator alongside the fixture's `dev` specialist. */
+  function deployOperatorToo(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [{ capabilityId: "append-typed-events", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "claude-sonnet",
+          },
+        },
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  async function clearOperatorLeases(): Promise<void> {
+    const { resetOperatorLeasesForTests } = await import(
+      "~/server/runtimes/operator-run.server"
+    );
+    resetOperatorLeasesForTests();
+  }
+
+  const runs = () => listRunsForTaskRows(store.db, store.slug, "VIB-1");
+  const notifications = () =>
+    store.db
+      .prepare(`SELECT user_id, kind, text FROM notifications`)
+      .all() as { user_id: string; kind: string; text: string }[];
+
+  /**
+   * A backend handle names a RUNTIME, so it must name the RIGHT one. Both
+   * directions in one test: the claude fixture agent does not answer to
+   * `@codex`, and a deployed codex agent does — otherwise "one deployed
+   * specialist of that backend" could be read as "the only deployed specialist".
+   */
+  it("@codex reaches the codex specialist and @claude the claude one — backends never cross", () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "claude-sonnet",
+          },
+        },
+        {
+          profileId: "analyst",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "analyst",
+            role: "analysis",
+            backends: ["codex"],
+            model: "gpt-5.6-sol",
+          },
+        },
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const call = (text: string) =>
+      resolveMentionedAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", text);
+    expect(call("@codex please take a look")).toMatchObject({
+      profileId: "analyst",
+      backend: "codex",
+      isOperator: false,
+    });
+    expect(call("@claude please take a look")).toMatchObject({
+      profileId: "dev",
+      backend: "claude",
+    });
+  });
+
+  it("a TEAMMATE @mention notifies the person and starts no run — a human tag never buys a provider call", async () => {
+    const before = runs().length;
+    const specsBefore = startedRunSpecs().length;
+    // Arda is a project ADMIN: if this handle resolved to an agent, the RBAC
+    // gate would not stop the run — the resolution is the only thing that does.
+    const handle = store.users.selin.email.split("@")[0]!;
+    const result = await commentToAgent(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: `@${handle} can you take acceptance once the dev is done?`,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    expect(result.agent).toBeNull();
+    expect(result.triggered).toBeNull();
+    expect(result.logThreadId).toBeNull();
+    expect(result.runtimeDenied).toBe(false);
+    // Not tinted as routed-to-agent either — the timeline says who it is for.
+    expect(result.toAgent).toBe(false);
+    // No run, and nothing was ever handed to a provider adapter.
+    expect(runs().length).toBe(before);
+    expect(startedRunSpecs().length).toBe(specsBefore);
+    // …and the human half DID happen: the teammate is in their inbox.
+    expect(result.mentionedUserIds).toEqual([store.users.selin.id]);
+    const rows = notifications();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ user_id: store.users.selin.id, kind: "mention" });
+  });
+
+  it("@operator engages the OPERATOR — a governed run, not the task's primary specialist", async () => {
+    deployOperatorToo();
+    await clearOperatorLeases();
+    const before = runs().length;
+
+    const result = await commentToAgent(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: "@operator what is holding this up?",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    expect(result.agent).toMatchObject({ profileId: "operator" });
+    expect(result.triggered).toBe("started");
+    const after = runs();
+    expect(after.length).toBeGreaterThan(before);
+    // The OPERATOR ran…
+    expect(after.some((r) => r.kind === "operator")).toBe(true);
+    // …and `dev` — the task's delivering specialist, and what a resolver that
+    // treats every reserved handle as "the agent" would have picked — did not.
+    expect(after.some((r) => r.kind !== "operator")).toBe(false);
+    // The human's words reach the operator's turn, not just the timeline.
+    const spec = startedRunSpecs().at(-1);
+    expect(spec?.prompt ?? "").toContain("what is holding this up?");
+  }, 20_000);
+
+  /**
+   * R15-14, the fallback half. Routing an answered question back to its ASKER is
+   * an optimization; the guarantee underneath it is that the decision reaches
+   * SOMEONE. When the asker cannot be reached — undeployed profile, dead
+   * session, a packet the operator itself raised — the operator hand-off that
+   * has always run here must still fire, or a human's decision is recorded on
+   * the timeline and acted on by nobody.
+   */
+  it("a question whose asker is no longer deployed still hands the decision to the operator", async () => {
+    deployOperatorToo();
+    await clearOperatorLeases();
+    const existing = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    writeTask(store.dataRoot, store.slug, {
+      ...existing.parsed,
+      packet: {
+        id: "pkt_gone",
+        type: "input",
+        kind: "Agent question",
+        from: "agent:claude/ghost-writer (documentation)",
+        // The profile that asked has since been removed from the project.
+        askedBy: "ghost-writer",
+        title: "Which config should I target?",
+        body: "Ambiguous scope.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Target the staging config", d: "", rec: true },
+          { kind: "custom", t: "Target production", d: "", rec: false },
+        ],
+      },
+    } as never);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        note: "staging only, production needs sign-off",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    // The decision was handed to the operator instead of being swallowed.
+    const handedOff = await waitFor(() => runs().some((r) => r.kind === "operator"));
+    expect(handedOff).toBe(true);
+    // Nothing was relayed to a specialist — there was nobody to relay it to.
+    expect(runs().some((r) => r.kind !== "operator")).toBe(false);
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    expect(
+      timeline.some((e) => e.text.includes("has been answered by a human")),
+    ).toBe(false);
   }, 20_000);
 });

@@ -179,3 +179,113 @@ describe("denied authority is audited (P13-D-8)", () => {
     });
   });
 });
+
+/**
+ * F19-30: the D2 invariant at the top of project-authority.server.ts says EVERY
+ * org-admin override grant leaves a `project.org_admin.override` row. The
+ * `"any-member"` gate was exempt, justified as "config-surface route READs plus
+ * a couple of idempotent no-ops — every real mutation names a concrete
+ * RbacAction and IS audited". That was false: COMMENTING is a real, visible,
+ * deliberately role-free mutation whose ONLY authority is this gate
+ * (`appendComment` never calls `requireAction`), so an org-admin NON-MEMBER
+ * could write into a members-only project leaving no override row anywhere.
+ */
+describe("org-admin override on the any-member gate is audited (F19-30)", () => {
+  let ctx: TestDbContext;
+  let db: DatabaseSync;
+
+  const orgAdmin = { userId: "u_orgadmin", label: "orgadmin@viberr.test" };
+  const project: AuthorityProject = {
+    slug: "proj",
+    memberRoles: new Map([["u_member", "contributor"]]),
+    archived: false,
+  };
+  const OVERRIDE = "project.org_admin.override";
+
+  beforeEach(() => {
+    ctx = createTestDbContext();
+    db = ctx.makeDb();
+    insertUser(db, {
+      id: orgAdmin.userId,
+      email: orgAdmin.label,
+      name: "Org Admin",
+      role: "admin",
+    });
+  });
+  afterEach(() => ctx.cleanup());
+
+  it("a non-member org admin commenting leaves an override row", () => {
+    // The exact comment-path authority: `requireVisibleProject` →
+    // assertProjectAction("any-member", …, "act on this project").
+    const granted = requireProjectAuthority(db, project, orgAdmin, "any-member", {
+      action: "any-member",
+      what: "act on this project",
+    });
+    expect(granted.isOrgAdminOverride).toBe(true);
+
+    const rows = listAuditEvents(db, { action: OVERRIDE });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      actorUserId: orgAdmin.userId,
+      projectSlug: "proj",
+      subjectKind: "project",
+      subjectId: "proj",
+    });
+    expect(rows[0]!.details).toMatchObject({
+      action: "any-member",
+      what: "act on this project",
+      memberRole: null,
+    });
+  });
+
+  it("a READ gate can never mask the WRITE gate — the `what` keys them apart", () => {
+    // Page load first (the F7-pass7 noise path), then the comment. The comment
+    // must still leave its own row even though a read row exists a tick earlier.
+    requireProjectAuthority(db, project, orgAdmin, "any-member", {
+      action: "any-member",
+      what: "view this project's policy",
+    });
+    requireProjectAuthority(db, project, orgAdmin, "any-member", {
+      action: "any-member",
+      what: "act on this project",
+    });
+    const whats = listAuditEvents(db, { action: OVERRIDE }).map(
+      (r) => r.details?.what,
+    );
+    expect(whats).toContain("act on this project");
+    expect(whats).toContain("view this project's policy");
+  });
+
+  it("repeats of the SAME any-member gate collapse (the page-load flood F7-pass7 named)", () => {
+    for (let i = 0; i < 5; i += 1) {
+      requireProjectAuthority(db, project, orgAdmin, "any-member", {
+        action: "any-member",
+        what: "view this project's policy",
+      });
+    }
+    expect(listAuditEvents(db, { action: OVERRIDE })).toHaveLength(1);
+  });
+
+  it("RbacAction overrides are never collapsed — every governed grant rows", () => {
+    for (let i = 0; i < 3; i += 1) {
+      requireProjectAuthority(db, project, orgAdmin, ["admin"], {
+        action: "edit-policy",
+        what: "change the policy",
+      });
+    }
+    expect(listAuditEvents(db, { action: OVERRIDE })).toHaveLength(3);
+  });
+
+  it("an org admin who is ALSO a member is not an override (no row)", () => {
+    const asMember: AuthorityProject = {
+      ...project,
+      memberRoles: new Map([[orgAdmin.userId, "contributor"]]),
+    };
+    const granted = requireProjectAuthority(db, asMember, orgAdmin, "any-member", {
+      action: "any-member",
+      what: "act on this project",
+    });
+    expect(granted.isOrgAdminOverride).toBe(false);
+    expect(listAuditEvents(db, { action: OVERRIDE })).toEqual([]);
+  });
+});

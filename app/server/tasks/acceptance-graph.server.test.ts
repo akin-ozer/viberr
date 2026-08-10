@@ -19,6 +19,8 @@ import {
   applyRecommendation,
   dismissRecommendation,
   forceAcceptCompletion,
+  OPERATOR_TASK_ACTOR,
+  reorderTask,
   resolveAcceptanceAffordance,
   resolvePacket,
   setTaskArchived,
@@ -312,6 +314,19 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     expect(taskFile(store).parsed.frontmatter.validation).toBe("healthy");
   });
 
+  /**
+   * R19-5 (owner ruling 2026-08-06) — force-accept MAY skip the remaining
+   * stages AND the review gate.
+   *
+   * A pass-19 implementer inverted this test to assert a 409 from an
+   * off-boundary stage ("move the task to the boundary first"); the owner
+   * reverted that server refusal. The override exists precisely for a wedged
+   * board, so walling it off behind the workflow graph would have removed the
+   * only exit. The burden is HONESTY instead: the affordance says it skips the
+   * remaining stages and the review gate, and the confirm dialog enumerates
+   * which stages those are (`accept-confirm.tsx`). The server's job is to name
+   * the bypassed gate in the audit row — which is what this asserts.
+   */
   it("an admin can still force-accept off-boundary, and the audit names the graph gate", async () => {
     const store = prepared();
     seed(store, { stage: "triage" });
@@ -325,6 +340,30 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
     expect(forced).toHaveLength(1);
     expect(String(forced[0]!.details?.bypassed)).toContain("Triage");
+  });
+
+  it("at the review boundary the audited override still works, and names the gate it bypassed", async () => {
+    const store = prepared();
+    // Delivered work with no approving verdict — the wedged process gate DG-2
+    // exists for, at the boundary acceptance is exercised from.
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      branch: "vib-1-work",
+      workRevision: revision(),
+      pr: { number: 7, state: "review", title: "[VIB-1] Task VIB-1" },
+      validation: "changed",
+    });
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("done");
+    const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
+    expect(forced).toHaveLength(1);
+    expect(String(forced[0]!.details?.bypassed)).toContain("approving verdict");
   });
 
   it("the same gate holds on the packet path", async () => {
@@ -665,6 +704,152 @@ describe("R14-3: the task archive", () => {
       status: 409,
       message: expect.stringContaining("archived"),
     });
+  });
+
+  /**
+   * F19-8 — acceptance was guarded from the start; the MOVE was not.
+   *
+   * Under the board's "Archived" filter an archived card kept a working Move
+   * menu and a live drag handle, so abandoned work could be walked from column
+   * to column while every surface around it said it was out of the flow. Only a
+   * drop on the terminal stage met a refusal, and only after the board had
+   * animated the move. Both writers now refuse it up front.
+   */
+  it("an archived task cannot be moved between stages at all — not just into Done", async () => {
+    const store = prepared();
+    seed(store, { stage: "impl", waiting: "none", archived: true });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("archived"),
+    });
+    // The stage is unchanged — the refusal happened before any write.
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("impl");
+  });
+
+  it("an archived task cannot be dragged on the board either (reorderTask)", async () => {
+    const store = prepared();
+    seed(store, { stage: "impl", waiting: "none", archived: true });
+    await expect(
+      reorderTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("archived"),
+    });
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("impl");
+  });
+
+  it("a LIVE task still moves — the guard keys off `archived`, not the stage", async () => {
+    const store = prepared();
+    seed(store, { stage: "impl", waiting: "none" });
+    const moved = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(moved.stage).toBe("review");
+  });
+});
+
+/**
+ * F19-38 (pass 19, live-reproduced) — the SERVER half of "an archived card is
+ * inert". The board verifier drove the writers directly with an archived task at
+ * `impl`: `transitionStage({toStageId:"review", manual:true})` → `{ok:true}` and
+ * `reorderTask({toStageId:"review"})` → `{ok:true,moved:true}`. Only the
+ * TERMINAL target refused, because the archived check lived exclusively inside
+ * `acceptanceRefusalReason`. F19-8 made the card inert in the UI; without these
+ * the UI guard is decoration a crafted POST walks straight past.
+ */
+describe("F19-38: an archived task cannot be moved on the board", () => {
+  it("refuses a MANUAL non-terminal transition (409), and the stage is untouched", async () => {
+    const store = prepared();
+    seed(store, { stage: "impl", archived: true });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+        actor(store.users.arda), // admin — the widest human authority there is
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: "VIB-1 is archived — restore it before moving it between stages.",
+    });
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("impl");
+  });
+
+  it("refuses the OPERATOR's own transition too — archive outranks agent authority", async () => {
+    const store = prepared();
+    seed(store, { stage: "ready", archived: true });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        { dataRoot: store.dataRoot, operatorAuthorized: true },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("ready");
+  });
+
+  it("refuses a cross-stage reorderTask (the drag path) — no stage move, no rank write", async () => {
+    const store = prepared();
+    seed(store, { stage: "impl", archived: true, boardRank: 100 });
+    await expect(
+      reorderTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", beforeKey: null },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    const fm = taskFile(store).parsed.frontmatter;
+    expect(fm.stage).toBe("impl");
+    expect(fm.boardRank).toBe(100);
+  });
+
+  it("refuses a SAME-stage reorderTask as well — the rank write never reaches transitionStage", async () => {
+    const store = prepared();
+    seed(store, { stage: "impl", archived: true, boardRank: 100 });
+    await expect(
+      reorderTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: null },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(taskFile(store).parsed.frontmatter.boardRank).toBe(100);
+  });
+
+  it("moves normally once RESTORED — the guard is a disposition gate, not a freeze", async () => {
+    const store = prepared();
+    seed(store, { stage: "impl", archived: true });
+    await setTaskArchived(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", archived: false },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("review");
   });
 });
 

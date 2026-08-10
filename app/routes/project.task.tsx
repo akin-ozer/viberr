@@ -18,6 +18,8 @@ import {
   getTaskDetail,
   getTaskSummary,
 } from "~/server/projections/task-query.server";
+import { markTaskNotificationsSeen } from "~/server/projections/notifications.server";
+import { logger } from "~/server/logging/logger.server";
 import {
   applyRecommendation,
   commentToAgent,
@@ -44,6 +46,7 @@ import {
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
 import { latestTaskReconcileAt } from "~/server/provenance/provenance-query.server";
+import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
 import {
@@ -51,6 +54,7 @@ import {
   type RealBackend,
 } from "~/server/runtimes/runtime-registry.server";
 import {
+  operatorAutonomyFor,
   operatorBackendFor,
   type OperatorAutonomy,
 } from "~/server/tasks/operator-actions.server";
@@ -110,6 +114,22 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!detail) {
     throw data(`No task ${params.key} in projects/${params.slug}.`, {
       status: 404,
+    });
+  }
+  // R19-15: opening the task IS seeing its notifications — mark this viewer's
+  // unread rows for it read here, loader-side. Loader-side is correct: the app
+  // uses no link prefetch (this loader runs only on a real view), the write is
+  // idempotent + monotonic, and the `notification.read` it emits converges —
+  // the revalidation it triggers marks nothing on its second pass and emits no
+  // further event, so no loop can sustain. Guarded because viewing a task must
+  // never 500 because read-marking hiccuped.
+  try {
+    markTaskNotificationsSeen(db, user.id, params.slug, params.key);
+  } catch (error) {
+    logger.warn("R19-15 task-view read-marking failed", {
+      projectSlug: params.slug,
+      taskKey: params.key,
+      error,
     });
   }
   const limit = clampTimelineLimit(
@@ -242,6 +262,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     deployedSpecialists,
     // P11-76: the operator's configured backend so the run picker defaults to it.
     operatorBackend: operatorBackendFor({}, params.slug),
+    // R19-A: the ceiling, so the run picker offers only what will actually run.
+    operatorAutonomy: operatorAutonomyFor({}, params.slug),
     // P11-41: which backends are actually configured, so the run picker can
     // disable an option that would fail fast rather than offering it blindly.
     backendAvailable: {
@@ -262,6 +284,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // architecture.md. It now goes through app/server/provenance/, which owns
     // the table.
     githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
+    // F19-22: the line above is the last pass that CHANGED something — DG-3
+    // deliberately withholds the provenance row when a poller tick finds
+    // nothing new (github-reconciler.server.ts), so it drifts to "1h ago" on a
+    // task the poller is verifying every five minutes, and the panel rendering
+    // it as "Synced" contradicted its own tooltip. The last CHECK is a
+    // different fact with a different writer: `github.reconcile.task` is
+    // recorded after every early return in `reconcileTaskExclusive`, so a row
+    // exists iff a pass completed — changed or not — and audit retention (90d)
+    // bounds it. Both ship; the panel renders them as two rows, because one
+    // number cannot answer both questions.
+    githubCheckedAt: latestTaskReconcileCheckAt(db, params.slug, params.key),
     // R15-1 accept confirm + R15-2 manual-delivery affordance.
     workRevisionSha,
     noChanges,
@@ -844,6 +877,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}
+      operatorAutonomy={loaderData.operatorAutonomy}
       backendAvailable={loaderData.backendAvailable}
       deliveringActive={loaderData.deliveringActive}
       activeReviewerIds={loaderData.activeReviewerIds}
@@ -862,6 +896,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
+      githubCheckedAt={loaderData.githubCheckedAt}
       workRevisionSha={loaderData.workRevisionSha}
       noChanges={loaderData.noChanges}
       defaultBranch={loaderData.defaultBranch}

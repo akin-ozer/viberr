@@ -1,3 +1,7 @@
+import { execFile } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -147,6 +151,10 @@ describe("Codex structured operator completion", () => {
             name: "Operator",
             backends: ["codex"],
             model: defaultModelFor("codex"),
+            // R19-A: per-run autonomy is CLAMPED to the project's configured
+            // level, so `start()`'s `autonomy: "full"` below only means
+            // something on a project that CONFIGURED full autonomy.
+            autonomy: "full",
           },
         },
       ] as never,
@@ -1675,8 +1683,90 @@ describe("runOperator — authority, ordering, orphans", () => {
     const started = await drive({ trigger: "manual" });
     expect(started.queued).toBe(false);
     const spec = adapter5.pending!.spec;
+    // R19-1: an undeployed operator may LOOK at the repository — but through the
+    // read-only checkout under its cwd (Read/Grep/Glob), so the in-process MCP
+    // floor is just `get_task`, and it still changes nothing.
     expect(spec.allowedTools).toEqual(["mcp__viberr__get_task"]);
     expect(spec.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
+  });
+
+  /**
+   * F19-20 / FR39 — "a scheduled re-run never fires on a terminal stage",
+   * enforced where the run STARTS.
+   *
+   * The schedule runner decided mootness from the tick's projection snapshot,
+   * and `runOperator` had no terminal-stage guard of its own. Two windows
+   * survived that: the runner drains its claimed list sequentially, and — far
+   * wider — a trigger arriving while a drive holds the lease is QUEUED and
+   * fired on release with no mootness re-check at all. That in-flight turn is
+   * frequently the one that calls `accept_completion`, so the human watched a
+   * fresh unwatched agent turn start on the task they had just closed.
+   */
+  it("F19-20: a SCHEDULED trigger on a Done task starts no run", async () => {
+    // Canary: delete the `input.trigger === "scheduled"` guard in runOperator
+    // and a run row appears / adapter5.pending is non-null.
+    deployAgents([operatorAgent()]);
+    seed("done");
+
+    const result = await drive({ trigger: "scheduled" });
+
+    expect(result.refused).toBe("terminal-stage");
+    expect(result.runId).toBeNull();
+    expect(result.queued).toBe(false);
+    expect(adapter5.pending).toBeNull();
+    expect(operatorRuns()).toHaveLength(0);
+  });
+
+  it("F19-20: the guard is scoped to `scheduled` — a human trigger on a Done task still drives", async () => {
+    // Every other trigger on a terminal task is legitimate (a `pr-diverged`
+    // recovery, an `@operator` question about finished work). FR39 singles out
+    // the scheduled one because it is the capability that acts unwatched.
+    deployAgents([operatorAgent()]);
+    seed("done");
+
+    const result = await drive({ trigger: "manual" });
+
+    expect(result.refused).toBeUndefined();
+    expect(adapter5.pending).not.toBeNull();
+  });
+
+  it("F19-20: a scheduled trigger QUEUED behind a live drive is re-checked when it FIRES", async () => {
+    // The wide window the claim-time check cannot cover: a trigger arriving
+    // while a drive holds the lease is queued and fired on release with no
+    // mootness re-check anywhere — and that in-flight turn is frequently the
+    // one that calls `accept_completion`. So the human watched a fresh
+    // unwatched agent turn start on the task they had just closed.
+    //
+    // Canary: delete the `input.trigger === "scheduled"` guard in runOperator —
+    // the drain starts a second run, so `waiting` never settles and the
+    // eventually() below times out on a 2-run list.
+    deployAgents([operatorAgent()]);
+    seed("impl");
+
+    await drive({ trigger: "manual" });
+    expect(adapter5.pending).not.toBeNull();
+    const queued = await drive({ trigger: "scheduled" });
+    expect(queued.queued).toBe(true);
+    const firstRunId = adapter5.pending!.spec.runId;
+
+    // The live turn closes the task, THEN releases the lease and drains.
+    seed("done");
+    adapter5.pending!.callbacks.onExit({
+      outcome: "finished",
+      effectiveBackend: "claude",
+      sessionId: "s1",
+    });
+
+    // Wait on a POSITIVE observable of the drain having landed — the refusal
+    // settles the waiting flag the lease release skipped (it skipped it exactly
+    // because a trigger was queued to fire). Asserting the ABSENCE of a second
+    // run without this would pass on the first tick, before the drain ran.
+    await eventually(() => {
+      expect(task().frontmatter.waiting).not.toBe("agent");
+      expect(operatorRuns().filter((r) => r.id !== firstRunId)).toHaveLength(0);
+    });
+    // A closed task with no packet and no recommendation waits on nobody.
+    expect(task().frontmatter.waiting).toBe("none");
   });
 
   /**
@@ -1927,5 +2017,299 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
       expect(runs()).toHaveLength(2);
       expect(adapter6.pending).not.toBeNull();
     });
+  });
+});
+
+/**
+ * R19-1 (owner ruling, extends F19-4) — the operator gets a FULL READ-ONLY
+ * CLONE of the project repository before it reasons about the repository.
+ *
+ * Live: at triage the operator's cwd (the task's canonical store folder) held
+ * exactly `task.md`, and the model published a decision packet stating "Repo
+ * contents visible to operator: only task.md — no docs/ or README found" about
+ * a repository that has both, then offered "add a README" as a scoping option.
+ * It was describing its own empty workspace. A summary-only view and a
+ * persona-only fix were both rejected: the packets have to be grounded in the
+ * real tree.
+ *
+ * These tests never reach the network. `createGitHubClonePlan` clones
+ * `https://github.com/<repo>.git` with the server process env inherited, so a
+ * `url.<local>.insteadOf` entry in a temp `GIT_CONFIG_GLOBAL` redirects the
+ * real code path at a local origin — the clone that runs is the production one,
+ * only its remote is local.
+ */
+describe("R19-1 — the operator's read-only repository view", () => {
+  let ctx7: TestDbContext;
+  let store7: TestStore;
+  let adapter7: ControlledAdapter;
+  let origins: string;
+
+  const exec = promisify(execFile);
+
+  const deploy = (
+    repo: string | null,
+    definitionOver: Record<string, unknown> = {},
+  ): void => {
+    const project = readProjectFile({
+      projectSlug: store7.slug,
+      dataRoot: store7.dataRoot,
+    })!;
+    writeProject(store7.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: OPERATOR_POLICY,
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["claude"],
+            model: "sonnet",
+            ...definitionOver,
+          },
+        },
+      ] as never,
+    });
+    writeTask(store7.dataRoot, store7.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "triage",
+        readiness: "ready",
+        waiting: "agent",
+        ownerUserId: store7.users.arda.id,
+      }),
+      goal: "Ship the parser.",
+    });
+    rebuildAll(store7.db, { dataRoot: store7.dataRoot, force: true });
+  };
+
+  const drive = (over: Partial<Parameters<typeof runOperator>[1]> = {}) =>
+    runOperator(store7.db, {
+      projectSlug: store7.slug,
+      taskKey: "VIB-1",
+      autonomy: "supervised",
+      trigger: "manual",
+      dataRoot: store7.dataRoot,
+      ...over,
+    });
+
+  const workspaceRoot = () =>
+    path.join(store7.dataRoot, "projects", store7.slug, "tasks", "VIB-1", "workspace");
+  const checkoutDir = () => path.join(workspaceRoot(), "widgets");
+  const systemPrompt = () => adapter7.pending?.spec.systemPrompt ?? "";
+
+  /**
+   * A local origin for `acme/widgets`, carrying the two things the live
+   * confabulation denied existed (a README and a `docs/` folder) plus a
+   * `.claude` catalog, which a clone Viberr creates must strip (R18-3).
+   */
+  async function makeOrigin(): Promise<void> {
+    const bare = path.join(origins, "acme", "widgets.git");
+    mkdirSync(path.dirname(bare), { recursive: true });
+    await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
+    const seed = path.join(origins, "seed");
+    mkdirSync(path.join(seed, "docs"), { recursive: true });
+    mkdirSync(path.join(seed, ".claude", "skills", "repo-own"), { recursive: true });
+    writeFileSync(path.join(seed, "README.md"), "# widgets\n");
+    writeFileSync(path.join(seed, "docs", "guide.md"), "the guide\n");
+    writeFileSync(
+      path.join(seed, ".claude", "skills", "repo-own", "SKILL.md"),
+      "# ungoverned\n",
+    );
+    await exec("git", ["init", "-q", "-b", "main", seed]);
+    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
+    await exec("git", ["-C", seed, "config", "user.name", "T"]);
+    await exec("git", ["-C", seed, "add", "-A"]);
+    await exec("git", ["-C", seed, "commit", "-qm", "init"]);
+    await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
+  }
+
+  /**
+   * Point `https://github.com/` at a local directory for the duration of `work`
+   * — an existing one for the success arm, a missing one to make the real clone
+   * fail instantly and offline.
+   */
+  async function withOrigin<T>(root: string, work: () => Promise<T>): Promise<T> {
+    const configPath = path.join(origins, `gitconfig-${path.basename(root)}`);
+    writeFileSync(
+      configPath,
+      `[url "${root}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
+    );
+    const saved = {
+      global: process.env.GIT_CONFIG_GLOBAL,
+      system: process.env.GIT_CONFIG_SYSTEM,
+      protocol: process.env.GIT_ALLOW_PROTOCOL,
+    };
+    process.env.GIT_CONFIG_GLOBAL = configPath;
+    process.env.GIT_CONFIG_SYSTEM = "/dev/null";
+    // Belt and braces: if the rewrite ever stopped applying, git must FAIL
+    // rather than quietly reach github.com from a unit test.
+    process.env.GIT_ALLOW_PROTOCOL = "file";
+    try {
+      return await work();
+    } finally {
+      for (const [key, value] of [
+        ["GIT_CONFIG_GLOBAL", saved.global],
+        ["GIT_CONFIG_SYSTEM", saved.system],
+        ["GIT_ALLOW_PROTOCOL", saved.protocol],
+      ] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  beforeEach(() => {
+    ctx7 = createTestDbContext();
+    store7 = setupTestStore(ctx7);
+    origins = ctx7.makeTempDir();
+    resetSseBrokerForTests();
+    resetOperatorLeasesForTests();
+    adapter7 = new ControlledAdapter();
+    configureRunServiceForTests({ claude: adapter7, codex: adapter7 });
+    setBackendAvailability("claude", true);
+    setBackendAvailability("codex", true);
+  });
+
+  afterEach(() => {
+    resetOperatorLeasesForTests();
+    resetSseBrokerForTests();
+    ctx7.cleanup();
+  });
+
+  it("clones the repository into the task workspace and tells the operator where it is", async () => {
+    // Canary: drop the `ensureOperatorRepoCheckout` call from `runOperator` and
+    // the checkout assertions fail; drop `workspaceSection` from
+    // `buildOperatorSystemPrompt` and the prompt assertions fail.
+    deploy("acme/widgets");
+    await makeOrigin();
+
+    await withOrigin(origins, () => drive());
+
+    // The real tree is on disk — the two things the live packet claimed were
+    // absent are the two things asserted here.
+    expect(existsSync(path.join(checkoutDir(), "README.md"))).toBe(true);
+    expect(readFileSync(path.join(checkoutDir(), "docs", "guide.md"), "utf8")).toContain(
+      "the guide",
+    );
+    // R18-3 still holds for a clone Viberr creates: the repo's own catalog is
+    // not discoverable by the run.
+    expect(existsSync(path.join(checkoutDir(), ".claude"))).toBe(false);
+
+    // …and the model is TOLD, in the path it can actually use (its cwd is the
+    // task folder, so the checkout is one level down).
+    const prompt = systemPrompt();
+    expect(prompt).toContain("# Your workspace");
+    expect(prompt).toContain("read-only checkout of **acme/widgets**");
+    expect(prompt).toContain("`./workspace/widgets/`");
+    expect(prompt).toContain('as "the repository"');
+    // Read-only means the MODEL's hands, and the prompt must not over-correct
+    // into "you cannot push": `deliver_for_review` pushes the deliverer's
+    // branch, and the operator definition tells the model delivery is its
+    // decision. A prompt that denies it would make a careful operator stop
+    // delivering — a repo-view fix that broke shipping.
+    expect(prompt).toContain("Your own hands never touch that tree");
+    expect(prompt).toContain("the SERVER executes");
+    expect(prompt).not.toMatch(/cannot write, commit, push/);
+  });
+
+  it("reuses an existing checkout WITHOUT touching it (F19-15)", async () => {
+    // The checkout is shared with the delivering engagement, and a run may be
+    // streaming against it right now. So the operator's provisioning is
+    // ensure-only: no re-clone, no remote re-sanitization, no `.claude`
+    // re-strip — that strip is exactly what deleted a live run's mounted
+    // skills.
+    // Canary: replace the existing-checkout early return with a `cloneRepo`
+    // style reuse (sanitize + strip) and both survival assertions fail.
+    deploy("acme/widgets");
+    const dir = checkoutDir();
+    mkdirSync(path.join(dir, ".claude", "skills", "mounted"), { recursive: true });
+    writeFileSync(path.join(dir, ".claude", "skills", "mounted", "SKILL.md"), "MOUNTED");
+    await exec("git", ["init", "-q", "-b", "main", dir]);
+    await exec("git", ["-C", dir, "remote", "add", "origin", "https://example.invalid/x.git"]);
+
+    // No origin rewrite in scope: a clone attempt here would have to reach the
+    // network, and `GIT_ALLOW_PROTOCOL` is not even set — the only way this
+    // passes fast is by not cloning at all.
+    await drive();
+
+    expect(readFileSync(path.join(dir, ".claude", "skills", "mounted", "SKILL.md"), "utf8"))
+      .toBe("MOUNTED");
+    const { stdout } = await exec("git", ["-C", dir, "config", "--get", "remote.origin.url"]);
+    expect(stdout.trim()).toBe("https://example.invalid/x.git");
+    expect(systemPrompt()).toContain("`./workspace/widgets/`");
+  });
+
+  it("the run is READ-ONLY: the write and shell built-ins are denied", async () => {
+    // R19-1 is a coordinator holding a checkout, so "read-only" has to be a
+    // property of the RUN — a persona sentence is overridable by the next thing
+    // the model reads. `disallowedTools` removes the tool from its context even
+    // under bypassPermissions.
+    // Canary: return `[]` from `operatorDisallowedTools` and this fails.
+    deploy("acme/widgets");
+    await makeOrigin();
+
+    await withOrigin(origins, () => drive());
+
+    const spec = adapter7.pending!.spec;
+    for (const tool of ["Bash", "Edit", "MultiEdit", "Write", "NotebookEdit"]) {
+      expect(spec.disallowedTools).toContain(tool);
+    }
+    // Reading is the whole point of the checkout — those tools must survive.
+    expect(spec.disallowedTools).not.toContain("Read");
+    expect(spec.disallowedTools).not.toContain("Grep");
+    expect(spec.disallowedTools).not.toContain("Glob");
+  });
+
+  it("the CODEX operator carries the same read-only confinement", async () => {
+    // Codex has no denylist channel: the denied write set is what makes
+    // `startRun` mark the run repo-write-withheld, which is the flag its
+    // adapter turns into a read-only sandbox.
+    deploy("acme/widgets", { backends: ["codex"], model: defaultModelFor("codex") });
+    await makeOrigin();
+
+    await withOrigin(origins, () => drive({ backend: "codex" }));
+
+    const spec = adapter7.pending!.spec;
+    expect(spec.backend).toBe("codex");
+    expect(spec.disallowedTools).toContain("Write");
+    expect(spec.repoWriteWithheld).toBe(true);
+    expect(spec.systemPrompt ?? "").toContain("`./workspace/widgets/`");
+  });
+
+  it("a FAILED clone degrades honestly — the drive still runs, and the prompt says it is blind", async () => {
+    // The failure must not strand the coordinator (it can still ask, assign,
+    // transition), but it must not silently look like an empty repository
+    // either — that is the F19-4 confabulation with extra steps.
+    // Canary: let the clone failure throw out of `ensureOperatorRepoCheckout`
+    // (drop its catch) and the run never starts.
+    deploy("acme/widgets");
+
+    const result = await withOrigin(path.join(origins, "nope"), () => drive());
+
+    expect(result.runId).not.toBeNull();
+    expect(adapter7.pending).not.toBeNull();
+    expect(existsSync(path.join(checkoutDir(), ".git"))).toBe(false);
+    const prompt = systemPrompt();
+    expect(prompt).toContain("NO checkout of **acme/widgets** is available on this run");
+    expect(prompt).not.toContain("read-only checkout of");
+    expect(prompt).toContain('as "the repository"');
+    // F19-6: the sentence names WHY, and quotes git rather than only its exit
+    // code — "git exit 128" alone told a human with a working credential
+    // nothing they could act on.
+    expect(prompt).toContain("The workspace checkout failed");
+    expect(prompt).toContain("The checkout reported:");
+  });
+
+  it("a repo-less project gets the no-checkout arm and no clone is attempted", async () => {
+    deploy(null);
+
+    await drive();
+
+    expect(existsSync(workspaceRoot())).toBe(false);
+    const prompt = systemPrompt();
+    expect(prompt).toContain("There is no repository checkout on this run");
+    expect(prompt).toContain('as "the repository"');
   });
 });

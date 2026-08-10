@@ -331,3 +331,34 @@ export function markTaskPacketApprovalRead(
   }
   return changes;
 }
+
+/**
+ * R19-15: per-user VIEW side-effect — opening a task's page marks THIS
+ * viewer's unread notifications for that (project, task) read, EVERY kind.
+ * This is what lets the bell badge count genuinely-unseen items: a user who
+ * reaches the task from the board (never touching the popover or the inbox)
+ * must not keep its rows unread forever. Deliberately unlike
+ * `markTaskPacketApprovalRead` above, which is a RESOLUTION side-effect:
+ * resolving a decision clears the packet/approval kinds for EVERY user
+ * because the decision itself is gone, while a view proves only that ONE
+ * user has seen — so this touches one user's rows and leaves everyone
+ * else's unread. Same monotonic/idempotent contract, same single
+ * `notification.read` emit only when something actually changed.
+ */
+export function markTaskNotificationsSeen(
+  db: DatabaseSync,
+  userId: string,
+  projectSlug: string,
+  taskKey: string,
+): number {
+  const result = db
+    .prepare(
+      `UPDATE notifications SET read_at = ?
+       WHERE user_id = ? AND project_slug = ? AND task_key = ?
+         AND read_at IS NULL`,
+    )
+    .run(new Date().toISOString(), userId, projectSlug, taskKey);
+  const changes = Number(result.changes);
+  if (changes > 0) emitNotificationRead(userId);
+  return changes;
+}

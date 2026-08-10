@@ -46,3 +46,53 @@ describe("operator profile parity: asset template vs seed catalog (seed #4)", ()
     expect(sortCaps(asset.capabilities)).toEqual(sortCaps(catalog.capabilities));
   });
 });
+
+const operatorDefinitionMd = readFileSync(
+  path.join(import.meta.dirname, "assets/operator.definition.md"),
+  "utf8",
+);
+
+/**
+ * R19-1 (ruling 55) — the operator gets a FULL read-only checkout of the
+ * repository under its cwd and must ground repo claims in it, read via
+ * Read/Grep/Glob. Live origin (F19-4): before the clone, at triage the working
+ * directory held only `task.md`, and with nothing else to look at the operator
+ * described that directory AS the repository — writing `Repo contents visible
+ * to operator: "only task.md — no docs/ or README found"` into a human-facing
+ * packet about a repo that has both, then offering to write a README that
+ * already existed. The persona is read on every turn, so it must name the
+ * checkout as the repository view — NOT the removed `list_repo_files` /
+ * `read_repo_file` MCP tools, which the pass-19 merge dropped (a persona that
+ * calls a nonexistent tool teaches the model a false affordance).
+ */
+describe("R19-1: the persona grounds repo claims in the read-only checkout", () => {
+  it("names a read-only repository checkout read with Read/Grep/Glob", () => {
+    expect(operatorDefinitionMd).toMatch(/read-only checkout of the project repository/i);
+    expect(operatorDefinitionMd).toMatch(/`Read`, `Grep`, and `Glob`/);
+  });
+
+  it("does NOT name the removed repo-view MCP tools", () => {
+    expect(operatorDefinitionMd).not.toContain("list_repo_files");
+    expect(operatorDefinitionMd).not.toContain("read_repo_file");
+  });
+
+  it("grounds every repository claim in the checkout, not the bare task folder", () => {
+    expect(operatorDefinitionMd).toMatch(
+      /Ground EVERY claim about the repository .*in that checkout, never in the bare task folder/i,
+    );
+  });
+
+  it("forbids reporting a file missing when the checkout is unavailable", () => {
+    expect(operatorDefinitionMd).toMatch(
+      /never report a file as missing, or the repository as empty/i,
+    );
+  });
+
+  it("makes the triage gate read the checkout before proposing scope", () => {
+    // The exact failure: options invented without reading the repo.
+    expect(operatorDefinitionMd).toMatch(/READ THE REPOSITORY CHECKOUT FIRST/);
+    expect(operatorDefinitionMd).toMatch(
+      /never offer to add something the repository already has/i,
+    );
+  });
+});

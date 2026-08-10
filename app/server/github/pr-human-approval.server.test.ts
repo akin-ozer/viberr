@@ -1,0 +1,425 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+  type TestStore,
+} from "../../../test-support/test-store";
+import { updateUserFields } from "~/server/auth/user-store.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
+import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
+import {
+  acceptanceRefusalFor,
+  resolveAcceptanceAffordance,
+} from "~/server/tasks/task-actions.server";
+import {
+  derivePrHumanApproval,
+  humanApprovalRefusalNote,
+  humanVerdictApproval,
+  humanVerdictNote,
+  PR_HUMAN_APPROVAL_KEY,
+  readPrHumanApproval,
+  resolveGithubHandle,
+  type PrHumanApproval,
+} from "./pr-human-approval.server";
+
+/**
+ * R19-B (owner ruling, pass 19) — **a project member's GitHub approval on the
+ * PR counts as the approving verdict.**
+ *
+ * Before this, `report-validation-verdict` was agent-only and a human reviewer's
+ * only paths were (a) engage an AI reviewer he did not need or (b) be a project
+ * admin and force-accept — writing a `task.acceptance.forced` row asserting he
+ * bypassed a gate he had actually satisfied. On a project running no
+ * verdict-capable agent, `deriveValidation` can never reach `healthy`, so EVERY
+ * acceptance was permanently audited as bypassing a gate nobody could satisfy.
+ */
+
+let ctx: TestDbContext;
+let store: TestStore;
+
+const DELIVERED = "d3l1ver3dsha0000000000000000000000000000";
+const OLDER = "01d3rsha00000000000000000000000000000000";
+
+function revision(headSha = DELIVERED): WorkRevision {
+  return {
+    id: "rev_1",
+    headSha,
+    treeSha: null,
+    branch: "vib-301-workspace",
+    createdAt: "2026-08-08T08:00:00Z",
+    sourceProfileId: "developer",
+    kind: "delivered",
+  };
+}
+
+function prWith(approval: PrHumanApproval | null): PrRef {
+  return {
+    number: 318,
+    state: "review",
+    title: "Attach execution workspace",
+    ...(approval ? { [PR_HUMAN_APPROVAL_KEY]: approval } : {}),
+  } as PrRef;
+}
+
+/** A delivered task sitting at the review boundary with no agent reviewer
+ *  engaged — the project shape the gap is about. */
+function seedDeliveredTask(pr: PrRef, rev: WorkRevision = revision()): void {
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter("VIB-301", {
+      title: "Attach execution workspace",
+      stage: "review",
+      branch: "vib-301-workspace",
+      ownerUserId: store.users.arda.id,
+      pr,
+      workRevision: rev,
+      engagements: [],
+      verdicts: [],
+    }),
+    goal: "Deliver the workspace attach path.",
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
+beforeEach(() => {
+  ctx = createTestDbContext();
+  store = setupTestStore(ctx);
+});
+afterEach(() => ctx.cleanup());
+
+describe("resolveGithubHandle — mapping a GitHub login to a Viberr user", () => {
+  it("matches case-insensitively and tolerates a leading @", () => {
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "MuratDev" });
+    expect(resolveGithubHandle(store.db, "muratdev")).toEqual({
+      kind: "found",
+      userId: store.users.murat.id,
+      name: store.users.murat.name,
+    });
+    expect(resolveGithubHandle(store.db, "@MURATDEV").kind).toBe("found");
+  });
+
+  it("returns `none` when no account carries the handle", () => {
+    expect(resolveGithubHandle(store.db, "octocat")).toEqual({ kind: "none" });
+  });
+
+  it("returns `ambiguous` rather than guessing when two accounts claim it", () => {
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "shared" });
+    updateUserFields(store.db, store.users.selin.id, { githubHandle: "shared" });
+    expect(resolveGithubHandle(store.db, "shared")).toEqual({ kind: "ambiguous" });
+  });
+});
+
+describe("derivePrHumanApproval — fail closed unless it is confidently a member", () => {
+  const members = () => new Set([store.users.murat.id, store.users.arda.id]);
+
+  it("counts a mapped project member who approved the DELIVERED commit", () => {
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    expect(
+      derivePrHumanApproval({
+        approvals: [{ login: "muratdev", commitSha: DELIVERED, at: "2026-08-08T09:00:00Z" }],
+        deliveredSha: DELIVERED,
+        memberUserIds: members(),
+        db: store.db,
+      }),
+    ).toMatchObject({ status: "counted", userId: store.users.murat.id, login: "muratdev" });
+  });
+
+  it("does NOT count an approval on an older commit (R15-1 revision binding)", () => {
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    expect(
+      derivePrHumanApproval({
+        approvals: [{ login: "muratdev", commitSha: OLDER, at: null }],
+        deliveredSha: DELIVERED,
+        memberUserIds: members(),
+        db: store.db,
+      }),
+    ).toMatchObject({ status: "stale_revision" });
+  });
+
+  it("does NOT count an approval GitHub gave no commit for", () => {
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    expect(
+      derivePrHumanApproval({
+        approvals: [{ login: "muratdev", commitSha: null, at: null }],
+        deliveredSha: DELIVERED,
+        memberUserIds: members(),
+        db: store.db,
+      }),
+    ).toMatchObject({ status: "stale_revision" });
+  });
+
+  it("does NOT count an unlinked handle, an ambiguous one, or a non-member", () => {
+    expect(
+      derivePrHumanApproval({
+        approvals: [{ login: "octocat", commitSha: DELIVERED, at: null }],
+        deliveredSha: DELIVERED,
+        memberUserIds: members(),
+        db: store.db,
+      }),
+    ).toMatchObject({ status: "unlinked_handle", userId: null });
+
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "twin" });
+    updateUserFields(store.db, store.users.selin.id, { githubHandle: "twin" });
+    expect(
+      derivePrHumanApproval({
+        approvals: [{ login: "twin", commitSha: DELIVERED, at: null }],
+        deliveredSha: DELIVERED,
+        memberUserIds: members(),
+        db: store.db,
+      }),
+    ).toMatchObject({ status: "ambiguous_handle" });
+
+    // deniz is a registered user who is NOT a member of this project.
+    updateUserFields(store.db, store.users.deniz.id, { githubHandle: "deniz" });
+    expect(
+      derivePrHumanApproval({
+        approvals: [{ login: "deniz", commitSha: DELIVERED, at: null }],
+        deliveredSha: DELIVERED,
+        memberUserIds: members(),
+        db: store.db,
+      }),
+    ).toMatchObject({ status: "not_a_member", userId: store.users.deniz.id });
+  });
+
+  it("a member's counted approval outranks a stranger's — one cannot mask the other", () => {
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    expect(
+      derivePrHumanApproval({
+        approvals: [
+          { login: "octocat", commitSha: DELIVERED, at: null },
+          { login: "muratdev", commitSha: DELIVERED, at: null },
+        ],
+        deliveredSha: DELIVERED,
+        memberUserIds: members(),
+        db: store.db,
+      }),
+    ).toMatchObject({ status: "counted", login: "muratdev" });
+  });
+
+  it("nothing to record when the PR carries no standing approval", () => {
+    expect(
+      derivePrHumanApproval({
+        approvals: [],
+        deliveredSha: DELIVERED,
+        memberUserIds: members(),
+        db: store.db,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("humanVerdictApproval — the binding is re-checked on every READ", () => {
+  const counted: PrHumanApproval = {
+    login: "muratdev",
+    commitSha: DELIVERED,
+    at: "2026-08-08T09:00:00Z",
+    userId: "u_murat",
+    name: "Murat Test",
+    status: "counted",
+  };
+
+  it("satisfies the gate while it binds to the current revision", () => {
+    expect(
+      humanVerdictApproval({ pr: prWith(counted), workRevision: revision() }),
+    ).toMatchObject({ login: "muratdev" });
+  });
+
+  it("a RE-DELIVERY revokes it instantly, with no GitHub round-trip", () => {
+    // The stored record still says `counted` — what changed is the delivered
+    // revision under it. This is why an unreachable GitHub can never leave a
+    // stale approval standing over new work.
+    expect(
+      humanVerdictApproval({ pr: prWith(counted), workRevision: revision("f5eshsha") }),
+    ).toBeNull();
+  });
+
+  it("a non-counted record never satisfies the gate", () => {
+    expect(
+      humanVerdictApproval({
+        pr: prWith({ ...counted, status: "unlinked_handle", userId: null }),
+        workRevision: revision(),
+      }),
+    ).toBeNull();
+  });
+
+  it("garbage in the file reads as 'no approval', never as a throw", () => {
+    const pr = { number: 1, state: "review", title: "t", humanApproval: "yes" } as PrRef;
+    expect(readPrHumanApproval(pr)).toBeNull();
+    expect(humanVerdictApproval({ pr, workRevision: revision() })).toBeNull();
+  });
+
+  it("names the human and the commit — a satisfied gate is never anonymous", () => {
+    expect(humanVerdictNote(counted)).toContain("Murat Test (@muratdev)");
+    expect(humanVerdictNote(counted)).toContain(DELIVERED.slice(0, 7));
+  });
+});
+
+describe("humanApprovalRefusalNote — fail closed, but never silently", () => {
+  const base: PrHumanApproval = {
+    login: "octocat",
+    commitSha: DELIVERED,
+    at: null,
+    userId: null,
+    name: null,
+    status: "unlinked_handle",
+  };
+
+  it("says an unlinked handle is the problem, and how to fix it", () => {
+    const note = humanApprovalRefusalNote({
+      pr: prWith(base),
+      workRevision: revision(),
+    });
+    expect(note).toContain("@octocat");
+    expect(note).toContain("no Viberr account carries that GitHub handle");
+  });
+
+  it("says a non-member approved it", () => {
+    const note = humanApprovalRefusalNote({
+      pr: prWith({ ...base, status: "not_a_member", userId: "u_deniz", name: "Deniz Test" }),
+      workRevision: revision(),
+    });
+    expect(note).toContain("Deniz Test (@octocat)");
+    expect(note).toContain("not a member of this project");
+  });
+
+  it("says WHICH commit was approved when it is not the delivered one", () => {
+    const note = humanApprovalRefusalNote({
+      pr: prWith({ ...base, commitSha: OLDER, status: "stale_revision" }),
+      workRevision: revision(),
+    });
+    expect(note).toContain(OLDER.slice(0, 7));
+    expect(note).toContain("not the delivered revision");
+  });
+
+  it("explains a previously-counted approval that the delivered revision moved past", () => {
+    const note = humanApprovalRefusalNote({
+      pr: prWith({ ...base, status: "counted", userId: "u_murat", name: "Murat Test" }),
+      workRevision: revision("f5eshsha"),
+    });
+    expect(note).toContain("no longer the delivered revision");
+  });
+
+  it("has nothing to say when there is no approval at all", () => {
+    expect(
+      humanApprovalRefusalNote({ pr: prWith(null), workRevision: revision() }),
+    ).toBeNull();
+  });
+});
+
+/**
+ * The gate itself. This is the case gap [24] measured: a delivered task, a real
+ * pull request, NO verdict-capable agent engaged — `deriveValidation` returns
+ * `changed` forever and acceptance was reachable only through an admin
+ * force-accept.
+ */
+describe("R19-B — the acceptance verdict gate accepts a member's GitHub approval", () => {
+  const refusal = () =>
+    acceptanceRefusalFor(
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      { dataRoot: store.dataRoot },
+    );
+
+  it("blocks with the ordinary sentence when nobody approved", () => {
+    seedDeliveredTask(prWith(null));
+    expect(refusal()).toContain("has no approving verdict yet");
+    // The sentence now names the human path too, because there IS one.
+    expect(refusal()).toContain("approve the pull request on GitHub");
+  });
+
+  it("UNBLOCKS once a project member approved the delivered revision", () => {
+    seedDeliveredTask(
+      prWith({
+        login: "muratdev",
+        commitSha: DELIVERED,
+        at: "2026-08-08T09:00:00Z",
+        userId: store.users.murat.id,
+        name: store.users.murat.name,
+        status: "counted",
+      }),
+    );
+    expect(refusal()).toBeNull();
+  });
+
+  it("names the approver on the acceptance surface instead of going green in silence", () => {
+    seedDeliveredTask(
+      prWith({
+        login: "muratdev",
+        commitSha: DELIVERED,
+        at: "2026-08-08T09:00:00Z",
+        userId: store.users.murat.id,
+        name: store.users.murat.name,
+        status: "counted",
+      }),
+    );
+    const affordance = resolveAcceptanceAffordance(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-301",
+        viewerUserId: store.users.arda.id,
+      },
+      { dataRoot: store.dataRoot },
+    );
+    expect(affordance.canAccept).toBe(true);
+    expect(affordance.verdictSatisfiedBy).toContain("Approved on GitHub by");
+    expect(affordance.verdictSatisfiedBy).toContain(store.users.murat.name);
+  });
+
+  it("STAYS BLOCKED on an approval of an older commit, and says which one", () => {
+    seedDeliveredTask(
+      prWith({
+        login: "muratdev",
+        commitSha: OLDER,
+        at: null,
+        userId: store.users.murat.id,
+        name: store.users.murat.name,
+        status: "stale_revision",
+      }),
+    );
+    const reason = refusal();
+    expect(reason).toContain("has no approving verdict yet");
+    expect(reason).toContain(OLDER.slice(0, 7));
+  });
+
+  it("STAYS BLOCKED for an unmappable approver, and says why on the surface", () => {
+    seedDeliveredTask(
+      prWith({
+        login: "octocat",
+        commitSha: DELIVERED,
+        at: null,
+        userId: null,
+        name: null,
+        status: "unlinked_handle",
+      }),
+    );
+    const affordance = resolveAcceptanceAffordance(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-301",
+        viewerUserId: store.users.arda.id,
+      },
+      { dataRoot: store.dataRoot },
+    );
+    expect(affordance.canAccept).toBe(false);
+    expect(affordance.verdictSatisfiedBy).toBeNull();
+    expect(affordance.blockedReason).toContain(
+      "no Viberr account carries that GitHub handle",
+    );
+  });
+
+  it("re-blocks the moment new work is delivered under a counted approval", () => {
+    const counted: PrHumanApproval = {
+      login: "muratdev",
+      commitSha: DELIVERED,
+      at: null,
+      userId: store.users.murat.id,
+      name: store.users.murat.name,
+      status: "counted",
+    };
+    seedDeliveredTask(prWith(counted));
+    expect(refusal()).toBeNull();
+    // Same stored approval, a NEW delivered revision.
+    seedDeliveredTask(prWith(counted), revision("aa11bb22cc33dd44ee55ff6677889900aabbccdd"));
+    expect(refusal()).toContain("no longer the delivered revision");
+  });
+});

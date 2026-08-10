@@ -1,0 +1,322 @@
+import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTestDbContext } from "../../../test-support/test-db";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+  type TestStore,
+} from "../../../test-support/test-store";
+import { taskDir } from "~/server/files/file-store-root.server";
+import { logger } from "~/server/logging/logger.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
+import type { DiskSpace } from "./disk-space.server";
+
+/**
+ * Gaps 15 + 20 + 16 — retention existed but ran ONCE, at boot, which coupled
+ * the whole policy to the restart a stable deployment never performs
+ * (`compose.yml`: `restart: unless-stopped`). These pin the periodic pass, the
+ * one guard that makes a mid-flight workspace reclaim safe, and the free-space
+ * watch that acts instead of only reporting.
+ */
+
+/** Fake free space for the disk-pressure tests; undefined = measure for real. */
+let fakeDisk: DiskSpace | null | undefined;
+
+vi.mock("./disk-space.server", async () => {
+  const actual =
+    await vi.importActual<typeof import("./disk-space.server")>(
+      "./disk-space.server",
+    );
+  return {
+    ...actual,
+    measureDataRootSpace: (dataRoot?: string) =>
+      fakeDisk === undefined ? actual.measureDataRootSpace(dataRoot) : fakeDisk,
+  };
+});
+
+const {
+  activeRunCount,
+  checkDiskPressure,
+  DEFAULT_MAINTENANCE_INTERVAL_MS,
+  maintenanceState,
+  resetMaintenanceStateForTests,
+  runMaintenancePass,
+  startMaintenanceScheduler,
+  stopMaintenanceScheduler,
+} = await import("./maintenance.server");
+
+const ctx = createTestDbContext();
+
+afterEach(() => {
+  resetMaintenanceStateForTests();
+  fakeDisk = undefined;
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  ctx.cleanup();
+});
+
+const DAY = 86_400_000;
+
+function iso(daysAgo: number): string {
+  return new Date(Date.now() - daysAgo * DAY).toISOString();
+}
+
+function insertRun(
+  store: TestStore,
+  id: string,
+  state: "queued" | "running" | "finished",
+): void {
+  store.db
+    .prepare(
+      `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
+         backend, model, sdk, state, turns, input_tokens,
+         cached_input_tokens, output_tokens, created_at, updated_at, agent_profile_id)
+       VALUES (?, 'VIB-1', ?, 't', 'r', 'primary', 'claude', 'm', 's', ?,
+         0, 0, 0, 0, ?, ?, 'developer')`,
+    )
+    .run(id, store.slug, state, iso(0), iso(0));
+}
+
+function seedWorkspace(store: TestStore, key: string): string {
+  const root = path.join(taskDir(store.slug, key, store.dataRoot), "workspace");
+  const repo = path.join(root, "viberr");
+  mkdirSync(repo, { recursive: true });
+  writeFileSync(path.join(repo, "chunk.bin"), "x".repeat(4096));
+  return root;
+}
+
+function agedTranscript(store: TestStore, name: string, daysAgo: number): string {
+  const file = path.join(store.dataRoot, "runtimes", "claude", name);
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, '{"line":1}\n'.repeat(20));
+  const when = new Date(Date.now() - daysAgo * DAY);
+  utimesSync(file, when, when);
+  return file;
+}
+
+function storeWithTerminalTask(): TestStore {
+  const store = setupTestStore(ctx);
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter("VIB-1", { stage: "done" }),
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  return store;
+}
+
+describe("runMaintenancePass (gaps 15 + 20)", () => {
+  it("prunes SQLite rows AND on-disk transcripts AND workspaces in one pass", () => {
+    const store = storeWithTerminalTask();
+    const workspace = seedWorkspace(store, "VIB-1");
+    const oldTranscript = agedTranscript(store, "run_old.jsonl", 40);
+    const freshTranscript = agedTranscript(store, "run_new.jsonl", 1);
+    insertRun(store, "run_old", "finished");
+    store.db
+      .prepare(
+        `INSERT INTO run_log_lines (run_id, seq, occurred_at, raw_json, display_json, created_at)
+         VALUES ('run_old', 1, ?, '{}', '{}', ?)`,
+      )
+      .run(iso(40), iso(40));
+
+    const result = runMaintenancePass(store.db, {
+      reason: "interval",
+      dataRoot: store.dataRoot,
+    });
+
+    expect(result.retention.runLogLines).toBe(1);
+    expect(result.transcripts.transcripts).toBe(1);
+    expect(result.workspaces?.removed).toBe(1);
+    expect(result.freedBytes).toBeGreaterThan(0);
+    expect(existsSync(oldTranscript)).toBe(false);
+    expect(existsSync(freshTranscript)).toBe(true);
+    expect(existsSync(workspace)).toBe(false);
+  });
+
+  it("SKIPS the workspace reclaim while any run is queued or running (P14-RT-09)", () => {
+    const store = storeWithTerminalTask();
+    const workspace = seedWorkspace(store, "VIB-1");
+    insertRun(store, "run_live", "running");
+
+    expect(activeRunCount(store.db)).toBe(1);
+    const result = runMaintenancePass(store.db, {
+      reason: "interval",
+      dataRoot: store.dataRoot,
+    });
+
+    expect(result.workspaces).toBeNull();
+    expect(result.workspacesSkipped).toBe("active-runs");
+    // Boot can reclaim unguarded because it runs after recovery settles; a
+    // timer has no such moment, and rm -rf'ing a live working tree kills a run.
+    expect(existsSync(workspace)).toBe(true);
+
+    // …and the retention half still ran — it is age-windowed, so it is safe
+    // mid-flight and must not be held hostage by a busy instance.
+    expect(result.retention).toBeDefined();
+  });
+
+  it("reclaims once the runs are terminal", () => {
+    const store = storeWithTerminalTask();
+    const workspace = seedWorkspace(store, "VIB-1");
+    insertRun(store, "run_done", "finished");
+    const result = runMaintenancePass(store.db, {
+      reason: "interval",
+      dataRoot: store.dataRoot,
+    });
+    expect(result.workspacesSkipped).toBeNull();
+    expect(existsSync(workspace)).toBe(false);
+  });
+
+  it("boot's pass leaves workspaces to reconcileRestartedWork", () => {
+    const store = storeWithTerminalTask();
+    const workspace = seedWorkspace(store, "VIB-1");
+    const result = runMaintenancePass(store.db, {
+      reason: "boot",
+      reclaimWorkspaces: false,
+      dataRoot: store.dataRoot,
+    });
+    expect(result.workspacesSkipped).toBe("not-requested");
+    expect(existsSync(workspace)).toBe(true);
+  });
+
+  it("logs every pass with what it removed — including a pass that removed nothing", () => {
+    const store = storeWithTerminalTask();
+    const info = vi.spyOn(logger, "info");
+    runMaintenancePass(store.db, {
+      reason: "interval",
+      dataRoot: store.dataRoot,
+    });
+    const line = info.mock.calls.find(([msg]) => msg === "store maintenance pass");
+    expect(line).toBeDefined();
+    expect(line![1]).toMatchObject({
+      reason: "interval",
+      runLogLines: 0,
+      transcripts: 0,
+      workspaces: 0,
+    });
+  });
+
+  it("records the pass so the health endpoint can prove the pruner is alive", () => {
+    const store = storeWithTerminalTask();
+    expect(maintenanceState().lastPassAt).toBeNull();
+    runMaintenancePass(store.db, {
+      reason: "interval",
+      dataRoot: store.dataRoot,
+    });
+    const state = maintenanceState();
+    expect(state.lastPassAt).not.toBeNull();
+    expect(state.lastPassReason).toBe("interval");
+    expect(state.intervalMs).toBe(DEFAULT_MAINTENANCE_INTERVAL_MS);
+  });
+});
+
+describe("startMaintenanceScheduler (gap 15)", () => {
+  it("runs a pass on every interval tick — the long-lived deployment case", () => {
+    vi.useFakeTimers();
+    const store = storeWithTerminalTask();
+    const workspace = seedWorkspace(store, "VIB-1");
+    agedTranscript(store, "run_old.jsonl", 40);
+
+    startMaintenanceScheduler(store.db, {
+      intervalMs: 1_000,
+      diskCheckIntervalMs: 60_000,
+      dataRoot: store.dataRoot,
+    });
+    expect(maintenanceState().scheduled).toBe(true);
+    expect(maintenanceState().lastPassAt).toBeNull(); // no immediate pass
+
+    vi.advanceTimersByTime(1_000);
+
+    expect(maintenanceState().lastPassAt).not.toBeNull();
+    expect(maintenanceState().lastPassReason).toBe("interval");
+    // The process never restarted, and the disk was still reclaimed.
+    expect(existsSync(workspace)).toBe(false);
+  });
+
+  it("is idempotent, unref'd, and stoppable", () => {
+    vi.useFakeTimers();
+    const store = storeWithTerminalTask();
+    startMaintenanceScheduler(store.db, { intervalMs: 1_000 });
+    startMaintenanceScheduler(store.db, { intervalMs: 1_000 });
+    stopMaintenanceScheduler();
+    vi.advanceTimersByTime(10_000);
+    expect(maintenanceState().lastPassAt).toBeNull();
+    expect(maintenanceState().scheduled).toBe(false);
+  });
+});
+
+describe("checkDiskPressure (gap 16)", () => {
+  const space = (freeBytes: number): DiskSpace => ({
+    freeBytes,
+    totalBytes: 100 * 1024 * 1024 * 1024,
+    usedPercent: 99,
+    status:
+      freeBytes < 512 * 1024 * 1024
+        ? "critical"
+        : freeBytes < 2 * 1024 * 1024 * 1024
+          ? "low"
+          : "ok",
+    lowThresholdBytes: 2 * 1024 * 1024 * 1024,
+    criticalThresholdBytes: 512 * 1024 * 1024,
+  });
+
+  it("warns on the transition into low space and reclaims immediately", () => {
+    const store = storeWithTerminalTask();
+    const workspace = seedWorkspace(store, "VIB-1");
+    const warn = vi.spyOn(logger, "warn");
+    fakeDisk = space(1024 * 1024 * 1024); // 1 GiB free → low
+
+    const observed = checkDiskPressure(store.db, store.dataRoot);
+
+    expect(observed?.status).toBe("low");
+    expect(warn).toHaveBeenCalledWith(
+      "data root is low on free space",
+      expect.objectContaining({ free: "1 GB" }),
+    );
+    // Acting, not just reporting: the pass that frees the 11-16 MB clones runs
+    // now rather than at the next 6-hour tick.
+    expect(maintenanceState().lastPassReason).toBe("disk-pressure");
+    expect(existsSync(workspace)).toBe(false);
+  });
+
+  it("escalates a critical volume to error level", () => {
+    const store = storeWithTerminalTask();
+    const error = vi.spyOn(logger, "error");
+    fakeDisk = space(64 * 1024 * 1024);
+    expect(checkDiskPressure(store.db, store.dataRoot)?.status).toBe("critical");
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("critically low on free space"),
+      expect.objectContaining({ free: "64 MB" }),
+    );
+  });
+
+  it("logs the TRANSITION only — not every sample", () => {
+    const store = storeWithTerminalTask();
+    fakeDisk = space(1024 * 1024 * 1024);
+    checkDiskPressure(store.db, store.dataRoot);
+    const warn = vi.spyOn(logger, "warn");
+    checkDiskPressure(store.db, store.dataRoot);
+    checkDiskPressure(store.db, store.dataRoot);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("stays silent, and triggers nothing, when there is room", () => {
+    const store = storeWithTerminalTask();
+    const workspace = seedWorkspace(store, "VIB-1");
+    const warn = vi.spyOn(logger, "warn");
+    fakeDisk = space(50 * 1024 * 1024 * 1024);
+    expect(checkDiskPressure(store.db, store.dataRoot)?.status).toBe("ok");
+    expect(warn).not.toHaveBeenCalled();
+    expect(maintenanceState().lastPassAt).toBeNull();
+    expect(existsSync(workspace)).toBe(true);
+  });
+
+  it("reports nothing when the volume cannot be measured (never a false alarm)", () => {
+    const store = storeWithTerminalTask();
+    const error = vi.spyOn(logger, "error");
+    fakeDisk = null;
+    expect(checkDiskPressure(store.db, store.dataRoot)).toBeNull();
+    expect(error).not.toHaveBeenCalled();
+    expect(maintenanceState().lastPassAt).toBeNull();
+  });
+});

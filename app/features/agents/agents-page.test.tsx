@@ -24,8 +24,20 @@ import {
   type BackendHealthMap,
 } from "./agents-page";
 import { ToastProvider } from "~/ui/toast";
+import { capabilityById } from "~/shared/capabilities";
 
 afterEach(cleanup);
+
+/**
+ * F19-12 — the capability LABEL is rendered copy (capability matrix, profile
+ * detail panel, policy page); the capability ID is a persisted key and stays
+ * `assign-primary-specialist` deliberately. Read the label from the REAL
+ * catalog so this fixture can never drift from what the app renders, and pin
+ * the string itself inside the matrix test below: reverting
+ * `app/shared/capabilities.ts` to the retired "Assign the primary specialist"
+ * turns that assertion red.
+ */
+const ASSIGN_DELIVERER_LABEL = capabilityById("assign-primary-specialist")!.label;
 
 /** Curated-ish catalogs the stub's /resources/model-catalog loader returns. */
 const CLAUDE_CATALOG: ModelCatalog = {
@@ -626,7 +638,7 @@ describe("CapabilityMatrixModal", () => {
         name: "Operator",
         icon: "shield",
         actions: {
-          direct: ["Assign the primary specialist"],
+          direct: [ASSIGN_DELIVERER_LABEL],
           recommend: [],
           forbidden: ["Change project policy"],
         },
@@ -653,7 +665,11 @@ describe("CapabilityMatrixModal", () => {
     // Off-catalog actions (operator coordination + the pruned advisory review
     // caps a seed profile still carries) land in "Other actions".
     expect(getByText("Other actions")).toBeTruthy();
-    expect(getByText("Assign the primary specialist")).toBeTruthy();
+    // F19-12: the exact rendered label, pinned against the shipped vocabulary
+    // ("Assign delivering agent" / "Delivering agent" in execution-profile.tsx).
+    expect(ASSIGN_DELIVERER_LABEL).toBe("Assign the delivering agent");
+    expect(getByText(ASSIGN_DELIVERER_LABEL)).toBeTruthy();
+    expect(container.textContent).not.toMatch(/primary specialist/i);
     // Cell modes render as mx-cell classes with accessible titles.
     expect(container.querySelectorAll(".mx-cell.human").length).toBeGreaterThan(0);
     expect(container.querySelectorAll(".mx-cell.off").length).toBeGreaterThan(0);
@@ -683,6 +699,38 @@ describe("CapabilityMatrixModal", () => {
     const codes = [...container.querySelectorAll("code")].map((c) => c.textContent);
     expect(codes).toContain("mcp__everything-http__get-annotated-message");
     expect(codes).toContain("mcp__everything_http__get_annotated_message");
+  });
+
+  /**
+   * F19-16 / ruling 51 (R18-5) — the Claude-native vs Codex-injected skills
+   * asymmetry is canon *because it is disclosed*: "Codex keeps prompt-text
+   * injection — the asymmetry is disclosed, not silent". It was disclosed in
+   * code comments and in this ledger only; the runtime-differences section this
+   * modal ships for exactly that purpose never named it, so an admin granting a
+   * long skill could learn about the Codex clipping only by comparing two runs.
+   */
+  it("discloses that granted skills are SDK-native on Claude and prompt-injected on Codex", () => {
+    const { getByText, container } = render(
+      <CapabilityMatrixModal
+        profiles={[mkProfile({})]}
+        projectName="Viberr Core"
+        onClose={() => {}}
+      />,
+    );
+    expect(getByText("Granted skills arrive differently.")).toBeTruthy();
+    const notes = container.querySelector(".mx-notes")!.textContent!;
+    // The Claude leg: installed for the SDK, loaded on invoke, uncapped.
+    expect(notes).toContain("loads the full");
+    expect(notes).toContain("no length cap");
+    // The Codex leg named as prompt text, with the real shared budget
+    // (SKILL_INJECTION_BUDGET = 24_000) and the clipping consequence.
+    expect(notes).toContain("pasted into the prompt");
+    expect(notes).toContain("24,000-character budget");
+    expect(notes).toContain("clipped");
+    // And the honest exception: a Claude run that can't mount them (no
+    // checkout, or another live run holding the workspace catalog) gets the
+    // Codex treatment — so the Claude leg is not read as a guarantee.
+    expect(notes).toContain("falls back to the same prompt text");
   });
 });
 
@@ -894,6 +942,274 @@ describe("CreateProfileModal", () => {
     const checked = radios.filter((r) => r.getAttribute("aria-checked") === "true");
     expect(checked).toHaveLength(1);
     expect(checked[0]!.className).toContain("on");
+  });
+
+  /**
+   * F19-5 — the context-resource chips (skills / MCP servers / KBs) are the one
+   * chip group in this file that never reported its pressed state: the grant
+   * lived in the `on` class and a check glyph, so a screen reader announced a
+   * granted KB exactly like an ungranted one. Backend (:243), autonomy (:304)
+   * and stage (:430) chips have carried `aria-pressed` since G5/UXA-4.
+   */
+  it("resource grant chips report their granted state (aria-pressed), missing grants included", () => {
+    const { container, getByText } = renderModal({
+      initial: mkProfile({
+        resources: { skills: ["repo-write"], mcps: [], kb: ["retired-kb"] },
+      }),
+      resourceCatalog: [
+        {
+          group: "Skills",
+          key: "skills",
+          mono: true,
+          items: [
+            { id: "repo-write", def: false },
+            { id: "release-notes", def: false },
+          ],
+        },
+        { group: "MCP servers", key: "mcps", mono: true, items: [] },
+        // `retired-kb` is granted but no longer in the store → a dangling chip.
+        { group: "Knowledge bases", key: "kb", mono: false, items: [] },
+      ],
+    });
+
+    // The first resource group ("Skills") is expanded on mount.
+    const chips = [...container.querySelectorAll(".cap-mbody .pick-chip")];
+    const chipFor = (id: string) =>
+      chips.find((c) => c.textContent === id) as HTMLButtonElement;
+    // The granted skill reports pressed; the ungranted one reports the
+    // attribute with "false" — present, not absent, so the toggle is readable.
+    expect(chipFor("repo-write").getAttribute("aria-pressed")).toBe("true");
+    expect(chipFor("release-notes").getAttribute("aria-pressed")).toBe("false");
+    expect(chipFor("repo-write").className).toContain("on");
+
+    // A dangling grant IS a grant (clicking it removes one) — it reports pressed.
+    fireEvent.click(getByText("Knowledge bases"));
+    const ghost = container.querySelector(
+      ".pick-chip.missing",
+    ) as HTMLButtonElement;
+    expect(ghost.textContent).toBe("retired-kb");
+    expect(ghost.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /**
+   * F19-35 — the collapsible group headers (`cap-mghead`) carried expanded vs
+   * collapsed in the `open` CSS class alone: the chevron rotates and a screen
+   * reader learns nothing. Both matrices use the same header, so both are
+   * pinned here.
+   */
+  it("capability + resource group headers report expanded/collapsed (aria-expanded)", () => {
+    const { container, getByText } = renderModal({
+      initial: null,
+      resourceCatalog: [
+        {
+          group: "Skills",
+          key: "skills",
+          mono: true,
+          items: [{ id: "repo-write", def: false }],
+        },
+      ],
+    });
+    const heads = () => [...container.querySelectorAll(".cap-mghead")];
+    expect(heads().length).toBeGreaterThan(2);
+    // Every header reports its state — none may be missing the attribute, and
+    // it always agrees with the `open` class the CSS used to carry alone.
+    const agrees = () =>
+      heads().every(
+        (h) =>
+          h.getAttribute("aria-expanded") ===
+          String(h.classList.contains("open")),
+      );
+    expect(agrees()).toBe(true);
+    // Mount state: the first capability group and the first resource group are
+    // the expanded ones, so both values are actually exercised.
+    expect(
+      heads().map((h) => h.getAttribute("aria-expanded")),
+    ).toContain("true");
+    expect(
+      heads().map((h) => h.getAttribute("aria-expanded")),
+    ).toContain("false");
+
+    // A collapsed capability group flips to expanded on click.
+    const collapsed = heads().find(
+      (h) => h.getAttribute("aria-expanded") === "false",
+    ) as HTMLButtonElement;
+    const label = collapsed.querySelector(".cap-mglabel")!.textContent!;
+    fireEvent.click(collapsed);
+    const reFind = () =>
+      heads().find(
+        (h) => h.querySelector(".cap-mglabel")!.textContent === label,
+      )!;
+    expect(reFind().getAttribute("aria-expanded")).toBe("true");
+    expect(agrees()).toBe(true);
+
+    // The resource-group header is the same control and collapses the same way.
+    const resHead = () =>
+      getByText("Skills").closest(".cap-mghead") as HTMLButtonElement;
+    expect(resHead().getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(resHead());
+    expect(resHead().getAttribute("aria-expanded")).toBe("false");
+    expect(agrees()).toBe(true);
+  });
+
+  /**
+   * F19 UX-13 — a control that accepts input and discards it.
+   *
+   * `agent-profile-actions.server.ts` coerces every id in
+   * `ALWAYS_HUMAN_CAPABILITY_IDS` to `human` "whatever the submitted form says"
+   * (:185 edit, :239 create). The picker offered Allowed/Human-only/Off on those
+   * three rows anyway: an admin set "Merge a pull request" to Allowed, got a
+   * success toast, reopened the profile and found Human-only again. The Policy
+   * page draws the same class of invariant with the locked variant of this exact
+   * control (`.cap-seg.locked`, policy-page.tsx:471); the modal never applied it.
+   */
+  it("UX-13 — the always-human rows render locked, and the invariant is stated", () => {
+    const { container, getByText } = renderModal({ initial: null });
+    // The always-human group is the LAST accordion and starts collapsed.
+    fireEvent.click(getByText("Reserved for humans"));
+    const seg = container.querySelector(
+      '[aria-label^="Policy for Merge a pull request"]',
+    ) as HTMLElement;
+    expect(seg).toBeTruthy();
+    expect(seg.className).toContain("locked");
+    const radios = [...seg.querySelectorAll("button")];
+    expect(radios.map((b) => b.disabled)).toEqual([true, true, true]);
+    // The lock is named, not left to the group heading + a greyed control.
+    expect(
+      getByText(/They stay reserved for humans on every profile/),
+    ).toBeTruthy();
+    // And "Allowed" no longer takes a click whose result the server discards:
+    // the row stays Human-only, which is what a save would store.
+    fireEvent.click(seg.querySelector("button.direct")!);
+    expect(
+      seg.querySelector("button.human")!.getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  /**
+   * F19 UX-13, second half — `report-validation-verdict` is an explicit-`direct`
+   * -or-nothing grant: `agent-profile-actions.server.ts:180` (create path :249)
+   * persists `direct` iff the form said `direct` and `off` for every other
+   * value. Offering "Human-only" therefore stored a mode in a DIFFERENT bucket
+   * than the admin picked (`capabilitiesToActionLabels` counts `human`
+   * separately from `off`), with no notice anywhere.
+   */
+  it("UX-13 — the verdict row offers only the modes the save layer can store", () => {
+    const { container, getByText } = renderModal({
+      initial: mkProfile({
+        capabilities: [
+          // A stored `human` the save layer rewrites to `off` on the next save.
+          { capabilityId: "report-validation-verdict", mode: "human" },
+        ],
+      }),
+    });
+    fireEvent.click(getByText("Collaboration"));
+    const seg = container.querySelector(
+      '[aria-label="Policy for Report a validation verdict"]',
+    ) as HTMLElement;
+    expect(seg).toBeTruthy();
+    expect([...seg.querySelectorAll("button")].map((b) => b.textContent)).toEqual(
+      ["Allowed", "Off"],
+    );
+    // Seeded to what the next save actually stores, not to the discarded mode.
+    expect(seg.querySelector("button.off")!.getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    // Its siblings keep all three specialist modes — this is a per-row rule.
+    const sibling = container.querySelector(
+      '[aria-label="Policy for Ask the human a question"]',
+    ) as HTMLElement;
+    expect([...sibling.querySelectorAll("button")].map((b) => b.textContent)).toEqual(
+      ["Allowed", "Human-only", "Off"],
+    );
+  });
+
+  /**
+   * F19 UX-19 — UXA-4 gave this control the radiogroup ROLE and stopped there.
+   * A radiogroup promises arrow-key traversal (`app/ui/roving-radio.ts`), which
+   * UXA-7 wired into the twin on the Policy sheet (policy-page.tsx:158/:474) and
+   * never into this one: ←/→ did nothing, and every radio was its own tab stop
+   * (15 instead of 5 for an expanded Collaboration group).
+   */
+  it("UX-19 — the capability radiogroup traverses with arrow keys on one tab stop", () => {
+    const { container } = renderModal({ initial: null });
+    const seg = container.querySelector(
+      '.cap-seg[role="radiogroup"]',
+    ) as HTMLElement;
+    const radios = [...seg.querySelectorAll<HTMLElement>('[role="radio"]')];
+    expect(radios).toHaveLength(3);
+    // Roving tabindex: the checked option is the group's single tab stop.
+    expect(radios.map((r) => r.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
+    radios[0]!.focus();
+    fireEvent.keyDown(seg, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(radios[1]);
+    fireEvent.keyDown(seg, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(radios[0]);
+    // The ends wrap, like every other adopter of the shared helper.
+    fireEvent.keyDown(seg, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(radios[2]);
+  });
+
+  /**
+   * F19 UX-21 — the two `cap-mghead` accordions were the only custom-button
+   * disclosures in the app that never reported their state: it lived in the
+   * chevron's CSS rotation alone. Every group after the first starts COLLAPSED,
+   * so reaching any capability outside "Repository & execution" means operating
+   * a control whose state a screen reader cannot read.
+   */
+  it("UX-21 — both accordions report expanded/collapsed state", () => {
+    const { container } = renderModal({
+      initial: null,
+      resourceCatalog: [
+        { group: "Skills", key: "skills", mono: true, items: [{ id: "repo-write", def: false }] },
+        { group: "MCP servers", key: "mcps", mono: true, items: [] },
+      ],
+    });
+    const heads = () => [...container.querySelectorAll(".cap-mghead")];
+    // Capability groups + resource groups — every one of them reports.
+    expect(heads().length).toBeGreaterThan(3);
+    expect(heads().every((h) => h.hasAttribute("aria-expanded"))).toBe(true);
+    // The first group of each section is open and points at its own body.
+    const first = heads()[0]!;
+    expect(first.getAttribute("aria-expanded")).toBe("true");
+    const body = container.querySelector(".cap-mbody")!;
+    expect(body.id).not.toBe("");
+    expect(first.getAttribute("aria-controls")).toBe(body.id);
+    // A collapsed header has no body to point at, and never a dangling id.
+    const collapsedIdx = heads().findIndex(
+      (h) => h.getAttribute("aria-expanded") === "false",
+    );
+    expect(collapsedIdx).toBeGreaterThan(0);
+    expect(heads()[collapsedIdx]!.getAttribute("aria-controls")).toBeNull();
+    fireEvent.click(heads()[collapsedIdx]!);
+    expect(heads()[collapsedIdx]!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  /**
+   * F19 UX-23 — the collapsed summary printed bare digits ("3 2 1") whose only
+   * key was the dot colour, while the identical strip on the Policy page names
+   * every mode (policy-page.tsx:309-322). Zero counts render nothing, so
+   * position did not disambiguate either. The words now come from the SAME mode
+   * list the expanded segment uses for this profile kind, so one vocabulary
+   * covers both views.
+   */
+  it("UX-23 — the collapsed capability summary names each mode, not just its dot", () => {
+    const { container } = renderModal({ initial: null });
+    const head = [...container.querySelectorAll(".cap-mghead")].find((h) =>
+      h.textContent!.startsWith("Reserved for humans"),
+    )!;
+    // All three always-human caps seed `human` — and the count says so, using
+    // the specialist segment's own word for that mode.
+    expect(head.textContent).toContain("3 Human-only");
+    // No count anywhere in the modal is a bare digit.
+    const counts = [...container.querySelectorAll(".cap-msum .cs")];
+    expect(counts.length).toBeGreaterThan(1);
+    counts.forEach((c) =>
+      expect(c.textContent!.trim()).toMatch(/^\d+ [A-Za-z]/),
+    );
+    // The withheld swatch matches the capability matrix legend's "Not granted"
+    // dot (`.d.off`); the modal used to draw a `.d.none` grey no legend shows.
+    expect(container.querySelector(".cap-msum .d.none")).toBeNull();
+    expect(container.querySelector(".cap-msum .d.off")).not.toBeNull();
   });
 });
 
@@ -1269,5 +1585,62 @@ describe("UXA-15: the Agents page explains its read-only state", () => {
   it("an admin sees no read-only note", () => {
     const { container } = renderAs("admin");
     expect(container.textContent).not.toContain("Read-only —");
+  });
+});
+
+/**
+ * UX19-11 — the delete-profile confirm is the last guardrail before an
+ * irreversible policy change, and it stated the opposite of the ruling that
+ * decides the outcome. "Those threads keep running until the operator reassigns
+ * them" promised continuity twice over: ruling 26 (R15-7) makes every
+ * subsequent run of an unresolvable profile fully conservative — no delivery,
+ * no comments, no ask-human, no evidence — and `deleteAgentProfile` queues no
+ * operator run, writes no task timeline event and sends no notification, so
+ * nothing initiates the reassignment the sentence names.
+ */
+describe("UX19-11: the delete-profile confirm states R15-7's real outcome", () => {
+  const renderConfirm = (insts: AgentDeploymentView[]) => {
+    const utils = render(
+      <ProfileDetail
+        a={mkProfile({})}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={insts}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    fireEvent.click(utils.getByText("Delete"));
+    return utils.container.querySelector('[role="alertdialog"]')!;
+  };
+
+  it("does not promise that engaged threads keep running, or that the operator reassigns them", () => {
+    const dialog = renderConfirm([mkDeployment({})]);
+    // Canary: restore the old sentence and both of these fail.
+    expect(dialog.textContent).not.toContain("keep running");
+    expect(dialog.textContent).not.toContain("until the operator reassigns");
+  });
+
+  it("names what ruling 26 actually withholds, and whose job the recovery is", () => {
+    const dialog = renderConfirm([
+      mkDeployment({}),
+      mkDeployment({ taskKey: "VIB-151" }),
+    ]);
+    expect(dialog.textContent).toContain("2 active tasks");
+    expect(dialog.textContent).toContain("stay on the tasks");
+    expect(dialog.textContent).toContain(
+      "can't deliver, comment, ask a question or attach evidence",
+    );
+    // The human's next step, named — the copy used to hand it to the operator.
+    expect(dialog.textContent).toContain("assigns a replacement");
+  });
+
+  it("an unengaged profile still gets the short, true sentence", () => {
+    const dialog = renderConfirm([]);
+    expect(dialog.textContent).toContain("The global base definition is unaffected.");
+    expect(dialog.textContent).not.toContain("stay on the tasks");
   });
 });

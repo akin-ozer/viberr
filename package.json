@@ -1,5 +1,6 @@
 {
   "name": "viberr",
+  "version": "0.19.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -14,7 +15,11 @@
     "e2e": "tsx scripts/e2e.ts",
     "seed": "tsx scripts/seed.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
-    "rescan": "tsx scripts/rescan.ts"
+    "rescan": "tsx scripts/rescan.ts",
+    "store:check": "tsx scripts/store-check.ts",
+    "backup": "tsx scripts/backup.ts",
+    "restore": "tsx scripts/restore.ts",
+    "keys": "tsx scripts/secret-keys.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",

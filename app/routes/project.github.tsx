@@ -6,8 +6,12 @@ import {
   requireFormAction,
 } from "~/server/auth/form-action.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
-import { assertProjectAction } from "~/server/auth/project-authority.server";
+import {
+  assertProjectAction,
+  isOrgAdmin,
+} from "~/server/auth/project-authority.server";
 import { requireVisibleProject } from "./project-visibility.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { getDb } from "~/server/db/sqlite.server";
 import {
   runClearCredential,
@@ -15,9 +19,18 @@ import {
   runReconcile,
   runSetCredential,
 } from "~/features/github/github-actions.server";
-import { getGithubViewData } from "~/features/github/github-query.server";
-import { GithubViewPage } from "~/features/github/github-view";
-import type { RbacAction } from "~/shared/rbac";
+import {
+  getGithubViewData,
+  type GithubViewData,
+} from "~/features/github/github-query.server";
+import {
+  GithubViewPage,
+  type ReconcileCheckView,
+} from "~/features/github/github-view";
+import { latestProjectReconcileCheckAt } from "~/server/audit/audit-query.server";
+import { isReconcileStale } from "~/server/interpretation/freshness-policy.server";
+import { formatRelative } from "~/shared/dates/format";
+import { roleCan, type ProjectRole, type RbacAction } from "~/shared/rbac";
 
 /**
  * /projects/:slug/github — the GitHub surface (github-view spec), replacing
@@ -30,13 +43,129 @@ import type { RbacAction } from "~/shared/rbac";
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireProjectMember(request, params.slug, "view this project's GitHub surface");
+  // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a
+  // client-supplied `?_routes=` filter, so
+  // `GET /projects/<slug>/github.data?_routes=routes/project.github` runs this
+  // loader ALONE and the layout's membership refusal never executes. The guard
+  // answers a non-member with the byte-identical unknown-slug 404 — a 403 here
+  // would confirm the project exists (WI-13).
+  const { user } = await requireProjectMember(
+    request,
+    params.slug,
+    "view this project's GitHub surface",
+  );
   const db = getDb();
   const view = await getGithubViewData(db, params.slug);
   if (!view) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  return { view };
+  return {
+    view: credentialGrantHolder(db, params.slug, user.id)
+      ? view
+      : { ...view, credential: withoutCredentialDetail(view.credential) },
+    reconcileCheck: reconcileCheckView(db, params.slug),
+  };
+}
+
+/**
+ * R19-11 (owner ruling, Q-V1 PAT half) — does this reader hold the credential
+ * grant on this project?
+ *
+ * The role derivation is `routes/project.tsx`'s, verbatim: the live membership
+ * role from project.md, or project-admin authority for an ORG admin who is not
+ * a member (D2). That is deliberate — the layout's `myRole` is what
+ * `GithubViewPage` gates the card on, so deriving it any other way here would
+ * let the payload and the render disagree (a redacted card rendered as if it
+ * held a credential, or the reverse).
+ *
+ * The ACTION is read from `ACTION_ROLES` through `roleCan`, never a role
+ * literal, so this can never drift from the `grant-github-scope` guard the
+ * `action` below enforces on the same three credential mutations.
+ *
+ * `resolveProjectAuthority` is deliberately NOT used: it audits, and a page
+ * READ by a role that simply has no reason to see a token is not an
+ * unauthorized attempt (P13-D-8's `silentDeny` category). Membership itself was
+ * already resolved — and audited — by `requireProjectMember` above.
+ */
+function credentialGrantHolder(
+  db: ReturnType<typeof getDb>,
+  projectSlug: string,
+  userId: string,
+): boolean {
+  const file = readProjectFile({ projectSlug });
+  if (!file) return false;
+  const memberRole: ProjectRole | null =
+    file.parsed.frontmatter.members.find((m) => m.userId === userId)?.role ??
+    null;
+  const myRole = memberRole ?? (isOrgAdmin(db, userId) ? "admin" : null);
+  return roleCan(myRole, "grant-github-scope");
+}
+
+/**
+ * R19-11 — the credential facts a reader without the grant never receives.
+ *
+ * A render-only gate would not close this ruling: single-fetch serializes the
+ * loader payload into the document, so `github_pat_••••42af` stayed in a
+ * viewer's HTML however the card was hidden — which is exactly how the pass-18
+ * live session found it ("a viewer's Settings HTML still carries the GitHub
+ * connection tail"). Withhold it from the payload and the DOM together.
+ *
+ * `configured` / `source` / `requiredScopes` stay: none of them is credential
+ * DETAIL. The first two say only what the Connection pill already says out loud
+ * ("no credential"), and required scopes are project policy — the same list the
+ * Policy surface publishes to every member. What goes is the token's identity
+ * and health: the masked tail, its label and id, when it was last validated,
+ * the validator result, the per-scope verdicts and the open violations.
+ */
+function withoutCredentialDetail(
+  credential: GithubViewData["credential"],
+): GithubViewData["credential"] {
+  return {
+    ...credential,
+    patId: null,
+    label: null,
+    masked: null,
+    lastValidatedAt: null,
+    validation: null,
+    scopes: [],
+    openViolations: [],
+  };
+}
+
+/**
+ * F19-22 — the freshness chip's second fact.
+ *
+ * `view.reconcile` is `MAX(observed_at)` over `github.reconcile` PROVENANCE,
+ * and DG-3 (github-reconciler.server.ts) deliberately skips that row when a
+ * poller tick finds nothing new, so it is the last pass that CHANGED something.
+ * Rendered as "Updated 3m ago" it claimed to be the last pass that RAN, and on
+ * a quiet repository it drifted to hours while the poller was healthy.
+ *
+ * The last CHECK comes off the per-tick `github.reconcile.task` audit row
+ * instead (unioned with the human sweep's `github.reconcile.project`, since a
+ * poller tick writes only the former and a sweep over an all-terminal board
+ * only the latter). It arrives BESIDE `view.reconcile` rather than inside it
+ * because `getGithubViewData` builds the projection view and this is an audit
+ * read — the same composition `routes/project.task.tsx` already does with
+ * `githubReconciledAt`.
+ *
+ * Label and staleness are computed HERE, server-side, for the reason the
+ * `view.reconcile` label is: both halves of the chip must render from one
+ * loader payload, or SSR and hydration straddle a minute boundary and disagree.
+ */
+function reconcileCheckView(
+  db: ReturnType<typeof getDb>,
+  projectSlug: string,
+): ReconcileCheckView {
+  const at = latestProjectReconcileCheckAt(db, projectSlug);
+  return {
+    at,
+    label: at && Number.isFinite(Date.parse(at)) ? formatRelative(at) : null,
+    // Only meaningful when `at` is set — the view treats a null `at` as "no
+    // check on record" and falls back to the change-based cue, which is the
+    // only evidence of a pass it has left.
+    stale: isReconcileStale(at),
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -86,6 +215,10 @@ export async function action({ request, params }: Route.ActionArgs) {
 export default function GithubView({ loaderData }: Route.ComponentProps) {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   return (
-    <GithubViewPage data={loaderData.view} myRole={layout?.myRole ?? null} />
+    <GithubViewPage
+      data={loaderData.view}
+      reconcileCheck={loaderData.reconcileCheck}
+      myRole={layout?.myRole ?? null}
+    />
   );
 }

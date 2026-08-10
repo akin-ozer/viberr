@@ -124,6 +124,77 @@ describe("workspace layout loader (seeded)", () => {
       expect(thrown?.init?.status ?? thrown?.status).toBe(404);
     });
 
+    /**
+     * F19-28: the layout loader is the chokepoint only when it RUNS. Single
+     * fetch honors a client-supplied `?_routes=` filter, so
+     * `GET /projects/<slug>/policy.data?_routes=routes/project.policy` executes
+     * the CHILD loader alone — the layout's 404 never fires. Six config-surface
+     * loaders answered that request with `requireProjectMember`'s 403 ("Only
+     * project members can view this project's policy"), a project-existence
+     * oracle: 403 = exists, 404 = does not. This drives each child loader in
+     * isolation (exactly what the `?_routes=` request does) and pins that a
+     * non-member and an unknown slug are indistinguishable.
+     */
+    const CHILD_SURFACES = [
+      { mod: "~/routes/project.activity", path: "activity" },
+      { mod: "~/routes/project.review", path: "review" },
+      { mod: "~/routes/project.agents", path: "agents" },
+      { mod: "~/routes/project.policy", path: "policy" },
+      { mod: "~/routes/project.github", path: "github" },
+      { mod: "~/routes/project.settings", path: "settings" },
+    ] as const;
+
+    /** Run ONE child loader the way single fetch's `?_routes=` filter does. */
+    async function childLoader(
+      surface: (typeof CHILD_SURFACES)[number],
+      slug: string,
+      cookie: string,
+    ): Promise<{ status: number; body: string }> {
+      const { loader } = await import(/* @vite-ignore */ surface.mod);
+      const url =
+        `/projects/${slug}/${surface.path}.data` +
+        `?_routes=routes/project.${surface.path}`;
+      const thrown = await (
+        loader as (a: unknown) => Promise<unknown>
+      )(await loaderArgs(url, { slug }, cookie)).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      const wrapped = thrown as
+        | { data?: unknown; init?: { status?: number }; status?: number }
+        | null;
+      return {
+        status: wrapped?.init?.status ?? wrapped?.status ?? 200,
+        body: String(wrapped?.data ?? ""),
+      };
+    }
+
+    for (const surface of CHILD_SURFACES) {
+      it(`${surface.path}: the single-fetch child loader answers a non-member as an unknown slug`, async () => {
+        const { cookie } = await app.cookieFor(seedIds.deniz);
+        const nonMember = await childLoader(surface, "viberr-core", cookie);
+        const unknown = await childLoader(surface, "nope", cookie);
+
+        expect(nonMember.status).toBe(404);
+        expect(unknown.status).toBe(404);
+        // Byte-identical once the slug itself is normalized — the reply must
+        // not confirm that `viberr-core` exists.
+        expect(nonMember.body).toBe(unknown.body.replace("nope", "viberr-core"));
+        // …and identical to the LAYOUT loader's refusal, so switching surfaces
+        // cannot be used as the oracle either.
+        expect(nonMember.body).toBe("No project at projects/viberr-core.");
+        expect(nonMember.body).not.toMatch(/member/i);
+      });
+    }
+
+    it("a project member still reaches each child loader", async () => {
+      const { cookie } = await app.cookieFor(seedIds.selin); // contributor
+      for (const surface of CHILD_SURFACES) {
+        const res = await childLoader(surface, "viberr-core", cookie);
+        expect(res.status, `${surface.path} must serve a member`).toBe(200);
+      }
+    });
+
     it("an ORG ADMIN who is not a member keeps access, with the override pill", async () => {
       const { loader } = await import("~/routes/project");
       const { updateUserFields } = await import("~/server/auth/user-store.server");

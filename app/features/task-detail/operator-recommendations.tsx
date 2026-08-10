@@ -6,8 +6,15 @@ import { Pill } from "~/ui/pill";
  * actions (assign a specialist, engage a reviewer, move a stage) rather than
  * performing them. Each pending recommendation renders as a highlighted card
  * with the operator's reasoning and a one-click Apply (admin|maintainer) that
- * executes the same governed mutation, plus Dismiss. Under full autonomy the
- * operator performs the actions itself and no cards appear (it just comments).
+ * executes the same mutation a human would, plus Dismiss. Under full autonomy
+ * the operator performs the actions itself and no cards appear (it comments).
+ *
+ * This is a DUMB panel: Apply and Dismiss call back to the page. One card kind
+ * — `accept_completion`, and any `transition` whose target is the terminal
+ * stage — reaches the same merge writer as the Accept button, so the page
+ * routes THOSE clicks through the shared acceptance confirm before they run
+ * (F19-3 / F19-26 / ruling 20). The panel owns no fetcher and no confirm state:
+ * a section that owned its own submission structurally could not ask first.
  */
 
 export interface RecommendationView {
@@ -45,7 +52,10 @@ const KIND_LABEL: Record<RecommendationView["kind"], string> = {
   // wore two names one viewport apart. The generic-agents vocabulary won.
   assign_specialist: "Delivering agent",
   assign_reviewer: "Reviewer",
-  run_specialist: "Run specialist",
+  // …and the row one line below said "Run specialist" for the SAME actor. The
+  // server already words this card "Start the delivering agent's run"
+  // (operator-actions.server.ts), so the chip was the last holdout.
+  run_specialist: "Run delivering agent",
   run_reviewer: "Run reviewer",
   transition: "Stage",
   accept_completion: "Completion",
@@ -63,6 +73,8 @@ export function OperatorRecommendations({
   /** admin|maintainer — gates the Apply button (server re-checks). */
   canApply: boolean;
   busy: boolean;
+  /** Page-owned: an `accept_completion` (or terminal-stage `transition`) Apply
+   *  reaches the acceptance confirm before it submits (F19-3). */
   onApply: (recId: string) => void;
   onDismiss: (recId: string) => void;
 }) {
@@ -103,7 +115,11 @@ export function OperatorRecommendations({
                   className="btn primary sm"
                   disabled={busy}
                   onClick={() => onApply(r.id)}
-                  title="Apply the operator's recommendation"
+                  title={
+                    r.kind === "accept_completion"
+                      ? "Apply the operator's recommendation — asks before merging"
+                      : "Apply the operator's recommendation"
+                  }
                 >
                   <Icon name="check" />
                   Apply

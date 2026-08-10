@@ -235,6 +235,15 @@ div.top-search:focus-within,
 .fine.dim { color: var(--placeholder); }
 /* A control that spans its container (side-panel actions, modal footers). */
 .full { width: 100%; }
+/* A full-width button is sized by its CONTAINER, not its content, so the
+   `white-space: nowrap` that keeps ordinary inline buttons on one line has
+   nothing left to protect here — it just makes a long label paint outside the
+   button and its panel. Live: R19-5's honest "Force accept (skips the remaining
+   stages and the review gate)" measured scrollWidth 351 against clientWidth 299
+   and spilled 52px past the GitHub card's right edge. Governance affordances
+   are exactly the ones whose labels must say the whole truth, so the label
+   wraps and the button grows instead. */
+.btn.full { white-space: normal; text-align: center; line-height: 1.25; }
 /* Shove this child to the end of its flex row (`.pull`: to the start of the
    trailing group). `.panel-head .right` is the same idiom scoped to one
    container; these are the unscoped ones. */
@@ -1074,8 +1083,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .packet-body { padding: 1rem 1.1rem 1.15rem; }
 .packet-body h2 { font-size: 1.25rem; line-height: 1.12; margin-bottom: .5rem; }
 .packet-obs { display: grid; gap: .5rem; margin: .85rem 0; }
+/* The label column holds a fixed 92px so every row's value starts on the same
+   line — until a label is wider than that and its text spills across the gap
+   into the value (live: "RECOMMENDATION" in the acceptance dialog, added with
+   F19-3). `minmax` keeps the shared alignment and lets the widest label decide
+   the column, which is what the fixed value was approximating. */
 .obs {
-  display: grid; grid-template-columns: 92px 1fr; gap: .7rem;
+  display: grid; grid-template-columns: minmax(92px, max-content) 1fr; gap: .7rem;
   align-items: start;
   font-size: .86rem; color: var(--fg); line-height: 1.4;
   padding: .55rem .7rem;
@@ -1116,6 +1130,31 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 
 .packet-actions { display: flex; gap: .55rem; margin-top: 1rem; flex-wrap: wrap; }
 .packet-actions .btn { flex: 1; min-width: 130px; }
+
+/* D18 continuity recovery panel — the fifth custom component. Warning tone, NOT
+   failure tone: the SAME amber pair the `continuity` timeline event already
+   wears (`.pev-ico.act-continuity` below), so one product state reads the same
+   on both surfaces. Deliberately not `.packet.blocked`'s coral — nothing is
+   stuck and nothing was violated; context was lost and recovered, and the spec
+   requires warning and failure to stay distinguishable. */
+.continuity-panel {
+  border-color: color-mix(in srgb, var(--yellow-dark), transparent 62%);
+  background: linear-gradient(color-mix(in srgb, var(--orange-light), transparent 72%), var(--surface) 60%);
+}
+.continuity-panel .panel-head .ico { color: var(--yellow-dark); }
+.continuity-panel .hint { margin-top: .85rem; }
+/* The announcement node: reachable by a screen reader, out of the layout for
+   everyone else. Same technique as `.mention-vh`, kept separate because that
+   one also suppresses selection for clipboard reasons this has no stake in. */
+.cont-live {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* execution profile */
 /* F18-12: `1fr 1fr` tracks can't shrink below their content's min-content, so on
@@ -2177,6 +2216,11 @@ dialog[data-closing]::backdrop {
 /* P13-D-18: was var(--link, …); --link is defined nowhere, so only the fallback
    ever rendered. Resolved to the token that was already doing the work. */
 .act-toggle { font-size: .78rem; font-weight: 600; color: var(--teal-dark); }
+/* R19-7: the rows an "N runtime sessions opened" summary stands for, revealed
+   in place. Indented to the summary's TEXT column — the `.pev-ico` box (26px)
+   plus the `.pol-ev` gap (.65rem) — so the run reads as belonging to the line
+   that folded it rather than as N new top-level entries. */
+.pol-ev.pev-sub { padding-left: 2.28rem; }
 .pev-t { font-family: var(--font-mono); font-size: .7rem; color: var(--placeholder); flex: none; padding-top: .3rem; white-space: nowrap; }
 
 
@@ -3934,10 +3978,14 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .detail { grid-template-columns: 1fr; }
   .detail-side { flex-direction: row; flex-wrap: wrap; }
   .detail-side > * { flex: 1; min-width: 280px; }
-  /* agents: the profile rail becomes a horizontal strip */
+  /* agents: the profile rail becomes a horizontal strip. The group labels ride
+     along rather than hide: `.ag-group-label.ag-group-row` is not only a label,
+     it CONTAINS the `New specialist profile` button (agents-page.tsx), and
+     R19-12's contract is that no control is hidden at any width. The gate in
+     `app.css.test.ts` fails if a width query ever hides it again. */
   .agents-layout { grid-template-columns: 1fr; }
   .profile-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding-bottom: .5rem; }
-  .profile-list .ag-group-label { display: none; }
+  .profile-list .ag-group-label { flex: 0 0 auto; align-self: center; padding: 0 .3rem; }
   .ag-item { min-width: 200px; }
   .cap-cols, .res-groups, .runtime-row { grid-template-columns: 1fr; }
   /* the three 2-up pages */

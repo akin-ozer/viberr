@@ -68,6 +68,18 @@ export function resolveStageRoles(
 }
 
 /**
+ * A stage's DISPLAY name, or the raw id when the id resolves to no stage (a
+ * reference to a renamed/removed stage). The one spelling every caller shares,
+ * so the "unknown id → show the id" fallback can never diverge.
+ */
+export function stageName(
+  stages: readonly Pick<StageDef, "id" | "name">[],
+  stageId: string,
+): string {
+  return stages.find((s) => s.id === stageId)?.name ?? stageId;
+}
+
+/**
  * True when a human gates every advance BEFORE work starts — the `strict`
  * preset's actual signature in the workflow graph.
  *

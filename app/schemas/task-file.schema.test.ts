@@ -95,6 +95,55 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     ).toBe("failing");
   });
 
+  // F19-27 — live-caught on VC-9: a verification-only task accepted through the
+  // R19-8 no-change path sat in Done, pill "accepted", wearing "awaiting
+  // verdict" on its board card. It has a work revision (its empty branch) and
+  // no required reviewer, so the old fall-through returned `changed`. Nobody
+  // owed that verdict; the task was closed.
+  it("deriveValidation: a no-change completion owes no verdict — none, not 'awaiting verdict'", () => {
+    // The exact VC-9 shape: an empty branch, a deliverer, no required reviewer.
+    expect(
+      deriveValidation({
+        engagements: [deliverer],
+        workRevision: rev1,
+        verdicts: [],
+        noChanges: true,
+      }),
+    ).toBe("none");
+    // Same shape WITHOUT the flag still reports the pending state, so the fix
+    // is scoped to a verified no-change completion and nothing else.
+    expect(
+      deriveValidation({ engagements: [deliverer], workRevision: rev1, verdicts: [] }),
+    ).toBe("changed");
+  });
+
+  it("deriveValidation: a no-change flag never erases a reviewer's APPROVAL", () => {
+    // The R19-8 review path mints a verification revision and binds a real
+    // verdict to it. That approval is evidence — reporting "none" there would
+    // throw away the only signal the acceptance gate has.
+    expect(
+      deriveValidation({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev1,
+        verdicts: [verdict("reviewer", "approve")],
+        noChanges: true,
+      }),
+    ).toBe("healthy");
+  });
+
+  it("deriveValidation: a no-change flag never hides a recorded request-changes", () => {
+    // Defensive ordering: an empty diff should not be able to carry a rejection,
+    // but if one is on the record it outranks the flag rather than vanishing.
+    expect(
+      deriveValidation({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev1,
+        verdicts: [verdict("reviewer", "request_changes")],
+        noChanges: true,
+      }),
+    ).toBe("failing");
+  });
+
   it("deriveValidation: healthy only when EVERY required reviewer approves the current revision", () => {
     const base = { engagements: [deliverer, reviewerA, reviewerB], workRevision: rev1 };
     // Only one of two approved → still changed (pending).
@@ -153,6 +202,24 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     expect(
       acceptanceBlockedReason({ engagements: [], workRevision: null, verdicts: [] }),
     ).toBeNull();
+  });
+
+  it("F19-21: the no-revision refusal names the way OUT of it", () => {
+    // Live (VC-5) this refusal was a dead end on a verification-only task:
+    // nothing that task would ever do produces a revision, so "nothing to
+    // approve" read as permanent and the remaining exits were force-accept,
+    // archive, or an operator packet recommending "manually mark Done" — the
+    // ceremony bypass R17-2 exists to prevent. Running delivery once IS the
+    // path: it inspects the workspace and records the verified no-change
+    // outcome, minting the base revision these reviewers then approve.
+    const reason = acceptanceBlockedReason({
+      engagements: [reviewerA],
+      workRevision: null,
+      verdicts: [],
+    });
+    expect(reason).toContain("run delivery once to verify and record that");
+    // Still the same refusal first — the guidance is an addition, not a swap.
+    expect(reason).toMatch(/^No reviewed revision yet/);
   });
 
   it("nextWorkRevision: same tree = same subject (no invalidation); different tree = new revision", () => {

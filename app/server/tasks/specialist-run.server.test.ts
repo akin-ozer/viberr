@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -21,8 +22,15 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   deliveringEngagement,
   supportingEngagements,
+  type TaskFileEvent,
+  type TaskPacket,
 } from "~/schemas/task-file.schema";
+import {
+  RUN_INPUTS_TAG,
+  type RunInputs,
+} from "~/features/runtime/runtime-types";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
+import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -36,7 +44,10 @@ import type {
 } from "~/server/runtimes/adapter.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
-import { installFakeRuntime, lastRunSpec } from "../../../test-support/fake-runtime";
+import {
+  installFakeRuntime,
+  lastRunSpec,
+} from "../../../test-support/fake-runtime";
 import {
   assignReviewer,
   assignSpecialist,
@@ -233,7 +244,12 @@ describe("assignSpecialist", () => {
     const event = file.parsed.timeline[0]!;
     expect(event.type).toBe("agent");
     expect(event.text).toContain("Deployed **dev**");
-    expect(event.text).toContain("primary specialist");
+    // F19-12: the deploy timeline event is rendered copy — it names the SHIPPED
+    // role ("delivering agent"), never the retired "primary specialist"
+    // (D9/Q17-5). Both directions asserted so neither a reverted string nor a
+    // half-revert (adding the new phrase while keeping the old) passes.
+    expect(event.text).toContain("as the delivering agent.");
+    expect(event.text).not.toMatch(/primary specialist/i);
 
     const audit = listAuditEvents(store.db, { action: "task.specialist.assigned" });
     expect(audit[0]?.taskKey).toBe("VIB-1");
@@ -642,6 +658,147 @@ describe("assignReviewer / removeReviewer", () => {
 
     const noop = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "ghost" }, actor(store.users.arda), opts);
     expect(noop.removed).toBe(false);
+  });
+
+  /**
+   * UX19-3 (mechanism 2) — `validation` is a DERIVED cache with exactly ONE
+   * writer, `deriveValidation` (F10-15). The required-reviewer set is one of its
+   * inputs, so ANY roster change invalidates it. `assignReviewer` and
+   * `removeReviewer` mutated `engagements` without recomputing, which is how the
+   * review queue could render "validation healthy" (it reads the cache) at the
+   * same instant the task page refused acceptance (it derives fresh).
+   */
+  describe("UX19-3: a roster change re-derives the `validation` cache", () => {
+    const REV = {
+      id: "rev-1",
+      headSha: "a".repeat(40),
+      treeSha: null,
+      branch: "viberr/VIB-1",
+      createdAt: "2026-08-06T09:00:00.000Z",
+      sourceProfileId: "dev",
+    };
+
+    /** Deploy a deliverer plus two VERDICT-CAPABLE reviewers. The explicit
+     *  `report-validation-verdict: direct` grant is the only thing that makes an
+     *  engagement a required reviewer (F10-14, explicit-only). */
+    function deployReviewPanel(): void {
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      const specialist = (profileId: string, role: string, verdict: boolean) =>
+        ({
+          profileId,
+          capabilities: [
+            {
+              capabilityId: "report-validation-verdict",
+              mode: verdict ? "direct" : "off",
+            },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: profileId,
+            role,
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        }) as never;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: null,
+        agents: [
+          specialist("dev", "developer", false),
+          specialist("critic", "reviewer", true),
+          specialist("critic2", "reviewer", true),
+          specialist("scout", "reviewer", false),
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }
+
+    /** VIB-1 at review with a delivered revision `critic` has ALREADY approved —
+     *  an honestly-cached `validation: healthy`, the state both the queue chip
+     *  and the task hero pill render. */
+    function writeApprovedTask(): void {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "review",
+          ownerUserId: store.users.arda.id,
+          title: "Attach execution workspace",
+          engagements: [
+            { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+            { profileId: "critic", backend: "claude", role: "reviewer", delivers: false, verdictCapable: true },
+          ],
+          workRevision: REV,
+          verdicts: [
+            {
+              profileId: "critic",
+              revisionId: REV.id,
+              headSha: REV.headSha,
+              result: "approve",
+              reason: "",
+              at: "2026-08-06T10:00:00.000Z",
+            },
+          ],
+          validation: "healthy",
+        }),
+        goal: "Let the operator attach a repo and run the specialist.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }
+
+    const readFm = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+
+    beforeEach(() => {
+      deployReviewPanel();
+      writeApprovedTask();
+    });
+
+    it("assignReviewer disarms a healthy cache when it adds a required reviewer", async () => {
+      // Canary: drop `parsed.frontmatter.validation = deriveValidation(...)`
+      // from assignReviewer's updateTaskFile callback → the file still says
+      // "healthy" while the acceptance gate waits on critic2.
+      expect(readFm().validation).toBe("healthy"); // honest before the change
+      await assignReviewer(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic2" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const fm = readFm();
+      expect(fm.engagements.some((e) => e.profileId === "critic2" && e.verdictCapable)).toBe(true);
+      // The new required reviewer has no verdict on rev-1 → not healthy.
+      expect(fm.validation).toBe("changed");
+    });
+
+    it("removeReviewer disarms a healthy cache when it drops the approving reviewer", async () => {
+      // Canary: drop the same line from removeReviewer's callback → the file
+      // keeps "healthy" with zero required reviewers and zero live verdicts.
+      await removeReviewer(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const fm = readFm();
+      expect(supportingEngagements(fm)).toEqual([]);
+      expect(fm.validation).toBe("changed");
+    });
+
+    it("a roster change that leaves the gate satisfied keeps the cache healthy", async () => {
+      // The recompute is a DERIVATION, not a blanket downgrade: `scout` holds no
+      // verdict grant, so engaging it adds no gate and healthy still stands.
+      await assignReviewer(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "scout" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const fm = readFm();
+      expect(fm.engagements.some((e) => e.profileId === "scout" && !e.verdictCapable)).toBe(true);
+      expect(fm.validation).toBe("healthy");
+    });
   });
 
   it("denies reviewer + viewer roles (admin|maintainer only)", async () => {
@@ -1083,6 +1240,41 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("wastes a human's time on a false lead");
   });
 
+  it("F19-6: git's own (redacted) words reach the prompt, with an order to quote them", () => {
+    // The classification alone is not actionable: exit 128 covers auth
+    // rejection, a missing remote, DNS, a proxy and an LFS hook alike. Live
+    // (VC-3) the credential was present, the repo cloned from a shell, and
+    // every channel a human could read said only "git exit 128" — so the
+    // agent's report, and the operator's blocked packet built from it, could
+    // say nothing else either.
+    // Canary: drop the `stderrExcerpt` line from the cloneFailure branch and
+    // both assertions below fail.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      cloned: false,
+      cloneFailure: {
+        sentence: "The workspace checkout failed (git exit 128).",
+        hadCredential: true,
+        stderrExcerpt: "remote: Repository not found.\nfatal: repository not found",
+      },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+    });
+    expect(prompt).toContain("fatal: repository not found");
+    expect(prompt).toContain("include it VERBATIM in your report");
+    // Absent excerpt ⇒ no empty contract line pretending git said something.
+    expect(
+      buildAnalyzePrompt({
+        ...base,
+        cloned: false,
+        cloneFailure: {
+          sentence: "The workspace checkout failed (git exit 128).",
+          hadCredential: true,
+        },
+        delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      }),
+    ).not.toContain("error output (already redacted by Viberr)");
+  });
+
   it("still tells the agent to clone when the server never had a credential to try", () => {
     // A public repo with no project credential is the one case where a
     // self-clone genuinely works, so the instruction must survive there.
@@ -1354,6 +1546,53 @@ describe("buildSpecialistPersona — attached resources", () => {
   });
 
   /**
+   * R19-2 (owner ruling) — the repo-wins note ships ONCE, before the bodies it
+   * ranks, and as the ONE exported constant both runtimes push.
+   *
+   * The end-to-end test in the R18-1 block asserts the count with a SINGLE KB,
+   * where "once per prompt" and "once per KB" are the same number. With two
+   * KBs they diverge, which is the shape the ruling actually forbids (the rule
+   * restated between every pair of bodies reads as if it ranked only the one
+   * that follows it).
+   */
+  it("R19-2: with MANY KBs the precedence note is still pushed once, before them all", () => {
+    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the `for (const part of
+    // kbSet.parts)` loop and the count assertion fails; fork its text into a
+    // local string literal and the exported-constant assertion fails.
+    const dataRoot = tempRoot();
+    for (const [name, sentinel] of [
+      ["house-style", "SENTINEL-KB-HOUSE"],
+      ["team-facts", "SENTINEL-KB-TEAM"],
+    ] as const) {
+      mkdirSync(path.join(dataRoot, "kb", name), { recursive: true });
+      writeFileSync(
+        path.join(dataRoot, "kb", name, "conventions.md"),
+        `# ${name}\n\n${sentinel}`,
+      );
+    }
+
+    const persona = buildSpecialistPersona({
+      profileId: "dev",
+      skills: [],
+      kb: ["house-style", "team-facts"],
+      dataRoot,
+    });
+
+    // The exact constant the operator runtime pushes — not a paraphrase of it.
+    expect(persona).toContain(KB_PRECEDENCE_NOTE);
+    expect(
+      persona.split("Which source wins (knowledge bases vs the repository)").length - 1,
+    ).toBe(1);
+    // Both bodies arrived, and BOTH sit after the rule that ranks them.
+    expect(persona.indexOf("Which source wins")).toBeLessThan(
+      persona.indexOf("SENTINEL-KB-HOUSE"),
+    );
+    expect(persona.indexOf("Which source wins")).toBeLessThan(
+      persona.indexOf("SENTINEL-KB-TEAM"),
+    );
+  });
+
+  /**
    * C1/pass-16 — this test used to end at "injects nothing", which was exactly
    * the bug: a KB grant that resolved to nothing produced a `logger.warn` and
    * NOTHING else, so the renamed folder was invisible to the run while the
@@ -1583,6 +1822,62 @@ describe("buildSpecialistPersona — attached resources", () => {
 // (it and the skill mount are two halves of "Viberr owns the workspace's
 // `.claude`"); its tests moved with it, to skill-mount.server.test.ts.
 
+/**
+ * R19-2 (ruling 56) — precedence between an attached KB and the repository's own
+ * documented conventions. Live: `qa/smoke/README.md` documented one pass-note
+ * format and a granted KB documented another; the deliverer (KB granted)
+ * followed the KB and a reviewer (no KB) followed the README, so one repository
+ * grew two house styles from the same facts. Nothing in the product had ever
+ * said which source wins.
+ */
+describe("R19-2 — the repository wins; a knowledge base is context", () => {
+  const tempRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-precedence-"));
+
+  function personaWithKb(): string {
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "house-style"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "house-style", "style.md"),
+      "# Style\n\nMarker files end with `Marker-Convention: v3`.",
+    );
+    return buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["house-style"],
+      dataRoot,
+    });
+  }
+
+  it("states the precedence rule whenever a KB is attached", () => {
+    const persona = personaWithKb();
+    // Canary: delete the `kbSet.parts.length > 0` block and this fails.
+    expect(persona).toContain(
+      "When a knowledge base and the repository disagree",
+    );
+    expect(persona).toContain("The REPOSITORY wins");
+  });
+
+  it("requires a noticed conflict to be REPORTED, never silently resolved", () => {
+    const persona = personaWithKb();
+    expect(persona).toMatch(/say so plainly in your report/i);
+    expect(persona).toMatch(/never resolve it silently/i);
+  });
+
+  it("says nothing about precedence when no KB is attached", () => {
+    // The rule is about a conflict that cannot arise without a KB; stating it
+    // anyway would spend prompt budget on every run that has no second source.
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: [],
+      dataRoot: tempRoot(),
+    });
+    expect(persona).not.toContain(
+      "When a knowledge base and the repository disagree",
+    );
+  });
+});
+
 describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => {
   /** Deploy a `dev` deliverer granting KB `deliverKb` and a `critic` reviewer
    *  granting KB `reviewKb` (may be []). */
@@ -1654,6 +1949,91 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     writeKb("shared", "# Shared\n\nSENTINEL-SHARED-KB");
     const sys = await engageAndRunCritic();
     expect(sys.split("shared (knowledge base)").length - 1).toBe(1);
+  });
+
+  it("R19-3/F19-2: SKILLS are NOT inherited — only KBs cross from the deliverer", async () => {
+    // The `deliveringContextGrants` docstring claimed the inheritance had been
+    // "widened to SKILLS by LV-F3". It never was: both call sites union `kb`
+    // only, and "LV-F3" appeared nowhere in the repo except that sentence. The
+    // owner ruled the inheritance stays KBs (R18-1 stands), so this pins the
+    // absence — a future reader who believes the old comment and implements the
+    // widening breaks a test instead of silently handing every reviewer the
+    // deliverer's craft.
+    //
+    // Canary: union `resolveDeployedSpecialist(...).skills` into the reviewer's
+    // skills at either call site and the SENTINEL assertion fails.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: null, // no checkout ⇒ skills ride the prompt, where we can see them
+      agents: [
+        {
+          profileId: "dev", capabilities: [], extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "developer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: ["deliverer-craft"], mcps: [], kb: ["shared-kb"] },
+          },
+        } as never,
+        {
+          profileId: "critic", capabilities: [], extras: [],
+          definition: {
+            kind: "specialist", name: "critic", role: "reviewer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: [], mcps: [], kb: [] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    mkdirSync(path.join(store.dataRoot, "skills", "deliverer-craft"), { recursive: true });
+    writeFileSync(
+      path.join(store.dataRoot, "skills", "deliverer-craft", "SKILL.md"),
+      "# Craft\n\nSENTINEL-DELIVERER-SKILL",
+    );
+    writeKb("shared-kb", "# Conventions\n\nSENTINEL-DELIVERER-KB");
+
+    const sys = await engageAndRunCritic();
+
+    // The KB crosses (R18-1) …
+    expect(sys).toContain("SENTINEL-DELIVERER-KB");
+    // … the skill does NOT, on either channel.
+    expect(sys).not.toContain("SENTINEL-DELIVERER-SKILL");
+    expect(sys).not.toContain("deliverer-craft");
+    expect(lastRunSpec()?.skills).toBeUndefined();
+  });
+
+  it("R19-2: the repo-wins precedence rule ships WITH the KB text, and only then", async () => {
+    // Live-caught this pass: a KB-granted Codex developer and a KB-less Claude
+    // writer produced two different formats for the same file family on ONE
+    // repo, because nothing told either run which source outranks the other.
+    // The owner ruled the repo wins and the KB supplements — and that the rule
+    // ships with every KB injection.
+    //
+    // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildSpecialistPersona and
+    // the first two assertions fail.
+    deployKbPair(["house"], []);
+    writeKb("house", "# House style\n\nSENTINEL-DELIVERER-KB");
+    const sys = await engageAndRunCritic();
+    expect(sys).toContain("Which source wins (knowledge bases vs the repository)");
+    expect(sys).toContain("outrank the knowledge bases");
+    // It is stated ONCE, not per KB, and it precedes the bodies.
+    expect(
+      sys.split("Which source wins (knowledge bases vs the repository)").length - 1,
+    ).toBe(1);
+    expect(sys.indexOf("Which source wins")).toBeLessThan(
+      sys.indexOf("house (knowledge base)"),
+    );
+
+    // …and a run with NO knowledge base carries no rule about one.
+    const none = buildSpecialistPersona({
+      profileId: "dev",
+      skills: [],
+      kb: [],
+      dataRoot: store.dataRoot,
+    });
+    expect(none).not.toContain("Which source wins");
   });
 
   it("does NOT leak the reviewer's own KB back onto the delivering run", async () => {
@@ -1741,6 +2121,41 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       actor(store.users.arda));
   }
 
+  /**
+   * Run `work` with git forced OFFLINE, for the two cases below that need the
+   * workspace clone to FAIL.
+   *
+   * They used to depend on github.com answering "Repository not found" — a real
+   * network round trip inside a unit test. Observed on this machine roughly one
+   * run in three: the clone instead spent ~5s reaching the network and the
+   * assertions went red for a reason that had nothing to do with the code.
+   * `cloneRepo`'s child env spreads `process.env` (`createGitHubAskpassEnv`), so
+   * a proxy pointed at a port nothing listens on produces the SAME `git exit
+   * 128` failure instantly, offline, with git's real stderr — which is exactly
+   * what the F19-6 assertion reads.
+   */
+  const PROXY_ENV_KEYS = [
+    "https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY",
+    "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY",
+  ] as const;
+
+  async function withOfflineGit<T>(work: () => Promise<T>): Promise<T> {
+    const saved = PROXY_ENV_KEYS.map((k) => [k, process.env[k]] as const);
+    for (const key of PROXY_ENV_KEYS) {
+      process.env[key] = key.toLowerCase().startsWith("no_")
+        ? "" // never bypass the dead proxy
+        : "http://127.0.0.1:1";
+    }
+    try {
+      return await work();
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
   it("mounts the grant into the workspace, passes it to the SDK, and stops injecting the body", async () => {
     // End to end on the fresh-run path: store grant → workspace mount → RunSpec.
     // Canary: drop `skills: skillMount.mounted` from the startRun call and the
@@ -1788,10 +2203,41 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     deployWithSkills(["conventional-commits"]);
     writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
 
-    await runDev();
+    await withOfflineGit(runDev);
 
     expect(lastRunSpec()?.skills).toBeUndefined();
     expect(lastRunSpec()?.systemPrompt ?? "").toContain("SENTINEL-SKILL-BODY");
+  });
+
+  it("F19-6: the checkout-failure NOTE quotes git, not just the classification", async () => {
+    // The same no-checkout path as above, read from the human's side: a repo is
+    // configured and the clone genuinely fails (no such repository / no
+    // network), so the run takes `cloneRepo`'s catch. Before this, every
+    // channel a person could read said only "git exit 128" — which covers auth
+    // rejection, a missing remote, DNS, a proxy and an LFS hook alike — and
+    // live (VC-3) the credential was fine, the repo cloned from a shell, and
+    // nobody could act.
+    //
+    // The assertion is on the SHAPE, not on git's exact words: whichever way
+    // the clone fails here, its own output must reach the note.
+    // Canary: drop the `stderrExcerpt` arm from the note text and the
+    // "What the checkout reported" assertion fails.
+    deployWithSkills(["conventional-commits"]);
+    writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
+
+    await withOfflineGit(runDev);
+
+    const note = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.text.includes("**Workspace checkout failed:**"));
+    expect(note).toBeDefined();
+    expect(note!.text).toContain("What the checkout reported:");
+    // Fenced, so a multi-line git complaint stays readable on the task page.
+    expect(note!.text).toMatch(/```\n[\s\S]+\n```/);
+    // …and the classification the note already carried is still there.
+    expect(note!.text).toContain("The workspace checkout");
   });
 
   it("a RESUMED run re-mounts and re-arms the same skills (fresh/resume parity)", async () => {
@@ -1824,5 +2270,698 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(
       existsSync(path.join(ws, ".claude", "skills", "conventional-commits")),
     ).toBe(true);
+  });
+
+  /**
+   * UC-15, the owner's question in full: "are the RIGHT skills loaded, and ONLY
+   * those?"
+   *
+   * The persona-level negative is already pinned ("mounts ONLY the declared
+   * skills", above), but that test reads ONE channel — the prompt text. Since
+   * R18-5 a Claude run has THREE places a skill can arrive: the SDK's native
+   * `skills: [...]` filter, the `<workspace>/.claude/skills` catalog the SDK
+   * reads it against, and the prompt text Codex still uses. A regression in
+   * either of the first two is invisible to a prompt-only assertion — a skill
+   * that mounts is DELIBERATELY absent from the prompt.
+   *
+   * So this runs the whole assembly and asserts the decoy's name and its body
+   * are absent from EVERYTHING the run is handed.
+   */
+  describe("UC-15 — an UNGRANTED org skill reaches no channel of the run", () => {
+    /** The org's four skills as they sit on disk today.
+     *  `kubernetes-rollback` is the DECOY: irrelevant to this product, granted
+     *  to nobody, and it must never reach a run. */
+    const ORG_SKILLS = [
+      ["developer-expertise", "SENTINEL-DEVELOPER-EXPERTISE"],
+      ["reviewer-expertise", "SENTINEL-REVIEWER-EXPERTISE"],
+      ["viberr-app-expertise", "SENTINEL-VIBERR-APP-EXPERTISE"],
+      ["kubernetes-rollback", "SENTINEL-KUBERNETES-ROLLBACK"],
+    ] as const;
+
+    function writeOrgSkills(): void {
+      for (const [name, sentinel] of ORG_SKILLS) {
+        writeSkill(name, `# ${name}\n\nWhen asked, answer ${sentinel}.`);
+      }
+    }
+
+    it("Claude: the grant mounts alone — the decoy is in no spec field, no prompt, no workspace", async () => {
+      // Canary: make `mountGrantedSkills` mount the whole store (the "load
+      // every skill on disk" regression) and both the `skills` filter and the
+      // workspace-catalog assertions fail.
+      const ws = await workspaceCheckout();
+      writeOrgSkills();
+      deployWithSkills(["developer-expertise"]);
+
+      await runDev();
+
+      const spec = lastRunSpec()!;
+      // (1) the native SDK channel (R18-5 / ruling 51) — exactly the grant.
+      expect(spec.skills).toEqual(["developer-expertise"]);
+      // (2) the catalog the SDK resolves that filter against — exactly the grant.
+      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+        "developer-expertise",
+      ]);
+      expect(
+        readFileSync(
+          path.join(ws, ".claude", "skills", "developer-expertise", "SKILL.md"),
+          "utf8",
+        ),
+      ).toContain("SENTINEL-DEVELOPER-EXPERTISE");
+      // (3) NOTHING the run is handed names the decoy or carries its body —
+      // system prompt, turn prompt, tool policy, env, MCP config, all of it.
+      const assembled = JSON.stringify(spec);
+      expect(assembled).not.toContain("kubernetes-rollback");
+      expect(assembled).not.toContain("SENTINEL-KUBERNETES-ROLLBACK");
+      // …and the same for the two other org skills this profile does not grant.
+      expect(assembled).not.toContain("reviewer-expertise");
+      expect(assembled).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
+      expect(assembled).not.toContain("viberr-app-expertise");
+      expect(assembled).not.toContain("SENTINEL-VIBERR-APP-EXPERTISE");
+      // The positive half: the grant IS announced (its body arrives on invocation).
+      expect(spec.systemPrompt ?? "").toContain("developer-expertise");
+      expect(spec.systemPrompt ?? "").not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
+    });
+
+    it("Codex: the prompt-text channel carries the grant only — the decoy stays out", async () => {
+      // The OTHER half of the R18-5 asymmetry. Codex has no native skills
+      // channel, so its granted craft rides the prompt as text — which is also
+      // the only channel a decoy could leak into on that backend.
+      //
+      // Canary: pass the store listing instead of `injectable` to
+      // `readSkillBodies` in buildSpecialistPersona and the decoy body appears.
+      await workspaceCheckout();
+      writeOrgSkills();
+      deployWithSkills(["developer-expertise"], ["codex"]);
+
+      await runDev();
+
+      const spec = lastRunSpec()!;
+      expect(spec.backend).toBe("codex");
+      // Nothing mounted natively — the Codex adapter would ignore it anyway.
+      expect(spec.skills).toBeUndefined();
+      const sys = spec.systemPrompt ?? "";
+      expect(sys).toContain("developer-expertise (skill)");
+      expect(sys).toContain("SENTINEL-DEVELOPER-EXPERTISE");
+      expect(sys).not.toContain("kubernetes-rollback");
+      expect(sys).not.toContain("SENTINEL-KUBERNETES-ROLLBACK");
+      expect(sys).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
+      expect(sys).not.toContain("SENTINEL-VIBERR-APP-EXPERTISE");
+    });
+  });
+
+  /**
+   * R18-3 / ruling 49, read through the RUN seam rather than through
+   * `stripUngovernedRepoCatalog` on its own (which skill-mount.server.test.ts
+   * already covers). What matters to a human is the end state of a real run:
+   * the cloned repository's own `.claude` — its slash-commands, sub-agents,
+   * skills and `settings.json` HOOKS, none of them granted by any profile — is
+   * not discoverable by the agent, and stripping it ships no diff.
+   */
+  describe("R18-3 — the repo's own catalog never survives into a run", () => {
+    /** A checkout that COMMITS its own `.claude` (as viberr's own repo does). */
+    async function checkoutWithRepoCatalog(): Promise<string> {
+      const dir = await workspaceCheckout();
+      mkdirSync(path.join(dir, ".claude", "skills", "repo-rogue"), {
+        recursive: true,
+      });
+      writeFileSync(
+        path.join(dir, ".claude", "skills", "repo-rogue", "SKILL.md"),
+        "---\nname: repo-rogue\nallowed-tools: Bash\n---\n\nSENTINEL-REPO-ROGUE-SKILL",
+      );
+      writeFileSync(
+        path.join(dir, ".claude", "settings.json"),
+        '{"hooks":{"PreToolUse":[{"command":"SENTINEL-REPO-HOOK"}]}}',
+      );
+      await exec("git", ["-C", dir, "add", "-A"]);
+      await exec("git", ["-C", dir, "commit", "-q", "-m", "repo ships a catalog"]);
+      return dir;
+    }
+
+    it("the repo's catalog is gone, the grant is mounted, and the delivery carries no catalog change", async () => {
+      // Canary: this is a belt-and-braces guarantee — `cloneRepo`'s reuse arm
+      // strips AND `mountGrantedSkills` strips before it writes — so removing
+      // either alone keeps it green (that redundancy is the point; the two
+      // isolating canaries are the two tests below). Remove BOTH strip calls
+      // and every assertion in the first half fails.
+      const ws = await checkoutWithRepoCatalog();
+      writeSkill("granted-craft", "# Craft\n\nSENTINEL-GRANTED-CRAFT");
+      deployWithSkills(["granted-craft"]);
+
+      await runDev();
+
+      // The repo's own catalog is gone from the working tree…
+      expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+      expect(existsSync(path.join(ws, ".claude", "skills", "repo-rogue"))).toBe(false);
+      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+        "granted-craft",
+      ]);
+      // …and nothing of it reached the run.
+      const assembled = JSON.stringify(lastRunSpec());
+      expect(assembled).not.toContain("repo-rogue");
+      expect(assembled).not.toContain("SENTINEL-REPO-ROGUE-SKILL");
+      expect(assembled).not.toContain("SENTINEL-REPO-HOOK");
+      // R18-3's delivery half: git sees no change (skip-worktree) and the mount
+      // is excluded, so delivering from this workspace ships no catalog edit.
+      const status = await exec("git", ["-C", ws, "status", "--porcelain"]);
+      expect(status.stdout).not.toContain(".claude");
+      expect(
+        readFileSync(path.join(ws, ".git", "info", "exclude"), "utf8"),
+      ).toContain(".claude/");
+    });
+
+    it("strips it even when the profile grants NO skills (the mount never runs)", async () => {
+      // The isolating canary for the CLONE leg: `mountGrantedSkills` returns
+      // early on an empty grant list without stripping anything, so the reuse
+      // arm's strip is the only thing standing between this agent and the
+      // repo's hooks. Canary: delete `await stripUngovernedRepoCatalog(dir)`
+      // from cloneRepo's reuse arm and `.claude` survives here.
+      const ws = await checkoutWithRepoCatalog();
+      deployWithSkills([]);
+
+      await runDev();
+
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      expect(lastRunSpec()?.skills).toBeUndefined();
+    });
+
+    it("a RESUMED run re-strips a catalog written since the last run", async () => {
+      // The isolating canary for the MOUNT leg: the resume path never clones,
+      // so `mountGrantedSkills`'s own strip is the only one that runs. This is
+      // the case that matters most — the agent itself can write
+      // `.claude/settings.json` into its workspace during a turn, and the
+      // project setting source EXECUTES hooks. Canary: delete the
+      // `stripUngovernedRepoCatalog` call inside `mountGrantedSkills` and the
+      // agent-written settings.json survives into the resumed run.
+      const ws = await workspaceCheckout();
+      writeSkill("granted-craft", "# Craft\n\nSENTINEL-GRANTED-CRAFT");
+      deployWithSkills(["granted-craft"]);
+      mkdirSync(path.join(ws, ".claude", "skills", "self-written"), {
+        recursive: true,
+      });
+      writeFileSync(
+        path.join(ws, ".claude", "settings.json"),
+        '{"hooks":{"PreToolUse":[{"command":"SENTINEL-AGENT-HOOK"}]}}',
+      );
+      writeFileSync(
+        path.join(ws, ".claude", "skills", "self-written", "SKILL.md"),
+        "# self\n\nSENTINEL-SELF-WRITTEN",
+      );
+
+      const confinement = await resolveResumeConfinement(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          profileId: "dev",
+          backend: "claude",
+          delivers: true,
+        },
+      );
+
+      expect(confinement.skills).toEqual(["granted-craft"]);
+      expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+        "granted-craft",
+      ]);
+      expect(confinement.systemPrompt ?? "").not.toContain("SENTINEL-SELF-WRITTEN");
+    });
+  });
+
+  /**
+   * R18-1 + R19-3, in the channel the existing pair of tests cannot see.
+   *
+   * "R19-3/F19-2: SKILLS are NOT inherited" runs on a repo-LESS project, where
+   * every skill rides the prompt as text — so it can assert the deliverer's
+   * skill body is absent. On a real checkout that assertion is vacuous: a
+   * mounted skill's body is deliberately NOT in the prompt (R18-5), so an
+   * inheritance widened to skills would leave it green while the reviewer
+   * really held the deliverer's craft, mounted and invocable.
+   */
+  describe("R18-1 / R19-3 — the boundary holds in the NATIVE channel too", () => {
+    it("the reviewer inherits the deliverer's KB and mounts ONLY its own skills", async () => {
+      // Canary (verified): union the deliverer's skills into the `skills:`
+      // argument of the `mountGrantedSkills` call in startSpecialistRun.
+      // This test goes red on `spec.skills` and on the workspace catalog; the
+      // repo-less "SKILLS are NOT inherited" test above stays GREEN, because
+      // the widened grant is mounted rather than injected and its body is
+      // deliberately absent from the prompt either way.
+      const ws = await workspaceCheckout();
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "dev", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "dev", role: "developer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: ["deliverer-craft"], mcps: [], kb: ["house-kb"] },
+            },
+          } as never,
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: ["critic-craft"], mcps: [], kb: [] },
+            },
+          } as never,
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      writeSkill("deliverer-craft", "# Deliverer\n\nSENTINEL-DELIVERER-SKILL");
+      writeSkill("critic-craft", "# Critic\n\nSENTINEL-CRITIC-SKILL");
+      mkdirSync(path.join(store.dataRoot, "kb", "house-kb"), { recursive: true });
+      writeFileSync(
+        path.join(store.dataRoot, "kb", "house-kb", "conventions.md"),
+        "# House\n\nSENTINEL-DELIVERER-KB",
+      );
+
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+        actor(store.users.arda));
+
+      const spec = lastRunSpec()!;
+      // R18-1: the deliverer's KB crosses to the reviewer…
+      expect(spec.systemPrompt ?? "").toContain("SENTINEL-DELIVERER-KB");
+      expect(spec.systemPrompt ?? "").toContain("house-kb (knowledge base)");
+      // …R19-3: its SKILL does not, on either channel.
+      expect(spec.skills).toEqual(["critic-craft"]);
+      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+        "critic-craft",
+      ]);
+      const assembled = JSON.stringify(spec);
+      expect(assembled).not.toContain("deliverer-craft");
+      expect(assembled).not.toContain("SENTINEL-DELIVERER-SKILL");
+    });
+  });
+});
+
+// ---------------------------------------------------------------- P19-G0/G11
+
+/**
+ * P19-G0 — "Any reactivated agent re-anchors on the canonical task artifact
+ * before acting" (PRD Runtime continuity), and FR22's continuation promise
+ * holds "even when prior runtime history is unavailable".
+ *
+ * Exactly ONE path honoured that: the @mention RESUME, whose whole prompt is
+ * `specialistReplyDirective` with `canonicalTaskAnchor` prepended. Every FRESH
+ * run — the UI Run button, the operator's run_agent/prompt_agent, and a FIRST
+ * @mention of an agent with no prior session — got `buildAnalyzePrompt`: role,
+ * title, goal, repo/branch contract, directive, trust boundary, and nothing
+ * about what had already happened on the task. So the rework loop's own
+ * re-runs were stateless: a re-run reviewer could not tell whether the change
+ * it asked for last revision had been made, and the deliverer re-prompted for
+ * that rework had no record of why its own branch looks the way it does. There
+ * is no pull-side substitute either — the specialist MCP surface has no
+ * task-read tool and the run cwd is never the task dir.
+ */
+describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () => {
+  const packet: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "SENTINEL-PACKET: ship the mount behind a flag?",
+    body: "Two viable options.",
+    observations: [],
+    options: [
+      { kind: "custom", t: "Behind a flag", d: "", rec: true },
+      { kind: "custom", t: "Unconditionally", d: "", rec: false },
+    ],
+  };
+
+  const event = (text: string, n: number): TaskFileEvent => ({
+    occurredAt: `2026-08-0${n}T10:00:00.000Z`,
+    type: "comment",
+    actor: { kind: "human", userId: "u_1", nameHint: "Deniz" },
+    title: null,
+    text,
+    toAgent: false,
+    evidence: null,
+  });
+
+  /** VIB-1 with real history: a prior reviewer request, an open decision. */
+  function taskWithHistory(): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "Attach execution workspace",
+        readiness: "ready",
+        waiting: "agent",
+        validation: "changed",
+        branch: "vib-1-attach-execution-workspace",
+        engagements: [
+          {
+            profileId: "dev",
+            backend: "claude",
+            role: "developer",
+            delivers: true,
+            verdictCapable: false,
+          },
+        ],
+      }),
+      goal: "Ship the CURRENT goal, not the one the agent remembers.",
+      packet,
+      timeline: [
+        event("SENTINEL-REVIEWER-REQUEST: extract the mount into its own module.", 6),
+        event("Older note nobody needs.", 5),
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("puts the canonical task state — timeline, open decision, stage — into the fresh-run prompt", async () => {
+    // The headline: a run started with NO directive at all still knows what has
+    // happened on this task. Canary: drop `...(anchor ? { anchor } : {})` from
+    // the buildAnalyzePrompt call in startAgentRun and every assertion below
+    // except the goal fails — the goal is the ONE fact the old prompt carried.
+    taskWithHistory();
+    const run = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const prompt = lastRunSpec()?.prompt ?? "";
+
+    expect(prompt).toContain("## Canonical task state");
+    // What the reviewer asked for last time — the fact a stateless re-run of
+    // the deliverer could not possibly have.
+    expect(prompt).toContain("SENTINEL-REVIEWER-REQUEST");
+    // The open decision, WITH its options, so the agent does not re-answer it
+    // itself (the anchor also says a human resolves it).
+    expect(prompt).toContain("SENTINEL-PACKET");
+    expect(prompt).toContain("Behind a flag");
+    // Current position: the stage's DISPLAY name, not the raw `impl` id.
+    expect(prompt).toContain("stage: In Progress");
+    expect(prompt).toContain("readiness: ready");
+    expect(prompt).toContain("validation: changed");
+    // And it must claim precedence over the model's own memory.
+    expect(prompt).toMatch(/not the source of truth/i);
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda),
+    );
+  });
+
+  it("covers a FIRST @mention, which has no session to resume and falls through to a fresh run", async () => {
+    // The hole inside the hole: the @mention path was the ONE path that
+    // anchored — but only on its RESUME branch. With no prior session
+    // `commentToAgent` engages the agent and calls `startAgentRun`, and the
+    // anchor rode `specialistReplyDirective` only, so the very first time a
+    // human addressed an agent it answered with no idea what had happened on
+    // the task. Canary: same as the fresh-run canary above — this test fails
+    // with it, because it IS the fresh-run path.
+    taskWithHistory();
+    const { commentToAgent } = await import("./task-actions.server");
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev what is left here?" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("started");
+    const prompt = lastRunSpec()?.prompt ?? "";
+    expect(prompt).toContain("## Canonical task state");
+    expect(prompt).toContain("SENTINEL-REVIEWER-REQUEST");
+    // The human's own words still arrive as the turn's directive.
+    expect(prompt).toContain("what is left here?");
+  });
+
+  it("orders the prompt contract → canonical state → directive, and names the state in the trust boundary", () => {
+    // Placement is load-bearing: the delivery contract is what the agent MAY
+    // do and must not be reframed by task content, and the anchor's timeline is
+    // human/agent text — so the trust boundary has to cover it explicitly.
+    const anchor = "## Canonical task state (task.md — read this before you act)\nSENTINEL-ANCHOR";
+    const prompt = buildAnalyzePrompt({
+      role: "Implementation",
+      taskKey: "VIB-42",
+      title: "t",
+      goal: "g",
+      repo: "acme/app",
+      branch: "vib-42",
+      cloned: true,
+      delivers: true,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      anchor,
+      directive: "SENTINEL-DIRECTIVE",
+      directiveFrom: "Deniz",
+    });
+    expect(prompt).toContain("SENTINEL-ANCHOR");
+    expect(prompt.indexOf("Workspace contract")).toBeLessThan(prompt.indexOf("SENTINEL-ANCHOR"));
+    expect(prompt.indexOf("SENTINEL-ANCHOR")).toBeLessThan(prompt.indexOf("SENTINEL-DIRECTIVE"));
+    expect(prompt).toContain("the canonical task state, comments");
+  });
+
+  it("still runs — without an anchor block — when the task file cannot be anchored", () => {
+    // The anchor is best-effort by construction: a run must never fail because
+    // its canonical block could not be built.
+    const prompt = buildAnalyzePrompt({
+      role: "Implementation",
+      taskKey: "VIB-42",
+      title: "t",
+      goal: "g",
+      repo: null,
+      branch: "vib-42",
+      cloned: false,
+      delivers: true,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+    });
+    expect(prompt).not.toContain("## Canonical task state");
+    expect(prompt).toContain("Trust boundary");
+  });
+});
+
+/**
+ * P19-G8/G11 — what a run was GIVEN is inspectable.
+ *
+ * The console was output-only by construction: no prompt kind in the LogLine
+ * union, no resolved-resource column on `agent_runs`, and the persona and
+ * anchor were built, sent and dropped. So the product's own claims about a run
+ * — which knowledge bases it carried, which granted skills actually mounted,
+ * which MCP grants resolved to nothing, what canonical state it re-anchored on
+ * — could not be checked by the human the disclosures exist for. The
+ * "Attached resources that did NOT reach this run" honesty in particular
+ * reached the AGENT only: a human learned about a KB grant that resolved to
+ * nothing solely if the agent chose to repeat it.
+ */
+describe("P19-G11 — the run records what it was given", () => {
+  function inputsLine(runId: string): RunInputs | undefined {
+    return listRunLines(store.db, runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    )?.display.inputs;
+  }
+
+  async function assignAndRun(): Promise<string> {
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const run = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda),
+    );
+    return run.runId;
+  }
+
+  it("writes a run·inputs line carrying the anchor, the confinement and the workspace", async () => {
+    // Canary: delete the `recordRunInputs(...)` call in startAgentRun and this
+    // whole block fails — there is no other record of a run's inputs anywhere.
+    const runId = await assignAndRun();
+    const inputs = inputsLine(runId);
+    expect(inputs).toBeTruthy();
+    expect(inputs!.anchor).toContain("## Canonical task state");
+    expect(inputs!.delivers).toBe(true);
+    expect(inputs!.promptChars).toBeGreaterThan(0);
+    // The confinement a human could not see before: `dev` is deployed with NO
+    // capability grants, so every delivery tool is withheld.
+    expect(inputs!.tools.denied.length).toBeGreaterThan(0);
+    // And the line is human-readable without expanding anything.
+    const display = listRunLines(store.db, runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    )!.display;
+    expect(display.ev).toBe("meta");
+    expect(display.text).toContain("Run inputs");
+    expect(display.text).toContain("canonical anchor");
+    // The stored envelope carries the same payload for the `{ } raw` toggle.
+    const raw = listRunLines(store.db, runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    )!.raw;
+    expect(JSON.parse(raw)).toMatchObject({ type: "run_inputs", source: "viberr" });
+  });
+
+  it("names a knowledge-base grant whose content never reached the run", async () => {
+    // The silent-resource class, told to a HUMAN for the first time. The
+    // prompt has said this to the agent since P14; nothing said it to anyone
+    // who could fix the configuration.
+    //
+    // Canary: drop the `unresolvedOut` push in buildSpecialistPersona and
+    // `unresolvedResources` comes back empty while the persona still warns the
+    // agent — the exact asymmetry this closes.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            resources: { skills: [], mcps: [], kb: ["house-style"] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const runId = await assignAndRun();
+    const inputs = inputsLine(runId);
+    expect(inputs!.knowledge).toEqual(["house-style"]);
+    expect(inputs!.unresolvedResources.map((r) => r.name)).toContain("house-style");
+    // The persona still tells the agent too — both audiences, one resolution.
+    expect(lastRunSpec()?.systemPrompt ?? "").toContain("did NOT reach this run");
+  });
+
+  it("resolveResumeConfinement returns the SAME resolved-resource record for a resumed turn", async () => {
+    // The resume half of the disclosure. `resolveResumeConfinement` exists
+    // because resume kept silently dropping half of a run's policy (XS-1) — a
+    // disclosure that described the fresh run accurately and the resumed one
+    // approximately would re-create that bug inside the surface built to catch
+    // it. So both paths build this record through `resolvedResourceInputs`,
+    // from their own resolution.
+    //
+    // The caller (task-actions' @mention resume) owns the remaining three
+    // fields and hands the whole thing to `recordRunInputs`; TypeScript makes
+    // that omission explicit rather than lettings a placeholder ship.
+    //
+    // Canary: drop `runInputs` from the returned object and this fails to
+    // compile, then fails here.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            resources: { skills: [], mcps: [], kb: ["house-style"] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const confinement = await resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "dev",
+        backend: "claude",
+        delivers: true,
+      },
+    );
+    expect(confinement.runInputs.knowledge).toEqual(["house-style"]);
+    expect(confinement.runInputs.unresolvedResources.map((r) => r.name)).toContain(
+      "house-style",
+    );
+    expect(confinement.runInputs.tools.denied).toEqual(confinement.disallowedTools);
+    expect(confinement.runInputs.delivers).toBe(true);
+  });
+
+  it("says so when a resumed run's profile cannot be resolved at all", async () => {
+    // The conservative branch. It withholds every delivery tool — and now says
+    // WHY on the run, instead of a console that just looks unusually quiet.
+    const confinement = await resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "vanished",
+        backend: "claude",
+        delivers: true,
+      },
+    );
+    expect(confinement.runInputs.unresolvedResources[0]?.name).toBe("vanished");
+    expect(confinement.runInputs.unresolvedResources[0]?.reason).toContain(
+      "fully withheld",
+    );
+    expect(confinement.runInputs.tools.denied.length).toBeGreaterThan(0);
+  });
+
+  it("records which granted skills MOUNTED natively and which rode the prompt", async () => {
+    // R18-5's disclosure promise, per run: the same grant reaches Claude as a
+    // native mount and Codex as prompt text, and until now neither surface
+    // said which had happened. A run with no checkout cannot mount anything —
+    // this project has no repo, so the grant is carried as text.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            resources: { skills: ["conventional-commits"], mcps: [], kb: [] },
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const runId = await assignAndRun();
+    const inputs = inputsLine(runId);
+    expect(inputs!.skills.granted).toEqual(["conventional-commits"]);
+    expect(inputs!.skills.native).toEqual([]);
+    expect(inputs!.skills.injected).toEqual(["conventional-commits"]);
   });
 });

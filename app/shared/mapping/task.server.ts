@@ -19,6 +19,7 @@ import {
   decodeActorRef,
   systemIdToName,
 } from "~/server/files/actor-ref.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 
 /**
  * Centralized snake_case → camelCase mapping for `task_projections` and the
@@ -118,6 +119,24 @@ export interface TaskSummary {
    *  revision is acceptance-ready, else why it isn't. Projected so read models
    *  (review queue) don't re-read task files on a loader path. */
   blockReason: string | null;
+  /**
+   * F19-27 — does this task stand where a completion may be accepted FROM?
+   *
+   * The STAGE gate, and only that: `acceptanceStageBlockedReason`
+   * (task-actions.server.ts) is the one acceptance refusal `blockReason` above
+   * deliberately leaves out (see `acceptanceBlockReason`, rebuilder.server.ts),
+   * because it turns on the PROJECT's workflow graph rather than anything in the
+   * task file. So a board drag from the entry stage straight into the terminal
+   * one opened a confident accept dialog with no blocked row and the server then
+   * refused the click with a 409. Projected here — `isAtAcceptanceBoundary`
+   * mirrors the server predicate against the same stages + edges — so the
+   * client can answer it without the graph.
+   *
+   * NOT the same as `AcceptanceAffordance.atBoundary`, which folds in the
+   * archived check; an archived task has its own row, from its own shared
+   * predicate (`archivedTaskBlockedReason`).
+   */
+  atAcceptanceBoundary: boolean;
   owner: ActorRender | null;
   specialist: AgentRender | null;
   reviewers: AgentRender[];
@@ -196,6 +215,35 @@ export function mapPrMergeable(pr: PrRef | null): PrMergeable | null {
   return pr.state === "review" || pr.state === "accepted" ? pr.mergeable : null;
 }
 
+/**
+ * F19-27 — the client-answerable half of `acceptanceStageBlockedReason`
+ * (task-actions.server.ts): may a completion be accepted FROM `stageId`?
+ *
+ * Same three questions the server asks, against the same `resolveStageRoles`
+ * the server resolves the terminal/review ids with, so the two cannot drift:
+ * acceptance is the human authority at the boundary the workflow puts before
+ * the terminal stage, so it may only be exercised from a stage with a declared
+ * edge into that stage (a custom board may have several) or from the resolved
+ * review stage. Everything else must walk the graph first.
+ *
+ * True — not false — when there is no terminal stage to reason about or the
+ * task is ALREADY terminal: the server refuses neither (its writers' idempotent
+ * "already Done" return owns the second), and a projected `false` there would
+ * put a refusal on a click the server would accept.
+ */
+export function isAtAcceptanceBoundary(
+  stageId: string,
+  stages: readonly { id: string }[],
+  workflow: readonly { from: string; to: string }[],
+): boolean {
+  const { terminalId, reviewId } = resolveStageRoles(stages, workflow);
+  if (terminalId === null || stageId === terminalId) return true;
+  return (
+    workflow.some((w) => w.from === stageId && w.to === terminalId) ||
+    stageId === reviewId
+  );
+}
+
 function agentBackendName(backend: "codex" | "claude"): string {
   return backend === "codex" ? "Codex" : "Claude Code";
 }
@@ -263,6 +311,10 @@ export function mapTaskProjectionRow(
   context: {
     /** Project stages in order — id for position, name for display copy. */
     stages: { id: string; name: string }[];
+    /** F19-27: the project's workflow edges — the ONLY source for the
+     *  acceptance-boundary fact below. Empty is legal (a graph-less project
+     *  resolves its roles positionally, exactly as the server does). */
+    workflow: readonly { from: string; to: string }[];
     /** Resolved owner render shape (null when unowned/unknown). */
     owner: ActorRender | null;
     accepted: boolean;
@@ -302,6 +354,11 @@ export function mapTaskProjectionRow(
     archived: row.archived === 1,
     validation: row.validation,
     blockReason: row.validation_block_reason,
+    atAcceptanceBoundary: isAtAcceptanceBoundary(
+      row.stage,
+      context.stages,
+      context.workflow,
+    ),
     owner: context.owner,
     specialist,
     reviewers,
