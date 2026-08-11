@@ -139,6 +139,131 @@ describe("AgentLogsPanel", () => {
     expect(queryByText("friendly text")).toBeNull();
   });
 
+  /* ---------------------------------------------------------- P19-RC1 */
+
+  it("folds a reasoning RUN behind a measured summary, and the raw toggle still shows every line", () => {
+    const rawA = '{"type":"reasoning","text":"weighing the options"}';
+    const rawB = '{"type":"reasoning","text":"picking the branch"}';
+    const { container, getByText, queryByText } = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 2 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{
+          primary: [
+            { display: { t: "10:00:01", ev: "think", tag: "reasoning", text: "weighing the options" }, raw: rawA },
+            { display: { t: "10:00:05", ev: "think", tag: "reasoning", text: "picking the branch" }, raw: rawB },
+          ],
+        }}
+      />,
+    );
+    // Folded: the summary is measured from the stored clocks, and the steps are
+    // behind it rather than gone.
+    expect(getByText("Thought for 4s · 2 steps")).toBeTruthy();
+    expect(queryByText("weighing the options")).toBeNull();
+    fireEvent.click(getByText("Thought for 4s · 2 steps"));
+    expect(getByText("weighing the options")).toBeTruthy();
+    expect(getByText("picking the branch")).toBeTruthy();
+
+    // …and `raw` is authoritative: no fold, both stored envelopes verbatim.
+    fireEvent.click(getByText("{ } raw"));
+    expect(container.textContent).toContain(rawA);
+    expect(container.textContent).toContain(rawB);
+    expect(queryByText(/Thought for/)).toBeNull();
+  });
+
+  it("renders a tool call as a chip and file changes as per-file chips", () => {
+    const { container, getByText, queryByText } = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 2 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{
+          primary: [
+            { display: { t: "10:00:01", ev: "tool", tag: "tool_use", name: "Bash", text: "npm run build" }, raw: '{"type":"tool_use","name":"Bash"}' },
+            {
+              display: {
+                t: "10:00:02", ev: "diff", tag: "file_change", text: "2 files",
+                changes: [
+                  { path: "app/a.ts", kind: "add" },
+                  { path: "app/b.ts", kind: "delete" },
+                ],
+              },
+              raw: '{"type":"file_change"}',
+            },
+          ],
+        }}
+      />,
+    );
+    expect(container.querySelector(".log-chip .lc-name")!.textContent).toBe("Bash");
+    expect(getByText("npm run build")).toBeTruthy();
+    const files = [...container.querySelectorAll(".log-file")];
+    expect(files.map((f) => f.textContent)).toEqual(["+app/a.ts", "−app/b.ts"]);
+    // WCAG 1.4.1: the kind is a glyph as well as a colour class.
+    expect(files[0]!.className).toContain("lf-add");
+    expect(files[1]!.className).toContain("lf-delete");
+
+    fireEvent.click(getByText("{ } raw"));
+    expect(container.querySelector(".log-chip")).toBeNull();
+    expect(container.querySelector(".log-file")).toBeNull();
+    expect(queryByText("npm run build")).toBeNull();
+  });
+
+  it("lifts multi-line output into a bounded block, whole and copyable", () => {
+    const out = ["> npm test", "", "34 passed", "done in 1.2s"].join("\n");
+    const { container, getByText } = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 1 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{
+          primary: [{ display: { t: "10:00:01", ev: "out", tag: "tool_result", text: out }, raw: '{"type":"tool_result"}' }],
+        }}
+      />,
+    );
+    const block = container.querySelector(".log-code")!;
+    expect(block).toBeTruthy();
+    // Every line is present — the block is bounded by CSS and scrolls, it never
+    // drops the tail of what the agent produced.
+    expect(container.querySelectorAll(".log-code .lk-line")).toHaveLength(4);
+    expect(block.textContent).toContain("34 passed");
+    expect(block.textContent).toContain("done in 1.2s");
+    expect(getByText("4 lines")).toBeTruthy();
+    // The text is not ALSO printed inline above the block.
+    expect(container.querySelectorAll(".log-line.out .lx")[0]!.textContent).toBe(
+      block.textContent,
+    );
+  });
+
+  it("colours diff polarity on top of the glyph the stored line already carries", () => {
+    const { container } = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 1 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{
+          primary: [
+            {
+              display: {
+                t: "10:00:01", ev: "diff", tag: "patch",
+                text: ["--- a/app/a.ts", "+++ b/app/a.ts", "+const next = 1;", "-const prev = 0;", " unchanged"].join("\n"),
+              },
+              raw: '{"type":"patch"}',
+            },
+          ],
+        }}
+      />,
+    );
+    const lines = [...container.querySelectorAll(".log-code .lk-line")];
+    expect(lines.map((l) => l.className)).toEqual([
+      "lk-line", // --- header, not a removal
+      "lk-line", // +++ header, not an addition
+      "lk-line lk-add",
+      "lk-line lk-del",
+      "lk-line",
+    ]);
+  });
+
   // P14-WL-02: the console rendered `rate_limit_event` JSON blobs and dozens of
   // `system·thinking_tokens` rows as ordinary timeline lines, burying the run.
   it("folds wire telemetry into one row, and the raw toggle still shows it", () => {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { PillKind } from "~/ui/pill";
+import type { ConsoleEntry } from "./log-noise";
 import {
   isRunBoundary,
   isRunInputsLine,
@@ -233,6 +234,174 @@ export function runInputRows(inputs: RunInputs): RunInputRow[] {
   });
 
   return rows;
+}
+
+/* ---------------------------------------------------------------- console
+ *
+ * P19-RC1 — the console renders one flat row per line, for every `ev` kind.
+ * The projection already distinguishes reasoning (`think`), tool calls
+ * (`tool`, with `name`/`input`), file changes (`changes`) and multi-line
+ * output (`out`, `diff`) — and then paints all of them as the same grid row,
+ * so a reader scanning for "what did it DO" wades through the model narrating
+ * itself, and a 200-line command dump pushes the next real event off screen.
+ *
+ * These helpers fold that structure back out. They are pure, so what a reader
+ * is shown about a run is unit-testable against the stored lines rather than
+ * only reachable by rendering a panel — the same contract `runInputRows` and
+ * `collapseTelemetry` already hold.
+ *
+ * ONE RULE ABOVE ALL: every one of them is a NO-OP under `raw`. The
+ * `{ } raw` toggle's whole contract is "what the provider sent", so grouping,
+ * chips and blocks must never reshape it (see `collapseTelemetry`).
+ */
+
+/**
+ * A console block: a real row, a folded telemetry run (`collapseTelemetry`), or
+ * a folded THOUGHT run. Additive over `ConsoleEntry` so the existing pipeline
+ * keeps its meaning and only the new kind has to be handled.
+ */
+export type ConsoleBlock<T> = ConsoleEntry<T> | { kind: "thought"; lines: T[] };
+
+/** True when a line is the model narrating its own reasoning. */
+export function isThoughtLine(line: LogLine): boolean {
+  return line.ev === "think";
+}
+
+/**
+ * Fold consecutive reasoning lines into one collapsible block.
+ *
+ * Consecutive only: a thought run broken by a tool call is two blocks, because
+ * that IS the shape of the work — collapsing across the call would tell the
+ * reader the agent thought once when it thought, acted, and thought again.
+ *
+ * A single thought line is left as an ordinary row: wrapping one line in a
+ * "1 step" disclosure adds a click and hides a line for nothing.
+ */
+export function groupThoughts<T extends { display: LogLine }>(
+  entries: readonly ConsoleEntry<T>[],
+  raw: boolean,
+): ConsoleBlock<T>[] {
+  if (raw) return [...entries];
+  const out: ConsoleBlock<T>[] = [];
+  for (const entry of entries) {
+    if (entry.kind !== "line" || !isThoughtLine(entry.line.display)) {
+      out.push(entry);
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last && last.kind === "thought") {
+      last.lines.push(entry.line);
+      continue;
+    }
+    out.push({ kind: "thought", lines: [entry.line] });
+  }
+  // Unfold the runs that never grew past one line.
+  return out.map((block) =>
+    block.kind === "thought" && block.lines.length === 1
+      ? ({ kind: "line", line: block.lines[0]! } as ConsoleBlock<T>)
+      : block,
+  );
+}
+
+/** `HH:MM:SS` → seconds, or null when the clock is not readable. */
+function clockSeconds(t: string): number | null {
+  const m = /^(\d{2}):(\d{2}):(\d{2})$/.exec(t);
+  if (!m) return null;
+  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+}
+
+/**
+ * The folded block's own copy — how long the agent reasoned and in how many
+ * steps.
+ *
+ * The duration is MEASURED between the first and last line's stored clock, and
+ * is simply omitted when that span is zero or unreadable. A thinking block that
+ * invents "4s" because it looks better than "3 steps" is the fabricated-signal
+ * failure this codebase keeps ruling against — and the reader can always open
+ * the block and read the timestamps that produced it.
+ */
+export function thoughtLabel(lines: readonly { display: LogLine }[]): string {
+  const steps = `${lines.length} step${lines.length === 1 ? "" : "s"}`;
+  const first = clockSeconds(lines[0]!.display.t);
+  const last = clockSeconds(lines[lines.length - 1]!.display.t);
+  if (first === null || last === null) return `Thought · ${steps}`;
+  // A block that crosses midnight would read negative; treat it as unmeasured
+  // rather than printing a wrong number.
+  const span = last - first;
+  if (span <= 0) return `Thought · ${steps}`;
+  return `Thought for ${span}s · ${steps}`;
+}
+
+/** A tool call reduced to what a scanning reader needs: the verb and its target. */
+export interface ToolChip {
+  /** The tool's own name — `Bash`, `Read`, `exec`… */
+  name: string;
+  /** What it was pointed at; empty when the line carried only a name. */
+  detail: string;
+}
+
+/**
+ * `tool` lines → a chip. Returns null for anything else, so the caller keeps
+ * one branch and the row rendering stays the default.
+ *
+ * `name` is the projection's own field (Claude's tool name, codex's `exec`);
+ * when a provider sent none there is nothing to promote and the line stays a
+ * plain row rather than getting a chip labelled with a guess.
+ */
+export function toolChip(line: LogLine): ToolChip | null {
+  if (line.ev !== "tool" || !line.name) return null;
+  return { name: line.name, detail: line.text };
+}
+
+/** One file a run touched, as the `file_change` envelope recorded it. */
+export interface FileChangeChip {
+  path: string;
+  kind: "add" | "update" | "delete";
+}
+
+/**
+ * `changes` → per-file chips.
+ *
+ * Deliberately NO line counts: the envelope records a path and a kind, and
+ * nothing else. A "+74 −41" next to a file the record cannot support would be
+ * invented, so the chip shows the kind the provider actually reported.
+ */
+export function fileChangeChips(line: LogLine): FileChangeChip[] | null {
+  if (!line.changes || line.changes.length === 0) return null;
+  return line.changes.map((c) => ({ path: c.path, kind: c.kind }));
+}
+
+/** Multi-line output lifted out of the row and into its own bounded block. */
+export interface ConsoleCodeBlock {
+  code: string;
+  /** Diffs get per-line +/- colouring; other output is plain. */
+  diff: boolean;
+}
+
+/**
+ * Multi-line `out` / `diff` text → a code block.
+ *
+ * Single-line output stays inline: a one-line `✓ built in 1.2s` in a framed,
+ * scrollable box is more furniture than information. Nothing is truncated —
+ * the block is bounded by CSS and scrolls — because a console that quietly
+ * drops the tail of a command's output is the failure mode the raw toggle
+ * exists to make impossible.
+ *
+ * No language label. The projection carries no language, and guessing one from
+ * a path would put a confident wrong word ("TypeScript") on a shell transcript.
+ */
+export function consoleCodeBlock(line: LogLine): ConsoleCodeBlock | null {
+  if (line.ev !== "out" && line.ev !== "diff") return null;
+  if (!line.text.includes("\n")) return null;
+  return { code: line.text, diff: line.ev === "diff" };
+}
+
+/** Per-line class for a diff block — `+` adds, `-` removes, everything else plain. */
+export function diffLineKind(line: string): "add" | "del" | null {
+  if (line.startsWith("+++") || line.startsWith("---")) return null;
+  if (line.startsWith("+")) return "add";
+  if (line.startsWith("-")) return "del";
+  return null;
 }
 
 /**

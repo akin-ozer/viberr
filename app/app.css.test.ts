@@ -1544,6 +1544,14 @@ const RENDERED_INSIDE: Record<string, { container: string; why: string }> = {
     container: ".console",
     why: "runs-panels.tsx renders every log row inside `div.console`, which paints a fixed near-black fill in BOTH themes (that is why these rules use literal hex rather than tokens — see the .log-more comment). Measured against --bg/--surface they would read as failures in light and the console's real contrast would go unchecked.",
   },
+  "log-chip": {
+    container: ".console",
+    why: "P19-RC1 tool chips render inside a `.log-line`'s `.lx`, which is inside `div.console` (runs-panels.tsx) — the same fixed near-black fill every log row is measured against.",
+  },
+  "log-file": {
+    container: ".console",
+    why: "P19-RC1 file-change chips render inside a `.log-line`'s `.lx`, which is inside `div.console` (runs-panels.tsx). Their add/update/delete tints are console-palette, so --bg/--surface would measure them against a backdrop they never touch.",
+  },
   lcaret: {
     container: ".console",
     why: "the tail caret is the last child of `div.console` (runs-panels.tsx) — same fixed dark fill as the log rows it marks the end of.",

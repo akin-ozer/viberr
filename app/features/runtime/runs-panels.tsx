@@ -16,14 +16,21 @@ function finishedClock(value: string, hydrated: boolean): string {
 }
 import { Pill } from "~/ui/pill";
 import {
+  consoleCodeBlock,
+  diffLineKind,
+  fileChangeChips,
   fmtClock,
   fmtTok,
+  groupThoughts,
   hoistRunInputs,
   roleShort,
   runInputRows,
   runLabel,
   runStatePill,
+  thoughtLabel,
+  toolChip,
   useElapsed,
+  type ConsoleCodeBlock,
 } from "./runs-helpers";
 import { localLogClock } from "./log-clock";
 import { collapseTelemetry, telemetryLabel } from "./log-noise";
@@ -335,6 +342,69 @@ function SessionIdChip({
 }
 
 /**
+ * P19-RC1: the mark on a file-change chip. A glyph AND a class, never colour
+ * alone — WCAG 1.4.1: a reader who cannot separate the green from the red must
+ * still be able to tell an added file from a deleted one. The `title` carries
+ * the word itself for anyone who needs it spelled out.
+ */
+const FILE_KIND_MARK: Record<"add" | "update" | "delete", string> = {
+  add: "+",
+  update: "~",
+  delete: "−",
+};
+
+/**
+ * P19-RC1 — multi-line command output and diffs, lifted out of the grid row
+ * into their own bounded block.
+ *
+ * Bounded by CSS and SCROLLABLE rather than truncated: the console's promise is
+ * that what the agent produced is readable, so silently dropping the tail of a
+ * 300-line build log would be the exact dishonesty the `{ } raw` toggle exists
+ * to rule out. Copy hands the reader the whole thing regardless of scroll.
+ */
+function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(block.code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard denied (permissions, insecure origin): the text is on screen
+      // and selectable, which is the fallback that always works.
+    }
+  };
+  const lines = block.code.split("\n");
+  return (
+    <span className="log-code">
+      <span className="lk-head">
+        <span className="lk-meta">
+          {lines.length} line{lines.length === 1 ? "" : "s"}
+        </span>
+        <button
+          type="button"
+          className="log-more"
+          onClick={copy}
+          aria-label="Copy this output"
+        >
+          {copied ? "copied" : "copy"}
+        </button>
+      </span>
+      <span className="lk-body">
+        {lines.map((line, n) => {
+          const kind = block.diff ? diffLineKind(line) : null;
+          return (
+            <span className={"lk-line" + (kind ? " lk-" + kind : "")} key={n}>
+              {line === "" ? " " : line}
+            </span>
+          );
+        })}
+      </span>
+    </span>
+  );
+}
+
+/**
  * The "Agent logs" dark console. Live streaming is fed by the dedicated SSE
  * consumer (`linesByThread`) — NOT loader revalidation. The raw toggle
  * renders the stored wire envelope verbatim (runs.md §5.4).
@@ -377,6 +447,12 @@ export function AgentLogsPanel({
    * backward paging — an array index does not).
    */
   const [openInputs, setOpenInputs] = useState<string[]>([]);
+  /**
+   * P19-RC1: which folded reasoning blocks are expanded, keyed the same way the
+   * input disclosures are — by the first line's stored envelope, so the key
+   * survives streaming, folding and backward paging.
+   */
+  const [openThoughts, setOpenThoughts] = useState<string[]>([]);
   const hydrated = useHydrated();
   const boxRef = useRef<HTMLDivElement>(null);
   /**
@@ -406,7 +482,13 @@ export function AgentLogsPanel({
   // P19-G11: each run's `run·inputs` disclosure is restored to the head of its
   // own block first (see `hoistRunInputs`) — what the run was GIVEN reads before
   // what it produced.
-  const entries = collapseTelemetry(hoistRunInputs(shown), raw);
+  // P19-RC1: …and consecutive reasoning lines fold into one block on top of
+  // that. Both foldings are no-ops under `raw`, which keeps the stored stream
+  // the authoritative view of what the provider sent.
+  const entries = groupThoughts(
+    collapseTelemetry(hoistRunInputs(shown), raw),
+    raw,
+  );
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -605,6 +687,55 @@ export function AgentLogsPanel({
               </div>
             );
           }
+          // P19-RC1: a run of reasoning lines, folded into one disclosure. The
+          // model narrating itself is the bulkiest thing in most consoles and
+          // the least often the thing a reader came for — so it is summarised
+          // (measured duration + step count) and opened on demand, exactly like
+          // the telemetry fold above it. `raw` never reaches here: groupThoughts
+          // returns the entries untouched under it.
+          if (entry.kind === "thought") {
+            const key = entry.lines[0]!.raw;
+            const open = openThoughts.includes(key);
+            const head = entry.lines[0]!.display;
+            return (
+              <Fragment key={i}>
+                <div className="log-line think">
+                  <span className="lt">
+                    {hydrated ? localLogClock(head.t, cur!.startedAt) : head.t}
+                  </span>
+                  <span className="ltag">thinking</span>
+                  <span className="lx">
+                    <button
+                      type="button"
+                      className="log-more"
+                      aria-expanded={open}
+                      onClick={() =>
+                        setOpenThoughts((prev) =>
+                          prev.includes(key)
+                            ? prev.filter((k) => k !== key)
+                            : [...prev, key],
+                        )
+                      }
+                    >
+                      {thoughtLabel(entry.lines)}
+                    </button>
+                  </span>
+                </div>
+                {open &&
+                  entry.lines.map((line, n) => (
+                    <div className="log-line think tstep" key={n}>
+                      <span className="lt">
+                        {hydrated
+                          ? localLogClock(line.display.t, cur!.startedAt)
+                          : line.display.t}
+                      </span>
+                      <span className="ltag">{line.display.tag}</span>
+                      <span className="lx">{line.display.text}</span>
+                    </div>
+                  ))}
+              </Fragment>
+            );
+          }
           const display = entry.line.display;
           // F15-08: the stored `t` is a UTC wall clock; the timeline on the
           // same page is local. One story per page. Until hydration the raw UTC
@@ -661,6 +792,12 @@ export function AgentLogsPanel({
               </Fragment>
             );
           }
+          // P19-RC1: the three shapes the projection already distinguishes and
+          // the console used to flatten. All three are computed only when `raw`
+          // is off — under it the stored envelope prints verbatim, unchanged.
+          const chip = raw ? null : toolChip(display);
+          const files = raw ? null : fileChangeChips(display);
+          const code = raw ? null : consoleCodeBlock(display);
           return (
             <div className={"log-line " + display.ev} key={i}>
               <span className="lt">{clock}</span>
@@ -670,8 +807,34 @@ export function AgentLogsPanel({
                   entry.line.raw
                 ) : (
                   <>
-                    {display.name ? <b className="ln">{display.name} </b> : null}
-                    {display.text}
+                    {chip ? (
+                      <span className="log-chip">
+                        <span className="lc-name">{chip.name}</span>
+                        {chip.detail ? (
+                          <span className="lc-detail">{chip.detail}</span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      <>
+                        {display.name ? (
+                          <b className="ln">{display.name} </b>
+                        ) : null}
+                        {/* When the text IS the block below, printing it here
+                            too would render the whole dump twice. */}
+                        {code ? null : display.text}
+                      </>
+                    )}
+                    {files ? (
+                      <span className="log-files">
+                        {files.map((f, n) => (
+                          <span className={"log-file lf-" + f.kind} key={n}>
+                            <span className="lf-kind">{FILE_KIND_MARK[f.kind]}</span>
+                            {f.path}
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
+                    {code ? <ConsoleCode block={code} /> : null}
                   </>
                 )}
               </span>

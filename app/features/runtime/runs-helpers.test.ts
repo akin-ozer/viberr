@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  consoleCodeBlock,
+  diffLineKind,
+  fileChangeChips,
   fmtClock,
   fmtTok,
+  groupThoughts,
   hoistRunInputs,
   roleShort,
   runInputRows,
   runLabel,
   runStatePill,
   RUN_STATE,
+  thoughtLabel,
+  toolChip,
 } from "./runs-helpers";
 import {
   runBoundaryLine,
@@ -202,5 +208,166 @@ describe("runInputRows (P19-G11)", () => {
     expect(byTag.mcp).toContain("granted but NOT mounted (no such server): vm-memory");
     expect(byTag.mcp).toContain("last connection check failed: broken-mcp");
     expect(byTag.missing).toContain("house-style (no such knowledge base)");
+  });
+});
+
+
+/* ------------------------------------------------------------------ P19-RC1
+ *
+ * The console projected `think` / `tool` / `out` / `diff` and painted them all
+ * as the same flat row. These fold that structure back out — and every one of
+ * them must be a NO-OP under `raw`, whose contract is "what the provider sent".
+ */
+
+const L = (over: Partial<LogLine> = {}): LogLine => ({
+  t: "10:00:00",
+  ev: "text",
+  tag: "agent_message",
+  text: "hello",
+  ...over,
+});
+const R = (display: LogLine, raw = "{}") => ({ display, raw });
+const line = <T,>(l: T) => ({ kind: "line" as const, line: l });
+
+describe("groupThoughts (P19-RC1)", () => {
+  it("folds a RUN of reasoning lines into one block", () => {
+    const a = R(L({ ev: "think", text: "step one" }), "{a}");
+    const b = R(L({ ev: "think", text: "step two" }), "{b}");
+    const out = groupThoughts([line(a), line(b)], false);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.kind).toBe("thought");
+    if (out[0]!.kind === "thought") expect(out[0]!.lines).toEqual([a, b]);
+  });
+
+  it("does NOT fold across the work between two thoughts", () => {
+    // Thought → acted → thought is the real shape of the turn. One merged
+    // block would tell the reader the agent thought once.
+    const out = groupThoughts(
+      [
+        line(R(L({ ev: "think", text: "before" }))),
+        line(R(L({ ev: "tool", tag: "tool_use", name: "Bash", text: "npm test" }))),
+        line(R(L({ ev: "think", text: "after" }))),
+      ],
+      false,
+    );
+    expect(out.map((b) => b.kind)).toEqual(["line", "line", "line"]);
+  });
+
+  it("leaves a LONE reasoning line as an ordinary row", () => {
+    // A "1 step" disclosure would hide a line behind a click for nothing.
+    const out = groupThoughts([line(R(L({ ev: "think" })))], false);
+    expect(out.map((b) => b.kind)).toEqual(["line"]);
+  });
+
+  it("is a NO-OP under raw — the stored stream is never reshaped", () => {
+    const entries = [
+      line(R(L({ ev: "think", text: "one" }))),
+      line(R(L({ ev: "think", text: "two" }))),
+    ];
+    expect(groupThoughts(entries, true)).toEqual(entries);
+  });
+
+  it("carries telemetry blocks through untouched", () => {
+    const tele = { kind: "telemetry" as const, count: 3, tags: ["token_count"] };
+    expect(groupThoughts([tele], false)).toEqual([tele]);
+  });
+});
+
+describe("thoughtLabel (P19-RC1)", () => {
+  it("MEASURES the span from the stored clocks", () => {
+    expect(
+      thoughtLabel([R(L({ t: "10:00:01" })), R(L({ t: "10:00:05" }))]),
+    ).toBe("Thought for 4s · 2 steps");
+  });
+
+  it("omits a duration it cannot measure rather than inventing one", () => {
+    // Same second, unreadable clock, or a midnight wrap: say the step count and
+    // stop. A fabricated "4s" because it reads better is the exact
+    // invented-signal failure this codebase keeps ruling out.
+    expect(thoughtLabel([R(L({ t: "10:00:02" })), R(L({ t: "10:00:02" }))])).toBe(
+      "Thought · 2 steps",
+    );
+    expect(thoughtLabel([R(L({ t: "nope" })), R(L({ t: "10:00:05" }))])).toBe(
+      "Thought · 2 steps",
+    );
+    expect(thoughtLabel([R(L({ t: "23:59:59" })), R(L({ t: "00:00:03" }))])).toBe(
+      "Thought · 2 steps",
+    );
+  });
+});
+
+describe("toolChip (P19-RC1)", () => {
+  it("promotes the tool's own name and target", () => {
+    expect(toolChip(L({ ev: "tool", name: "Bash", text: "npm run build" }))).toEqual({
+      name: "Bash",
+      detail: "npm run build",
+    });
+  });
+
+  it("declines anything that is not a named tool call", () => {
+    // No name = nothing the provider actually reported; a chip labelled with a
+    // guess is worse than the plain row.
+    expect(toolChip(L({ ev: "tool", text: "no name" }))).toBeNull();
+    expect(toolChip(L({ ev: "text", name: "Bash" }))).toBeNull();
+  });
+});
+
+describe("fileChangeChips (P19-RC1)", () => {
+  it("reports the path and the KIND the envelope recorded", () => {
+    const chips = fileChangeChips(
+      L({
+        ev: "diff",
+        changes: [
+          { path: "app/a.ts", kind: "add" },
+          { path: "app/b.ts", kind: "delete" },
+        ],
+      }),
+    );
+    expect(chips).toEqual([
+      { path: "app/a.ts", kind: "add" },
+      { path: "app/b.ts", kind: "delete" },
+    ]);
+    // Deliberately no line counts: `changes` carries a path and a kind, so a
+    // "+74 −41" beside it would be invented.
+    expect(JSON.stringify(chips)).not.toMatch(/[+-]\d/);
+  });
+
+  it("is null when the line recorded no changes", () => {
+    expect(fileChangeChips(L({ ev: "diff" }))).toBeNull();
+    expect(fileChangeChips(L({ ev: "diff", changes: [] }))).toBeNull();
+  });
+});
+
+describe("consoleCodeBlock (P19-RC1)", () => {
+  it("lifts MULTI-line output and diffs out of the row", () => {
+    expect(consoleCodeBlock(L({ ev: "out", text: "a\nb" }))).toEqual({
+      code: "a\nb",
+      diff: false,
+    });
+    expect(consoleCodeBlock(L({ ev: "diff", text: "+a\n-b" }))).toEqual({
+      code: "+a\n-b",
+      diff: true,
+    });
+  });
+
+  it("leaves a single line inline, and other kinds alone", () => {
+    expect(consoleCodeBlock(L({ ev: "out", text: "built in 1.2s" }))).toBeNull();
+    expect(consoleCodeBlock(L({ ev: "text", text: "a\nb" }))).toBeNull();
+  });
+
+  it("never truncates — the whole output is the block's content", () => {
+    const long = Array.from({ length: 400 }, (_, i) => `line ${i}`).join("\n");
+    expect(consoleCodeBlock(L({ ev: "out", text: long }))!.code).toBe(long);
+  });
+});
+
+describe("diffLineKind (P19-RC1)", () => {
+  it("marks adds and removals, and spares the file headers", () => {
+    expect(diffLineKind("+ added")).toBe("add");
+    expect(diffLineKind("- removed")).toBe("del");
+    expect(diffLineKind(" context")).toBeNull();
+    // `+++ b/file` / `--- a/file` are headers, not content.
+    expect(diffLineKind("+++ b/app/a.ts")).toBeNull();
+    expect(diffLineKind("--- a/app/a.ts")).toBeNull();
   });
 });
