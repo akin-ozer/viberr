@@ -23,6 +23,7 @@ import {
   listKnowledgeBases,
   listSkills,
   type McpSpawn,
+  listMcpServers,
   probeMcpTarget,
   reindexKnowledgeBase,
   reindexKnowledgeBaseByDir,
@@ -575,6 +576,20 @@ describe("mcp servers", () => {
     );
     expect(leaky.toast).toContain("fatal: giving up");
     expect(leaky.toast).not.toContain("sk-live-abcdefghijklmnop");
+
+    /* R19-17: the reason PERSISTS on the row, so it is still there after the
+       toast is gone — and a passing retest clears it, because a stale
+       explanation under a green dot is worse than none. */
+    expect(
+      listMcpServers(db).find((m) => m.name === "crashing-stdio")!.lastError,
+    ).toContain("ImportError: cannot import name 'McpError'");
+    const crashedId = listMcpServers(db).find(
+      (m) => m.name === "crashing-stdio",
+    )!.id;
+    const recovered = await testMcpServer(db, crashedId, {
+      spawnImpl: fakeMcpSpawn(3),
+    });
+    expect(recovered.mcp).toMatchObject({ up: true, tools: 3, lastError: null });
 
     // Duplicate name guard.
     await expect(

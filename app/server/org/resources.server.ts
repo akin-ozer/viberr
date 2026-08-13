@@ -528,6 +528,14 @@ export interface McpView {
   /** true up · false down · null never probed / not probeable (stdio). */
   up: boolean | null;
   lastCheckedAt: string | null;
+  /**
+   * R19-17: why the last probe failed, in the command's own words (already
+   * scrubbed of the credential the child was spawned with). NULL when the
+   * server is up or was never probed — the reason used to live only in a toast,
+   * so the moment it faded a red dot was the whole story and the admin had to
+   * re-run the test to find out why again.
+   */
+  lastError: string | null;
 }
 
 interface McpRow {
@@ -539,6 +547,7 @@ interface McpRow {
   tools_count: number | null;
   up: number | null;
   last_checked_at: string | null;
+  last_error: string | null;
 }
 
 function mapMcp(row: McpRow): McpView {
@@ -556,6 +565,7 @@ function mapMcp(row: McpRow): McpView {
     tools: row.tools_count,
     up: row.up === null ? null : row.up === 1,
     lastCheckedAt: row.last_checked_at,
+    lastError: row.last_error,
   };
 }
 
@@ -687,7 +697,7 @@ function openedForNewRow(
 }
 
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
-                        up, last_checked_at FROM org_mcp_servers`;
+                        up, last_checked_at, last_error FROM org_mcp_servers`;
 
 export function listMcpServers(db: DatabaseSync): McpView[] {
   const rows = db
@@ -1215,6 +1225,9 @@ export async function saveMcpServer(
   const checkedAt: string | null = now;
   const up = disc.kind === "up" ? 1 : 0;
   const tools = disc.kind === "up" ? disc.tools : null;
+  // R19-17: a failure keeps its reason on the row; a success CLEARS it, so a
+  // stale explanation can never sit under a green dot.
+  const lastError = disc.kind === "up" ? null : disc.reason;
   const spawnNote = transport === "stdio" ? " · spawned per run" : "";
   const credNote = credOpened.unreadable
     ? " · its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
@@ -1240,9 +1253,10 @@ export async function saveMcpServer(
     db.prepare(
       `UPDATE org_mcp_servers
        SET name = ?, transport = ?, target = ?, cred_ref = ?,
-           tools_count = ?, up = ?, last_checked_at = ?, updated_at = ?
+           tools_count = ?, up = ?, last_checked_at = ?, last_error = ?,
+           updated_at = ?
        WHERE id = ?`,
-    ).run(name, transport, target, cred, tools, up, checkedAt, now, id);
+    ).run(name, transport, target, cred, tools, up, checkedAt, lastError, now, id);
     // P14-KM-01: an MCP grant is a NAME reference, and this was the one rename
     // leg that never rewrote it — KB and skill renames did, every delete dropped
     // its grants, but renaming a server left each profile pointing at a name the
@@ -1264,9 +1278,9 @@ export async function saveMcpServer(
     db.prepare(
       `INSERT INTO org_mcp_servers
          (id, name, transport, target, cred_ref, tools_count, up,
-          last_checked_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, name, transport, target, cred, tools, up, checkedAt, now, now);
+          last_checked_at, last_error, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, name, transport, target, cred, tools, up, checkedAt, lastError, now, now);
     recordAudit(db, {
       action: "org.mcp.added",
       actor,
@@ -1312,7 +1326,8 @@ export async function testMcpServer(
   if (disc.kind === "up") {
     db.prepare(
       `UPDATE org_mcp_servers
-       SET up = 1, tools_count = ?, last_checked_at = ?, updated_at = ?
+       SET up = 1, tools_count = ?, last_checked_at = ?, last_error = NULL,
+           updated_at = ?
        WHERE id = ?`,
     ).run(disc.tools, now, now, id);
     const fresh = getMcpServer(db, id)!;
@@ -1323,9 +1338,10 @@ export async function testMcpServer(
   }
   db.prepare(
     `UPDATE org_mcp_servers
-     SET up = 0, tools_count = NULL, last_checked_at = ?, updated_at = ?
+     SET up = 0, tools_count = NULL, last_checked_at = ?, last_error = ?,
+         updated_at = ?
      WHERE id = ?`,
-  ).run(now, now, id);
+  ).run(now, disc.reason, now, id);
   const fresh = getMcpServer(db, id)!;
   return {
     mcp: fresh,

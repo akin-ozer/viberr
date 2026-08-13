@@ -232,6 +232,15 @@ export function McpPanel({
                     (usedBy(m.name) === 1 ? "" : "s")
                   : ""}
               </span>
+              {/* R19-17: WHY it is unreachable, in the command's own words.
+                  The reason used to exist only in the toast the probe returned,
+                  so the moment it faded a red dot was the entire story and the
+                  only way to see the cause again was to re-run the test. It is
+                  scrubbed of the credential the child was spawned with before
+                  it is ever stored (`discoverStdioMcpTools`). */}
+              {m.up === false && m.lastError && (
+                <span className="rsrc-err mono">{m.lastError}</span>
+              )}
             </span>
             <span className="rsrc-acts">
               <button

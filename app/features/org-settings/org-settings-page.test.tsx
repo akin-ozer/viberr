@@ -320,9 +320,9 @@ const KBS: KbView[] = [
 ];
 const MCPS: McpView[] = [
   { id: "m1", name: "github-mcp", transport: "HTTP", target: "https://mcp.internal:7801/sse",
-    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString() },
+    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null },
   { id: "m2", name: "browserbase", transport: "HTTP", target: "https://mcp.internal:7809/sse",
-    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString() },
+    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null },
 ];
 const SKILLS: SkillView[] = [
   { id: "s1", name: "terraform-review", summary: "Module review checklist.",
@@ -370,6 +370,40 @@ describe("ResourcesPanel", () => {
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();
   });
 
+  it("R19-17: an unreachable MCP shows WHY on the row, not just a red dot", () => {
+    // The reason used to live only in the probe's toast, so once it faded the
+    // dot was the entire story and the cause was unrecoverable without
+    // re-running the test.
+    const failed: McpView[] = [
+      {
+        id: "m7",
+        name: "uvx-fetch",
+        transport: "stdio",
+        target: "uvx mcp-server-fetch",
+        hasCred: false,
+        tools: null,
+        up: false,
+        lastCheckedAt: new Date().toISOString(),
+        lastError:
+          "exited before responding — ImportError: cannot import name 'McpError' from 'mcp.shared.exceptions'",
+      },
+    ];
+    const { container } = renderPanel(
+      <ResourcesPanel kbs={[]} mcps={failed} skills={[]} gagents={[]} stages={STAGES} />,
+    );
+    const err = container.querySelector(".rsrc-err")!;
+    expect(err).toBeTruthy();
+    expect(err.textContent).toContain("ImportError: cannot import name 'McpError'");
+  });
+
+  it("R19-17: a HEALTHY server shows no error line", () => {
+    // A stale reason under a green dot would be worse than none.
+    const { container } = renderPanel(
+      <ResourcesPanel kbs={[]} mcps={MCPS.filter((m) => m.up === true)} skills={[]} gagents={[]} stages={STAGES} />,
+    );
+    expect(container.querySelector(".rsrc-err")).toBeNull();
+  });
+
   it("A9/F17: an MCP whose stored credential no longer decrypts reads 'auth: unreadable', not 'configured'", () => {
     const brokenMcps: McpView[] = [
       {
@@ -379,6 +413,7 @@ describe("ResourcesPanel", () => {
         target: "https://mcp.internal:7810/sse",
         hasCred: true,
         credUnreadable: true,
+        lastError: null,
         tools: null,
         up: null,
         lastCheckedAt: new Date().toISOString(),
@@ -444,7 +479,7 @@ describe("ResourcesPanel", () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     const staleMcps: McpView[] = [
       { id: "m3", name: "notes-fixture", transport: "stdio", target: "node /tmp/notes.mjs",
-        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo },
+        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null },
     ];
     const { container } = renderPanel(
       <ResourcesPanel kbs={[]} mcps={staleMcps} skills={[]} gagents={[]} stages={STAGES} />,

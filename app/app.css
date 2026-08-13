@@ -4113,3 +4113,30 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    +/− , so the colour is reinforcement rather than the only signal. */
 .log-code .lk-line.lk-add { color: #86e0b4; }
 .log-code .lk-line.lk-del { color: #f0a3a3; }
+
+/* R19-17 — why an MCP server is unreachable, on the row itself.
+   The probe's reason used to live only in the toast it returned, so once that
+   faded a red dot was the whole story. Monospace because the content is a
+   command's own output (a traceback, a `spawn … ENOENT`), and clamped in
+   height so one Python stack cannot push the rest of the list off screen —
+   it scrolls rather than truncating, since the last line is usually the one
+   that names the cause. */
+.rsrc-main .rsrc-err {
+  display: block;
+  /* Tall enough for the WHOLE clamped reason: `redactGitOutput` already bounds
+     it to 8 lines, so a tighter box here would re-clip content that was
+     deliberately kept — and it keeps the TAIL, where a traceback names the
+     actual error. `overflow` stays for a long unwrapped path. */
+  max-height: 9.5rem;
+  overflow: auto;
+  margin-top: .3rem;
+  padding: .35rem .5rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 78%);
+  background: color-mix(in srgb, var(--coral-light), var(--surface) 55%);
+  color: var(--coral-dark);
+  font-size: .68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

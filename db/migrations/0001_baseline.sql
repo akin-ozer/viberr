@@ -262,6 +262,10 @@ CREATE TABLE org_mcp_servers (
   tools_count INTEGER,                -- discovered tool count (NULL unknown)
   up INTEGER,                         -- 1 up · 0 down · NULL never probed
   last_checked_at TEXT,
+  -- R19-17: why the last probe failed, in the command's own words (scrubbed).
+  -- NULL when the server is up or was never probed — a stale reason next to a
+  -- green dot would be worse than none, so the up path CLEARS it.
+  last_error TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
