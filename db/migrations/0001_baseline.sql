@@ -262,6 +262,11 @@ CREATE TABLE org_mcp_servers (
   tools_count INTEGER,                -- discovered tool count (NULL unknown)
   up INTEGER,                         -- 1 up · 0 down · NULL never probed
   last_checked_at TEXT,
+  -- R19-18: set while a first-run install runs in the BACKGROUND for this
+  -- server (ISO). A command that is still fetching its dependencies is not a
+  -- broken one, so the row shows "installing" rather than a red dot, and the
+  -- warm-up writes the real verdict when it settles.
+  warming_since TEXT,
   -- R19-17: why the last probe failed, in the command's own words (scrubbed).
   -- NULL when the server is up or was never probed — a stale reason next to a
   -- green dot would be worse than none, so the up path CLEARS it.

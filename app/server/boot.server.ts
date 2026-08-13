@@ -20,6 +20,7 @@ import {
 import { startFileWatcher } from "./files/file-watch.service.server";
 import { startKbWatcher } from "./files/kb-watch.service.server";
 import { startGithubReconcilePoller } from "./github/reconcile-poller.server";
+import { reapStaleWarmups } from "~/server/org/mcp-warmup.server";
 import { logger } from "./logging/logger.server";
 import { getBuildInfo } from "./ops/build-info.server";
 import { formatBytes, measureDataRootSpace } from "./ops/disk-space.server";
@@ -118,6 +119,20 @@ export function logBootIntegrity(db: DatabaseSync): void {
  * Exported so the wiring is testable without booting a real server.
  */
 export function startStoreMaintenance(db: DatabaseSync): void {
+  try {
+    // R19-18: a background MCP install belongs to the process that started it,
+    // so a restart leaves rows flagged "installing" with no installer behind
+    // them. Clear them first — a stale flag is indistinguishable from a live
+    // one to the reader, and the row's own affordance (retest) restarts it.
+    const reaped = reapStaleWarmups(db);
+    if (reaped > 0) {
+      logger.info("cleared MCP installs interrupted by a restart", { reaped });
+    }
+  } catch (error) {
+    logger.error("could not clear interrupted MCP installs", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
   try {
     runMaintenancePass(db, { reason: "boot", reclaimWorkspaces: false });
   } catch (error) {

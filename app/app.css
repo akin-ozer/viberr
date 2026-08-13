@@ -4140,3 +4140,14 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* R19-18 — an MCP server installing on first use. Its own state: not green
+   (nothing has answered yet) and not red (nothing is broken). The pulse says
+   work is happening without the row claiming a verdict it does not have;
+   reduced-motion readers get the colour alone, which is why the dot also
+   carries a `title`. */
+.stat-dot.warming { background: var(--blue); animation: warmPulse 1.6s ease-in-out infinite; }
+@keyframes warmPulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .stat-dot.warming { animation: none; }
+}

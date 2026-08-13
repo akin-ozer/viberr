@@ -320,9 +320,9 @@ const KBS: KbView[] = [
 ];
 const MCPS: McpView[] = [
   { id: "m1", name: "github-mcp", transport: "HTTP", target: "https://mcp.internal:7801/sse",
-    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null },
+    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null },
   { id: "m2", name: "browserbase", transport: "HTTP", target: "https://mcp.internal:7809/sse",
-    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null },
+    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null },
 ];
 const SKILLS: SkillView[] = [
   { id: "s1", name: "terraform-review", summary: "Module review checklist.",
@@ -386,6 +386,7 @@ describe("ResourcesPanel", () => {
         lastCheckedAt: new Date().toISOString(),
         lastError:
           "exited before responding — ImportError: cannot import name 'McpError' from 'mcp.shared.exceptions'",
+        warmingSince: null,
       },
     ];
     const { container } = renderPanel(
@@ -394,6 +395,34 @@ describe("ResourcesPanel", () => {
     const err = container.querySelector(".rsrc-err")!;
     expect(err).toBeTruthy();
     expect(err.textContent).toContain("ImportError: cannot import name 'McpError'");
+  });
+
+  it("R19-18: an installing server reads as installing, not unreachable", () => {
+    // The row carries a stale `up: false` — the verdict of the probe that
+    // STARTED this install — and must not show it as the answer.
+    const warming: McpView[] = [
+      {
+        id: "m8",
+        name: "writing-tools",
+        transport: "stdio",
+        target: "uvx --from git+https://example.dev/w writing-tools-mcp",
+        hasCred: false,
+        tools: null,
+        up: false,
+        lastCheckedAt: new Date().toISOString(),
+        lastError: "still installing after 20s — …",
+        warmingSince: new Date().toISOString(),
+      },
+    ];
+    const { container } = renderPanel(
+      <ResourcesPanel kbs={[]} mcps={warming} skills={[]} gagents={[]} stages={STAGES} />,
+    );
+    expect(container.textContent).toContain("installing on first use");
+    expect(container.textContent).not.toContain("unreachable");
+    // Its own dot state, and no red error block shouting while it works.
+    expect(container.querySelector(".stat-dot.warming")).toBeTruthy();
+    expect(container.querySelector(".stat-dot.down")).toBeNull();
+    expect(container.querySelector(".rsrc-err")).toBeNull();
   });
 
   it("R19-17: a HEALTHY server shows no error line", () => {
@@ -413,7 +442,7 @@ describe("ResourcesPanel", () => {
         target: "https://mcp.internal:7810/sse",
         hasCred: true,
         credUnreadable: true,
-        lastError: null,
+        lastError: null, warmingSince: null,
         tools: null,
         up: null,
         lastCheckedAt: new Date().toISOString(),
@@ -479,7 +508,7 @@ describe("ResourcesPanel", () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     const staleMcps: McpView[] = [
       { id: "m3", name: "notes-fixture", transport: "stdio", target: "node /tmp/notes.mjs",
-        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null },
+        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null, warmingSince: null },
     ];
     const { container } = renderPanel(
       <ResourcesPanel kbs={[]} mcps={staleMcps} skills={[]} gagents={[]} stages={STAGES} />,

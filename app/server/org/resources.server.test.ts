@@ -606,9 +606,11 @@ describe("mcp servers", () => {
         timeoutMs: 60,
       },
     );
-    expect(installing.toast).toContain("still installing");
-    expect(installing.toast).toContain("Run the command once on the server");
-    expect(installing.toast).toContain("nvidia-curand");
+    // R19-18: Viberr now finishes the install itself rather than telling the
+    // admin to go warm it from a shell, so the row goes to "installing" and the
+    // save says so instead of reporting a failure.
+    expect(installing.toast).toContain("installing in the background");
+    expect(installing.mcp.warmingSince).not.toBeNull();
 
     /* …and a command that says NOTHING is still a plain timeout — the hint is
        earned by evidence, never assumed. */

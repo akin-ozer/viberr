@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRevalidator } from "react-router";
 import { StoreBrowser } from "~/features/kb-browser/store-browser";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
@@ -98,6 +99,28 @@ export function ResourcesPanel({
    * the slug. The label says "templates" because project deployments carry
    * their own copies and are not counted here.
    */
+  /**
+   * R19-18: while any MCP server is installing on first use, re-read the page
+   * every 20s so its dot turns green (or red) by itself.
+   *
+   * A poll rather than an SSE event because the event vocabulary is a closed
+   * typed union routed by user/project/task scope, and an org-settings row fits
+   * none of them — a new name plus a new scope would be a lot of plumbing for
+   * one transient state. It costs nothing when nothing is installing: the
+   * effect only arms while `warming` is true, and revalidation is the app's
+   * normal update mechanism (no optimistic UI).
+   */
+  const warming = mcps.some((m) => m.warmingSince !== null);
+  const revalidator = useRevalidator();
+  useEffect(() => {
+    if (!warming) return;
+    const id = setInterval(() => void revalidator.revalidate(), 20_000);
+    return () => clearInterval(id);
+    // `revalidator` is stable enough to omit; re-arming on every render would
+    // reset the 20s window each time the page re-read itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [warming]);
+
   const usedBy = (key: "skills" | "mcps" | "kbs", slug: string) =>
     gagents.filter((a) => a[key].includes(slug)).length;
 

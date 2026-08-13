@@ -19,6 +19,7 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { startMcpWarmup } from "./mcp-warmup.server";
 import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -536,6 +537,12 @@ export interface McpView {
    * re-run the test to find out why again.
    */
   lastError: string | null;
+  /**
+   * R19-18: when set, a first-run install is running in the BACKGROUND for this
+   * server. The row reads "installing" rather than unreachable, and the
+   * settings page re-checks until the warm-up writes a real verdict.
+   */
+  warmingSince: string | null;
 }
 
 interface McpRow {
@@ -548,6 +555,7 @@ interface McpRow {
   up: number | null;
   last_checked_at: string | null;
   last_error: string | null;
+  warming_since: string | null;
 }
 
 function mapMcp(row: McpRow): McpView {
@@ -566,6 +574,7 @@ function mapMcp(row: McpRow): McpView {
     up: row.up === null ? null : row.up === 1,
     lastCheckedAt: row.last_checked_at,
     lastError: row.last_error,
+    warmingSince: row.warming_since,
   };
 }
 
@@ -697,7 +706,8 @@ function openedForNewRow(
 }
 
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
-                        up, last_checked_at, last_error FROM org_mcp_servers`;
+                        up, last_checked_at, last_error, warming_since
+                 FROM org_mcp_servers`;
 
 export function listMcpServers(db: DatabaseSync): McpView[] {
   const rows = db
@@ -744,6 +754,9 @@ export type McpSpawn = (
 export interface McpProbeOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** R19-18: budget for a BACKGROUND install started off this probe (tests
+   *  shorten it; production uses `WARMUP_CAP_MS`). */
+  capMs?: number;
   /** Injected spawn for stdio tool-count discovery (tests supply a fake). */
   spawnImpl?: McpSpawn;
 }
@@ -760,7 +773,13 @@ const defaultSpawn: McpSpawn = (command, args, token) =>
 
 export type StdioDiscovery =
   | { kind: "up"; latencyMs: number; tools: number }
-  | { kind: "down"; reason: string };
+  | {
+      kind: "down";
+      reason: string;
+      /** R19-18: the command was mid first-run install when the probe gave up —
+       *  a candidate for a background warm-up, not a failure to report. */
+      installing?: boolean;
+    };
 
 /**
  * Split a stdio MCP command line into argv, keeping quoted segments whole.
@@ -880,9 +899,10 @@ export async function discoverStdioMcpTools(
       const installing = INSTALLING_RE.test(stderr);
       finish({
         kind: "down",
+        ...(installing ? { installing: true } : {}),
         reason: withDetail(
           installing
-            ? `still installing after ${Math.round(timeoutMs / 1000)}s — the first run of this command fetches its dependencies, and the probe stopped it before it finished, so nothing was cached. Run the command once on the server to warm it, then retest`
+            ? `still installing after ${Math.round(timeoutMs / 1000)}s — the first run of this command fetches its dependencies`
             : `timed out after ${Math.round(timeoutMs / 1000)}s`,
         ),
       });
@@ -1251,6 +1271,10 @@ export async function saveMcpServer(
   // R19-17: a failure keeps its reason on the row; a success CLEARS it, so a
   // stale explanation can never sit under a green dot.
   const lastError = disc.kind === "up" ? null : disc.reason;
+  // R19-18: a command that was still fetching gets a background install rather
+  // than a red dot. Started AFTER the row is written, below, so the warm-up's
+  // own `warming_since` write cannot be overwritten by this save.
+  const warmable = disc.kind === "down" && disc.installing === true;
   const spawnNote = transport === "stdio" ? " · spawned per run" : "";
   const credNote = credOpened.unreadable
     ? " · its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
@@ -1263,7 +1287,9 @@ export async function saveMcpServer(
         // a reason that now says what actually happened, giving
         // "didn't respond (exited before responding — …)". The reason speaks
         // for itself; the prefix only has to say the server was saved anyway.
-        ? `${name} saved, but it did not answer — ${disc.reason}`
+        ? warmable
+          ? `${name} saved — installing in the background; this page updates when it finishes`
+          : `${name} saved, but it did not answer — ${disc.reason}`
         : `${name} saved — endpoint didn't answer as an MCP server (${disc.reason})`) +
     credNote;
 
@@ -1313,6 +1339,13 @@ export async function saveMcpServer(
     });
   }
 
+  if (warmable && transport === "stdio") {
+    startMcpWarmup(
+      db,
+      { id, name, target, token: plainCred },
+      options,
+    );
+  }
   return { mcp: getMcpServer(db, id)!, toast };
 }
 
@@ -1365,6 +1398,25 @@ export async function testMcpServer(
          updated_at = ?
      WHERE id = ?`,
   ).run(now, disc.reason, now, id);
+  // R19-18: retesting a command that is mid first-run install hands it to the
+  // background runner instead of failing it again — retesting used to restart
+  // the same download and kill it at the same point, forever.
+  if (
+    existing.transport === "stdio" &&
+    disc.kind === "down" &&
+    disc.installing === true
+  ) {
+    startMcpWarmup(
+      db,
+      { id, name: existing.name, target: existing.target, token },
+      options,
+    );
+    const warming = getMcpServer(db, id)!;
+    return {
+      mcp: warming,
+      toast: `${warming.name} is installing in the background — this page updates when it finishes${credNote}`,
+    };
+  }
   const fresh = getMcpServer(db, id)!;
   return {
     mcp: fresh,

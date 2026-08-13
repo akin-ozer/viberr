@@ -177,20 +177,34 @@ export function McpPanel({
           <div className="rsrc-row" key={m.id}>
             {(() => {
               const stale = m.up === true && isStaleCheck(m.lastCheckedAt);
+              // R19-18: a first-run install is neither up nor broken, and it
+              // outranks the stored `up` — that value is the verdict of the
+              // probe this install was started BY.
+              const warming = m.warmingSince !== null;
               return (
                 <span
                   className={
                     "stat-dot" +
-                    (stale ? " stale" : m.up === true ? " up" : m.up === false ? " down" : "")
+                    (warming
+                      ? " warming"
+                      : stale
+                        ? " stale"
+                        : m.up === true
+                          ? " up"
+                          : m.up === false
+                            ? " down"
+                            : "")
                   }
                   title={
-                    stale
-                      ? "last check passed but is stale — retest to confirm"
-                      : m.up === true
-                        ? "connected"
-                        : m.up === false
-                          ? "unreachable"
-                          : "not health-checked"
+                    warming
+                      ? "installing on first use — this finishes in the background"
+                      : stale
+                        ? "last check passed but is stale — retest to confirm"
+                        : m.up === true
+                          ? "connected"
+                          : m.up === false
+                            ? "unreachable"
+                            : "not health-checked"
                   }
                 ></span>
               );
@@ -201,7 +215,9 @@ export function McpPanel({
                 {m.transport} · {m.target}
               </span>
               <span className="sub">
-                {m.up === true
+                {m.warmingSince !== null
+                  ? "installing on first use — finishing in the background"
+                  : m.up === true
                   ? (m.tools !== null ? m.tools + " tools · " : "reachable · ") +
                     "checked " + rel(m.lastCheckedAt) +
                     (isStaleCheck(m.lastCheckedAt) ? " · stale, retest" : "")
@@ -238,7 +254,7 @@ export function McpPanel({
                   only way to see the cause again was to re-run the test. It is
                   scrubbed of the credential the child was spawned with before
                   it is ever stored (`discoverStdioMcpTools`). */}
-              {m.up === false && m.lastError && (
+              {m.up === false && m.lastError && m.warmingSince === null && (
                 <span className="rsrc-err mono">{m.lastError}</span>
               )}
             </span>
