@@ -1,8 +1,28 @@
 # syntax=docker/dockerfile:1
 
 # ============================================================================
-# Build stage — install dependencies, compile the app, then prune node_modules
-# down to production dependencies.
+# Production dependency tree.
+#
+# Its own stage, keyed ONLY on the lockfile — which is the whole point. The
+# runtime tree used to be produced by `npm ci && npm run build && npm prune
+# --omit=dev` in the build stage, AFTER `COPY . .`, so every source edit
+# re-ran the prune: ~150 seconds of rewriting a 900MB node_modules over the
+# VM's filesystem, printing nothing while it worked. It reliably read as a
+# hung build (it was not; it was silent).
+#
+# Installing the production tree directly removes the prune entirely. This
+# layer now survives any source change, and buildkit runs it in PARALLEL with
+# the build below, so an ordinary code change rebuilds in seconds.
+# ============================================================================
+FROM node:26-slim AS prod-deps
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# ============================================================================
+# Build stage — the full tree (dev dependencies included) to compile the app.
 # ============================================================================
 FROM node:26-slim AS build
 
@@ -12,10 +32,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-# --no-audit/--no-fund: npm 11.19 (current node:26-slim) hangs prune on its
-# registry round-trip; pruning an already-installed tree needs no network.
-RUN npm run build \
-    && npm prune --omit=dev --no-audit --no-fund
+RUN npm run build --no-audit --no-fund
 
 # ============================================================================
 # Runtime stage.
@@ -46,8 +63,10 @@ ENV PORT=3000
 
 WORKDIR /app
 
-# Production node_modules (native modules included) + built app.
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
+# Production node_modules (native modules included) + built app. The tree comes
+# from the prod-deps stage, which installed it directly — the build stage's
+# tree still carries the dev dependencies it needed to compile.
+COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/build ./build
 COPY --from=build --chown=node:node /app/package.json ./package.json
 
