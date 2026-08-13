@@ -108,6 +108,21 @@ function crashingSpawn(stderrText: string): McpSpawn {
   };
 }
 
+/** Chatters on stderr (a package manager fetching) but never answers. */
+function chattySpawn(stderrText: string): McpSpawn {
+  return () => {
+    const err = new EventEmitter();
+    queueMicrotask(() => err.emit("data", Buffer.from(stderrText)));
+    return {
+      stdin: { write() {}, end() {} },
+      stdout: { on() {} },
+      stderr: { on: (event, cb) => err.on(event, cb) },
+      on() {},
+      kill() {},
+    };
+  };
+}
+
 /** A spawn that fails immediately (command not found). */
 const failingSpawn: McpSpawn = () => {
   throw new Error("ENOENT");
@@ -577,6 +592,35 @@ describe("mcp servers", () => {
     expect(leaky.toast).toContain("fatal: giving up");
     expect(leaky.toast).not.toContain("sk-live-abcdefghijklmnop");
 
+    /* R19-17c: a command that is still FETCHING on first use is not a broken
+       one, and the two need different next steps. `npx`/`uvx` install on first
+       run — live, a server pulling a CUDA-sized dependency tree could never
+       finish inside any probe window, and each killed probe discarded the
+       partial download, so retesting never converged. */
+    const installing = await saveMcpServer(
+      db,
+      { name: "cold-stdio", transport: "stdio", target: "uvx big-server", cred: "" },
+      ACTOR,
+      {
+        spawnImpl: chattySpawn("Downloading nvidia-curand (59.1MiB)\n"),
+        timeoutMs: 60,
+      },
+    );
+    expect(installing.toast).toContain("still installing");
+    expect(installing.toast).toContain("Run the command once on the server");
+    expect(installing.toast).toContain("nvidia-curand");
+
+    /* …and a command that says NOTHING is still a plain timeout — the hint is
+       earned by evidence, never assumed. */
+    const silent = await saveMcpServer(
+      db,
+      { name: "silent-stdio", transport: "stdio", target: "node /tmp/hang.mjs", cred: "" },
+      ACTOR,
+      { spawnImpl: silentSpawn, timeoutMs: 60 },
+    );
+    expect(silent.toast).toContain("timed out after");
+    expect(silent.toast).not.toContain("still installing");
+
     /* R19-17: the reason PERSISTS on the row, so it is still there after the
        toast is gone — and a passing retest clears it, because a stale
        explanation under a green dot is worse than none. */
@@ -663,7 +707,7 @@ describe("mcp servers", () => {
         spawnImpl: silentSpawn,
         timeoutMs: 20,
       }),
-    ).toMatchObject({ kind: "down", reason: "timed out" });
+    ).toMatchObject({ kind: "down", reason: "timed out after 0s" });
     expect(
       await discoverStdioMcpTools("mcp-server", { spawnImpl: failingSpawn }),
     ).toMatchObject({ kind: "down", reason: "command not found — ENOENT" });

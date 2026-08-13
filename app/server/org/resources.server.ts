@@ -796,7 +796,15 @@ export async function discoverStdioMcpTools(
   const parts = splitMcpCommand(command);
   if (parts.length === 0) return { kind: "down", reason: "no command" };
   const spawnImpl = options.spawnImpl ?? defaultSpawn;
-  const timeoutMs = options.timeoutMs ?? 5000;
+  /**
+   * R19-17c: 5s was too short for the commands people actually register. `npx`
+   * and `uvx` FETCH on first use, and the probe would kill them before either
+   * had printed a word — so the row said a bare "timed out" about a command
+   * that was busy downloading. 20s is long enough that a first-run install has
+   * announced itself on stderr (which the reason then carries), and short
+   * enough to sit inside the save request that waits for it.
+   */
+  const timeoutMs = options.timeoutMs ?? 20_000;
   const started = Date.now();
 
   return new Promise<StdioDiscovery>((resolve) => {
@@ -860,10 +868,25 @@ export async function discoverStdioMcpTools(
       if (stderr.length < STDERR_CAP) stderr += String(chunk);
     });
 
-    const timer = setTimeout(
-      () => finish({ kind: "down", reason: withDetail("timed out") }),
-      timeoutMs,
-    );
+    /**
+     * Package managers announce a first-run fetch before the server can
+     * possibly speak. Telling those two states apart is the difference between
+     * "this is broken" and "this is still downloading" — and only the second
+     * has a useful next step.
+     */
+    const INSTALLING_RE =
+      /\b(downloading|building|installing|resolving|fetching|added \d+ packages)\b/i;
+    const timer = setTimeout(() => {
+      const installing = INSTALLING_RE.test(stderr);
+      finish({
+        kind: "down",
+        reason: withDetail(
+          installing
+            ? `still installing after ${Math.round(timeoutMs / 1000)}s — the first run of this command fetches its dependencies, and the probe stopped it before it finished, so nothing was cached. Run the command once on the server to warm it, then retest`
+            : `timed out after ${Math.round(timeoutMs / 1000)}s`,
+        ),
+      });
+    }, timeoutMs);
 
     const send = (msg: unknown) => {
       try {
