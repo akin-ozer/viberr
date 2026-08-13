@@ -49,6 +49,18 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# STDIO MCP SERVERS. `specialist-mcp.server.ts` spawns a registered stdio
+# server's command verbatim — there is no allow-list — so whatever the command
+# names has to exist HERE. Node-based servers (`npx -y @modelcontextprotocol/
+# server-…`) already worked because npx ships with the base image; the entire
+# Python half of the ecosystem (`uvx mcp-server-…`) did not, and failed at
+# registration with a bare ENOENT.
+#
+# uv is a single static binary and brings `uvx`, so this is two files rather
+# than a Python toolchain: uv downloads and manages its own CPython on first
+# use, which is also why a system python3 is deliberately NOT installed.
+COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /usr/local/bin/
+
 ENV NODE_ENV=production
 # Canonical file store + SQLite projections live here; compose mounts a
 # host directory (or named volume) at this path.
@@ -59,6 +71,12 @@ ENV CLAUDE_CONFIG_DIR=/data/runtimes/claude-home
 # Keep Codex sessions and optional cached ChatGPT login on the same managed
 # data volume; never import the host user's full ~/.codex directory.
 ENV CODEX_HOME=/data/runtimes/codex-home
+# uv's package cache and its managed CPython, on the same volume for the same
+# reason: both default under $HOME, which is container-local, so every
+# `docker compose up` after a recreate would re-download an interpreter and
+# every package before the first Python MCP server could answer.
+ENV UV_CACHE_DIR=/data/runtimes/uv-cache
+ENV UV_PYTHON_INSTALL_DIR=/data/runtimes/uv-python
 ENV PORT=3000
 
 WORKDIR /app
