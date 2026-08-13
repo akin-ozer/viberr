@@ -19,6 +19,7 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   isSecretBox,
@@ -718,6 +719,8 @@ export type McpProbeOutcome =
 export interface McpChild {
   stdin: { write(data: string): void; end(): void } | null;
   stdout: { on(event: "data", cb: (chunk: unknown) => void): void } | null;
+  /** The failed command's OWN explanation — see `discoverStdioMcpTools`. */
+  stderr: { on(event: "data", cb: (chunk: unknown) => void): void } | null;
   on(event: "error" | "exit", cb: (arg?: unknown) => void): void;
   kill(signal?: string): void;
 }
@@ -737,7 +740,9 @@ export interface McpProbeOptions {
 
 const defaultSpawn: McpSpawn = (command, args, token) =>
   spawn(command, args, {
-    stdio: ["pipe", "pipe", "ignore"],
+    // stderr was "ignore" — discarded by the OS, so the one thing that
+    // explains a failure never reached us. See `discoverStdioMcpTools`.
+    stdio: ["pipe", "pipe", "pipe"],
     ...(token
       ? { env: { ...process.env, MCP_CREDENTIAL: token } }
       : {}),
@@ -792,13 +797,44 @@ export async function discoverStdioMcpTools(
       // without it reported "unreachable" in Settings for servers that work
       // perfectly inside a run.
       child = spawnImpl(parts[0]!, parts.slice(1), options.token ?? null);
-    } catch {
-      resolve({ kind: "down", reason: "command not found" });
+    } catch (err) {
+      resolve({
+        kind: "down",
+        reason:
+          err instanceof Error && err.message
+            ? `command not found — ${err.message}`
+            : "command not found",
+      });
       return;
     }
 
     let settled = false;
     let buffer = "";
+    /**
+     * What the command itself said. The probe used to answer a failure with
+     * five fixed words — "command not found", "failed to start", "exited before
+     * responding" — while the process had ALREADY explained itself on stderr and
+     * the spawn threw that channel away (`stdio: [...,"ignore"]`). Live, a
+     * `uvx` MCP server that crashed on an upstream import error reported
+     * "exited before responding", and the ImportError naming the exact symbol
+     * was unrecoverable from the app at all.
+     *
+     * Same shape as ruling 69 for git's stderr, and the same scrubber: the
+     * child is spawned WITH `MCP_CREDENTIAL` in its env (P13-KM-05), so a
+     * server that dumps its environment while dying would otherwise print the
+     * credential into a toast. `redactGitOutput` removes it BY VALUE — it is
+     * the shared child-process scrubber, named for the caller it was written
+     * for — and clamps to the TAIL, which is where a traceback's actual error
+     * sits.
+     */
+    let stderr = "";
+    const STDERR_CAP = 8000;
+    const withDetail = (base: string, extra?: string): string => {
+      const detail = redactGitOutput([extra, stderr].filter(Boolean).join("\n"), {
+        token: options.token ?? null,
+      });
+      return detail ? `${base} — ${detail}` : base;
+    };
     const finish = (result: StdioDiscovery) => {
       if (settled) return;
       settled = true;
@@ -810,8 +846,12 @@ export async function discoverStdioMcpTools(
       }
       resolve(result);
     };
+    child.stderr?.on("data", (chunk) => {
+      if (stderr.length < STDERR_CAP) stderr += String(chunk);
+    });
+
     const timer = setTimeout(
-      () => finish({ kind: "down", reason: "timed out" }),
+      () => finish({ kind: "down", reason: withDetail("timed out") }),
       timeoutMs,
     );
 
@@ -823,9 +863,20 @@ export async function discoverStdioMcpTools(
       }
     };
 
-    child.on("error", () => finish({ kind: "down", reason: "failed to start" }));
+    // The spawn error itself is the most precise thing there is for a missing
+    // binary — `spawn uvx ENOENT` names the command that is not installed,
+    // where "failed to start" left the reader guessing.
+    child.on("error", (err) =>
+      finish({
+        kind: "down",
+        reason: withDetail(
+          "failed to start",
+          err instanceof Error ? err.message : undefined,
+        ),
+      }),
+    );
     child.on("exit", () =>
-      finish({ kind: "down", reason: "exited before responding" }),
+      finish({ kind: "down", reason: withDetail("exited before responding") }),
     );
 
     const handle = (msg: {
@@ -1172,7 +1223,11 @@ export async function saveMcpServer(
     (disc.kind === "up"
       ? `${name} saved — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} discovered${spawnNote}`
       : transport === "stdio"
-        ? `${name} saved — command didn't respond (${disc.reason}); check it`
+        // R19-17: the wrapper used to add "command didn't respond" in front of
+        // a reason that now says what actually happened, giving
+        // "didn't respond (exited before responding — …)". The reason speaks
+        // for itself; the prefix only has to say the server was saved anyway.
+        ? `${name} saved, but it did not answer — ${disc.reason}`
         : `${name} saved — endpoint didn't answer as an MCP server (${disc.reason})`) +
     credNote;
 

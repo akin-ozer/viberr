@@ -66,6 +66,7 @@ function fakeMcpSpawn(tools: number): McpSpawn {
         end() {},
       },
       stdout: { on: (event, cb) => stdout.on(event, cb) },
+      stderr: { on() {} },
       on() {},
       kill() {},
     };
@@ -76,9 +77,35 @@ function fakeMcpSpawn(tools: number): McpSpawn {
 const silentSpawn: McpSpawn = () => ({
   stdin: { write() {}, end() {} },
   stdout: { on() {} },
+  stderr: { on() {} },
   on() {},
   kill() {},
 });
+
+/**
+ * A server that dies the way a real one does: a line of explanation on stderr,
+ * then exit. The probe used to answer this with the words "exited before
+ * responding" and drop the only thing that said WHY.
+ */
+function crashingSpawn(stderrText: string): McpSpawn {
+  return () => {
+    const err = new EventEmitter();
+    const exit = new EventEmitter();
+    queueMicrotask(() => {
+      err.emit("data", Buffer.from(stderrText));
+      queueMicrotask(() => exit.emit("exit"));
+    });
+    return {
+      stdin: { write() {}, end() {} },
+      stdout: { on() {} },
+      stderr: { on: (event, cb) => err.on(event, cb) },
+      on: (event, cb) => {
+        if (event === "exit") exit.on("exit", cb);
+      },
+      kill() {},
+    };
+  };
+}
 
 /** A spawn that fails immediately (command not found). */
 const failingSpawn: McpSpawn = () => {
@@ -506,7 +533,48 @@ describe("mcp servers", () => {
       { spawnImpl: silentSpawn, timeoutMs: 20 },
     );
     expect(dead.mcp).toMatchObject({ up: false, tools: null });
-    expect(dead.toast).toContain("didn't respond");
+    expect(dead.toast).toContain("did not answer");
+
+    /* R19-17: a stdio server that CRASHES explains itself on stderr, and the
+       probe used to answer with three fixed words. This is the live case: a
+       `uvx` MCP server whose upstream package broke against the current Python
+       SDK exited instantly, and the ImportError naming the exact symbol was
+       unreachable from the app. */
+    const crashed = await saveMcpServer(
+      db,
+      { name: "crashing-stdio", transport: "stdio", target: "uvx mcp-server-time", cred: "" },
+      ACTOR,
+      {
+        spawnImpl: crashingSpawn(
+          "Traceback (most recent call last):\n" +
+            "ImportError: cannot import name 'McpError' from 'mcp.shared.exceptions'\n",
+        ),
+        timeoutMs: 200,
+      },
+    );
+    expect(crashed.mcp).toMatchObject({ up: false, tools: null });
+    expect(crashed.toast).toContain("ImportError: cannot import name 'McpError'");
+
+    /* …and the credential the child was spawned WITH never rides along, even
+       when the dying server prints its own environment. */
+    const leaky = await saveMcpServer(
+      db,
+      {
+        name: "leaky-stdio",
+        transport: "stdio",
+        target: "uvx mcp-server-leak",
+        cred: "sk-live-abcdefghijklmnop",
+      },
+      ACTOR,
+      {
+        spawnImpl: crashingSpawn(
+          "env dump: MCP_CREDENTIAL=sk-live-abcdefghijklmnop\nfatal: giving up\n",
+        ),
+        timeoutMs: 200,
+      },
+    );
+    expect(leaky.toast).toContain("fatal: giving up");
+    expect(leaky.toast).not.toContain("sk-live-abcdefghijklmnop");
 
     // Duplicate name guard.
     await expect(
@@ -564,7 +632,11 @@ describe("mcp servers", () => {
       spawnImpl: failingSpawn,
     });
     expect(dead.mcp).toMatchObject({ up: false, tools: null });
-    expect(dead.toast).toBe("postgres-readonly unreachable — command not found");
+    // R19-17: the reason carries the spawn's own words ("ENOENT"), which is
+    // what tells a reader the binary is missing rather than the server broken.
+    expect(dead.toast).toBe(
+      "postgres-readonly unreachable — command not found — ENOENT",
+    );
   });
 
   it("discoverStdioMcpTools: handshake success, timeout, spawn failure", async () => {
@@ -579,7 +651,7 @@ describe("mcp servers", () => {
     ).toMatchObject({ kind: "down", reason: "timed out" });
     expect(
       await discoverStdioMcpTools("mcp-server", { spawnImpl: failingSpawn }),
-    ).toMatchObject({ kind: "down", reason: "command not found" });
+    ).toMatchObject({ kind: "down", reason: "command not found — ENOENT" });
   });
 });
 
