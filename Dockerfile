@@ -19,7 +19,14 @@ FROM node:26-slim AS prod-deps
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# --foreground-scripts serializes install scripts. Without it a from-scratch
+# install (changed lockfile and/or fresh base image, so no layer cache) can
+# fail with ETXTBSY: esbuild's postinstall spawns its just-written binary for
+# `--version` while overlayfs still counts a writer on it — observed live
+# 2026-08-14 in this exact layer (esbuild rides the prod tree via tsx). The
+# layer is lockfile-cached, so the serialization cost is paid only on real
+# dependency changes.
+RUN npm ci --omit=dev --foreground-scripts
 
 # ============================================================================
 # Build stage — the full tree (dev dependencies included) to compile the app.
@@ -29,7 +36,8 @@ FROM node:26-slim AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# Same ETXTBSY hardening as prod-deps above.
+RUN npm ci --foreground-scripts
 
 COPY . .
 RUN npm run build --no-audit --no-fund
