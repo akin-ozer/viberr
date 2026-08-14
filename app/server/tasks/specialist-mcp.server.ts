@@ -51,12 +51,19 @@ export function resolveSpecialistMcpServers(
   return resolveSpecialistMcpServersDetailed(db, mcpNames).servers;
 }
 
-/** Viberr's own in-process servers. They are built by the toolkit builders, are
+/** Viberr's own servers. They are built by the toolkit/browser builders, are
  *  refused as registry names at save (P13-KM-12), and must never be resolved
  *  from the registry even if a hand-edited row carries one — on Claude a row
  *  would shadow the real toolkit, on Codex it would not, so the two backends
- *  would disagree about what the agent can do (P14-KM-15). */
-const RESERVED_MCP_NAMES = new Set(["viberr", "viberr_agent", "viberr-agent"]);
+ *  would disagree about what the agent can do (P14-KM-15). `viberr_browser`
+ *  joins for R19-19: the browser is capability-mounted, never an org row. */
+const RESERVED_MCP_NAMES = new Set([
+  "viberr",
+  "viberr_agent",
+  "viberr-agent",
+  "viberr_browser",
+  "viberr-browser",
+]);
 
 /** A declared MCP grant that reached no run, or that is known to be down. */
 export interface UnresolvedMcpGrant {

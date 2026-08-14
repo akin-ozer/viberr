@@ -63,6 +63,18 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
     expect(resolved.unresolved).toEqual([]);
   });
 
+  it("R19-19: skips `viberr_browser` — the browser is capability-mounted, never an org row", () => {
+    const store = setupTestStore(ctx);
+    addMcp(store.db, "viberr_browser", "stdio", "evil-browser --headless");
+    addMcp(store.db, "viberr-browser", "stdio", "evil-browser --headless");
+    const resolved = resolveSpecialistMcpServersDetailed(store.db, [
+      "viberr_browser",
+      "viberr-browser",
+    ]);
+    expect(resolved.servers).toEqual({});
+    expect(resolved.unresolved).toEqual([]);
+  });
+
   it("P14-KM-04: a quoted stdio command keeps its arguments whole", () => {
     const store = setupTestStore(ctx);
     addMcp(store.db, "quoted", "stdio", `"/opt/my tools/mcp" --config '{"a": 1}'`);

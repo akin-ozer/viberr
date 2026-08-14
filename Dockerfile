@@ -49,6 +49,21 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# R19-19: agents get a real browser. Debian's chromium (~700MB installed with
+# its dependency closure — the owner accepted the weight over a sidecar), driven
+# by the @playwright/mcp server that ships in node_modules. The env var is how
+# the mount builder finds it (`specialist-browser-mcp.server.ts`); when it is
+# set the builder also passes --no-sandbox, because chromium's user-namespace
+# sandbox cannot start under docker's default seccomp profile as a non-root
+# user. Debian's package is used instead of `npx playwright install` for the
+# same reason uv is copied above: a pinned binary in the image, not a first-run
+# download into a container-local cache.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends chromium fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+ENV VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium
+
 # STDIO MCP SERVERS. `specialist-mcp.server.ts` spawns a registered stdio
 # server's command verbatim — there is no allow-list — so whatever the command
 # names has to exist HERE. Node-based servers (`npx -y @modelcontextprotocol/

@@ -4151,3 +4151,68 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .stat-dot.warming { animation: none; }
 }
+
+/* ============================= P19-19 attachments =============================
+   R19-19: browser-produced files on the task page. Thumbnails are real <img>
+   content from the member-only serving route; the grid stays modest — this is
+   an evidence surface, not a gallery. */
+.attach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: .6rem;
+}
+.attach-thumb {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+  text-decoration: none;
+  color: var(--fg);
+}
+.attach-thumb:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.attach-thumb img {
+  display: block;
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  object-position: top;
+  background: color-mix(in srgb, var(--fg), transparent 96%);
+}
+.attach-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: .5rem;
+  padding: .4rem .55rem;
+  min-width: 0;
+}
+.attach-name {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-size { font-size: .7rem; color: var(--muted); flex: none; }
+.attach-file {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem .55rem;
+  margin-top: .45rem;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+  text-decoration: none;
+  color: var(--fg);
+}
+.attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.attach-file svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
+.attach-file .attach-name { flex: 1; }
+/* Evidence label token that names a real attachment (timeline.tsx linkify). */
+/* Same token text-links use (P13-D-18 precedent) — --blue on white is 3.84:1
+   and fails AA for normal text; --teal-dark clears it in both themes. */
+.tl-card .ev-row .ev-file { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; }
+.tl-card .ev-row .ev-file:hover { text-decoration-thickness: 2px; }

@@ -36,6 +36,7 @@ import {
   updateTaskGoal,
 } from "~/server/tasks/task-actions.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { listTaskAttachments } from "~/server/files/task-attachments.server";
 import {
   assignReviewer,
   assignSpecialist,
@@ -238,8 +239,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     (taskFile?.parsed.frontmatter.ownerUserId === user.id &&
       roleCan(myProjectRole, "own-task"));
 
+  // R19-19: browser-produced files for this task. Same visibility bar as the
+  // run console (a screenshot shows whatever the agent saw) — non-members get
+  // an empty list, and the serving route re-checks membership itself.
+  const attachments = runsVisible
+    ? listTaskAttachments(params.slug, params.key)
+    : [];
+
   return {
     task: { ...detail, timeline: slice.events },
+    attachments,
     recommendations,
     schedules,
     archived,
@@ -854,7 +863,10 @@ export function meta({ loaderData, params }: Route.MetaArgs) {
   ];
 }
 
-export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
+export default function TaskDetailRoute({
+  loaderData,
+  params,
+}: Route.ComponentProps) {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   if (!layout) return null;
 
@@ -874,6 +886,8 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       // log selection (mock `key={task.key}` behavior, spec §1).
       key={loaderData.task.key}
       task={loaderData.task}
+      attachments={loaderData.attachments}
+      attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}

@@ -98,6 +98,17 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // reachable on both, for the same reason shell writes do: the specialist needs
   // Bash to run validation.
   cap("use-web-search-fetch", "Search & fetch from the web", ["agent", "operator"], "Collaboration"),
+  // R19-19 (owner ruling): a REAL browser — navigate, click, read the page,
+  // screenshot — mounted as a viberr-owned Playwright MCP server, per run.
+  // Default OFF for the same reason report-validation-verdict is: a casually
+  // created profile must not silently acquire a driven browser (JS execution,
+  // sessions, arbitrary origins). Enforcement is the MOUNT itself — withheld ⇒
+  // the server is never attached, on both backends — so unlike third-party org
+  // MCPs this does NOT ride the P13-KM-04 instruction-only gap. The mount also
+  // requires effective `use-web-search-fetch`: the browser IS network egress,
+  // and a profile whose egress was revoked must not re-acquire it one row down
+  // (`resolveBrowserMcp` in specialist-browser-mcp.server.ts enforces the pair).
+  cap("use-browser", "Drive a live web browser", ["agent"], "Collaboration", "off"),
   // Verdicts gate acceptance (G2) — default OFF so a casually-created profile
   // never acquires acceptance-veto power; the seed grants it to the reviewer.
   cap("report-validation-verdict", "Report a validation verdict", ["agent"], "Collaboration", "off"),
@@ -223,6 +234,10 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   // claude-only set below; without landing HERE it would read as "advisory",
   // understating the enforcement further than the label it replaced.
   "use-web-search-fetch",
+  // R19-19: withheld ⇒ the browser MCP server is not mounted into the run, on
+  // both backends — the strongest enforcement shape the runtime has (the tool
+  // surface simply does not exist, no deny rule needed).
+  "use-browser",
 ]);
 
 /** Specialist tool-denial capabilities enforced by Claude but advisory on Codex.

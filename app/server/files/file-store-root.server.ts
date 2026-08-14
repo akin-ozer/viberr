@@ -7,7 +7,10 @@ import { getEnv } from "../config/env.server";
  *
  * Layout under ${VIBERR_DATA_ROOT}:
  *   projects/<slug>/project.md
- *   projects/<slug>/tasks/<KEY>/task.md   (+ attachments/ later)
+ *   projects/<slug>/tasks/<KEY>/task.md
+ *   projects/<slug>/tasks/<KEY>/attachments/   (R19-19 — files an agent's
+ *                                          browser produces: screenshots, PDFs;
+ *                                          served member-only, cited as evidence)
  *   agents/profiles/<id>.md               (org-level agent profile templates)
  *   runtimes/                             (NDJSON run logs — Phase 8)
  *   kb/<dir>/                             (knowledge-base folders — Phase 9B;
@@ -72,6 +75,21 @@ export function taskFilePath(
   dataRoot?: string,
 ): string {
   return path.join(taskDir(slug, key, dataRoot), "task.md");
+}
+
+/**
+ * R19-19: one task's attachments — files an agent's browser produced
+ * (screenshots, PDFs, downloads). Written by the browser MCP server via
+ * `--output-dir`, listed on the task page, served member-only by the
+ * attachment route. Lives inside the task dir so archive/delete flows that
+ * move the task move its attachments with it, with no retention machinery.
+ */
+export function taskAttachmentsDir(
+  slug: string,
+  key: string,
+  dataRoot?: string,
+): string {
+  return path.join(taskDir(slug, key, dataRoot), "attachments");
 }
 
 export function agentProfilesDir(dataRoot?: string): string {

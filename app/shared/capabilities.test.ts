@@ -4,6 +4,7 @@ import {
   CAP_CATALOG,
   CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS,
   ENFORCED_CAPABILITY_IDS,
+  UNIFIED_CAP_CATALOG,
   applyVerdictOutcomeGate,
   capabilityByLabel,
   capabilityEnforcement,
@@ -86,6 +87,15 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(capabilityEnforcement("report-validation-verdict")).toBe("both");
     expect(capabilityEnforcement("ask-human")).toBe("both");
     expect(capabilityEnforcement("comment-on-task")).toBe("claude-only");
+  });
+
+  it("R19-19: classifies the browser as BOTH — withheld ⇒ the server is never mounted, either backend", () => {
+    expect(capabilityEnforcement("use-browser")).toBe("both");
+    // Default OFF: a casually created profile must not silently acquire a
+    // driven browser (same rationale as report-validation-verdict).
+    const entry = UNIFIED_CAP_CATALOG.find((c) => c.id === "use-browser")!;
+    expect(entry.defaultMode).toBe("off");
+    expect(entry.kinds).toEqual(["agent"]);
   });
 
   it("the matrix badge (capabilityByLabel → enforcement) is claude-only ONLY for the 3 fine-grained delivery rows", () => {

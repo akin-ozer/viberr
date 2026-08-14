@@ -1044,7 +1044,8 @@ export async function probeMcpTarget(
 /**
  * Every name Viberr's own in-process tooling owns: `viberr` is the operator's
  * governance server, `viberr_agent` the specialist toolkit (and `viberr-agent`
- * the hyphen spelling a Codex run would see). `saveMcpServer` refuses all three,
+ * the hyphen spelling a Codex run would see), `viberr_browser` the R19-19
+ * browser server (`viberr-browser` likewise). `saveMcpServer` refuses them all,
  * but a row created before that guard — or written straight into the DB — is
  * still on disk, and the catalog only skipped the first. It would then be
  * offered in the picker while every resolver skipped it: a grant that resolves
@@ -1053,7 +1054,11 @@ export async function probeMcpTarget(
  */
 export function isReservedMcpName(name: string): boolean {
   return (
-    name === "viberr" || name === "viberr_agent" || name === "viberr-agent"
+    name === "viberr" ||
+    name === "viberr_agent" ||
+    name === "viberr-agent" ||
+    name === "viberr_browser" ||
+    name === "viberr-browser"
   );
 }
 

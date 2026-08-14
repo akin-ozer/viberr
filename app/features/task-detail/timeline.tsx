@@ -101,14 +101,63 @@ function CollapsibleComment({
   );
 }
 
+/**
+ * R19-19: linkify an evidence label whose tokens name a REAL attachment.
+ * Agents are told to "cite the exact filename" when a screenshot backs a
+ * claim; when a token (backticks/quotes/trailing punctuation stripped) matches
+ * a file the task actually has, it becomes a link to the serving route.
+ * Everything else renders as the plain text it always was — no guessing.
+ */
+function EvidenceLabel({
+  label,
+  attachments,
+  base,
+}: {
+  label: string;
+  attachments?: ReadonlySet<string>;
+  base?: string;
+}) {
+  if (!attachments || attachments.size === 0 || !base) return <span>{label}</span>;
+  const parts = label.split(/(\s+)/);
+  return (
+    <span>
+      {parts.map((part, i) => {
+        const clean = part.replace(/^[`"'(\[]+|[`"'),.;:\]]+$/g, "");
+        if (!clean || !attachments.has(clean)) return part;
+        const at = part.indexOf(clean);
+        return (
+          <span key={i}>
+            {part.slice(0, at)}
+            <a
+              className="ev-file"
+              href={`${base}/${encodeURIComponent(clean)}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {clean}
+            </a>
+            {part.slice(at + clean.length)}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 export function TimelineItem({
   ev,
   mentionNames = [],
+  attachmentNames,
+  attachmentsBase,
 }: {
   ev: TimelineEventRender;
   /** Known mentionable names, for whole-name @mention chips in comment bodies
    *  AND in typed-event text. */
   mentionNames?: string[];
+  /** R19-19: the task's real attachment filenames (evidence linkify). */
+  attachmentNames?: ReadonlySet<string>;
+  /** The attachment route base — absent (e.g. bare renders) ⇒ plain labels. */
+  attachmentsBase?: string;
 }) {
   const meta = eventMeta(ev.type);
   const actor = ev.actor;
@@ -184,7 +233,11 @@ export function TimelineItem({
               <div className="tl-card evidence">
                 {ev.evidence.map((e, i) => (
                   <div className="ev-row" key={i}>
-                    <span>{e.label}</span>
+                    <EvidenceLabel
+                      label={e.label}
+                      {...(attachmentNames ? { attachments: attachmentNames } : {})}
+                      {...(attachmentsBase ? { base: attachmentsBase } : {})}
+                    />
                     <span>
                       <span className="add">{e.add}</span>{" "}
                       <span className="del">{e.del}</span>
@@ -210,6 +263,8 @@ export function Timeline({
   mentionables,
   onAgentLog,
   taskClosed,
+  attachmentNames,
+  attachmentsBase,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
@@ -227,6 +282,11 @@ export function Timeline({
   /** Terminal-stage task (R7-6): comments stay ENABLED — only a subtle hint
    *  above the composer says the task is closed. */
   taskClosed?: boolean;
+  /** R19-19: the task's real attachment filenames — evidence labels citing one
+   *  become links to the serving route. Absent ⇒ plain text (bare renders,
+   *  non-members whose list the loader withheld). */
+  attachmentNames?: string[];
+  attachmentsBase?: string;
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   // The raw draft, synced synchronously from the editor. A ref, not state:
@@ -241,6 +301,11 @@ export function Timeline({
   // Known mentionable names — drives whole-name @mention highlighting in the
   // composer and in rendered comment bodies.
   const mentionNames = useMemo(() => mentionNamesFor(mentionables), [mentionables]);
+  // R19-19: set-ify once per list — the per-token evidence lookup is O(1).
+  const attachmentSet = useMemo(
+    () => (attachmentNames?.length ? new Set(attachmentNames) : null),
+    [attachmentNames],
+  );
   const seenAsk = useRef(ask);
   const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<{
@@ -411,7 +476,13 @@ export function Timeline({
           </div>
         ) : (
           items.map((ev) => (
-            <TimelineItem key={ev.id} ev={ev} mentionNames={mentionNames} />
+            <TimelineItem
+              key={ev.id}
+              ev={ev}
+              mentionNames={mentionNames}
+              {...(attachmentSet ? { attachmentNames: attachmentSet } : {})}
+              {...(attachmentsBase ? { attachmentsBase } : {})}
+            />
           ))
         )}
         {hasMore && (

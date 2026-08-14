@@ -82,6 +82,15 @@ const envSchema = z.object({
   // this machine can rule out.
   VIBERR_FORCE_DATA_ROOT_LOCK: z.string().optional(),
 
+  // R19-19: absolute path of the chromium binary the browser MCP server drives.
+  // The image sets it (/usr/bin/chromium); when set, the mount builder passes
+  // --executable-path AND --no-sandbox (docker's default seccomp blocks the
+  // user-namespace sandbox for non-root). Unset on a dev host, Playwright's own
+  // browser resolution applies — which may require `npx playwright install
+  // chromium` for the alpha playwright @playwright/mcp pins, or pointing this
+  // at a local Chrome build.
+  VIBERR_BROWSER_EXECUTABLE: z.string().min(1).optional(),
+
   // Optional OAuth providers — the login buttons stay disabled when unset.
   GITHUB_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GITHUB_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),

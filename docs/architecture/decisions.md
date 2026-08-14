@@ -814,6 +814,66 @@ it is regenerated from the filesystem rather than restated here.
     (`markTaskNotificationsSeen` in `app/server/projections/notifications.server.ts`; called from
     `app/routes/project.task.tsx`)
 
+72. **R19-16 (2026-08-10): OAuth sign-in is configured IN THE APP.** The Allow-access modal
+    offered "GitHub · off / Google · off" with a tooltip naming an env var no admin could set
+    from the app — a dead end. Owner ruled (three answers): a new org-settings **Sign-in & SSO**
+    tab; credentials saved there **override** the deployment env; and enabling a method
+    **requires a passing credential test** against the provider first. The mechanism keeps three
+    honesty rules: saving never enables; changing either half of the pair clears the verdict AND
+    switches the method off; a passing test says what it proved (the pair) and what it did not
+    (the callback registration, which is shown with a copy button because a provider app without
+    it fails at real sign-in regardless). Secrets are sealed (registered in `SEALED_STORES`, which
+    grew per-store `idColumn` for it), and the running auth handler picks changes up per-request
+    via `oauthConfigFingerprint` — no restart. (`app/server/auth/oauth-providers.server.ts`,
+    `oauth-credential-test.server.ts`, `app/features/org-settings/sso-panel.tsx`,
+    `app/shared/auth/auth-paths.ts`)
+
+73. **R19-17 (2026-08-13): a failed MCP command's OWN WORDS are surfaced — and kept.** A
+    registered stdio server that failed showed a bare red dot; the command's complaint went to
+    `stdio: "ignore"` at the OS level, so `uvx` printing exactly what was wrong was thrown away
+    unread. Now stderr is captured (piped, 8KB cap), scrubbed by value + token-shape through the
+    shared `redactGitOutput` (the child holds `MCP_CREDENTIAL`, so this is the same
+    credential-safety bar as ruling 69), appended to the probe verdict, **persisted** on the row
+    as `last_error` (17b — the reason used to evaporate on page reload), and rendered under the
+    row. 17c distinguishes a first-run INSTALL from a hung command (`INSTALLING_RE` against the
+    live stderr) so "downloading cpython" is not reported as "unreachable".
+    (`discoverStdioMcpTools` in `app/server/org/resources.server.ts`;
+    `app/features/org-settings/resource-rows.tsx`)
+
+74. **R19-18 (2026-08-14): first-run MCP installs FINISH IN THE BACKGROUND.** A `uvx`/`npx`
+    server that installs on first use could never go green: the probe killed it at the deadline,
+    and uv only commits its cache on completion, so every retest restarted the download from
+    zero — an unwinnable loop (measured: 556s in and still fetching). Owner ruled: start the
+    warm-up **automatically** when a probe gives up on a visibly-installing command, cap it at
+    **15 minutes**, and let the page re-check (~20s revalidation while any row warms) until the
+    row turns into a real verdict on its own. The warm-up is the SAME `discoverStdioMcpTools`
+    handshake with a bigger deadline — not a second code path — tracked by `warming_since` on the
+    row plus an in-process registry; a boot reaper clears flags orphaned by a restart so no row
+    claims to be installing with no installer. Proven live: uv cache 8.2MB → 963MB → 2.1GB
+    across rounds, where before each round reset to zero.
+    (`app/server/org/mcp-warmup.server.ts`; reaper wired in `app/server/boot.server.ts`;
+    polling in `app/features/org-settings/resources-panel.tsx`)
+
+75. **R19-19 (2026-08-14): agents get a REAL BROWSER — as a first-class capability.** Agents
+    could read the web (`use-web-search-fetch`) but never drive it: no screenshots, no console,
+    no "does my change actually render". Owner ruled for browser capabilities on four explicit
+    decisions. **(a) Governance**: a new `use-browser` agent capability (default **off** — a
+    casually created profile must not silently acquire a browser), enforced on BOTH backends by
+    mounting or withholding a viberr-owned Playwright MCP server per run — deliberately NOT a
+    bare org-registry mount riding the P13-KM-04 instruction-only gap. The mount additionally
+    requires effective web egress: a profile whose `use-web-search-fetch` is withheld cannot
+    re-acquire egress through the browser (the polarity hole that motivated first-class
+    governance). **(b) Injection stance**: prompt-level guardrails, same posture as MCP
+    governance — page content is data, never instructions; never enter credentials; the browser
+    widens no authority. **(c) Deployment**: the chromium binary ships IN the app image (Debian
+    `chromium` on node:26-slim, ~700MB installed — owner accepted the weight over a sidecar or
+    repo-supplied browsers). **(d) Output**: what the browser produces lands in the task's
+    canonical `attachments/` directory (the long-standing file-store placeholder made real) —
+    member-only serving, rendered on the task page, citable in evidence references that carry
+    into the review PR body. (`app/shared/capabilities.ts`,
+    `app/server/tasks/specialist-browser-mcp.server.ts`, `Dockerfile`,
+    `app/server/files/file-store-root.server.ts`, `app/routes/task-attachment.tsx`)
+
 ## Route map
 
 ```
@@ -823,6 +883,7 @@ it is regenerated from the filesystem rather than restated here.
 /projects/:slug                         → redirect to board
 /projects/:slug/board  /review  /agents  /policy  /github  /activity  /settings
 /projects/:slug/tasks/:key
+/projects/:slug/tasks/:key/attachments/:file   (R19-19 — member-only, raw bytes)
 /org/settings                           (org admin, tabbed)
 /profile   /notifications   /notifications/read   /prefs/theme
 /resources/events  (SSE)   /resources/health   /resources/run-log

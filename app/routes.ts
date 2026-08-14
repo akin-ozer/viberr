@@ -35,6 +35,13 @@ export default [
   // transcript so the conversation can be resumed locally (same subscription).
   route("resources/session-export", "routes/resources.session-export.ts"),
 
+  // R19-19: one task attachment (browser-produced screenshot/PDF). A resource
+  // route OUTSIDE the workspace layout — it serves raw bytes, member-only.
+  route(
+    "projects/:slug/tasks/:key/attachments/:file",
+    "routes/task-attachment.ts",
+  ),
+
   // Bare /projects → home (the project list lives at `/`), not a 404 (N5).
   route("projects", "routes/projects.tsx"),
   // Workspace shell (rail + topbar) with the seven project views + task.

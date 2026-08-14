@@ -19,6 +19,8 @@ import {
   OperatorRecommendations,
   type RecommendationView,
 } from "./operator-recommendations";
+import { AttachmentsPanel } from "./attachments-panel";
+import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
@@ -91,6 +93,8 @@ function recReachesAcceptance(
 
 export function TaskDetailPage({
   task,
+  attachments = [],
+  attachmentsBase = null,
   runtime,
   deployedSpecialists,
   operatorBackend,
@@ -121,6 +125,13 @@ export function TaskDetailPage({
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
+  /** R19-19: browser-produced files (loader; `[]` for non-members — the same
+   *  visibility bar as the run console). */
+  attachments?: TaskAttachmentEntry[];
+  /** `/projects/<slug>/tasks/<KEY>/attachments` — the serving route's base,
+   *  built by the route component (the one place that knows the params).
+   *  Null hides the panel and the evidence links (e.g. bare test renders). */
+  attachmentsBase?: string | null;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
   /** Deployed specialists the assign menu offers (loader). */
@@ -616,6 +627,10 @@ export function TaskDetailPage({
           </section>
         ) : null}
 
+        {attachmentsBase ? (
+          <AttachmentsPanel base={attachmentsBase} attachments={attachments} />
+        ) : null}
+
         <Timeline
           events={task.timeline}
           hasMore={timelineHasMore}
@@ -626,6 +641,12 @@ export function TaskDetailPage({
           mentionables={mentionables}
           onAgentLog={onAgentLog}
           taskClosed={taskClosed}
+          {...(attachmentsBase
+            ? {
+                attachmentNames: attachments.map((a) => a.name),
+                attachmentsBase,
+              }
+            : {})}
         />
       </div>
 
