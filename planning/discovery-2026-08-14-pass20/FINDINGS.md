@@ -680,3 +680,72 @@ main-session findings already covered by FIX-SPECS Specs 1–4 and §5a/5b/5d.
   resultless).
 - Live residue: the org account `probe.nobody@viberr.dev` still exists (project membership removed,
   account never deleted) — it is the live specimen for F20-12.
+
+---
+
+# Batch-2 findings (live campaign, 2026-08-15) — verifier CONFIRMED all, nothing refuted
+
+Batch 2 exercised the OLD container image (b97ad02), so several observations are
+things my in-flight fixes already address (recorded as corroboration); the rest are NEW.
+
+## Corroborated (already being fixed)
+- **D1 / F20-9 confirmed live** (UC-18): a SUPERVISED operator's Agents card + matrix render
+  "Accept completion into Done · Acts directly" that the runtime refuses; sits beside
+  "Transition a task to Done · Reserved for humans" with no reconciling note. Fix = R20-7 (C-AGENTS).
+  UC-18 also PROVED the good half: promotable:false held (Supervised→Full did NOT auto-promote the
+  grant), all ALWAYS_HUMAN locks render locked in every editor surface.
+- **F20-23 corroborated** (UC-25, both backends): closed PR shows a "closed" pill on /github after
+  Update status — but the Execution-branches TABLE still doesn't say closed (the F20-23 gap stands).
+- **N20-4 corroborated** (UC-25): PR #165/#166 bodies carry the relative `/projects/...` link (404s on github.com).
+- **UC-05 update-branch PASS, UC-29 rescan/rebuild PASS, UC-10 attachment governance PASS,
+  UC-21 mention→reply→auto-read PASS, UC-20 secondary-engagement coexistence + verdict-binding
+  (code) confirmed.** UC-07 codex-browser + UC-20 live verdict were BLOCKED by a transient
+  container egress outage (environmental, not a defect).
+
+## F20-31 — Operator front-runs a clarifying question the goal DELEGATED to the delivering agent · OPEN — MED · ASK
+- UC-22 (VIB-9). Goal said "FIRST ask the human owner, via YOUR ask-human capability" (aimed at the
+  Developer). At triage the OPERATOR instead opened its OWN input packet (type:input, "Decision
+  required", from:operator, no askedBy) to gather the amber/cobalt choice itself — no disclosure it
+  was substituting for the delegated developer ask. (I saw the same shape live in VIB-9's amber/cobalt.)
+- ASK owner: when a goal explicitly delegates an ask to the delivering agent, should the operator
+  hand off to that agent (deploy it, let IT raise the ask_human) rather than gather the answer
+  itself? Or is operator-gathers-at-triage the intended coordination? Either way the substitution
+  should be DISCLOSED.
+
+## F20-32 — Codex developer FALSELY narrates "ask-human capability is unavailable" while using it · OPEN — MED
+- UC-22. On Codex the ask-human channel is the outcome-envelope `question` field (not a callable
+  tool; toolkit was []). The developer's envelope both CLAIMED "the available ask-human capability
+  is unavailable in this session, so I cannot obtain the required confirmation" AND successfully
+  populated `question` to ask it. The persona/prompt must describe the Codex ask-human channel
+  accurately so the agent doesn't narrate a false limitation. Fix: persona/toolkit-description text
+  for the Codex backend.
+
+## F20-33 — The OPERATOR's Codex fallback model is also gpt-5.6-sol (unrunnable) · OPEN — MED
+- UC-26. Switching the operator to Codex and running → hard 400 "gpt-5.6-sol not supported … with a
+  ChatGPT account". The operator has no concrete codex model (seed model "orchestration runtime",
+  agent-catalog.server.ts:82-83) and falls back to the model-catalog codex DEFAULT gpt-5.6-sol.
+  R20-8 fixed only the seeded Developer. Fix: the catalog codex default (and/or the operator's codex
+  fallback) → gpt-5.6-terra, so a fresh deployment's operator-on-Codex is runnable. Pairs with R20-3
+  (which now surfaces the provider sentence) and R20-8.
+
+## F20-34 — Operator/Codex spawn failure still surfaces generically (extends F20-4/R20-3) · OPEN — verify
+- UC-26. The operator-Codex 400 surfaced as the generic "Operator run failed — pick a recovery
+  path"; the provider's exact sentence was only in the run log. R20-3 Phase A wired
+  `escalateFailedOperatorRun` to carry `reason.text` — VERIFY at live-validation that the operator
+  spawn-error path (not just the specialist path) actually surfaces the provider sentence now.
+
+## Batch-2 nits
+- **N20-15** — the packet "Ask operator" button appears inert on input/agent-question packets (3
+  real clicks → no server write, no run), while "Confirm decision" works. Confirm whether "Ask
+  operator" is meant to function on non-failure packets, else disable/hide it there.
+- **N20-16** — a developer's OWN ask_human packet ("Agent question" from Implementation) labels its
+  recommended option "operator pick", attributing the rec to the operator on a packet the developer
+  raised. Mislabel.
+- **N20-17** — a Done/terminal task disables the explicit "Run operator" button ("reopen it to run")
+  yet an @operator comment still triggers a full operator run+reply. One run-path blocked, another
+  open, with no in-UI hint that mentioning will run it. Make the two consistent (or hint).
+- **N20-18** — in the default (raw-OFF) run console, a Codex `agent_message` renders as the raw
+  structured-output JSON envelope (`{"evidence":null,"summary":"…","verdict":null,"question":null}`)
+  with the meaningful `summary` buried and null fields shown verbatim, whereas Claude's `assistant`
+  event renders as clean prose. Extract+render the Codex envelope's `summary`/`question` as prose in
+  the non-raw console (P19-RC1 parity across backends). Fix area: run-console helpers.
