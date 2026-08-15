@@ -754,3 +754,10 @@ things my in-flight fixes already address (recorded as corroboration); the rest 
 - **R20-9 (on F20-31)**: the operator MAY gather at triage an answer a goal delegated to the
   delivering agent's ask-human (it's needed before work starts), BUT the packet must DISCLOSE it
   is substituting for the delegated agent ask — the timeline must be honest about the substitution.
+
+## Disposition note (Band 3)
+- **C9 header-identity half → NOT-A-DEFECT (kept as-is).** The GitHub trace card's empty state
+  renders `.panel-head` + "GitHub" (labels the section, standard empty-state pattern) while the
+  populated state renders `.gh-bar` + the repo slug — both carry the github icon and are clearly
+  the same card. The concrete C9 defect (the pill row clipping "1/2 checks faili" at 1440px) IS
+  fixed in app.css by C-CSS-LAYOUT. No markup change made for the header half.

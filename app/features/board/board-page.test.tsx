@@ -80,6 +80,8 @@ function renderBoard(
     view?: "list";
     canTransition?: boolean;
     search?: string;
+    /** D3: the merge target the shared acceptance ceremony names. */
+    defaultBranch?: string;
     /** Server result for the board's own fetchers (reorder / rescan). */
     action?: () => { ok: boolean; toast?: string; error?: string };
   } = {},
@@ -95,6 +97,7 @@ function renderBoard(
             canCreate
             canTransition={opts.canTransition ?? true}
             canRescan
+            {...(opts.defaultBranch ? { defaultBranch: opts.defaultBranch } : {})}
           />
         </ToastProvider>
       ),
@@ -161,8 +164,10 @@ describe("LV-20 family: the board subtitle counts what the projection says", () 
     ]);
     // WL-04: the stat now names its scope ("…in this project"), and JSX line
     // wrapping splits the sentence across text nodes — match the whole line.
+    // C4: the phrase is the project-scope canonical "waiting on a human" (the
+    // trailing "decision" was collapsed away in this pass).
     expect(subtitle(container)).toBe(
-      "2 tasks · 1 waiting on a human decision in this project",
+      "2 tasks · 1 waiting on a human in this project",
     );
   });
 });
@@ -285,7 +290,7 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
       { search: "filter=agent" },
     );
     expect(subtitle(container)).toBe(
-      "0 of 2 tasks · 1 waiting on a human decision in this project",
+      "0 of 2 tasks · 1 waiting on a human in this project",
     );
   });
 
@@ -300,7 +305,7 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
     fireEvent.click(clear);
     // Both hiding mechanisms are gone: the card is back and the chip retires.
     expect(subtitle(container)).toBe(
-      "1 task · 0 waiting on a human decision in this project",
+      "1 task · 0 waiting on a human in this project",
     );
     expect(queryByText("Clear")).toBeNull();
   });
@@ -328,7 +333,7 @@ describe("P13-D-10: a rejected board action must not render the success tick", (
     fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
     // B1: a move into the FINAL stage is an acceptance (a real merge attempt),
     // so it now asks first — the request is only sent once confirmed.
-    fireEvent.click(getByRole("button", { name: /^Accept → Done$/ }));
+    fireEvent.click(getByRole("button", { name: /^Move → Done$/ }));
     await waitFor(() =>
       expect(container.querySelector(".toast")).not.toBeNull(),
     );
@@ -367,7 +372,7 @@ describe("P13-D-10: a rejected board action must not render the success tick", (
     );
     fireEvent.click(getByLabelText("Change stage (currently In Progress)"));
     fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
-    fireEvent.click(getByRole("button", { name: /^Accept → Done$/ })); // B1
+    fireEvent.click(getByRole("button", { name: /^Move → Done$/ })); // B1
     await waitFor(() =>
       expect(container.querySelector(".toast")).not.toBeNull(),
     );
@@ -399,10 +404,13 @@ describe("B1: accepting from the board asks first", () => {
     fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
 
     // The dialog states the consequence — and NOTHING has been posted yet.
-    expect(getByText(/Merging is one-way/)).toBeTruthy();
+    // D3: the board renders the ONE shared ceremony now, whose heading names the
+    // move-into-terminal-stage acceptance ("Merging is one-way" appears only when
+    // a PR is attached; this default task has none — the foot says nothing merges).
+    expect(getByText("Moving to Done accepts this completion")).toBeTruthy();
     expect(submitted).toHaveLength(0);
 
-    fireEvent.click(getByRole("button", { name: /^Accept → Done$/ }));
+    fireEvent.click(getByRole("button", { name: /^Move → Done$/ }));
     await waitFor(() => expect(submitted.length).toBeGreaterThan(0));
   });
 
@@ -783,16 +791,21 @@ describe("F19-8: an archived card is inert and honest", () => {
 });
 
 /**
- * N20-14 / C2 — the shared pill VOCABULARY for a force-accepted task. This pins
- * the C-VOCAB `ValidationPill` export: `deriveValidation` projects "bypassed"
- * from the durable `acceptance: "forced"` fact, and the pill maps it to a
- * `risk`-toned "accepted · gate bypassed" chip instead of the stale "awaiting
- * verdict" a force-accepted Done task used to re-derive. (Asserts the display
- * VALUE only — the board card source is C-BOARD's; its own C2 card-side
- * withdrawal, when it lands, will move this coverage.)
+ * N20-14 / C2 — a force-accepted (terminal) card WITHDRAWS the validation pill,
+ * matching the task hero (task-detail-components.test.tsx "a force-accepted task
+ * never wears 'awaiting verdict' or a redundant bypass pill on the hero"). The
+ * projection still carries the honest `bypassed` value (`deriveValidation` from
+ * the durable `acceptance: "forced"` fact); the card simply does not RENDER a
+ * live-obligation pill on terminal work — an accepted completion owes nobody a
+ * verdict. The readiness pill stays, because "accepted" IS the terminal status,
+ * not a live claim.
+ *
+ * (This moved from a "carries the gate-bypassed validation" assertion once C2's
+ * card-side withdrawal landed — the exact hand-off C-VOCAB flagged. The
+ * bypassed→risk pill mapping is still exercised, by the non-terminal case below.)
  */
-describe("N20-14/C2: a force-accepted card carries the gate-bypassed validation", () => {
-  it("maps `bypassed` validation to the risk-toned 'accepted · gate bypassed' chip", () => {
+describe("N20-14/C2: a force-accepted card withdraws the validation pill", () => {
+  it("shows the terminal readiness but no 'awaiting verdict' or 'gate bypassed' chip", () => {
     const { container } = renderBoard([
       task({
         key: "VIB-2",
@@ -802,9 +815,25 @@ describe("N20-14/C2: a force-accepted card carries the gate-bypassed validation"
       }),
     ]);
     const card = container.querySelector(".card")!;
-    expect(card.textContent).toContain("accepted · gate bypassed");
-    // The false live obligation the fact replaces.
+    // The terminal status stays (the readiness pill); the live obligation goes.
+    expect(card.querySelector(".card-top")!.textContent).toContain("accepted");
     expect(card.textContent).not.toContain("awaiting verdict");
+    // C2 (canary): revert the `!terminal` guard in StateSignals and the
+    // withdrawn validation pill returns — this assertion goes red.
+    expect(card.textContent).not.toContain("gate bypassed");
+  });
+
+  it("still draws the bypassed pill on a NON-terminal card — the mapping is intact, only withheld on terminal work", () => {
+    const { container } = renderBoard([
+      task({
+        key: "VIB-3",
+        stage: "impl",
+        displayReadiness: "ready",
+        validation: "bypassed",
+      }),
+    ]);
+    const card = container.querySelector(".card")!;
+    expect(card.textContent).toContain("accepted · gate bypassed");
     // `risk`-toned: an override, not a clean pass.
     expect(card.querySelector(".pill.risk")).toBeTruthy();
   });
@@ -1087,9 +1116,11 @@ describe("F19-27: the confirm names the stage gate the server will refuse on", (
 
   it("still names the stage the card is leaving in the head sentence", () => {
     const text = fromTriage({ atAcceptanceBoundary: false });
-    expect(text).toContain("Moving VIB-1 from Triage into Done");
-    // The one-way warning the whole dialog exists for stays put.
-    expect(text).toContain("Merging is one-way");
+    // D3: the shared ceremony's heading names the acceptance, and its "Moving"
+    // row names the move — from the leaving stage to the terminal one — so the
+    // shape of a Triage→Done jump is still visible before the Blocked row.
+    expect(text).toContain("Moving to Done accepts this completion");
+    expect(text).toContain("Triage → Done");
   });
 
   it("blocks an off-boundary accept and says which stage the task is at", () => {
@@ -1626,5 +1657,163 @@ describe("gap-10: the board says when a task has gone quiet", () => {
     expect(
       getByRole("button", { name: /No activity/ }).textContent,
     ).not.toContain("·");
+  });
+});
+
+/**
+ * D3 (rulings 14 + 53) — the board raised its OWN acceptance dialog, forked from
+ * the task page's and disclosing less: no merge target, no delivered-revision
+ * row, no verdict attribution, no no-change disposition. Ruling 14 forbids the
+ * fork; ruling 53 (R18-7) required the board ceremony to "match the task-detail
+ * dialog". The board now renders the ONE shared `AcceptConfirm` in its
+ * `stage-move` mode.
+ *
+ * Canary: point the call site back at a board-only dialog and every assertion
+ * that reads a shared-ceremony row (the merge target, the delivered-revision
+ * row, the `data-screen-label`) goes red.
+ */
+describe("D3: the board renders the shared acceptance ceremony", () => {
+  const openConfirm = (
+    patch: Partial<BoardTask>,
+    opts: { defaultBranch?: string } = {},
+  ) => {
+    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
+      action: () => ({ ok: true as const, toast: "moved" }),
+      ...opts,
+    });
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    return r;
+  };
+
+  it("is the ONE shared dialog (its screen label), not a board-only fork", () => {
+    const r = openConfirm({});
+    expect(
+      r.container.querySelector(
+        'dialog[data-screen-label="Accept completion dialog"]',
+      ),
+    ).toBeTruthy();
+  });
+
+  it("names the merge target — the project default branch the fork could not", () => {
+    const text = openConfirm(
+      { pr: { number: 124, state: "review", title: "t" } },
+      { defaultBranch: "trunk" },
+    )
+      .container.querySelector("dialog")!
+      .textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("PR #124");
+    expect(text).toContain("into trunk");
+  });
+
+  it("carries the delivered-revision row the fork omitted (honest absence: a board summary holds no sha)", () => {
+    expect(
+      openConfirm({}).container.querySelector("dialog")!.textContent,
+    ).toContain("No delivered revision recorded.");
+  });
+
+  it("names the acceptance and the move it performs, in the shared vocabulary", () => {
+    const text = openConfirm({})
+      .container.querySelector("dialog")!
+      .textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("Moving to Done accepts this completion");
+    // The `stage-move` ceremony's Moving row names leaving + terminal stage.
+    expect(text).toContain("In Progress → Done");
+  });
+
+  it("still discloses the PR, its drift and the verdict it accepts over", () => {
+    const text = openConfirm({
+      validation: "changed",
+      pr: {
+        number: 124,
+        state: "review",
+        title: "t",
+        revisionDrift: { aheadBy: 2, headSha: "a4c790ce63efbeef" },
+      },
+    })
+      .container.querySelector("dialog")!
+      .textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("PR #124 · in review");
+    expect(text).toContain("a4c790ce63ef");
+    expect(text).toContain("2 commits added since review");
+    expect(text).toContain("awaiting verdict"); // the ValidationPill verdict row
+  });
+});
+
+/**
+ * D9 (WCAG 2.2 / UX spec §Accessibility Strategy) — board moves were announced
+ * to no one. Drag is pointer-only and keyboard users move via the StageMenu, but
+ * nothing spoke a requested move, a completed one, or a refusal (including the
+ * server's 409 on an off-boundary move). A polite `aria-live` region owned by
+ * the board now speaks all three.
+ *
+ * Canary: delete `announceMove` / the effect's `setAnnounce` calls and these
+ * outcome/request assertions go red.
+ */
+describe("D9: the board announces moves to a screen reader", () => {
+  // Scope to the board's own region — the ToastProvider host is also a polite
+  // status region, but it lives OUTSIDE `.board-wrap`.
+  const region = (c: HTMLElement) =>
+    c.querySelector('.board-wrap [aria-live="polite"]');
+
+  it("mounts an empty polite status region", () => {
+    const { container } = renderBoard([task()]);
+    const live = region(container)!;
+    expect(live).toBeTruthy();
+    expect(live.getAttribute("role")).toBe("status");
+    expect(live.textContent).toBe("");
+  });
+
+  it("announces the request, then the server's own outcome sentence", async () => {
+    const { container, getByLabelText, getByRole } = renderBoard(
+      [task({ key: "VIB-1", stage: "triage" })],
+      { action: () => ({ ok: true as const, toast: "Moved VIB-1 to In Progress" }) },
+    );
+    // A NON-final move commits straight from the gesture (no confirm dialog).
+    fireEvent.click(getByLabelText("Change stage (currently Triage)"));
+    fireEvent.click(getByRole("menuitemradio", { name: "In Progress" }));
+    expect(region(container)!.textContent).toBe(
+      "Move requested: VIB-1 to In Progress.",
+    );
+    await waitFor(() =>
+      expect(region(container)!.textContent).toBe("Moved VIB-1 to In Progress"),
+    );
+  });
+
+  it("announces a refusal — the class the 409 on an off-boundary move falls into", async () => {
+    const { container, getByLabelText, getByRole } = renderBoard(
+      [task({ key: "VIB-1", stage: "triage" })],
+      {
+        action: () => ({
+          ok: false as const,
+          error: "Triage → In Progress is not an allowed edge.",
+        }),
+      },
+    );
+    fireEvent.click(getByLabelText("Change stage (currently Triage)"));
+    fireEvent.click(getByRole("menuitemradio", { name: "In Progress" }));
+    await waitFor(() =>
+      expect(region(container)!.textContent).toContain("Move refused:"),
+    );
+    expect(region(container)!.textContent).toContain(
+      "Triage → In Progress is not an allowed edge.",
+    );
+  });
+
+  it("announces the outcome of a confirmed acceptance from the board", async () => {
+    const { container, getByLabelText, getByRole } = renderBoard(
+      [task({ key: "VIB-1", stage: "impl" })],
+      { action: () => ({ ok: true as const, toast: "Accepted VIB-1 — moved to Done" }) },
+    );
+    fireEvent.click(getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
+    // The acceptance waits for the confirm; the request fires on confirm.
+    fireEvent.click(getByRole("button", { name: /^Move → Done$/ }));
+    expect(region(container)!.textContent).toBe("Move requested: VIB-1 to Done.");
+    await waitFor(() =>
+      expect(region(container)!.textContent).toBe(
+        "Accepted VIB-1 — moved to Done",
+      ),
+    );
   });
 });

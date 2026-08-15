@@ -121,6 +121,10 @@ export default function Board() {
       canCreate={canCreate}
       canTransition={canTransition}
       canRescan={canRescan}
+      // D3: the merge target the shared acceptance ceremony names when a board
+      // move into the terminal stage is confirmed (task-detail already reads the
+      // same fact from the project record).
+      defaultBranch={layout.board.project.defaultBranch}
     />
   );
 }

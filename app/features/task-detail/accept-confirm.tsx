@@ -1,4 +1,4 @@
-import type { TaskDetail } from "~/server/projections/task-query.server";
+import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import { prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
@@ -52,6 +52,27 @@ export interface AcceptCeremony {
   label?: string;
 }
 
+/**
+ * D3 (rulings 14/53) — the exact task facts this one ceremony reads, declared
+ * STRUCTURALLY so BOTH acceptance surfaces render this single component instead
+ * of forking it. The task page passes its full `TaskDetail` (a superset); the
+ * board passes a projection `TaskSummary` plus the board's own stage list — the
+ * board summary carries every field below except `stages`, which it supplies
+ * from its columns. Ruling 14 forbids a per-surface fork; keeping the param a
+ * subset is what lets one implementation serve both without a cast.
+ */
+export interface AcceptConfirmTask {
+  key: string;
+  title: string;
+  /** Current stage id — positions the task within `stages`. */
+  stage: string;
+  /** Project stages in order (id + display name). */
+  stages: { id: string; name: string }[];
+  validation: Validation;
+  branch: string | null;
+  pr: PrRef | null;
+}
+
 function headingFor(mode: AcceptCeremonyMode, terminalName: string): string {
   switch (mode) {
     case "force":
@@ -100,7 +121,7 @@ export function AcceptConfirm({
   onCancel,
   onConfirm,
 }: {
-  task: TaskDetail;
+  task: AcceptConfirmTask;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
   /** R17-2: a verified no-change completion. TWO shapes reach this, and the
