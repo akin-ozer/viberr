@@ -341,6 +341,7 @@ export function SsoPanel({
       {confirm && (
         <ConfirmDelete
           what={`the ${PROVIDER_META[confirm.provider].label} configuration`}
+          confirmLabel="Remove configuration"
           detail={
             confirm.envAvailable
               ? `${PROVIDER_META[confirm.provider].label} sign-in falls back to the credentials in this deployment's environment.`

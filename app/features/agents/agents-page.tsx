@@ -975,8 +975,11 @@ export function LiveRoster({
         </div>
         {sorted.length === 0 && (
           // Empty state the mock never designed (agents spec §4.4).
+          // D8: absent → why it matters → next action (P16).
           <div className="empty sm">
-            No agents are currently engaged.
+            No agents are currently engaged. When an operator or specialist is
+            running on a task, it appears here with its live status. Open a task
+            and run the operator to engage one.
           </div>
         )}
         {sorted.map((d) => {

@@ -7,8 +7,12 @@ import { Icon } from "~/ui/icon";
  * (screenshots, PDFs), listed newest-first from the canonical
  * `attachments/` directory.
  *
- * Renders NOTHING when the task has no attachments — an empty "Attachments
- * (0)" panel on every task would be noise for a feature most tasks never use.
+ * D8: when empty it used to render NOTHING at all, so a user promised browser
+ * evidence had no surface telling them none arrived. Now it renders a real
+ * empty state (what's absent, why it matters, what happens next) — but ONLY
+ * when the task has a browser-capable agent (`browserExpected`); on the tasks
+ * that never touch the feature it still stays silent, which is what kept an
+ * empty "Attachments (0)" from being noise on every task.
  * Member-gated upstream: the loader ships `[]` to non-members (same bar as the
  * run console), and the serving route re-checks membership on every fetch.
  */
@@ -18,13 +22,32 @@ const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
 export function AttachmentsPanel({
   base,
   attachments,
+  browserExpected = false,
 }: {
   /** `/projects/<slug>/tasks/<KEY>/attachments` — built by the route, which is
    *  the one place that actually knows the URL params. */
   base: string;
   attachments: TaskAttachmentEntry[];
+  /** D8: a deployed agent holds `use-browser`, so browser evidence is promised
+   *  for this task even before the first file lands. */
+  browserExpected?: boolean;
 }) {
-  if (attachments.length === 0) return null;
+  if (attachments.length === 0) {
+    if (!browserExpected) return null;
+    return (
+      <section className="panel" data-comment-anchor="attachments">
+        <div className="panel-head">
+          <Icon name="file" />
+          <h2>Attachments</h2>
+        </div>
+        <p className="empty">
+          No attachments yet. A browser-capable agent on this task saves the
+          screenshots and files it captures here — none have landed. They appear
+          the next time such an agent runs and produces evidence.
+        </p>
+      </section>
+    );
+  }
   const href = (name: string) => `${base}/${encodeURIComponent(name)}`;
   const images = attachments.filter((a) => IMAGE_RE.test(a.name));
   const files = attachments.filter((a) => !IMAGE_RE.test(a.name));

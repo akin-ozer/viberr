@@ -194,6 +194,9 @@ export function HomePage({
         d.ok
           ? `Projections rebuilt from files — ${countLabel(d.projects ?? 0, "project")}, ${countLabel(d.tasks ?? 0, "task")} re-projected`
           : (d.error ?? "Rebuild failed — check the server log"),
+        // D5: the failure branch borrowed the success tick — the sibling rescan
+        // handler already passes the kind, this one did not.
+        d.ok ? "success" : "error",
       );
     }
   }, [rebuildFetcher.state, rebuildFetcher.data, push]);

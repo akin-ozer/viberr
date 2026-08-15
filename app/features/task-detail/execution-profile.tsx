@@ -30,6 +30,10 @@ export interface DeployedSpecialistView {
     verdict: boolean;
     /** May raise ask-human question packets. */
     askHuman: boolean;
+    /** D8/R19-19: holds `use-browser` — its runs save screenshots/downloads into
+     *  the task's `attachments/`, so the attachments panel is meaningful even
+     *  before any file lands. */
+    browser: boolean;
   };
 }
 

@@ -2641,6 +2641,9 @@ export interface DeployedSpecialistView {
     verdict: boolean;
     /** May raise ask-human question packets. */
     askHuman: boolean;
+    /** D8/R19-19: holds `use-browser` → its runs can save browser evidence into
+     *  the task's `attachments/`. */
+    browser: boolean;
   };
   /** Declared resources (skills/MCPs/KBs) — selection context. */
   resources: { skills: string[]; mcps: string[]; kb: string[] };
@@ -2753,6 +2756,11 @@ export function listDeployedSpecialists(
         // profile look review-capable and mis-picked the reviewer.
         verdict: granted("report-validation-verdict"),
         askHuman: effectiveCollabMode(grants, "ask-human") === "direct",
+        // D8/R19-19: whether this agent can drive a browser — the mount's own
+        // gate (`resolveBrowserMcp`), so a task with a browser-capable agent
+        // gets an attachments empty state ("evidence lands here; none yet")
+        // instead of nothing at all.
+        browser: effectiveCollabMode(grants, "use-browser") === "direct",
       },
       resources: {
         skills: resolved.skills,

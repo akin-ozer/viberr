@@ -254,7 +254,7 @@ describe("ProfilePage", () => {
       memberships: [],
       accessRole: null,
     });
-    expect(getByText("No project membership yet.")).toBeTruthy();
+    expect(getByText(/No project membership yet/)).toBeTruthy();
     expect(container.querySelectorAll(".rbac-yes")).toHaveLength(0);
     // Nav copy renders as plain text (no dead keybtn).
     expect(container.querySelector(".keybtn")).toBeNull();

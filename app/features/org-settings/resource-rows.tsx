@@ -137,7 +137,14 @@ export function KbPanel({
             </span>
           </div>
         ))}
-        {kbs.length === 0 && <div className="empty">No knowledge bases yet.</div>}
+        {kbs.length === 0 && (
+          // D8: absent → why it matters → next action (P16), not a bare label.
+          <div className="empty">
+            No knowledge bases yet. A knowledge base is a folder of docs agents
+            read live while they work. Add one with <strong>New</strong> above,
+            then grant it to an agent profile.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -294,7 +301,14 @@ export function McpPanel({
             </span>
           </div>
         ))}
-        {mcps.length === 0 && <div className="empty">No MCP servers yet.</div>}
+        {mcps.length === 0 && (
+          // D8: absent → why it matters → next action (P16).
+          <div className="empty">
+            No MCP servers yet. An MCP server exposes external tools an agent can
+            call during a run. Add one with <strong>Add</strong> above, then
+            grant it to an agent profile.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -380,7 +394,14 @@ export function SkillPanel({
             </span>
           </div>
         ))}
-        {skills.length === 0 && <div className="empty">No skills yet.</div>}
+        {skills.length === 0 && (
+          // D8: absent → why it matters → next action (P16).
+          <div className="empty">
+            No skills yet. A skill packages instructions an agent loads on demand
+            while it works. Add one with <strong>New</strong> above, then grant
+            it to an agent profile.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -460,7 +481,14 @@ export function AgentPanel({
             </div>
           );
         })}
-        {gagents.length === 0 && <div className="empty">No global agent profiles yet.</div>}
+        {gagents.length === 0 && (
+          // D8: absent → why it matters → next action (P16).
+          <div className="empty">
+            No global agent profiles yet. A profile is a reusable agent
+            definition — its backend, model, skills and grants — that you can
+            deploy into any project. Create one with <strong>New</strong> above.
+          </div>
+        )}
       </div>
     </section>
   );

@@ -24,7 +24,7 @@ function profile(
     model: "sonnet",
     ...(verdict === undefined
       ? {}
-      : { capabilities: { delivery: false, verdict, askHuman: false } }),
+      : { capabilities: { delivery: false, verdict, askHuman: false, browser: false } }),
   };
 }
 

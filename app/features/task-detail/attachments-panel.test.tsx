@@ -19,9 +19,25 @@ const entry = (name: string, size = 2048) => ({
 });
 
 describe("AttachmentsPanel", () => {
-  it("renders NOTHING for a task with no attachments", () => {
+  it("renders NOTHING for a task with no attachments and no browser-capable agent", () => {
+    // The no-noise default: most tasks never touch the browser feature, so an
+    // empty "Attachments (0)" panel would just be clutter.
     const { container } = render(<AttachmentsPanel base={BASE} attachments={[]} />);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("D8: renders an orienting empty state when a browser-capable agent is deployed", () => {
+    // The finding: a user promised browser evidence had NO surface telling them
+    // none arrived. Now it says what's absent, why, and what happens next.
+    const { container } = render(
+      <AttachmentsPanel base={BASE} attachments={[]} browserExpected />,
+    );
+    expect(container.textContent).toContain("Attachments");
+    expect(container.textContent).toContain("No attachments yet");
+    expect(container.textContent).toContain("browser-capable agent");
+    // Still no thumbnails/rows on an empty panel.
+    expect(container.querySelector(".attach-thumb")).toBeNull();
+    expect(container.querySelector(".attach-file")).toBeNull();
   });
 
   it("renders image thumbnails from the member-only route and plain rows for other files", () => {

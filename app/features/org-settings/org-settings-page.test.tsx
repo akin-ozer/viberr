@@ -91,7 +91,8 @@ describe("ConnectionsPanel", () => {
     expect(
       getByText(/Projects already created from hepapi keep their repos/),
     ).toBeTruthy();
-    fireEvent.click(getByText("Remove", { selector: "button.btn.danger" }));
+    // C6: the confirm button now names the outcome instead of a bare "Remove".
+    fireEvent.click(getByText("Remove connection", { selector: "button.btn.danger" }));
     await waitFor(() =>
       expect(lastForm).toMatchObject({
         intent: "connection-remove",
@@ -222,7 +223,8 @@ describe("UsersPanel", () => {
 
     fireEvent.click(getByLabelText("Remove Selin Aksoy"));
     expect(getByText(/Their comments and decisions stay in the audit history/)).toBeTruthy();
-    fireEvent.click(getByText("Remove", { selector: "button.btn.danger" }));
+    // C6: outcome-naming confirm label.
+    fireEvent.click(getByText("Remove member", { selector: "button.btn.danger" }));
     await waitFor(() =>
       expect(lastForm).toMatchObject({ intent: "user-remove", userId: "u_selin" }),
     );
@@ -528,7 +530,8 @@ describe("ResourcesPanel", () => {
     const { getByText, getByLabelText } = renderResources();
     fireEvent.click(getByLabelText("Delete Architecture notes"));
     expect(getByText(/The index is removed from the store/)).toBeTruthy();
-    fireEvent.click(getByText("Remove", { selector: "button.btn.danger" }));
+    // C6: outcome-naming confirm label per resource kind.
+    fireEvent.click(getByText("Remove knowledge base", { selector: "button.btn.danger" }));
     await waitFor(() =>
       expect(lastForm).toMatchObject({ intent: "kb-delete", kbId: "kb1" }),
     );

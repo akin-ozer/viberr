@@ -84,7 +84,11 @@ export function HumanAccess({
     if (m.role === r) return;
     if (m.role === "admin" && r !== "admin" && counts.admin <= 1) {
       // Client mirror of the server guard (UX sugar — the action re-checks).
-      push(`${projectName} needs at least one admin — promote someone else first`);
+      // D5: a refusal must not render the success tick.
+      push(
+        `${projectName} needs at least one admin — promote someone else first`,
+        "error",
+      );
       return;
     }
     onSetRole(m, r);

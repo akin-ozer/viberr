@@ -255,7 +255,7 @@ describe("ReviewQueuePage", () => {
         "Nothing waits on you. Completion reports land here when a task reaches the boundary.",
       ),
     ).toBeTruthy();
-    expect(getByText("No review work in flight.")).toBeTruthy();
+    expect(getByText(/No review work in flight/)).toBeTruthy();
     expect(
       getByText("0 tasks at the review boundary · 0 waiting on your acceptance"),
     ).toBeTruthy();

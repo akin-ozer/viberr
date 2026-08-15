@@ -291,7 +291,12 @@ export function ReviewQueuePage({
               ))}
             </div>
           ) : (
-            <div className="empty">No review work in flight.</div>
+            // D8: absent → why it matters (P16), not a bare label.
+            <div className="empty">
+              No review work in flight. A task an agent is actively revising in
+              a review stage shows here until it reaches the boundary and moves
+              to the queue above.
+            </div>
           )}
         </div>
       </div>

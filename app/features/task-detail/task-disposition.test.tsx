@@ -15,6 +15,7 @@ import { DecisionPacket } from "./decision-packet";
 import type { RecommendationView } from "./operator-recommendations";
 import { TaskDetailPage } from "./task-detail-page";
 import { ScheduledActions } from "./task-main-sections";
+import type { RunView } from "~/features/runtime/runtime-types";
 
 afterEach(cleanup);
 
@@ -95,6 +96,7 @@ function renderPage(props: {
   recommendations?: RecommendationView[];
   workRevisionSha?: string | null;
   schedules?: TaskSchedule[];
+  runtime?: RunView[];
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -104,7 +106,7 @@ function renderPage(props: {
         <ToastProvider>
           <TaskDetailPage
             task={detail(props.task ?? {})}
-            runtime={[]}
+            runtime={props.runtime ?? []}
             deployedSpecialists={[]}
             operatorBackend="claude"
           operatorAutonomy="supervised"
@@ -1570,7 +1572,7 @@ const deployedAgent = (
   role,
   backend: "claude",
   model: "claude-sonnet",
-  capabilities: { delivery: true, verdict, askHuman: true },
+  capabilities: { delivery: true, verdict, askHuman: true, browser: false },
 });
 
 function renderExec(opts: {
@@ -1910,4 +1912,125 @@ describe("UX19-18: the three popovers keep the keyboard promises they make", () 
       expect(document.activeElement).toBe(btn);
     });
   }
+});
+
+/**
+ * D6 — confirmation coverage. Six consequential single-click actions had no
+ * confirm while a reversible archive took a three-row ceremony; release-ownership
+ * was already ceremonied (ReleaseConfirm). These three had none: cancelling a
+ * queued re-run, dismissing an operator recommendation, interrupting a live run.
+ * Each now confirms first, naming the outcome, before anything submits.
+ * (Remove-stage and remove-member are covered in settings-page.test.tsx.)
+ */
+describe("D6: consequential actions confirm before they act", () => {
+  const runningRun = (): RunView =>
+    ({
+      id: "primary",
+      serverRunId: "run_1",
+      role: "Primary specialist",
+      kind: "primary",
+      who: { kind: "agent", backend: "claude", name: "Claude Code", role: "Developer" },
+      backend: "claude",
+      sdk: "Claude Agent SDK",
+      model: "claude-sonnet-4-5",
+      profileId: "developer",
+      exportable: false,
+      sid: "51d8f0e2",
+      state: "running",
+      lifecycle: "running",
+      interruptedBy: null,
+      phase: "Running validation sweep",
+      step: "Bash · npm test",
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      finished: null,
+      turns: 1,
+      tokens: 0,
+      lines: [],
+      raw: [],
+      lineCount: 0,
+      logWindow: { totalLines: 0, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 0 },
+    }) as unknown as RunView;
+
+  it("cancelling a scheduled re-run confirms, then posts cancel-schedule", async () => {
+    const submitted: Record<string, string>[] = [];
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <ScheduledActions
+              schedules={[
+                {
+                  id: "s-1",
+                  dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+                  backend: "claude",
+                  autonomy: "supervised",
+                  note: null,
+                  createdByLabel: "Selin",
+                } as unknown as TaskSchedule,
+              ]}
+              canRunAgents
+              taskClosed={false}
+              configuredAutonomy="supervised"
+              backendAvailable={{ claude: true, codex: true }}
+            />
+          </ToastProvider>
+        ),
+        action: async ({ request }: { request: Request }) => {
+          const fd = await request.formData();
+          const row: Record<string, string> = {};
+          for (const [k, v] of fd.entries()) if (typeof v === "string") row[k] = v;
+          submitted.push(row);
+          return { ok: true };
+        },
+      },
+    ]);
+    const { getByText, queryByText } = render(<Stub initialEntries={["/"]} />);
+    // The row's Cancel opens a confirm — nothing submits yet.
+    fireEvent.click(getByText("Cancel", { selector: "button.sched-cancel" }));
+    expect(getByText("Cancel this scheduled re-run?")).toBeTruthy();
+    expect(submitted).toHaveLength(0);
+    // Canary: wire the row button straight to submit and this dialog never shows.
+    expect(queryByText(/scheduled by Selin/)).toBeTruthy();
+    fireEvent.click(getByText("Cancel re-run", { selector: "button.btn.danger" }));
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!).toMatchObject({ intent: "cancel-schedule", scheduleId: "s-1" });
+  });
+
+  it("dismissing a recommendation confirms, then posts dismiss-recommendation", async () => {
+    const { container, submitted, getByText } = renderPage({
+      myRole: "admin",
+      recommendations: [
+        {
+          id: "rec-d",
+          kind: "delivery",
+          label: "Deliver the branch and open a PR",
+          detail: "The work looks ready to push.",
+        },
+      ],
+    });
+    fireEvent.click(findButton(container, "Dismiss")!);
+    // Confirms first — the harmless-looking dismiss withdraws a governed decision.
+    expect(getByText("Dismiss this recommendation?")).toBeTruthy();
+    expect(submitted).toHaveLength(0);
+    fireEvent.click(findButton(container, "Dismiss recommendation")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("dismiss-recommendation");
+    expect(submitted[0]!.recId).toBe("rec-d");
+  });
+
+  it("interrupting a live run confirms, then posts run-interrupt", async () => {
+    const { container, submitted, getByText } = renderPage({
+      myRole: "admin",
+      runtime: [runningRun()],
+    });
+    fireEvent.click(findButton(container, "Interrupt")!);
+    // The button opens a confirm; the run keeps going until it is confirmed.
+    expect(getByText("Interrupt this run?")).toBeTruthy();
+    expect(submitted).toHaveLength(0);
+    fireEvent.click(findButton(container, "Interrupt run")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("run-interrupt");
+    expect(submitted[0]!.runId).toBe("run_1");
+  });
 });

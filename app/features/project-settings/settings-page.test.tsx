@@ -216,7 +216,13 @@ describe("StagesPanel", () => {
     fireEvent.click(removeButtons[0]!); // triage → locked
     fireEvent.click(removeButtons[3]!); // review → 2 tasks
     expect(onRemove).not.toHaveBeenCalled();
-    fireEvent.click(removeButtons[1]!); // ready → empty, unlocked
+    fireEvent.click(removeButtons[1]!); // ready → empty, unlocked → opens confirm
+    // D6: an empty unlocked stage now confirms before it dispatches (governance
+    // change, audit row). The click opens the confirm; onRemove fires on OK.
+    expect(onRemove).not.toHaveBeenCalled();
+    const confirm = container.querySelector("dialog.confirm-card")!;
+    expect(confirm.textContent).toContain("Remove the Ready stage?");
+    fireEvent.click(confirm.querySelector("button.btn.danger")!);
     expect(onRemove).toHaveBeenCalledWith("ready");
   });
 
@@ -484,7 +490,12 @@ describe("MembersPanel", () => {
     const removeButtons = container.querySelectorAll(".stg-x");
     fireEvent.click(removeButtons[0]!); // self
     expect(onRemove).not.toHaveBeenCalled();
-    fireEvent.click(removeButtons[1]!); // elif, now a viewer → allowed
+    fireEvent.click(removeButtons[1]!); // elif, now a viewer → opens confirm
+    // D6: removing a member confirms before it dispatches.
+    expect(onRemove).not.toHaveBeenCalled();
+    const confirm = container.querySelector("dialog.confirm-card")!;
+    expect(confirm.textContent).toContain("Remove");
+    fireEvent.click(confirm.querySelector("button.btn.danger")!);
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 

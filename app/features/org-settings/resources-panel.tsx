@@ -184,9 +184,11 @@ export function ResourcesPanel({
           onEdit={(a) => setModal({ kind: "agent", item: a })}
           onDelete={(a) => {
             if (a.used > 0) {
+              // D5: a refusal must not render the success tick.
               push(
                 "Detach " + a.name + " from its " + a.used + " project" +
                   (a.used === 1 ? "" : "s") + " first",
+                "error",
               );
               return;
             }
@@ -258,6 +260,16 @@ export function ResourcesPanel({
       {confirm && (
         <ConfirmDelete
           what={confirm.item.name}
+          // C6: name the outcome per resource kind, not a bare "Remove".
+          confirmLabel={
+            confirm.kind === "kb"
+              ? "Remove knowledge base"
+              : confirm.kind === "mcp"
+                ? "Remove MCP server"
+                : confirm.kind === "skill"
+                  ? "Remove skill"
+                  : "Remove agent profile"
+          }
           detail={
             confirm.kind === "kb"
               ? "The index is removed from the store." +

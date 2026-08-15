@@ -598,7 +598,8 @@ describe("LiveRoster", () => {
 
   it("renders the added empty state when nothing is engaged", () => {
     const { getByText } = render(<LiveRoster deployments={[]} onOpen={() => {}} />);
-    expect(getByText("No agents are currently engaged.")).toBeTruthy();
+    // D8: the empty state now orients the reader; the label is its opening.
+    expect(getByText(/No agents are currently engaged/)).toBeTruthy();
   });
 
   // P13-UI-27 residual: an id with no profile used to be printed raw, which

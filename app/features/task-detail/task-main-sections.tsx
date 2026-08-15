@@ -5,6 +5,7 @@ import type {
   TaskDetail,
 } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
@@ -308,6 +309,9 @@ export function ScheduledActions({
   useActionFeedback(fetcher);
   const busy = fetcher.state !== "idle";
   const canSchedule = canRunAgents && !taskClosed;
+  // D6: cancelling a queued re-run (possibly one another member scheduled)
+  // removes a pending action — confirm it, naming when it was due.
+  const [confirmCancel, setConfirmCancel] = useState<TaskSchedule | null>(null);
   // UX19-10: same fallback formula as `OperatorRunControl` (P11-41) — the
   // picker never starts on an option that would fail fast. It used to be a flat
   // `defaultValue="claude"`, so on a Codex-only instance the two operator
@@ -345,8 +349,11 @@ export function ScheduledActions({
       </div>
 
       {schedules.length === 0 ? (
+        // D8: absent → why it matters → next action (P16), not a bare label.
         <p className="empty flush">
-          No scheduled operator re-runs.
+          {canSchedule
+            ? "No scheduled operator re-runs. Use the form below to have the operator revisit this task at a set time — handy when you're waiting on something external."
+            : "No scheduled operator re-runs. A re-run has the operator revisit this task at a set time; scheduling one needs the run-agents grant."}
         </p>
       ) : (
         <ul className="sched-list">
@@ -369,7 +376,8 @@ export function ScheduledActions({
                   type="button"
                   className="btn ghost sched-cancel"
                   disabled={busy}
-                  onClick={() => submit({ intent: "cancel-schedule", scheduleId: s.id })}
+                  // D6: opens a confirm instead of cancelling on the click.
+                  onClick={() => setConfirmCancel(s)}
                 >
                   Cancel
                 </button>
@@ -447,6 +455,32 @@ export function ScheduledActions({
           </button>
         </fetcher.Form>
       ) : null}
+
+      {confirmCancel && (
+        <ConfirmDialog
+          title="Cancel this scheduled re-run?"
+          body={
+            <>
+              The operator re-run due{" "}
+              <strong>
+                <LocalDayDotTime iso={confirmCancel.dueAt} />
+              </strong>
+              {confirmCancel.createdByLabel
+                ? ` (scheduled by ${confirmCancel.createdByLabel})`
+                : ""}{" "}
+              will not fire. You can schedule another below.
+            </>
+          }
+          confirmLabel="Cancel re-run"
+          cancelLabel="Keep it"
+          busy={busy}
+          onCancel={() => setConfirmCancel(null)}
+          onConfirm={() => {
+            submit({ intent: "cancel-schedule", scheduleId: confirmCancel.id });
+            setConfirmCancel(null);
+          }}
+        />
+      )}
     </section>
   );
 }

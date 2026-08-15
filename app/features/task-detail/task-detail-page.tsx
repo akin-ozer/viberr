@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
@@ -298,6 +299,14 @@ export function TaskDetailPage({
   // action has to replay — a recommendation id, a packet option + its note, or
   // the stage the human picked out of the Current-state menu (F19-37).
   const [confirmAccept, setConfirmAccept] = useState<PendingAccept | null>(null);
+  // D6: two consequential single-click actions gained a confirm — interrupting a
+  // live run (discards its in-flight, uncommitted work) and dismissing an
+  // operator recommendation (withdraws a governed, audited decision). Both were
+  // one silent click while a reversible archive took a three-row ceremony.
+  const [confirmInterrupt, setConfirmInterrupt] = useState<string | null>(null);
+  const [confirmDismiss, setConfirmDismiss] = useState<
+    { recId: string; label: string } | null
+  >(null);
   const acceptFetcher = useFetcher<ActionResult>();
   useActionFeedback(acceptFetcher);
   const acceptBusy = acceptFetcher.state !== "idle";
@@ -466,13 +475,21 @@ export function TaskDetailPage({
     }
     submitApplyRec(recId);
   };
-  const onDismissRec = (recId: string) => {
+  const submitDismissRec = (recId: string) => {
     if (recBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "dismiss-recommendation");
     fd.set("recId", recId);
     recFetcher.submit(fd, { method: "post" });
+  };
+  // D6: dismissing withdraws a pending operator recommendation — confirm it,
+  // naming the recommendation. (Apply already routes through the accept confirm
+  // when it reaches acceptance; the harmless dismiss had no gate at all.)
+  const onDismissRec = (recId: string) => {
+    if (recBusy) return;
+    const rec = recommendations.find((r) => r.id === recId);
+    setConfirmDismiss({ recId, label: rec?.label ?? "this recommendation" });
   };
 
   // Manual stage change from the Current-state menu. Page-owned since F19-37 —
@@ -533,7 +550,8 @@ export function TaskDetailPage({
           <LiveRunPanel
             runtime={runtime}
             onViewLogs={onViewLogs}
-            onInterrupt={onInterrupt}
+            // D6: the button opens a confirm instead of interrupting on the click.
+            onInterrupt={(id) => setConfirmInterrupt(id)}
             canInterrupt={canInterrupt}
             interrupting={runBusy}
           />
@@ -674,7 +692,15 @@ export function TaskDetailPage({
         ) : null}
 
         {attachmentsBase ? (
-          <AttachmentsPanel base={attachmentsBase} attachments={attachments} />
+          <AttachmentsPanel
+            base={attachmentsBase}
+            attachments={attachments}
+            // D8: show an empty state (not nothing) when a browser-capable agent
+            // is deployed — its runs are what fill this panel.
+            browserExpected={deployedSpecialists.some(
+              (s) => s.capabilities?.browser,
+            )}
+          />
         ) : null}
 
         <Timeline
@@ -825,6 +851,42 @@ export function TaskDetailPage({
             onOwner("release");
           }}
           onOwner={onOwner}
+        />
+      )}
+
+      {/* D6: interrupt a live run — discards uncommitted in-flight work. */}
+      {confirmInterrupt && (
+        <ConfirmDialog
+          title="Interrupt this run?"
+          body="The agent stops where it is. Anything it has not already committed or delivered is lost — you can start a new run afterward."
+          confirmLabel="Interrupt run"
+          busy={runBusy}
+          onCancel={() => setConfirmInterrupt(null)}
+          onConfirm={() => {
+            onInterrupt(confirmInterrupt);
+            setConfirmInterrupt(null);
+          }}
+        />
+      )}
+
+      {/* D6: dismiss an operator recommendation — a governed, audited decision. */}
+      {confirmDismiss && (
+        <ConfirmDialog
+          title="Dismiss this recommendation?"
+          body={
+            <>
+              <strong>{confirmDismiss.label}</strong> is withdrawn without acting
+              on it. The dismissal is recorded on the timeline; the operator may
+              raise it again on its next run.
+            </>
+          }
+          confirmLabel="Dismiss recommendation"
+          busy={recBusy}
+          onCancel={() => setConfirmDismiss(null)}
+          onConfirm={() => {
+            submitDismissRec(confirmDismiss.recId);
+            setConfirmDismiss(null);
+          }}
         />
       )}
     </div>
