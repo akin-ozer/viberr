@@ -561,8 +561,8 @@ export function StoreStrip({
           styled as such and confirmed before it runs. */}
       <Icon name="memory" />
       <span>
-        <b>Store maintenance</b> · admins only — the board is a projection of the
-        task files on disk. Neither action edits a task file.
+        <b>Store maintenance</b> · admins only — projects and boards are a
+        projection of the task files on disk. Neither action edits a task file.
         {lockHolder && (
           // F18-5: one writer per data root. Naming the holder makes a
           // second-writer mistake visible instead of only surfacing as silent

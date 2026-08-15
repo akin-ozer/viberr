@@ -92,7 +92,7 @@ describe("ReviewQueuePage", () => {
     );
   });
 
-  it("rows carry key, subline, PR pill, validation pill and the divergent wait-tag copy", () => {
+  it("rows carry key, subline, PR pill, validation pill and the scoped wait-tag copy", () => {
     const { container } = renderQueue([rowHuman], [rowAgent]);
     const rows = container.querySelectorAll(".rq-row");
     expect(rows).toHaveLength(2);
@@ -102,9 +102,11 @@ describe("ReviewQueuePage", () => {
     expect(first.querySelector(".sub")!.textContent).toBe(
       "Completion report — Accept completion, or send back for one fix?",
     );
-    // "your acceptance" — deliberately NOT the board's "waiting on you".
+    // C4: the viewer-scoped canonical phrase — the same "waiting on you" the
+    // board card uses. (The panel HEADING still names the acceptance action;
+    // this per-row tag is a status, and shares the app's two-phrase vocabulary.)
     expect(first.querySelector(".wait-tag.human")!.textContent).toContain(
-      "your acceptance",
+      "waiting on you",
     );
     expect(first.textContent).toContain("PR #318");
     // validation `changed` names what is OWED, not the mechanism (owner
@@ -399,8 +401,8 @@ describe("gap-10: a review row that has gone quiet says so", () => {
     expect(meta.textContent).toContain("no activity");
     expect(meta.querySelector(".pill.neutral")).toBeTruthy();
     // The row still says whose move it is — the cue adds time, it never replaces
-    // the wait state.
-    expect(meta.textContent).toContain("your acceptance");
+    // the wait state. C4: the viewer-scoped "waiting on you".
+    expect(meta.textContent).toContain("waiting on you");
   });
 
   it("says nothing on a row that is still moving", () => {

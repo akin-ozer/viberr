@@ -507,7 +507,7 @@ export default function Login({
             <input
               id="lg-email"
               name="email"
-              type="text"
+              type="email"
               className="mono"
               autoComplete="username"
               value={email}

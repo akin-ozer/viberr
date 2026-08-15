@@ -836,3 +836,75 @@ describe("task archive (R14-3)", () => {
     expect((await runLoader("VIB-153", ids.murat)).archived).toBe(false);
   });
 });
+
+/* --------------------------------------------------- F20-11 read-marking */
+
+describe("F20-11: task-view read-marking fires only on a genuine navigation", () => {
+  /** Run the loader against an arbitrary wire URL (a `.data` revalidation vs a
+   *  clean document path) so we can prove which one marks notifications seen. */
+  async function runLoaderAt(
+    key: string,
+    userId: string,
+    url: string,
+    headers?: Record<string, string>,
+  ) {
+    const { loader } = await import("~/routes/project.task");
+    const { cookie } = await app.cookieFor(userId);
+    return loader({
+      request: app.request(url, { cookie, headers }),
+      params: { slug: "viberr-core", key },
+      context: {},
+    } as never);
+  }
+
+  const readAt = (id: string) =>
+    (
+      app.db
+        .prepare(`SELECT read_at FROM notifications WHERE id = ?`)
+        .get(id) as { read_at: string | null } | undefined
+    )?.read_at ?? null;
+
+  it("a `.data` revalidation does NOT mark the viewer's rows seen (the parked-tab eat)", async () => {
+    const { createNotification } = await import(
+      "~/server/projections/notifications.server"
+    );
+    createNotification(app.db, {
+      id: "f2011_data",
+      userId: ids.arda,
+      kind: "packet",
+      ptype: "blocked",
+      text: "Blocked — decision needed",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+    });
+    // The SSE-driven revalidation shape: the single-fetch `.data` wire address.
+    await runLoaderAt(
+      "VIB-142",
+      ids.arda,
+      "/projects/viberr-core/tasks/VIB-142.data?_routes=routes/project.task",
+      { "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty" },
+    );
+    expect(readAt("f2011_data")).toBeNull();
+  });
+
+  it("a real document navigation DOES mark the viewer's rows seen (R19-15 preserved)", async () => {
+    const { createNotification } = await import(
+      "~/server/projections/notifications.server"
+    );
+    createNotification(app.db, {
+      id: "f2011_doc",
+      userId: ids.arda,
+      kind: "packet",
+      ptype: "blocked",
+      text: "Blocked — decision needed",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-148",
+    });
+    // A genuine top-level load: clean route path, `Sec-Fetch-Mode: navigate`.
+    await runLoaderAt("VIB-148", ids.arda, "/projects/viberr-core/tasks/VIB-148", {
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "document",
+    });
+    expect(readAt("f2011_doc")).not.toBeNull();
+  });
+});

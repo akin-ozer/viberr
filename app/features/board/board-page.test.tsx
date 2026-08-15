@@ -26,8 +26,12 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     key: "VIB-142",
     title: "Attach a project credential",
     stage: "impl",
-    readiness: "on_track",
-    displayReadiness: "on_track",
+    // C12: a canonical readiness value. This fixture used the non-enum
+    // "on_track", which rode the ReadinessPill's old `ready` fallback; the
+    // fallback is now a neutral "unknown" pill (never green "ready"), so the
+    // default card must carry a real value to render a real readiness chip.
+    readiness: "ready",
+    displayReadiness: "ready",
     waiting: "none",
     waitingOnMe: false,
     urgent: false,
@@ -775,6 +779,34 @@ describe("F19-8: an archived card is inert and honest", () => {
     // move tasks sees.
     expect(container.querySelector('[aria-label^="Change stage"]')).toBeNull();
     expect(row.textContent).toContain("In Progress");
+  });
+});
+
+/**
+ * N20-14 / C2 — the shared pill VOCABULARY for a force-accepted task. This pins
+ * the C-VOCAB `ValidationPill` export: `deriveValidation` projects "bypassed"
+ * from the durable `acceptance: "forced"` fact, and the pill maps it to a
+ * `risk`-toned "accepted · gate bypassed" chip instead of the stale "awaiting
+ * verdict" a force-accepted Done task used to re-derive. (Asserts the display
+ * VALUE only — the board card source is C-BOARD's; its own C2 card-side
+ * withdrawal, when it lands, will move this coverage.)
+ */
+describe("N20-14/C2: a force-accepted card carries the gate-bypassed validation", () => {
+  it("maps `bypassed` validation to the risk-toned 'accepted · gate bypassed' chip", () => {
+    const { container } = renderBoard([
+      task({
+        key: "VIB-2",
+        stage: "done",
+        displayReadiness: "accepted",
+        validation: "bypassed",
+      }),
+    ]);
+    const card = container.querySelector(".card")!;
+    expect(card.textContent).toContain("accepted · gate bypassed");
+    // The false live obligation the fact replaces.
+    expect(card.textContent).not.toContain("awaiting verdict");
+    // `risk`-toned: an override, not a clean pass.
+    expect(card.querySelector(".pill.risk")).toBeTruthy();
   });
 });
 

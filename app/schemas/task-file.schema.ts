@@ -33,7 +33,13 @@ export type Readiness = (typeof READINESS_VALUES)[number];
 export const WAITING_VALUES = ["human", "agent", "none"] as const;
 export type Waiting = (typeof WAITING_VALUES)[number];
 
-export const VALIDATION_VALUES = ["healthy", "changed", "failing", "none"] as const;
+// N20-14 (§5c / C2): `bypassed` is a DERIVED display value produced only by
+// `deriveValidation` when a task carries the durable `acceptance: "forced"`
+// fact — a human accepted the completion past the verdict gate. It is not a
+// hand-authored source value (like the other four), but it rides the same
+// `validation` field the projection caches, so it must be a first-class member
+// of the enum for the round-trip and the derivation return type.
+export const VALIDATION_VALUES = ["healthy", "changed", "failing", "none", "bypassed"] as const;
 export type Validation = (typeof VALIDATION_VALUES)[number];
 
 /** The 10 timeline event types (cross-cutting contracts §1.3). Parsers keep
@@ -568,6 +574,9 @@ type ReviewState = {
   /** R19-8: this task was verified to have nothing to deliver. Optional so the
    *  existing call sites (which all pass whole frontmatter) need no change. */
   noChanges?: boolean;
+  /** N20-14 (§5c): `"forced"` when a human force-accepted this task past the
+   *  verdict gate — the durable override fact. Optional for the same reason. */
+  acceptance?: "forced" | null;
 };
 
 /** Supporting engagements that are REQUIRED reviewers (verdict-capable). Their
@@ -626,6 +635,19 @@ export function deriveValidation(
   // request-changes → `failing` above). Labelling that "none" would tell the
   // human "nothing owed" while the acceptance gate is genuinely holding on a
   // verdict — the F19-21 regression. It stays `changed` until the verdict lands.
+  // N20-14 (§5c) / C2: a force-accept is a durable human override of the verdict
+  // gate. Once it is recorded, re-deriving the pre-acceptance pending state
+  // ("awaiting verdict") is a false live obligation — the task reached Done
+  // because a human bypassed the gate, not because a verdict landed. Surface the
+  // override itself so a force-accepted, Done task never re-derives "awaiting
+  // verdict" on any surface that still renders its validation pill.
+  //
+  // Placed AFTER the real-verdict arms (`failing` / `healthy`) and the no-change
+  // arm's siblings but BEFORE `none`/`changed`, mirroring the no-change arm's
+  // rule that a recorded verdict is EVIDENCE and must not be erased: a reviewer
+  // who actually approved or requested changes still wins. Only the genuinely
+  // moot pending/none case yields to the bypass fact.
+  if (fm.acceptance === "forced") return "bypassed";
   if (fm.noChanges && required.length === 0) return "none";
   return "changed";
 }

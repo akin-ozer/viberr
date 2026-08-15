@@ -18,7 +18,10 @@ import {
   getTaskDetail,
   getTaskSummary,
 } from "~/server/projections/task-query.server";
-import { markTaskNotificationsSeen } from "~/server/projections/notifications.server";
+import {
+  isTaskViewNavigation,
+  markTaskNotificationsSeen,
+} from "~/server/projections/notifications.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   applyRecommendation,
@@ -119,20 +122,27 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     });
   }
   // R19-15: opening the task IS seeing its notifications — mark this viewer's
-  // unread rows for it read here, loader-side. Loader-side is correct: the app
-  // uses no link prefetch (this loader runs only on a real view), the write is
-  // idempotent + monotonic, and the `notification.read` it emits converges —
-  // the revalidation it triggers marks nothing on its second pass and emits no
-  // further event, so no loop can sustain. Guarded because viewing a task must
-  // never 500 because read-marking hiccuped.
-  try {
-    markTaskNotificationsSeen(db, user.id, params.slug, params.key);
-  } catch (error) {
-    logger.warn("R19-15 task-view read-marking failed", {
-      projectSlug: params.slug,
-      taskKey: params.key,
-      error,
-    });
+  // unread rows for it read here, loader-side. The write is idempotent +
+  // monotonic, and the `notification.read` it emits converges — the second pass
+  // marks nothing and emits no further event, so no loop can sustain.
+  //
+  // F20-11: gate it on `isTaskViewNavigation`. This loader does NOT run "only on
+  // a real view" as once assumed — single fetch re-runs it as a `.data` GET on
+  // every SSE revalidation and after every POST on this page, so a parked
+  // background tab used to silently eat any notification that landed on this
+  // task (the bell never badged, even for "Blocked — decision needed" packets).
+  // Marking only on a genuine document navigation keeps the badge honest.
+  // Guarded because viewing a task must never 500 because read-marking hiccuped.
+  if (isTaskViewNavigation(request)) {
+    try {
+      markTaskNotificationsSeen(db, user.id, params.slug, params.key);
+    } catch (error) {
+      logger.warn("R19-15 task-view read-marking failed", {
+        projectSlug: params.slug,
+        taskKey: params.key,
+        error,
+      });
+    }
   }
   const limit = clampTimelineLimit(
     new URL(request.url).searchParams.get("events"),

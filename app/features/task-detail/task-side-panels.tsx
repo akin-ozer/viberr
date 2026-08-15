@@ -568,11 +568,18 @@ export function CurrentStatePanel({
               // F17-2: name WHERE the decision lives without asserting WHICH one
               // (that is state-dependent — a packet, a stage move, or acceptance).
               // A wrong specific hint would mislead; this tooltip is always true.
+              // C4: the copy is the ONE project-scope phrase the board's card and
+              // subtitle also use — "waiting on a human" ("Waiting on" + "a
+              // human") — collapsing the five spellings the app had for "a human
+              // owes something". This rail deliberately does NOT personalise to
+              // "you" (ruling 10 / R8-3 reserves the viewer-scoped "waiting on
+              // you" for surfaces that resolve the viewer, which this one never
+              // did); the project phrase is the correct one here.
               <span
                 className="by-human"
                 title="A human decision is needed — see the decision packet, the stage control, or the acceptance action on this page."
               >
-                Human decision
+                a human
               </span>
             ) : task.waiting === "agent" ? (
               <span className="by-agent">Agent work</span>

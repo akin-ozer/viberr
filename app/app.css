@@ -1425,12 +1425,24 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 
 .gh-bar {
   display: flex; align-items: center; gap: .6rem;
+  /* C9 (pass-20): the repo slug is the card's identity; the state / checks /
+     review pills are a sibling group that must WRAP under it, never clip. Before
+     this the row was a single no-wrap line inside `.panel.flush`'s
+     `overflow: hidden`, so three pills plus a repo slug overran the 340px side
+     column at 1440px and the checks pill was sliced mid-word ("1/2 checks
+     faili"). Wrapping drops the pill group onto its own row instead. */
+  flex-wrap: wrap;
   padding: .7rem .85rem;
   background: var(--fg); color: #fff;
 }
-.gh-bar .ico { width: 18px; height: 18px; }
-.gh-bar .repo { font-family: var(--font-mono); font-size: .78rem; }
-.gh-bar .pill { margin-left: auto; }
+.gh-bar .ico { width: 18px; height: 18px; flex: none; }
+.gh-bar .repo { font-family: var(--font-mono); font-size: .78rem; min-width: 0; overflow-wrap: anywhere; }
+/* Only the FIRST pill pushes the group to the right of the header line; the rest
+   pack beside it (the flex `gap` spaces them) so the pills wrap together as one
+   right-anchored row rather than each claiming its own auto margin. `flex: none`
+   keeps every pill at its full width so its label never shrinks and clips. */
+.gh-bar .pill { margin-left: auto; flex: none; }
+.gh-bar .pill ~ .pill { margin-left: 0; }
 .gh-body { padding: .9rem 1rem 1rem; }
 .commit {
   display: flex; align-items: center; gap: .55rem;
@@ -2641,7 +2653,22 @@ dialog[data-closing]::backdrop {
   box-shadow: var(--shadow-card);
 }
 .page-overlay-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
-.page-overlay .board-head { padding-right: 4.4rem; }
+/* N20-13 (pass-20): `.overlay-x` is pinned to the overlay's top-right corner
+   (position: absolute on the fixed, non-scrolling `.page-overlay`). The body
+   scrolls underneath it, so on a scrolled overlay (e.g. /profile scrolled to the
+   bottom) arbitrary content slid under the button and read as a clipped row. The
+   overlay's own header already reserves the button's gutter (`padding-right`);
+   pinning it with an opaque background turns it into an always-present strip that
+   scrolled content passes BEHIND — the close button now stays legible over its
+   reserved header at every scroll position instead of floating over live content.
+   z-index sits below `.overlay-x` (5) and above the scrolled body (auto). */
+.page-overlay .board-head {
+  padding-right: 4.4rem;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--bg);
+}
 .page-overlay .board-wrap { flex: none; }
 .page-overlay .policy-wrap { overflow: visible; padding-bottom: 1.6rem; }
 
@@ -3985,7 +4012,15 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .field-row { grid-template-columns: 1fr; }
   /* task detail: side panels move under the main column and go side-by-side */
   .detail { grid-template-columns: 1fr; }
-  .detail-side { flex-direction: row; flex-wrap: wrap; }
+  /* D2 (pass-20): the side column carries Current state — and with it the primary
+     "Accept completion → Done" button — plus Permissions. In source order it
+     follows `.detail-main`, whose LAST panel is the timeline, so a plain 1-up
+     stack dropped the app's most consequential action below every timeline entry.
+     `order: -1` lifts the current-state/acceptance column ahead of the timeline
+     VISUALLY at this breakpoint while leaving DOM order untouched, so a screen
+     reader still reads main → side (UX spec §Breakpoint Strategy). A CSS `order`
+     swap is deliberately preferred over a DOM reorder here (cheap, no markup). */
+  .detail-side { flex-direction: row; flex-wrap: wrap; order: -1; }
   .detail-side > * { flex: 1; min-width: 280px; }
   /* agents: the profile rail becomes a horizontal strip. The group labels ride
      along rather than hide: `.ag-group-label.ag-group-row` is not only a label,

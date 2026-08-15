@@ -161,7 +161,10 @@ function ProfileIdentity({
           <div className="field">
             <label className="flabel" htmlFor="profile-email">
               Email{" "}
-              <span className="fhint">{signsInVia} · admins can edit</span>
+              <span className="fhint">
+                {signsInVia} · an org admin can change it in Org settings →
+                Users &amp; access
+              </span>
             </label>
             <input id="profile-email" type="text" value={user.email} disabled />
           </div>

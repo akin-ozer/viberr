@@ -145,6 +145,20 @@ export function TaskHero({
     }
   }, [editGoalSignal, canEditGoal, task.goal, editGoalDraft]);
 
+  // C2 (⇄ N20-14/UXO-1): the validation pill asserts a LIVE obligation
+  // ("awaiting verdict"). UXO-1 withdrew it on archived tasks because abandoned
+  // work owes nobody a verdict; the exact same is true of any TERMINAL task —
+  // an accepted/merged completion owes nobody one either, and a force-accepted
+  // one would otherwise read "accepted · awaiting verdict". Extend the archived
+  // predicate to the same accepted/merged pair the rest of the app treats as
+  // terminal (task-side-panels.tsx `isTerminal`, task-detail-page.tsx
+  // `taskClosed`). The readiness pill stays for a terminal task: its value is
+  // "accepted"/"merged", a terminal STATUS, not a live claim.
+  const terminal =
+    archived ||
+    task.displayReadiness === "accepted" ||
+    task.displayReadiness === "merged";
+
   return (
     <div className="task-hero">
       <span className="key">{task.key}</span>
@@ -164,20 +178,28 @@ export function TaskHero({
           {stage?.name ?? ""}
         </Pill>
         {/* UXO-1: an ARCHIVED task is out of the flow — the archive confirm and
-            the acceptance panel both already say so. Its readiness and
-            validation pills, though, kept asserting live obligations: a task
-            archived mid-review still read "ready · awaiting verdict", i.e. that
-            someone still owes a verdict, when nobody does. The stage stays (it
-            answers "how far did this get?"); the two ACTIONABLE signals drop. */}
-        {!archived &&
-          (agentWorking && task.displayReadiness === "input_required" ? (
-            <Pill kind="agent" dot>
-              agent working
-            </Pill>
-          ) : (
-            <ReadinessPill value={task.displayReadiness} />
-          ))}
-        {!archived && <ValidationPill value={task.validation} />}
+            the acceptance panel both already say so. Its readiness pill kept
+            asserting a live obligation ("ready" = someone will act) that is
+            false on abandoned work, so it drops and the `archived` pill above
+            stands in its place. A terminal (accepted/merged) task keeps its
+            readiness pill: that value IS the terminal status, not a live claim. */}
+        {!archived && <ReadinessPill value={task.displayReadiness} />}
+        {/* C3: "agent working" gets its OWN slot instead of replacing the
+            readiness pill during a live run. The old swap hid the one readiness
+            value that most needs a human — `input_required` — so the same task
+            read "input required" on the board card and "agent working" on the
+            hero at the same instant. The readiness pill above now always shows
+            (matching the card); this pill sits beside it to note that a run is
+            in flight on that input-required state. */}
+        {!archived && agentWorking && task.displayReadiness === "input_required" && (
+          <Pill kind="agent" dot>
+            agent working
+          </Pill>
+        )}
+        {/* C2 (⇄ N20-14/UXO-1): the validation pill is a live obligation and is
+            withdrawn on every terminal task, not just archived ones — see the
+            `terminal` note above. */}
+        {!terminal && <ValidationPill value={task.validation} />}
         <span className="hero-file">
           <Icon name="file" />
           <span>{task.filePath}</span>

@@ -2280,6 +2280,77 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
   });
 });
 
+describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
+  // C2 (⇄ N20-14/UXO-1): UXO-1 withdrew the live-obligation pills on archived
+  // tasks; the same is true of any TERMINAL task. An accepted, Done task owes
+  // nobody a verdict, so its validation pill (a live obligation) drops — while
+  // the readiness pill stays, because "accepted" is a terminal STATUS, not a
+  // live claim.
+  it("C2: an accepted (terminal) task withdraws the validation pill, keeps its stage + readiness", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "accepted", validation: "changed" })}
+        stage={{ id: "done", name: "Done", color: "#00b473" }}
+        canEditGoal
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("Done"); // stage stays — "how far did this get?"
+    expect(meta).toContain("accepted"); // the readiness pill is a terminal status
+    expect(meta).not.toContain("awaiting verdict"); // the withdrawn obligation
+  });
+
+  it("C2/N20-14: a force-accepted task never wears 'awaiting verdict' or a redundant bypass pill on the hero", () => {
+    // deriveValidation projects `bypassed` for a force-accept; the hero withdraws
+    // the validation pill for the terminal task, so neither the stale "awaiting
+    // verdict" nor a redundant "gate bypassed" sits next to "accepted".
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "accepted", validation: "bypassed" })}
+        stage={{ id: "done", name: "Done", color: "#00b473" }}
+        canEditGoal
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("accepted");
+    expect(meta).not.toContain("awaiting verdict");
+    expect(meta).not.toContain("gate bypassed");
+  });
+
+  // C3: a live run gives "agent working" its OWN slot instead of replacing the
+  // readiness pill — the old swap hid `input_required`, the value that most needs
+  // a human, so the board and the hero disagreed mid-run.
+  it("C3: a live run shows 'agent working' BESIDE the input-required readiness, not in its place", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "input_required", validation: "none" })}
+        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        canEditGoal
+        agentWorking
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("input required"); // no longer suppressed by the run
+    expect(meta).toContain("agent working"); // the live-run cue, in its own slot
+  });
+
+  // C12: an unrecognised readiness value must not greenwash. The lookup used to
+  // fall back to a green "ready" pill; it now falls back to a neutral "unknown".
+  it("C12: an unrecognised readiness value renders a neutral 'unknown' pill, never green 'ready'", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "in_review", validation: "none" })}
+        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        canEditGoal
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!;
+    expect(meta.textContent).toContain("unknown");
+    // The greenwash the fix forbids: a malformed value read as healthy.
+    expect(meta.querySelector(".pill.ready")).toBeNull();
+  });
+});
+
 describe("failure toasts use the error kind (P13-D-10)", () => {
   it("renders the alert glyph, not the success tick, when an action fails", async () => {
     const { container, getByText } = renderWithRouter(

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Icon } from "./icon";
 
 /**
  * Status, readiness, and validation pills.
@@ -64,7 +65,27 @@ const READINESS_DISPLAY: Record<
   merged: { kind: "done", label: "merged" },
 };
 
-/** Always dotted (mock contract). Unknown values fall back to `ready`. */
+/** C12: an UNRECOGNISED readiness value must never greenwash. The lookup used to
+ *  fall back to the `ready` entry, so a malformed or future value rendered as a
+ *  green "ready" pill — the one thing a tolerant-parsing product must not do
+ *  (decisions.md "Behavior rules": malformed input is "a readiness downgrade …
+ *  never a silent drop"). It falls back to a NEUTRAL "unknown" pill instead; the
+ *  diagnostics panel carries the reason. */
+const READINESS_UNKNOWN: { kind: PillKind; label: string } = {
+  kind: "neutral",
+  label: "unknown",
+};
+
+/**
+ * Self-labelling readiness chip. C5: the readiness value alone collided with a
+ * user-authored stage name — the default workflow ships a "Ready" stage, so the
+ * hero read "Ready" (stage) immediately followed by "ready" (readiness),
+ * distinguishable only by capitalisation and dot colour. The chip now carries a
+ * status glyph (the shared `activity` pulse mark, `currentColor`-tinted to the
+ * kind) so it reads as a different CLASS of object from the stage's colour dot.
+ * This reuses the existing Icon-in-Pill pattern (the `archived` pill does the
+ * same) — no new app.css class, which the stylesheet's integrity gate requires.
+ */
 export function ReadinessPill({
   value,
   sm,
@@ -72,17 +93,21 @@ export function ReadinessPill({
   value: ReadinessDisplayValue | (string & {});
   sm?: boolean;
 }) {
-  const r =
-    READINESS_DISPLAY[value as ReadinessDisplayValue] ??
-    READINESS_DISPLAY.ready;
+  const r = READINESS_DISPLAY[value as ReadinessDisplayValue] ?? READINESS_UNKNOWN;
   return (
-    <Pill kind={r.kind} dot sm={sm}>
+    <Pill kind={r.kind} sm={sm}>
+      <Icon name="activity" />
       {r.label}
     </Pill>
   );
 }
 
-export type ValidationValue = "healthy" | "changed" | "failing" | "none";
+export type ValidationValue =
+  | "healthy"
+  | "changed"
+  | "failing"
+  | "none"
+  | "bypassed";
 
 const VALIDATION_DISPLAY: Record<
   ValidationValue,
@@ -96,6 +121,12 @@ const VALIDATION_DISPLAY: Record<
   changed: { kind: "input", label: "awaiting verdict" },
   failing: { kind: "blocked", label: "validation failing" },
   none: { kind: "neutral", label: "no validation" },
+  // N20-14 (§5c / C2): a durable force-accept fact — `deriveValidation` returns
+  // "bypassed" when `acceptance === "forced"`. `risk`-toned because it is an
+  // OVERRIDE, not a clean pass: a human accepted the completion past the verdict
+  // gate. It replaces the stale "awaiting verdict" a force-accepted, Done task
+  // used to re-derive on any surface that still renders its validation pill.
+  bypassed: { kind: "risk", label: "accepted · gate bypassed" },
 };
 
 /** Never dotted (mock contract). Unknown values fall back to `none`. */

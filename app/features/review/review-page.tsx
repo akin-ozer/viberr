@@ -17,9 +17,14 @@ import { reviewRowSub, type ReviewRowView } from "./review-helpers";
  * false "agent working"). Rows leave the queue live via the shell's SSE
  * revalidation (Phase 6).
  *
- * The wait-tag copy is deliberately different from the board ("your
- * acceptance" vs "waiting on you") — do not unify. The subline builder
- * lives in review-helpers.ts (Fast Refresh: components-only module).
+ * C4: the row WAIT-TAG uses the two canonical phrases the whole app shares —
+ * "waiting on you" (viewer-scoped: this viewer can accept) and "waiting on a
+ * human" (project-scoped: someone else must). The queue used to spell the
+ * viewer case "your acceptance", a fifth variant of "a human owes something";
+ * the panel heading below still names the acceptance action ("Waiting on your
+ * acceptance"), which is the queue's PURPOSE, not a per-row status tag. The
+ * subline builder lives in review-helpers.ts (Fast Refresh: components-only
+ * module).
  *
  * P13-D-9: the "human only" chip and the acceptance footer are conditional on
  * the project's operator authority (see review-acceptance-authority.server.ts).
@@ -111,7 +116,7 @@ function RQRow({
         {ready ? (
           <span className="wait-tag human">
             <Icon name="hand" />
-            your acceptance
+            waiting on you
           </span>
         ) : t.waiting === "human" ? (
           // Human-waiting, but not THIS viewer's to accept (R8-3) — a human still
