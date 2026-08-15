@@ -84,6 +84,13 @@ export const PACKET_OPTION_KINDS = [
   // work whose PR a human closed without merging. Resolution enforces the
   // same `approve-transition` authority as the Archive button.
   "archive_task",
+  // pass20 F20-6: 10th packet kind (decisions.md ruling 7 — count already updated by C-DOCS)
+  // Discard the task's LOCAL, never-pushed workspace branch — cleanup, not a
+  // disposition: the task stays on the board and closes through the ordinary
+  // no-change acceptance. Refuses when the branch exists on the remote (remote
+  // deletion stays ruling 17's archive-packet path). Resolution enforces
+  // `approve-transition` (it destroys commits).
+  "discard_branch",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -534,6 +541,13 @@ export const taskFrontmatterSchema = z.object({
   // LIVE remote read before any writer closes the task to Done, so a branch that
   // has since gained commits cannot ride a stale flag into Done (F19-21).
   noChanges: z.boolean().optional(),
+  // N20-14 (pass20 §5c): a durable record that this task reached Done through a
+  // force-accept — the human deliberately bypassed the verdict gate. Without it
+  // `deriveValidation` recomputes the pre-accept "awaiting verdict" state and a
+  // force-accepted Done task reads "accepted · awaiting verdict" on the hero and
+  // its card. This is the SERVER half only: the durable fact + its projection +
+  // TaskSummary. The "accepted · gate bypassed" display arm is C-VOCAB's.
+  acceptance: z.enum(["forced"]).nullable().optional(),
   github: githubCacheSchema.nullable(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
@@ -798,6 +812,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   // existing task.md keeps its line verbatim instead of losing it on rewrite.
   "pr",
   "noChanges",
+  "acceptance",
   "github",
   "createdAt",
   "updatedAt",
@@ -1139,6 +1154,14 @@ export function parseTaskFrontmatter(
       "noChanges",
       data.noChanges,
       taskFrontmatterSchema.shape.noChanges,
+      undefined,
+    ),
+    // N20-14: absent means "not force-accepted" — never a diagnostic.
+    acceptance: tolerant(
+      diagnostics,
+      "acceptance",
+      data.acceptance,
+      taskFrontmatterSchema.shape.acceptance,
       undefined,
     ),
     github: tolerant(

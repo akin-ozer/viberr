@@ -708,3 +708,113 @@ export async function pushWorkspaceBranch(
     };
   }
 }
+
+/**
+ * F20-6 (R20-2) — the outcome of discarding a task's LOCAL, never-pushed
+ * workspace branch. `deleted` carries the sha it read before removing the ref
+ * so the audit + timeline note can name exactly what was destroyed; `on_remote`
+ * is the refusal that keeps ruling 17's promise (remote-branch deletion lives
+ * only in the archive packet); `failed.reason` is git's own words, redacted
+ * (ruling 69).
+ */
+export type DiscardBranchOutcome =
+  | { status: "deleted"; branch: string; sha: string }
+  | { status: "not_found"; branch: string }
+  | { status: "on_remote"; branch: string }
+  | { status: "no_workspace"; branch: string }
+  | { status: "failed"; branch: string; reason: string };
+
+/**
+ * Delete a task's LOCAL workspace branch on the human's `discard_branch` confirm
+ * (Spec 2 §2.5). The operator that authored the option holds no repo-write tool
+ * — repo writes are human authority — so its option was inert until this
+ * executor ran on the confirm (F20-6: the human had to `git branch -D` by hand).
+ *
+ * It touches ONLY the workspace clone and refuses the moment the branch exists
+ * on origin: this is cleanup for a branch that was never pushed, not a
+ * disposition, and remote deletion stays the archive packet's job (ruling 17).
+ *
+ * Best-effort like the rest of this module — a git failure becomes a typed
+ * `failed` outcome, never a throw that could un-resolve the packet the caller
+ * already recorded.
+ */
+export async function discardLocalTaskBranch(input: {
+  projectSlug: string;
+  taskKey: string;
+  branch: string;
+  defaultBranch: string;
+  dataRoot?: string;
+  workdir?: string | null;
+  exec?: Exec;
+}): Promise<DiscardBranchOutcome> {
+  const { projectSlug, taskKey, branch, defaultBranch, dataRoot } = input;
+  const exec = input.exec ?? defaultExec;
+  try {
+    const projectFile = readProjectFile({ projectSlug, dataRoot });
+    const repo = projectFile?.parsed.frontmatter.repo ?? null;
+    const repoName = repo ? (repo.split("/").pop() ?? repo) : "repo";
+    const repoDir = findWorkspaceRepoDir(
+      projectSlug,
+      taskKey,
+      repoName,
+      dataRoot,
+      input.workdir,
+    );
+    if (!repoDir) return { status: "no_workspace", branch };
+
+    // Read the branch sha BEFORE any deletion — the outcome must name what it
+    // destroyed. An empty answer means the branch is not in this workspace.
+    const sha = await revParse(exec, repoDir, `refs/heads/${branch}`);
+    if (sha === "") return { status: "not_found", branch };
+
+    // Ruling 17: only a never-pushed branch may be discarded here. `ls-remote
+    // --exit-code` exits 0 when origin carries the ref — that is the remote's
+    // branch, and only the archive packet may delete it.
+    const remote = await exec(
+      "git",
+      ["-C", repoDir, "ls-remote", "--exit-code", "--heads", "origin", branch],
+      { cwd: repoDir, timeoutMs: 30_000 },
+    );
+    if (remote.ok) return { status: "on_remote", branch };
+
+    // git refuses to delete the branch HEAD is on, so step onto the default
+    // branch first when we are standing on the one being discarded.
+    const headRes = await exec(
+      "git",
+      ["-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD"],
+      { cwd: repoDir, timeoutMs: 5_000 },
+    );
+    if (headRes.ok && headRes.stdout.trim() === branch) {
+      const checkout = await exec(
+        "git",
+        ["-C", repoDir, "checkout", defaultBranch],
+        { cwd: repoDir, timeoutMs: 30_000 },
+      );
+      if (!checkout.ok) {
+        const reason = redactGitOutput(checkout.stderr) || "git checkout failed";
+        return { status: "failed", branch, reason: oneLine(reason) };
+      }
+    }
+
+    const del = await exec("git", ["-C", repoDir, "branch", "-D", branch], {
+      cwd: repoDir,
+      timeoutMs: 5_000,
+    });
+    if (!del.ok) {
+      const reason = redactGitOutput(del.stderr) || "git branch -D returned non-zero";
+      return { status: "failed", branch, reason: oneLine(reason) };
+    }
+
+    logger.info("discarded local task branch", { taskKey, branch, sha });
+    return { status: "deleted", branch, sha };
+  } catch (error) {
+    const reason =
+      redactGitOutput(gitErrorText(error)) || "the discard could not run";
+    logger.info("discard local task branch errored", {
+      taskKey,
+      branch,
+      err: error instanceof Error ? error.message : String(error),
+    });
+    return { status: "failed", branch, reason: oneLine(reason) };
+  }
+}

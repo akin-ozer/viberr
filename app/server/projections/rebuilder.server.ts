@@ -462,13 +462,13 @@ export function rebuildTaskFile(
   db.prepare(
     `INSERT INTO task_projections
        (project_slug, task_key, title, stage, readiness, stored_readiness,
-        waiting, urgent, archived, validation, validation_block_reason, owner_user_id, specialist_json,
+        waiting, urgent, archived, validation, validation_block_reason, acceptance, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         goal, packet_json, recommendation_count,
         schedules_json, event_count, comment_count,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -476,6 +476,7 @@ export function rebuildTaskFile(
        archived = excluded.archived,
        validation = excluded.validation,
        validation_block_reason = excluded.validation_block_reason,
+       acceptance = excluded.acceptance,
        owner_user_id = excluded.owner_user_id,
        specialist_json = excluded.specialist_json,
        reviewers_json = excluded.reviewers_json,
@@ -507,6 +508,8 @@ export function rebuildTaskFile(
       validation: derivedValidation,
       blockedPacket,
     }),
+    // N20-14 (§5c): the durable force-accept fact, projected for the display arm.
+    fm.acceptance ?? null,
     fm.ownerUserId,
     // Derived legacy projection shapes (G1): the delivering engagement fills
     // the `specialist` column, the supporting engagements fill `reviewers`.

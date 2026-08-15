@@ -64,6 +64,28 @@ describe("rebuilder", () => {
     expect(task?.filePath).toBe("projects/viberr-core/tasks/VIB-1/task.md");
   });
 
+  it("N20-14: projects the force-accept `acceptance` fact into task_projections", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "done", acceptance: "forced" }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "done" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const acceptanceOf = (key: string) =>
+      (
+        store.db
+          .prepare(
+            `SELECT acceptance FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+          )
+          .get(store.slug, key) as { acceptance: string | null }
+      ).acceptance;
+    expect(acceptanceOf("VIB-1")).toBe("forced");
+    expect(acceptanceOf("VIB-2")).toBeNull();
+  });
+
   it("content-hash short-circuit: unchanged files are not re-projected", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {

@@ -22,6 +22,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
     archived: 0,
     validation: "healthy",
     validation_block_reason: null,
+    acceptance: null,
     owner_user_id: null,
     specialist_json: null,
     reviewers_json: "[]",
@@ -108,6 +109,15 @@ describe("displayReadiness derivation (F7-UI3)", () => {
       pr_json: JSON.stringify({ number: 7, state: "merged", title: "PR" }),
     });
     expect(summarize(r, false).displayReadiness).toBe("ready");
+  });
+});
+
+describe("N20-14: acceptance fact surfaces on the summary", () => {
+  it("carries a force-accept fact through to TaskSummary", () => {
+    expect(summarize(row({ acceptance: "forced" }), true).acceptance).toBe("forced");
+  });
+  it("is null when the task was accepted the ordinary way", () => {
+    expect(summarize(row({ acceptance: null }), true).acceptance).toBeNull();
   });
 });
 

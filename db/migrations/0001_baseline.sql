@@ -91,6 +91,11 @@ CREATE TABLE task_projections (
   -- otherwise. Projected (P11-50) so the review-queue read model doesn't re-read
   -- task files on a loader path to recompute it.
   validation_block_reason TEXT,
+  -- N20-14 (pass20 §5c): the durable acceptance-override fact. 'forced' when a
+  -- human force-accepted this task past the verdict gate, NULL otherwise.
+  -- Projected so the hero/card display arm (C-VOCAB) reads it without re-reading
+  -- the task file, exactly like `validation` above.
+  acceptance TEXT CHECK (acceptance IN ('forced')),
   owner_user_id TEXT,
   specialist_json TEXT,
   reviewers_json TEXT NOT NULL DEFAULT '[]',

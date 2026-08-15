@@ -2829,7 +2829,7 @@ export function buildCodexOperatorPrompt(
       scheduleNote,
       resolvedOption,
     ) +
-    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
+    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes. Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
   );

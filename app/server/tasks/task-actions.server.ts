@@ -4890,6 +4890,36 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "discard_branch": {
+      // R20-2 (F20-6): discard the task's LOCAL, never-pushed workspace branch.
+      // It destroys commits, so it takes the same `approve-transition` tier the
+      // archive-with-branch-deletion path requires. The actual git work (and the
+      // `fm.branch` clear) happens AFTER the resolution write, below — the
+      // resolution itself only records the decision and clears the packet.
+      requireAction(
+        db,
+        project,
+        actor,
+        "approve-transition",
+        "discard this task's branch",
+      );
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. The task's local workspace branch is discarded.`,
+        toAgent: false,
+        evidence: null,
+      };
+      // The frontmatter edit happens after the git work (below); the resolution
+      // write only clears the packet and records the decision.
+      mutate = () => {};
+      clearPacket = true;
+      break;
+    }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
       event = {
@@ -5081,6 +5111,97 @@ export async function resolvePacket(
     }
   }
 
+  // discard_branch (R20-2 / F20-6): the decision IS the branch discard. The
+  // operator that authored the option holds no repo-write tool, so its option
+  // was inert (F20-6: the human had to `git branch -D` by hand) — the confirm
+  // now executes it. Best-effort like the archive cleanup above: a failed
+  // discard never un-resolves the packet, and every outcome lands one honest
+  // timeline note. `fm.branch` is cleared ONLY when the branch we really deleted
+  // is still the one the frontmatter names.
+  if (option.kind === "discard_branch") {
+    const branch = existing.parsed.frontmatter.branch;
+    if (!branch) {
+      await updateTaskFile(
+        taskRef(ctx, input.projectSlug, input.taskKey),
+        (parsed) => {
+          parsed.timeline.unshift({
+            occurredAt: new Date().toISOString(),
+            type: "note",
+            actor: { kind: "system", systemId: "policy-engine" },
+            title: null,
+            text: "This task has no workspace branch — nothing to discard.",
+            toAgent: false,
+            evidence: null,
+          });
+        },
+      );
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    } else {
+      const defaultBranch =
+        readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot })
+          ?.parsed.frontmatter.defaultBranch || "main";
+      const { discardLocalTaskBranch } = await import(
+        "~/server/github/push-workspace.server"
+      );
+      const outcome = await discardLocalTaskBranch({
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        branch,
+        defaultBranch,
+        ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+      });
+      const noteText =
+        outcome.status === "deleted"
+          ? `Branch \`${outcome.branch}\` (\`${outcome.sha.slice(0, 12)}\`) was deleted from this ` +
+            `task's workspace. It existed only there — nothing was pushed to GitHub, so nothing on ` +
+            `the remote changed.`
+          : outcome.status === "not_found"
+            ? `Branch \`${outcome.branch}\` was not in this task's workspace — nothing to discard.`
+            : outcome.status === "on_remote"
+              ? `Branch \`${outcome.branch}\` was **not** discarded — it exists on GitHub, so it is ` +
+                `no longer a local-only branch. Use archive with branch deletion to remove a pushed branch.`
+              : outcome.status === "no_workspace"
+                ? `Branch \`${outcome.branch}\` was **not** discarded — this task has no workspace clone.`
+                : `Branch \`${outcome.branch}\` was **not** discarded — ${outcome.reason}`;
+      await updateTaskFile(
+        taskRef(ctx, input.projectSlug, input.taskKey),
+        (parsed) => {
+          if (
+            outcome.status === "deleted" &&
+            parsed.frontmatter.branch === outcome.branch
+          ) {
+            parsed.frontmatter.branch = null;
+          }
+          parsed.timeline.unshift({
+            occurredAt: new Date().toISOString(),
+            type: "note",
+            actor: { kind: "system", systemId: "policy-engine" },
+            title: null,
+            text: noteText,
+            toAgent: false,
+            evidence: null,
+          });
+        },
+      );
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      recordAudit(db, {
+        action:
+          outcome.status === "deleted"
+            ? "task.branch.discarded"
+            : "task.branch.discard_refused",
+        actor: { userId: actor.userId, label: actor.label },
+        subjectKind: "task",
+        subjectId: input.taskKey,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        details:
+          outcome.status === "deleted"
+            ? { branch: outcome.branch, sha: outcome.sha, basis: "local_only" }
+            : { branch, status: outcome.status },
+      });
+    }
+  }
+
   // retry_other_backend: actually start the promised run. Operator-authorized
   // like the redirect path's re-engage (the packet is the human decision; the
   // execution is coordination machinery — an owner-contributor may resolve).
@@ -5128,6 +5249,133 @@ export async function resolvePacket(
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
     option,
   };
+}
+
+/**
+ * F20-18 (N20-7) — route a stranded decision to the people who can decide it.
+ *
+ * A contributor who OWNS a task can be handed a packet whose every option needs
+ * maintainer authority (`archive_task` = approve-transition, `edit_goal` =
+ * update-goal — both [A,M]). The owner-exception lets them RESOLVE a packet in
+ * principle, but each of those options re-checks a higher tier, so a
+ * contributor-owner is stranded: no option they can settle, and no in-app way to
+ * clear their own task (the Archive control is maintainer+ too). RBAC reserves
+ * those dispositions for maintainer+ on purpose, so widening them to the owner is
+ * the wrong direction (it is exactly the recommend→direct-style silent widening
+ * a later ruling banned). The owner's real path is to hand the decision UP.
+ *
+ * This notifies the project's maintainers + admins — the same recipient set
+ * every packet notification uses — records the ask on the timeline so an
+ * arriving maintainer sees WHY it landed on them, and audits it. It never
+ * mutates the packet: the maintainer still resolves it through the ordinary
+ * gate. The deny-note that surfaces this control is C-GOV-UI's (a later band);
+ * this is the server half it calls.
+ */
+export async function requestPacketMaintainerDecision(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; note?: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ notified: number }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const packet = existing.parsed.packet;
+  if (!packet) throw AppError.conflict("This packet was already resolved.");
+
+  // The escalation is meaningful ONLY for a contributor-owner who cannot resolve
+  // the packet themselves. A maintainer/admin (owner or not) already holds
+  // `resolve-packet` and every disposition tier — routing would notify people
+  // who can already act (and, for an owner, notify themselves). Refuse with a
+  // pointer instead of sending a pointless alert.
+  const role = project.memberRoles.get(actor.userId ?? "");
+  const canResolveDirectly = roleCan(role, "resolve-packet");
+  const isOwner = ownerException(
+    project,
+    actor,
+    existing.parsed.frontmatter.ownerUserId,
+  );
+  if (canResolveDirectly) {
+    throw AppError.validation(
+      "You can resolve this decision yourself — no need to route it to a maintainer.",
+    );
+  }
+  if (!isOwner) {
+    // Not the owner and not resolve-capable: no standing to route another's
+    // task. The standard gate throws the honest 403.
+    requireAction(db, project, actor, "resolve-packet", "resolve decision packets");
+  }
+
+  const ownerLabel = actor.label || "The task owner";
+  const trimmedNote = input.note?.trim();
+  const noteText =
+    `${ownerLabel} owns ${input.taskKey} but every option on this decision ` +
+    `("${packet.title}") needs maintainer authority, so they asked a maintainer ` +
+    `or admin to make the call.` +
+    (trimmedNote ? `\n\n> ${trimmedNote.replace(/\n/g, "\n> ")}` : "");
+  const occurredAt = new Date().toISOString();
+
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt,
+        type: "note",
+        actor: humanActorRef(db, actor),
+        title: null,
+        text: noteText,
+        toAgent: false,
+        evidence: null,
+      });
+    },
+  );
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+
+  // Notification `from` is an ActorRender (a render shape), not the FileActorRef
+  // the timeline event carries — build the human render when we have a user id.
+  const fromName = actor.userId ? userName(db, actor.userId) : ownerLabel;
+  const notified = notifyTaskWatchers(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      kind: "packet",
+      ptype: packet.type === "blocked" ? "blocked" : "input",
+      title: `Decision needs a maintainer: ${packet.title}`,
+      text: noteText,
+      occurredAt,
+      ...(actor.userId
+        ? {
+            from: {
+              kind: "human" as const,
+              userId: actor.userId,
+              name: fromName,
+              initials: initialsOfName(fromName),
+              tone:
+                (db
+                  .prepare(`SELECT avatar_tone FROM users WHERE id = ?`)
+                  .get(actor.userId) as { avatar_tone: string | null } | undefined)
+                  ?.avatar_tone ?? "",
+            },
+            // Don't notify the owner about their own ask.
+            exceptUserId: actor.userId,
+          }
+        : {}),
+    },
+    ctx,
+  );
+
+  recordAudit(db, {
+    action: "task.packet.escalated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { packetKind: packet.kind, notified: notified.length },
+  });
+
+  return { notified: notified.length };
 }
 
 // ---------------------------------------------------- operator recommendations
@@ -5613,6 +5861,12 @@ export async function applyAcceptanceWrite(
      *  `skipInLockRecheck` — the audited force override — because this path
      *  merges nothing; the head gate above is never bypassed. */
     noChangeCheck?: AcceptanceNoChangeCheck;
+    /** N20-14 (§5c): this acceptance is a force-accept — the human deliberately
+     *  bypassed the verdict gate. Recorded as a DURABLE frontmatter fact so the
+     *  hero/card don't recompute the pre-accept "awaiting verdict" state onto a
+     *  Done task. The `task.acceptance.forced` audit row stays; this is the
+     *  additional durable field. */
+    forced?: boolean;
   },
 ): Promise<void> {
   const project = loadProjectContext(ctx, input.projectSlug);
@@ -5662,6 +5916,12 @@ export async function applyAcceptanceWrite(
     // below, which reads `noChanges`.
     if (noChange.applies && noChange.autoDetected) {
       parsed.frontmatter.noChanges = true;
+    }
+    // N20-14 (§5c): a force-accept records the durable bypass fact. Set BEFORE
+    // deriveValidation below — the C-VOCAB display arm reads this to render
+    // "accepted · gate bypassed" instead of the recomputed "awaiting verdict".
+    if (input.forced) {
+      parsed.frontmatter.acceptance = "forced";
     }
     parsed.frontmatter.stage = input.doneStageId;
     parsed.frontmatter.readiness = "ready";
@@ -5864,7 +6124,7 @@ async function acceptCompletion(
     event,
     headCheck,
     noChangeCheck: noChange,
-    ...(input.force ? { skipInLockRecheck: true } : {}),
+    ...(input.force ? { skipInLockRecheck: true, forced: true } : {}),
   });
 
   recordAudit(db, {

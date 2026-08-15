@@ -1,6 +1,10 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { taskDir } from "~/server/files/file-store-root.server";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -329,6 +333,17 @@ describe("P3.7 governance & lifecycle fixes", () => {
     const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
     expect(forced).toHaveLength(1);
     expect((forced[0]!.details as { bypassed?: string }).bypassed).toContain("request");
+    // N20-14 (§5c): the bypass is also a DURABLE frontmatter fact, so the
+    // hero/card don't recompute "awaiting verdict" onto the force-accepted Done
+    // task. The audit row alone was not enough (deriveValidation re-derived it).
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.acceptance).toBe("forced");
+    // And it is projected for the read models (C-VOCAB reads it).
+    expect(res.task.acceptance).toBe("forced");
   });
 
   it("forceAcceptCompletion on an already-Done task is a no-op — no misleading audit (DG-2)", async () => {
@@ -1122,6 +1137,213 @@ describe("resolvePacket kind matrix", () => {
     expect(
       texts.some((t) => t.includes("The branch was **not** deleted") && t.includes("no GitHub repo or credential")),
     ).toBe(true);
+  });
+
+  // F20-6 (R20-2): the operator's discard option now EXECUTES on confirm.
+  const DISCARD_PACKET: TaskPacket = {
+    type: "input",
+    kind: "Completion report",
+    from: "operator",
+    title: "The branch is empty — discard it, or refine the goal?",
+    body: "vib-1-work was never pushed.",
+    observations: [],
+    options: [
+      { kind: "discard_branch", t: "Discard the empty vib-1-work branch", d: "", rec: true },
+      { kind: "edit_goal", t: "Refine the goal instead", d: "", rec: false },
+    ],
+  };
+
+  function gitc(cwd: string, args: string[]): string {
+    return execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
+  }
+
+  /** A REAL workspace clone with a local task branch `vib-1-work`, at the dir
+   *  findWorkspaceRepoDir resolves to for this project (repo `.../viberr`). */
+  function initTaskWorkspace(store: TestStore, opts: { onRemote?: boolean } = {}): string {
+    const repoDir = path.join(
+      taskDir(store.slug, "VIB-1", store.dataRoot),
+      "workspace",
+      "viberr",
+    );
+    rmSync(repoDir, { recursive: true, force: true });
+    mkdirSync(repoDir, { recursive: true });
+    gitc(repoDir, ["init", "-q", "-b", "main"]);
+    gitc(repoDir, ["config", "user.email", "t@viberr.local"]);
+    gitc(repoDir, ["config", "user.name", "Test"]);
+    writeFileSync(path.join(repoDir, "README.md"), "# repo\n");
+    gitc(repoDir, ["add", "-A"]);
+    gitc(repoDir, ["commit", "-q", "-m", "init"]);
+    gitc(repoDir, ["checkout", "-q", "-b", "vib-1-work"]);
+    writeFileSync(path.join(repoDir, "w.txt"), "w\n");
+    gitc(repoDir, ["add", "-A"]);
+    gitc(repoDir, ["commit", "-q", "-m", "work"]);
+    gitc(repoDir, ["checkout", "-q", "main"]);
+    if (opts.onRemote) {
+      const remoteDir = path.join(store.dataRoot, "bare-origin.git");
+      mkdirSync(remoteDir, { recursive: true });
+      gitc(remoteDir, ["init", "-q", "--bare"]);
+      gitc(repoDir, ["remote", "add", "origin", remoteDir]);
+      gitc(repoDir, ["push", "-q", "origin", "vib-1-work"]);
+    }
+    return repoDir;
+  }
+
+  it("discard_branch: a contributor-OWNER is refused (it destroys commits → approve-transition tier)", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.selin.id, // contributor owner — may resolve packets…
+        branch: "vib-1-work",
+      },
+      DISCARD_PACKET,
+    );
+    // …but the discard destroys commits (approve-transition): the owner exception
+    // that admits selin to the PACKET does not widen the branch-disposition tier.
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    // The refused resolution leaves the packet untouched.
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(fm.packet).not.toBeNull();
+  });
+
+  it("discard_branch: deletes the local branch, clears fm.branch, writes the note + task.branch.discarded", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", waiting: "human", branch: "vib-1-work" },
+      DISCARD_PACKET,
+    );
+    initTaskWorkspace(store);
+    const { task, option } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat), // maintainer
+      { dataRoot: store.dataRoot },
+    );
+    expect(option.kind).toBe("discard_branch");
+    expect(task.packet).toBeNull();
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.branch).toBeNull();
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(
+      texts.some((t) => t.includes("was deleted from this") && t.includes("nothing was pushed")),
+    ).toBe(true);
+    const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
+    expect(discarded).toHaveLength(1);
+    expect(discarded[0]!.details).toMatchObject({ branch: "vib-1-work", basis: "local_only" });
+  });
+
+  it("discard_branch / ruling 17: refuses an on-remote branch, keeps fm.branch, still resolves the packet", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", waiting: "human", branch: "vib-1-work" },
+      DISCARD_PACKET,
+    );
+    initTaskWorkspace(store, { onRemote: true });
+    const { task } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    // The packet resolves in every case (the discard is best-effort after it).
+    expect(task.packet).toBeNull();
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // A refused discard must NOT clear the branch the task still owns.
+    expect(fm.branch).toBe("vib-1-work");
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(
+      texts.some((t) => t.includes("was **not** discarded") && t.includes("exists on GitHub")),
+    ).toBe(true);
+    expect(listAuditEvents(store.db, { action: "task.branch.discard_refused" })).toHaveLength(1);
+  });
+
+  // F20-18 (N20-7): a contributor-owner handed a packet whose every option needs
+  // maintainer authority has an in-app path — route the decision UP.
+  const STRANDED_PACKET: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "Archive the task, or refine the goal?",
+    body: "",
+    observations: [],
+    options: [
+      { kind: "archive_task", t: "Archive the task", d: "", rec: true },
+      { kind: "edit_goal", t: "Refine the goal", d: "", rec: false },
+    ],
+  };
+
+  it("F20-18: a contributor-owner routes a stranded packet to the maintainers (notify + note + audit)", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", waiting: "human", ownerUserId: store.users.selin.id },
+      STRANDED_PACKET,
+    );
+    const { requestPacketMaintainerDecision } = await import("./task-actions.server");
+    const res = await requestPacketMaintainerDecision(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", note: "please archive this" },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+    // arda (admin) + murat (maintainer) are notified; selin (the owner) is not.
+    expect(res.notified).toBeGreaterThanOrEqual(1);
+    expect(listNotifications(store.db, store.users.murat.id).length).toBeGreaterThanOrEqual(1);
+    expect(listNotifications(store.db, store.users.selin.id).length).toBe(0);
+    // The ask lands on the timeline (with the owner's note) and is audited.
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(
+      texts.some((t) => t.includes("asked a maintainer") && t.includes("please archive this")),
+    ).toBe(true);
+    expect(listAuditEvents(store.db, { action: "task.packet.escalated" })).toHaveLength(1);
+    // The packet is NOT resolved — a maintainer still decides through the gate.
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(fm.packet).not.toBeNull();
+  });
+
+  it("F20-18: a maintainer is told to resolve it themselves, not route it", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", waiting: "human", ownerUserId: store.users.murat.id },
+      STRANDED_PACKET,
+    );
+    const { requestPacketMaintainerDecision } = await import("./task-actions.server");
+    await expect(
+      requestPacketMaintainerDecision(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
   });
 
   it("edit_goal: packet stays (stamped awaiting goal_edit) until the edited goal lands, then clears instantly", async () => {

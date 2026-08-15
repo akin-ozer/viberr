@@ -38,6 +38,8 @@ export interface TaskProjectionRow {
   archived: 0 | 1;
   validation: Validation;
   validation_block_reason: string | null;
+  /** N20-14 (§5c): 'forced' when a human force-accepted past the verdict gate. */
+  acceptance: "forced" | null;
   owner_user_id: string | null;
   specialist_json: string | null;
   reviewers_json: string;
@@ -115,6 +117,11 @@ export interface TaskSummary {
   /** R14-3: archived tasks leave every default view but keep their record. */
   archived: boolean;
   validation: Validation;
+  /** N20-14 (§5c): 'forced' when a human force-accepted this task past the
+   *  verdict gate — a durable override fact, not recomputed by deriveValidation.
+   *  Carried so the hero/card display arm (C-VOCAB) can render "accepted · gate
+   *  bypassed" instead of the stale "awaiting verdict". */
+  acceptance?: "forced" | null;
   /** Revision-bound acceptance block reason (P11-50): null when the current
    *  revision is acceptance-ready, else why it isn't. Projected so read models
    *  (review queue) don't re-read task files on a loader path. */
@@ -353,6 +360,7 @@ export function mapTaskProjectionRow(
     urgent: row.urgent === 1,
     archived: row.archived === 1,
     validation: row.validation,
+    acceptance: row.acceptance ?? null,
     blockReason: row.validation_block_reason,
     atAcceptanceBoundary: isAtAcceptanceBoundary(
       row.stage,
