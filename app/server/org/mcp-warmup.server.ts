@@ -62,11 +62,21 @@ function markWarming(db: DatabaseSync, id: string, at: string | null): void {
 export function startMcpWarmup(
   db: DatabaseSync,
   input: { id: string; name: string; target: string; token: string | null },
-  options: McpProbeOptions & { capMs?: number } = {},
+  options: McpProbeOptions & { capMs?: number; heuristic?: boolean } = {},
 ): void {
   if (inFlight.has(input.id)) return;
   inFlight.add(input.id);
   markWarming(db, input.id, new Date().toISOString());
+  // R20-4 (N20-2): a HEURISTIC warm-up (the command LOOKS like an installer but
+  // said nothing on stderr) is capped at one per row — count it here, at arm
+  // time, so a server that never answers cannot re-arm forever. The
+  // evidence-based path (`installing === true`) is NOT counted: it is not a
+  // guess. `reapStaleWarmups` rolls this back for a warm-up a restart killed.
+  if (options.heuristic) {
+    db.prepare(
+      `UPDATE org_mcp_servers SET heuristic_warmups = heuristic_warmups + 1 WHERE id = ?`,
+    ).run(input.id);
+  }
 
   const capMs = options.capMs ?? WARMUP_CAP_MS;
   // `resources.server` imports THIS module to start a warm-up, so the probe is
@@ -86,9 +96,13 @@ export function startMcpWarmup(
         db.prepare(
           `UPDATE org_mcp_servers
              SET up = 1, tools_count = ?, last_checked_at = ?, last_error = NULL,
-                 warming_since = NULL, updated_at = ?
+                 warming_since = NULL, first_success_at = COALESCE(first_success_at, ?),
+                 updated_at = ?
            WHERE id = ?`,
-        ).run(disc.tools, now, now, input.id);
+          // R20-4: the warm-up finishing is this server's first-ever success —
+          // stamp it (idempotently) so a later cold probe is never mistaken for
+          // a fresh first run.
+        ).run(disc.tools, now, now, now, input.id);
         logger.info("mcp background install finished — server answered", {
           mcp: input.name,
           tools: disc.tools,
@@ -135,6 +149,12 @@ export function reapStaleWarmups(db: DatabaseSync): number {
     db.prepare(
       `UPDATE org_mcp_servers
          SET warming_since = NULL,
+             -- R20-4 (N20-2): a warm-up a restart killed never got its 15
+             -- minutes, so it is NOT a spent heuristic attempt — roll the
+             -- counter back so a retest can try once more (and so the reaper's
+             -- "retest to start it again" message is not a lie). MAX(0, …) keeps
+             -- an evidence-armed row (counter 0) at 0.
+             heuristic_warmups = MAX(0, heuristic_warmups - 1),
              last_error = COALESCE(last_error,
                'the background install was interrupted by a restart — retest to start it again'),
              updated_at = ?

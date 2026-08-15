@@ -97,7 +97,10 @@ import {
   resolveSpecialistDisallowedTools,
   resolveUndeployedDisallowedTools,
 } from "./specialist-tool-policy";
-import { resolveSpecialistMcpServersDetailed } from "./specialist-mcp.server";
+import {
+  resolveSpecialistMcpServersDetailed,
+  verifyStdioMcpMountsForRun,
+} from "./specialist-mcp.server";
 import {
   BROWSER_MCP_NAME,
   browserPersonaSection,
@@ -228,11 +231,20 @@ function deploymentGrants(
  * still announced it — live, an agent reported `vm-memory` as "mounted" and
  * found zero tools under it. The caller owes the run an honest prompt.
  */
-function mcpServersFor(
+async function mcpServersFor(
   db: DatabaseSync,
   names: string[],
-): { mcpServers?: Record<string, unknown>; unresolved: string[]; unhealthy: string[] } {
-  const { servers, unresolved } = resolveSpecialistMcpServersDetailed(db, names);
+): Promise<{ mcpServers?: Record<string, unknown>; unresolved: string[]; unhealthy: string[] }> {
+  // F20-10: a declared stdio server that fails to START (a half-installed npx
+  // tree crashing in <1s) used to be mounted anyway — the run was told it had
+  // tools it would never get, and every Settings surface kept calling it
+  // healthy. Pre-flight the stdio mounts against the real handshake so a dead
+  // one is DROPPED from the run, disclosed by name, and its row is corrected.
+  const resolution = await verifyStdioMcpMountsForRun(
+    db,
+    resolveSpecialistMcpServersDetailed(db, names),
+  );
+  const { servers, unresolved } = resolution;
   return {
     ...(Object.keys(servers).length ? { mcpServers: servers } : {}),
     // Only the grants that reached NO server; a mounted-but-unhealthy one is
@@ -1101,7 +1113,7 @@ export async function startAgentRun(
   // prompt announced a server the run had no tools for). The persona itself is
   // built AFTER the clone below, because the same rule now applies to skills:
   // which ones mount natively is only knowable once the workspace exists.
-  const resolvedMcps = mcpServersFor(db, mcpNames);
+  const resolvedMcps = await mcpServersFor(db, mcpNames);
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
@@ -2149,8 +2161,12 @@ export async function resolveResumeConfinement(
       input.profileId,
     );
     // P14-LV-09: resolve first, then describe what MOUNTED — the resumed run
-    // gets the same honest prompt as a fresh one.
-    const resumeMcps = resolveSpecialistMcpServersDetailed(db, resolved.mcps);
+    // gets the same honest prompt as a fresh one. F20-10: pre-flight the stdio
+    // mounts so a server that fails to start is dropped + disclosed here too.
+    const resumeMcps = await verifyStdioMcpMountsForRun(
+      db,
+      resolveSpecialistMcpServersDetailed(db, resolved.mcps),
+    );
     const mcpServers = resumeMcps.servers;
     // R18-1 parity: a resumed/@mention reviewer must keep the deliverer's KBs it
     // had on the fresh run, or it silently loses those conventions mid-thread.

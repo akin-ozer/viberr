@@ -271,6 +271,17 @@ CREATE TABLE org_mcp_servers (
   -- NULL when the server is up or was never probed — a stale reason next to a
   -- green dot would be worse than none, so the up path CLEARS it.
   last_error TEXT,
+  -- R20-4 (N20-2): when this server first answered a probe successfully (ISO).
+  -- NULL means it has never worked here — which is what makes a timeout on an
+  -- npx/uvx-style command a plausible first-run INSTALL rather than a broken
+  -- server. Stamped idempotently (COALESCE), never cleared.
+  first_success_at TEXT,
+  -- R20-4 (N20-2): how many times the HEURISTIC (stderr said nothing install-y,
+  -- but the command is an installer and the row has never succeeded) armed a
+  -- background warm-up. Capped at 1 so a command that times out on EVERY probe
+  -- still settles to `unreachable` instead of re-downloading forever — the
+  -- terminal condition R19-17c's honesty depends on.
+  heuristic_warmups INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

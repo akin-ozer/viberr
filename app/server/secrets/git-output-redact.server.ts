@@ -56,12 +56,6 @@ const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 // eslint-disable-next-line no-control-regex
 const C0_CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
 
-/**
- * Below this length a "token" the caller handed us is a flag or a placeholder,
- * not a secret, and scrubbing it by value would mangle unrelated output.
- */
-const MIN_TOKEN_LEN = 8;
-
 /** The tail is where git states its verdict; the head is the command echo and,
  *  for a clone, the transfer progress. */
 const MAX_DETAIL_LINES = 8;
@@ -82,7 +76,16 @@ export function redactGitOutput(
   let out = text;
   // Layer 1 — by value. `split`/`join` needs no regex escaping, which matters:
   // a PAT is not guaranteed to be regex-inert.
-  if (opts.token && opts.token.length >= MIN_TOKEN_LEN) {
+  //
+  // F20-7: scrub the caller's credential at ANY length — the old
+  // `>= MIN_TOKEN_LEN` (8) floor let a short secret ride straight through into
+  // the MCP row error, the toast, and the persisted `last_error` (live: a
+  // 5-char `MCP_CREDENTIAL` printed as `CRED=xy7Qk`). The by-value pass is
+  // exact — it only ever removes the string the caller HANDED us, so a shorter
+  // value has nothing extra to mangle; the floor only ever protected a leak.
+  // The empty-string case is still guarded (falsy `opts.token`), because a
+  // split on "" would insert `[redacted]` between every character.
+  if (opts.token) {
     out = out.split(opts.token).join(REDACTED);
   }
   // Layer 2 — userinfo. Runs AFTER layer 1 so `x-access-token:<pat>@host`,

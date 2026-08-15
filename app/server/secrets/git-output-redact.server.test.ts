@@ -17,6 +17,28 @@ describe("redactGitOutput (F19-6 / F19-18)", () => {
     expect(out).not.toContain("ghp_short");
   });
 
+  it("F20-7: scrubs a SUB-8-char credential by value (the length floor is gone)", () => {
+    // The live leak: a 5-char `MCP_CREDENTIAL` printed as `CRED=xy7Qk` into the
+    // MCP row error, the toast, and the persisted `last_error`. The old
+    // `>= MIN_TOKEN_LEN` (8) floor skipped the by-value pass for a value this
+    // short, and no token SHAPE matches an arbitrary 5-char secret.
+    // Canary: restore the `opts.token.length >= 8` gate → `xy7Qk` survives.
+    const out = redactGitOutput(
+      "exited before responding — CRED=xy7Qk\nfatal: giving up",
+      { token: "xy7Qk" },
+    );
+    expect(out).toContain("exited before responding");
+    expect(out).toContain("[redacted]");
+    expect(out).not.toContain("xy7Qk");
+  });
+
+  it("F20-7: an EMPTY token is still a no-op, never a per-character redaction", () => {
+    // The falsy-`opts.token` guard survives the floor removal: a `split("")`
+    // would splice `[redacted]` between every character.
+    const out = redactGitOutput("fatal: plain output", { token: "" });
+    expect(out).toBe("fatal: plain output");
+  });
+
   it("strips ANSI colour and stray control characters — a timeline note is plain text", () => {
     // git colourises `fatal:`/`hint:` when it has a TTY, and a NUL can ride along; plain text only.
     // Canary: drop the ANSI_CSI_RE / C0_CONTROL_RE replaces and the escapes survive.

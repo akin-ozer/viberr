@@ -191,6 +191,65 @@ describe("classifyLock", () => {
   });
 });
 
+describe("classifyLock — container self-lockout (F20-8b)", () => {
+  // The app runs as pid 1 in the container and compose pins the hostname, so a
+  // CRASHED predecessor leaves writer.lock naming pid 1 on this very host. Asking
+  // isAlive(1) from the restarted process is a self-probe (always "alive"), which
+  // refused every boot for 11 restarts until the file was deleted by hand. The
+  // pid's real start time breaks the tie the liveness probe cannot.
+  const CRASHED_PID1: LockHolder = {
+    pid: 1,
+    hostname: "viberr",
+    startedAt: "2026-08-14T16:50:03.813Z",
+    bootId: "boot-crashed",
+    procStartedAt: 111,
+  };
+  const RESTART_SELF: LockHolder = {
+    pid: 1,
+    hostname: "viberr",
+    startedAt: "2026-08-14T17:16:33.000Z",
+    bootId: "boot-restart",
+  };
+
+  it("RECLAIMS a crashed predecessor's lock — the recycled pid started at a new time", () => {
+    // isAlive says "alive" (it is exactly the self-probe that bricked the boot);
+    // we ignore it and trust that /proc reports a DIFFERENT start time now.
+    expect(classifyLock(CRASHED_PID1, RESTART_SELF, alive, () => 222)).toBe("stale");
+  });
+
+  it("still refuses while the pid's start time proves the original writer is there", () => {
+    // Same start time the lock recorded → the same instance still holds pid 1.
+    // Start-time evidence wins over the (here contradictory) liveness probe.
+    expect(classifyLock(CRASHED_PID1, RESTART_SELF, dead, () => 111)).toBe("held");
+  });
+
+  it("falls back to the liveness probe when /proc cannot be read", () => {
+    expect(classifyLock(CRASHED_PID1, RESTART_SELF, dead, () => null)).toBe("stale");
+    expect(classifyLock(CRASHED_PID1, RESTART_SELF, alive, () => null)).toBe("held");
+  });
+
+  it("a lock written before procStartedAt existed keeps the old liveness behavior", () => {
+    const legacy: LockHolder = {
+      pid: 1,
+      hostname: "viberr",
+      startedAt: "x",
+      bootId: "boot-old",
+    };
+    // No recorded start time → never overrides the probe, even though pids match.
+    expect(classifyLock(legacy, RESTART_SELF, alive, () => 222)).toBe("held");
+    expect(classifyLock(legacy, RESTART_SELF, dead, () => 222)).toBe("stale");
+  });
+
+  it("consults /proc only for THIS process's own pid, never across a pid mismatch", () => {
+    const other: LockHolder = { ...RESTART_SELF, pid: 4242 };
+    const throwingReader = () => {
+      throw new Error("the /proc reader must not run for a foreign pid");
+    };
+    expect(classifyLock(CRASHED_PID1, other, dead, throwingReader)).toBe("stale");
+    expect(classifyLock(CRASHED_PID1, other, alive, throwingReader)).toBe("held");
+  });
+});
+
 describe("forceDataRootTakeover", () => {
   it("reads 1/true/yes as a takeover and everything else as off", () => {
     expect(forceDataRootTakeover({ VIBERR_FORCE_DATA_ROOT_LOCK: "1" })).toBe(true);

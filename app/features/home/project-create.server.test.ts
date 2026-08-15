@@ -5,7 +5,35 @@ import { setupTestStore } from "../../../test-support/test-store";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createPat, getProjectCredential } from "~/server/secrets/pat-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { isAppError } from "~/server/errors/app-error.server";
 import { createProject } from "./project-create.server";
+
+// F20-1: fault-inject a stale-mount write. The shared flag defaults OFF so every
+// other test in this file writes for real; a test flips it ON only after setup,
+// so the store seeding above it is untouched. The ESTALE→typed-error translation
+// itself is unit-proven in atomic-file.server.test.ts; here we assert the ACTION
+// surfaces a typed error and never hangs.
+const mockAtomic = vi.hoisted(() => ({ failWrites: false }));
+vi.mock("~/server/files/atomic-file.server", async (importActual) => {
+  const actual =
+    await importActual<typeof import("~/server/files/atomic-file.server")>();
+  const { AppError } = await import("~/server/errors/app-error.server");
+  const { ERROR_CODES } = await import("~/server/errors/error-codes");
+  return {
+    ...actual,
+    writeFileAtomic: (absPath: string, content: string) => {
+      if (mockAtomic.failWrites && absPath.endsWith("project.md")) {
+        throw new AppError({
+          code: ERROR_CODES.INTERNAL,
+          status: 503,
+          message: `ESTALE writing ${absPath} — data root unreachable`,
+          userMessage: `The data root is unreachable (ESTALE) — ${absPath} was not written.`,
+        });
+      }
+      return actual.writeFileAtomic(absPath, content);
+    },
+  };
+});
 
 // Hermetic env for the secret box.
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -317,5 +345,47 @@ describe("createProject — policy preset shapes REAL governance", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/GitHub repository is required/i);
+  });
+});
+
+describe("createProject — F20-1 data-root write resilience", () => {
+  it("a stale-mount write fails the ACTION with a typed error and does not hang", async () => {
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ default_branch: "main" }), { status: 200 }),
+      ),
+    );
+
+    // Flip the fault ON only now — after the store seeding wrote for real.
+    mockAtomic.failWrites = true;
+    const start = Date.now();
+    let caught: unknown;
+    try {
+      await createProject(
+        store.db,
+        { name: "Ghost Mount", key: "GHM", owner: "akin-ozer", repoName: "ghost", policy: "balanced" },
+        ACTOR,
+        { dataRoot: store.dataRoot },
+      );
+    } catch (e) {
+      caught = e;
+    } finally {
+      mockAtomic.failWrites = false;
+    }
+
+    // Rejects with a typed AppError (not a raw errno, not a hang). The action
+    // watchdog window is 30s; a real fault returns in milliseconds.
+    expect(isAppError(caught)).toBe(true);
+    if (isAppError(caught)) {
+      expect(caught.status).toBe(503);
+      expect(caught.userMessage).toMatch(/data root is unreachable/i);
+    }
+    expect(Date.now() - start).toBeLessThan(2000);
+
+    // The half-created project left no readable project.md behind.
+    expect(readProjectFile({ projectSlug: "ghost-mount", dataRoot: store.dataRoot })).toBeNull();
   });
 });

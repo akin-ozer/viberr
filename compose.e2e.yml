@@ -41,6 +41,8 @@ services:
     # must use `--no-deps` so the seed one-shot cannot re-run and reset the
     # volume mid-check.
     hostname: viberr-e2e
+    # F20-2: reap orphaned children (see compose.yml's `init: true`).
+    init: true
     environment:
       <<: *e2e-env
       NODE_ENV: production

@@ -2198,7 +2198,14 @@ export interface OperatorMcpResolution {
   unhealthy: string[];
 }
 
-/** Resolve the operator's MCP grants once per run (see OperatorMcpResolution). */
+/** Resolve the operator's MCP grants once per run (see OperatorMcpResolution).
+ *
+ * TODO(pass20 F20-10): the specialist run path pre-flights its stdio mounts via
+ * `verifyStdioMcpMountsForRun` so a server that fails to START is dropped +
+ * disclosed + its row corrected. The operator resolves org MCP the same way and
+ * should do the same — make this async and `await verifyStdioMcpMountsForRun(db,
+ * { servers, unresolved })` before building the resolution. Deferred here because
+ * the operator run is a hot path this cluster otherwise owns. */
 function operatorMcpResolution(
   db: DatabaseSync,
   names: readonly string[],

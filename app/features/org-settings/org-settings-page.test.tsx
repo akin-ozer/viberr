@@ -417,7 +417,9 @@ describe("ResourcesPanel", () => {
     const { container } = renderPanel(
       <ResourcesPanel kbs={[]} mcps={warming} skills={[]} gagents={[]} stages={STAGES} />,
     );
-    expect(container.textContent).toContain("installing on first use");
+    // R20-4 (N20-2): softened to one copy for both the evidence and heuristic
+    // warm-up bases — the reader can act on neither distinction.
+    expect(container.textContent).toContain("first run — installing in the background");
     expect(container.textContent).not.toContain("unreachable");
     // Its own dot state, and no red error block shouting while it works.
     expect(container.querySelector(".stat-dot.warming")).toBeTruthy();
@@ -633,6 +635,26 @@ describe("ResourcesPanel", () => {
     fireEvent.click(getByLabelText("Edit github-mcp"));
     expect(getByText(/1 agent template grants/)).toBeTruthy();
     expect(getByText(/Renaming it rewrites their grants/)).toBeTruthy();
+  });
+
+  it("N20-5: the Add-MCP modal shows the slug the name will actually be saved as", () => {
+    const { getByText, container } = renderResources();
+    // Open the MCP panel's own "Add" button (KB/skills have one too).
+    const mcpPanel = [...container.querySelectorAll("section.panel")].find(
+      (s) => s.querySelector("h2")?.textContent === "MCP servers",
+    )!;
+    const addBtn = [...mcpPanel.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Add"),
+    )!;
+    fireEvent.click(addBtn);
+
+    // The name is slugified before saving (`_`→`-`), which silently rewrote what
+    // the admin typed — and the reserved-name refusal then quoted a name they
+    // never entered. The field now discloses the slug the moment it differs.
+    const nameInput = container.querySelector("#mcp-name") as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: "viberr_browser" } });
+    expect(getByText(/will be saved as/)).toBeTruthy();
+    expect(getByText("viberr-browser")).toBeTruthy();
   });
 
   it("P14-KM-10: the agent modal renders orphaned grants as removable red chips", () => {

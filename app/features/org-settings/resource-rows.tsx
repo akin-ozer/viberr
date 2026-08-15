@@ -197,7 +197,7 @@ export function McpPanel({
                   }
                   title={
                     warming
-                      ? "installing on first use — this finishes in the background"
+                      ? "first run of this command — finishing in the background"
                       : stale
                         ? "last check passed but is stale — retest to confirm"
                         : m.up === true
@@ -215,8 +215,13 @@ export function McpPanel({
                 {m.transport} · {m.target}
               </span>
               <span className="sub">
+                {/* R20-4 (N20-2): softer than "installing on first use" because
+                    the row also reaches here on the HEURISTIC arm — an inference
+                    that an npx/uvx-style command is still fetching, not a
+                    reported install. One copy for both bases: the reader can act
+                    on neither distinction. */}
                 {m.warmingSince !== null
-                  ? "installing on first use — finishing in the background"
+                  ? "first run — installing in the background"
                   : m.up === true
                   ? (m.tools !== null ? m.tools + " tools · " : "reachable · ") +
                     "checked " + rel(m.lastCheckedAt) +

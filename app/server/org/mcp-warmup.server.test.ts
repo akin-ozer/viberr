@@ -63,6 +63,15 @@ function installerSpawn(afterMs: number, tools = 2): McpSpawn {
   };
 }
 
+/** Silent: prints nothing and never answers — a cold npx that just times out. */
+const silentSpawn: McpSpawn = () => ({
+  stdin: { write() {}, end() {} },
+  stdout: { on() {} },
+  stderr: { on() {} },
+  on() {},
+  kill() {},
+});
+
 const settle = () => new Promise((r) => setTimeout(r, 120));
 
 describe("startMcpWarmup (R19-18)", () => {
@@ -117,5 +126,74 @@ describe("startMcpWarmup (R19-18)", () => {
     const row = listMcpServers(db).find((m) => m.name === "orphan-stdio")!;
     expect(row.warmingSince).toBeNull();
     expect(row.lastError).toBeTruthy();
+  });
+});
+
+describe("first-run npx warm-up (R20-4 / N20-2)", () => {
+  it("only the HEURISTIC arm bumps heuristic_warmups; the evidence arm does not", async () => {
+    const db = dbCtx.makeDb();
+    // Heuristic: a SILENT npx command — nothing install-y on stderr, but it is a
+    // package runner and the row has never succeeded here.
+    const heur = await saveMcpServer(
+      db,
+      { name: "cold-npx", transport: "stdio", target: "npx -y @mcp/x", cred: "" },
+      ACTOR,
+      { spawnImpl: silentSpawn, timeoutMs: 5, capMs: 40 },
+    );
+    expect(heur.mcp.warmingSince).not.toBeNull();
+    expect(heur.mcp.heuristicWarmups).toBe(1);
+
+    // Evidence: it PRINTS an install line, so it warms WITHOUT spending the cap.
+    const evid = await saveMcpServer(
+      db,
+      { name: "loud-uvx", transport: "stdio", target: "uvx big", cred: "" },
+      ACTOR,
+      { spawnImpl: installerSpawn(10_000), timeoutMs: 5, capMs: 40 },
+    );
+    expect(evid.mcp.warmingSince).not.toBeNull();
+    expect(evid.mcp.heuristicWarmups).toBe(0);
+    await settle();
+  });
+
+  it("a warm-up that finally answers stamps first_success_at", async () => {
+    const db = dbCtx.makeDb();
+    const saved = await saveMcpServer(
+      db,
+      { name: "cold-npx", transport: "stdio", target: "uvx big", cred: "" },
+      ACTOR,
+      // Chatters (evidence), gives up in the probe, answers inside the warm-up.
+      { spawnImpl: installerSpawn(40), timeoutMs: 5, capMs: 5000 },
+    );
+    expect(saved.mcp.firstSuccessAt ?? null).toBeNull();
+
+    await settle();
+    const row = listMcpServers(db).find((m) => m.name === "cold-npx")!;
+    expect(row).toMatchObject({ up: true, warmingSince: null });
+    expect(row.firstSuccessAt).toBeTruthy();
+  });
+
+  it("reapStaleWarmups rolls the heuristic counter back — a killed warm-up is not spent", async () => {
+    const db = dbCtx.makeDb();
+    await saveMcpServer(
+      db,
+      { name: "orphan-npx", transport: "stdio", target: "npx -y @mcp/x", cred: "" },
+      ACTOR,
+      { spawnImpl: silentSpawn, timeoutMs: 5, capMs: 5 },
+    );
+    // The counter was bumped at ARM time.
+    expect(
+      listMcpServers(db).find((m) => m.name === "orphan-npx")!.heuristicWarmups,
+    ).toBe(1);
+    await settle();
+
+    // Simulate the process that owned the warm-up going away mid-install.
+    db.prepare(`UPDATE org_mcp_servers SET warming_since = ? WHERE name = 'orphan-npx'`)
+      .run(new Date().toISOString());
+    resetWarmupsForTest();
+
+    expect(reapStaleWarmups(db)).toBe(1);
+    const row = listMcpServers(db).find((m) => m.name === "orphan-npx")!;
+    expect(row.warmingSince).toBeNull();
+    expect(row.heuristicWarmups).toBe(0); // rolled back so a retest may try once more
   });
 });

@@ -4,6 +4,7 @@ import type {
   ProjectFrontmatter,
   WorkflowBoundary,
 } from "~/schemas/project-file.schema";
+import { withActionWatchdog } from "~/server/actions/action-watchdog.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -187,6 +188,23 @@ export interface CreateProjectResult {
 }
 
 export async function createProject(
+  db: DatabaseSync,
+  input: CreateProjectInput,
+  actor: { userId: string; label: string },
+  ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
+): Promise<CreateProjectResult> {
+  // F20-1: guard the whole mutating action behind the data-root watchdog, so a
+  // hung/unreachable mount fails THIS action with a typed error instead of
+  // wedging the request. The real work lives in createProjectImpl — later
+  // edits (create-time repo probe, C-PROJECT-SETTINGS) go there, unwrapped.
+  // See action-watchdog.server.ts for what the guard can and cannot interrupt.
+  return withActionWatchdog(
+    `create-project:${input.key || "?"}`,
+    () => createProjectImpl(db, input, actor, ctx),
+  );
+}
+
+async function createProjectImpl(
   db: DatabaseSync,
   input: CreateProjectInput,
   actor: { userId: string; label: string },

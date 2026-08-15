@@ -20,8 +20,10 @@ import {
   getMcpServer,
   getKnowledgeBase,
   getSkill,
+  isFirstRunInstallerCommand,
   listKnowledgeBases,
   listSkills,
+  markMcpServerUnreachableFromRun,
   type McpSpawn,
   listMcpServers,
   probeMcpTarget,
@@ -30,8 +32,10 @@ import {
   saveKnowledgeBase,
   saveMcpServer,
   saveSkill,
+  splitMcpCommand,
   testMcpServer,
 } from "./resources.server";
+import { resetWarmupsForTest } from "./mcp-warmup.server";
 
 /**
  * A fake stdio MCP server: answers the JSON-RPC `initialize` and `tools/list`
@@ -129,6 +133,47 @@ const failingSpawn: McpSpawn = () => {
 };
 
 /**
+ * F20-8 (EPIPE): a child that has already exited — writing to its stdin emits
+ * an ASYNC 'error' the way a real broken pipe does. Without an 'error' listener
+ * on the stdin stream that emit is an uncaught fatal (a `node:events` 'error'
+ * with no listener throws), so this fake is also the canary: revert the handler
+ * and the emit takes the process down instead of settling the probe.
+ */
+const epipeSpawn: McpSpawn = () => {
+  const stdinErr = new EventEmitter();
+  return {
+    stdin: {
+      write() {
+        queueMicrotask(() => stdinErr.emit("error", new Error("write EPIPE")));
+      },
+      end() {},
+      on: (event: "error", cb: (err: unknown) => void) => stdinErr.on(event, cb),
+    },
+    stdout: { on() {} },
+    stderr: { on() {} },
+    on() {},
+    kill() {},
+  };
+};
+
+/** F20-22: exits with a given code/signal, printing nothing on stderr. */
+function exitingSpawn(code: number | null, signal?: string): McpSpawn {
+  return () => {
+    const exit = new EventEmitter();
+    queueMicrotask(() => exit.emit("exit", code, signal));
+    return {
+      stdin: { write() {}, end() {} },
+      stdout: { on() {} },
+      stderr: { on() {} },
+      on: (event, cb) => {
+        if (event === "exit") exit.on("exit", cb as (a?: unknown, b?: unknown) => void);
+      },
+      kill() {},
+    };
+  };
+}
+
+/**
  * Agent-resource CRUD: every KB/skill mutation is a REAL folder mutation
  * under the temp data root; scans read straight from disk (external edits
  * appear); MCP health probes are injectable + honest.
@@ -136,6 +181,9 @@ const failingSpawn: McpSpawn = () => {
 
 const dbCtx = createTestDbContext();
 afterEach(dbCtx.cleanup);
+// R20-4: the warm-up registry is in-process; never leave one armed for the next
+// test (and the terminal-condition test depends on a clean counter).
+afterEach(() => resetWarmupsForTest());
 
 const ACTOR = { userId: "u_t", label: "t@test" };
 
@@ -544,7 +592,10 @@ describe("mcp servers", () => {
     // A command that never answers → honest unreachable, count stays null.
     const dead = await saveMcpServer(
       db,
-      { name: "broken-stdio", transport: "stdio", target: "npx -y @mcp/nope", cred: "" },
+      // A NON-installer command (not npx/uvx), so a silent timeout is an honest
+      // failure, not a first-run install. R20-4's heuristic warm-up is exercised
+      // by its own terminal-condition test; here the point is a dead command.
+      { name: "broken-stdio", transport: "stdio", target: "mcp-server-nope --serve", cred: "" },
       ACTOR,
       { spawnImpl: silentSpawn, timeoutMs: 20 },
     );
@@ -713,6 +764,207 @@ describe("mcp servers", () => {
     expect(
       await discoverStdioMcpTools("mcp-server", { spawnImpl: failingSpawn }),
     ).toMatchObject({ kind: "down", reason: "command not found — ENOENT" });
+  });
+});
+
+describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
+  it("F20-7: refuses a sub-8-char credential; a longer one never lands in last_error", async () => {
+    const { db } = setup();
+    // A credential under 8 chars is refused outright — it never reaches the row.
+    // Canary: drop the `< 8` guard in saveMcpServer → this no longer throws.
+    await expect(
+      saveMcpServer(
+        db,
+        { name: "shorty", transport: "stdio", target: "uvx svc", cred: "xy7Qk" },
+        ACTOR,
+        { spawnImpl: crashingSpawn("boom\n"), timeoutMs: 50 },
+      ),
+    ).rejects.toThrowError(/at least 8 characters/);
+    expect(listMcpServers(db).find((m) => m.name === "shorty")).toBeUndefined();
+
+    // A longer credential IS allowed; if the dying command echoes it, the
+    // persisted `last_error` carries [redacted], never the value.
+    await saveMcpServer(
+      db,
+      { name: "leaky", transport: "stdio", target: "uvx svc", cred: "sk-live-abcdefghijk" },
+      ACTOR,
+      {
+        spawnImpl: crashingSpawn("env: MCP_CREDENTIAL=sk-live-abcdefghijk\nfatal: boom\n"),
+        timeoutMs: 60,
+      },
+    );
+    const row = listMcpServers(db).find((m) => m.name === "leaky")!;
+    expect(row.lastError).toContain("fatal: boom");
+    expect(row.lastError).not.toContain("sk-live-abcdefghijk");
+  });
+
+  it("F20-10: markMcpServerUnreachableFromRun flips a healthy row to unreachable by name", async () => {
+    const { db } = setup();
+    const { mcp } = await saveMcpServer(
+      db,
+      { name: "everything", transport: "stdio", target: "npx -y @mcp/everything", cred: "" },
+      ACTOR,
+      { spawnImpl: fakeMcpSpawn(16) },
+    );
+    expect(mcp).toMatchObject({ up: true, tools: 16 });
+
+    markMcpServerUnreachableFromRun(
+      db,
+      "everything",
+      "it failed to start for this run — Cannot find module 'ajv'",
+    );
+    const row = listMcpServers(db).find((m) => m.name === "everything")!;
+    expect(row.up).toBe(false);
+    expect(row.tools).toBeNull();
+    expect(row.lastError).toContain("Cannot find module 'ajv'");
+    // An unknown name is a no-op, not a throw.
+    expect(() => markMcpServerUnreachableFromRun(db, "nope", "x")).not.toThrow();
+  });
+
+  it("F20-8: a broken-pipe write to a fast-exiting child settles `down`, never crashes", async () => {
+    // Without the stdin 'error' handler the async EPIPE is an uncaught fatal
+    // that took the whole server down. Canary: remove the handler and the
+    // `emit('error')` with no listener throws, failing this test.
+    const disc = await discoverStdioMcpTools("mcp-server", {
+      spawnImpl: epipeSpawn,
+      timeoutMs: 500,
+    });
+    expect(disc.kind).toBe("down");
+    if (disc.kind === "down") expect(disc.reason).toContain("exited before responding");
+  });
+
+  it("F20-22: a silent exit folds its exit code / signal into the reason", async () => {
+    expect(
+      await discoverStdioMcpTools("svc", { spawnImpl: exitingSpawn(3) }),
+    ).toMatchObject({ kind: "down", reason: "exited before responding — exit code 3" });
+    expect(
+      await discoverStdioMcpTools("svc", { spawnImpl: exitingSpawn(null, "SIGSEGV") }),
+    ).toMatchObject({ kind: "down", reason: "killed by SIGSEGV" });
+    // A clean 0-exit before answering stays the bare sentence (nothing to add).
+    expect(
+      await discoverStdioMcpTools("svc", { spawnImpl: exitingSpawn(0) }),
+    ).toMatchObject({ kind: "down", reason: "exited before responding" });
+  });
+
+  it("F20-2: teardown signals the process GROUP when a pid is present, else the child", async () => {
+    // The fakes model NO grandchildren, so this proves only the SIGNAL choice —
+    // the real zombie-reap proof is compose `init: true`, not a unit test.
+    const groups: number[] = [];
+    let directKills = 0;
+    const realKill = process.kill.bind(process);
+    process.kill = ((pid: number, sig?: string | number) => {
+      if (pid < 0) {
+        groups.push(pid);
+        return true;
+      }
+      return realKill(pid, sig as never);
+    }) as typeof process.kill;
+    try {
+      const withPid: McpSpawn = () => ({
+        stdin: { write() {}, end() {} },
+        stdout: { on() {} },
+        stderr: { on() {} },
+        on() {},
+        kill() {
+          directKills++;
+        },
+        pid: 4242,
+      });
+      await discoverStdioMcpTools("svc", { spawnImpl: withPid, timeoutMs: 10 });
+      expect(groups).toContain(-4242);
+      expect(directKills).toBe(0);
+
+      const noPid: McpSpawn = () => ({
+        stdin: { write() {}, end() {} },
+        stdout: { on() {} },
+        stderr: { on() {} },
+        on() {},
+        kill() {
+          directKills++;
+        },
+      });
+      await discoverStdioMcpTools("svc", { spawnImpl: noPid, timeoutMs: 10 });
+      expect(directKills).toBe(1);
+    } finally {
+      process.kill = realKill;
+    }
+  });
+
+  it("R20-4: isFirstRunInstallerCommand matches package-runner argv only", () => {
+    for (const cmd of [
+      "npx -y @mcp/x",
+      "bunx thing",
+      "uvx svc",
+      "pipx run svc",
+      "pnpm dlx svc",
+      "yarn dlx svc",
+      "bun x svc",
+      "uv tool run svc",
+      "/usr/local/bin/npx svc",
+    ]) {
+      expect(isFirstRunInstallerCommand(splitMcpCommand(cmd))).toBe(true);
+    }
+    for (const cmd of [
+      "node server.js",
+      "my-npx-tool --go",
+      "/usr/local/bin/mcp-server",
+      "pnpm start",
+      "python -m svc",
+    ]) {
+      expect(isFirstRunInstallerCommand(splitMcpCommand(cmd))).toBe(false);
+    }
+  });
+
+  it("R20-4: a silent npx probe reports firstRunInstaller; a silent node probe is a plain timeout", async () => {
+    const npx = await discoverStdioMcpTools("npx -y @mcp/never", {
+      spawnImpl: silentSpawn,
+      timeoutMs: 20,
+    });
+    expect(npx).toMatchObject({ kind: "down", firstRunInstaller: true });
+    if (npx.kind === "down") expect(npx.reason).toContain("fetches its package on first use");
+
+    const node = await discoverStdioMcpTools("node server.js", {
+      spawnImpl: silentSpawn,
+      timeoutMs: 20,
+    });
+    expect(node).toMatchObject({ kind: "down", reason: "timed out after 0s" });
+    expect((node as { firstRunInstaller?: boolean }).firstRunInstaller).toBeUndefined();
+  });
+
+  it("R20-4 (N20-2): an always-timing-out npx arms ONE heuristic warm-up, then settles unreachable", async () => {
+    const { db } = setup();
+    // First save: a SILENT npx command → the heuristic first-run warm-up arms.
+    const saved = await saveMcpServer(
+      db,
+      { name: "cold-npx", transport: "stdio", target: "npx -y @mcp/never", cred: "" },
+      ACTOR,
+      { spawnImpl: silentSpawn, timeoutMs: 10, capMs: 20 },
+    );
+    expect(saved.mcp.warmingSince).not.toBeNull();
+    expect(saved.mcp.heuristicWarmups).toBe(1);
+    expect(saved.toast).toContain("installing in the background");
+
+    // Let the (also silent) warm-up time out and settle the row down.
+    await new Promise((r) => setTimeout(r, 120));
+    const afterWarmup = listMcpServers(db).find((m) => m.name === "cold-npx")!;
+    expect(afterWarmup.warmingSince).toBeNull();
+    expect(afterWarmup.up).toBe(false);
+    expect(afterWarmup.firstSuccessAt ?? null).toBeNull();
+    expect(afterWarmup.heuristicWarmups).toBe(1);
+
+    // The cap is spent: a retest does NOT arm a second warm-up and reads plainly
+    // unreachable — the terminal condition R19-17c requires. Canary: drop the
+    // `heuristicWarmups < 1` clause and the retest re-arms (warmingSince set,
+    // toast says "installing"), failing the two assertions below.
+    const retest = await testMcpServer(db, afterWarmup.id, {
+      spawnImpl: silentSpawn,
+      timeoutMs: 10,
+      capMs: 20,
+    });
+    expect(retest.mcp.warmingSince).toBeNull();
+    expect(retest.mcp.up).toBe(false);
+    expect(retest.mcp.heuristicWarmups).toBe(1);
+    expect(retest.toast).toContain("unreachable");
   });
 });
 
@@ -1113,18 +1365,18 @@ describe("MCP credentials and transports", () => {
     };
     await saveMcpServer(
       db,
-      { name: "stdio-secured", transport: "stdio", target: "npx -y @mcp/x", cred: "tok-1" },
+      { name: "stdio-secured", transport: "stdio", target: "npx -y @mcp/x", cred: "tok-12345" },
       ACTOR,
       { spawnImpl },
     );
-    expect(sawToken).toBe("tok-1");
+    expect(sawToken).toBe("tok-12345");
   });
 
   it("a blank credential KEEPS the stored one; clearCred REMOVES it", async () => {
     const { db } = setup();
     const saved = await saveMcpServer(
       db,
-      { name: "keeper", transport: "HTTP", target: "https://x.dev/mcp", cred: "tok" },
+      { name: "keeper", transport: "HTTP", target: "https://x.dev/mcp", cred: "tok-first" },
       ACTOR,
       { fetchImpl: mcpHttpFetch(1) },
     );

@@ -17,6 +17,7 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 import { createGithubClient } from "~/server/github/github-client.server";
 // C5-followup: the editor's own copy of this list is gone. What Viberr will
 // author, list as editable and inject is now ONE set — three hand-maintained
@@ -796,11 +797,29 @@ export async function importGithubSnapshot(
   let folder = baseName;
   let refreshed = false;
   let i = 2;
+  // F20-1: bound the collision scan. On a healthy mount this settles in a hop
+  // or two; on a ghost data-root inode (a deleted VirtioFS bind-mount under a
+  // running container) `existsSync` can answer `true` for EVERY candidate name,
+  // and the old unbounded `while` then pegged the event loop forever with no
+  // error — the whole app went down (a create-project spin was the live repro).
+  // Cap the foreign-collision attempts and fail THIS import with a typed error
+  // naming the folder instead of spinning. The refresh-in-place branch below
+  // never counts against the cap (it breaks immediately).
+  const COLLISION_CAP = 32;
+  let attempts = 0;
   while (existsSync(path.join(baseAbs, folder))) {
     if (importSourceOf(baseAbs, folder) === sourceKey) {
       refreshed = true;
       rmSync(path.join(baseAbs, folder), { recursive: true, force: true });
       break;
+    }
+    if (++attempts > COLLISION_CAP) {
+      throw new AppError({
+        code: ERROR_CODES.INTERNAL,
+        status: 503,
+        message: `import collision scan exceeded ${COLLISION_CAP} attempts under ${baseAbs}`,
+        userMessage: `Could not find a free folder under "${baseName}" after ${COLLISION_CAP} attempts — the data root may be unreachable. Nothing was imported.`,
+      });
     }
     folder = `${baseName}-${i++}`;
   }
