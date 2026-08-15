@@ -1914,6 +1914,15 @@ dialog[data-closing]::backdrop {
 }
 .def-note .ico { width: 13px; height: 13px; margin-top: .15rem; flex: none; color: var(--placeholder); }
 .def-note code { font-family: var(--font-mono); font-size: .72rem; color: var(--muted); }
+/* F20-9 (R20-7): the Agents capability card carries the Policy page's reconciling
+   note for "Transition a task to Done" — a muted caption with a leading lock, so
+   the card reads as policy-truth beside the ACTS-DIRECTLY / RESERVED columns. */
+.cap-exception {
+  display: flex; align-items: flex-start; gap: .45rem;
+  margin: .1rem 0 .7rem; font-size: .76rem; line-height: 1.5; color: var(--faint);
+}
+.cap-exception svg { width: 13px; height: 13px; margin-top: .15rem; flex: none; color: var(--placeholder); }
+.cap-exception strong { color: var(--muted); font-weight: 600; }
 /* R15-12: unenforced capability lines, collapsed. Native <details> so keyboard
    and screen-reader behavior come for free — the panel already ships in the
    WCAG sweep and must not regress it. */

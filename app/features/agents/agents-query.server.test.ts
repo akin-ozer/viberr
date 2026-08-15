@@ -82,6 +82,84 @@ describe("capabilitiesToActionLabels — verdict outcomes follow the verdict (F1
 });
 
 /**
+ * F20-9 / R20-7 (D1): the display buckets must mirror the runtime acceptance
+ * gate (`operator-actions.server.ts:2580`,
+ * `authority.autonomy !== "full" || gate(...) !== "direct"`). A supervised
+ * operator holding `completion-for-acceptance: direct` renders it under ACTS
+ * DIRECTLY — authority the server refuses — unless the autonomy ceiling is
+ * applied, the exact F15-06 class one axis over.
+ */
+describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (F20-9/R20-7)", () => {
+  it("a SUPERVISED operator's direct accept-completion renders RECOMMENDS ONLY, not ACTS DIRECTLY", () => {
+    const out = capabilitiesToActionLabels(
+      [
+        cap("completion-for-acceptance", "direct"),
+        cap("assign-primary-specialist", "direct"),
+      ],
+      [],
+      "supervised",
+    );
+    // Canary: drop the `autonomy` arg / the ceiling and this flips back to `direct`.
+    expect(out.direct).not.toContain("Accept completion into Done");
+    expect(out.recommend).toContain("Accept completion into Done");
+    // The ceiling touches ONLY accept-completion — other grants are unaffected.
+    expect(out.direct).toContain("Assign the delivering agent");
+  });
+
+  it("a FULL-autonomy operator keeps it under ACTS DIRECTLY (the exception is live)", () => {
+    const out = capabilitiesToActionLabels(
+      [cap("completion-for-acceptance", "direct")],
+      [],
+      "full",
+    );
+    expect(out.direct).toContain("Accept completion into Done");
+    expect(out.recommend).not.toContain("Accept completion into Done");
+  });
+
+  it("effectiveProfileView threads the operator's own autonomy into the ceiling", () => {
+    const opDeployment = (
+      autonomy: "supervised" | "full" | undefined,
+      mode: CapabilityMode,
+    ) =>
+      ({
+        profileId: "operator",
+        capabilities: [{ capabilityId: "completion-for-acceptance", mode }],
+        extras: [],
+        definition: {
+          kind: "operator",
+          name: "Operator",
+          ...(autonomy ? { autonomy } : {}),
+        },
+      }) as never;
+
+    const supervised = effectiveProfileView(
+      opDeployment("supervised", "direct"),
+      undefined,
+      absentDeliverReviewPrMode(false),
+    );
+    expect(supervised.autonomy).toBe("supervised");
+    expect(supervised.actions.recommend).toContain("Accept completion into Done");
+    expect(supervised.actions.direct).not.toContain("Accept completion into Done");
+
+    const full = effectiveProfileView(
+      opDeployment("full", "direct"),
+      undefined,
+      absentDeliverReviewPrMode(false),
+    );
+    expect(full.autonomy).toBe("full");
+    expect(full.actions.direct).toContain("Accept completion into Done");
+
+    // No autonomy on the deployment resolves to supervised, so the ceiling holds.
+    const defaulted = effectiveProfileView(
+      opDeployment(undefined, "direct"),
+      undefined,
+      absentDeliverReviewPrMode(false),
+    );
+    expect(defaulted.actions.recommend).toContain("Accept completion into Done");
+  });
+});
+
+/**
  * Live find (pass 15): `deliver-review-pr` postdates every operator deployment
  * created before R15-2. Its runtime gate reads an ABSENT grant as `direct`
  * (deliverGate), so those operators kept delivering — while this view, which

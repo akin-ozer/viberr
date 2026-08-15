@@ -28,6 +28,7 @@ import {
   forceAcceptCompletion,
   manualDeliverForReview,
   releaseOwner,
+  requestPacketMaintainerDecision,
   resolveAcceptanceAffordance,
   resolvePacket,
   setOwner,
@@ -454,6 +455,26 @@ export async function action({ request, params }: Route.ActionArgs) {
                   : option.t,
               }
             : {}),
+        };
+      }
+      case "request-maintainer-decision": {
+        // F20-18: a contributor-OWNER holds no option they can settle on this
+        // packet — hand the decision UP. The server notifies the maintainers +
+        // admins, records the ask on the timeline, and refuses (with a pointer)
+        // if the caller could actually resolve it themselves.
+        const note = String(formData.get("note") ?? "").slice(0, 2000);
+        const { notified } = await requestPacketMaintainerDecision(
+          db,
+          { projectSlug, taskKey, ...(note.trim() ? { note } : {}) },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast:
+            notified > 0
+              ? `Sent to ${notified} maintainer${notified === 1 ? "" : "s"} — they'll decide`
+              : "Sent — a maintainer will decide",
         };
       }
       case "complete-merge": {

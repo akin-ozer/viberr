@@ -581,6 +581,7 @@ function ReviewerControl({
 function OperatorRunControl({
   busy,
   disabled,
+  blockedReason,
   defaultBackend,
   configuredAutonomy,
   backendAvailable,
@@ -589,6 +590,12 @@ function OperatorRunControl({
   busy: boolean;
   /** Task is closed (terminal stage) — controls render disabled (G9). */
   disabled?: boolean;
+  /** F20-5 (R20-1): a non-structural reason the manual run is refused — an open
+   *  decision packet pauses coordination, so `runOperator` returns
+   *  `refused: "open-packet"` for a manual trigger and this button would be a
+   *  paid no-op. The reason is rendered copy (a `title` never opens on a
+   *  disabled control — the same P14 reason the closed state renders text). */
+  blockedReason?: string;
   /** The operator profile's configured backend — the picker's default (P11-76). */
   defaultBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy — the CEILING a run may
@@ -613,7 +620,9 @@ function OperatorRunControl({
           : defaultBackend;
   const [backend, setBackend] = useState<string>(initialBackend);
   const [autonomy, setAutonomy] = useState<string>(configuredAutonomy);
-  const off = busy || disabled;
+  // F20-5: an open decision packet is refused server-side just like a closed
+  // task is, so it joins `disabled` in switching the control off.
+  const off = busy || disabled || !!blockedReason;
   return (
     <span className="op-run">
       <select
@@ -658,9 +667,10 @@ function OperatorRunControl({
         disabled={off}
         onClick={() => onRun(backend, autonomy)}
         title={
-          disabled
+          blockedReason ??
+          (disabled
             ? "Task is closed (terminal stage) — reopen it to run the operator"
-            : "Run the operator to coordinate this task"
+            : "Run the operator to coordinate this task")
         }
       >
         <Icon name="shield" />
@@ -669,10 +679,19 @@ function OperatorRunControl({
       {/* P14 ruling: a `title` is unreachable on a DISABLED control (no hover
           target for keyboard or touch), so the reason a control is dead has to
           be rendered copy — the reviewer panel already says this for its own
-          closed state. */}
-      {disabled && (
-        <span className="sub">Task closed — reopen it to run the operator.</span>
-      )}
+          closed state. F20-5's open-packet reason wins over the closed copy. */}
+      {blockedReason ? (
+        <span className="sub">{blockedReason}</span>
+      ) : disabled ? (
+        // N20-17: the explicit Run-operator button is off on a closed task, but
+        // an @operator comment still starts a full operator run (the comment
+        // handler dispatches on the mention) — say so, or the two run paths read
+        // as silently inconsistent (one blocked, one open).
+        <span className="sub">
+          Task closed — reopen it to run the operator. Mentioning{" "}
+          <code>@operator</code> in a comment still runs it.
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -789,6 +808,12 @@ export function ExecutionProfile({
     task.displayReadiness === "accepted" ||
     task.displayReadiness === "merged" ||
     task.archived;
+  // F20-5 (R20-1): the server refuses a MANUAL operator run while a decision
+  // packet is open — coordination is paused by the packet, so a run would burn
+  // several turns and take no action. Derived from the same `task.packet` the
+  // DecisionPacket card renders (one fact, no prop threaded through the
+  // section). A closed task keeps its own "reopen it" copy.
+  const packetOpen = !!task.packet;
   return (
     <div className="panel">
       <div className="panel-head">
@@ -830,6 +855,12 @@ export function ExecutionProfile({
               <OperatorRunControl
                 busy={operatorBusy}
                 disabled={closed}
+                {...(packetOpen && !closed
+                  ? {
+                      blockedReason:
+                        "Open decision — resolve it before running the operator.",
+                    }
+                  : {})}
                 defaultBackend={operatorBackend}
                 configuredAutonomy={operatorAutonomy}
                 backendAvailable={backendAvailable}

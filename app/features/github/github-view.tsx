@@ -325,8 +325,19 @@ export function BranchesPanel({
                 <span>
                   {row.pr && prPill ? (
                     <>
+                      {/* F20-23: a closed-not-merged (or merge-pending) PR used
+                          to render a bare `#162` with only a colour tint, so a
+                          reader scanning this table could not tell the delivery
+                          was rejected. Carry the state word — "closed" /
+                          "merge pending" — the way the PR list above does. An
+                          open "in review" PR and a "merged" one stay bare here:
+                          the Sync column already says "merged", and the narrow
+                          column keeps the common open state uncluttered. */}
                       <Pill kind={prPill.kind} sm>
                         #{row.pr.number}
+                        {row.pr.state !== "review" &&
+                          row.pr.state !== "merged" &&
+                          ` · ${prPill.label}`}
                       </Pill>
                       {/* P13-D-28: only the actionable state here — this is a
                           single narrow column, and the PR list above carries

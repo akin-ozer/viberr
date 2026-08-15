@@ -13,7 +13,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import { composePrBody, openTaskPr, taskUrl } from "./pr-open.server";
+import { composePrBody, openTaskPr } from "./pr-open.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -64,12 +64,13 @@ function setupWithBranch(
 }
 
 describe("composePrBody", () => {
-  it("carries the Viberr task back-link, goal, and change summary", () => {
+  it("carries the absolute Viberr task back-link, goal, and change summary", () => {
     const body = composePrBody({
       taskKey: "VIB-201",
+      projectSlug: "core",
       title: "Attach workspace",
       goal: "Wire the workspace.",
-      taskUrl: "https://viberr.example/projects/core/tasks/VIB-201",
+      appOrigin: "https://viberr.example",
       changeSummary: "3 files changed.",
       evidence: ["unit tests pass"],
     });
@@ -83,10 +84,35 @@ describe("composePrBody", () => {
     expect(body).toContain("unit tests pass");
   });
 
-  it("taskUrl falls back to a relative path when no origin is configured", () => {
-    expect(taskUrl("core", "VIB-1")).toBe("/projects/core/tasks/VIB-1");
-    expect(taskUrl("core", "VIB-1", "https://v.example/")).toBe(
-      "https://v.example/projects/core/tasks/VIB-1",
+  // N20-4 (§5a): with no configured public origin the back-link used to be a
+  // RELATIVE `/projects/…` path that 404s on github.com — worse than none. The
+  // composer now omits the link and names the task by its store key instead.
+  // Canary: put the relative fallback back and the "no link" assertions go red.
+  it("omits the link and writes the plain store key when no origin is configured", () => {
+    const body = composePrBody({
+      taskKey: "VIB-1",
+      projectSlug: "core",
+      title: "Wire it",
+      goal: "Wire.",
+      appOrigin: null,
+    });
+    expect(body).toContain("**Viberr task:** VIB-1 — Wire it");
+    // No markdown link at all, and no relative path a github.com reader could
+    // click into a 404.
+    expect(body).not.toContain("](");
+    expect(body).not.toContain("/projects/core/tasks/VIB-1");
+  });
+
+  it("builds the absolute back-link when an origin IS configured", () => {
+    const body = composePrBody({
+      taskKey: "VIB-1",
+      projectSlug: "core",
+      title: "Wire it",
+      goal: "Wire.",
+      appOrigin: "https://v.example",
+    });
+    expect(body).toContain(
+      "[VIB-1 — Wire it](https://v.example/projects/core/tasks/VIB-1)",
     );
   });
 });

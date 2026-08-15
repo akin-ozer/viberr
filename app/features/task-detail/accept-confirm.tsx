@@ -82,6 +82,7 @@ export function AcceptConfirm({
   task,
   workRevisionSha,
   noChanges = false,
+  noPullRequest = false,
   defaultBranch,
   atBoundary = true,
   ceremony,
@@ -107,6 +108,14 @@ export function AcceptConfirm({
    *  (F17-L9), and a verification-only task that never branched at all
    *  (F19-21). Neither has a PR. */
   noChanges?: boolean;
+  /** F20-6 (R20-2): the task has no review PR AND the completion did not claim
+   *  `noChanges` — so accepting will AUTO-DETECT a no-change completion by
+   *  re-probing the branch on GitHub (empty → closes with no changes; has work
+   *  → refused with the commit count). The dialog states exactly that instead
+   *  of promising a merge. Threaded as a prop (not derived from `!task.pr`) so
+   *  an ordinary PR-less accept still reads "closes without a merge" — the loader
+   *  decides which shape this is. */
+  noPullRequest?: boolean;
   /** The merge target — the project's default branch. */
   defaultBranch: string;
   /** `acceptance.atBoundary` — the task stands at the stage a completion is
@@ -249,6 +258,27 @@ export function AcceptConfirm({
                       nothing merges.
                     </>
                   )}
+                </>
+              ) : noPullRequest && !force ? (
+                // F20-6 (R20-2): no PR, and the completion never claimed "no
+                // changes" — the server auto-detects it by re-probing the branch
+                // AT acceptance. State what the click actually does; a loader-
+                // time GitHub probe on every task open is unaffordable, so this
+                // honest sentence is the alternative (it promises no merge).
+                // Not on the FORCE path — force bypasses the very refusal this
+                // sentence describes (its own Skips/Bypassing rows say what it
+                // does), so the "refused if commits" clause would contradict it.
+                <>
+                  <strong>Nothing to merge yet.</strong> This task has no review
+                  pull request. Accepting re-checks{" "}
+                  {task.branch ? (
+                    <span className="mono">{task.branch}</span>
+                  ) : (
+                    "the branch"
+                  )}{" "}
+                  on GitHub: if it carries no commits the task closes as{" "}
+                  <strong>completed with no changes</strong>; if it carries work
+                  the acceptance is refused and says how many commits.
                 </>
               ) : (
                 <>No linked pull request — the task closes without a merge.</>

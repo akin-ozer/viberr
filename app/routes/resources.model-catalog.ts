@@ -1,5 +1,6 @@
 import type { Route } from "./+types/resources.model-catalog";
 import { requireUser } from "~/server/auth/require-user.server";
+import { getDb } from "~/server/db/sqlite.server";
 import { getModelCatalog } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 
@@ -14,12 +15,17 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  *
  * Returns `{ data: { models, efforts, defaultModel, defaultEffort } }`. An
  * unknown/missing backend defaults to claude so the modal always renders.
+ *
+ * R20-3 / F20-4: the db is threaded so `getModelCatalog` stamps each model
+ * `unavailable` from the `model_availability` marks — the picker then disables
+ * and explains a model a real run proved this account cannot use, instead of
+ * silently offering one that 400s at the SDK.
  */
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   const url = new URL(request.url);
   const raw = url.searchParams.get("backend");
   const backend: RealBackend = raw === "codex" ? "codex" : "claude";
-  const catalog = await getModelCatalog(backend);
+  const catalog = await getModelCatalog(backend, { db: getDb() });
   return Response.json({ data: catalog });
 }

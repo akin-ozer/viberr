@@ -13,7 +13,8 @@ import {
   resolveTaskFilePath,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { getEnv } from "~/server/config/env.server";
+import { appOrigin } from "~/server/config/env.server";
+import { logger } from "~/server/logging/logger.server";
 import { taskBranchName } from "./branch-sync.server";
 import {
   getProjectGithubContext,
@@ -32,14 +33,30 @@ import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
  */
 export function composePrBody(input: {
   taskKey: string;
+  projectSlug: string;
   title: string;
   goal: string;
-  taskUrl: string;
+  /**
+   * N20-4 (§5a): the app's absolute public origin, or `null` when it is not
+   * configured (the caller passes `appOrigin()`). When `null` the link is
+   * OMITTED and the plain store key is written instead — a relative
+   * `/projects/…` link 404s on github.com, which is worse than no link.
+   */
+  appOrigin: string | null;
   changeSummary?: string | null;
   evidence?: string[] | null;
 }): string {
   const lines: string[] = [];
-  lines.push(`**Viberr task:** [${input.taskKey} — ${input.title}](${input.taskUrl})`);
+  if (input.appOrigin) {
+    const url = `${input.appOrigin}/projects/${input.projectSlug}/tasks/${input.taskKey}`;
+    lines.push(`**Viberr task:** [${input.taskKey} — ${input.title}](${url})`);
+  } else {
+    // N20-4 (§5a): no absolute origin to link to — name the task by its store
+    // key so a reviewer can still find it, rather than emitting a relative link
+    // that dead-ends on github.com (ruling 3: the store-relative key is the
+    // honest fallback).
+    lines.push(`**Viberr task:** ${input.taskKey} — ${input.title}`);
+  }
   lines.push("");
   lines.push("## Goal");
   lines.push(input.goal.trim() || "_No goal recorded on the task._");
@@ -79,21 +96,15 @@ export function latestEvidenceLines(
   );
 }
 
-/** Absolute Viberr URL for a task, from BETTER_AUTH_URL when configured. */
-export function taskUrl(
-  projectSlug: string,
-  taskKey: string,
-  appOrigin?: string,
-): string {
-  const origin = (appOrigin ?? getEnv().BETTER_AUTH_URL ?? "").replace(/\/+$/, "");
-  const path = `/projects/${projectSlug}/tasks/${taskKey}`;
-  return origin ? `${origin}${path}` : path;
-}
-
 export interface OpenTaskPrContext {
   dataRoot?: string;
   fetchImpl?: typeof fetch;
-  /** App origin for the task back-link when BETTER_AUTH_URL is unset (dev). */
+  /**
+   * N20-4 (§5a): optional app-origin OVERRIDE. Production never sets it (the
+   * delivery path has no request to derive one from), so the origin comes from
+   * `appOrigin()` — this exists only so a test can inject one without touching
+   * the process env cache.
+   */
   appOrigin?: string;
 }
 
@@ -265,11 +276,23 @@ export async function openTaskPr(
   }
 
   // 2. Create the PR.
+  // N20-4 (§5a): the back-link origin comes from `appOrigin()` (BETTER_AUTH_URL),
+  // never from a request — delivery runs off background operator runs. `null`
+  // means the link is omitted (a relative link 404s on github.com); log it once
+  // at debug so the deployment fix (set BETTER_AUTH_URL) is discoverable.
+  const origin = ctx.appOrigin ?? appOrigin();
+  if (!origin) {
+    logger.debug(
+      "PR body omits the task back-link — no absolute app origin; set BETTER_AUTH_URL",
+      { taskKey: input.taskKey, projectSlug: input.projectSlug },
+    );
+  }
   const body = composePrBody({
     taskKey: input.taskKey,
+    projectSlug: input.projectSlug,
     title: fm.title,
     goal: file.parsed.goal,
-    taskUrl: taskUrl(input.projectSlug, input.taskKey, ctx.appOrigin),
+    appOrigin: origin,
     changeSummary: fm.github?.changed
       ? `${fm.github.changed.files} file(s) changed (+${fm.github.changed.add}/-${fm.github.changed.del}).`
       : null,

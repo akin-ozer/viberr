@@ -1133,6 +1133,58 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(spec.prompt).not.toContain('"question"');
   });
 
+  /**
+   * F20-32: on Codex the ask-human capability IS the envelope `question` field —
+   * there is no callable `ask_human` tool. A Codex developer, told its goal to
+   * "ask the human via your ask-human capability", went hunting for a tool,
+   * found none, and narrated "the ask-human capability is unavailable in this
+   * session" WHILE filling in `question`. The Codex collaboration note must name
+   * the `question` field AS the ask-human channel so the false limitation goes
+   * away — and must NOT claim ask-human is unavailable.
+   */
+  it("F20-32: an ask-granted Codex profile is told `question` IS its ask-human channel", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [
+            { capabilityId: "ask-human", mode: "direct" },
+            { capabilityId: "report-validation-verdict", mode: "off" },
+            { capabilityId: "attach-evidence-references", mode: "off" },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["codex"],
+            model: "gpt-5-codex",
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const spec = specs.at(-1)!;
+    expect(spec.prompt).toContain("## Collaboration");
+    // The envelope's `question` field is named as the ask-human channel …
+    expect(spec.prompt).toContain('"question"');
+    expect(spec.prompt).toContain("ask-human capability on THIS backend is that `question` field");
+    // … and the prompt explicitly forbids narrating the channel as unavailable.
+    expect(spec.prompt).toContain("never say ask-human is unavailable");
+    expect(spec.prompt).toContain("there is no separate ask_human tool here");
+  });
+
   it("a run of a LIVE deployment still follows its own grants", async () => {
     // A GRANTED profile is the control: the withheld fallback must not leak
     // onto a profile that resolves, or every deliverer would lose its tools.

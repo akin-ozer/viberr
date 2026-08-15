@@ -749,3 +749,8 @@ things my in-flight fixes already address (recorded as corroboration); the rest 
   with the meaningful `summary` buried and null fields shown verbatim, whereas Claude's `assistant`
   event renders as clean prose. Extract+render the Codex envelope's `summary`/`question` as prose in
   the non-raw console (P19-RC1 parity across backends). Fix area: run-console helpers.
+
+## Owner ruling 2026-08-15 (batch-2)
+- **R20-9 (on F20-31)**: the operator MAY gather at triage an answer a goal delegated to the
+  delivering agent's ask-human (it's needed before work starts), BUT the packet must DISCLOSE it
+  is substituting for the delegated agent ask — the timeline must be honest about the substitution.

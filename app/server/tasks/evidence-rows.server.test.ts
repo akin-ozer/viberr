@@ -495,9 +495,10 @@ describe("composePrBody finally receives evidence (P13-D-26)", () => {
   it("renders an ## Evidence section in the PR body", () => {
     const body = composePrBody({
       taskKey: "VIB-1",
+      projectSlug: "p",
       title: "Attach execution workspace",
       goal: "Attach a repo and run the specialist.",
-      taskUrl: "https://viberr.test/projects/p/tasks/VIB-1",
+      appOrigin: "https://viberr.test",
       changeSummary: "9 file(s) changed (+412/-87).",
       evidence: ["unit/policy_gate_test · +14 · 0"],
     });

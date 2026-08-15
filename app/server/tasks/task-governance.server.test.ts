@@ -33,6 +33,7 @@ import {
   recordAgentCompletion,
   reorderTask,
   resolvePacket,
+  setTaskArchived,
   transitionStage,
   updateTaskGoal,
 } from "./task-actions.server";
@@ -1278,6 +1279,91 @@ describe("resolvePacket kind matrix", () => {
       texts.some((t) => t.includes("was **not** discarded") && t.includes("exists on GitHub")),
     ).toBe(true);
     expect(listAuditEvents(store.db, { action: "task.branch.discard_refused" })).toHaveLength(1);
+  });
+
+  it("F20-24: archive_task + deleteBranch discards the LOCAL branch too so 'discard work' leaves nothing to re-deliver", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        pr: { number: 318, state: "closed", title: "PR" },
+        branch: "vib-1-work",
+      },
+      RECOVERY_PACKET,
+    );
+    // A real workspace holding a local-only `vib-1-work`. No credential in the
+    // fixture, so the REMOTE delete degrades typed (no_pat_configured) — the
+    // local-discard wiring is what this test exercises.
+    initTaskWorkspace(store);
+    const repoDir = path.join(
+      taskDir(store.slug, "VIB-1", store.dataRoot),
+      "workspace",
+      "viberr",
+    );
+    const { task } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 }, // archive + delete branch
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.packet).toBeNull();
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.archived).toBe(true);
+    // The commit is truly gone: fm.branch is cleared AND the branch is removed
+    // from the workspace, so restore cannot re-push it. Canary: drop the
+    // local-discard block and fm.branch stays "vib-1-work".
+    expect(fm.branch).toBeNull();
+    expect(() =>
+      gitc(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
+    ).toThrow();
+    const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
+    expect(
+      discarded.some((a) => (a.details as { basis?: string }).basis === "archive_cleanup"),
+    ).toBe(true);
+  });
+
+  it("F20-25: restore names the next step, and archive drops the false 'reopen the question' promise", async () => {
+    const store = prepared();
+    withTask(store, { stage: "review", waiting: "human" }, RECOVERY_PACKET);
+    await setTaskArchived(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", archived: true },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    const archivedNote = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline[0]!.text;
+    expect(archivedNote).toContain("withdrawn");
+    // The old promise restore could not keep is gone (it said "reopen the
+    // question" but withdrew the packet's options).
+    expect(archivedNote).not.toContain("reopen the question");
+
+    const { archived } = await setTaskArchived(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", archived: false },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(archived).toBe(false);
+    const back = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // The waiting contract is preserved (a restored task waits on a human)…
+    expect(back.frontmatter.waiting).toBe("human");
+    // …but it is no longer stranded silently — the restore note names the next
+    // step, so "Waiting on: Human decision" reads as actionable.
+    expect(back.timeline[0]!.text).toContain("run the operator");
   });
 
   // F20-18 (N20-7): a contributor-owner handed a packet whose every option needs

@@ -114,20 +114,29 @@ const CLAUDE_CURATED: ModelCatalog = {
  *  that already stored it keeps running on the tier it was configured with. */
 const CODEX_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 
+// F20-33: Terra is listed FIRST, so it is the fallback default
+// (`defaultModelFor("codex")` = `CODEX_MODELS[0]` — the "default is the first
+// model" invariant). Sol is the flagship, but a ChatGPT-plan Codex account 400s
+// on it ("The 'gpt-5.6-sol' model is not supported when using Codex with a
+// ChatGPT account."), and this fallback is what an operator (or any profile)
+// with no concrete Codex model resolves to — so a fresh operator-on-Codex must
+// land on Terra, the CLI default that actually runs, not Sol. Sol stays offered
+// (a profile can still pick it; F20-4 then marks it unavailable from a real
+// failure) — it is just no longer the default.
 const CODEX_MODELS: CatalogModel[] = [
-  {
-    value: "gpt-5.6-sol",
-    displayName: "GPT-5.6 Sol",
-    description:
-      "Flagship model for complex coding, research, and high-value work.",
-    supportsEffort: true,
-    efforts: [...CODEX_EFFORTS],
-  },
   {
     value: "gpt-5.6-terra",
     displayName: "GPT-5.6 Terra",
     description:
       "Balanced everyday workhorse with strong reasoning and tool use.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  {
+    value: "gpt-5.6-sol",
+    displayName: "GPT-5.6 Sol",
+    description:
+      "Flagship model for complex coding, research, and high-value work.",
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },
@@ -150,8 +159,8 @@ const CODEX_MODELS: CatalogModel[] = [
 const CODEX_CURATED: ModelCatalog = {
   models: CODEX_MODELS,
   efforts: [...CODEX_EFFORTS],
-  // Default = the first available model (a changeable starting point). Sol is
-  // the current recommended starting model for ChatGPT-plan Codex usage.
+  // Default = the first available model (a changeable starting point). F20-33
+  // put Terra first because Sol 400s on a ChatGPT-plan Codex account.
   defaultModel: CODEX_MODELS[0]!.value,
   defaultEffort: "medium",
 };

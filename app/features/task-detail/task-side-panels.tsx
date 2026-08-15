@@ -119,11 +119,12 @@ export function GithubTrace({
   const forceAcceptRow =
     forceAcceptReason && onForceAccept ? (
       <div className="force-accept">
-        {/* P13-D-19: `.hint` used to exist only as `.pj-new .hint`, so this line
-            rendered as an unstyled <p>; it is a global utility now. */}
-        <p className="hint">
-          Acceptance is blocked: {forceAcceptReason}
-        </p>
+        {/* C1: the refusal sentence has ONE owner — the Current-state panel,
+            where the Accept button lives. It used to render here too ("Acceptance
+            is blocked: …"), byte-identical to the Current-state deny-note ~350px
+            away; a prior pass fixed the two DISAGREEING and left them duplicates.
+            This panel keeps only the GitHub-side fact: the admin override itself,
+            whose button already names what it does. */}
         <button
           type="button"
           className="btn ghost sm full"

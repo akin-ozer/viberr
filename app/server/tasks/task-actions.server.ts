@@ -4429,9 +4429,15 @@ export async function setTaskArchived(
         ...existing.parsed.frontmatter.recommendations.map((r) => `“${r.label}”`),
       ]
     : [];
+  // F20-25: the archive discards the packet (its options are gone), so restore
+  // cannot literally re-open the SAME decision — it hands the task back to a
+  // human, who runs the operator to re-open coordination. The note used to
+  // promise "restore … to reopen the question", which left a restored task
+  // stranded on "Waiting on: Human decision" with no decision to act on; say
+  // what restore actually does instead.
   const withdrawnNote =
     withdrawn.length > 0
-      ? ` ${withdrawn.join(", ")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn — restore the task to reopen the question.`
+      ? ` ${withdrawn.join(", ")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn — restoring the task brings it back to a human, who can run the operator to reopen the decision.`
       : "";
 
   const event: TaskFileEvent = {
@@ -4442,7 +4448,9 @@ export async function setTaskArchived(
     title: null,
     text: input.archived
       ? `**Archived:** ${input.taskKey} was archived — it leaves the board and the review queue, and its record is kept.${withdrawnNote}`
-      : `**Restored:** ${input.taskKey} was restored from the archive and is back on the board.`,
+      : // F20-25: a restored task waits on a human but carries no decision object
+        // — name the next step so it is not stranded on a silent "Human decision".
+        `**Restored:** ${input.taskKey} was restored from the archive and is back on the board, waiting on a human — run the operator to reopen coordination, or move the task on yourself.`,
     toAgent: false,
     evidence: null,
   };
@@ -5107,6 +5115,63 @@ export async function resolvePacket(
           },
         );
         reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      }
+
+      // F20-24: `deleteTaskRemoteBranch` removes only the REMOTE ref — the local
+      // workspace commit survived, so "discard work" was a lie: "Restore from
+      // archive" re-offered an ENABLED "Deliver branch & open PR" that would
+      // re-push the abandoned work and open a fresh PR. Discard the local branch
+      // too and clear `fm.branch`, so the discarded work exists nowhere and the
+      // restored task shows no phantom branch row. Skipped only when the remote
+      // deletion was REFUSED (an open PR / the default branch — the work is
+      // deliberately KEPT). `discardLocalTaskBranch` keeps ruling 17's own guard:
+      // a branch still reachable on the remote is never removed here.
+      const localBranch = existing.parsed.frontmatter.branch;
+      if (localBranch && outcome.status !== "refused") {
+        const defaultBranch =
+          readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot })
+            ?.parsed.frontmatter.defaultBranch || "main";
+        const { discardLocalTaskBranch } = await import(
+          "~/server/github/push-workspace.server"
+        );
+        const local = await discardLocalTaskBranch({
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          branch: localBranch,
+          defaultBranch,
+          ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+        });
+        if (local.status === "deleted") {
+          await updateTaskFile(
+            taskRef(ctx, input.projectSlug, input.taskKey),
+            (parsed) => {
+              if (parsed.frontmatter.branch === local.branch) {
+                parsed.frontmatter.branch = null;
+              }
+              parsed.timeline.unshift({
+                occurredAt: new Date().toISOString(),
+                type: "note",
+                actor: { kind: "system", systemId: "policy-engine" },
+                title: null,
+                text:
+                  `The local workspace branch \`${local.branch}\` (\`${local.sha.slice(0, 12)}\`) ` +
+                  `was discarded too — "discard work" now leaves no commit to re-deliver.`,
+                toAgent: false,
+                evidence: null,
+              });
+            },
+          );
+          reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+          recordAudit(db, {
+            action: "task.branch.discarded",
+            actor: { userId: actor.userId, label: actor.label },
+            subjectKind: "task",
+            subjectId: input.taskKey,
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            details: { branch: local.branch, sha: local.sha, basis: "archive_cleanup" },
+          });
+        }
       }
     }
   }

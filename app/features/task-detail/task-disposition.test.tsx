@@ -7,6 +7,7 @@ import {
   type DeployedSpecialistView,
 } from "./execution-profile";
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { ToastProvider } from "~/ui/toast";
 import { AcceptConfirm } from "./accept-confirm";
@@ -93,6 +94,7 @@ function renderPage(props: {
   canDeliver?: boolean;
   recommendations?: RecommendationView[];
   workRevisionSha?: string | null;
+  schedules?: TaskSchedule[];
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -121,7 +123,7 @@ function renderPage(props: {
             myRole={props.myRole ?? "admin"}
             mentionables={{ agents: [], users: [], reserved: [] }}
             recommendations={props.recommendations ?? []}
-            schedules={[]}
+            schedules={props.schedules ?? []}
             archived={props.archived ?? false}
             acceptance={{ ...ACCEPTANCE, ...(props.acceptance ?? {}) }}
             githubHost="https://github.com"
@@ -254,11 +256,13 @@ describe("P14-LV-06: the acceptance affordance", () => {
     expect(getAllByText(/no approving verdict yet/).length).toBeGreaterThan(0);
   });
 
-  it("UX19-2: the GitHub panel and Current state quote the SAME refusal — no two-gate contradiction", () => {
-    // Live: "Acceptance is blocked: …no approving verdict yet…" (projection
-    // column, revision dimension only) sat one panel above "Not acceptable
-    // yet — at In Progress, not Review" (live gate, stage first). Canary: read
-    // `task.blockReason` in GithubTrace again and the two sentences diverge.
+  it("C1: the refusal has ONE owner (Current state); the GitHub panel's override carries no duplicate", () => {
+    // UX19-2 first made the two panels AGREE (both quoting the live refusal);
+    // C1 found the fix had made them DUPLICATES — byte-identical sentences ~350px
+    // apart. One owner now: the Current-state deny-note holds the sentence, and
+    // the GitHub panel's admin override renders only its button, no reason line.
+    // Canary: bring back the `.force-accept .hint` "Acceptance is blocked: …"
+    // paragraph and the duplicate returns here.
     const stageRefusal =
       "VIB-151 is at In Progress, not Review — a completion can only be accepted from the boundary the workflow puts before Done.";
     const { container } = renderPage({
@@ -272,11 +276,15 @@ describe("P14-LV-06: the acceptance affordance", () => {
         blockedReason: stageRefusal,
       },
     });
-    const hatch = container.querySelector(".force-accept .hint")!;
+    // The force-accept row is now just the override button — no reason paragraph.
+    const forceAccept = container.querySelector(".force-accept")!;
+    expect(forceAccept.querySelector(".hint")).toBeNull();
+    expect(forceAccept.textContent).not.toContain(stageRefusal);
+    // The sentence lives once, in the Current-state deny-note.
     const denyNote = container.querySelector(".deny-note")!;
-    expect(hatch.textContent).toContain(stageRefusal);
     expect(denyNote.textContent).toContain(stageRefusal);
-    expect(hatch.textContent).not.toContain("no approving verdict yet");
+    // And it is the live gate, never the projection's revision-only blockReason.
+    expect(denyNote.textContent).not.toContain("no approving verdict yet");
   });
 
   it("R16-3: a closed PR frames the refusal as CLOSED and withdraws force-accept", () => {
@@ -892,6 +900,82 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
   });
 });
 
+/**
+ * F20-5 (R20-1) — the server refuses a MANUAL operator run while a decision
+ * packet is open (coordination is paused by the packet). The button must say so
+ * instead of offering a paid no-op. N20-17 — a closed task's disabled button
+ * notes that mentioning @operator still runs it, so the two run paths do not
+ * read as silently inconsistent. C8 — Scheduled re-runs collapses below the
+ * Execution profile.
+ */
+describe("F20-5 / N20-17: the operator run control's honest off-states", () => {
+  const openPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "Operator",
+    title: "VIB-151 needs a decision",
+    body: "Choose a path.",
+    observations: [],
+    options: [{ kind: "custom", t: "Rework and re-run", d: "", rec: true }],
+  } as unknown as TaskDetail["packet"];
+
+  it("F20-5: an open packet disables Run operator with the resolve-first reason", () => {
+    const { container } = renderPage({ myRole: "admin", task: { packet: openPacket } });
+    const runOperator = findButton(container, "Run operator")!;
+    expect(runOperator).toBeDefined();
+    // Canary: drop the `packetOpen` blockedReason wiring and the button goes
+    // live while the server refuses the run as a paid no-op.
+    expect(runOperator.disabled).toBe(true);
+    expect(container.textContent).toContain(
+      "Open decision — resolve it before running the operator.",
+    );
+  });
+
+  it("N20-17: a closed task's disabled button notes that @operator still runs it", () => {
+    const { container } = renderPage({
+      myRole: "admin",
+      task: { displayReadiness: "accepted", stage: "done" } as Partial<TaskDetail>,
+    });
+    const runOperator = findButton(container, "Run operator")!;
+    expect(runOperator.disabled).toBe(true);
+    expect(container.textContent).toContain("Mentioning");
+    expect(container.textContent).toContain("still runs it");
+  });
+});
+
+describe("C8: Scheduled re-runs collapses below the Execution profile", () => {
+  const schedule = (id: string): TaskSchedule =>
+    ({
+      id,
+      dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+      backend: "claude",
+      autonomy: "supervised",
+      note: null,
+      createdByLabel: "Arda",
+    }) as unknown as TaskSchedule;
+
+  it("shows a one-line disclosure (not the form) when nothing is scheduled", () => {
+    const { container, getByText, queryByText } = renderPage({ myRole: "admin" });
+    // The four-control form is not rendered up-front any more…
+    expect(queryByText("Schedule operator re-run")).toBeNull();
+    // …only a one-line disclosure, which opens the form on click.
+    const disclosure = findButton(container, "Schedule a re-run")!;
+    expect(disclosure).toBeDefined();
+    fireEvent.click(disclosure);
+    expect(getByText("Schedule operator re-run")).toBeTruthy();
+  });
+
+  it("renders the panel expanded when a schedule already exists", () => {
+    const { getByText, queryByText } = renderPage({
+      myRole: "admin",
+      schedules: [schedule("s-1")],
+    });
+    // Something to show → the panel is expanded, no disclosure step.
+    expect(getByText("Scheduled re-runs")).toBeTruthy();
+    expect(queryByText("Schedule a re-run")).toBeNull();
+  });
+});
+
 describe("R14-3: the task archive", () => {
   it("maintainer+ gets Archive; it confirms first, then submits archive-task", async () => {
     const { container, submitted, getByText } = renderPage({ myRole: "maintainer" });
@@ -904,6 +988,23 @@ describe("R14-3: the task archive", () => {
     fireEvent.click(findButton(container, "Archive VIB-151")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("archive-task");
+  });
+
+  it("C14: the Withdrawn row names its scope, not a blanket 'nothing is pending'", () => {
+    // The row surveys the open packet + pending recommendations only; on a task
+    // with neither it claimed "Nothing is pending on this task right now", which
+    // over-reached a live run streaming behind the dialog. Narrowed to scope.
+    const { container } = renderPage({ myRole: "maintainer" });
+    fireEvent.click(findButton(container, "Archive task")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Archive task dialog"]',
+    )!;
+    expect(dialog.textContent).toContain(
+      "No open decision or pending recommendation to withdraw",
+    );
+    expect(dialog.textContent).not.toContain(
+      "Nothing is pending on this task right now",
+    );
   });
 
   it("F19-36: the archive confirm names the PR state in the product's vocabulary, not the raw token", () => {

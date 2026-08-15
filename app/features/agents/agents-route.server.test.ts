@@ -285,9 +285,9 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       role: "Schema changes",
       icon: "agents",
       backends: ["codex"],
-      // No picked model in FORM → per-backend catalog default (no more the
-      // old invalid hardcoded id).
-      model: "gpt-5.6-sol",
+      // No picked model in FORM → per-backend catalog default. F20-33 made the
+      // codex default Terra (Sol 400s on a ChatGPT-plan account).
+      model: "gpt-5.6-terra",
       effort: "medium",
       scope: "Created in Viberr Core",
       stages: ["ready", "impl"],
@@ -1145,5 +1145,86 @@ describe("F15-05/06 — a brand-new profile claims no verdict authority", () => 
       path.join(app.dataRoot, "agents", "profiles", `${orgProfileId}.md`),
       { force: true },
     );
+  });
+});
+
+/**
+ * F20-20: raising the operator to FULL autonomy (and/or granting it "Accept
+ * completion into Done") lets it close tasks with no human — a governance
+ * decision that used to be audited as a generic "project.agent_profile.updated"
+ * row and never surfaced to the admin. It now writes an explicit
+ * `project.operator.autonomy_changed` event AND rides a governance notice.
+ */
+describe("F20-20 — an operator autonomy elevation is audited + surfaced, not generic", () => {
+  it("elevating supervised → full with direct-accept records a dedicated event and a notice", async () => {
+    const operatorForm = (
+      autonomy: "supervised" | "full",
+      accept: "recommend" | "direct",
+    ) =>
+      JSON.stringify({
+        name: "Operator",
+        role: "Task coordinator",
+        backend: "claude",
+        stages: ["triage", "ready", "impl", "review", "done"],
+        definition: "Operator.",
+        autonomy,
+        caps: { "completion-for-acceptance": accept },
+        resources: { skills: [], mcps: [], kb: [] },
+      });
+
+    // Baseline the operator to supervised (self-contained regardless of the
+    // order earlier tests left it in) — this is NOT an elevation, so no notice.
+    const baseline = (await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "operator",
+      payload: operatorForm("supervised", "recommend"),
+    })) as { ok: boolean; governanceNotice?: unknown };
+    expect(baseline.ok).toBe(true);
+    expect(baseline.governanceNotice).toBeUndefined();
+
+    // Now elevate to full + direct accept-completion: the exception goes live.
+    const elevated = (await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "operator",
+      payload: operatorForm("full", "direct"),
+    })) as { ok: boolean; governanceNotice?: { message: string } };
+    expect(elevated.ok).toBe(true);
+    expect(elevated.governanceNotice?.message).toContain("full autonomy");
+    expect(elevated.governanceNotice?.message).toContain("without a human");
+
+    // A dedicated, greppable audit event — not just the generic updated row.
+    // (`listAuditEvents` is newest-first, and an earlier test also elevates the
+    // operator, so match on the row's own shape rather than by position.)
+    const govRows = listAuditEvents(app.db, {
+      action: "project.operator.autonomy_changed",
+    }).filter((e) => e.subjectId === "operator");
+    expect(
+      govRows.some((e) => {
+        const d = (e.details ?? {}) as {
+          from?: string;
+          to?: string;
+          directDoneLive?: boolean;
+        };
+        return d.from === "supervised" && d.to === "full" && d.directDoneLive === true;
+      }),
+      "an autonomy_changed event records supervised→full with the exception live",
+    ).toBe(true);
+
+    // …and the generic update row now carries the explicit autonomy fact too.
+    const updated = listAuditEvents(app.db, {
+      action: "project.agent_profile.updated",
+    }).filter((e) => e.subjectId === "operator");
+    expect(
+      updated.some(
+        (e) => (e.details as { operatorAutonomy?: string })?.operatorAutonomy === "full",
+      ),
+    ).toBe(true);
+
+    // Restore supervised so later tests see the seeded posture.
+    await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "operator",
+      payload: operatorForm("supervised", "recommend"),
+    });
   });
 });

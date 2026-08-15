@@ -169,6 +169,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         toast: `Profile "${result.name}" updated — changes apply to future assignments`,
         profileId: result.profileId,
         ...(result.notice ? { notice: result.notice } : {}),
+        // F20-20: an operator autonomy elevation / direct-accept grant rides its
+        // own governance notice so the toast names what the admin just enabled.
+        ...(result.governanceNotice
+          ? { governanceNotice: result.governanceNotice }
+          : {}),
       };
     }
     if (intent === "delete-profile") {

@@ -2640,7 +2640,15 @@ function triageQualityGate(snapshot: OperatorTaskSnapshot): string {
     '"The documentation could be improved. Make it better." is a wish, not a goal: no file, no change, no acceptance criteria. ' +
     "While the goal is that vague you MUST NOT `transition_stage` forward: either `set_goal` with real scope when the task text, comments, and repository make it unambiguous, " +
     'or `open_decision_packet` (type "input") proposing 2–4 concrete scopes for the human to choose between. Reading the repository is not scoping — a scope you invented is the failure this gate exists to stop. ' +
-    "If the goal IS concrete, say why in the transition `reason`: name the deliverable and the acceptance signal. If you cannot write that sentence, it is not concrete. "
+    "If the goal IS concrete, say why in the transition `reason`: name the deliverable and the acceptance signal. If you cannot write that sentence, it is not concrete. " +
+    // R20-9 (F20-31): a goal may DELEGATE a clarifying question to the
+    // delivering agent ("first ask the human, via YOUR ask-human capability,
+    // whether…"). You may still gather that answer now with an input packet so
+    // work can start — but DISCLOSE the substitution: the answer was meant to be
+    // raised by that agent, so say in the packet body that you are gathering it
+    // on the delivering agent's behalf, or the timeline reads as if the agent
+    // never held the ask.
+    "If the goal DELEGATED a clarifying question to the delivering agent (e.g. \"first ask the human, via your ask-human capability, whether…\"), you may gather that answer yourself with an `open_decision_packet` (type \"input\") so work is not stalled — but SAY SO in the packet body: state that you are gathering it on the delivering agent's behalf, so the timeline is honest that you, not that agent, raised it. "
   );
 }
 

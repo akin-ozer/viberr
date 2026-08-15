@@ -783,3 +783,7 @@ the runtime/mount/process items need the rebuilt container.
   (the old "R7-5" widening tests) to expect `off`. Without this, a hostile/legacy submitted
   specialist `recommend` displays as `recommend` while the runtime treats it as withheld — the
   three-way divergence F20-21 is about, one layer up.
+
+- **C-CSS-LAYOUT (Band 3) must add `.cap-exception`**: C-AGENTS's F20-9 reconciling-note on the
+  Agents card references a new class `.cap-exception` that has no rule in app.css yet (renders
+  unstyled). Style it (small muted/caption note, reuse existing tokens) when C-CSS-LAYOUT runs.

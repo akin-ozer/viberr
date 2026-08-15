@@ -632,6 +632,53 @@ describe("BranchesPanel", () => {
     expect(onOpenTask).toHaveBeenCalledWith("VIB-151");
   });
 
+  /**
+   * F20-23: a closed-not-merged (or merge-pending) PR rendered a bare `#162` in
+   * the PR column — only a colour tint, no state word — so a reader scanning
+   * the branch table could not tell the delivery had been rejected. The state
+   * word now rides in the pill, the way the PR list above shows it. A merged
+   * row stays bare here (the Sync column already says "merged"); an open
+   * "in review" PR stays bare too (the common state, kept uncluttered).
+   */
+  it("F20-23: a closed PR shows the 'closed' state word; a merged one stays bare", () => {
+    const rows: BranchRowView[] = [
+      {
+        taskKey: "VIB-8",
+        title: "Abandoned probe",
+        branch: "vib-8-probe",
+        pr: { number: 162, state: "closed", checks: null, review: null, mergeable: null },
+        sync: "unknown",
+        commitCount: 1,
+      },
+      {
+        taskKey: "VIB-9",
+        title: "Merged work",
+        branch: "vib-9-merged",
+        pr: { number: 170, state: "merged", checks: null, review: null, mergeable: null },
+        sync: "merged",
+        commitCount: 0,
+      },
+    ];
+    const { container } = render(
+      <BranchesPanel branches={rows} onOpenTask={() => {}} />,
+    );
+    const liveRows = container.querySelectorAll(".live-row");
+    // The closed row: the PR pill names the rejection, not just the number.
+    const closedPill = [...liveRows[0]!.querySelectorAll(".pill")].find((p) =>
+      p.textContent?.includes("#162"),
+    )!;
+    expect(closedPill.textContent).toContain("closed");
+    expect(closedPill.classList.contains("risk")).toBe(true);
+    // The merged row's PR pill stays bare (#170 only) — the "merged" word lives
+    // in the Sync column, so the narrow PR column is not doubled up.
+    const mergedPrPill = [...liveRows[1]!.querySelectorAll(".pill")].find((p) =>
+      p.textContent?.includes("#170"),
+    )!;
+    expect(mergedPrPill.textContent).not.toContain("merged");
+    // …and the Sync column still carries the merged fact.
+    expect(liveRows[1]!.textContent).toContain("merged");
+  });
+
   it("takes the count's type scale and the note's spacing from the sheet (F19-33)", () => {
     const { container } = render(
       <BranchesPanel branches={branches} onOpenTask={() => {}} />,

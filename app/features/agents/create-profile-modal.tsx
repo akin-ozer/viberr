@@ -61,6 +61,9 @@ interface CatalogModel {
   description: string;
   supportsEffort: boolean;
   efforts?: string[];
+  /** R20-3 / F20-4: set when a real run proved the provider refuses this model
+   *  for this account — the option is disabled and the reason explained. */
+  unavailable?: { reason: string; markedAt: string };
 }
 interface ModelCatalog {
   models: CatalogModel[];
@@ -178,7 +181,9 @@ function ModalHead({
         <Icon name="agents" />
       </span>
       <div className="mh-main">
-        <h2>{editing ? "Edit " + initialName : "New specialist profile"}</h2>
+        {/* C11: "specialist" is retired vocabulary — the object is an agent
+            profile the operator engages per task (delivering / supporting). */}
+        <h2>{editing ? "Edit " + initialName : "New agent profile"}</h2>
         <div className="mh-sub">
           {!editing
             ? "A reusable agent the operator can assign to tasks."
@@ -402,16 +407,31 @@ function ModelEffortFields({
               <option value={model}>{model}</option>
             )}
           {(catalog?.models ?? []).map((m) => (
-            <option key={m.value} value={m.value} title={m.description}>
+            <option
+              key={m.value}
+              value={m.value}
+              // R20-3/F20-4: a model a real run proved unusable for this account
+              // is offered but not selectable — the reason rides its title.
+              disabled={!!m.unavailable}
+              title={m.unavailable ? m.unavailable.reason : m.description}
+            >
               {m.displayName}
+              {m.unavailable ? " — unavailable for this account" : ""}
             </option>
           ))}
         </select>
-        {selectedModel?.description && (
+        {selectedModel?.unavailable ? (
+          // A stored profile pinned to a now-refused model: name the provider's
+          // own sentence and tell the admin to pick another (a run would 400).
+          <span className="fhint flush err">
+            <Icon name="alert" /> Unavailable for this account —{" "}
+            {selectedModel.unavailable.reason} Pick another model.
+          </span>
+        ) : selectedModel?.description ? (
           <span className="fhint flush">
             {selectedModel.description}
           </span>
-        )}
+        ) : null}
       </div>
       {showEffort && (
         <div className="field">
@@ -1037,7 +1057,7 @@ export function CreateProfileModal({
     // the ::backdrop scrim all come from showModal() + useDialog.
     <dialog
       className="modal-card"
-      aria-label={editing ? "Edit profile" : "New specialist profile"}
+      aria-label={editing ? "Edit profile" : "New agent profile"}
       ref={dialogRef}
     >
       <ModalHead

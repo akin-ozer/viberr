@@ -199,3 +199,23 @@ export function resetEnvCacheForTests(): void {
   const cache = globalThis as unknown as Record<symbol, Env | undefined>;
   cache[ENV_CACHE_KEY] = undefined;
 }
+
+/**
+ * N20-4 (§5a) — the app's absolute public origin, or `null` when it cannot be
+ * known here. Derived from `BETTER_AUTH_URL`, the only configured absolute
+ * origin: R19-16's request-derived `callbackOrigin` is unavailable off-request,
+ * and PR bodies are composed from background operator runs (no request to
+ * derive one from). Trimmed and trailing-slash-stripped; `null` unless it is an
+ * `http(s)` origin.
+ *
+ * A `null` result is honest, not a fallback to a relative path: a relative
+ * `/projects/…` link 404s on github.com (worse than none), so the composer
+ * omits the link and writes the plain store-relative task key instead.
+ */
+export function appOrigin(): string | null {
+  const raw = getEnv().BETTER_AUTH_URL;
+  if (!raw) return null;
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(trimmed)) return null;
+  return trimmed || null;
+}

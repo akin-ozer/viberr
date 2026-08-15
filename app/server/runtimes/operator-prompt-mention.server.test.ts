@@ -66,3 +66,28 @@ describe("operator turn instruction — @tag the human (NEW-4)", () => {
     expect(prompt).not.toContain("tag them");
   });
 });
+
+/**
+ * R20-9 (F20-31): a goal may delegate a clarifying question to the DELIVERING
+ * agent's ask-human. The operator may gather that answer itself at triage so
+ * work is not stalled, but the packet must DISCLOSE it is substituting for the
+ * delegated agent ask. The triage-turn guidance carries that instruction.
+ */
+describe("operator triage gate — disclose a substituted delegated ask (R20-9)", () => {
+  const TRIAGE: OperatorTaskSnapshot = {
+    ...SNAPSHOT,
+    stage: "triage",
+    stageName: "Triage",
+  } as OperatorTaskSnapshot;
+
+  it("Claude triage prompt tells the operator to disclose gathering on the agent's behalf", () => {
+    const prompt = buildOperatorTurnPrompt(TRIAGE, "create");
+    expect(prompt).toContain("DELEGATED a clarifying question to the delivering agent");
+    expect(prompt).toContain("on the delivering agent's behalf");
+  });
+
+  it("Codex triage prompt carries the same disclosure clause", () => {
+    const prompt = buildCodexOperatorPrompt(TRIAGE, "create");
+    expect(prompt).toContain("on the delivering agent's behalf");
+  });
+});

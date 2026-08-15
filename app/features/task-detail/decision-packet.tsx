@@ -69,9 +69,25 @@ function renderInlineCode(text: string): ReactNode[] {
  * ones (`prompt_agent error`, `open packet`). The row uppercases them, so a
  * live packet rendered "PROMPT_AGENT ERROR" at a human. Underscores become
  * spaces; the CSS still does the uppercasing.
+ *
+ * C7: two further shapes leaked into the field labels — a camelCase-derived key
+ * printed as one screaming token ("NOCHANGES FLAG"), and a file PATH used as a
+ * label ("ORIGIN/MAIN TEST-ARTIFACTS/…"). Split camelCase into words so the
+ * uppercase render stays readable, cap an over-long key, and reject a
+ * path-shaped key outright — a path is not a field name, so it renders a
+ * neutral label rather than masquerading as one.
  */
 export function observationLabel(key: string): string {
-  return key.replace(/_/g, " ").trim();
+  const raw = key.trim();
+  // A path-shaped key is a mis-slotted value, not a label — don't dress it up.
+  if (/[\\/]/.test(raw)) return "detail";
+  const words = raw
+    .replace(/_/g, " ")
+    // camelCase / PascalCase word boundary: a lower/digit followed by an upper.
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+  return words.length > 40 ? words.slice(0, 39).trimEnd() + "…" : words;
 }
 
 export function observationValue(key: string, value: string): string {
@@ -265,6 +281,106 @@ function PacketArchiveConfirm({
   );
 }
 
+/**
+ * F20-6 (R20-2) — a `discard_branch` packet option deletes the task's LOCAL,
+ * never-pushed workspace branch. It destroys commits, so it asks first, exactly
+ * like its `archive_task` sibling above — but with a narrower promise: nothing
+ * on GitHub changes (resolution refuses the moment the branch exists on the
+ * remote, ruling 17). A local dialog for the same reason `PacketArchiveConfirm`
+ * is one: this is the only surface that offers the discard.
+ */
+function PacketDiscardConfirm({
+  option,
+  branch,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  option: PacketRender["options"][number];
+  /** The task's workspace branch (`task.branch`) — named when the page wired it. */
+  branch: string | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { ref: panelRef, close } = useDialog(onCancel);
+  return (
+    <dialog
+      className="modal-card release-card"
+      role="alertdialog"
+      aria-label="Discard this task's workspace branch"
+      data-screen-label="Packet discard dialog"
+      ref={panelRef}
+    >
+      <div className="modal-head">
+        <span className="agent-glyph lg warn">
+          <Icon name="alert" />
+        </span>
+        <div className="mh-main">
+          <h2>Discard this task&rsquo;s workspace branch?</h2>
+          <div className="mh-sub">{option.t}</div>
+        </div>
+        <button
+          type="button"
+          className="icon-btn modal-close"
+          onClick={close}
+          aria-label="Close"
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-body tight">
+        <div className="packet-obs flush">
+          <div className="obs">
+            <span className="k">Decision</span>
+            <span>&ldquo;{option.t}&rdquo; — confirming it discards the branch.</span>
+          </div>
+          <div className="obs warn">
+            <span className="k">Deletes</span>
+            <span>
+              The <strong>local</strong> workspace branch{" "}
+              {branch ? (
+                <span className="mono">{branch}</span>
+              ) : (
+                <>for this task</>
+              )}{" "}
+              and every commit that exists only there.{" "}
+              <strong>This cannot be undone.</strong>
+            </span>
+          </div>
+          <div className="obs">
+            <span className="k">GitHub</span>
+            <span>
+              Nothing on GitHub changes — this branch was never pushed. (If it
+              had been, the discard is refused and the archive option is the
+              path.)
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <span className="foot-hint">
+          Recorded as a timeline note and an audit row.
+        </span>
+        <div className="foot-actions">
+          <button type="button" className="btn ghost" onClick={close}>
+            Not yet
+          </button>
+          <button
+            type="button"
+            className="btn danger"
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            <Icon name="alert" />
+            {branch ? `Discard ${branch}` : "Discard the branch"}
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
 export function DecisionPacket({
   packet,
   busy,
@@ -272,8 +388,10 @@ export function DecisionPacket({
   canResolveCompletion,
   canEditGoal,
   canArchive,
+  canDiscardBranch = false,
   archiveDisclosure,
   onResolve,
+  onRequestMaintainer,
   onAsk,
 }: {
   packet: PacketRender;
@@ -298,9 +416,20 @@ export function DecisionPacket({
    *  `archive_task` option re-checks server-side. Same block-with-reason
    *  treatment as the two flags above. */
   canArchive: boolean;
+  /** F20-6 (R20-2): whether the viewer holds `approve-transition` — the tier a
+   *  `discard_branch` option re-checks server-side (it destroys commits, same
+   *  authority the archive-with-branch-deletion needs). Same block-with-reason
+   *  treatment as `canArchive`. */
+  canDiscardBranch?: boolean;
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
   onResolve: (optionIndex: number, note: string) => void;
+  /** F20-18: hand this decision UP to a maintainer/admin. Present only for a
+   *  contributor-OWNER who may resolve the packet but for whom EVERY option
+   *  needs a tier above theirs — the one case `requestPacketMaintainerDecision`
+   *  exists for. Absent hides the affordance (a maintainer/admin already holds
+   *  every tier, and a non-owner has no standing to route another's task). */
+  onRequestMaintainer?: () => void;
   onAsk: () => void;
 }) {
   const p = packet;
@@ -314,7 +443,14 @@ export function DecisionPacket({
   const [note, setNote] = useState("");
   // UX19-9: the archive_task option index awaiting its confirm (null = none).
   const [pendingArchive, setPendingArchive] = useState<number | null>(null);
+  // F20-6: the discard_branch option index awaiting its confirm (null = none).
+  const [pendingDiscard, setPendingDiscard] = useState<number | null>(null);
   const isBlocked = p.type === "blocked";
+  // N20-16: a packet raised by the operator recommends its own default; one
+  // raised by a delivering/reviewing agent (an ask_human question) carries the
+  // AGENT's recommendation. Attributing every rec to "operator pick" was a lie
+  // on the developer's own question packet — read the real author off `from`.
+  const authoredByOperator = p.from === "Operator";
 
   /**
    * UX19-4 — the closed-PR recovery packet enumerated rework / archive /
@@ -377,13 +513,32 @@ export function DecisionPacket({
   const selectedGoalBlocked = selected?.kind === "edit_goal" && !canEditGoal;
   const selectedArchiveBlocked =
     selected?.kind === "archive_task" && !canArchive;
+  // F20-6: `discard_branch` re-checks `approve-transition` server-side.
+  const selectedDiscardBlocked =
+    selected?.kind === "discard_branch" && !canDiscardBranch;
+  // N20-8: one phrasing for the same [A,M] tier — the sibling notes read
+  // "reserved for maintainers" and "reserved for maintainers and admins", and
+  // the first misread as excluding admins. Say "maintainers and admins" once.
   const blockReason = completionBlocked
     ? "Accepting completion is reserved for maintainers and this task's owner."
     : selectedGoalBlocked
-      ? "Editing the goal is reserved for maintainers."
+      ? "Editing the goal is reserved for maintainers and admins."
       : selectedArchiveBlocked
         ? "Archiving is reserved for maintainers and admins."
-        : null;
+        : selectedDiscardBlocked
+          ? "Discarding the branch is reserved for maintainers and admins."
+          : null;
+  // F20-17/F20-18: is EVERY option above this viewer's tier? Only meaningful
+  // when they can resolve at all (a contributor-OWNER — the owner exception let
+  // them open the card, but each option re-checks a higher tier). A single
+  // un-gated option (custom / request_edit / …) means they are not stranded.
+  const optionAboveTier = (o: PacketRender["options"][number]) =>
+    (o.kind === "accept_completion" && !canResolveCompletion) ||
+    (o.kind === "edit_goal" && !canEditGoal) ||
+    (o.kind === "archive_task" && !canArchive) ||
+    (o.kind === "discard_branch" && !canDiscardBranch);
+  const everyOptionForbidden =
+    canResolve && p.options.length > 0 && p.options.every(optionAboveTier);
 
   // UI-44: roving tabindex + real focus movement. Every `role="radio"` used to
   // stay tabbable and the arrow handler only changed `sel`, so DOM focus stayed
@@ -420,15 +575,20 @@ export function DecisionPacket({
         </p>
 
         <div className="packet-obs">
-          {p.observations.map((o, i) => {
-            const value = observationValue(o.k, o.v);
-            return (
-              <div className="obs" key={i}>
-                <span className="k">{observationLabel(o.k)}</span>
-                <span>{o.code ? <code>{value}</code> : value}</span>
-              </div>
-            );
-          })}
+          {p.observations
+            // C7: a live packet doubled its summary sentence — the body lede
+            // above and an observation row (the operator's SIGNAL) were
+            // byte-identical. Drop the observation that only repeats the body.
+            .filter((o) => o.v.trim() !== p.body.trim())
+            .map((o, i) => {
+              const value = observationValue(o.k, o.v);
+              return (
+                <div className="obs" key={i}>
+                  <span className="k">{observationLabel(o.k)}</span>
+                  <span>{o.code ? <code>{value}</code> : value}</span>
+                </div>
+              );
+            })}
         </div>
 
         <div
@@ -453,7 +613,14 @@ export function DecisionPacket({
             // same honest block for a resolver below that tier (LV-08 — no
             // control that only exists to 403).
             const archiveBlocked = o.kind === "archive_task" && !canArchive;
-            const blocked = goalBlocked || archiveBlocked;
+            // F20-6: discard_branch re-checks the same `approve-transition` tier.
+            const discardBlocked = o.kind === "discard_branch" && !canDiscardBranch;
+            // F20-17: a viewer who cannot resolve this packet at ALL used to see
+            // every option fully interactive with no Confirm and no reason — the
+            // un-gated ones read as "yours". Mark them all inert; the one
+            // card-level deny note below names who can decide.
+            const blocked =
+              goalBlocked || archiveBlocked || discardBlocked || !canResolve;
             return (
               <button
                 key={i}
@@ -471,10 +638,12 @@ export function DecisionPacket({
                 style={blocked ? { opacity: 0.55 } : undefined}
                 title={
                   goalBlocked
-                    ? "Editing the goal is reserved for maintainers — ask one to refine it"
+                    ? "Editing the goal is reserved for maintainers and admins — ask one to refine it"
                     : archiveBlocked
                       ? "Archiving is reserved for maintainers and admins"
-                      : undefined
+                      : discardBlocked
+                        ? "Discarding the branch is reserved for maintainers and admins"
+                        : undefined
                 }
                 onClick={() => {
                   if (blocked) return;
@@ -487,10 +656,13 @@ export function DecisionPacket({
                   <div className="od">
                     {o.d}
                     {goalBlocked
-                      ? " · your role can't edit the goal — a maintainer must"
+                      ? " · your role can't edit the goal — a maintainer or admin must"
                       : ""}
                     {archiveBlocked
-                      ? " · your role can't archive — a maintainer must"
+                      ? " · your role can't archive — a maintainer or admin must"
+                      : ""}
+                    {discardBlocked
+                      ? " · your role can't discard the branch — a maintainer or admin must"
                       : ""}
                   </div>
                 </span>
@@ -506,8 +678,12 @@ export function DecisionPacket({
                 )}
                 {o.rec && (
                   <span className="rec-tag">
+                    {/* N20-16: attribute the recommendation to whoever RAISED
+                        the packet — "operator pick" was printed on a developer's
+                        own ask_human question, crediting the operator for a rec
+                        the developer made. */}
                     <Pill kind="info" sm>
-                      operator pick
+                      {authoredByOperator ? "operator pick" : "recommended"}
                     </Pill>
                   </span>
                 )}
@@ -561,6 +737,46 @@ export function DecisionPacket({
           </p>
         )}
 
+        {/* F20-17: the viewer cannot resolve this packet at all — say who can,
+            once, instead of leaving a live-looking radiogroup with no Confirm. */}
+        {!canResolve && (
+          <p className="deny-note" style={DENY_NOTE_STYLE}>
+            <Icon name="lock" />
+            You can&rsquo;t resolve this decision — a maintainer, an admin, or
+            this task&rsquo;s owner can. You can still comment or ask the operator
+            below.
+          </p>
+        )}
+
+        {/* F20-18: a contributor-OWNER may open this card (owner exception) but
+            EVERY option re-checks a higher tier, so there is nothing they can
+            settle. Name that, and hand the decision UP to a maintainer instead
+            of leaving them stranded (server: requestPacketMaintainerDecision). */}
+        {everyOptionForbidden && (
+          <div className="deny-note" style={DENY_NOTE_STYLE}>
+            <Icon name="lock" />
+            <span>
+              Every option here needs maintainer or admin authority — you own{" "}
+              {archiveDisclosure?.taskKey ?? "this task"} and raised this
+              decision, but settling it is above your role.
+              {onRequestMaintainer && (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    disabled={busy}
+                    onClick={onRequestMaintainer}
+                  >
+                    <Icon name="message" />
+                    Send to a maintainer
+                  </button>
+                </>
+              )}
+            </span>
+          </div>
+        )}
+
         <div className="packet-actions">
           {canResolve && (
             <button
@@ -595,6 +811,12 @@ export function DecisionPacket({
                   setPendingArchive(sel);
                   return;
                 }
+                // F20-6: discard_branch destroys commits — ask first, like its
+                // archive sibling, before the deletion is dispatched.
+                if (selected?.kind === "discard_branch") {
+                  setPendingDiscard(sel);
+                  return;
+                }
                 onResolve(sel, note);
               }}
             >
@@ -607,7 +829,17 @@ export function DecisionPacket({
               Confirm decision
             </button>
           )}
-          <button type="button" className="btn ghost" onClick={onAsk}>
+          {/* N20-15: this is not inert — it drops `@operator` into the comment
+              composer below and focuses it; sending that comment starts a real
+              operator run (the mention path). The title says so, because a click
+              that only scrolls to an already-focused composer looked like a
+              no-op. Open to everyone, resolver or not (commenting is app-wide). */}
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={onAsk}
+            title="Starts a comment mentioning @operator below — send it to pull the operator in"
+          >
             <Icon name="message" />
             Ask operator
           </button>
@@ -624,6 +856,20 @@ export function DecisionPacket({
           onConfirm={() => {
             const index = pendingArchive;
             setPendingArchive(null);
+            onResolve(index, note);
+          }}
+        />
+      )}
+
+      {pendingDiscard !== null && p.options[pendingDiscard] && (
+        <PacketDiscardConfirm
+          option={p.options[pendingDiscard]!}
+          branch={archiveDisclosure?.branch ?? null}
+          busy={busy}
+          onCancel={() => setPendingDiscard(null)}
+          onConfirm={() => {
+            const index = pendingDiscard;
+            setPendingDiscard(null);
             onResolve(index, note);
           }}
         />

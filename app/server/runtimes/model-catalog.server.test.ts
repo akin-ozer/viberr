@@ -100,14 +100,17 @@ describe("curated catalog", () => {
 
   it("codex curated: current subscription models + low…xhigh efforts", () => {
     const cat = curatedCatalog("codex");
+    // F20-33: Terra is listed FIRST (so it is the fallback default) — Sol 400s
+    // on a ChatGPT-plan Codex account and must not be what a model-less operator
+    // falls back to. Sol stays offered, just no longer first/default.
     expect(cat.models.map((m) => m.value)).toEqual([
-      "gpt-5.6-sol",
       "gpt-5.6-terra",
+      "gpt-5.6-sol",
       "gpt-5.6-luna",
       "gpt-5.5",
     ]);
     expect(cat.efforts).toEqual(["low", "medium", "high", "xhigh"]);
-    expect(cat.defaultModel).toBe("gpt-5.6-sol");
+    expect(cat.defaultModel).toBe("gpt-5.6-terra");
     expect(cat.defaultEffort).toBe("medium");
   });
 
@@ -137,7 +140,7 @@ describe("getModelCatalog", () => {
       claudeQueryFn: queryFn as unknown as ClaudeQueryFn,
       isAvailable: () => true,
     });
-    expect(cat.defaultModel).toBe("gpt-5.6-sol");
+    expect(cat.defaultModel).toBe("gpt-5.6-terra");
     expect(queryFn).not.toHaveBeenCalled();
   });
 

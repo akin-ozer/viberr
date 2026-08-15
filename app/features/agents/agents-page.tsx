@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useNavigate, useSearchParams } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { capabilityById } from "~/shared/capabilities";
 import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
 import { countLabel } from "~/shared/text/plural";
+import {
+  TRANSITION_TO_DONE_CAPABILITY_ID,
+  TRANSITION_TO_DONE_EXCEPTION,
+} from "~/features/policy/policy-data";
 import type { BackendCredentialHealth } from "~/server/runtimes/runtime-registry.server";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
@@ -183,6 +188,34 @@ function ProfileItem({
       </span>
       <ActiveBadge count={count} unusable={unusable} />
     </button>
+  );
+}
+
+/**
+ * C10 — the ONE deployment-status pill for this page.
+ *
+ * The status strings are a server contract (`agent-types.DeploymentStatus`), but
+ * the roster rendered them as the raw `d.status` text inside a bare `<Pill>` at
+ * two call sites, so a future rename of the vocabulary would have to be chased
+ * across the page. Routing both sites through this component keeps the kind AND
+ * the label in one place (ruling 14's single implementations). It also restores
+ * the article the board carries — the raw status "waiting on human" reads
+ * "waiting on a human" here, matching every other surface (C4) — while the
+ * underlying status VALUE the loader derives is untouched.
+ */
+function deploymentStatusLabel(status: string): string {
+  return status === "waiting on human" ? "waiting on a human" : status;
+}
+
+function DeploymentStatusPill({
+  d,
+}: {
+  d: Pick<AgentDeploymentView, "status" | "running">;
+}) {
+  return (
+    <Pill kind={deploymentStatusKind(d.status)} sm dot={deploymentDot(d)}>
+      {deploymentStatusLabel(d.status)}
+    </Pill>
   );
 }
 
@@ -607,6 +640,19 @@ export function ProfileDetail({
     recommend: a.actions.recommend.filter(isGoverned),
     forbidden: a.actions.forbidden.filter(isGoverned),
   };
+  // F20-9 / D1 second half: on the OPERATOR card, "Accept completion into Done"
+  // (direct/recommend) sits above "Transition a task to Done" (Reserved for
+  // humans) with no reconciliation — the exact contradiction the Policy page
+  // resolves with ONE exception note. Borrow that canonical copy (never restate
+  // it) so the two surfaces cannot drift. The exception is operator-only, so a
+  // specialist's always-human Transition-to-Done row carries no such note.
+  const transitionToDoneLabel = capabilityById(
+    TRANSITION_TO_DONE_CAPABILITY_ID,
+  )?.label;
+  const showDoneException =
+    a.kind === "operator" &&
+    transitionToDoneLabel !== undefined &&
+    governed.forbidden.includes(transitionToDoneLabel);
   // The advisory line keeps each label's MODE. Concatenating the three buckets
   // lost it, so an advisory capability an admin explicitly set to human-only
   // read exactly like one left at "acts directly" — the matrix still tells them
@@ -699,6 +745,15 @@ export function ProfileDetail({
           <Icon name="shield" />
           <h2>Capability policy</h2>
         </div>
+        {showDoneException && (
+          <p className="cap-exception">
+            <Icon name="lock" />
+            <span>
+              <strong>{transitionToDoneLabel}</strong> stays reserved for humans{" "}
+              {TRANSITION_TO_DONE_EXCEPTION}.
+            </span>
+          </p>
+        )}
         <div className="cap-cols">
           <CapColumn group="direct" items={governed.direct} />
           <CapColumn group="recommend" items={governed.recommend} />
@@ -804,6 +859,18 @@ export function ProfileDetail({
                     default
                   </span>
                 )}
+                {/* R20-3/F20-4: a real run proved the provider refuses this model
+                    for this account. The badge names the provider's own redacted
+                    sentence; a run on it would be refused before it starts. */}
+                {a.modelUnavailable && (
+                  <span
+                    className="model-sub"
+                    title={`${a.modelUnavailable.reason} A run on this model would be refused — open Edit profile to pick another.`}
+                  >
+                    <Icon name="alert" />
+                    unavailable
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -862,9 +929,7 @@ export function ProfileDetail({
                 {d.backend && a.kind !== "operator" && (
                   <BackendChip b={d.backend} />
                 )}
-                <Pill kind={deploymentStatusKind(d.status)} sm dot={deploymentDot(d)}>
-                  {d.status}
-                </Pill>
+                <DeploymentStatusPill d={d} />
               </button>
             ))}
           </div>
@@ -990,9 +1055,7 @@ export function LiveRoster({
                 </Pill>
               </span>
               <span>
-                <Pill kind={deploymentStatusKind(d.status)} sm dot={deploymentDot(d)}>
-                  {d.status}
-                </Pill>
+                <DeploymentStatusPill d={d} />
               </span>
             </button>
           );
@@ -1014,6 +1077,10 @@ type ProfileActionResult =
        *  capability is granted — shown as its own failure-toned toast, because
        *  the green "updated" tick alone reads as "nothing to see here". */
       notice?: { kind: "repaired" | "withheld"; message: string };
+      /** F20-20: an operator autonomy elevation / direct-accept grant, named so
+       *  the admin sees what the save just enabled (the generic "updated" tick
+       *  hid that the operator can now close tasks without a human). */
+      governanceNotice?: { message: string };
     }
   | { ok: false; error: string };
 
@@ -1141,6 +1208,12 @@ export function AgentsPage({
       if (d.notice) {
         push(d.notice.message, d.notice.kind === "withheld" ? "error" : "success");
       }
+      // F20-20: a governance elevation (full autonomy / direct-accept) gets its
+      // own toast naming the consequence — the save succeeded, so it is not
+      // error-toned, but it must not be silent under the generic "updated" tick.
+      if (d.governanceNotice) {
+        push(d.governanceNotice.message);
+      }
       setCreating(false);
       setLibraryOpen(false);
       setEditing(null);
@@ -1193,9 +1266,15 @@ export function AgentsPage({
       <div className="board-head">
         <div>
           <h1>Agents</h1>
+          {/* C11 — record the profile-vs-engagement split the task page settled
+              on (UXA-6 / FR14): these are reusable PROFILES; per task the
+              operator engages one as the DELIVERING agent and others as
+              SUPPORTING agents. The old "specialist" vocabulary is dropped
+              below so one object stops carrying three names one click apart. */}
           <div className="sub">
-            Reusable profiles, eligible stages, and capability policy · global
-            base, customized for {projectName}
+            Reusable agent profiles, eligible stages, and capability policy — the
+            operator engages one per task as the delivering agent, others as
+            supporting · global base, customized for {projectName}
           </div>
         </div>
         <div className="board-tools">
@@ -1256,9 +1335,15 @@ export function AgentsPage({
         <div className="pol-note">
           <Icon name="lock" />
           <span>
+            {/* F20-16: name the REAL grant (the Policy matrix's own label for
+                `manage-agents`) and the REAL tier — `manage-agents` is
+                `roles: [A]` (rbac.ts), a project admin only, NOT a maintainer.
+                The old copy invented "Manage agents … (project admin or
+                maintainer)", telling a maintainer they hold a grant this page
+                then refuses. */}
             Read-only — deploying, editing or removing agent profiles needs the{" "}
-            <strong>Manage agents</strong> grant (project admin or maintainer).
-            The capability matrix below is readable by every member.
+            <strong>Manage agent profiles</strong> grant, held by a project
+            admin. The capability matrix below is readable by every member.
           </span>
         </div>
       )}
@@ -1308,13 +1393,16 @@ export function AgentsPage({
               />
             )}
             <div className="ag-group-label ag-group-row">
-              Specialist profiles
+              {/* C11: "delivering agent" is the shipped vocabulary (UXA-6);
+                  "Specialist" was a third name for the same object. These are
+                  the assignable agent profiles (the operator is the one above). */}
+              Agent profiles
               {canManage && (
                 <button
                   type="button"
                   className="ag-add"
-                  title="New specialist profile"
-                  aria-label="New specialist profile"
+                  title="New agent profile"
+                  aria-label="New agent profile"
                   onClick={() => setCreating(true)}
                 >
                   <Icon name="plus" />
@@ -1334,7 +1422,7 @@ export function AgentsPage({
             {canManage && (
               <button type="button" className="ag-newbtn" onClick={() => setCreating(true)}>
                 <Icon name="plus" />
-                New specialist profile
+                New agent profile
               </button>
             )}
             {canManage && libraryProfiles.length > 0 && (

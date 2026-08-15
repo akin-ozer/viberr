@@ -1363,6 +1363,19 @@ export async function startAgentRun(
           : "") +
         "}.",
     );
+    if (collab.ask) {
+      // F20-32: on Codex the ask-human capability IS this `question` field —
+      // there is no callable `ask_human` tool on this backend (the in-process
+      // toolkit is Claude-only). Live, a Codex developer whose GOAL told it to
+      // "ask the human, via your ask-human capability" went hunting for a tool,
+      // found none, and narrated "the ask-human capability is unavailable in
+      // this session, so I cannot obtain the required confirmation" — WHILE
+      // populating `question` to ask exactly that. Name the channel so the agent
+      // stops reporting a limitation that isn't real.
+      collabNotes.push(
+        '- Your ask-human capability on THIS backend is that `question` field: filling it in is how you raise a question for the humans — there is no separate ask_human tool here, so never say ask-human is unavailable. Set `question` when a human decision blocks you; the answer arrives on a later resumed run, not during this one, so note it and finish.',
+      );
+    }
   }
   const prompt = collabNotes.length
     ? `${basePrompt}\n\n## Collaboration\n\n${collabNotes.join("\n")}`
