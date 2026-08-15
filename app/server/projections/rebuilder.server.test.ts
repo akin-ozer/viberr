@@ -86,6 +86,58 @@ describe("rebuilder", () => {
     expect(acceptanceOf("VIB-2")).toBeNull();
   });
 
+  it("D4: projects `continuity: 'degraded'` when the timeline carries a continuity event", () => {
+    const store = setupTestStore(ctx);
+    // VIB-1 lost its provider session — a `continuity` event is on the timeline,
+    // exactly what `noteContinuityReset` (run-service.server.ts) writes.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review" }),
+      timeline: [
+        {
+          occurredAt: "2026-07-05T10:00:00.000Z",
+          type: "continuity",
+          actor: { kind: "system", systemId: "runtime-continuity" },
+          title: null,
+          text: "Runtime continuity was lost: the Claude Code session behind Reviewer's thread no longer has a provider transcript.",
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    // VIB-2 has an ordinary comment — healthy continuity.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review" }),
+      timeline: [
+        {
+          occurredAt: "2026-07-05T10:00:00.000Z",
+          type: "comment",
+          actor: { kind: "human", userId: store.users.murat.id, nameHint: null },
+          text: "Looks good.",
+          title: null,
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const continuityOf = (key: string) =>
+      (
+        store.db
+          .prepare(
+            `SELECT continuity FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+          )
+          .get(store.slug, key) as { continuity: string | null }
+      ).continuity;
+    expect(continuityOf("VIB-1")).toBe("degraded");
+    expect(continuityOf("VIB-2")).toBeNull();
+
+    // And it reaches the read model the board/queue consume (TaskSummary).
+    const summaries = listProjectTasks(store.db, store.slug);
+    expect(summaries.find((t) => t.key === "VIB-1")?.continuity).toBe("degraded");
+    expect(summaries.find((t) => t.key === "VIB-2")?.continuity).toBeNull();
+  });
+
   it("content-hash short-circuit: unchanged files are not re-projected", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {

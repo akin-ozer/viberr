@@ -113,6 +113,19 @@ function RQRow({
             </Pill>
           </span>
         )}
+        {/* D4: the same continuity cue the board card carries (ContinuityTag,
+            board-page.tsx) — one vocabulary, one tone (risk), one glyph — so a
+            supervisor at the acceptance boundary sees the lost provider session
+            too, not only on the task page's Continuity Recovery panel. The row
+            has room for the tooltip the dense card cannot carry. */}
+        {t.continuity === "degraded" && (
+          <span title="A resumed agent session lost its provider transcript; the agent re-anchored on the task record and continued fresh. See the Continuity recovery panel on the task.">
+            <Pill kind="risk" sm>
+              <Icon name="refresh" />
+              degraded continuity
+            </Pill>
+          </span>
+        )}
         {ready ? (
           <span className="wait-tag human">
             <Icon name="hand" />

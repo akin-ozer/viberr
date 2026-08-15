@@ -459,16 +459,31 @@ export function rebuildTaskFile(
 
   const commentCount = parsed.timeline.filter((e) => e.type === "comment").length;
 
+  // D4 (C-CONTINUITY): project runtime-continuity health as a task-level fact.
+  // The Continuity Recovery panel (continuity-recovery.tsx) treats the canonical
+  // `continuity` timeline event as "the proof that a break happened" — the run
+  // markers it also reads only REFINE recovery progress (running/recovered/
+  // stalled) and live in the run projection, not the task file this projection
+  // reads. So the derivable, file-authoritative state is binary: a break is on
+  // the record → `degraded`, else NULL. Projecting it is what carries the state
+  // off the panel and onto the board card, the board filter and the review row,
+  // so it means the same thing everywhere a supervisor looks.
+  const continuity: "degraded" | null = parsed.timeline.some(
+    (e) => e.type === "continuity",
+  )
+    ? "degraded"
+    : null;
+
   db.prepare(
     `INSERT INTO task_projections
        (project_slug, task_key, title, stage, readiness, stored_readiness,
-        waiting, urgent, archived, validation, validation_block_reason, acceptance, owner_user_id, specialist_json,
+        waiting, urgent, archived, validation, validation_block_reason, acceptance, continuity, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         goal, packet_json, recommendation_count,
         schedules_json, event_count, comment_count,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -477,6 +492,7 @@ export function rebuildTaskFile(
        validation = excluded.validation,
        validation_block_reason = excluded.validation_block_reason,
        acceptance = excluded.acceptance,
+       continuity = excluded.continuity,
        owner_user_id = excluded.owner_user_id,
        specialist_json = excluded.specialist_json,
        reviewers_json = excluded.reviewers_json,
@@ -510,6 +526,8 @@ export function rebuildTaskFile(
     }),
     // N20-14 (§5c): the durable force-accept fact, projected for the display arm.
     fm.acceptance ?? null,
+    // D4: runtime-continuity health, derived from the timeline above.
+    continuity,
     fm.ownerUserId,
     // Derived legacy projection shapes (G1): the delivering engagement fills
     // the `specialist` column, the supporting engagements fill `reviewers`.

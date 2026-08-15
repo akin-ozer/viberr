@@ -90,6 +90,10 @@ export interface ReviewQueueRow {
   lastActivityAt: string | null;
   /** Gap-10: this row has gone quiet past its threshold (see `isQuiet`). */
   quiet: boolean;
+  /** D4: 'degraded' when this task's runtime continuity was lost (projected task
+   *  fact) — the same state the Continuity Recovery panel shows on task detail,
+   *  carried here so the review boundary flags it too. NULL otherwise. */
+  continuity: "degraded" | null;
 }
 
 export interface ReviewQueueData {
@@ -169,6 +173,9 @@ export function getReviewQueue(
     // must not answer "when did anything last happen here" two different ways.
     lastActivityAt: t.lastActivityAt,
     quiet: t.quiet,
+    // D4: the projected continuity fact, carried straight through so the review
+    // row flags degraded continuity the same way the board card does.
+    continuity: t.continuity,
   }));
 
   // R8-3: "Waiting on your acceptance" is member-scoped by ACCEPTANCE AUTHORITY,

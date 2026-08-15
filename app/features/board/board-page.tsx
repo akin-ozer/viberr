@@ -316,6 +316,9 @@ function StateSignals({ task }: { task: BoardTask }) {
       {!terminal && task.validation !== "none" && (
         <ValidationPill value={task.validation} sm />
       )}
+      {/* D4: the continuity cue sits with the other supervision signals, before
+          the quiet/wait tags. Same component the list row shares (below). */}
+      <ContinuityTag task={task} />
       {/* Gap-10: the quiet cue sits after validation and before the wait tag,
           the order both board views share. */}
       <QuietTag task={task} />
@@ -361,6 +364,30 @@ function QuietTag({ task }: { task: BoardTask }) {
           renders a non-breaking space for one frame and fills in after
           hydration (app/ui/local-time.tsx). */}
       no activity · <LocalRelative iso={task.lastActivityAt} />
+    </Pill>
+  );
+}
+
+/**
+ * D4 — the runtime-continuity cue, and the whole point of projecting the state:
+ * "degraded continuity" existed only on the task page's Continuity Recovery
+ * panel, so a supervisor scanning the board could not see which tasks lost their
+ * provider session. It now carries the SAME state onto the card (UX spec §State
+ * Semantics: "Every state must mean the same thing everywhere it appears").
+ *
+ * Warning tone (`risk`), matching how the panel draws the same state — a lost
+ * conversation the agent had to re-anchor around is a real supervision signal,
+ * not a neutral fact like "no activity". The refresh glyph is the panel heading's
+ * own icon, so the cue reads as the same thing on both surfaces. It is a coarse
+ * "a break happened" flag; the panel still owns the recovery detail (which agent,
+ * whether it recovered), which lives in the run projection this card cannot see.
+ */
+function ContinuityTag({ task }: { task: BoardTask }) {
+  if (task.continuity !== "degraded") return null;
+  return (
+    <Pill kind="risk" sm>
+      <Icon name="refresh" />
+      degraded continuity
     </Pill>
   );
 }
@@ -1130,6 +1157,14 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   // "quiet" rather than "stalled" because the detector observes an absence of
   // events; it does not diagnose a fault.
   { id: "quiet", label: "No activity", icon: "clock" },
+  // D4: the UX spec names "degraded continuity" a default filter, so a supervisor
+  // scanning the board can find the tasks whose provider session was lost — the
+  // Murat journey the spec tests begins "a continuity warning appears on the task
+  // OR board". Named for what it selects (R16-2). Like the Archived chip it only
+  // renders when the project has any such task (or the filter is active), because
+  // degraded continuity is rare and an always-empty chip on every board is the
+  // clutter the board's density rules fight (see FilterBar).
+  { id: "continuity", label: "Degraded continuity", icon: "refresh" },
   // R14-3: archived tasks are out of every other view; this is the way back to
   // them. The chip only renders when the project has any (see FilterBar).
   { id: "archived", label: "Archived", icon: "lock" },
@@ -1237,6 +1272,7 @@ function FilterBar({
   query,
   waitingOnMe,
   quiet,
+  continuity,
   archived,
   setParam,
   onClear,
@@ -1252,6 +1288,9 @@ function FilterBar({
    *  flight. Two meanings one click apart is the vocabulary drift this pass has
    *  been removing; the chip now matches the pill it selects ("no activity"). */
   quiet: number;
+  /** D4: tasks whose runtime continuity is degraded — the "Degraded continuity"
+   *  chip's tally, and (like `archived`) whether the chip shows at all. */
+  continuity: number;
   /** R14-3: archived tasks in this project — the chip is the only way back to
    *  them, so it renders only when there are any (and always while it is on). */
   archived: number;
@@ -1261,7 +1300,11 @@ function FilterBar({
   return (
     <div className="filter-bar">
       {FILTERS.filter(
-        (f) => f.id !== "archived" || archived > 0 || filter === "archived",
+        (f) =>
+          (f.id !== "archived" || archived > 0 || filter === "archived") &&
+          // D4: same rarity gate as Archived — surface the continuity chip only
+          // when there is a degraded task to find (or the filter is already on).
+          (f.id !== "continuity" || continuity > 0 || filter === "continuity"),
       ).map((f) => (
         <button
           type="button"
@@ -1277,6 +1320,9 @@ function FilterBar({
           )}
           {f.id === "quiet" && quiet > 0 && (
             <span className="tally">· {quiet}</span>
+          )}
+          {f.id === "continuity" && continuity > 0 && (
+            <span className="tally">· {continuity}</span>
           )}
           {f.id === "archived" && archived > 0 && (
             <span className="tally">· {archived}</span>
@@ -1655,6 +1701,12 @@ export function BoardPage({
   // `isQuiet` already refuses archived and terminal tasks, and this keeps the
   // chip's tally reading the same population its filter draws.
   const quietCount = liveTasks.filter((t) => t.quiet === true).length;
+  // D4: counted over LIVE tasks, like the chips above — an archived task's
+  // continuity break is part of its record but it is out of every default view,
+  // so it neither draws the chip nor feeds its tally.
+  const continuityCount = liveTasks.filter(
+    (t) => t.continuity === "degraded",
+  ).length;
   const archivedCount = countArchived(allTasks);
   // The card in flight (for the drop-preview shown in the hovered column).
   const draggedTask = drag
@@ -1914,6 +1966,7 @@ export function BoardPage({
         query={query}
         waitingOnMe={waitingOnMe}
         quiet={quietCount}
+        continuity={continuityCount}
         archived={archivedCount}
         setParam={setParam}
         onClear={clearFilters}

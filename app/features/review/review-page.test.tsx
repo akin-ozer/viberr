@@ -22,6 +22,7 @@ const rowHuman: ReviewRowView = {
   blockReason: null,
   lastActivityAt: "2026-07-02T09:41:00.000Z",
   quiet: false,
+  continuity: null,
 };
 
 const rowAgent: ReviewRowView = {
@@ -36,6 +37,7 @@ const rowAgent: ReviewRowView = {
   blockReason: null,
   lastActivityAt: "2026-07-02T09:41:00.000Z",
   quiet: false,
+  continuity: null,
 };
 
 function renderQueue(
@@ -127,6 +129,26 @@ describe("ReviewQueuePage", () => {
     expect(second.querySelector(".wait-tag.agent .working")).toBeTruthy();
     // Merged PR renders the done pill kind.
     expect(second.querySelector(".pill.done")!.textContent).toBe("PR #311");
+  });
+
+  it("D4: a row whose task has degraded continuity carries the same cue the board card does", () => {
+    // The state used to live only on the task page's Continuity Recovery panel;
+    // the review boundary is exactly where a supervisor looks, so it surfaces
+    // here too — warning tone (risk pill), the panel's refresh glyph, one
+    // vocabulary. Canary: drop the `t.continuity === "degraded"` block and this
+    // (and the negative case below) go red.
+    const degraded: ReviewRowView = { ...rowHuman, continuity: "degraded" };
+    const { container } = renderQueue([degraded], []);
+    const row = container.querySelector(".rq-row")!;
+    expect(row.textContent).toContain("degraded continuity");
+    expect(row.querySelector(".rq-meta .pill.risk")).toBeTruthy();
+  });
+
+  it("D4: a healthy-continuity row shows no continuity cue", () => {
+    const { container } = renderQueue([rowHuman], []);
+    expect(container.querySelector(".rq-row")!.textContent).not.toContain(
+      "degraded continuity",
+    );
   });
 
   it("R15-11: every row names its primary action and where it goes", () => {
@@ -265,6 +287,7 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
       "VIB-9's delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.",
     lastActivityAt: "2026-07-02T09:41:00.000Z",
     quiet: false,
+    continuity: null,
   };
 
   it("the subline names the closed PR and the queue never advertises force-accept", () => {

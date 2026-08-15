@@ -63,6 +63,8 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     // Gap-10: `listProjectTasks` annotates every summary with these two.
     lastActivityAt: null,
     quiet: false,
+    // D4: projected runtime-continuity fact (null = healthy).
+    continuity: null,
     ...patch,
   } as BoardTask;
 }
@@ -217,6 +219,78 @@ describe("P13-D-6: the card and the list row draw validation status (FR24)", () 
     const card = container.querySelector(".card")!;
     expect(card.querySelector(".pill.ready")!.textContent).toBe("ready");
     expect(card.textContent).toContain("validation failing");
+  });
+});
+
+describe("D4: degraded continuity reaches the board (card + filter)", () => {
+  it("draws a warning-toned continuity cue on a card whose continuity is degraded", () => {
+    // Before D4 this state lived ONLY on the task page's Continuity Recovery
+    // panel; a supervisor scanning the board could not see it. The card now
+    // carries the same state, warning tone (risk pill), refresh glyph.
+    const { container } = renderBoard([
+      task({ key: "VIB-1", continuity: "degraded" }),
+    ]);
+    const card = container.querySelector('[data-board-card="VIB-1"]')!;
+    expect(card.textContent).toContain("degraded continuity");
+    expect(card.querySelector(".card-foot .pill.risk")).toBeTruthy();
+  });
+
+  it("stays silent on a card whose continuity is healthy", () => {
+    const { container } = renderBoard([task({ key: "VIB-1", continuity: null })]);
+    expect(container.querySelector('[data-board-card="VIB-1"]')!.textContent).not.toContain(
+      "continuity",
+    );
+  });
+
+  it("draws the same cue in the list row", () => {
+    const { container } = renderBoard(
+      [task({ key: "VIB-1", continuity: "degraded" })],
+      { view: "list" },
+    );
+    const row = container.querySelector(".card.list-row")!;
+    expect(row.textContent).toContain("degraded continuity");
+    expect(row.querySelector(".pill.risk")).toBeTruthy();
+  });
+
+  it("shows the 'Degraded continuity' filter chip (with a tally) only when a degraded task exists", () => {
+    const withDegraded = renderBoard([
+      task({ key: "VIB-1", stage: "impl", continuity: "degraded" }),
+      task({ key: "VIB-2", stage: "impl", continuity: null }),
+    ]);
+    const chip = [...withDegraded.container.querySelectorAll(".filter-bar .fchip")].find(
+      (b) => b.textContent!.includes("Degraded continuity"),
+    );
+    expect(chip).toBeTruthy();
+    expect(chip!.textContent).toContain("· 1"); // the tally counts the one degraded task
+    cleanup();
+
+    // A board with no degraded task does not carry the (near-always-empty) chip.
+    const noneDegraded = renderBoard([task({ key: "VIB-1", continuity: null })]);
+    expect(
+      [...noneDegraded.container.querySelectorAll(".filter-bar .fchip")].some((b) =>
+        b.textContent!.includes("Degraded continuity"),
+      ),
+    ).toBe(false);
+  });
+
+  it("filters the board to only degraded-continuity tasks (canary for the filter clause)", () => {
+    const { container } = renderBoard(
+      [
+        task({ key: "VIB-1", stage: "impl", continuity: "degraded" }),
+        task({ key: "VIB-2", stage: "impl", continuity: null }),
+      ],
+      { search: "filter=continuity" },
+    );
+    // Only the degraded card survives the filter.
+    expect(container.querySelector('[data-board-card="VIB-1"]')).toBeTruthy();
+    expect(container.querySelector('[data-board-card="VIB-2"]')).toBeNull();
+    // The healthy card is accounted for by the empty-state copy, not vanished.
+    const implEmpty = [...container.querySelectorAll(".column")].find((c) =>
+      c.querySelector(".col-head .nm")!.textContent!.includes("In Progress"),
+    );
+    // (Both cards were in the same column, so the column still shows the survivor
+    // — the count check above is the real assertion; this just proves no crash.)
+    expect(implEmpty).toBeTruthy();
   });
 });
 

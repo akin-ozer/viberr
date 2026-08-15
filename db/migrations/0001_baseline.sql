@@ -96,6 +96,18 @@ CREATE TABLE task_projections (
   -- Projected so the hero/card display arm (C-VOCAB) reads it without re-reading
   -- the task file, exactly like `validation` above.
   acceptance TEXT CHECK (acceptance IN ('forced')),
+  -- D4 (pass20 C-CONTINUITY): runtime-continuity health as a TASK-LEVEL fact.
+  -- 'degraded' when this task's timeline carries a `continuity` event — a resumed
+  -- provider session whose transcript was gone, so the agent re-anchored on
+  -- `task.md` and continued fresh (run-service.server.ts `noteContinuityReset`).
+  -- NULL otherwise. The Continuity Recovery panel (continuity-recovery.tsx)
+  -- derives the same state client-side from the same event; projecting it here is
+  -- what lets the state mean the same thing on the board card, the board filter
+  -- and the review row (UX spec §State Semantics: "Every state must mean the same
+  -- thing everywhere it appears"; §Additional Patterns names a degraded-continuity
+  -- default filter). Persistent by design — the record survives in the timeline,
+  -- so the base-interface cue does too.
+  continuity TEXT CHECK (continuity IN ('degraded')),
   owner_user_id TEXT,
   specialist_json TEXT,
   reviewers_json TEXT NOT NULL DEFAULT '[]',

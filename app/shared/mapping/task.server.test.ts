@@ -23,6 +23,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
     validation: "healthy",
     validation_block_reason: null,
     acceptance: null,
+    continuity: null,
     owner_user_id: null,
     specialist_json: null,
     reviewers_json: "[]",
@@ -118,6 +119,17 @@ describe("N20-14: acceptance fact surfaces on the summary", () => {
   });
   it("is null when the task was accepted the ordinary way", () => {
     expect(summarize(row({ acceptance: null }), true).acceptance).toBeNull();
+  });
+});
+
+describe("D4: continuity fact surfaces on the summary", () => {
+  it("carries the projected 'degraded' continuity through to TaskSummary", () => {
+    expect(summarize(row({ continuity: "degraded" }), false).continuity).toBe(
+      "degraded",
+    );
+  });
+  it("is null when runtime continuity is healthy", () => {
+    expect(summarize(row({ continuity: null }), false).continuity).toBeNull();
   });
 });
 
