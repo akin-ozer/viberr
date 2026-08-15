@@ -130,6 +130,72 @@ describe("searchWorkspace", () => {
     expect(byTitle.find((h) => h.kind === "task")?.href).toContain("VIB-142");
   });
 
+  // F20-28: a full task key the viewer typed must rank that exact task FIRST,
+  // ahead of a newer row whose TITLE merely mentions the key. Before this the
+  // single scan sorted by `updated_at DESC` only, so typing a key + Enter could
+  // land on a different task.
+  it("ranks an exact task-key match ahead of a title that only mentions it", () => {
+    const store = setupTestStore(ctx);
+    // VIB-1 IS the task. VIB-2's title mentions "VIB-1", and it is the more
+    // recently updated row — so recency alone floated the wrong task to row 0.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        title: "Seed the marker",
+        updatedAt: "2026-07-01T09:00:00.000Z",
+      }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        title: "Browser-verify the merged VIB-1 marker",
+        updatedAt: "2026-07-09T09:00:00.000Z",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const tasks = searchWorkspace(store.db, asMember(store), "VIB-1", {
+      dataRoot: store.dataRoot,
+    }).filter((h) => h.kind === "task");
+    // Both match "VIB-1" (one by key, one by title); the exact-key hit is row 0
+    // regardless of which row was touched last, and the fuzzy match still shows.
+    expect(tasks.map((h) => h.id)).toEqual([
+      "task:viberr-core/VIB-1",
+      "task:viberr-core/VIB-2",
+    ]);
+  });
+
+  // F20-29: an archived PROJECT hit is labelled like an archived task hit — the
+  // flag lives on `HomeProjectCard` already; `projectHits` used to drop it, so
+  // an archived project came back through the palette byte-identical to a live
+  // one.
+  it("marks an ARCHIVED project instead of passing it off as live", () => {
+    const store = seed();
+    // Re-file the project itself as archived (same members) — Home lifts it into
+    // its own "Archived" section, but the palette row said nothing.
+    writeProject(store.dataRoot, {
+      name: "Viberr Core",
+      slug: store.slug,
+      repo: "akin-ozer/viberr",
+      defaultBranch: "main",
+      taskPrefix: "VIB",
+      nextTaskNumber: 100,
+      stages: GOVERNED_TEMPLATE.stages,
+      workflow: GOVERNED_TEMPLATE.workflow,
+      members: Object.values(store.users)
+        .filter((u) => u.projectRole !== null)
+        .map((u) => ({ userId: u.id, role: u.projectRole! })),
+      agents: [],
+      credentialPolicy: null,
+      guardrails: [],
+      archived: true,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const project = searchWorkspace(store.db, asMember(store), "viberr", {
+      dataRoot: store.dataRoot,
+    }).find((h) => h.kind === "project");
+    expect(project?.sub).toBe("akin-ozer/viberr · archived");
+  });
+
   it("files a branch-only match under branches, not tasks", () => {
     const store = seed();
     const hits = searchWorkspace(store.db, asMember(store), "rotate-pat", {

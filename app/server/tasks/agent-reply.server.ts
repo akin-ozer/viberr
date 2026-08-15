@@ -518,6 +518,11 @@ export function fullReplyTextForRun(
   return extractFullReplyText(lines);
 }
 
+/** R20-3 (F20-4): the marker both runtimes append the provider's redacted
+ *  sentence behind, so `runFailureReason` can split it back off. Kept in one
+ *  place; the runtimes write the same literal string. */
+export const PROVIDER_TEXT_MARKER = "\n\nThe provider reported: ";
+
 /** Classified failure classes for an errored run (F8 + R7-2 fail-fast). */
 export type RunFailureKind =
   | "quota"
@@ -548,14 +553,25 @@ export type RunFailureKind =
 export function runFailureReason(
   db: DatabaseSync,
   runId: string,
-): { kind: RunFailureKind; text: string } | null {
+): { kind: RunFailureKind; text: string; providerText?: string } | null {
   const lines = listRunLines(db, runId).map((l) => l.display);
   let last: LogLine | null = null;
   for (const l of lines) {
     if (l.ev === "err" || /fail|error/i.test(l.tag ?? "")) last = l;
   }
   if (!last?.text) return null;
-  const text = last.text.trim();
+  // R20-3 (F20-4): the adapter appended the provider's own redacted sentence
+  // after a marker (git-output-redact:redactProviderText / the two runtimes).
+  // Split it back off so `text` stays the human sentence every existing caller
+  // expects, and `providerText` rides separately into the packet observation
+  // and the fenced timeline block.
+  const raw = last.text.trim();
+  const markerIdx = raw.indexOf(PROVIDER_TEXT_MARKER);
+  const text = (markerIdx >= 0 ? raw.slice(0, markerIdx) : raw).trim();
+  const providerText =
+    markerIdx >= 0
+      ? raw.slice(markerIdx + PROVIDER_TEXT_MARKER.length).trim()
+      : "";
   // An adapter that classified its OWN failure before redacting the raw stderr
   // rides the class on the err tag as a `·<kind>` suffix (e.g. `error·quota`).
   // Trust that structured signal directly: the redaction-safe message text is
@@ -568,7 +584,12 @@ export function runFailureReason(
     /·(quota|auth|unavailable|max_turns|idle_timeout|session_missing|unknown)$/.exec(
       last.tag ?? "",
     );
-  if (tagged) return { kind: tagged[1] as RunFailureKind, text };
+  if (tagged)
+    return {
+      kind: tagged[1] as RunFailureKind,
+      text,
+      ...(providerText ? { providerText } : {}),
+    };
   const kind: RunFailureKind =
     // P13-D-2 first: a vanished session is NOT an auth problem, and "no
     // conversation found" would otherwise fall through to `unknown` and be
@@ -582,7 +603,7 @@ export function runFailureReason(
           : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
             ? "auth"
             : "unknown";
-  return { kind, text };
+  return { kind, text, ...(providerText ? { providerText } : {}) };
 }
 
 // -------------------------------------------------------- resume workdir

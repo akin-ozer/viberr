@@ -22,13 +22,46 @@ import { getProjectGithubContext } from "~/server/github/github-context.server";
 import { invalidateRepoAccess } from "~/features/github/github-query.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { generateTempPassword } from "~/server/auth/password.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
+import type { Boundary } from "~/schemas/project-file.schema";
 import {
   realignChainToStages,
   rejoinChainAroundStage,
   spliceStageIntoChain,
 } from "~/shared/workflow/transitions";
 import { countLiveAdmins, removedAccountLabel } from "./membership.server";
+
+/**
+ * F20-15: GitHub's `/repos/{owner}/{repo}` returns the `permissions` block it
+ * computed for THIS token — the read-only proof of write access. A project
+ * exists to push branches and open PRs, so a repo the credential can only READ
+ * is not deliverable. Mirrors the (module-private) `repoWritable` in
+ * pat-validator.server.ts; kept local so this file stays decoupled from it.
+ * Tri-state on purpose: `null` (permissions absent) is "unknown", never a
+ * refusal — only a PROVEN read-only repo (push === false) is rejected.
+ */
+interface RepoPermissions {
+  admin?: boolean;
+  maintain?: boolean;
+  push?: boolean;
+}
+function repoPushable(permissions: RepoPermissions | undefined): boolean | null {
+  if (!permissions || typeof permissions !== "object") return null;
+  if (permissions.admin === true || permissions.maintain === true || permissions.push === true) {
+    return true;
+  }
+  if (permissions.push === false) return false;
+  return null;
+}
+
+/** Boundary → the label the Policy page uses (policy-data.ts BOUNDARIES). */
+const BOUNDARY_LABEL: Record<Boundary, string> = {
+  auto: "Auto-advance",
+  approval: "Human approval",
+  human: "Human only",
+};
+const BOUNDARY_RANK: Record<Boundary, number> = { auto: 0, approval: 1, human: 2 };
 
 /**
  * Project-settings mutations (project-settings spec §5): identity, the
@@ -60,11 +93,16 @@ export interface SettingsMutationContext {
   dataRoot?: string;
 }
 
+// N20-10: hex, never a CSS token. project.md is the canonical, human-readable
+// governance record — read by agents and off-browser tooling — and every seeded
+// stage stores a hex (app/shared/workflow/templates.ts). A `var(--yellow-dark)`
+// here is meaningless outside a stylesheet. These are the light-theme values the
+// old tokens resolved to (app.css): --blue/--yellow-dark/--agent/--teal-dark.
 export const NEW_STAGE_COLORS = [
-  "var(--blue)",
-  "var(--yellow-dark)",
-  "var(--agent)",
-  "var(--teal-dark)",
+  "#5b76fe",
+  "#746019",
+  "#7b61ff",
+  "#187574",
 ] as const;
 
 function requireProjectAction(
@@ -304,11 +342,20 @@ export async function repairProjectRepo(
   let probed = false;
   let defaultBranch: string | null = null;
   if (gh.status === "ok") {
-    const res = await gh.client.request<{ default_branch?: string }>(
-      "GET",
-      `/repos/${repo}`,
-    );
+    const res = await gh.client.request<{
+      default_branch?: string;
+      permissions?: RepoPermissions;
+    }>("GET", `/repos/${repo}`);
     if (res.ok) {
+      // F20-15: `res.ok` proves the credential can SEE the repo, not push to it.
+      // Adopting a read-only-visible repo silently defers the failure to first
+      // delivery (live: repairing to a foreign public repo succeeded). Refuse a
+      // PROVEN read-only target; an unknown/absent permissions block still passes.
+      if (repoPushable(res.data.permissions) === false) {
+        throw AppError.validation(
+          `The attached credential can see ${repo} but cannot push to it — a project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then repair again. Nothing was changed.`,
+        );
+      }
       probed = true;
       defaultBranch =
         typeof res.data.default_branch === "string" && res.data.default_branch
@@ -450,7 +497,10 @@ export async function addStage(
     subjectKind: "stage",
     subjectId: stageId,
     projectSlug: input.projectSlug,
-    details: {},
+    // F20-27: record the stage NAME so the activity renderer prints it (it reads
+    // `d.name`) instead of the generic "added a workflow stage." Contract shared
+    // with the renderer (C-WORKFLOW-POLICY): `{ id, name }`.
+    details: { id: stageId, name },
   });
   return {
     toast: `"${name}" added — it appears on the board immediately`,
@@ -478,8 +528,22 @@ export async function removeStage(
   ).n;
 
   let stageName = input.stageId;
+  // F20-13: removing a stage collapses its two edges into one that carries the
+  // STRICTER boundary (rejoinChainAroundStage) — deliberate, so a column edit
+  // cannot silently delete an approval gate, but historically UNDISCLOSED: the
+  // toast/audit said only "Stage X removed" while a hop that used to
+  // auto-advance now needs a human. Capture the composite tightening so both
+  // can name it.
+  // Assigned inside the closure below; a holder keeps TS control-flow from
+  // narrowing a closure-only-assigned `let` back to its `null` initializer at
+  // the outer use sites (which made the `tightening ? …` branch `never`).
+  const removal: {
+    tightening: { from: string; to: string; boundary: Boundary } | null;
+  } = { tightening: null };
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
-    const stage = parsed.frontmatter.stages.find((s) => s.id === input.stageId);
+    const stagesBefore = parsed.frontmatter.stages;
+    const idx = stagesBefore.findIndex((s) => s.id === input.stageId);
+    const stage = idx === -1 ? undefined : stagesBefore[idx];
     if (!stage) throw AppError.notFound(`No stage ${input.stageId}.`);
     stageName = stage.name;
     const locked = stageLockReason(input.stageId, parsed.frontmatter.stages);
@@ -491,6 +555,23 @@ export async function removeStage(
         `Move ${count} ${count === 1 ? "task" : "tasks"} out of ${stage.name} first`,
       );
     }
+    // Neighbours + the edges about to be merged, read from the PRE-removal state.
+    const prevStage = idx > 0 ? stagesBefore[idx - 1] : null;
+    const nextStage = idx < stagesBefore.length - 1 ? stagesBefore[idx + 1] : null;
+    const workflowBefore = parsed.frontmatter.workflow;
+    const inEdge = prevStage
+      ? workflowBefore.find((w) => w.from === prevStage.id && w.to === input.stageId)
+      : undefined;
+    const outEdge = nextStage
+      ? workflowBefore.find((w) => w.from === input.stageId && w.to === nextStage.id)
+      : undefined;
+    const hadDirect = Boolean(
+      prevStage &&
+        nextStage &&
+        workflowBefore.some(
+          (w) => w.from === prevStage.id && w.to === nextStage.id,
+        ),
+    );
     // P13-D-1: rules referencing the removed stage still go (spec §7.4 — nothing
     // may point at a stage that no longer exists), but the neighbours are now
     // RE-JOINED instead of left with a hole in the chain: prev→next takes their
@@ -503,6 +584,24 @@ export async function removeStage(
       parsed.frontmatter.workflow,
       input.stageId,
     );
+    // The merged hop is stricter than at least one of the edges it replaced when
+    // the two differed (or the terminal invariant forced it up). Disclose that.
+    if (!hadDirect && prevStage && nextStage && inEdge && outEdge) {
+      const merged = parsed.frontmatter.workflow.find(
+        (w) => w.from === prevStage.id && w.to === nextStage.id,
+      );
+      if (
+        merged &&
+        BOUNDARY_RANK[merged.boundary] >
+          Math.min(BOUNDARY_RANK[inEdge.boundary], BOUNDARY_RANK[outEdge.boundary])
+      ) {
+        removal.tightening = {
+          from: prevStage.name,
+          to: nextStage.name,
+          boundary: merged.boundary,
+        };
+      }
+    }
     parsed.frontmatter.stages = parsed.frontmatter.stages.filter(
       (s) => s.id !== input.stageId,
     );
@@ -530,9 +629,30 @@ export async function removeStage(
     subjectKind: "stage",
     subjectId: input.stageId,
     projectSlug: input.projectSlug,
-    details: { name: stageName },
+    // F20-27: `{ id, name }` is the contract the activity renderer reads
+    // (`d.name`). F20-13: when the removal retightened a hop, also record
+    // `tightened: { from, to, boundary }` — stage NAMES + boundary id — the shape
+    // the renderer (C-WORKFLOW-POLICY, activity-feed.server.ts) reads to disclose
+    // it. `{ id, name }` stays always-present.
+    details: {
+      id: input.stageId,
+      name: stageName,
+      ...(removal.tightening
+        ? {
+            tightened: {
+              from: removal.tightening.from,
+              to: removal.tightening.to,
+              boundary: removal.tightening.boundary,
+            },
+          }
+        : {}),
+    },
   });
-  return { toast: `Stage "${stageName}" removed` };
+  return {
+    toast: removal.tightening
+      ? `Stage "${stageName}" removed — ${removal.tightening.from} → ${removal.tightening.to} now needs ${BOUNDARY_LABEL[removal.tightening.boundary]} (the removed stage's stricter gate was kept)`
+      : `Stage "${stageName}" removed`,
+  };
 }
 
 export async function reorderStages(
@@ -596,17 +716,26 @@ export async function reorderStages(
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Invite (spec §5.3): registered email → membership entry (role viewer,
- * status invited). Unregistered email → a passwordless whitelist user row
- * is created first (phase-2 model: the user row IS the whitelist entry;
- * they sign in via OAuth — no mailer in V1, ruling 13), then the entry.
+ * Invite (spec §5.3): registered email → membership entry (role viewer).
+ * Unregistered email → a NEW account is minted first, then the entry.
+ *
+ * F20-12: that account used to be minted PASSWORDLESS (`tempPassword: null`) on
+ * the phase-2 "the row IS the whitelist, they sign in via OAuth" assumption. On
+ * a deployment with no SSO that mints an account that can never sign in — no
+ * credential, no OAuth path — yet `statusOf` showed it healthy, and the invitee
+ * hit a flat "no local account" wall at /login. Now the mint carries a temp
+ * password (the same ceremony Allow-access uses), so the account is usable via
+ * Users & access → Reset password and `statusOf` marks it setup-pending. The
+ * temp password itself is generated but not surfaced on the members card (that
+ * lives in Users & access, where the credential is handed over out-of-band — no
+ * mailer, ruling 13); it is returned for a caller that wants to surface it.
  */
 export async function inviteMember(
   db: DatabaseSync,
   input: { projectSlug: string; name: string; email: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
-): Promise<{ toast: string; userId: string }> {
+): Promise<{ toast: string; userId: string; tempPassword?: string }> {
   // Honest action id (pass-7 seam 4): inviting IS member management, not a
   // policy edit — `manage-members`, same admin tier as before.
   requireProjectAction(db, ctx, "manage-members", input.projectSlug, actor, "manage members & roles");
@@ -619,10 +748,14 @@ export async function inviteMember(
 
   const auditActor = { userId: actor.userId, label: actor.label };
   let user = findUserByEmail(db, email);
+  let tempPassword: string | undefined;
   if (!user) {
+    // F20-12: mint WITH a temp password so the account can actually sign in
+    // (createUser stamps pwresetRequired=true → statusOf reads "setup pending").
+    tempPassword = generateTempPassword();
     user = await createUser(
       db,
-      { email, name, role: "member", tempPassword: null },
+      { email, name, role: "member", tempPassword },
       auditActor,
     );
   }
@@ -648,7 +781,13 @@ export async function inviteMember(
     projectSlug: input.projectSlug,
     details: { email, role: "viewer" },
   });
-  return { toast: `Invite sent to ${email} · joins as Viewer`, userId };
+  // N20-6: no mailer exists (ruling 13) — do NOT claim an invite was sent. Name
+  // what actually happened, and for a freshly minted account point at where the
+  // sign-in credential is completed.
+  const toast = tempPassword
+    ? `Added ${email} — joins as Viewer. Set their sign-in password in Users & access.`
+    : `Added ${email} — joins as Viewer`;
+  return { toast, userId, ...(tempPassword ? { tempPassword } : {}) };
 }
 
 export async function removeMember(

@@ -208,8 +208,31 @@ function auditText(
         ? `${actor} renamed a workflow stage to **${name}**.`
         : `${actor} renamed a workflow stage.`;
     }
-    case "project.stage.removed":
-      return `${actor} removed a workflow stage.`;
+    case "project.stage.removed": {
+      // F20-27: the writer records `details: { id, name }`; read the name (it was
+      // stored all along and ignored, so every removal printed the bare
+      // "removed a workflow stage").
+      const name = str(d.name);
+      const base = name
+        ? `${actor} removed workflow stage **${name}**`
+        : `${actor} removed a workflow stage`;
+      // F20-13: removing a stage re-joins its neighbours, and the merged hop
+      // keeps the STRICTER of the two boundaries it replaced
+      // (transitions.ts → rejoinChainAroundStage). When that tightened a
+      // surviving hop, the writer records the composite change under
+      // `tightened: { from, to, boundary }` (display NAMES) so the audit row
+      // discloses the side effect the toast alone hid — the same vocabulary a
+      // manual boundary flip audits under.
+      const tightened = d.tightened;
+      if (tightened && typeof tightened === "object") {
+        const t = tightened as Record<string, unknown>;
+        const tf = str(t.from) ?? "?";
+        const tt = str(t.to) ?? "?";
+        const tb = BOUNDARY_LABEL[str(t.boundary) ?? ""] ?? str(t.boundary);
+        if (tb) return `${base} — **${tf} → ${tt}** is now ${tb}.`;
+      }
+      return `${base}.`;
+    }
     case "project.stage.reordered":
       return `${actor} reordered the workflow stages.`;
     case "project.settings.updated":

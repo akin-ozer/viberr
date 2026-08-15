@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTestDbContext } from "../../../test-support/test-db";
 import type {
   ClaudeQuery,
   ClaudeQueryFn,
@@ -16,6 +17,10 @@ import {
   resolveRunModel,
   type SdkModelInfo,
 } from "./model-catalog.server";
+import {
+  clearModelMark,
+  markModelUnavailable,
+} from "./model-availability.server";
 
 /**
  * Catalog tests: curated fallback for both backends (works offline, no
@@ -352,5 +357,72 @@ describe("isKnownModel agrees with what the picker offered (P13-RT-07)", () => {
     expect(resolveRunModel("claude", "opus-next")).toBe("opus-next");
     // Codex has no live endpoint, so its curated list stays authoritative.
     expect(isKnownModel("codex", "opus-next")).toBe(false);
+  });
+});
+
+describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable", () => {
+  const dbCtx = createTestDbContext();
+  afterEach(dbCtx.cleanup);
+  afterEach(() => resetModelCatalogCache());
+
+  it("stamps a marked model in the curated (codex) catalog", async () => {
+    const db = dbCtx.makeDb();
+    markModelUnavailable(db, {
+      backend: "codex",
+      model: "gpt-5.6-sol",
+      reason: "not supported on this account",
+    });
+    const cat = await getModelCatalog("codex", { db });
+    const sol = cat.models.find((m) => m.value === "gpt-5.6-sol");
+    expect(sol?.unavailable?.reason).toContain("not supported");
+    // An unmarked model is untouched.
+    expect(
+      cat.models.find((m) => m.value === "gpt-5.6-terra")?.unavailable,
+    ).toBeUndefined();
+  });
+
+  it("stamps the LIVE-enhanced claude catalog too", async () => {
+    const db = dbCtx.makeDb();
+    markModelUnavailable(db, {
+      backend: "claude",
+      model: "opus",
+      reason: "model unavailable for this deployment",
+    });
+    const cat = await getModelCatalog("claude", {
+      db,
+      isAvailable: () => false, // curated path still carries all three
+    });
+    expect(cat.models.find((m) => m.value === "opus")?.unavailable).toBeTruthy();
+  });
+
+  it("the TTL live cache does NOT freeze the mark (applied after cloneCatalog)", async () => {
+    const db = dbCtx.makeDb();
+    const live: SdkModelInfo[] = [
+      { value: "sonnet", displayName: "S", description: "", supportsEffort: true },
+    ];
+    const queryFn = makeFakeQuery(live);
+    // First call: no mark yet.
+    const before = await getModelCatalog("claude", {
+      db,
+      claudeQueryFn: queryFn,
+      isAvailable: () => true,
+    });
+    expect(before.models[0]!.unavailable).toBeUndefined();
+    // Mark it — no cache reset — the very next call reflects it.
+    markModelUnavailable(db, { backend: "claude", model: "sonnet", reason: "gone" });
+    const after = await getModelCatalog("claude", {
+      db,
+      claudeQueryFn: queryFn,
+      isAvailable: () => true,
+    });
+    expect(after.models[0]!.unavailable?.reason).toBe("gone");
+    // And clearing it takes effect the next call with no reset either.
+    clearModelMark(db, "claude", "sonnet");
+    const cleared = await getModelCatalog("claude", {
+      db,
+      claudeQueryFn: queryFn,
+      isAvailable: () => true,
+    });
+    expect(cleared.models[0]!.unavailable).toBeUndefined();
   });
 });

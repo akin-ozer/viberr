@@ -149,9 +149,11 @@ describe("ProjectPanel", () => {
         (f) => (f as HTMLInputElement).disabled,
       ),
     ).toBe(true);
-    // …and now it says why.
+    // …and now it says why. F20-16: the honest grant name + tier.
     expect(container.textContent).toContain("Read-only");
-    expect(container.textContent).toContain("Change project settings");
+    expect(container.textContent).toContain("Edit workflow & policy");
+    expect(container.textContent).toContain("project admin");
+    expect(container.textContent).not.toContain("Change project settings");
   });
 });
 
@@ -260,7 +262,9 @@ describe("StagesPanel", () => {
       <StagesPanel {...base} canManage={false} onRename={() => {}} onRemove={() => {}} />,
     );
     expect(container.textContent).toContain("Read-only");
-    expect(container.textContent).toContain("Change project settings");
+    // F20-16: the honest grant name + tier.
+    expect(container.textContent).toContain("Edit workflow & policy");
+    expect(container.textContent).not.toContain("Change project settings");
     // The manage-only how-to must not be shown to someone who cannot do it.
     expect(container.textContent).not.toContain("Drag a row to reorder");
   });

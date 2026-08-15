@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { MembershipView } from "~/features/project-settings/membership.server";
 import type { TransitionView } from "./policy-query.server";
 import { AgentCapability, HumanAccess, WorkflowRules, type PcapProfile } from "./policy-page";
-import { ROLE_IDS } from "./policy-data";
+import { ROLE_IDS, operatorAutonomyState } from "./policy-data";
 
 afterEach(cleanup);
 
@@ -84,6 +84,11 @@ describe("HumanAccess", () => {
     expect(container.textContent).not.toContain("membership not required");
     expect(container.textContent).not.toContain("member or not");
     expect(container.textContent).toContain("this project is members-only");
+    // N20-7: the owner authority footnote now also documents that an owner may
+    // resolve the operator's non-acceptance packet options, not just accept.
+    expect(container.textContent).toContain(
+      "may resolve the non-acceptance options on a decision packet",
+    );
 
     // Selecting a new role dispatches; re-selecting the current one no-ops.
     const selinSeg = container.querySelectorAll(".mini-seg")[3]!;
@@ -339,6 +344,121 @@ describe("WorkflowRules — the not-permitted case says why", () => {
     // The V1 lock is a different reason and must survive independently: it
     // still applies to a manager.
     expect(getByText("locked · V1")).toBeTruthy();
+  });
+});
+
+// F20-19: the human-accepts-completion note must state whether the always-human
+// -Done exception is actually live on THIS project (configured operator
+// autonomy + the Direct accept grant), so the conditional prose is no longer
+// byte-identical whether the exception is active or not.
+describe("WorkflowRules — states the project's operator autonomy (F20-19)", () => {
+  const renderWith = (operator: Parameters<typeof WorkflowRules>[0]["operator"]) =>
+    render(
+      <WorkflowRules
+        stages={STAGES}
+        transitions={TRANSITIONS}
+        canManage={false}
+        busy={false}
+        onSetBoundary={() => {}}
+        operator={operator}
+      />,
+    );
+
+  it("reads the exception as ACTIVE for a full-autonomy operator with the Direct grant", () => {
+    const { container } = renderWith({
+      present: true,
+      autonomy: "full",
+      directDoneLive: true,
+      operatorName: "Operator",
+    });
+    const note = container.querySelector(".pol-note.after")!;
+    expect(note.textContent).toContain("On this project:");
+    expect(note.textContent).toContain("(Operator)");
+    expect(note.textContent).toContain("is active");
+    expect(note.textContent).not.toContain("not active");
+  });
+
+  it("reads the exception as NOT active for a supervised operator", () => {
+    const { container } = renderWith({
+      present: true,
+      autonomy: "supervised",
+      directDoneLive: false,
+      operatorName: "Operator",
+    });
+    const note = container.querySelector(".pol-note.after")!;
+    expect(note.textContent).toContain("supervised");
+    expect(note.textContent).toContain("not active");
+  });
+
+  it("reads NOT active for full autonomy that lacks the Direct accept grant", () => {
+    const { container } = renderWith({
+      present: true,
+      autonomy: "full",
+      directDoneLive: false,
+      operatorName: "Operator",
+    });
+    const note = container.querySelector(".pol-note.after")!;
+    expect(note.textContent).toContain("without the Direct accept grant");
+    expect(note.textContent).toContain("not active");
+  });
+
+  it("keeps the generic invariant (no per-project clause) when no roster is supplied", () => {
+    const { container } = renderWith(undefined);
+    const note = container.querySelector(".pol-note.after")!;
+    expect(note.textContent).not.toContain("On this project:");
+    // The canonical exception sentence still renders.
+    expect(note.textContent).toContain("full autonomy");
+  });
+});
+
+// F20-19 derivation: operatorAutonomyState reads the shared roster the same way
+// the runtime gate does (full autonomy + `completion-for-acceptance: direct`).
+describe("operatorAutonomyState (F20-19)", () => {
+  const operator = (
+    autonomy: "supervised" | "full",
+    acceptMode: "direct" | "recommend" | "human" | "off",
+  ) => ({
+    kind: "operator" as const,
+    name: "Operator",
+    autonomy,
+    capabilities: [
+      { capabilityId: "completion-for-acceptance", mode: acceptMode },
+    ],
+  });
+
+  it("is live only for full autonomy AND completion-for-acceptance direct", () => {
+    expect(operatorAutonomyState([operator("full", "direct")])).toEqual({
+      present: true,
+      autonomy: "full",
+      directDoneLive: true,
+      operatorName: "Operator",
+    });
+    expect(operatorAutonomyState([operator("full", "recommend")]).directDoneLive).toBe(false);
+    expect(operatorAutonomyState([operator("supervised", "direct")]).directDoneLive).toBe(false);
+  });
+
+  it("reports absent when no operator profile is deployed", () => {
+    const specialist = {
+      kind: "specialist" as const,
+      name: "Developer",
+      autonomy: undefined,
+      capabilities: [],
+    };
+    expect(operatorAutonomyState([specialist])).toEqual({
+      present: false,
+      autonomy: null,
+      directDoneLive: false,
+      operatorName: null,
+    });
+  });
+
+  it("prefers the operator that makes the exception live", () => {
+    const state = operatorAutonomyState([
+      operator("supervised", "off"),
+      operator("full", "direct"),
+    ]);
+    expect(state.directDoneLive).toBe(true);
+    expect(state.autonomy).toBe("full");
   });
 });
 

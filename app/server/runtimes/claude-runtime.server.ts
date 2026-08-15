@@ -9,6 +9,7 @@ import type {
 import { SESSION_MISSING_RE } from "./session-export.server";
 import { isSdkSkillName } from "./skill-mount.server";
 import { projectEnvelope } from "./wire-format.server";
+import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
@@ -393,13 +394,17 @@ function resolveMaxTurns(): number {
 function classifyClaudeError(error: unknown): {
   kind: ClaudeFailureKind;
   message: string;
+  providerText: string;
 } {
   const code = (error as { code?: unknown } | null)?.code;
   if (code === "EBADF" || code === "EMFILE" || code === "ENFILE") {
+    // R20-3: these three name the real cause already (host resource exhaustion,
+    // not a provider verdict), so there is no separate provider sentence to add.
     return {
       kind: "unknown",
       message:
         "The agent process could not be started (the host ran out of file handles). No work was performed.",
+      providerText: "",
     };
   }
   if (code === "ENOENT") {
@@ -407,9 +412,14 @@ function classifyClaudeError(error: unknown): {
       kind: "unknown",
       message:
         "The agent runtime executable was not found. Check the deployment's Claude CLI/SDK install.",
+      providerText: "",
     };
   }
   const raw = error instanceof Error ? error.message : String(error ?? "");
+  // R20-3 (F20-4): the provider's own redacted sentence, surfaced beside the
+  // canonical message for the quota/auth/unknown arms (the earlier arms already
+  // name their cause). See git-output-redact:redactProviderText.
+  const providerText = redactProviderText(error);
   // P13-D-2 before the auth branch: a swept transcript must never be narrated
   // as a rejected credential.
   if (SESSION_MISSING_RE.test(raw)) {
@@ -417,6 +427,7 @@ function classifyClaudeError(error: unknown): {
       kind: "session_missing",
       message:
         "The Claude Code session could not be resumed — its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+      providerText: "",
     };
   }
   if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
@@ -427,6 +438,7 @@ function classifyClaudeError(error: unknown): {
       // triaging a failed delivery run toward the operator).
       message:
         "The Claude model is over its usage quota. Retry after the limit resets.",
+      providerText,
     };
   }
   if (
@@ -438,11 +450,13 @@ function classifyClaudeError(error: unknown): {
       kind: "auth",
       message:
         "The model credential was rejected. Review the configured Claude authentication.",
+      providerText,
     };
   }
   return {
     kind: "unknown",
     message: "The agent run did not complete. Review the runtime configuration.",
+    providerText,
   };
 }
 
@@ -503,7 +517,13 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               t: new Date().toISOString().slice(11, 19),
               ev: "err",
               tag: `run·error·${failure.kind}`,
-              text: failure.message,
+              // R20-3: append the provider's redacted sentence once (the marker
+              // is what runFailureReason splits back off).
+              text:
+                failure.providerText &&
+                !failure.message.includes(failure.providerText)
+                  ? `${failure.message}\n\nThe provider reported: ${failure.providerText}`
+                  : failure.message,
             },
             facts: {},
             occurredAt: new Date().toISOString(),
@@ -775,7 +795,12 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               t: now.slice(11, 19),
               ev: "err",
               tag: `run·error·${failure.kind}`,
-              text: failure.message,
+              // R20-3: same provider-sentence append as settleError.
+              text:
+                failure.providerText &&
+                !failure.message.includes(failure.providerText)
+                  ? `${failure.message}\n\nThe provider reported: ${failure.providerText}`
+                  : failure.message,
             },
             facts: {},
             occurredAt: now,

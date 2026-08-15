@@ -11,6 +11,7 @@ import {
   countLiveAdmins,
   removedAccountLabel,
 } from "~/features/project-settings/membership.server";
+import { defaultTransitionBy } from "~/shared/workflow/transitions";
 import { ROLE_LABEL, BOUNDARIES } from "./policy-data";
 
 /**
@@ -214,6 +215,11 @@ export async function setTransitionBoundary(
     toName = stages.find((s) => s.id === input.to)?.name ?? input.to;
     if (rule.boundary === boundary) return; // no-op
     rule.boundary = boundary;
+    // F20-26: the human-readable `by` prose describes the boundary. Mutating
+    // only `boundary` left the row self-contradicting (e.g. "Human decision"
+    // beside an Auto-advance selection). Recompute it from the same source the
+    // chain editor uses (transitions.ts) so file = projection = rendered row.
+    rule.by = defaultTransitionBy(boundary);
     changed = true;
   });
 
@@ -227,9 +233,13 @@ export async function setTransitionBoundary(
     action: "project.policy.boundary_changed",
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "workflow_boundary",
+    // The stage-id pair stays the stable subject key; the human-readable detail
+    // carries NAMES (N20-9) — the renderer prints `d.from`/`d.to` verbatim, so
+    // storing ids made the audit row read "ready → impl" while the toast and the
+    // rest of the app say "Ready → In Progress".
     subjectId: `${input.from}>${input.to}`,
     projectSlug: input.projectSlug,
-    details: { from: input.from, to: input.to, boundary },
+    details: { from: fromName, to: toName, boundary },
   });
   return { toast, changed: true };
 }

@@ -313,9 +313,26 @@ export function applyVerdictOutcomeGate<
   );
 }
 
-/** Specialists have no recommend mode; coerce it to the equivalent direct mode. */
-export function coerceSpecialistCapabilityMode<M extends string>(mode: M): M {
-  return (mode === "recommend" ? "direct" : mode) as M;
+/**
+ * F20-21 / R20-6: a specialist only ever acts DIRECTLY or is WITHHELD — there is
+ * no specialist `recommend`. This used to WIDEN a specialist `recommend` to
+ * `direct` at every call site (the display/enforcement READ paths AND the
+ * create/edit/deploy WRITE paths), so a stored `recommend` was rendered,
+ * counted, and enforced as `direct` — the seeded canonical project.md ("Move the
+ * task to Review: recommend") disagreeing with every rendered surface ("Acts
+ * directly"), and widening is the dangerous direction.
+ *
+ * The seed is now honest (agent-catalog.server.ts writes `direct`, never
+ * `recommend`, for a specialist). A stray `recommend` — a hand-edited project.md
+ * or a hostile form submission — normalizes DOWN to `off` (withheld, the SAFE
+ * direction), never up to `direct`, at both the write path and the `:285`
+ * display read, so stored = enforced = displayed. Re-introducing a
+ * `recommend → direct` transform here is the F20-21 regression.
+ */
+export function coerceSpecialistCapabilityMode<M extends string>(
+  mode: M,
+): M | "off" {
+  return mode === "recommend" ? "off" : mode;
 }
 
 /** The fine-grained delivery capabilities that the headline

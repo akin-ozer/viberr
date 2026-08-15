@@ -4,6 +4,7 @@ import {
   RBAC_DEFINITIONS,
   type ProjectRole,
 } from "~/shared/rbac";
+import type { AgentProfileView } from "~/features/agents/agent-types";
 export { ROLE_LABEL } from "~/shared/rbac";
 
 /**
@@ -53,6 +54,19 @@ export const BCLS: Record<BoundaryId, string> = {
   human: "human",
 };
 
+/**
+ * F20-9 (co-owned with C-AGENTS): the single canonical statement of the one
+ * operator exception to the always-human "Transition a task to Done" invariant.
+ * The Agents capability card borrows THIS constant (via `ALWAYS_HUMAN_ROWS`)
+ * rather than restating the sentence, so the two surfaces cannot drift. Do not
+ * inline the phrasing anywhere else — import it.
+ */
+export const TRANSITION_TO_DONE_EXCEPTION =
+  "except an operator at full autonomy with an explicit Accept completion into Done grant — see below";
+
+/** The capability whose id is scoped to the operator exception above. */
+export const TRANSITION_TO_DONE_CAPABILITY_ID = "transition-to-done";
+
 /** "Always reserved for humans" — rendered from the server invariant list
  * (ruling 2), never hard-coded UI strings.
  *
@@ -71,7 +85,67 @@ export const ALWAYS_HUMAN_ROWS: readonly {
   id,
   label: capabilityById(id)?.label ?? id,
   exception:
-    id === "transition-to-done"
-      ? "except an operator at full autonomy with an explicit Accept completion into Done grant — see below"
-      : null,
+    id === TRANSITION_TO_DONE_CAPABILITY_ID ? TRANSITION_TO_DONE_EXCEPTION : null,
 }));
+
+// ----------------------------------------------- F20-19: operator autonomy
+
+/** The capability whose `direct` grant, together with full autonomy, is the one
+ *  policy that lets an operator accept completion into Done itself — the exact
+ *  runtime combination checked in operator-actions.server.ts. */
+export const DIRECT_ACCEPT_CAPABILITY_ID = "completion-for-acceptance";
+
+export interface OperatorAutonomyState {
+  /** An operator profile is deployed on this project. */
+  present: boolean;
+  /** The deployed operator's configured default autonomy (null = none deployed). */
+  autonomy: "supervised" | "full" | null;
+  /** The human-only-Done exception is actually LIVE here: an operator at full
+   *  autonomy that ALSO holds `completion-for-acceptance: direct`. Anything
+   *  short of that combination leaves the exception configured-off. */
+  directDoneLive: boolean;
+  /** Operator display name for the sentence (null when none deployed). */
+  operatorName: string | null;
+}
+
+type OperatorProfileShape = Pick<
+  AgentProfileView,
+  "kind" | "name" | "autonomy" | "capabilities"
+>;
+
+/**
+ * F20-19: derive the project's configured operator autonomy from the shared
+ * agent roster so the Policy page can state whether the always-human-Done
+ * exception is live — a value that previously appeared only on the operator's
+ * Agents profile card, leaving the Policy page byte-identical whether the
+ * exception was active or not. Prefers whichever operator makes the exception
+ * live, so a board that has configured the grant reads as live.
+ */
+export function operatorAutonomyState(
+  profiles: readonly OperatorProfileShape[],
+): OperatorAutonomyState {
+  const operators = profiles.filter((p) => p.kind === "operator");
+  if (operators.length === 0) {
+    return {
+      present: false,
+      autonomy: null,
+      directDoneLive: false,
+      operatorName: null,
+    };
+  }
+  const live = operators.find(
+    (p) =>
+      p.autonomy === "full" &&
+      p.capabilities.some(
+        (c) =>
+          c.capabilityId === DIRECT_ACCEPT_CAPABILITY_ID && c.mode === "direct",
+      ),
+  );
+  const chosen = live ?? operators[0]!;
+  return {
+    present: true,
+    autonomy: chosen.autonomy ?? "supervised",
+    directDoneLive: Boolean(live),
+    operatorName: chosen.name,
+  };
+}

@@ -123,9 +123,32 @@ function presetAgents(
  */
 type RepoProbe =
   | { status: "ok"; defaultBranch: string | null }
+  | { status: "read_only"; defaultBranch: string | null }
   | { status: "not_found" }
   | { status: "forbidden" }
   | { status: "unreachable" };
+
+/**
+ * F20-15: `/repos/{owner}/{repo}` returns the `permissions` block computed for
+ * THIS token — the read-only proof of write access. A project exists to push
+ * branches and open PRs, so a repo the credential can only READ is not
+ * deliverable. Tri-state: `null` (permissions absent) is "unknown" and passes;
+ * only a PROVEN read-only repo (push === false) is called out. Mirrors the
+ * (module-private) `repoWritable` in pat-validator.server.ts.
+ */
+interface RepoPermissions {
+  admin?: boolean;
+  maintain?: boolean;
+  push?: boolean;
+}
+function repoPushable(permissions: RepoPermissions | undefined): boolean | null {
+  if (!permissions || typeof permissions !== "object") return null;
+  if (permissions.admin === true || permissions.maintain === true || permissions.push === true) {
+    return true;
+  }
+  if (permissions.push === false) return false;
+  return null;
+}
 
 async function probeRemoteRepo(
   token: string,
@@ -143,8 +166,18 @@ async function probeRemoteRepo(
     if (res.status === 404) return { status: "not_found" };
     if (res.status === 401 || res.status === 403) return { status: "forbidden" };
     if (!res.ok) return { status: "unreachable" };
-    const data = (await res.json()) as { default_branch?: string };
-    return { status: "ok", defaultBranch: data.default_branch ?? null };
+    const data = (await res.json()) as {
+      default_branch?: string;
+      permissions?: RepoPermissions;
+    };
+    const defaultBranch = data.default_branch ?? null;
+    // F20-14/F20-15: Repair refuses a repo the credential can only read; the same
+    // check belongs at create time (live: creating against a read-only-visible
+    // repo was silently accepted and failed only at first delivery).
+    if (repoPushable(data.permissions) === false) {
+      return { status: "read_only", defaultBranch };
+    }
+    return { status: "ok", defaultBranch };
   } catch {
     return { status: "unreachable" };
   }
@@ -269,6 +302,11 @@ async function createProjectImpl(
       const probe = await probeRemoteRepo(token, repo);
       if (probe.status === "ok") {
         if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
+      } else if (probe.status === "read_only") {
+        // The repo exists and is visible, so we can adopt its default branch —
+        // but the token can't push, so delivery will fail until it's fixed.
+        if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
+        repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it — agents won't be able to open branches or PRs there until it's granted write access.`;
       } else if (probe.status === "not_found") {
         repoWarning = `GitHub has no repository ${repo} that this connection can see — check the name, or create it before agents start delivering.`;
       } else if (probe.status === "forbidden") {

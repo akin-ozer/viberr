@@ -285,6 +285,21 @@ CREATE TABLE org_mcp_servers (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- R20-3 (F20-4): a model the PROVIDER refused for this deployment's account.
+-- Org-level (unscoped, like org_mcp_servers): the credential is a deployment
+-- fact, not a project one. Written only from a REAL run's failure whose
+-- redacted text matches MODEL_UNSUPPORTED_RE; cleared by a real run's success.
+-- Never written by a synthetic probe (ruling 19). Presence of a row =
+-- unavailable; absence = unknown-but-offered (never "proven available", the
+-- claim we cannot make).
+CREATE TABLE model_availability (
+  backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+  model      TEXT NOT NULL,
+  reason     TEXT NOT NULL,        -- the provider's own redacted sentence
+  marked_at  TEXT NOT NULL,
+  run_id     TEXT,                 -- the run that proved it
+  PRIMARY KEY (backend, model)
+);
 CREATE TABLE org_skills (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,          -- slug; folder ${DATA_ROOT}/skills/<name>/

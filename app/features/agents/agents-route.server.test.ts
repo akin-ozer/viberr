@@ -554,11 +554,13 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     }
   });
 
-  it("R7-5 — a specialist `recommend` grant coerces to `direct` ('Allowed') on create", async () => {
+  it("R20-6/F20-21 — a stray specialist `recommend` normalizes to `off` (withheld) on create", async () => {
     // The specialist picker no longer offers `recommend`, but a hostile/legacy
-    // form might still submit it. `recommend` is operator-only (runtime-
-    // identical to `direct` for a specialist; F7-CAP1), so it must persist as
-    // `direct`; `human`/`off` pass through unchanged.
+    // form might still submit it. R20-6: a specialist has no `recommend`, so a
+    // stray one normalizes DOWN to `off` (withheld, the SAFE direction) — never
+    // up to `direct` (the old F7-CAP1 widening, which F20-21 removed because it
+    // made a stored `recommend` render/count/enforce as `direct`); `human`/`off`
+    // pass through unchanged.
     const result = (await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
@@ -583,9 +585,9 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     )!;
     const mode = (id: string) =>
       created.capabilities.find((c) => c.capabilityId === id)?.mode;
-    // Both submitted `recommend` grants coerced to `direct`.
-    expect(mode("open-review-pr")).toBe("direct");
-    expect(mode("commit-push-branch")).toBe("direct");
+    // Both submitted `recommend` grants normalized to `off` (withheld).
+    expect(mode("open-review-pr")).toBe("off");
+    expect(mode("commit-push-branch")).toBe("off");
     // No specialist cap is ever stored/read as `recommend`.
     expect(created.capabilities.map((c) => c.mode)).not.toContain("recommend");
     // Non-recommend modes are untouched.
@@ -598,7 +600,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     });
   });
 
-  it("R7-5 — editing a specialist coerces a submitted `recommend` to `direct` (grantsFor path)", async () => {
+  it("R20-6/F20-21 — editing a specialist normalizes a submitted `recommend` to `off` (grantsFor path)", async () => {
     await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
@@ -631,8 +633,8 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     )!;
     const mode = (id: string) =>
       edited.capabilities.find((c) => c.capabilityId === id)?.mode;
-    expect(mode("open-review-pr")).toBe("direct");
-    expect(mode("commit-push-branch")).toBe("direct");
+    expect(mode("open-review-pr")).toBe("off");
+    expect(mode("commit-push-branch")).toBe("off");
     expect(edited.capabilities.map((c) => c.mode)).not.toContain("recommend");
 
     await postAction(ids.arda, {

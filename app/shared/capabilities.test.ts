@@ -8,6 +8,7 @@ import {
   applyVerdictOutcomeGate,
   capabilityByLabel,
   capabilityEnforcement,
+  coerceSpecialistCapabilityMode,
   conservativeGrantsFor,
   normalizeDeliveryGrants,
   repairDeliveryGrants,
@@ -213,6 +214,24 @@ describe("applyVerdictOutcomeGate (F15-06 — verdict outcomes follow the verdic
       mode("request-changes", "recommend"),
     ];
     expect(applyVerdictOutcomeGate(grants)).toEqual(grants);
+  });
+});
+
+describe("coerceSpecialistCapabilityMode (F20-21 / R20-6 — direct or withheld)", () => {
+  it("normalizes a specialist `recommend` DOWN to `off`, never up to `direct`", () => {
+    // R20-6: a specialist has no `recommend`. The old body WIDENED it to
+    // `direct` (the dangerous direction — a stored `recommend` rendered/counted/
+    // enforced as `direct`); the fix normalizes it DOWN to `off` (withheld, the
+    // SAFE direction) at the write path and the display read, so file =
+    // enforcement = display. Re-adding a `recommend → direct` transform here is
+    // the F20-21 regression this canary guards.
+    expect(coerceSpecialistCapabilityMode("recommend")).toBe("off");
+  });
+
+  it("passes direct / human / off through unchanged", () => {
+    for (const m of ["direct", "human", "off"] as const) {
+      expect(coerceSpecialistCapabilityMode(m)).toBe(m);
+    }
   });
 });
 

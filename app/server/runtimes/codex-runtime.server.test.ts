@@ -484,7 +484,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
         return {
           events: asSdkEvents(
             (async function* () {
-              throw new Error("request failed with sk-secret-sentinel");
+              throw new Error("request failed with sk-secretsentinel0123456789");
             })(),
           ),
         };
@@ -503,11 +503,16 @@ describe("codex adapter (SDK, injected fake client)", () => {
     await drain();
 
     expect(exit).toMatchObject({ outcome: "error" });
-    expect(lines.at(-1)?.display).toMatchObject({
-      ev: "err",
-      text: "Codex execution failed. Review its authentication and runtime configuration.",
-    });
-    expect(lines.at(-1)?.raw).not.toContain("sk-secret-sentinel");
+    // R20-3 (F20-4): the canonical sentence still leads, but the provider's own
+    // words now ride behind the marker — with a token-shaped secret redacted.
+    const errText = lines.at(-1)?.display?.text ?? "";
+    expect(errText).toContain(
+      "Codex execution failed. Review its authentication and runtime configuration.",
+    );
+    expect(errText).toContain("The provider reported:");
+    expect(errText).toContain("request failed with [redacted]");
+    expect(errText).not.toContain("sk-secretsentinel0123456789");
+    expect(lines.at(-1)?.raw).not.toContain("sk-secretsentinel0123456789");
   });
 
   it("retains a safe auth category while redacting the raw SDK failure", async () => {
@@ -517,7 +522,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
         return {
           events: asSdkEvents(
             (async function* () {
-              throw new Error("401 unauthorized for token sk-secret-sentinel");
+              throw new Error("401 unauthorized for token sk-secretsentinel0123456789");
             })(),
           ),
         };
@@ -534,11 +539,14 @@ describe("codex adapter (SDK, injected fake client)", () => {
     });
     await drain();
 
-    expect(lines.at(-1)?.display).toMatchObject({
-      ev: "err",
-      text: "Codex authentication failed. Review the configured subscription credential.",
-    });
-    expect(lines.at(-1)?.raw).not.toContain("sk-secret-sentinel");
+    const errText = lines.at(-1)?.display?.text ?? "";
+    expect(errText).toContain(
+      "Codex authentication failed. Review the configured subscription credential.",
+    );
+    // R20-3: the provider's sentence surfaces with the token redacted by shape.
+    expect(errText).toContain("401 unauthorized for token [redacted]");
+    expect(errText).not.toContain("sk-secretsentinel0123456789");
+    expect(lines.at(-1)?.raw).not.toContain("sk-secretsentinel0123456789");
   });
 
   it("retains a safe quota category while redacting the raw SDK failure", async () => {
@@ -548,7 +556,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
         return {
           events: asSdkEvents(
             (async function* () {
-              throw new Error("429 rate limit: internal request id secret-sentinel");
+              throw new Error("429 rate limit: internal request id sk-secretsentinel0123456789");
             })(),
           ),
         };
@@ -565,11 +573,13 @@ describe("codex adapter (SDK, injected fake client)", () => {
     });
     await drain();
 
-    expect(lines.at(-1)?.display).toMatchObject({
-      ev: "err",
-      text: "Codex usage limit was reached. Retry after the subscription limit resets.",
-    });
-    expect(lines.at(-1)?.raw).not.toContain("secret-sentinel");
+    const errText = lines.at(-1)?.display?.text ?? "";
+    expect(errText).toContain(
+      "Codex usage limit was reached. Retry after the subscription limit resets.",
+    );
+    expect(errText).toContain("The provider reported:");
+    expect(errText).not.toContain("sk-secretsentinel0123456789");
+    expect(lines.at(-1)?.raw).not.toContain("sk-secretsentinel0123456789");
   });
 
   it("interrupt() aborts the signal and ends interrupted", async () => {
@@ -642,7 +652,7 @@ describe("codex failure classification survives redaction into runFailureReason 
    *  read them exactly as production would (via the display_json round-trip). */
   async function classifyThrownFailure(
     message: string,
-  ): Promise<{ kind: string; text: string } | null> {
+  ): Promise<{ kind: string; text: string; providerText?: string } | null> {
     const thread: CodexThread = {
       id: "thread-1",
       async runStreamed() {
@@ -696,25 +706,30 @@ describe("codex failure classification survives redaction into runFailureReason 
 
   it("a redacted quota failure classifies as 'quota'", async () => {
     const reason = await classifyThrownFailure(
-      "429 rate limit: internal request id secret-sentinel",
+      "429 rate limit: internal request id sk-secretsentinel0123456789",
     );
     expect(reason?.kind).toBe("quota");
-    // The persisted text is the redaction-safe canonical message, not stderr.
+    // R20-3: `text` is the redaction-safe canonical message with the provider's
+    // sentence split back OFF onto `providerText`, so it never carries stderr.
     expect(reason?.text).toBe(
       "Codex usage limit was reached. Retry after the subscription limit resets.",
     );
-    expect(reason?.text).not.toContain("secret-sentinel");
+    expect(reason?.text).not.toContain("secretsentinel");
+    // The provider's own words ride separately, with the token redacted.
+    expect(reason?.providerText).toContain("429 rate limit");
+    expect(reason?.providerText).not.toContain("sk-secretsentinel0123456789");
   });
 
   it("a redacted auth failure classifies as 'auth' (the prose alone would not)", async () => {
     const reason = await classifyThrownFailure(
-      "401 unauthorized for token sk-secret-sentinel",
+      "401 unauthorized for token sk-secretsentinel0123456789",
     );
     expect(reason?.kind).toBe("auth");
     expect(reason?.text).toBe(
       "Codex authentication failed. Review the configured subscription credential.",
     );
-    expect(reason?.text).not.toContain("sk-secret-sentinel");
+    expect(reason?.text).not.toContain("secretsentinel");
+    expect(reason?.providerText).toContain("401 unauthorized for token [redacted]");
   });
 
   it("a vanished rollout classifies as 'session_missing', not 'auth' (P13-D-2)", async () => {
@@ -750,7 +765,7 @@ describe("codex failure classification survives redaction into runFailureReason 
         return {
           events: asSdkEvents(
             (async function* () {
-              throw new Error("usage limit exceeded — secret-sentinel");
+              throw new Error("usage limit exceeded — sk-secretsentinel0123456789");
             })(),
           ),
         };
@@ -767,10 +782,10 @@ describe("codex failure classification survives redaction into runFailureReason 
     });
     await drain();
 
-    // Redaction invariant: the raw envelope never carries the stderr secret,
-    // but the projected display tag carries the safe-to-persist class.
+    // Redaction invariant: the projected display tag carries the safe-to-persist
+    // class, and R20-3's surfaced provider sentence redacts a token by shape.
     expect(lines.at(-1)?.display).toMatchObject({ ev: "err", tag: "error·quota" });
-    expect(lines.at(-1)?.raw).not.toContain("secret-sentinel");
+    expect(lines.at(-1)?.raw).not.toContain("sk-secretsentinel0123456789");
   });
 });
 

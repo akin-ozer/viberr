@@ -112,7 +112,9 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
       id: "developer", kind: "specialist", name: "Developer", role: "Implementation",
-      icon: "branch", backends: ["codex", "claude"], model: "gpt-5.6-sol",
+      // R20-8: this deployment's ChatGPT-account Codex cannot run `gpt-5.6-sol`;
+      // `gpt-5.6-terra` is the CLI default that works, so the seed ships it.
+      icon: "branch", backends: ["codex", "claude"], model: "gpt-5.6-terra",
       scope: "Global base",
       stages: ["ready", "impl"],
       resources: {
@@ -130,8 +132,12 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // and the master gate for ALL delivery (specialist-tool-policy.ts): with it
       // withheld, the fine-grained branch/commit/PR grants below are vetoed and the
       // developer silently delivers nothing (VIB-1 class). A deliverer MUST hold it.
-      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Post mid-run comments", "Ask the human a question"],
-      recommend: ["Move the task to Review"],
+      // F20-21/R20-6: a specialist acts DIRECTLY or is WITHHELD — no `recommend`.
+      // "Move the task to Review" ships `direct` (it used to ship `recommend`,
+      // which the runtime widened to `direct` behind the matrix's back), so the
+      // file now literally matches what enforcement and the Policy counts show.
+      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Post mid-run comments", "Ask the human a question", "Move the task to Review"],
+      recommend: [],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
     "Implements stage work on the task-key branch: writes code, runs local validation, and commits with traceable messages. Hands the committed branch back to the operator at the review boundary — Viberr pushes it and opens the review PR on the Review transition.",
@@ -151,8 +157,13 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
     {
       // The single quality specialist: reviews the diff AND authors/runs the
       // validation suite (the former Tester role is folded in here).
-      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Post mid-run comments", "Ask the human a question", "Report a validation verdict"],
-      recommend: ["Approve the review", "Request changes"],
+      // F20-21/R20-6: a specialist acts DIRECTLY or is WITHHELD — no `recommend`.
+      // "Approve the review" / "Request changes" ship `direct` (they used to ship
+      // `recommend`, silently widened to `direct` at runtime), so the reviewer's
+      // Policy count reads "10 direct · 0 recommend" honestly. They stay gated by
+      // "Report a validation verdict" via applyVerdictOutcomeGate regardless.
+      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Post mid-run comments", "Ask the human a question", "Report a validation verdict", "Approve the review", "Request changes"],
+      recommend: [],
       // The reviewer must NOT push/commit — use the exact catalog label so this
       // becomes a REAL `commit-push-branch: human` grant (D4) that the tool
       // policy actually denies (git push + git commit), not a decorative extra.

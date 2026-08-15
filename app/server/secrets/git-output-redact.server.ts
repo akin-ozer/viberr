@@ -116,6 +116,48 @@ export function redactGitOutput(
 }
 
 /**
+ * R20-3 (F20-4): one redacted SENTENCE from a Claude/Codex provider failure,
+ * for a packet observation line, a fenced timeline block and a log field.
+ *
+ * Ruling 69's argument transfers verbatim from git to the model runtimes: the
+ * credential never lives in argv (Codex gets it via `CodexOptions.apiKey`/env,
+ * Claude via `claudeSpawnEnv`), so the same value+shape scrub plus
+ * control-character stripping makes a provider's own complaint safe to surface.
+ * `redactGitOutput` already IS that shared child-process scrubber, so this
+ * layers on top of it: coerce the (possibly nested) error to text, scrub, keep
+ * the LAST non-empty line (the provider states its verdict at the tail, same as
+ * git — see MAX_DETAIL_CHARS's reasoning), and clamp shorter still, because the
+ * consumers (a packet observation, the 240-char delivery-reason convention from
+ * ruling 69) want one sentence, not eight lines.
+ */
+export const PROVIDER_TEXT_CHARS = 240;
+export function redactProviderText(
+  raw: unknown,
+  token?: string | null,
+): string {
+  // Walk `cause` the same three levels `classifyCodexFailure` does — the SDK
+  // wraps the real message a couple of layers down.
+  const parts: string[] = [];
+  let current: unknown = raw;
+  for (let depth = 0; depth < 3 && current != null; depth += 1) {
+    if (current instanceof Error) {
+      parts.push(current.message);
+      current = current.cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  const scrubbed = redactGitOutput(parts.join("\n"), { token });
+  if (!scrubbed) return "";
+  const lines = scrubbed.split("\n").filter((l) => l.trim() !== "");
+  const last = (lines.length ? lines[lines.length - 1]! : "").trim();
+  return last.length > PROVIDER_TEXT_CHARS
+    ? `…${last.slice(-PROVIDER_TEXT_CHARS)}`
+    : last;
+}
+
+/**
  * The best text a rejected `execFile` promise can offer: git's stderr when it
  * said anything, else the wrapper's own message (which quotes argv — already
  * credential-free by construction, and scrubbed anyway).

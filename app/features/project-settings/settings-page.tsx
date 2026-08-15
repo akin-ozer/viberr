@@ -110,9 +110,12 @@ export function ProjectPanel({
         <div className="pol-note">
           <Icon name="lock" />
           <span>
+            {/* F20-16: name the REAL grant + tier. `edit-policy` is admin-only
+                (rbac.ts) and its label is "Edit workflow & policy"; the old
+                "Change project settings (project admin or maintainer)" invented a
+                grant and wrongly promised maintainers. Matches the Policy page. */}
             Read-only — editing project settings needs the{" "}
-            <strong>Change project settings</strong> grant (project admin or
-            maintainer).
+            <strong>Edit workflow &amp; policy</strong> grant (project admin).
           </span>
         </div>
       )}
@@ -787,9 +790,10 @@ export function StagesPanel({
             </>
           ) : (
             <>
+              {/* F20-16: real grant + tier (see the identity card note). */}
               Read-only — editing the workflow stages needs the{" "}
-              <strong>Change project settings</strong> grant (project admin or
-              maintainer). Boundaries are shown in{" "}
+              <strong>Edit workflow &amp; policy</strong> grant (project admin).
+              Boundaries are shown in{" "}
               <button type="button" className="keybtn" onClick={onNavPolicy}>
                 Policy → Workflow rules
               </button>
@@ -1173,10 +1177,10 @@ export function RepoPanel({
         <div className="pol-note">
           <Icon name="lock" />
           <span>
+            {/* F20-16: real grant + tier (see the identity card note). */}
             Read-only — repairing the repository binding and changing the
             after-merge branch policy need the{" "}
-            <strong>Change project settings</strong> grant (project admin or
-            maintainer).
+            <strong>Edit workflow &amp; policy</strong> grant (project admin).
           </span>
         </div>
       )}

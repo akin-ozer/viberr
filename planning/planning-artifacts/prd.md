@@ -275,7 +275,7 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 
 - NFR6: All authenticated application traffic and external service traffic must be encrypted in transit.
 - NFR7: Repository credentials, provider credentials, tokens, and secrets must never be written to task-visible timelines, comments, audit views, or general application logs.
-- NFR8: The system must enforce separate permission boundaries for human users and agent profiles on every governed action.
+- NFR8: The system must enforce separate permission boundaries for human users and agent profiles on every governed action. *(Amended 2026-08-14, pass 20 — owner ruling 39 / R16-5. MCP server grants sit OUTSIDE the capability matrix: granting a profile an MCP server is itself the authorization to use that server's tools, whatever they do, because Viberr will not pretend to bound a third-party tool it does not define. The consequence is deliberate, not a gap — an agent whose `execute-code-or-write-repo` capability is `off` can still reach the write tools of a granted MCP server. "Every governed action" therefore means every action Viberr itself defines and gates; a granted server's tools are authorized as a unit by the grant, and that boundary is disclosed in the capability-matrix UI and pinned by the absence of any `mcp__*` deny rule. This is the amendment note ruling 39 cites and that this line previously lacked; recorded here so a reader of the PRD alone does not get the opposite impression. D13.)*
 - NFR9: The system must apply least-privilege access for GitHub and runtime-provider credentials based on project policy and active task context.
 - NFR10: Security-relevant actions (policy changes, credential failures, unauthorized action attempts, and human approval actions) must be recorded in audit records.
 
@@ -287,7 +287,7 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 
 ### Integration Integrity
 
-- NFR14: GitHub integration failures (including branch and PR status problems) must be surfaced to users with task-relevant context within 10 seconds of detection.
+- NFR14: GitHub integration failures (including branch and PR status problems) must be surfaced to users with task-relevant context. *(Amended 2026-08-15, pass 20 — owner ruling 63 / R19-9 applied to the fifth number it missed. The original text required surfacing "within 10 seconds of detection"; that figure is struck. Nothing measures it — the only code citing NFR14 (`app/server/github/pr-open.server.ts`) implements the surfacing, not the budget, and no harness records a detection-to-surface latency — so it was exactly the unenforced number ruling 63 struck NFR1–NFR4 for. The surfacing requirement itself stands and is real: a GitHub failure reaches the task with task-relevant context and never fails silently. Only the stopwatch reading is dropped, under ruling 63's standing rule that a latency budget lands in the same change as the harness that measures it, never before it. D13.)*
 - NFR15: Task-linked branch, commit, and PR references must remain uniquely traceable to the originating task key.
 - NFR16: The system must preserve idempotent behavior for external execution actions so that retries do not create duplicate official task transitions, duplicate branch records, or duplicate PR associations.
 - NFR17: Supported coding-agent runtime integrations must preserve agent-identity continuity across resumed task work, or fail explicitly when continuity cannot be maintained.

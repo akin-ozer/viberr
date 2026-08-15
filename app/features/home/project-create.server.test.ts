@@ -93,6 +93,42 @@ describe("createProject — GitHub connection wiring", () => {
     expect(row.default_branch).toBe("master");
   });
 
+  it("F20-14/F20-15: creation warns when the token can only READ the repo (no push)", async () => {
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+
+    // The repo is VISIBLE, so its default branch is adopted, but the token's
+    // computed permissions say no push — the same check Repair now enforces.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            default_branch: "master",
+            permissions: { admin: false, maintain: false, push: false },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const result = await createProject(
+      store.db,
+      { name: "Readonly", key: "RDO", owner: "akin-ozer", repoName: "hello-world", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    // Created (creating before the repo is deliverable is a real flow) but the
+    // caller is told delivery won't work yet — no longer silently accepted.
+    expect(result.repoWarning).toBeTruthy();
+    expect(result.repoWarning).toMatch(/push|write access/i);
+    // The visible default branch is still adopted.
+    const row = store.db
+      .prepare(`SELECT default_branch FROM projects WHERE slug = ?`)
+      .get(result.slug) as { default_branch: string };
+    expect(row.default_branch).toBe("master");
+  });
+
   it("F15-01: creation PROVES the bound credential against the real repo", async () => {
     // Before this, creation bound the PAT and stopped — a fine-grained token's
     // scope chips stayed `assumed`, so a brand-new project's credential card

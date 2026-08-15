@@ -57,3 +57,49 @@ describe("seeded agent catalog copy", () => {
     }
   });
 });
+
+describe("seeded specialist capability modes (F20-21 / R20-6 — direct or withheld)", () => {
+  const grantsOf = (id: string) =>
+    SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === id)!.frontmatter
+      .capabilities;
+  const modeOf = (id: string, capId: string) =>
+    grantsOf(id).find((c) => c.capabilityId === capId)?.mode;
+
+  it("no seeded SPECIALIST grant is `recommend` — the file matches the matrix", () => {
+    // The seed used to ship `move-task-to-review: recommend` (Developer) and
+    // `approve-review`/`request-changes: recommend` (Reviewer) while the runtime
+    // widened them to `direct`, so the canonical project.md disagreed with every
+    // rendered surface. Specialists act directly or are withheld — never propose.
+    for (const p of SEED_AGENT_PROFILES) {
+      if (p.frontmatter.kind !== "specialist") continue;
+      const recommend = p.frontmatter.capabilities.filter(
+        (c) => c.mode === "recommend",
+      );
+      expect(
+        recommend,
+        `${p.frontmatter.id} must ship no recommend grants`,
+      ).toEqual([]);
+    }
+  });
+
+  it("the Developer's former `recommend` (move-task-to-review) now ships `direct`", () => {
+    expect(modeOf("developer", "move-task-to-review")).toBe("direct");
+  });
+
+  it("the Reviewer's former `recommend` verdict outcomes now ship `direct`", () => {
+    expect(modeOf("reviewer", "approve-review")).toBe("direct");
+    expect(modeOf("reviewer", "request-changes")).toBe("direct");
+  });
+
+  it("the OPERATOR keeps its real `recommend` grants (only specialists were coerced)", () => {
+    expect(modeOf("operator", "stage-transitions")).toBe("recommend");
+    expect(modeOf("operator", "completion-for-acceptance")).toBe("recommend");
+  });
+});
+
+describe("seeded Developer model (R20-8)", () => {
+  it("defaults to gpt-5.6-terra — the model this account's Codex actually runs", () => {
+    const dev = SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === "developer")!;
+    expect(dev.frontmatter.model).toBe("gpt-5.6-terra");
+  });
+});

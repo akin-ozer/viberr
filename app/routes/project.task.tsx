@@ -426,7 +426,9 @@ export async function action({ request, params }: Route.ActionArgs) {
           option.kind === "accept_completion"
             ? `Completion accepted · ${taskKey} moved to Done`
             : option.kind === "block_on_policy"
-              ? "Task held on policy · opening repository settings"
+              ? // R20-1 (F20-5): the option UNBLOCKS + re-queues the operator now
+                // (it used to hold the task and deep-nav to settings).
+                "Policy / credential updated · the operator re-runs to re-check"
               : option.kind === "hold_runtime_debug"
                 ? "Held for runtime debug — the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
@@ -451,10 +453,6 @@ export async function action({ request, params }: Route.ActionArgs) {
                   ? `${option.t}\n\n${option.d.trim()}`
                   : option.t,
               }
-            : {}),
-          // Mock flow: blocking on policy opens the repository settings.
-          ...(option.kind === "block_on_policy"
-            ? { navigateTo: `/projects/${projectSlug}/settings` }
             : {}),
         };
       }

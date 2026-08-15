@@ -224,6 +224,56 @@ describe("listAuditLog", () => {
     expect(entries.some((e) => e.text.includes("task comment"))).toBe(false);
   });
 
+  // F20-27 / F20-13: the stage add/remove renderer names the stage (the name was
+  // recorded and ignored), and a removal that retightened a surviving hop
+  // discloses the composite boundary change the toast alone hid.
+  it("names the stage on add/remove and discloses a re-tightened boundary", () => {
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    // CONTRACT with C-PROJECT-SETTINGS (the writer): added/removed record
+    // `details: { id, name }`; a removal that tightens a hop also records
+    // `tightened: { from, to, boundary }` as display NAMES.
+    recordAudit(store.db, {
+      action: "project.stage.added",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: { id: "hold", name: "Hold" },
+    });
+    recordAudit(store.db, {
+      action: "project.stage.removed",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: { id: "hold", name: "Hold" },
+    });
+    recordAudit(store.db, {
+      action: "project.stage.removed",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: {
+        id: "parked",
+        name: "Parked",
+        tightened: { from: "Ready", to: "In Progress", boundary: "human" },
+      },
+    });
+
+    const texts = listAuditLog(store.db, store.slug).map((e) => e.text);
+    expect(texts).toContain(`${arda.name} added workflow stage **Hold**.`);
+    expect(texts).toContain(`${arda.name} removed workflow stage **Hold**.`);
+    expect(texts).toContain(
+      `${arda.name} removed workflow stage **Parked** — **Ready → In Progress** is now human only.`,
+    );
+    // A removal whose details drop the name still renders (older rows / no name).
+    recordAudit(store.db, {
+      action: "project.stage.removed",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: {},
+    });
+    expect(
+      listAuditLog(store.db, store.slug).map((e) => e.text),
+    ).toContain(`${arda.name} removed a workflow stage.`);
+  });
+
   it("sorts merged violations + audit rows newest-first and caps at limit", () => {
     const store = setupTestStore(ctx);
     recordAudit(store.db, {

@@ -810,7 +810,7 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
-  it("block_on_policy: readiness→blocked, waiting→human, packet KEPT", async () => {
+  it("R20-1 block_on_policy: UNBLOCKS (readiness→ready, waiting→agent), resolves, refuses a second confirm", async () => {
     const store = prepared();
     withTask(store, { stage: "review", waiting: "human" }, PACKET);
     const { task } = await resolvePacket(
@@ -819,26 +819,34 @@ describe("resolvePacket kind matrix", () => {
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
-    expect(task.readiness).toBe("blocked");
-    expect(task.waiting).toBe("human");
-    // B-WF2: `validation` is the REVIEW cache with one writer (deriveValidation).
-    // A policy hold is not a review verdict — this used to stamp "failing" and
-    // the next derive silently reverted it. The hold lives in `readiness`.
+    // R20-1 (F20-5): the label promises an UNBLOCK, so this records one and the
+    // packet is CLEARED — it used to record a "hold" and re-accept forever.
+    expect(task.readiness).toBe("ready");
+    expect(task.waiting).toBe("agent");
+    // B-WF2 stands: `validation` (the review cache) is never touched by a policy
+    // decision.
     expect(task.validation).toBe("none");
-    expect(task.packet).not.toBeNull();
+    expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({
-      type: "blocked",
-      text: "**Decision:** hold on policy. VIB-1 stays blocked until the project credential policy is updated.",
+      type: "transition",
+      text: "**Decision:** policy / credential updated. VIB-1 is unblocked and the operator re-runs to re-check. If it is still blocked, a new decision packet is opened.",
     });
+    // A second confirm on the already-resolved packet is a 409 (no repeat).
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
   });
 
-  it("B-WF2: a hold keeps its decision in the inbox — the packet it left open is the un-hold path", async () => {
-    // Fails before B-WF2: the hold options keep their packet open on purpose
-    // (re-resolving it with a different option is how a human lifts the hold),
-    // but the resolution consumed the packet/approval notifications anyway —
-    // so the task sat blocked with an open decision that had vanished from
-    // every inbox.
+  it("R20-1: a settled hold-decision consumes its inbox notification (no lingering open packet)", async () => {
+    // Before R20-1 the hold options kept their packet open and the notification
+    // stayed unread; now every recovery option RESOLVES the packet, so the
+    // decision is made and the inbox item is consumed.
     const store = prepared();
     withTask(store, { stage: "review", waiting: "human" }, PACKET);
     createNotification(store.db, {
@@ -861,10 +869,10 @@ describe("resolvePacket kind matrix", () => {
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
-    expect(unreadFor()).toHaveLength(1); // …and the hold leaves it there
+    expect(unreadFor()).toHaveLength(0); // …and the settled decision clears it
   });
 
-  it("hold_runtime_debug: readiness→blocked, packet KEPT, waiting untouched", async () => {
+  it("R20-1 hold_runtime_debug: resolves + stays blocked/waiting-human, NO run, refuses a second confirm", async () => {
     const store = prepared();
     withTask(store, { stage: "impl", waiting: "human" }, PACKET);
     const { task } = await resolvePacket(
@@ -875,11 +883,21 @@ describe("resolvePacket kind matrix", () => {
     );
     expect(task.readiness).toBe("blocked");
     expect(task.waiting).toBe("human");
-    expect(task.packet).not.toBeNull();
+    // R20-1: the hold now RESOLVES (clears) the packet — it just starts no run.
+    expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected — findings come back as task comments.",
+      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected — coordination is paused and no operator run was started. Use **Run operator** on the task page when the inspection is done.",
     );
+    // A repeat confirm on the resolved packet is refused.
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 3 },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
   });
 
   it("redirect without ev → fallback decision copy", async () => {
@@ -1166,6 +1184,46 @@ describe("resolvePacket kind matrix", () => {
     expect(
       texts.some((t) => t.includes("**Packet resolved:** the requested goal edit landed.")),
     ).toBe(true);
+  });
+
+  it("R20-1: an edit_goal-stamped packet refuses a SECOND confirm (waiting for the edited goal)", async () => {
+    const store = prepared();
+    const SCOPE_PACKET: TaskPacket = {
+      type: "blocked",
+      kind: "Blocked decision",
+      from: "operator",
+      title: "Scope needed: goal is a placeholder",
+      body: "",
+      observations: [],
+      options: [
+        { kind: "edit_goal", t: "Human specifies the goal", d: "", rec: true },
+        { kind: "hold_runtime_debug", t: "Hold", d: "", rec: false },
+      ],
+    };
+    withTask(
+      store,
+      { stage: "triage", waiting: "human", readiness: "blocked" },
+      SCOPE_PACKET,
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    // The packet is stamped awaiting the goal, so a second confirm — of ANY
+    // option — is a 409 telling the human to save the goal instead.
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("waiting for the edited goal"),
+    });
   });
 
   it("resolving an already-resolved packet → 409 conflict, no crash", async () => {

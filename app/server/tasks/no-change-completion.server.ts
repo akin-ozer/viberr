@@ -55,6 +55,14 @@ export function noChangeApplies(
   return fm.noChanges === true && !fm.pr;
 }
 
+/** The task has no pull request to merge — the only shape a "no changes" outcome
+ *  can have. R20-2 (F20-6): the ACCEPT path probes on this alone, not on the
+ *  agent's `noChanges` flag, because an envelope that forgot the flag left the
+ *  server refusing with advice that would open an EMPTY PR (VIB-2). */
+export function noChangeCandidate(fm: Pick<TaskFrontmatter, "pr">): boolean {
+  return !fm.pr;
+}
+
 interface GhRef {
   object?: { sha?: string };
 }
@@ -226,6 +234,15 @@ export interface AcceptanceNoChangeCheck {
   verification: NoChangeVerification | null;
   /** The probed branch — carried for the caller's copy. */
   branch: string | null;
+  /** R20-2 (F20-6): the frontmatter did NOT claim `noChanges` — the server
+   *  proved it by probing the branch. Drives the disclosure and the frontmatter
+   *  repair. */
+  autoDetected: boolean;
+  /** R20-2: for an UNCLAIMED task the probe could not clear — carried so the
+   *  refusal one level up can borrow the counted `has_work` sentence instead of
+   *  `verdictGateReason`'s (wrong-for-empty) "open the PR" advice. */
+  probe?: "has_work" | "unverifiable";
+  probeRefusal?: string | null;
 }
 
 /**
@@ -246,9 +263,13 @@ export async function acceptanceNoChangeCheck(
     ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
   });
   const fm = file?.parsed.frontmatter;
-  // The ordinary PR path pays NOTHING — no read, no request.
-  if (!fm || !noChangeApplies(fm)) {
-    return { applies: false, refusal: null, verification: null, branch: null };
+  if (!fm) {
+    return { applies: false, refusal: null, verification: null, branch: null, autoDetected: false };
+  }
+  const claimed = noChangeApplies(fm); // fm.noChanges === true && !fm.pr
+  // The ordinary PR path pays NOTHING — a task WITH a PR fails noChangeCandidate.
+  if (!claimed && !noChangeCandidate(fm)) {
+    return { applies: false, refusal: null, verification: null, branch: null, autoDetected: false };
   }
   const probe = await probeNothingToDeliver(db, ctx, projectSlug, taskKey);
   if (probe.status === "verified") {
@@ -257,6 +278,25 @@ export async function acceptanceNoChangeCheck(
       refusal: null,
       verification: probe.verification,
       branch: probe.verification.branch,
+      // R20-2: an UNCLAIMED task the server proved empty is auto-detected.
+      autoDetected: !claimed,
+    };
+  }
+  // R20-2: an UNCLAIMED task the probe could not clear is simply not a no-change
+  // acceptance. It must NOT inherit the claimed path's fail-closed refusal (that
+  // would turn every PR-less accept attempt into a GitHub-outage refusal). It
+  // falls through to the ordinary gates, which refuse it for the right reason
+  // (the counted `has_work` sentence, carried below). A CLAIMED task keeps the
+  // R19-8 fail-closed refusal exactly as it was.
+  if (!claimed) {
+    return {
+      applies: false,
+      refusal: null,
+      verification: null,
+      branch: fm.branch,
+      autoDetected: false,
+      probe: probe.status,
+      probeRefusal: probe.refusal,
     };
   }
   return {
@@ -264,6 +304,7 @@ export async function acceptanceNoChangeCheck(
     refusal: probe.refusal,
     verification: null,
     branch: fm.branch,
+    autoDetected: false,
   };
 }
 
@@ -278,7 +319,10 @@ export function assertVerifiedNoChangeStillApplies(
   check: AcceptanceNoChangeCheck,
   taskKey: string,
 ): void {
-  if (noChangeApplies(fm) === check.applies) return;
+  // R20-2: re-assert against the predicate the check actually used, or an
+  // auto-detected acceptance (which never saw a `noChanges` flag) always throws.
+  const stillApplies = check.autoDetected ? noChangeCandidate(fm) : noChangeApplies(fm);
+  if (stillApplies === check.applies) return;
   throw AppError.conflict(
     `${taskKey} changed while the acceptance was being verified — it is ` +
       `${noChangeApplies(fm) ? "now" : "no longer"} a no-change completion, and the state ` +
@@ -302,8 +346,17 @@ export function noChangeCompletionEvent(input: {
   /** The refusal that was overridden, when forced. Named verbatim so a forced
    *  close can never claim "we could not look" when we looked and found work. */
   forcedRefusal?: string | null;
+  /** R20-2 (F20-6): the completion did NOT claim `noChanges` — the server proved
+   *  it at acceptance. Disclosed so the record states who established the fact. */
+  autoDetected?: boolean;
 }): TaskFileEvent {
   const { taskKey, verification } = input;
+  // R20-2: one clause naming the server as the verifier, only when auto-detected
+  // and only for the two branch-shaped bases (no_repo names its own cause).
+  const autoClause =
+    input.autoDetected && verification && verification.basis !== "no_repo"
+      ? " The completion did not claim this; the server verified it at acceptance."
+      : "";
   const who =
     input.by === "operator"
       ? "Operator acceptance under **full-autonomy** policy recorded"
@@ -329,13 +382,15 @@ export function noChangeCompletionEvent(input: {
       `no pull request to merge: no \`${verification.branch}\` branch exists on the remote, ` +
       `checked against \`${verification.baseBranch}\`` +
       (verification.baseSha ? ` at \`${verification.baseSha.slice(0, 12)}\`` : "") +
-      ` when this was accepted.`;
+      ` when this was accepted.` +
+      autoClause;
   } else {
     text =
       `${who} — **${taskKey} completed with no changes**. Branch \`${verification.branch}\` ` +
       `carries no commits ahead of \`${verification.baseBranch}\`` +
       (verification.baseSha ? ` (\`${verification.baseSha.slice(0, 12)}\`)` : "") +
-      `, re-checked at acceptance — so there was nothing to deliver and no pull request to merge.`;
+      `, re-checked at acceptance — so there was nothing to deliver and no pull request to merge.` +
+      autoClause;
   }
 
   return {

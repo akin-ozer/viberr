@@ -771,3 +771,15 @@ the runtime/mount/process items need the rebuilt container.
   **D12** (skeleton loaders). Do not build these; leave the spec-vs-app gap noted.
 - **`tsc` + the full suite are required gates** (per prior-pass memory: `npm run build` ≠ typecheck).
   Each cluster lands green independently before the next dependent cluster starts.
+
+---
+
+## 6. Cross-cluster reconciliation notes (discovered during implementation)
+
+- **C-AGENTS must handle the write-path stray-recommend normalization (from C-SPECIALIST-MODE/R20-6):**
+  `coerceSpecialistCapabilityMode` is now an identity passthrough. The write path
+  (`agent-profile-actions.server.ts:182/252/431`) must normalize a stray specialist `recommend`
+  DOWN to `off` (withheld), NOT up to `direct`. Flip `agents-route.server.test.ts:557` and `:601`
+  (the old "R7-5" widening tests) to expect `off`. Without this, a hostile/legacy submitted
+  specialist `recommend` displays as `recommend` while the runtime treats it as withheld — the
+  three-way divergence F20-21 is about, one layer up.

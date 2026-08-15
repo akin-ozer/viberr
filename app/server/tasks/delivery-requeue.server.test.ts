@@ -260,6 +260,60 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
 });
 
 /**
+ * R20-1 (F20-5) — resolving a failure packet re-queues the operator with the
+ * dedicated `packet-resolved` trigger, EXCEPT for the documented NO_REQUEUE set
+ * (`hold_runtime_debug` asked for no run). Reuses the same `runOperator` mock.
+ */
+describe("R20-1 — a settled recovery decision re-queues the operator", () => {
+  const FAILURE_PACKET = {
+    type: "blocked",
+    kind: "Blocked decision",
+    from: "operator",
+    title: "Operator run failed — pick a recovery path",
+    body: "",
+    observations: [],
+    options: [
+      { kind: "block_on_policy", t: "Unblock and re-run", d: "", rec: true },
+      { kind: "hold_runtime_debug", t: "Hold", d: "", rec: false },
+    ],
+  } as never;
+
+  it("block_on_policy re-queues runOperator with trigger 'packet-resolved'", async () => {
+    deployOperator("supervised");
+    seedTask({ stage: "impl", waiting: "human", readiness: "blocked" }, FAILURE_PACKET);
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    await waitFor(() => runOp.mock.calls.length > 0, "the re-queued operator run");
+    expect(runOp).toHaveBeenCalledTimes(1);
+    expect(runOp.mock.calls[0]![1]).toMatchObject({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      trigger: "packet-resolved",
+      resolvedOption: { kind: "block_on_policy" },
+    });
+  });
+
+  it("hold_runtime_debug does NOT re-queue (the human asked for no run)", async () => {
+    deployOperator("supervised");
+    seedTask({ stage: "impl", waiting: "human", readiness: "blocked" }, FAILURE_PACKET);
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    await flush();
+    expect(runOp).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * R19-4 (F19-1, owner ruling 2026-08-06) — after a SUPERVISED operator delivery
  * the server GUARANTEES an actionable next step. Live: VC-1 was left
  * `waiting:human` with no recommendation, no packet and no chip while the

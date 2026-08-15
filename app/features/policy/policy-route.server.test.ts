@@ -247,15 +247,24 @@ describe("set-boundary", () => {
       toast: "In Progress → Review: auto-advance · applies to future transitions",
     });
     const { view } = await runLoader(ids.arda);
-    expect(
-      view.transitions.find((t) => t.from === "impl" && t.to === "review")!
-        .boundary,
-    ).toBe("auto");
+    const changed = view.transitions.find(
+      (t) => t.from === "impl" && t.to === "review",
+    )!;
+    expect(changed.boundary).toBe("auto");
+    // F20-26: the `by` prose is recomputed from the new boundary, so the row no
+    // longer contradicts itself (it used to keep the seed's `approval` copy
+    // beside an Auto-advance selection). Reverting the `rule.by = …` recompute
+    // in setTransitionBoundary makes this go red.
+    expect(changed.by).toBe(
+      "Operator, within policy — no human decision required",
+    );
     const audit = listAuditEvents(app.db, {
       action: "project.policy.boundary_changed",
     });
+    // N20-9: the human-readable detail carries stage NAMES, not raw ids, so the
+    // rendered audit row matches the toast and the rest of the app.
     expect(audit[0]).toMatchObject({
-      details: { from: "impl", to: "review", boundary: "auto" },
+      details: { from: "In Progress", to: "Review", boundary: "auto" },
     });
 
     // Restore.

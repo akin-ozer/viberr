@@ -86,6 +86,12 @@ export function HomePage({
   // does inside a project. Home's own box stays what it says it is ("Find a
   // project…"), a filter over the grid on screen.
   //
+  // F20-30: "app-wide" is now literally true. Home and the workspace `Topbar`
+  // mount the shortcut themselves (here and there); the three top-level overlay
+  // routes that render outside both — /profile, /notifications, /org/settings —
+  // get it from the shared `routes/palette-shell.tsx` layout instead. No route
+  // mounts it twice.
+  //
   // …and ONE implementation of it: this effect was a second copy of the
   // topbar's, free to drift from it. Both surfaces call the shared hook, which
   // also stops swallowing ⌥⌘K / Ctrl-Alt-K (OS and IDE combinations these

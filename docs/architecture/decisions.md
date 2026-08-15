@@ -164,12 +164,14 @@ it is regenerated from the filesystem rather than restated here.
    failure state. **Amended 2026-08-04 (ruling 40 / R16-6)** — that is true only of a human
    acceptance; a full-autonomy operator acceptance records the PR `accepted` (merge pending)
    and a human completes the merge later, because `merge-pull-request` is `ALWAYS_HUMAN`.
-   **Extended** — the kind set is now NINE: `accept_completion`, `request_edit`,
+   **Extended** — the kind set is now TEN: `accept_completion`, `request_edit`,
    `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`,
-   `archive_task`, `custom`. (`archive_task` arrived with R14-3 — the task archive — and
-   the count here was never updated; corrected 2026-08-05 against
+   `archive_task`, `discard_branch`, `custom`. (`archive_task` arrived with R14-3 — the task
+   archive — and the count here was never updated; corrected 2026-08-05 against
    `PACKET_OPTION_KINDS` in `app/schemas/task-file.schema.ts`, which is the source of
-   truth.) The same ruling governs the capability catalog: agent policy is id-based
+   truth. `discard_branch` arrived 2026-08-15, pass 20 — ruling 77 / R20-2 / F20-6 — as the
+   executable option that deletes a never-pushed local task branch; count nine→ten.) The same
+   ruling governs the capability catalog: agent policy is id-based
    against the shared catalog, and advisory ids with no runtime consumer get no toggle.
 8. **`tweaks-panel.jsx` is not ported** (dev harness, dead code). Review-queue packet and
    acceptance mechanics ship before the queue surface; the queue lives in
@@ -872,7 +874,107 @@ it is regenerated from the filesystem rather than restated here.
     member-only serving, rendered on the task page, citable in evidence references that carry
     into the review PR body. (`app/shared/capabilities.ts`,
     `app/server/tasks/specialist-browser-mcp.server.ts`, `Dockerfile`,
-    `app/server/files/file-store-root.server.ts`, `app/routes/task-attachment.tsx`)
+    `app/server/files/file-store-root.server.ts`, `app/routes/task-attachment.ts`)
+
+76. **R20-1 (2026-08-14, F20-5): confirming a recovery option on a failure packet RESOLVES it and
+    RE-QUEUES the operator — no repeat confirms, and the label says exactly what happens.** Live: the
+    "Operator run failed" packet offered "Update the policy / credential and unblock" whose recorded
+    effect was a HOLD (the label said UNBLOCK, the packet stayed open); the open packet then accepted
+    "Confirm decision" three times, writing three identical decision entries onto the canonical
+    timeline; and a human-pressed "Run operator" while it stayed open burned a paid no-op the
+    coordination pause could take no action on. The ruling: confirming ANY recovery option resolves
+    the packet (a settled decision refuses the next confirm), option labels must state their real
+    effect, a settled decision re-queues the operator automatically (except the documented
+    NO_REQUEUE set), and a repeat failure opens a NEW packet with a fresh decision record. A manual
+    "Run operator" is refused while a packet is open (`refused: "open-packet"`) rather than paid for.
+    Extends ruling 7's stable-kind dispatch and ruling 17's recovery-packet model.
+    (`resolvePacket` in `app/server/tasks/task-actions.server.ts`; the `packet-resolved` trigger in
+    `app/server/runtimes/operator-run.server.ts`)
+
+77. **R20-2 (2026-08-14, F20-6): `accept_completion` re-verifies the ACTUAL branch state, and the
+    packet's discard option actually deletes the never-pushed branch.** Live (VIB-2): a
+    verification-only task whose workspace branch stayed byte-identical to main and was never pushed;
+    the completion did not set `noChanges`, so `accept_completion` refused with advice that would have
+    opened an EMPTY PR, and the operator's chosen "delete the branch, complete with no changes" option
+    was UNEXECUTABLE — no one in-app could delete a task branch short of `archive_task(+deleteBranch)`.
+    The ruling: the accept path re-verifies branch state — empty or missing routes into the
+    no-change-acceptance path, with disclosure, regardless of the agent's `noChanges` flag — and a new
+    `discard_branch` packet kind (ruling 7's tenth) deletes the never-pushed local branch on confirm.
+    Consistent with ruling 62 (R19-8) — the no-change path keeps the full verdict gate — and ruling 17:
+    `discardLocalTaskBranch` refuses an on-remote branch, as remote deletion has always been
+    packet-only. (`no-change-completion.server.ts`, `push-workspace.server.ts`,
+    `app/server/tasks/task-actions.server.ts`, `app/schemas/task-file.schema.ts`)
+
+78. **R20-3 (2026-08-14, F20-4): the provider's OWN WORDS reach the packet and timeline (redacted),
+    and model availability is validated against the account.** Live: a seeded Developer shipping
+    `gpt-5.6-sol` on a ChatGPT-account Codex that rejects it (400 — "not supported when using Codex
+    with a ChatGPT account"), while the blocked packet said only the double-generic "Codex execution
+    failed. Review its authentication and runtime configuration." Both halves ship. Ruling 69's
+    surface-the-tool's-own-words rule (R19-13) extends to the Codex/Claude spawn/run error pipe: a
+    redacted `providerText` from `classifyCodexFailure` / `classifyClaudeError` reaches the persisted
+    `err` line, the packet observation, the escalation and the timeline (`redactProviderText`, its own
+    240-char clamp beside ruling 69's git redactor). AND model availability is marked from a REAL 400
+    and cleared on a real success — no synthetic probe, ruling 19's proven-verdicts-only posture — in a
+    new `model_availability` table, surfaced on the catalog and the profile modal so a marked model is
+    disabled with a reason. Extends ruling 69 (R19-13). (`app/server/secrets/git-output-redact.server.ts`,
+    `codex-runtime.server.ts`, `claude-runtime.server.ts`,
+    `app/server/runtimes/model-availability.server.ts`, `model-catalog.server.ts`)
+
+79. **R20-4 (2026-08-14, N20-2): a first-ever probe of an npx/bunx-style stdio command that times out
+    is treated as visibly-installing.** The uvx path already warmed a first-run install in the
+    background (ruling 74 / R19-18), but a cold `npx -y @modelcontextprotocol/server-everything`
+    exceeding the 20s probe showed a bare "timed out after 20s" and no warm-up, because npx's progress
+    output did not match the visibly-installing heuristic. The ruling extends R19-18's treatment to the
+    npx/bunx family: a first-ever timing-out probe of such a command auto-warms in the background under
+    the same 15-minute cap and the same polling row as uvx. Backed by `first_success_at` +
+    `heuristic_warmups` columns so the warm-up is armed at most once per command and rolled back if it
+    fails. Directly related to F20-10 — the same cold-install race that surfaces silently at run time.
+    Extends ruling 74 (R19-18). (`app/server/org/resources.server.ts`,
+    `app/server/org/mcp-warmup.server.ts`, `db/migrations/0001_baseline.sql`)
+
+80. **R20-5 (2026-08-15, scope): pass 20 fixes EVERY defect and every UX-coherence/drift item that is
+    a defect or inconsistency — only pure never-built PRD features are HELD.** The whole ledger
+    (F20-1..30, N20-1..14) plus the coherence/drift items C1..C14 and D2..D13 are committed todos for
+    this pass: no deferral, each validated. The only items held out of scope are features the product
+    never built and that would be net-new work rather than corrections: **D7** (the three dropped
+    Decision-Packet anatomy fields — impact / confidence / severity), **D10/D11** (the missing
+    Continuity-Recovery-Panel escalated / paused states and the Execution-truth-strip
+    runtime-continuity fact), and **D12** (skeleton loaders). Each held item stays noted as a
+    spec-vs-app gap, not silently dropped. Extends ruling 38 (R16-4) — correctness first, then the
+    full UI/a11y list, nothing deferred out of the pass.
+
+81. **R20-6 (2026-08-14, F20-21): specialists act DIRECTLY or are WITHHELD — `recommend` is dropped
+    for the specialist kind.** `coerceSpecialistCapabilityMode` silently widened a specialist's
+    `recommend` grant to `direct` (`capabilities.ts:316-318`) while the seeded canonical project.md
+    shipped `recommend` for the Developer's `move-task-to-review` and the Reviewer's
+    `approve-review` / `request-changes` — so the file said one thing (7 direct + 1 recommend, 8 + 2)
+    and every rendered surface said another ("Acts directly", "8 direct · 0 recommend"), with the
+    dangerous polarity (recommend→direct) as the silent one. The ruling makes file = enforcement =
+    display: remove the silent widening AND make the seed honest (write `direct`, not `recommend`, for
+    the specialist grants). The operator keeps its real `recommend`. Extends ruling 2's capability
+    model. (`app/shared/capabilities.ts`, `app/server/seed/agent-catalog.server.ts`)
+
+82. **R20-7 (2026-08-14, F20-9 / D1): the capability display MIRRORS the runtime gate — the Agents
+    card and the Capability matrix bucket grants autonomy-aware.** An operator profile holding
+    `completion-for-acceptance: direct` on a project deployed SUPERVISED rendered "Accept completion
+    into Done" under ACTS DIRECTLY, authority the server refuses: the display applied only
+    `applyVerdictOutcomeGate` (`capabilitiesToActionLabels`) while the runtime also gates on
+    `authority.autonomy !== "full"` (`operator-actions.server.ts:2580`) — the F15-06 defect class left
+    unfixed one axis over, with an admin reading the card as policy truth. The ruling: the display gate
+    applies the autonomy ceiling the same way it already applies the verdict gate, so under a supervised
+    project the row renders gated/conditional, not "Acts directly"; and the Agents card carries the
+    Policy page's reconciling note for the always-human "Transition a task to Done" row it prints
+    beside it. Extends ruling 67 (R19-A) — autonomy is a ceiling on every run — and ruling 2.
+    (`capabilitiesToActionLabels` in `app/features/agents/agents-query.server.ts`;
+    `app/features/agents/agents-page.tsx`; the runtime gate at
+    `app/server/tasks/operator-actions.server.ts` is the read-only mirror)
+
+83. **R20-8 (2026-08-14, F20-4 seed half): the seeded Developer's default Codex model becomes
+    `gpt-5.6-terra`.** The seed shipped `gpt-5.6-sol`, which this deployment's ChatGPT-account Codex
+    cannot run; the CLI default `gpt-5.6-terra` is the model the account actually runs, so the seed now
+    writes it. Ruling 78 (R20-3) still ships — a future mismatch is surfaced with the provider's own
+    words and marked unavailable, honest rather than generic — so this changes the default, not the
+    honesty machinery behind it. (`app/server/seed/agent-catalog.server.ts`)
 
 ## Route map
 
