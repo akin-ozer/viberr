@@ -26,6 +26,7 @@ import {
   coerceSpecialistCapabilityMode,
 } from "~/shared/capabilities";
 import { humanGatesPreWorkAdvance } from "~/shared/workflow/stage-roles";
+import { DEFAULT_PROFILE_ROLE_LABEL } from "./agent-types";
 import type { AgentProfileView, LibraryProfileView } from "./agent-types";
 
 /**
@@ -329,6 +330,48 @@ export type ModelMarks = Partial<
 >;
 
 /**
+ * Does this deployment's snapshot actually override the template's IDENTITY —
+ * i.e. does the project's copy differ from the global base in something the
+ * base defines about the profile itself?
+ *
+ * OBS-7 residual. `autonomy` and `resources` are excluded by design: both are
+ * written by controls that say nothing about who the profile is (project
+ * creation's `auto` preset writes autonomy alone onto an otherwise untouched
+ * operator; the org resource-rename rewriter edits `definition.resources` in
+ * place). A snapshot carrying only those still tracks the template for every
+ * field the card renders, so "customized for <project>" would be a claim about
+ * a divergence that does not exist.
+ *
+ * `scope` is deliberately not compared either — the caller already rejects a
+ * snapshot whose scope differs from the template's (those profiles name their
+ * own project in the sentence), so it could never contribute a difference here.
+ */
+function identityOverride(
+  def: AgentDeploymentDefinition,
+  template: TemplateProfile,
+): boolean {
+  const list = (v: readonly string[] | undefined) =>
+    v === undefined ? undefined : JSON.stringify(v);
+  const fields: [unknown, unknown][] = [
+    [def.kind, template.kind],
+    [def.name, template.name],
+    [def.role, template.role],
+    [def.icon, template.icon],
+    [list(def.backends), list(template.backends)],
+    [def.model, template.model],
+    // A template declares no `effort` at all, so any stored effort is an override.
+    [def.effort, undefined],
+    [def.desc, template.desc],
+    // A template's persona is its markdown BODY (F10-30) — the same value the
+    // view's `definition` field falls back to.
+    [def.persona, template.description],
+    [list(def.stages), list(template.stages)],
+    [def.spanAll, template.spanAll],
+  ];
+  return fields.some(([mine, base]) => mine !== undefined && mine !== base);
+}
+
+/**
  * Effective profile for ONE deployment entry (exported for actions/tests).
  *
  * `absentDeliverMode` (R15-9) is the mode the RUNTIME applies when the
@@ -409,7 +452,10 @@ export function effectiveProfileView(
     id: deployment.profileId,
     kind,
     name: def?.name ?? template?.name ?? deployment.profileId,
-    role: def?.role ?? template?.role ?? "Specialist",
+    // U12 residual: this default was "Specialist" — retired vocabulary, and the
+    // one value the card cannot improve on, since `profileRoleLabel` only
+    // rewrites a role that is empty or repeats the name. Shared literal.
+    role: def?.role ?? template?.role ?? DEFAULT_PROFILE_ROLE_LABEL[kind],
     icon: def?.icon ?? template?.icon ?? "agents",
     backends,
     model,
@@ -417,6 +463,28 @@ export function effectiveProfileView(
     modelKnown,
     effort: def?.effort ?? "",
     scope: def?.scope ?? template?.scope ?? "",
+    // OBS-7: a deployment holds a `definition` only once this project WROTE one
+    // — the seeded roster carries none (agent-catalog.server.ts deploys
+    // profileId + capabilities), so the snapshot is the fork itself. The
+    // scope-sentence test is what keeps the flag honest for the paths that
+    // already name themselves: create writes "Created in <project>" and the
+    // library deploy "Added from the global library to <project>", and neither
+    // needs (or gets) a second sentence saying it is project-local. What is left
+    // is precisely the case OBS-7 found: a fork still wearing the global base's
+    // own scope line.
+    //
+    // OBS-7 residual: "a snapshot exists" was too weak a signal for the
+    // sentence the card composes ("customized for <project>"). Project creation
+    // writes `definition: { ...a.definition, autonomy: "full" }` onto the
+    // operator for the `auto` preset (project-create.server.ts) — on a base
+    // deployment that is an autonomy-ONLY snapshot, so every auto-preset project
+    // claimed a customized operator from birth without a single identity field
+    // being touched. `identityOverride` is the honest half.
+    customized:
+      def !== null &&
+      template !== null &&
+      (def.scope === undefined || def.scope === template.scope) &&
+      identityOverride(def, template),
     // Short scannable copy (operator selection + cards): deployment override,
     // else the template's dedicated `desc` field, else the body (legacy
     // templates whose body IS the short description).

@@ -159,6 +159,8 @@ describe("AgentCapability", () => {
   // P14-WL-05: the library deploy copies the NAME into `role` when a template
   // declares none, and this row printed it raw — the deployed "Org Docs Writer"
   // read "Org Docs Writer · Org Docs Writer" here.
+  // U12 residual: the fallback said "Specialist", the retired third name for
+  // this object (`DEFAULT_PROFILE_ROLE_LABEL`, agent-types.ts).
   it("a role that only repeats the name renders as what the profile IS", () => {
     const { container } = render(
       <AgentCapability
@@ -172,7 +174,7 @@ describe("AgentCapability", () => {
     );
     const row = container.querySelector(".pcap-main")!;
     expect(row.querySelector(".nm")!.textContent).toBe("Org Docs Writer");
-    expect(row.querySelector(".sub")!.textContent).toBe("Specialist");
+    expect(row.querySelector(".sub")!.textContent).toBe("Agent profile");
   });
 
   it("keeps a real role verbatim", () => {

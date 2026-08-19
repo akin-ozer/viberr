@@ -32,6 +32,14 @@ export interface SettingsViewData {
   stages: { id: string; name: string; color: string }[];
   stageCounts: Record<string, number>;
   members: MembershipView[];
+  /**
+   * The ruling-5 single credential fact — assembled here for every member and
+   * REDACTED per reader in the route loader (F21-5 / R19-11: the token's label,
+   * masked tail and scope verdicts reach only `grant-github-scope` holders, via
+   * `features/github/credential-visibility.server`, exactly as on /github).
+   * The redaction lives with the reader identity, which this query has no access
+   * to and deliberately does not take.
+   */
   credential: ProjectCredentialHealth;
   /** Tasks whose GitHub records (linked PR / pushed commits) point at the
    * current repo — drives the repair dialog's footprint acknowledgment. */

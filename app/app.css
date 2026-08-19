@@ -881,7 +881,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: flex; flex-direction: column; gap: .3rem;
   animation: dropPreviewIn .16s var(--ease-out);
 }
-.card-drop-preview .key { font-family: var(--font-mono); font-size: .72rem; color: var(--blue-pressed); }
+/* F21-18: same key, same rule — one identifier never wraps (see `.card-top .key`).
+   The preview sits in the narrow drop column, which is where a squeeze happens. */
+.card-drop-preview .key { font-family: var(--font-mono); font-size: .72rem; color: var(--blue-pressed); white-space: nowrap; }
 .card-drop-preview .dp-title {
   font-size: .95rem; line-height: 1.18; font-weight: 800;
   color: color-mix(in srgb, var(--fg), transparent 15%);
@@ -959,7 +961,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 
 .card-top { display: flex; align-items: center; gap: .5rem; }
-.card-top .key { font-family: var(--font-mono); font-size: .72rem; color: var(--faint); }
+/* F21-18: `white-space: nowrap` — at 390px the readiness pill sharing this row
+   squeezed the key until it broke mid-token ("VIB-\n8"), which reads as two
+   values and is not a key any more. A task key is one identifier, so it never
+   wraps; the pill beside it is prose and takes the squeeze instead. */
+.card-top .key { font-family: var(--font-mono); font-size: .72rem; color: var(--faint); white-space: nowrap; }
 .card-top .spacer { flex: 1; }
 .card h3 { font-size: .98rem; line-height: 1.18; font-weight: 800; }
 
@@ -1015,8 +1021,21 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    works; it isn't an interactive control, so suppress the focus ring. */
 .detail:focus,
 .detail:focus-visible { outline: none; }
-.detail-main { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; }
-.detail-side { display: flex; flex-direction: column; gap: 1.1rem; }
+/* U7 (D2, second half): `.detail-side` comes FIRST in the markup — current
+   state, the acceptance button and Permissions ahead of the timeline — because
+   the UX spec's stacking rule is a READING order ("preserving reading order:
+   current state, latest packet, next action, then the timeline"), and a screen
+   reader and the keyboard follow the DOM, not the paint. Pass 20 lifted the
+   column visually with `order: -1` and left the source order alone, which fixed
+   the sighted stack and CREATED a visual-vs-focus mismatch below 1100px (WCAG
+   2.2 SC 1.3.2 / 2.4.3) on the app's core workflow.
+   The desktop two-column arrangement is restored by PLACEMENT rather than by
+   `order`: both children name their cell explicitly, so the grid draws
+   main-left / side-right at any source order. `grid-row: 1` is load-bearing —
+   auto-placement is sparse and would otherwise push the main column onto a
+   second row once the side column claims column 2 first. */
+.detail-main { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; grid-column: 1; grid-row: 1; }
+.detail-side { display: flex; flex-direction: column; gap: 1.1rem; grid-column: 2; grid-row: 1; }
 
 .panel {
   border: 1px solid var(--hairline);
@@ -3906,12 +3925,16 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    because every other `.key` rule is scoped to a container this row is not in
    (`.card-top`, `.task-hero`, `.live-task`, `.pj-name`). It read as a different
    kind of value at a glance. Only the width was ever declared here (P16-F3 moved
-   it out of an inline style, which is how the gap surfaced). */
+   it out of an inline style, which is how the gap surfaced).
+   F21-18: the 64px column is narrower than a long key, so this is in fact the
+   row that breaks a key mid-token first — it wraps inside its own fixed column
+   with nothing else on the row squeezing it. */
 .card.list-row .key {
   width: 64px;
   font-family: var(--font-mono);
   font-size: .72rem;
   color: var(--faint);
+  white-space: nowrap;
 }
 .card.list-row h3 { flex: 1; }
 .avatar.ghost { opacity: .5; }
@@ -4012,15 +4035,19 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .field-row { grid-template-columns: 1fr; }
   /* task detail: side panels move under the main column and go side-by-side */
   .detail { grid-template-columns: 1fr; }
-  /* D2 (pass-20): the side column carries Current state — and with it the primary
-     "Accept completion → Done" button — plus Permissions. In source order it
-     follows `.detail-main`, whose LAST panel is the timeline, so a plain 1-up
-     stack dropped the app's most consequential action below every timeline entry.
-     `order: -1` lifts the current-state/acceptance column ahead of the timeline
-     VISUALLY at this breakpoint while leaving DOM order untouched, so a screen
-     reader still reads main → side (UX spec §Breakpoint Strategy). A CSS `order`
-     swap is deliberately preferred over a DOM reorder here (cheap, no markup). */
-  .detail-side { flex-direction: row; flex-wrap: wrap; order: -1; }
+  /* D2 (pass-20) / U7 (pass-21): the side column carries Current state — and
+     with it the primary "Accept completion → Done" button — plus Permissions,
+     and the UX spec stacks it ABOVE the timeline ("preserving reading order:
+     current state, latest packet, next action, then the timeline").
+     It is first in the DOM now, so the 1-up stack needs no `order` at all: drop
+     the desktop cell placement and both columns fall into the single column in
+     source order. Pass 20's `order: -1` did this visually and left the DOM —
+     hence the screen reader and the keyboard — reading timeline-first, which is
+     the half of D2 U7 reopened. Nothing here may reintroduce `order`: it would
+     re-split what the eye and the focus ring see. */
+  .detail-main,
+  .detail-side { grid-column: 1; grid-row: auto; }
+  .detail-side { flex-direction: row; flex-wrap: wrap; }
   .detail-side > * { flex: 1; min-width: 280px; }
   /* agents: the profile rail becomes a horizontal strip. The group labels ride
      along rather than hide: `.ag-group-label.ag-group-row` is not only a label,

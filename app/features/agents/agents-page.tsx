@@ -5,6 +5,7 @@ import { capabilityById } from "~/shared/capabilities";
 import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
 import { countLabel } from "~/shared/text/plural";
 import {
+  BOUNDARIES,
   TRANSITION_TO_DONE_CAPABILITY_ID,
   TRANSITION_TO_DONE_EXCEPTION,
 } from "~/features/policy/policy-data";
@@ -58,6 +59,16 @@ export interface WorkflowEdgeView {
   from: string;
   to: string;
 }
+
+/** OBS-4: the operator capability whose column placement needs the boundary
+ *  qualifier below (the id is the persisted one; the LABEL comes from the
+ *  catalog so this card can never print a stale name). */
+const STAGE_TRANSITIONS_CAPABILITY_ID = "stage-transitions";
+
+/** The Policy page's own name for a boundary that advances without a human —
+ *  borrowed, never restated, so both surfaces call it the same thing. */
+const AUTO_BOUNDARY_LABEL =
+  BOUNDARIES.find((b) => b.id === "auto")?.label ?? "Auto-advance";
 
 // ------------------------------------------------------------ small parts
 
@@ -653,6 +664,19 @@ export function ProfileDetail({
     a.kind === "operator" &&
     transitionToDoneLabel !== undefined &&
     governed.forbidden.includes(transitionToDoneLabel);
+  // OBS-4: "Stage transitions" under RECOMMENDS ONLY is a simplification the
+  // live session caught contradicting the runtime — a supervised operator moved
+  // Triage→Ready and Ready→In Progress DIRECTLY, because the capability mode
+  // decides what happens at a boundary the WORKFLOW gates, and an auto-advance
+  // boundary has no gate to recommend into. The column is right about the gated
+  // boundaries and silent about the rest, so the card says which is which
+  // instead of reading as a flat "it never moves a task itself".
+  const stageTransitionsLabel = capabilityById(STAGE_TRANSITIONS_CAPABILITY_ID)
+    ?.label;
+  const showBoundaryNuance =
+    a.kind === "operator" &&
+    stageTransitionsLabel !== undefined &&
+    governed.recommend.includes(stageTransitionsLabel);
   // The advisory line keeps each label's MODE. Concatenating the three buckets
   // lost it, so an advisory capability an admin explicitly set to human-only
   // read exactly like one left at "acts directly" — the matrix still tells them
@@ -714,7 +738,18 @@ export function ProfileDetail({
               <span className="ag-idle">idle · available</span>
             )}
           </div>
-          <div className="ag-scope">{a.scope}</div>
+          {/* OBS-7: a fork keeps its own copy and stops tracking the global
+              (the edit modal's own warning says so), but the scope line still
+              read "Global base" — the one sentence a reader uses to decide
+              whether editing the org profile would reach this project. Name
+              both facts: where it came from, and that this project's copy has
+              since diverged. */}
+          <div className="ag-scope">
+            {a.scope}
+            {a.customized && (
+              <> · customized for {projectName}</>
+            )}
+          </div>
         </div>
         <div className="ag-hero-actions">
           {canDelete && (
@@ -751,6 +786,21 @@ export function ProfileDetail({
             <span>
               <strong>{transitionToDoneLabel}</strong> stays reserved for humans{" "}
               {TRANSITION_TO_DONE_EXCEPTION}.
+            </span>
+          </p>
+        )}
+        {showBoundaryNuance && (
+          /* OBS-4: the boundary the workflow marks "{AUTO_BOUNDARY_LABEL}" has
+             no approval to recommend into, so this operator moves it itself —
+             the label is borrowed from the Policy page's boundary list rather
+             than restated, so the two surfaces name the same thing. */
+          <p className="cap-exception">
+            <Icon name="arrow" />
+            <span>
+              <strong>{stageTransitionsLabel}</strong> is a recommendation at the
+              boundaries this project gates — a boundary set to{" "}
+              <strong>{AUTO_BOUNDARY_LABEL}</strong> is moved directly. The
+              Policy page lists which boundary is which.
             </span>
           </p>
         )}
@@ -943,6 +993,65 @@ export function ProfileDetail({
 
 const ENGAGEMENT_ORDER = { operator: 0, primary: 1, reviewer: 2 } as const;
 
+/**
+ * The four counters above the roster.
+ *
+ * Extracted from `AgentsPage` (U12) so the retired-vocabulary gate can render
+ * the labels without a router: the "specialist" noun survived here for two
+ * passes precisely because nothing could read this copy in isolation, and a
+ * gate that cannot render a string cannot defend it.
+ */
+export function AgentStats({
+  profiles,
+  operators,
+  working,
+  waiting,
+}: {
+  /** Approved profiles on this project, operator included. */
+  profiles: number;
+  /** Operator ENGAGEMENTS — one per active task. */
+  operators: number;
+  /** Engagements whose status is `working`. */
+  working: number;
+  /** Engagements parked on a human (waiting, or holding an open packet). */
+  waiting: number;
+}) {
+  return (
+    <div className="ag-stats">
+      <div className="ag-stat">
+        <div className="n">{profiles}</div>
+        <div className="l">profiles approved · incl. operator</div>
+      </div>
+      <div className="ag-stat">
+        <div className="n">{operators}</div>
+        {/* P13-UI-51: the number is operator ENGAGEMENTS, which is one per
+            active task — but the label read as a task count, so a task whose
+            operator had been released showed a smaller "active tasks" number
+            than the board did. Say what is counted. */}
+        <div className="l">tasks with a live operator</div>
+      </div>
+      <div className="ag-stat">
+        <div className="n agent">{working}</div>
+        {/* U12: this read "specialists in a working state" — the retired noun,
+            on the page whose own comment says the word is dropped. What is
+            counted is ENGAGEMENTS in a working state, the same unit the
+            "waiting on a human" stat beside it counts, so it says the same
+            word for it. */}
+        <div className="l">agent threads in a working state</div>
+      </div>
+      <div className="ag-stat">
+        <div className="n human">{waiting}</div>
+        {/* P14-WL-04: this counted agent ENGAGEMENTS parked on a human in
+            THIS project, while the board counted tasks and Home counted the
+            viewer's own decisions org-wide — three different questions with
+            near-identical copy, side by side in one session. Each surface now
+            names its own scope. */}
+        <div className="l">agent threads waiting on a human · this project</div>
+      </div>
+    </div>
+  );
+}
+
 export function LiveRoster({
   deployments,
   onOpen,
@@ -977,9 +1086,12 @@ export function LiveRoster({
           // Empty state the mock never designed (agents spec §4.4).
           // D8: absent → why it matters → next action (P16).
           <div className="empty sm">
-            No agents are currently engaged. When an operator or specialist is
-            running on a task, it appears here with its live status. Open a task
-            and run the operator to engage one.
+            {/* U12: "specialist" is retired vocabulary (C11/FR14) — the objects
+                on this page are agent profiles, engaged per task as the
+                delivering or a supporting agent. */}
+            No agents are currently engaged. When an operator or an agent profile
+            is running on a task, it appears here with its live status. Open a
+            task and run the operator to engage one.
           </div>
         )}
         {sorted.map((d) => {
@@ -1280,11 +1392,21 @@ export function AgentsPage({
               on (UXA-6 / FR14): these are reusable PROFILES; per task the
               operator engages one as the DELIVERING agent and others as
               SUPPORTING agents. The old "specialist" vocabulary is dropped
-              below so one object stops carrying three names one click apart. */}
+              below so one object stops carrying three names one click apart.
+
+              OBS-7 residual: this line ended "· global base, customized for
+              <project>" — a blanket claim over a roster where the answer is
+              per profile, and one each selected profile's own scope line
+              already gives (`.ag-scope`, which composes the template's sentence
+              with the fork). A project-created profile was never a global base,
+              and an untouched deployment was never customized, so the header
+              contradicted the card one click away in both directions. Point at
+              the card instead of asserting for it. */}
           <div className="sub">
             Reusable agent profiles, eligible stages, and capability policy — the
             operator engages one per task as the delivering agent, others as
-            supporting · global base, customized for {projectName}
+            supporting. Each profile names where it came from, and whether this
+            project's copy has since diverged.
           </div>
         </div>
         <div className="board-tools">
@@ -1357,37 +1479,12 @@ export function AgentsPage({
           </span>
         </div>
       )}
-      <div className="ag-stats">
-        <div className="ag-stat">
-          <div className="n">{profiles.length}</div>
-          <div className="l">profiles approved · incl. operator</div>
-        </div>
-        <div className="ag-stat">
-          <div className="n">{operators}</div>
-          {/* P13-UI-51: the number is operator ENGAGEMENTS, which is one per
-              active task — but the label read as a task count, so a task whose
-              operator had been released showed a smaller "active tasks" number
-              than the board did. Say what is counted. */}
-          <div className="l">tasks with a live operator</div>
-        </div>
-        <div className="ag-stat">
-          <div className="n agent">
-            {working}
-          </div>
-          <div className="l">specialists in a working state</div>
-        </div>
-        <div className="ag-stat">
-          <div className="n human">
-            {waiting}
-          </div>
-          {/* P14-WL-04: this counted agent ENGAGEMENTS parked on a human in
-              THIS project, while the board counted tasks and Home counted the
-              viewer's own decisions org-wide — three different questions with
-              near-identical copy, side by side in one session. Each surface now
-              names its own scope. */}
-          <div className="l">agent threads waiting on a human · this project</div>
-        </div>
-      </div>
+      <AgentStats
+        profiles={profiles.length}
+        operators={operators}
+        working={working}
+        waiting={waiting}
+      />
 
       {tab === "profiles" ? (
         <div className="agents-layout">

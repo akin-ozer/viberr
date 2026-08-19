@@ -174,7 +174,9 @@ export function useRunLogStream(input: {
   // covers the case where that terminal event never arrived (dropped stream /
   // reconnect gap), bounding a stale "running" strip to one interval.
   useEffect(() => {
-    if (!input.hasActiveRun || typeof window === "undefined") return;
+    // The `window` probe asks the HOST what it provides, which is the question
+    // this guard has: a server render has no timer to schedule on.
+    if (!input.hasActiveRun || !("window" in globalThis)) return;
     const id = window.setInterval(() => {
       void revalidateRef.current();
     }, 20_000);
@@ -403,7 +405,10 @@ export function useRunLogStream(input: {
   }, []);
 
   useEffect(() => {
-    if (typeof EventSource === "undefined") return;
+    // Live tailing is progressive enhancement: where the host provides no
+    // EventSource (a server render, a jsdom without it), the loader's window is
+    // the whole console and nothing here runs.
+    if (!("EventSource" in globalThis)) return;
     if (!enabled) return;
 
     // Aborts in-flight tail fetches on unmount / task change — a bare

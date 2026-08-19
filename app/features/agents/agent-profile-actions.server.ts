@@ -23,6 +23,8 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   defaultEffortFor,
   defaultModelFor,
+  foreignModelBackend,
+  modelDisplayName,
 } from "~/server/runtimes/model-catalog.server";
 import { existsSync, readFileSync } from "node:fs";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
@@ -207,12 +209,31 @@ function reprojectProject(
   });
 }
 
+/** The product's name for each backend, as the picker spells it. */
+const BACKEND_LABEL = { claude: "Claude Code", codex: "Codex" } as const;
+
 function parseForm(raw: SubmittedProfileForm): ProfileFormInput {
   const parsed = profileFormSchema.safeParse(raw);
   if (!parsed.success) {
     throw AppError.validation(
       parsed.error.issues[0]?.message ??
         "Name, role, one execution backend, and at least one stage are required.",
+    );
+  }
+  // F21-13: the backend and the model must agree. Live repro: editing a Codex
+  // profile, clicking "Claude Code", and saving WHILE the model select still
+  // read "loading available models…" persisted `backends: [claude]` next to
+  // `model: gpt-5.6-terra`. Nothing rejected it, and the run then silently ran
+  // on Claude's default — the agents page named one model, the provider ran
+  // another, and no surface said so. Same validator the runtime uses
+  // (`isKnownModel`, via `foreignModelBackend`), so save-time and run-time can
+  // never disagree about what a backend can run.
+  const foreign = foreignModelBackend(parsed.data.backend, parsed.data.model);
+  if (foreign) {
+    throw AppError.validation(
+      `${modelDisplayName(foreign, parsed.data.model)} is a ${BACKEND_LABEL[foreign]} model — ` +
+        `${BACKEND_LABEL[parsed.data.backend]} cannot run it. Pick a model from the ` +
+        `${BACKEND_LABEL[parsed.data.backend]} list.`,
     );
   }
   return parsed.data;
@@ -508,13 +529,22 @@ export async function deployAgentProfileFromLibrary(
         );
       }
       const backend = fm.backends[0] === "codex" ? "codex" : "claude";
+      // F21-13: a LIBRARY template is not a form — refusing the deployment over
+      // a stale template's model would strand the human with nothing to fix on
+      // this screen. Fall back to the backend's default instead, which is what
+      // the run would have used anyway; the difference is that project.md now
+      // records it, so the agents page and the run agree.
+      const templateModel = fm.model.trim();
       const definition: AgentDeploymentDefinition = {
         kind: "specialist",
         name: fm.name,
         role: fm.role || fm.name,
         icon: fm.icon,
         backends: fm.backends.length ? fm.backends : [backend],
-        model: fm.model.trim() || defaultModelFor(backend),
+        model:
+          templateModel && !foreignModelBackend(backend, templateModel)
+            ? templateModel
+            : defaultModelFor(backend),
         effort: defaultEffortFor(backend),
         scope: `Added from the global library to ${project.frontmatter.name}`,
         desc: fm.desc || parsed.description,

@@ -89,7 +89,7 @@ export function CapabilityMatrixModal({
             backends. Supporting (reviewing) agents run <b>read-only</b>. In-run
             tool limits bind on Claude; on Codex they are advisory, so a Codex
             run's own commands aren't blocked mid-run — the read-only sandbox and
-            server-side delivery gate are what actually constrain it. Specialist
+            server-side delivery gate are what actually constrain it. Agent
             processes share the host, not an OS sandbox.
           </div>
         </div>
@@ -196,8 +196,14 @@ export function CapabilityMatrixModal({
             <h3>What differs between the two runtimes</h3>
             <ul>
               <li>
-                A Claude specialist runs with Claude Code's coding harness underneath
-                its persona; a Codex specialist gets the persona alone.
+                {/* U12 residual: "specialist" is retired vocabulary (C11/FR14) —
+                    the rows of this very matrix are agent PROFILES, engaged per
+                    task as the delivering or a supporting agent. The word
+                    survived here because nothing rendered this modal's prose in
+                    a test; `retired-vocabulary.test.tsx` now does. */}
+                An agent profile running on <b>Claude</b> gets Claude Code's coding
+                harness underneath its persona; the same profile on <b>Codex</b>{" "}
+                gets the persona alone.
               </li>
               <li>
                 {/* F19-16 / ruling 51 (R18-5): the asymmetry is meant to be

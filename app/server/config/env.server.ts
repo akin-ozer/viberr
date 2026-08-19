@@ -227,6 +227,58 @@ export function resetEnvCacheForTests(): void {
  * `/projects/…` link 404s on github.com (worse than none), so the composer
  * omits the link and writes the plain store-relative task key instead.
  */
+/**
+ * U8 — the session cookie's `Secure` attribute is derived from this URL, and
+ * nothing said so.
+ *
+ * Viberr never sets a cookie security flag itself: better-auth reads
+ * `BETTER_AUTH_URL` and issues `__Secure-` cookies only when it starts with
+ * `https://`. So `BETTER_AUTH_URL=http://viberr.internal` silently downgrades
+ * every production session cookie to cleartext — AND removes the one accidental
+ * signal `docs/operations/deployment.md` documents as the symptom of a missing
+ * TLS proxy (the `__Secure-` login loop). The failure was silent in both
+ * directions, against NFR6.
+ *
+ * A WARNING, not a refusal: this value is `.optional()` and legitimate
+ * deployments set it late, so refusing at boot would brick a running install
+ * over a misconfiguration the operator can fix in seconds. It fires only where
+ * it is unambiguous — production, an explicit `http://` origin, and a host that
+ * is not a loopback name (a `http://localhost:5173` production build is someone
+ * testing the image locally, where cleartext to itself is not the finding).
+ *
+ * Exported as a pure function so the rule is testable without booting: `null`
+ * means nothing to say.
+ */
+export function insecureAuthOriginWarning(
+  env: Pick<Env, "NODE_ENV" | "BETTER_AUTH_URL">,
+): string | null {
+  if (env.NODE_ENV !== "production") return null;
+  const raw = env.BETTER_AUTH_URL?.trim();
+  if (!raw || !/^http:\/\//i.test(raw)) return null;
+  let host: string;
+  try {
+    host = new URL(raw).hostname.toLowerCase();
+  } catch {
+    // An unparseable value is the schema's problem, not this check's.
+    return null;
+  }
+  const loopback =
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "[::1]";
+  if (loopback) return null;
+  return (
+    `BETTER_AUTH_URL is an http:// origin in production (${raw}). ` +
+    "better-auth derives the session cookie's Secure attribute from it, so " +
+    "session cookies are issued WITHOUT Secure and travel in cleartext — any " +
+    "listener on the network path can replay them. Set BETTER_AUTH_URL to the " +
+    "https:// origin your reverse proxy terminates TLS on (NFR6; see " +
+    "docs/operations/deployment.md)."
+  );
+}
+
 export function appOrigin(): string | null {
   const raw = getEnv().BETTER_AUTH_URL;
   if (!raw) return null;

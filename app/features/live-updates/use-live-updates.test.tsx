@@ -274,3 +274,115 @@ describe("useLiveUpdates", () => {
     expect(loaderRuns).toBe(1);
   });
 });
+
+/**
+ * OBS-6 (live) — an owner's overnight tab outlived its session and hammered
+ * `/resources/events` with a 401 every couple of seconds, indefinitely. The
+ * backoff above cannot fix that on its own: an expired session fails EVERY
+ * reopen, so the schedule just settles at its cap and retries forever, and no
+ * amount of waiting makes a dead session authenticate.
+ *
+ * So after two consecutive failures the client asks the server which kind of
+ * failure this is — a 401 means reconnecting can never work and the loop stops
+ * (the paused chip and its retry stay, for the case where the human signs in
+ * again). Anything else is treated as transient and keeps retrying, because a
+ * 500 or a dropped network says nothing about the session.
+ */
+describe("useLiveUpdates — OBS-6: a dead session stops the retry loop", () => {
+  /** A stubbed `fetch` that answers the session probe with one status. Typed as
+   *  the real signature so the asserted call argument is the URL it was given. */
+  const answer = (status: number) =>
+    vi.fn((...args: Parameters<typeof fetch>) => {
+      void args;
+      return Promise.resolve(new Response(null, { status }));
+    });
+
+  /** Fail the current stream and run its backoff to the reopen. */
+  async function failAndWait(step: number) {
+    act(() => {
+      FakeEventSource.last().fail();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SSE_REOPEN_BACKOFF_MS[step]!);
+    });
+  }
+
+  it("probes after the second consecutive failure and stops reconnecting on 401", async () => {
+    const probe = answer(401);
+    vi.stubGlobal("fetch", probe);
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
+
+    // First failure: the ordinary transient case — reopen, no probe.
+    await failAndWait(0);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(probe).not.toHaveBeenCalled();
+
+    // Second: the client asks whether the session is still there…
+    await failAndWait(1);
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(String(probe.mock.calls[0]![0])).toContain("/resources/events");
+
+    // …and the answer is no, so no third stream is ever opened. This is the
+    // whole finding: before the probe, this window produced one 401 every two
+    // seconds for as long as the tab stayed open.
+    expect(FakeEventSource.instances).toHaveLength(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(FakeEventSource.instances).toHaveLength(2);
+    // The surface still says it is a snapshot — stopping is not pretending.
+    expect(lastPaused).toBe(true);
+  });
+
+  it("keeps retrying when the probe says the session is fine (a server blip)", async () => {
+    const probe = answer(500);
+    vi.stubGlobal("fetch", probe);
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
+
+    await failAndWait(0);
+    await failAndWait(1);
+    expect(probe).toHaveBeenCalledTimes(1);
+    // A 500 is not a verdict on the session: reconnect.
+    expect(FakeEventSource.instances).toHaveLength(3);
+  });
+
+  it("the retry affordance re-opens a stream after the loop has stopped", async () => {
+    const probe = answer(401);
+    vi.stubGlobal("fetch", probe);
+    let reconnectFn: () => void = () => {};
+    function RetryProbe() {
+      const { paused, reconnect } = useLiveUpdates(["user"]);
+      lastPaused = paused;
+      reconnectFn = reconnect;
+      return null;
+    }
+    render(<RetryProbe />, { wrapper: DataRouter });
+
+    await failAndWait(0);
+    await failAndWait(1);
+    expect(FakeEventSource.instances).toHaveLength(2);
+
+    // The human signed in again in another tab and pressed retry.
+    act(() => {
+      reconnectFn();
+    });
+    expect(FakeEventSource.instances).toHaveLength(3);
+  });
+
+  it("a successful open resets the backoff, so a later outage starts over", async () => {
+    const probe = answer(401);
+    vi.stubGlobal("fetch", probe);
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
+
+    await failAndWait(0);
+    act(() => {
+      FakeEventSource.last().onopen?.();
+    });
+    // Recovered. The NEXT failure is the first of a new outage: it reopens on
+    // the 2s step without probing (a probe here would call the session dead on
+    // the strength of one drop).
+    await failAndWait(0);
+    expect(probe).not.toHaveBeenCalled();
+    expect(FakeEventSource.instances).toHaveLength(3);
+  });
+});

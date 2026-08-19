@@ -1282,3 +1282,113 @@ describe("F20-20 — an operator autonomy elevation is audited + surfaced, not g
     });
   });
 });
+
+/**
+ * F21-13 — the backend and the model must agree AT SAVE TIME.
+ *
+ * Live repro: editing a Codex profile, clicking "Claude Code", and hitting Save
+ * WHILE the model select still read "loading available models…". The dialog let
+ * the save race the reload, and project.md ended up with `backends: [claude]`
+ * next to `model: gpt-5.6-terra`. Nothing rejected the pair, and the next run
+ * silently executed on Claude's default model — the agents page named Terra, the
+ * provider ran Sonnet, and no surface said so.
+ *
+ * The client half (disable Save while the model list reloads) belongs to the
+ * dialog; this is the server invariant under it, which holds however the request
+ * was produced — an older client, a replayed form, a direct POST.
+ */
+describe("F21-13 — a model foreign to the chosen backend is refused", () => {
+  it("refuses a Codex model on a Claude profile, naming both backends", async () => {
+    const reply = await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        ...FORM,
+        name: "Crossed Wires",
+        backend: "claude",
+        model: "gpt-5.6-terra",
+      }),
+    });
+    expect(refusalStatus(reply)).toBe(400);
+    const error = refusalError(reply)!;
+    expect(error).toContain("GPT-5.6 Terra");
+    expect(error).toContain("Codex");
+    expect(error).toContain("Claude Code");
+
+    // …and nothing was written: the incoherent pair never reaches project.md.
+    const file = readFileSync(
+      path.join(app.dataRoot, "projects/viberr-core/project.md"),
+      "utf8",
+    );
+    expect(file).not.toContain("gpt-5.6-terra");
+  });
+
+  it("refuses a Claude model on a Codex profile (the mirror direction)", async () => {
+    const reply = await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        ...FORM,
+        name: "Crossed Back",
+        backend: "codex",
+        model: "claude-sonnet-4-5",
+      }),
+    });
+    expect(refusalStatus(reply)).toBe(400);
+    expect(refusalError(reply)).toContain("Claude Code");
+  });
+
+  it("refuses the same pair on UPDATE, not only on create", async () => {
+    const created = saved(
+      await postAction(ids.arda, {
+        intent: "create-profile",
+        payload: JSON.stringify({ ...FORM, name: "Switcher", backend: "codex" }),
+      }),
+    );
+    expect(created.ok).toBe(true);
+
+    const reply = await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: created.profileId!,
+      payload: JSON.stringify({
+        ...FORM,
+        name: "Switcher",
+        backend: "claude",
+        model: "gpt-5.6-terra",
+      }),
+    });
+    expect(refusalStatus(reply)).toBe(400);
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: created.profileId!,
+    });
+  });
+
+  it("accepts a model the chosen backend DOES know — including a live-only dated id", async () => {
+    // The Claude catalog is OPEN (the live `supportedModels()` list, dated ids,
+    // and a cold cache all reach here), so the guard must reject "belongs to the
+    // other backend", never "not in the curated three".
+    const result = saved(
+      await postAction(ids.arda, {
+        intent: "create-profile",
+        payload: JSON.stringify({
+          ...FORM,
+          name: "Dated",
+          backend: "claude",
+          model: "claude-sonnet-4-5",
+        }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+
+    const data = await runLoader(ids.arda);
+    expect(data.profiles.find((p) => p.id === result.profileId)).toMatchObject({
+      backends: ["claude"],
+      model: "claude-sonnet-4-5",
+    });
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: result.profileId!,
+    });
+  });
+});

@@ -210,8 +210,15 @@ export function LiveRunPanel({
         <div className="run-phase">
           <span className="run-spin" aria-hidden="true" />
           <span>
-            <div className="ph">{run.phase}</div>
-            <div className="step mono">{run.step}</div>
+            {/* R21-4 / FR28: the phase and step are real now (both adapters
+                emit them, and the run pipeline emits "Preparing workspace"
+                before the provider starts). A run can still be between
+                updates — a resumed row before its first message, a legacy row
+                — so the heading falls back to the one thing that IS known from
+                the row's state rather than rendering an empty bold line, and
+                the step row is omitted entirely when there is no step. */}
+            <div className="ph">{run.phase ?? "Working"}</div>
+            {run.step ? <div className="step mono">{run.step}</div> : null}
           </span>
         </div>
         <div className="run-stats">

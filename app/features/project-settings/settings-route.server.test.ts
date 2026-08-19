@@ -8,6 +8,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { roleCan } from "~/shared/rbac";
 import type { SettingsViewData } from "./settings-query.server";
 
 /**
@@ -569,5 +570,89 @@ describe("archive-project", () => {
     expect(
       listAuditEvents(app.db, { action: "project.unarchived" })[0],
     ).toMatchObject({ subjectId: "viberr-core" });
+  });
+});
+
+/**
+ * F21-5 (live, Selin) — R19-11 / owner ruling Q-V1, PAT half, applied to the
+ * OTHER surface that renders the credential.
+ *
+ * "A read-only Viewer must not see the Danger zone or the PAT." Pass 19 closed
+ * it on `/projects/:slug/github` and this loader kept shipping the whole
+ * `ProjectCredentialHealth` — label, masked tail, per-scope verdicts — to every
+ * member, straight into a Viewer's document via single-fetch. The bar is the
+ * SERVER's own: `grant-github-scope` (admin|maintainer), the ACTION_ROLES entry
+ * this route's action already enforces on grant-scope / set-credential /
+ * clear-credential, which is why a contributor is refused here for the same
+ * reason a viewer is. `roleCan` reads that entry; nothing names a role.
+ *
+ * These assert the PAYLOAD, not the DOM: hiding the card leaves the tail in the
+ * HTML, which is the exact form the pass-18 session reported it in.
+ *
+ * Runs last: it binds a PAT and adds a viewer to project.md.
+ */
+describe("F21-5: the settings loader withholds credential detail without the grant", () => {
+  const MASKED = "····f215";
+  const LABEL = "f21-5 fixture PAT";
+
+  beforeAll(async () => {
+    const { createPat, setProjectCredential } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const actor = { userId: ids.arda, label: "arda@viberr.dev" };
+    const pat = createPat(
+      app.db,
+      { userId: ids.arda, label: LABEL, token: "ghp_f215fixturef215" },
+      actor,
+    );
+    setProjectCredential(app.db, { projectSlug: "viberr-core", patId: pat.id }, actor);
+
+    const { updateProjectFile } = await import(
+      "~/server/files/project-writer.server"
+    );
+    await updateProjectFile({ projectSlug: "viberr-core" }, (parsed) => {
+      if (!parsed.frontmatter.members.some((m) => m.userId === ids.deniz)) {
+        parsed.frontmatter.members.push({ userId: ids.deniz, role: "viewer" });
+      }
+    });
+  });
+
+  it("hands a MAINTAINER the real credential — the control case", async () => {
+    const { view } = await runLoader(ids.murat);
+    expect(view.credential.source).toBe("pat");
+    expect(view.credential.masked).toBe(MASKED);
+    expect(view.credential.label).toBe(LABEL);
+    expect(view.credential.patId).not.toBeNull();
+    expect(view.credential.scopes.length).toBeGreaterThan(0);
+  });
+
+  it("strips the tail, label, id and scope verdicts for a VIEWER", async () => {
+    const { view } = await runLoader(ids.deniz);
+    expect(view.credential.masked).toBeNull();
+    expect(view.credential.label).toBeNull();
+    expect(view.credential.patId).toBeNull();
+    expect(view.credential.lastValidatedAt).toBeNull();
+    expect(view.credential.validation).toBeNull();
+    expect(view.credential.scopes).toEqual([]);
+    expect(view.credential.openViolations).toEqual([]);
+    // Nowhere in the payload, not merely on a hidden card.
+    expect(JSON.stringify(view)).not.toContain("f215");
+    expect(JSON.stringify(view)).not.toContain(LABEL);
+    // The rest of the settings view is untouched — this is a redaction, not a
+    // refusal (a viewer legitimately reads stages, members and the repo).
+    expect(view.project.slug).toBe("viberr-core");
+    expect(view.members.length).toBeGreaterThan(0);
+    // Project POLICY survives: required scopes are the same list the Policy
+    // page publishes to every member (see withoutCredentialDetail).
+    expect(view.credential.requiredScopes.length).toBeGreaterThan(0);
+  });
+
+  it("strips it for a CONTRIBUTOR too — the grant is maintainer+", async () => {
+    expect(roleCan("contributor", "grant-github-scope")).toBe(false);
+    const { view } = await runLoader(ids.selin);
+    expect(view.credential.masked).toBeNull();
+    expect(view.credential.label).toBeNull();
+    expect(view.credential.scopes).toEqual([]);
+    expect(JSON.stringify(view)).not.toContain("f215");
   });
 });

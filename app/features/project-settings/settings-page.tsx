@@ -35,7 +35,12 @@ import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
-import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
+import {
+  PROJECT_ROLES,
+  roleCan,
+  type ProjectRole,
+  type RbacAction,
+} from "~/shared/rbac";
 import { countLabel } from "~/shared/text/plural";
 
 /**
@@ -59,6 +64,25 @@ type ActionResult =
 function asProjectRole(raw: string | null): ProjectRole | null {
   return PROJECT_ROLES.find((role) => role === raw) ?? null;
 }
+
+/**
+ * The gate a panel here asks for its OWN action id. `roleCan` is the only
+ * implementation the product ships and the default every caller gets — the
+ * parameter exists so a caller can substitute a different one WITHOUT replacing
+ * the module.
+ *
+ * E3 is why that seam is worth having: `edit-policy`, `manage-members` and
+ * `grant-github-scope` are three DIFFERENT server guards that happen to resolve
+ * to the same admin tier today. A check that only varies the ROLE therefore
+ * cannot tell one id from another — which is exactly how a `myRole === "admin"`
+ * literal survived on this page for so long. A gate that answers for exactly one
+ * action id pins each panel to the id it really asks for; re-tier any of the
+ * three and the pinning still holds.
+ */
+export type ProjectActionGate = (
+  role: ProjectRole | null,
+  action: RbacAction,
+) => boolean;
 
 /* F19-33: the panel-head counts and the trailing panel notes below used to be
    styled by two private consts here — `PANEL_COUNT_STYLE` (a byte copy of the
@@ -1314,35 +1338,56 @@ export function RepoPanel({
         />
       )}
 
-      <CredentialCard
-        credential={credential}
-        onOpenTask={onOpenTask}
-        warnActions={
-          // "Grant scope" re-checks a credential — on the no-credential card it
-          // can only no-op into a toast, so it doesn't render there.
-          canGrant && credential.source !== "none" ? (
-            <button
-              type="button"
-              className="btn sm push"
-              onClick={onGrantScope}
-              disabled={busy}
-              title="Re-check the credential's scopes against GitHub"
-            >
-              <Icon name="check" />
-              Grant scope
-            </button>
-          ) : undefined
-        }
-        manageActions={
-          <CredentialManageActions
-            configured={credential.source === "pat"}
-            canManage={canGrant}
-            busy={credBusy}
-            onSet={onSetCredential}
-            onClear={onClearCredential}
-          />
-        }
-      />
+      {/* F21-5 (R19-11 / owner ruling Q-V1, PAT half): the credential card is
+          the project's token fingerprint, its scope verdicts and its
+          rotate/remove controls. Every one of those actions gates on
+          `grant-github-scope` server-side (this route's action), so the card is
+          WITHDRAWN below that tier rather than rendered read-only — ruling 37's
+          precedent, and byte-for-byte what /projects/:slug/github already does
+          with the same component. The /github page fixed this in pass 19 and
+          Settings did not, so a project Viewer read the masked tail here. The
+          loader redacts the same fields it hides, so the withheld detail never
+          reaches the browser at all. */}
+      {canGrant ? (
+        <CredentialCard
+          credential={credential}
+          onOpenTask={onOpenTask}
+          warnActions={
+            // "Grant scope" re-checks a credential — on the no-credential card
+            // it can only no-op into a toast, so it doesn't render there.
+            credential.source !== "none" ? (
+              <button
+                type="button"
+                className="btn sm push"
+                onClick={onGrantScope}
+                disabled={busy}
+                title="Re-check the credential's scopes against GitHub"
+              >
+                <Icon name="check" />
+                Grant scope
+              </button>
+            ) : undefined
+          }
+          manageActions={
+            <CredentialManageActions
+              configured={credential.source === "pat"}
+              canManage={canGrant}
+              busy={credBusy}
+              onSet={onSetCredential}
+              onClear={onClearCredential}
+            />
+          }
+        />
+      ) : (
+        <div className="pol-note after last">
+          <Icon name="lock" />
+          <span>
+            Credential details need the <strong>Grant GitHub scope</strong>{" "}
+            grant (project admin or maintainer). The project GitHub page still
+            shows whether this repository is reachable.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1416,6 +1461,7 @@ export function DangerZone({
   busy,
   onArchive,
   onDelete,
+  gate = roleCan,
 }: {
   projectName: string;
   myRole: string | null;
@@ -1423,6 +1469,8 @@ export function DangerZone({
   busy: boolean;
   onArchive: (archived: boolean) => void;
   onDelete: (confirmName: string) => void;
+  /** See `ProjectActionGate`. Defaults to the shared `roleCan`. */
+  gate?: ProjectActionGate;
 }) {
   const [confirming, setConfirming] = useState(false);
   // RU-3: archive AND delete both gate on the `edit-policy` action server-side
@@ -1432,7 +1480,7 @@ export function DangerZone({
   // action the server actually checks — the same way `canGrant` already routes
   // through the shared helper. (`edit-policy` resolves to admin-only today, so
   // this is behavior-preserving; it stops being a hardcoded assumption.)
-  const canManageLifecycle = roleCan(asProjectRole(myRole), "edit-policy");
+  const canManageLifecycle = gate(asProjectRole(myRole), "edit-policy");
 
   return (
     <div className="panel danger-panel">
@@ -1519,10 +1567,13 @@ export function SettingsPage({
   data,
   meId,
   myRole,
+  gate = roleCan,
 }: {
   data: SettingsViewData;
   meId: string | null;
   myRole: string | null;
+  /** See `ProjectActionGate`. Defaults to the shared `roleCan`. */
+  gate?: ProjectActionGate;
 }) {
   const navigate = useNavigate();
   const csrf = useCsrfToken();
@@ -1549,9 +1600,9 @@ export function SettingsPage({
   // why the literal survived and exactly why it can't stay: re-tier either one
   // and the panels that don't belong to it would have followed along.
   const role = asProjectRole(myRole);
-  const canEditPolicy = roleCan(role, "edit-policy");
-  const canManageMembers = roleCan(role, "manage-members");
-  const canGrant = roleCan(role, "grant-github-scope");
+  const canEditPolicy = gate(role, "edit-policy");
+  const canManageMembers = gate(role, "manage-members");
+  const canGrant = gate(role, "grant-github-scope");
   const slug = data.project.slug;
 
   // Stage rename edit-mode lives here so a fresh add-stage response can
@@ -1722,6 +1773,7 @@ export function SettingsPage({
         <DangerZone
           projectName={data.project.name}
           myRole={myRole}
+          gate={gate}
           archived={data.project.archived}
           busy={dangerFetcher.state !== "idle"}
           onArchive={(archived) =>

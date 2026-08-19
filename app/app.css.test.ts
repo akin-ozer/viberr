@@ -856,6 +856,33 @@ describe("app.css breakpoints (P16-F8)", () => {
       /\.board\s*\{/,
     );
   });
+
+  /**
+   * U7 — the task detail's two columns are ordered in the MARKUP
+   * (task-detail-page.tsx: `.detail-side` first, asserted there) and placed by
+   * grid cell here, so the sighted stack and the screen-reader/focus order are
+   * the same order at every width.
+   *
+   * Pass 20 did it with `order: -1` in the 1100px block instead, which fixed the
+   * paint and left a keyboard user tabbing to "Accept completion → Done" LAST,
+   * after every timeline entry (WCAG 2.2 SC 1.3.2 / 2.4.3). Re-adding `order`
+   * to either column would silently reopen that split, so the sheet is pinned
+   * against it: the desktop arrangement must come from placement, and the
+   * stacked one from source order.
+   */
+  it("U7: the detail columns are placed by grid cell — never by `order`", () => {
+    const rules = CODE.match(/\.detail-(main|side)[^{]*\{[^}]*\}/g) ?? [];
+    expect(rules.length, "both columns must still be styled").toBeGreaterThan(1);
+    for (const rule of rules) {
+      expect(rule, `\`order\` is banned on the detail columns:\n${rule}`).not.toMatch(
+        /(^|[\s;{])order\s*:/,
+      );
+    }
+    // The desktop two-column arrangement, stated explicitly so source order
+    // cannot decide which side of the page a column lands on.
+    expect(CODE).toMatch(/\.detail-main\s*\{[^}]*grid-column:\s*1[^}]*grid-row:\s*1/);
+    expect(CODE).toMatch(/\.detail-side\s*\{[^}]*grid-column:\s*2[^}]*grid-row:\s*1/);
+  });
 });
 
 describe("app.css palette reachability on touch (P16-G3)", () => {
@@ -1080,14 +1107,36 @@ describe("app.css draws a task key the same way everywhere (P16-F3 follow-on)", 
     // F3 moved its width out of an inline style and there was nothing else.
     const grid = CODE.match(/\.card-top \.key\s*\{([^}]*)\}/)?.[1] ?? "";
     const list = CODE.match(/\.card\.list-row \.key\s*\{([^}]*)\}/)?.[1] ?? "";
+    // F21-18: the third rule that draws a task key — the drop preview at the top
+    // of a target column. Its color is deliberately its own (`--blue-pressed`,
+    // the preview's accent), so it joins the nowrap assertion below rather than
+    // the value-parity loop.
+    const preview = CODE.match(/\.card-drop-preview \.key\s*\{([^}]*)\}/)?.[1] ?? "";
     expect(grid, ".card-top .key must have a rule").not.toBe("");
     expect(list, ".card.list-row .key must have a rule").not.toBe("");
-    for (const prop of ["font-family", "font-size", "color"]) {
-      const value = (re: string) =>
-        new RegExp(`${prop}\\s*:\\s*([^;]+)`).exec(re)?.[1]?.trim();
-      expect(value(list), `${prop} must match the grid card's key`).toBe(
-        value(grid),
+    expect(preview, ".card-drop-preview .key must have a rule").not.toBe("");
+    // Anchored on a declaration boundary so `color` cannot match inside
+    // `background-color` and `font-family` cannot match `font-size`.
+    const value = (rule: string, prop: string) =>
+      new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(rule)?.[1]?.trim();
+    for (const prop of ["font-family", "font-size", "color", "white-space"]) {
+      expect(value(list, prop), `${prop} must match the grid card's key`).toBe(
+        value(grid, prop),
       );
+    }
+    // F21-18 residual: the nowrap landed on the grid card alone, so the same key
+    // still broke mid-token ("VIB-\n8") in the list row's fixed 64px column and
+    // in the drop preview. A key is ONE identifier on every surface that draws
+    // it — reverting any of the three rules fails here.
+    for (const [where, rule] of [
+      ["grid card", grid],
+      ["list row", list],
+      ["drop preview", preview],
+    ] as const) {
+      expect(
+        value(rule, "white-space"),
+        `the ${where}'s task key must not wrap mid-token`,
+      ).toBe("nowrap");
     }
   });
 });

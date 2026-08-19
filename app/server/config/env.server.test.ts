@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEnv } from "./env.server";
+import { insecureAuthOriginWarning, parseEnv } from "./env.server";
 
 const VALID_SESSION_SECRET = "s".repeat(32);
 // base64 of exactly 32 bytes
@@ -128,5 +128,63 @@ describe("parseEnv", () => {
     expect(() =>
       parseEnv({ ...REQUIRED_ENV, VIBERR_SEED_ADMIN_EMAIL: "not-an-email" }),
     ).toThrowError(/VIBERR_SEED_ADMIN_EMAIL/);
+  });
+});
+
+/**
+ * U8 — `BETTER_AUTH_URL=http://…` silently downgrades the session cookie.
+ *
+ * Viberr sets no cookie security flag of its own: better-auth derives
+ * `__Secure-` from this URL alone, so an `http://` value in production issues
+ * session cookies with no Secure attribute — and simultaneously removes the
+ * accidental `__Secure-` login loop that `docs/operations/deployment.md`
+ * documents as the symptom of a missing TLS proxy. Silent in both directions,
+ * against NFR6. The boot warning is the remedy; this is the rule it asks.
+ */
+describe("insecureAuthOriginWarning (U8)", () => {
+  const at = (NODE_ENV: string, BETTER_AUTH_URL?: string) => {
+    // Omitting the variable has to mean UNSET, not an empty string (parseEnv
+    // treats those alike, but the absence is what the last case is about).
+    const base = { ...REQUIRED_ENV, NODE_ENV };
+    return insecureAuthOriginWarning(
+      parseEnv(BETTER_AUTH_URL ? { ...base, BETTER_AUTH_URL } : base),
+    );
+  };
+
+  it("warns for an http:// production origin, naming the value and the consequence", () => {
+    const warning = at("production", "http://viberr.internal");
+    expect(warning).toContain("http://viberr.internal");
+    expect(warning).toContain("Secure");
+    expect(warning).toContain("cleartext");
+    // It has to say what to DO, not only what is wrong.
+    expect(warning).toContain("https://");
+  });
+
+  it("says nothing about an https:// origin — the correct configuration", () => {
+    expect(at("production", "https://viberr.example.com")).toBeNull();
+  });
+
+  it("says nothing in development, where http:// is the normal case", () => {
+    expect(at("development", "http://localhost:5173")).toBeNull();
+    expect(at("test", "http://viberr.internal")).toBeNull();
+  });
+
+  it("says nothing for a loopback host — a production build run locally", () => {
+    for (const url of [
+      "http://localhost:5173",
+      "http://app.localhost:5173",
+      "http://127.0.0.1:5173",
+    ]) {
+      expect({ url, warning: at("production", url) }).toEqual({
+        url,
+        warning: null,
+      });
+    }
+  });
+
+  it("says nothing when the variable is unset (better-auth infers the origin)", () => {
+    // The UNSET case has its own boot warning (OAuth + no BETTER_AUTH_URL);
+    // this rule must not double up on it.
+    expect(at("production")).toBeNull();
   });
 });
