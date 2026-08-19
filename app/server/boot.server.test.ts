@@ -305,3 +305,21 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
     expect(integrityFields()).toHaveProperty("disk");
   });
 });
+
+describe("projectionMissingColumns (pass-21 live-validation catch)", () => {
+  it("names columns the live root lacks relative to the shipped baseline, and nothing on a healthy schema", async () => {
+    const { projectionMissingColumns } = await import("./boot.server");
+    const ctx = createTestDbContext();
+    try {
+      const db = ctx.makeDb();
+      // Freshly migrated ⇒ healthy ⇒ nothing to report.
+      expect(projectionMissingColumns(db)).toEqual([]);
+      // An old root predating a baseline column addition (the real pass-21
+      // shape: work_revision_sha reached only fresh roots).
+      db.exec("ALTER TABLE task_projections DROP COLUMN work_revision_sha");
+      expect(projectionMissingColumns(db)).toEqual(["work_revision_sha"]);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+});

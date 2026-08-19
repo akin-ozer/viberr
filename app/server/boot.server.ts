@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { VALIDATION_VALUES } from "~/schemas/task-file.schema";
+import { runMigrations } from "./db/migration-runner.server";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
 import {
   getEnv,
@@ -118,6 +119,8 @@ type BootIntegrityFields = {
   disk: { free: string; total: string; status: DiskStatus } | null;
   /** F21-1: absent on a healthy schema — see `projectionValidationGaps`. */
   projectionSchemaDrift?: string[];
+  /** Absent on a healthy schema — see `projectionMissingColumns`. */
+  projectionMissingColumns?: string[];
 };
 
 /** One `count(*) AS c` aggregate → its number. */
@@ -170,6 +173,44 @@ function projectionValidationGaps(db: DatabaseSync): string[] {
     check[1]!.split(",").map((value) => value.trim().replace(/^'|'$/g, "")),
   );
   return VALIDATION_VALUES.filter((value) => !admitted.has(value));
+}
+
+/**
+ * Pass-21 live-validation catch (sibling of `projectionValidationGaps`):
+ * `task_projections` columns THIS database is missing relative to what the
+ * current build's baseline creates. A squashed, forward-only baseline means a
+ * column added to `0001_baseline.sql` (e.g. `work_revision_sha`) reaches only
+ * FRESH data roots — on an existing root the rebuilder's INSERT then fails
+ * with "no such column" for EVERY task, which is strictly worse than the CHECK
+ * drift above (nothing projects at all). The expectation is read from the real
+ * migrations run against a throwaway in-memory database, so this can never
+ * drift from the shipped baseline; the cost is one schema-only migration run
+ * at boot.
+ *
+ * Exported for the drift test beside `logBootIntegrity`.
+ */
+export function projectionMissingColumns(db: DatabaseSync): string[] {
+  // SAFETY: `PRAGMA table_info` rows always carry a non-null TEXT `name`
+  // column; only `name` is read.
+  const live = db
+    .prepare(`PRAGMA table_info(task_projections)`)
+    .all() as Array<{ name: string }>;
+  // No table at all is the migration runner's problem, same stance as above.
+  if (live.length === 0) return [];
+  const expectedDb = new DatabaseSync(":memory:");
+  try {
+    runMigrations(expectedDb);
+    // SAFETY: same `PRAGMA table_info` row shape as the live read above.
+    const expected = expectedDb
+      .prepare(`PRAGMA table_info(task_projections)`)
+      .all() as Array<{ name: string }>;
+    const liveNames = new Set(live.map((column) => column.name));
+    return expected
+      .map((column) => column.name)
+      .filter((name) => !liveNames.has(name));
+  } finally {
+    expectedDb.close();
+  }
 }
 
 /**
@@ -227,26 +268,39 @@ export function logBootIntegrity(db: DatabaseSync): void {
   if (missingDirs.length > 0) fields.missingDirs = missingDirs;
   const validationGaps = projectionValidationGaps(db);
   if (validationGaps.length > 0) fields.projectionSchemaDrift = validationGaps;
+  const missingColumns = projectionMissingColumns(db);
+  if (missingColumns.length > 0) fields.projectionMissingColumns = missingColumns;
   logger.info("boot integrity check", fields);
   // F21-1: loud and separate. Folded into the info line it would be one more
   // key on a line nobody greps; a task that silently stops projecting earns its
   // own WARN, carrying the remedy AND the remedy's cost.
-  if (validationGaps.length > 0) {
+  if (validationGaps.length > 0 || missingColumns.length > 0) {
+    const drift: Record<string, string | string[]> = {};
+    if (validationGaps.length > 0) drift.refuses = validationGaps;
+    if (missingColumns.length > 0) drift.missingColumns = missingColumns;
+    drift.impact =
+      missingColumns.length > 0
+        ? "the rebuilder INSERT names these columns, so EVERY task fails to " +
+          "project ('no such column') and rows go stale behind " +
+          "'projection rebuild failed'"
+        : "every task whose derived validation lands on one of these fails to " +
+          "project; its row goes stale and the rebuild logs only " +
+          "'projection rebuild failed'";
+    drift.remedy =
+      (missingColumns.length > 0 && validationGaps.length === 0
+        ? "additive drift only — `ALTER TABLE task_projections ADD COLUMN …` for " +
+          "each missing column matches the baseline without touching the " +
+          "non-derived rows. Otherwise (or to be certain): "
+        : "") +
+      "re-baseline the projection database: stop the app, delete " +
+      "<dataRoot>/state/projection.sqlite* , restart — projection tables rebuild " +
+      "from projects/ at boot. This also destroys the NON-derived rows in that file " +
+      "(users, sessions, sealed PATs, audit, notifications), so run `npm run backup` " +
+      "first and expect to re-establish sign-ins. See docs/operations/deployment.md " +
+      "§Re-baselining the projection database";
     logger.warn(
-      "projection schema drift — task_projections.validation refuses values this build produces",
-      {
-        refuses: validationGaps,
-        impact:
-          "every task whose derived validation lands on one of these fails to project; " +
-          "its row goes stale and the rebuild logs only 'projection rebuild failed'",
-        remedy:
-          "re-baseline the projection database: stop the app, delete " +
-          "<dataRoot>/state/projection.sqlite* , restart — projection tables rebuild " +
-          "from projects/ at boot. This also destroys the NON-derived rows in that file " +
-          "(users, sessions, sealed PATs, audit, notifications), so run `npm run backup` " +
-          "first and expect to re-establish sign-ins. See docs/operations/deployment.md " +
-          "§Re-baselining the projection database",
-      },
+      "projection schema drift — task_projections on this root lags the shipped baseline",
+      drift,
     );
   }
 }
