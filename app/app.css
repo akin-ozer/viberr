@@ -1876,7 +1876,14 @@ dialog[data-closing]::backdrop {
 .flabel { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .flabel .req { color: var(--coral-dark); margin-left: .15rem; }
 .fhint { font-size: .76rem; color: var(--faint); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: .5rem; }
-.field input[type="text"], .field input[type="password"], .field textarea {
+/* Typing fields opt in per TYPE (checkboxes and file pickers keep native
+   chrome), so this list must name every text-like type the markup uses — pass
+   20 flipped the login email to type="email" and the field silently fell back
+   to UA styling. app.css.test.ts diffs the list against the markup. Specificity
+   must stay (0,2,1): the later `.field input.mono` face override wins by source
+   order, and a :not() chain here would outrank it. */
+.field input[type="text"], .field input[type="password"], .field input[type="email"],
+.field input[type="search"], .field textarea {
   width: 100%; border: 1px solid var(--border); border-radius: var(--radius-button);
   padding: .55rem .7rem; background: var(--surface); color: var(--fg);
   font-family: var(--font-body); font-size: .9rem; outline: 0;

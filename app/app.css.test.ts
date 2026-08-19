@@ -2432,3 +2432,72 @@ describe("app/ gates no rendering on the viewport (R19-12)", () => {
     expect(stale, "an entry for a file that no longer reads the viewport").toEqual([]);
   });
 });
+
+/* --------------------------------------- field chrome per input type (P21) */
+
+/**
+ * P21 — pass 20 changed the login email input from `type="text"` to
+ * `type="email"` for autofill semantics, and the `.field input[type=…]` rule —
+ * which opts fields in per TYPE so checkboxes and file pickers keep their
+ * native chrome — silently stopped matching it. The email field rendered in UA
+ * default chrome next to a fully styled password field: the browser is happy,
+ * only a human notices, which is this file's exact remit. The owner was the
+ * human who noticed.
+ */
+describe("app.css field chrome covers every text-like input type (P21)", () => {
+  const ruleStart = CODE.indexOf('.field input[type="text"]');
+  const fieldSelector =
+    ruleStart >= 0 ? CODE.slice(ruleStart, CODE.indexOf("{", ruleStart)) : "";
+
+  /** The `type=` vocabulary that means "the user types here" — the values that
+   *  must take the shared field box when they sit inside a `.field`. Picker and
+   *  button types (checkbox, radio, file, submit, …) are excluded by not being
+   *  named: their UA rendering is the point. */
+  const TEXT_LIKE = new Set([
+    "text", "password", "email", "search", "url", "tel", "number",
+    "date", "datetime-local", "month", "week", "time",
+  ]);
+
+  // Harvested as bare `type="…"` literals rather than by matching <input>
+  // elements: JSX attribute lists hold arrow functions, so an element regex
+  // stops at the first `=>` and misses any `type` declared after a handler. No
+  // other element legally carries these attribute values, so the literal alone
+  // identifies a text input.
+  const used = new Map<string, Set<string>>();
+  for (const file of markupFiles()) {
+    const src = readFileSync(file, "utf8");
+    const rel = path.relative(path.dirname(APP_DIR), file);
+    for (const m of src.matchAll(/\btype="([a-z-]+)"/g)) {
+      if (!TEXT_LIKE.has(m[1])) continue;
+      if (!used.has(m[1])) used.set(m[1], new Set());
+      used.get(m[1])!.add(rel);
+    }
+  }
+
+  it("found the rule and the app's real inputs", () => {
+    // A scanner that silently harvests nothing would turn the gate green for
+    // free — the login form alone guarantees these two.
+    expect(fieldSelector, "the `.field input[type=…]` rule must exist").not.toBe("");
+    expect(used.has("text")).toBe(true);
+    expect(used.has("password")).toBe(true);
+  });
+
+  it("lists every text-like type the markup uses", () => {
+    const uncovered = [...used.entries()]
+      .filter(([type]) => !fieldSelector.includes(`input[type="${type}"]`))
+      // Named with their sites: the fix is one selector added to the list at
+      // the named rule, and the reader needs to know which flip caused it.
+      .map(([type, sites]) => `${type} (${[...sites].sort().join(", ")})`)
+      .sort();
+    expect(uncovered).toEqual([]);
+  });
+
+  it("keeps the base rule at the specificity the mono override beats", () => {
+    // `.field input.mono` (0,2,1) wins over the base rule by SOURCE ORDER, not
+    // by weight. Rewriting the type list as `.field input:not([type="…"]…)`
+    // reads as equivalent but scores (0,n+1,1) and would flip every mono field
+    // input in the app back to the body face.
+    expect(fieldSelector).not.toContain(":not(");
+    expect(CODE).toMatch(/\.field input\.mono\s*\{[^}]*font-family:\s*var\(--font-mono\)/);
+  });
+});
