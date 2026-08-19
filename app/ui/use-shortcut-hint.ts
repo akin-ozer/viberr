@@ -22,7 +22,9 @@ import { useEffect, useState } from "react";
 export function useModifierHint(key = "K"): string {
   const [mac, setMac] = useState(true);
   useEffect(() => {
-    if (typeof navigator === "undefined") return;
+    // No navigator on the host ⇒ no platform to read, so the SSR default (the
+    // Mac form) stands.
+    if (!("navigator" in globalThis)) return;
     setMac(/mac|iphone|ipad|ipod/i.test(navigator.userAgent));
   }, []);
   return mac ? `⌘${key}` : `Ctrl ${key}`;

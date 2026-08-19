@@ -160,7 +160,10 @@ function ToastHost({ toasts }: { toasts: Toast[] }) {
   useEffect(() => {
     const el = hostRef.current;
     if (!el) return;
-    const supported = typeof el.showPopover === "function";
+    // Popover is a HOST capability, not a shape: jsdom defines neither
+    // `showPopover` nor `hidePopover`, so the element simply stays in the normal
+    // layer there (and in any browser too old for the top layer).
+    const supported = "showPopover" in el;
     const hide = () => {
       if (!supported) return;
       try {
