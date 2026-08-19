@@ -28,3 +28,17 @@ Gates per band: `npx react-router typegen && npx tsc --noEmit` clean + full `npx
 - [ ] C2b residuals: ack on apply-recommendation + resolve-packet + board accept doors; resolvePacket accept arm in-lock no-op; operatorAcceptCompletion honors {accepted}; FILES.md row for acceptance-disclosure.ts
 - [x] Band-3 gate (FB3-GH/RUNTIME/OPERATOR/ACCEPT/POLISH/CANON + workspace-delivery U12 one-liner): typegen+tsc clean, full suite exit 0 ×2 consecutive (FB3-RUNTIME's closing run recorded 264 files / 4082 tests). All 19 audit PARTIALs addressed; canaries per cluster.
 - [~] C6-LINT running: 26 findings → 0 + ci.yml lint step (behavior-preserving mandate, F21-7-class warning given).
+
+## Live validation on the rebuilt container (old data root kept — owner's PAT preserved)
+- [x] F21-1 boot drift WARN fired verbatim on the lagging root (refuses:["bypassed"], impact+remedy+cost); live-validation CAUGHT the missing-column variant (work_revision_sha absent on old roots → every INSERT would fail) → new projectionMissingColumns check + WARN arm + additive-ALTER remedy note + unit test; this root healed via additive ALTER (users/PAT untouched). Fresh roots get the widened CHECK from birth (unit-pinned).
+- [x] R21-4a live: VIB-10 task page showed "Preparing workspace / Cloning akin-ozer/viberr" as a live-run row with elapsed counting (shot 38).
+- [x] R21-4b live: per-project bare mirror created at projects/viberr/.repo-mirror/akin-ozer__viberr.git (56M, refs/heads only).
+- [x] F21-5 live: Selin demoted to Viewer → /settings shows repo binding but NO credential label/tail/scopes; restored to Contributor after.
+- [x] OBS-7 live: Developer header reads "Global base · customized for viberr".
+- [x] F21-18 live: all board key chips single-line at 390px (computed white-space: nowrap).
+- [x] F21-21 live rerun (VIB-10, the exact VIB-7 shape): no false out-of-band claim; loop clean.
+- [x] F21-22 live: operator-deliver push logged commits: 1.
+- [x] F21-6 live: verdict-capable Reviewer engagement logged "as a reviewer" (supporting arm unit-pinned).
+- [x] Ruling 88 live: bare accept POST → 400 "needs the confirmation dialog… no record of what was shown"; ceremony accept then merged PR #174 (Done, branch auto-deleted).
+- [x] Full governed loop on the pass-21 build: VIB-10 create → phases visible → mirror-backed clone → Codex dev commit → PR #174 → reviewer approve → ceremony accept → REAL merge 20:58:03Z.
+- [x] Final gates: typegen+tsc clean; full suite 4082 green ×2; oxlint 0; lint first in CI verify.
