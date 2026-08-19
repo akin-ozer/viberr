@@ -2,8 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
   AgentDeploymentDefinition,
+  CapabilityGrant,
   CapabilityMode,
 } from "~/schemas/project-file.schema";
+import { withheldAgentGrants } from "~/features/agents/capability-catalog";
+import { effectiveCollabMode } from "./agent-outcome.server";
 import {
   deliveringEngagement,
   supportingEngagements,
@@ -1218,6 +1221,12 @@ export interface OperatorTaskSnapshot {
     /** Whether this specialist may work the task's CURRENT stage (F1) — the
      *  operator should only assign/prompt an eligible one. */
     eligibleForCurrentStage: boolean;
+    /** F21-16: the specialist's OWN capabilities, resolved live from its
+     *  deployment grants — the right place to look when a human asks whether an
+     *  agent's grant took effect. `DeployedSpecialistView.capabilities` already
+     *  carries `browser`; `web` (`use-web-search-fetch`) is added here because
+     *  it is the row the operator misattributed to itself. */
+    capabilities: DeployedSpecialistView["capabilities"] & { web: boolean };
   })[];
   openPacket: boolean;
   /** The open decision packet's CONTENT (null when none) — the operator needs
@@ -1270,8 +1279,22 @@ export interface OperatorTaskSnapshot {
    *  blind to it — no `pr` field anywhere in the snapshot — so it could neither
    *  see that a human had CLOSED the PR on GitHub (an out-of-band rejection)
    *  nor reason about it before recommending/accepting completion. `state` is
-   *  the task-file cache vocabulary: review | merged | closed | accepted. */
-  pr: { number: number; state: PrState; title: string } | null;
+   *  the task-file cache vocabulary: review | merged | closed | accepted.
+   *
+   *  F21-17: `revisionDrift` is the same fact the acceptance ceremony discloses
+   *  (R17-1) — commits pushed to the PR head AFTER the last reviewed revision.
+   *  The operator was structurally blind to it, so its PR-closed recovery packet
+   *  could say "the review before closure was clean (Approve)" while an
+   *  unreviewed out-of-band commit the reconciler had already seen went
+   *  unmentioned. Null when the head equals the reviewed revision. */
+  pr:
+    | {
+        number: number;
+        state: PrState;
+        title: string;
+        revisionDrift: { aheadBy: number; headSha: string } | null;
+      }
+    | null;
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
@@ -1306,8 +1329,28 @@ export interface OperatorTaskSnapshot {
     state: "queued" | "running";
   }[];
   autonomy: OperatorAutonomy;
-  /** capabilityId → mode the operator holds (the RBAC the tools honor). */
-  policy: Record<string, string>;
+  /**
+   * F21-16 — the operator's OWN capability policy, LABELLED as its own.
+   *
+   * This used to be a bare `policy: Record<string, string>` sitting next to
+   * `deployedSpecialists`, with nothing in the payload saying whose policy it
+   * was. Live (VIB-5): a human granted the Web Verifier profile web + browser,
+   * the operator read `use-web-search-fetch: off` out of THIS map — its own
+   * egress row, withheld from the coordinator on purpose — and generated a
+   * "Web egress grant did not take effect" packet about the specialist. The
+   * specialist's next run mounted the browser fine. A model cannot be blamed
+   * for reading an unlabelled map as the only policy in the payload, so the
+   * payload now names the scope and points at the right place for the other
+   * one (`deployedSpecialists[].capabilities`).
+   */
+  operatorPolicy: {
+    /** Always `"operator"` — whose capabilities these are. */
+    scope: "operator";
+    /** One line the model reads before it quotes a row at anybody. */
+    note: string;
+    /** capabilityId → mode the OPERATOR holds (the RBAC its own tools honor). */
+    capabilities: Record<string, string>;
+  };
 }
 
 /** [1] Hard bound on `snapshot.recommendations`: the whole snapshot is
@@ -1394,6 +1437,49 @@ function declinedRecommendations(
   });
 }
 
+/**
+ * F21-16 — the sentence that stops the operator quoting its own policy at a
+ * specialist. It ships INSIDE the payload (not only in the manual) because the
+ * misread happened while the model was reading this exact object.
+ *
+ * Also carries the F21-14 acceptance exception: the same live operator that
+ * misread the scope of this map also read `transition-to-done: human` off it and
+ * posted "I can't accept completion myself", then accepted 60 seconds later.
+ * `transition-to-done` is the RAW stage transition; acceptance is
+ * `completion-for-acceptance`, and the two rows answer different questions.
+ */
+export const OPERATOR_POLICY_SCOPE_NOTE =
+  "These capabilities are YOURS, the operator's, and nobody else's. They say NOTHING about what a " +
+  "specialist agent may do: an agent's own grants are in `deployedSpecialists[].capabilities` " +
+  "(delivery / verdict / askHuman / browser / web), resolved live from its profile. Never quote a " +
+  "row from here as evidence about an agent — e.g. `use-web-search-fetch: off` here means YOUR web " +
+  "egress is withheld, not that a specialist's web grant failed to take effect. " +
+  "Acceptance: `completion-for-acceptance: direct` plus task autonomy `full` IS the sanctioned " +
+  "route to Done — call `accept_completion` and say so plainly. `transition-to-done: human` is the " +
+  "RAW stage transition (`transition_stage` into the terminal stage), which stays human-only; it is " +
+  "not a bar on the acceptance action, so never narrate that you cannot accept while you hold that grant.";
+
+/**
+ * F21-16 — does this deployed specialist actually hold web egress?
+ *
+ * Resolved from the deployment's own grants, with the same polarity the run path
+ * uses (`deploymentGrants` + `effectiveCollabMode`): an EMPTY grant list is not
+ * "no opinion" but a fully WITHHELD profile (P13-AP-06), so it must not fall
+ * through to the catalog's granted-by-default egress.
+ */
+function specialistWebGranted(
+  deployments: readonly { profileId: string; capabilities: CapabilityGrant[] }[],
+  profileId: string,
+): boolean {
+  const deployment = deployments.find((d) => d.profileId === profileId);
+  if (!deployment) return false;
+  const grants =
+    deployment.capabilities.length > 0
+      ? deployment.capabilities
+      : withheldAgentGrants();
+  return effectiveCollabMode(grants, "use-web-search-fetch") === "direct";
+}
+
 /** `users.name` is TEXT NOT NULL; a missing row simply has no owner name. */
 const userNameSchema = z.object({ name: z.string() });
 
@@ -1478,6 +1564,12 @@ export function operatorSnapshot(
         file.parsed.frontmatter.stage,
         { stages, workflow },
       ),
+      // F21-16: the specialist's own egress row, so the operator has somewhere
+      // TRUE to look when it is asked whether an agent's web grant took effect.
+      capabilities: {
+        ...s.capabilities,
+        web: specialistWebGranted(project.parsed.frontmatter.agents, s.id),
+      },
     })),
     openPacket: !!file.parsed.packet,
     packet: file.parsed.packet
@@ -1517,7 +1609,20 @@ export function operatorSnapshot(
     // on GitHub WITHOUT merging — an out-of-band rejection the operator must
     // not paper over by recommending or accepting completion.
     pr: fm.pr
-      ? { number: fm.pr.number, state: fm.pr.state, title: fm.pr.title }
+      ? {
+          number: fm.pr.number,
+          state: fm.pr.state,
+          title: fm.pr.title,
+          // F21-17: the unreviewed-drift fact, verbatim from the same field the
+          // acceptance ceremony reads.
+          revisionDrift:
+            fm.pr.revisionDrift && fm.pr.revisionDrift.aheadBy > 0
+              ? {
+                  aheadBy: fm.pr.revisionDrift.aheadBy,
+                  headSha: fm.pr.revisionDrift.headSha,
+                }
+              : null,
+        }
       : null,
     // The task branch, so recovery copy can NAME what an `archive_task`
     // option with `deleteBranch: true` would delete instead of gesturing at
@@ -1544,7 +1649,11 @@ export function operatorSnapshot(
         state: r.state,
       })),
     autonomy: authority.autonomy,
-    policy: Object.fromEntries(authority.policy),
+    operatorPolicy: {
+      scope: "operator",
+      note: OPERATOR_POLICY_SCOPE_NOTE,
+      capabilities: Object.fromEntries(authority.policy),
+    },
   };
 }
 
@@ -1815,7 +1924,32 @@ export async function operatorRunSpecialist(
   };
 }
 
-/** Engage a reviewer (governed by summon-reviewers). */
+/**
+ * F21-6 — what a NON-delivering engagement is called.
+ *
+ * The schema already distinguishes the two (`!delivers && verdictCapable` makes
+ * a required reviewer; everything else is supporting — task-file.schema), and
+ * the execution profile renders them under "SUPPORTING AGENTS". This copy did
+ * not: every non-delivering engagement was announced "as a reviewer". Live, the
+ * Web Verifier profile (verdict = Off, so its report gates nothing) was engaged
+ * "as a reviewer" and then displayed as supporting — two names for one thing,
+ * and the misleading one implies acceptance-gating authority it does not hold.
+ *
+ * An UNKNOWN profile (not deployed) reads as supporting: the weaker claim is the
+ * honest one when the grant cannot be resolved.
+ */
+function supportingRoleWord(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  profileId: string,
+): "a reviewer" | "a supporting agent" {
+  return deployedAgent(ctx, projectSlug, profileId)?.capabilities.verdict
+    ? "a reviewer"
+    : "a supporting agent";
+}
+
+/** Engage a supporting agent — a reviewer when its verdict gates acceptance
+ *  (governed by summon-reviewers). */
 export async function operatorAssignReviewer(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -1826,6 +1960,7 @@ export async function operatorAssignReviewer(
   if (g === "deny") {
     return { outcome: "denied", message: "Summoning reviewers is not permitted for the operator here." };
   }
+  const as = supportingRoleWord(ctx, input.projectSlug, input.profileId);
   if (g === "recommend") {
     const name = specialistName(ctx, input.projectSlug, input.profileId);
     await addRecommendation(
@@ -1836,18 +1971,21 @@ export async function operatorAssignReviewer(
       {
         kind: "assign_reviewer",
         profileId: input.profileId,
-        label: `Engage ${name} as a reviewer`,
+        label: `Engage ${name} as ${as}`,
       },
-      input.reason ?? `${name} should review the work at this stage.`,
+      input.reason ??
+        (as === "a reviewer"
+          ? `${name} should review the work at this stage.`
+          : `${name} should support the work at this stage.`),
     );
-    return { outcome: "recommended", message: `Recommended engaging ${name} as a reviewer.` };
+    return { outcome: "recommended", message: `Recommended engaging ${name} as ${as}.` };
   }
   const result = await assignReviewer(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
     outcome: "done",
     message: result.alreadyEngaged
-      ? `${result.name} is already a reviewer.`
-      : `Engaged ${result.name} as a reviewer.`,
+      ? `${result.name} is already engaged as ${as}.`
+      : `Engaged ${result.name} as ${as}.`,
   };
 }
 
@@ -1870,7 +2008,9 @@ export async function operatorRunReviewer(
       input.projectSlug,
       input.taskKey,
       { kind: "run_reviewer", profileId: input.profileId, label: `Start ${name}'s review run` },
-      `${name} is engaged as a reviewer; a maintainer starts the review run.`,
+      // F21-6: the run itself is still the "review run" (the reviewer-kind run),
+      // but how the profile is ENGAGED depends on whether its verdict gates.
+      `${name} is engaged as ${supportingRoleWord(ctx, input.projectSlug, input.profileId)}; a maintainer starts the review run.`,
     );
     return { outcome: "recommended", message: `Recommended starting ${name}'s review run.` };
   }
@@ -2052,8 +2192,10 @@ export async function operatorPromptReviewer(
   }
   const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
   if (!agent) {
-    return { outcome: "noop", message: `No deployed specialist "${input.profileId}" to engage as a reviewer.` };
+    return { outcome: "noop", message: `No deployed specialist "${input.profileId}" to engage as a supporting agent.` };
   }
+  // F21-6: "reviewer" only when its verdict actually gates acceptance.
+  const as = agent.capabilities.verdict ? "a reviewer" : "a supporting agent";
 
   if (g === "recommend") {
     await addRecommendation(
@@ -2064,11 +2206,15 @@ export async function operatorPromptReviewer(
       {
         kind: "assign_reviewer",
         profileId: input.profileId,
-        label: `Engage ${agent.name} as a reviewer`,
+        label: `Engage ${agent.name} as ${as}`,
       },
-      input.reason ?? input.directive ?? `${agent.name} should review the work at this stage.`,
+      input.reason ??
+        input.directive ??
+        (as === "a reviewer"
+          ? `${agent.name} should review the work at this stage.`
+          : `${agent.name} should support the work at this stage.`),
     );
-    return { outcome: "recommended", message: `Recommended engaging ${agent.name} as a reviewer.` };
+    return { outcome: "recommended", message: `Recommended engaging ${agent.name} as ${as}.` };
   }
 
   // direct: engage (idempotent) then prompt + run.
@@ -2097,7 +2243,12 @@ export async function operatorPromptReviewer(
     },
     ctx,
   );
-  return { outcome: "done", message: `Prompted reviewer @${agent.name} and started its run.` };
+  return {
+    outcome: "done",
+    // F21-6: "reviewer" is a claim about verdict authority, not a synonym for
+    // "not the deliverer".
+    message: `Prompted ${as === "a reviewer" ? "reviewer" : "supporting agent"} @${agent.name} and started its run.`,
+  };
 }
 
 /** Move the task to an allowed next stage (governed by stage-transitions). */
@@ -2729,7 +2880,7 @@ export async function operatorAcceptCompletion(
   if (noChange.refusal) return { outcome: "noop", message: noChange.refusal };
   // R17-1 (F17-L12): name any reviewed-revision drift on the completion record.
   const driftNote = revisionDriftNote(file.parsed.frontmatter);
-  await applyAcceptanceWrite(db, ctx, {
+  const { accepted } = await applyAcceptanceWrite(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     doneStageId,
@@ -2757,6 +2908,18 @@ export async function operatorAcceptCompletion(
           evidence: null,
         },
   });
+  // U3 (NFR16): `accepted: false` means the task was ALREADY Done when the write
+  // lock was taken — a human acceptance (or a second operator turn) landed while
+  // this one was running its no-change probe. The completion event, the merge
+  // and the audit belong to THAT write; the row below would be a second,
+  // operator-attributed record of one acceptance, and the "moved to Done"
+  // message would credit this turn with a move it did not make. The early
+  // already-Done return above reads the file OUTSIDE the lock, so it is a guess;
+  // this is the decision. Same shape as `forceAcceptCompletion`, which has
+  // followed the write rather than preceding it since U3.
+  if (!accepted) {
+    return { outcome: "noop", message: `${input.taskKey} is already Done.` };
+  }
   recordAudit(db, {
     action: "task.operator.accepted_completion",
     actor: OPERATOR_AUDIT_ACTOR,

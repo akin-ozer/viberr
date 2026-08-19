@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
-import type {
-  RunCallbacks,
-  RunHandle,
-  RunSpec,
-  RuntimeAdapter,
+import {
+  phaseStepForLine,
+  RUN_PHASE,
+  type RunCallbacks,
+  type RunHandle,
+  type RunSpec,
+  type RuntimeAdapter,
 } from "./adapter.server";
 import { SESSION_MISSING_RE } from "./session-export.server";
 import { isSdkSkillName } from "./skill-mount.server";
@@ -179,8 +181,23 @@ export function claudeIdleTimeoutMs(): number {
  * writes only through its governance MCP tools — it never edits files, runs
  * shell commands, or spawns sub-agents that could. Denied tools are removed
  * from the model's context, so this holds even under bypassPermissions.
+ *
+ * F21-3: THE single source. This list used to exist twice — here (bound per
+ * `kind: "operator"` run) and again in `operator-run.server.ts` (stated where
+ * the run is built), as two unguarded literals with nothing tying them
+ * together. Two copies of a confinement list is one copy away from a run that
+ * believes it is read-only and is not, so `operator-run` imports this one and
+ * `capability-denylist-markers.test.ts` pins the join.
+ *
+ * Defined HERE rather than in `operator-run` because this module is a leaf of
+ * the runtime graph: `operator-run` already imports the run service (which
+ * reaches this file through the registry), so pointing the dependency the other
+ * way would close a cycle around a module-level `const`.
+ *
+ * `Read`/`Grep`/`Glob` deliberately survive — the operator's whole repository
+ * view (R19-1) is reading — and so does the tool-loading path.
  */
-const OPERATOR_DENIED_BUILTINS = [
+export const OPERATOR_READ_ONLY_DENIED_TOOLS = [
   // Repo-mutation built-ins — the operator coordinates, it never writes code.
   // (`Task` moved to BASE_DENIED_BUILTINS: no run may spawn ungoverned subagents.)
   "Bash",
@@ -458,8 +475,8 @@ const spawnErrorCodeSchema = z
   .transform((thrown) => thrown.code)
   .catch("");
 
-function classifyClaudeError(error: unknown): ClaudeFailure {
-  const code = spawnErrorCodeSchema.parse(error);
+function classifyClaudeError(cause: unknown): ClaudeFailure {
+  const code = spawnErrorCodeSchema.parse(cause);
   if (code === "EBADF" || code === "EMFILE" || code === "ENFILE") {
     // R20-3: these three name the real cause already (host resource exhaustion,
     // not a provider verdict), so there is no separate provider sentence to add.
@@ -478,11 +495,11 @@ function classifyClaudeError(error: unknown): ClaudeFailure {
       providerText: "",
     };
   }
-  const raw = error instanceof Error ? error.message : String(error ?? "");
+  const raw = cause instanceof Error ? cause.message : String(cause ?? "");
   // R20-3 (F20-4): the provider's own redacted sentence, surfaced beside the
   // canonical message for the quota/auth/unknown arms (the earlier arms already
   // name their cause). See git-output-redact:redactProviderText.
-  const providerText = redactProviderText(error);
+  const providerText = redactProviderText(cause);
   // P13-D-2 before the auth branch: a swept transcript must never be narrated
   // as a rejected credential.
   if (SESSION_MISSING_RE.test(raw)) {
@@ -539,6 +556,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let idleTimedOut = false;
       let queryHandle: ClaudeQuery | null = null;
 
+      // R21-4 / G5 (FR28): the live phase/step the run strip renders. `lastStep`
+      // sticks so a stretch of model thinking still shows the tool the run is
+      // waiting on, instead of blanking the column.
+      let lastStep: string | null = null;
+      const phase = (name: string, step: string | null = lastStep) => {
+        cb.onPhase?.(name, step);
+      };
+
       // IDLE (inactivity) guard, not a wall-clock cap — the same shape the
       // codex adapter has used since owner ruling A8 (P13-RT-11). A claude run
       // may legitimately take hours; but if the SDK stream produces NO message
@@ -570,10 +595,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       };
 
       /** Persist a redaction-safe classified reason line, then settle error. */
-      const settleError = (error: unknown) => {
+      const settleError = (cause: unknown) => {
         if (settled) return;
         try {
-          const failure = classifyClaudeError(error);
+          const failure = classifyClaudeError(cause);
           cb.onLine({
             raw: "",
             display: {
@@ -631,6 +656,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       };
 
       const run = async () => {
+        // Before anything can be awaited: the SDK module import, the binary
+        // spawn and the first provider round-trip all happen with no output at
+        // all, and that window is what the strip used to render blank.
+        phase(RUN_PHASE.starting, null);
         const queryFn = deps.queryFn ?? (await realQuery());
         const resolvedModel = resolveClaudeModel(spec.model);
         // The granted skills Viberr MOUNTED into this run's workspace (empty for
@@ -746,7 +775,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           ...BASE_DENIED_BUILTINS.filter(
             (tool) => tool !== "Skill" || nativeSkills.length === 0,
           ),
-          ...(spec.kind === "operator" ? OPERATOR_DENIED_BUILTINS : []),
+          ...(spec.kind === "operator" ? OPERATOR_READ_ONLY_DENIED_TOOLS : []),
           // Supporting/reviewing runs are read-only for the repo (F10-12).
           ...(spec.kind === "reviewer" ? SUPPORTING_DENIED_BUILTINS : []),
           ...(spec.disallowedTools ?? []),
@@ -795,7 +824,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                 facts.turns = liveTurns;
               }
             }
-            cb.onLine({ raw: JSON.stringify(message), display, facts, occurredAt });
+            const emitted = { raw: JSON.stringify(message), display, facts, occurredAt };
+            cb.onLine(emitted);
+            // R21-4: the strip's live row. `turn N` is the honest fallback until
+            // the run invokes its first tool — a number that climbs is what
+            // tells a human the run is alive. The service throttles the writes.
+            const step = phaseStepForLine(emitted);
+            if (step) lastStep = step;
+            phase(RUN_PHASE.working, lastStep ?? `turn ${liveTurns}`);
           }
         } catch (error) {
           disarmIdle();
@@ -812,6 +848,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           return settleError(error);
         }
         disarmIdle();
+        // The stream is done; the terminal classification + finalize below is
+        // what the strip is waiting on now.
+        phase(RUN_PHASE.finishing, null);
 
         // A stream that ENDS (rather than throwing) after the abort still has
         // to report the hang, not a plain "no result" error.

@@ -372,6 +372,9 @@ describe("path 3 — operatorAcceptCompletion", () => {
       number: 318,
       state: "closed",
       title: "[VIB-1] Attach execution workspace",
+      // F21-17: null here because this fixture's head IS the reviewed revision;
+      // when it is not, the fact travels into the recovery packet.
+      revisionDrift: null,
     });
   });
 

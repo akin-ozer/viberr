@@ -1,0 +1,472 @@
+import { execFile } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import path from "node:path";
+import { promisify } from "node:util";
+import { projectDir } from "~/server/files/file-store-root.server";
+import { logger } from "~/server/logging/logger.server";
+import {
+  gitErrorText,
+  redactGitOutput,
+} from "~/server/secrets/git-output-redact.server";
+import {
+  CLONE_TIMEOUT_MS,
+  createGitHubAskpassEnv,
+  createGitHubClonePlan,
+  githubRepositoryUrl,
+  setOriginUrlArgs,
+  type GitHubAskpassEnv,
+} from "./git-clone-auth.server";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * A per-project git MIRROR that task workspace clones are cut from (R21-4 /
+ * OBS-9).
+ *
+ * Live: every task cloned `akin-ozer/viberr` (113 MB) straight from GitHub, so
+ * VIB-1/2/3 each paid 4-12 minutes and each held its own full copy. The repo is
+ * the SAME for every task in a project — the only thing that differs is which
+ * commit each workspace sits on — so the network fetch belongs to the project,
+ * once, and the per-task work belongs on local disk.
+ *
+ * ## The design, and why this one
+ *
+ * The mirror is a BARE clone at `projects/<slug>/.repo-mirror/<owner>__<repo>.git`,
+ * refreshed (`fetch --prune`) immediately before each workspace clone. The
+ * workspace is then cloned FROM the mirror — a local clone, which git populates
+ * by HARDLINKING the object store — and its `origin` is rewritten to the real
+ * `https://github.com/<owner>/<repo>.git` before it is handed to anyone.
+ *
+ * The alternative the ruling names — `clone --reference <mirror> --dissociate`
+ * from GitHub — was rejected on two counts: it still opens a network clone (so a
+ * cold task still waits on github.com), and `--reference` does not combine with
+ * the `--depth 1` the direct path uses. Hardlinks give the independence
+ * `--dissociate` is asked for and give it for free: the workspace's object files
+ * are its OWN directory entries, so reclaiming the mirror, `git gc` inside it,
+ * or deleting the project cannot pull objects out from under a live run. That
+ * independence matters here specifically because task workspaces are reclaimed
+ * at boot on their own schedule (`workspace-retention.server`), with no
+ * knowledge of this cache.
+ *
+ * What the rewrite preserves, deliberately:
+ *   - **origin URL** — `remote.origin.url` is the credential-free GitHub URL, so
+ *     the delivery push (`push-workspace.server`) and the branch update path
+ *     find exactly what they found before;
+ *   - **credential flow** — unchanged and, if anything, narrower: the PAT now
+ *     reaches only the MIRROR's fetch (through `GIT_ASKPASS`, never argv or a
+ *     persisted URL). The workspace clone itself is a local filesystem copy that
+ *     needs no credential at all;
+ *   - **a fresh-from-remote view** — the mirror is fetched from GitHub in the
+ *     same call, so the workspace sees the refs a fresh clone would.
+ *
+ * The one visible difference: a workspace cut from the mirror carries FULL
+ * history rather than `--depth 1`. That is a strict gain here — the history is
+ * hardlinked, so it costs no disk, and it removes the shallow-repo deepen dance
+ * the delivery path otherwise has to do.
+ *
+ * ## Failure policy
+ *
+ * A cache may never block a task. Every mirror step is best-effort: create,
+ * refresh and the local clone each fall back to the direct GitHub clone this
+ * module replaces, with one WARN naming what went wrong. Only the final clone's
+ * failure propagates — the callers classify it (`cloneFailureLogDetails`) and
+ * turn it into the prompt/timeline story a human can act on.
+ *
+ * One refinement over "any trouble ⇒ clone from GitHub" (R21-4b): a mirror that
+ * EXISTS and merely failed to REFRESH is still served, with a warning that says
+ * it may be stale. Discarding a working 113 MB local copy because the network
+ * hiccuped, and then downloading it again over that same network, is the worst
+ * available move. Corruption still self-heals: two consecutive refresh failures
+ * condemn the copy, and the next clone-side caller rebuilds it from scratch.
+ */
+
+/** `owner/repo` — the only shape that becomes a mirror directory name. Anything
+ *  else (a hand-edited `project.md`, a traversal attempt) skips the cache
+ *  entirely rather than deriving a path from it. */
+const REPO_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Where this project caches its repository, or null when `repo` is not a plain
+ * `owner/name` pair.
+ *
+ * Lives beside `tasks/`, NOT inside a task workspace: the boot reclaim only
+ * removes `<taskDir>/workspace` (`workspace-retention.server`), the projection
+ * rebuild only reads `projects/<slug>/tasks/*`, and the dot prefix keeps the
+ * file watcher from walking a 100 MB object store (`shouldIgnoreWatchPath`
+ * ignores any dot-prefixed path segment).
+ */
+export function projectRepoMirrorDir(
+  projectSlug: string,
+  repo: string,
+  dataRoot?: string,
+): string | null {
+  const [owner, name, ...rest] = repo.split("/");
+  if (
+    rest.length > 0 ||
+    !owner ||
+    !name ||
+    !REPO_SEGMENT_RE.test(owner) ||
+    !REPO_SEGMENT_RE.test(name) ||
+    owner.startsWith(".") ||
+    name.startsWith(".")
+  ) {
+    return null;
+  }
+  return path.join(
+    projectDir(projectSlug, dataRoot),
+    ".repo-mirror",
+    `${owner}__${name}.git`,
+  );
+}
+
+/**
+ * One mirror operation at a time per mirror directory.
+ *
+ * Two runs on the same project start together routinely (the operator drive
+ * clones, then the specialist it engages clones), and two `git fetch`es into one
+ * bare repo race on `FETCH_HEAD` and the ref lock. Git's own locking would turn
+ * that into a spurious failure — which this module would absorb as a cache miss
+ * and pay a full network clone for. Serializing in-process is cheaper than
+ * retrying, and one process per data root is already the rule
+ * (`db/writer-lock`), so there is no second writer to coordinate with.
+ */
+const mirrorLocks = new Map<string, Promise<unknown>>();
+
+function withMirrorLock<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const prior = mirrorLocks.get(key) ?? Promise.resolve();
+  // `then(work, work)` — the next waiter runs whatever the previous one did.
+  const next = prior.then(work, work);
+  // The stored tail must never reject: it is only a sequencing token, and an
+  // unobserved rejection here would surface as an unhandled promise.
+  mirrorLocks.set(
+    key,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return next;
+}
+
+/** How long the mirror's own network step may run. The first one is a full
+ *  clone, so it gets the clone budget; a refresh finishes in seconds. */
+const MIRROR_TIMEOUT_MS = CLONE_TIMEOUT_MS;
+
+/**
+ * The refresh gets its OWN, much shorter budget (R21-4b).
+ *
+ * An incremental `fetch --prune` against an existing mirror moves the delta
+ * since the last workspace clone — seconds, not minutes. Letting it inherit the
+ * 15-minute CLONE budget meant a network that hangs rather than fails held every
+ * caller for a quarter of an hour: the workspace clone that is waiting on it,
+ * and the operator's default-branch read, which is a tool call inside a live
+ * agent turn. Failing at two minutes costs a stale mirror; hanging costs the
+ * whole turn.
+ */
+const MIRROR_REFRESH_TIMEOUT_MS = 120_000;
+
+/**
+ * Consecutive refresh failures before the mirror is thrown away and re-cloned
+ * (R21-4b).
+ *
+ * One failure is the network; two in a row on a mirror whose remote is reachable
+ * is the mirror itself — a half-written pack from a killed fetch, a ref lock
+ * left by a process that died. Serving that forever is the failure mode a cache
+ * must not have, and a rebuild is the one repair that always works. Counted per
+ * mirror directory, reset by any successful fetch or rebuild.
+ */
+const MIRROR_REBUILD_AFTER_FAILURES = 2;
+
+/** Consecutive `fetch` failures per mirror directory — see the constant above. */
+const mirrorFetchFailures = new Map<string, number>();
+
+/**
+ * The environment EVERY mirror git operation runs with, credentialed or not.
+ *
+ * R21-4b: the credential-free arm used to hand git a copy of `process.env` with
+ * only the prompt and helper suppressed — so a host `GIT_ASKPASS` / `SSH_ASKPASS`
+ * (a developer's credential helper, a CI runner's agent) was inherited by a
+ * mirror fetch, which is exactly what the credentialed arm takes care to strip.
+ * `createGitHubAskpassEnv` is the ONE builder for both arms: it deletes both
+ * askpass variables, suppresses the terminal prompt, resets the ambient
+ * credential helper, and installs Viberr's own askpass program only when a token
+ * is actually supplied. Always `dispose()`.
+ */
+export function mirrorGitEnv(token: string | null): GitHubAskpassEnv {
+  return token ? createGitHubAskpassEnv({ token }) : createGitHubAskpassEnv({});
+}
+
+/** One WARN naming what the cache could not do. `detail` is git's own
+ *  complaint, already scrubbed by the caller (`""` when git said nothing). */
+function mirrorWarn(
+  message: string,
+  fields: Record<string, string>,
+  detail: string,
+): void {
+  logger.warn(message, detail ? { ...fields, detail } : fields);
+}
+
+/** The project's mirror, ready to be read or cloned from. */
+export interface ProjectMirror {
+  /** The bare repository's directory. */
+  dir: string;
+  /** Whether THIS call brought it up to date with the remote. False means the
+   *  mirror is being served as it stood — the refresh failed, and the caller's
+   *  answer is as old as the last successful one. */
+  refreshed: boolean;
+}
+
+/**
+ * Create or refresh the project's mirror — or null when the cache is unusable,
+ * in which case the caller clones straight from GitHub (or reads whatever local
+ * ref it already has).
+ *
+ * Never throws.
+ */
+async function ensureProjectMirror(input: {
+  mirrorDir: string;
+  repo: string;
+  remoteUrl: string;
+  token: string | null;
+  projectSlug: string;
+  /** May this call CREATE (or rebuild) a missing mirror — a full network clone?
+   *  The workspace clone pays that gladly, since it is the cost it is replacing;
+   *  a read-side refresh must never turn one tool call into a 113 MB download. */
+  create: boolean;
+}): Promise<ProjectMirror | null> {
+  const { mirrorDir, remoteUrl, token } = input;
+  const fields = {
+    projectSlug: input.projectSlug,
+    repo: input.repo,
+    mirrorDir,
+  };
+  // R21-4b: ONE env builder for both arms — a host askpass is never inherited.
+  const auth = mirrorGitEnv(token);
+  const env = auth.env;
+  try {
+    let rebuilding = false;
+    if (existsSync(path.join(mirrorDir, "HEAD"))) {
+      try {
+        await execFileAsync("git", ["-C", mirrorDir, "fetch", "--prune", "origin"], {
+          timeout: MIRROR_REFRESH_TIMEOUT_MS,
+          env,
+        });
+        mirrorFetchFailures.delete(mirrorDir);
+        return { dir: mirrorDir, refreshed: true };
+      } catch (error) {
+        // R21-4b: a mirror that EXISTS is worth more than the network that
+        // failed. Falling back to a full GitHub clone here was the worst of both
+        // — it threw away a working local copy and then paid the very download
+        // the mirror exists to avoid, at the moment the network was already sick.
+        const failures = (mirrorFetchFailures.get(mirrorDir) ?? 0) + 1;
+        mirrorFetchFailures.set(mirrorDir, failures);
+        const detail = redactGitOutput(gitErrorText(error), { token });
+        rebuilding = input.create && failures >= MIRROR_REBUILD_AFTER_FAILURES;
+        if (!rebuilding) {
+          mirrorWarn(
+            "the project's repository mirror could not be refreshed — serving a possibly stale mirror",
+            fields,
+            detail,
+          );
+          return { dir: mirrorDir, refreshed: false };
+        }
+        mirrorWarn(
+          "the project's repository mirror failed to refresh twice — rebuilding it",
+          fields,
+          detail,
+        );
+      }
+    } else if (!input.create) {
+      // Nothing cached and no licence to pay for one: the caller degrades.
+      return null;
+    }
+    // A previous attempt died mid-clone (a directory with no `HEAD` is not a
+    // repository, and `git clone` refuses a non-empty destination), or the
+    // repeated fetch failures above condemned this copy.
+    rmSync(mirrorDir, { recursive: true, force: true });
+    mkdirSync(path.dirname(mirrorDir), { recursive: true });
+    await execFileAsync("git", ["clone", "--bare", remoteUrl, mirrorDir], {
+      timeout: MIRROR_TIMEOUT_MS,
+      env,
+    });
+    // `--bare` writes `remote.origin.url` but NO fetch refspec, so a later
+    // `fetch origin` would update nothing. Branch heads only: GitHub also
+    // advertises `refs/pull/*`, which `--mirror`'s `+refs/*:refs/*` would drag
+    // in for no benefit to a workspace clone.
+    await execFileAsync(
+      "git",
+      [
+        "-C",
+        mirrorDir,
+        "config",
+        "--local",
+        "--replace-all",
+        "remote.origin.fetch",
+        "+refs/heads/*:refs/heads/*",
+      ],
+      { timeout: 10_000 },
+    );
+    mirrorFetchFailures.delete(mirrorDir);
+    logger.info(
+      rebuilding
+        ? "rebuilt the project's repository mirror cache"
+        : "created the project's repository mirror cache",
+      fields,
+    );
+    pruneStaleMirrors(mirrorDir);
+    return { dir: mirrorDir, refreshed: true };
+  } catch (error) {
+    mirrorWarn(
+      "the project's repository mirror is unavailable — cloning from GitHub",
+      fields,
+      redactGitOutput(gitErrorText(error), { token }),
+    );
+    return null;
+  } finally {
+    auth.dispose();
+  }
+}
+
+export interface ProjectMirrorRequest {
+  projectSlug: string;
+  /** `owner/repo`. */
+  repo: string;
+  /** The project's PAT, when one is bound. */
+  token: string | null;
+  dataRoot?: string;
+  /** Default false — see `ensureProjectMirror`'s `create`. */
+  create?: boolean;
+}
+
+/**
+ * The project's mirror, refreshed, under the per-mirror lock.
+ *
+ * The one entry point for everything that wants the project's repository
+ * WITHOUT touching a task workspace: the workspace clone cuts from it, and the
+ * operator's default-branch read (`operator-repo-read.server`) reads out of it.
+ * Null when this project has no usable mirror.
+ */
+export function refreshProjectMirror(
+  input: ProjectMirrorRequest,
+): Promise<ProjectMirror | null> {
+  const mirrorDir = projectRepoMirrorDir(
+    input.projectSlug,
+    input.repo,
+    input.dataRoot,
+  );
+  if (!mirrorDir) return Promise.resolve(null);
+  return withMirrorLock(mirrorDir, () =>
+    ensureProjectMirror({
+      mirrorDir,
+      repo: input.repo,
+      remoteUrl: githubRepositoryUrl(input.repo),
+      token: input.token,
+      projectSlug: input.projectSlug,
+      create: input.create ?? false,
+    }),
+  );
+}
+
+/** Drop mirrors for repositories this project no longer points at — otherwise a
+ *  repo change leaves a full copy of the old one on disk forever. Best-effort
+ *  and silent: a cache that cannot tidy itself is not a failure. */
+function pruneStaleMirrors(mirrorDir: string): void {
+  const parent = path.dirname(mirrorDir);
+  const keep = path.basename(mirrorDir);
+  try {
+    for (const entry of readdirSync(parent)) {
+      if (entry !== keep) {
+        rmSync(path.join(parent, entry), { recursive: true, force: true });
+      }
+    }
+  } catch {
+    // Nothing here is worth failing a clone over.
+  }
+}
+
+export interface WorkspaceCloneInput {
+  projectSlug: string;
+  /** `owner/repo`. */
+  repo: string;
+  /** Where the working tree goes. Must not exist yet. */
+  destination: string;
+  /** The project's PAT, when one is bound. Absent ⇒ the clone is anonymous. */
+  token?: string | null;
+  dataRoot?: string;
+}
+
+export interface WorkspaceCloneResult {
+  /** Whether the working tree was cut from the project's mirror cache. */
+  viaMirror: boolean;
+}
+
+/**
+ * Populate `destination` with a working clone of `repo`, through the project's
+ * mirror cache when that is possible and straight from GitHub when it is not.
+ *
+ * Throws exactly what `execFile` throws when the CLONE fails, so the callers'
+ * existing classification (`cloneFailureLogDetails` → the prompt and timeline
+ * story) is unchanged. Mirror trouble never reaches the caller as a failure.
+ */
+export async function cloneWorkspaceRepo(
+  input: WorkspaceCloneInput,
+): Promise<WorkspaceCloneResult> {
+  const token = input.token ?? null;
+  const remoteUrl = githubRepositoryUrl(input.repo);
+  const mirrorRequest: ProjectMirrorRequest = {
+    projectSlug: input.projectSlug,
+    repo: input.repo,
+    token,
+    // The workspace clone is the caller that MAY pay for a mirror: the network
+    // clone it replaces is the very cost being avoided.
+    create: true,
+  };
+  if (input.dataRoot) mirrorRequest.dataRoot = input.dataRoot;
+  const mirror = await refreshProjectMirror(mirrorRequest);
+
+  if (mirror) {
+    try {
+      // Local clone ⇒ git hardlinks the object store: seconds and ~no disk,
+      // with no alternates file, so this tree outlives the mirror. No
+      // credential is involved at all — this step never leaves the disk — and
+      // the prompt suppression is belt and braces against a hang.
+      await execFileAsync("git", ["clone", mirror.dir, input.destination], {
+        timeout: CLONE_TIMEOUT_MS,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      });
+      // The tree must never be handed on pointing at a local path: every
+      // fetch/push after this one talks to GitHub with the project's
+      // credential.
+      await execFileAsync("git", setOriginUrlArgs(input.destination, remoteUrl), {
+        timeout: 10_000,
+      });
+      return { viaMirror: true };
+    } catch (error) {
+      mirrorWarn(
+        "cloning from the project's repository mirror failed — cloning from GitHub",
+        { projectSlug: input.projectSlug, repo: input.repo },
+        redactGitOutput(gitErrorText(error), { token }),
+      );
+      // A half-written tree would make `git clone` refuse the destination.
+      rmSync(input.destination, { recursive: true, force: true });
+    }
+  }
+
+  // No credential ⇒ no `token` key at all: the plan's askpass leg keys off the
+  // property's presence, so a public-repo clone must not carry an empty one.
+  const planInput: Parameters<typeof createGitHubClonePlan>[0] = {
+    repo: input.repo,
+    destination: input.destination,
+  };
+  if (token) planInput.token = token;
+  const plan = createGitHubClonePlan(planInput);
+  try {
+    await execFileAsync("git", plan.args, {
+      timeout: CLONE_TIMEOUT_MS,
+      env: plan.env,
+    });
+    return { viaMirror: false };
+  } finally {
+    plan.dispose();
+  }
+}

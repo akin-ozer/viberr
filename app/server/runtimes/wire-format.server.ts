@@ -215,9 +215,28 @@ type CodexEnvelope = z.infer<typeof codexEnvelopeFields>;
  * Project one real wire envelope (parsed JSON) → LogLine + facts. Tolerant:
  * unknown types produce a `meta` line, never throw (both vendors add event
  * types between minor versions — runtime-adapters.md gotcha 9).
+ *
+ * `raw` STAYS `unknown`, and the `no-unknown-parameters` waiver below is the
+ * considered answer, not an oversight. The rule's remedy — "parse at the I/O
+ * boundary before calling this function" — has no target here, because this
+ * function IS that boundary: `claudeEnvelope`/`codexEnvelope` are total (every
+ * field `.catch()`es, see the note above) and every branch past line one reads a
+ * decoded `ClaudeEnvelope`/`CodexEnvelope`, never this parameter. What flows in
+ * is `AsyncGenerator<unknown>` from the Claude SDK seam and a `ThreadEvent` from
+ * the Codex one, so no annotation narrower than `unknown` accepts both.
+ *
+ * The two alternatives were costed and both regress:
+ *   · taking the DECODED envelope loses the raw text `unknownEnvelope` renders,
+ *     so an event type this build has never seen would print a fabricated
+ *     full-shape object instead of the provider's own envelope — the one line a
+ *     human has to read when a vendor ships a new event;
+ *   · taking the wire LINE (`string`) forces a JSON round-trip per console line
+ *     on both adapters' hottest path, to buy a type the schemas re-widen on the
+ *     very next statement.
  */
 export function projectEnvelope(
   backend: "claude" | "codex",
+  // eslint-disable-next-line anti-slop/no-unknown-parameters -- see above
   raw: unknown,
   occurredAtIso?: string,
 ): ProjectedEnvelope {

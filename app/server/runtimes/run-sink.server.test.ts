@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogLine } from "~/features/runtime/runtime-types";
+import { closeDb, shutdownDatabase } from "~/server/db/sqlite.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
+import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, type TestStore } from "../../../test-support/test-store";
 import type { EmittedLine, RunSpec } from "./adapter.server";
@@ -275,6 +277,76 @@ describe("silent line loss is surfaced (B-FD7)", () => {
       expect(markers).toHaveLength(1);
       expect(markers[0]).toContain("INCOMPLETE");
     } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+});
+
+/**
+ * F21-24 — a shutdown drain is not ten faults.
+ *
+ * Live (UC-31, `docker restart` mid-Codex-run): SIGTERM closed sqlite while a
+ * run was still streaming, and the pipeline kept its stale handle. Every
+ * subsequent line produced a "run line persist failed" ERROR plus a "run
+ * divergence marker could not be persisted" ERROR — ~10 pairs of the same fact,
+ * burying the one line an operator needed. There is nothing to retry: the
+ * database will not reopen (see `getDb`'s refusal), the raw `.jsonl` is a plain
+ * append and still holds the full stream, and boot finalization already recovers
+ * the run ("finalized non-terminal runs at boot: 1").
+ */
+describe("run lines during a shutdown drain (F21-24)", () => {
+  it("collapses to ONE warning and writes no divergence marker", () => {
+    const runId = `run_drain_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    // The same persist failure B-FD7 emulates — but during a shutdown.
+    store.db.prepare(`DELETE FROM agent_runs WHERE id = ?`).run(runId);
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      shutdownDatabase();
+      for (let i = 0; i < 5; i++) {
+        sink.line(emitted({ t: "10:00:00", ev: "out", tag: "x", text: `l${i}` }, `{"n":${i}}`));
+      }
+
+      const drainWarnings = warn.mock.calls.filter(([msg]) =>
+        msg.includes("the database closed mid-run"),
+      );
+      expect(drainWarnings).toHaveLength(1);
+      // NOT one error per line — that spray is the defect.
+      expect(
+        error.mock.calls.filter(([msg]) => msg.includes("run line persist failed")),
+      ).toHaveLength(0);
+
+      const raw = readFileSync(rawLogPath("claude", runId), "utf8")
+        .split("\n")
+        .filter(Boolean);
+      // The canonical transcript is untouched by any of this…
+      expect(raw.filter((l) => l.includes('"n"'))).toHaveLength(5);
+      // …and no divergence marker was attempted: writing it would only produce
+      // the second half of the per-line error pair.
+      expect(raw.filter((l) => l.includes("line_lost"))).toHaveLength(0);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+      closeDb(); // clears the shutdown latch for the rest of the suite
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  it("still reports a GENUINE persist failure per line when nothing is shutting down", () => {
+    const runId = `run_genuine_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    store.db.prepare(`DELETE FROM agent_runs WHERE id = ?`).run(runId);
+    const error = vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      sink.line(emitted({ t: "10:00:00", ev: "out", tag: "x", text: "one" }, '{"say":"one"}'));
+      expect(
+        error.mock.calls.filter(([msg]) => msg.includes("run line persist failed")),
+      ).toHaveLength(1);
+    } finally {
+      error.mockRestore();
       rmSync(rawLogPath("claude", runId), { force: true });
     }
   });

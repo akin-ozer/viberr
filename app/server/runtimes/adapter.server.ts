@@ -1,5 +1,10 @@
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
-import type { LogLine, RunBackend, RunKind } from "~/features/runtime/runtime-types";
+import type {
+  JsonValue,
+  LogLine,
+  RunBackend,
+  RunKind,
+} from "~/features/runtime/runtime-types";
 import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
 import type { EnvelopeFacts } from "./wire-format.server";
 
@@ -20,6 +25,26 @@ export type RunMcpServers = Record<
   string,
   McpSdkServerConfigWithInstance | SpecialistMcpServerConfig
 >;
+
+/**
+ * One declaration as it reaches an ADAPTER, which is a wider contract than
+ * `RunMcpServers[string]` by exactly one arm.
+ *
+ * Every governed producer reaches an adapter through `StartRunInput` /
+ * `ResumeRunInput`, which enforce `RunMcpServers` — the first two arms. The
+ * third exists because each adapter's own tolerance tests hand it a
+ * deliberately MALFORMED declaration to prove the backend degrades safely
+ * (codex zod-drops a bad entry rather than crashing the run; claude forwards it
+ * to the SDK, which owns the verdict). That arm is a concrete JSON object
+ * rather than an escape hatch, so it still cannot smuggle in a value that has
+ * no wire representation, and neither adapter reads a field off this type: the
+ * codex side re-parses with `codexMcpServerSchema`, the claude side never
+ * inspects a declaration at all.
+ */
+export type RunMcpServerDeclaration =
+  | McpSdkServerConfigWithInstance
+  | SpecialistMcpServerConfig
+  | Record<string, JsonValue>;
 
 /** What the service asks an adapter to run. */
 export interface RunSpec {
@@ -53,12 +78,12 @@ export interface RunSpec {
    *  backends; Claude additionally supports in-process SDK servers such as the
    *  operator's `{ viberr: createSdkMcpServer(...) }`.
    *
-   *  Typed loose, not as `RunMcpServers`: every governed caller reaches this
-   *  through `StartRunInput`/`ResumeRunInput`, which DO enforce that union —
-   *  but the adapters' own tolerance tests hand this field deliberately
-   *  malformed configs to prove each backend degrades safely (codex zod-drops
-   *  a bad declaration instead of crashing the run). */
-  mcpServers?: Record<string, unknown>;
+   *  Typed as `RunMcpServerDeclaration`, not `RunMcpServers`: every governed
+   *  caller reaches this through `StartRunInput`/`ResumeRunInput`, which DO
+   *  enforce that union — but the adapters' own tolerance tests hand this field
+   *  deliberately malformed configs to prove each backend degrades safely
+   *  (codex zod-drops a bad declaration instead of crashing the run). */
+  mcpServers?: Record<string, RunMcpServerDeclaration>;
   /** Claude-only allowlist for automatic tool approval. */
   allowedTools?: string[];
   /** Denylist confining a specialist run to its granted capabilities (e.g. a
@@ -123,8 +148,69 @@ export interface RunExit {
 export interface RunCallbacks {
   onLine: (line: EmittedLine) => void;
   onExit: (exit: RunExit) => void;
-  /** Optional live phase/step update for the run strip (no persisted line). */
+  /**
+   * Live phase/step update for the run strip (no persisted line).
+   *
+   * R21-4 / G5 (FR28): this callback existed and was WIRED through
+   * `run-service.launch` since the phase-6 build, but NO adapter ever called it
+   * — so `agent_runs.phase`/`.step` stayed null for the entire life of every
+   * run and the Live-run strip rendered two empty rows while an agent worked.
+   * Both adapters now drive it (see `RUN_PHASE` + `phaseStepForLine`); the
+   * service throttles the writes.
+   */
   onPhase?: (phase: string | null, step: string | null) => void;
+}
+
+/**
+ * The phase vocabulary both adapters emit, so the strip reads the same on
+ * Claude and Codex. Deliberately tiny and literal — these are the four things
+ * the server actually KNOWS about a run, not a narration of what the model is
+ * "thinking".
+ *
+ * `preparing` is emitted by the RUN PIPELINE (before any adapter exists): a
+ * cold task-repo clone can take minutes (OBS-8: 3+ min on a 113 MB repo) and
+ * until it finished the task page showed no live row at all, which reads as a
+ * dead app.
+ */
+export const RUN_PHASE = {
+  preparing: "Preparing workspace",
+  starting: "Starting",
+  working: "Working",
+  finishing: "Finishing",
+} as const;
+
+/** Longest `step` we persist — the strip truncates at ~44ch and the column is
+ *  a live hint, not a transcript. */
+const STEP_MAX = 120;
+
+function clampStep(step: string): string {
+  const flat = step.replace(/\s+/g, " ").trim();
+  return flat.length > STEP_MAX ? `${flat.slice(0, STEP_MAX - 1)}…` : flat;
+}
+
+/**
+ * The `step` line for one emitted run line, or null when the line says nothing
+ * about what the run is doing right now.
+ *
+ * Derived from the PROJECTED display line, which both adapters already compute
+ * — so the two backends produce the same shape ("Bash · npm test") from very
+ * different envelopes, and neither adapter re-parses the wire format for this.
+ */
+export function phaseStepForLine(line: EmittedLine): string | null {
+  const display = line.display;
+  if (!display) return null;
+  // TOOL lines only. Both backends project a tool invocation as `ev: "tool"`
+  // with a `name` (claude `tool_use`, codex `command_execution` / `mcp_tool_call`
+  // / `web_search`), so one rule covers both. Command OUTPUT (`ev: "out"`) is
+  // deliberately excluded: it carries no tool name and would put the tail of
+  // whatever a build printed into the strip.
+  if (display.ev !== "tool") return null;
+  const name = display.name?.trim();
+  const text = display.text.trim();
+  if (name && text) return clampStep(`${name} · ${text}`);
+  if (name) return clampStep(name);
+  if (text) return clampStep(text);
+  return null;
 }
 
 /** A running handle the service can interrupt. */

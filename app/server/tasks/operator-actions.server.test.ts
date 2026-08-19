@@ -31,7 +31,10 @@ import {
   createTask,
   dismissRecommendation,
   transitionStage,
+  type TaskActionContext,
 } from "./task-actions.server";
+import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   AUTONOMY_CLAMPED_AUDIT_ACTION,
@@ -1308,6 +1311,143 @@ describe("operatorAcceptCompletion", () => {
     expect(task().frontmatter.validation).toBe("healthy");
   });
 
+  it("U3: a task that went Done during the accept is a NOOP — no second audit row", async () => {
+    // `applyAcceptanceWrite` re-checks "already Done" INSIDE the write lock and
+    // reports it (`accepted: false`); this caller ignored the answer, so a human
+    // acceptance landing while the operator was verifying the PR head left a
+    // `task.operator.accepted_completion` row and a "moved to Done" message for
+    // a write the operator never made — two records of one acceptance, the
+    // second one attributed to an agent. CANARY: drop the `if (!accepted)`
+    // return.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "direct" },
+    ]);
+    // deployRoster clears the project's repo; the race below rides the ONE
+    // remote read this path makes (the PR-head verification), so it needs a repo
+    // and a credential to reach GitHub at all.
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: "akin-ozer/viberr",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const patActor = {
+      userId: store.users.arda.id,
+      label: store.users.arda.email,
+    };
+    const pat = createPat(
+      store.db,
+      { ...patActor, label: "bot", token: "ghp_operatornoop01" },
+      patActor,
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      patActor,
+    );
+
+    seedTask("review");
+    const head = "a".repeat(40);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...task().frontmatter,
+        pr: { number: 7, state: "review" as const, title: "[VIB-1] work" },
+        branch: "vib-1-work",
+        workRevision: {
+          id: "rev_1",
+          headSha: head,
+          treeSha: "t".repeat(40),
+          branch: "vib-1-work",
+          createdAt: "2026-08-19T09:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+        // R15-1: delivered work needs an approving verdict, or the gate refuses
+        // before the write this test is about is ever reached.
+        engagements: [
+          {
+            profileId: "reviewer",
+            backend: "claude",
+            role: "Review & validation",
+            delivers: false,
+            verdictCapable: true,
+          },
+        ],
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_1",
+            headSha: head,
+            result: "approve" as const,
+            reason: "looks right",
+            at: "2026-08-19T09:30:00.000Z",
+          },
+        ],
+        validation: "healthy" as const,
+      },
+      goal: "g",
+      timeline: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    // The human acceptance lands mid-verification: after the operator's own
+    // already-Done read (which is OUTSIDE the lock, and therefore a guess) and
+    // before the write lock is taken.
+    const humanCompletion = {
+      occurredAt: "2026-08-19T10:00:00.000Z",
+      type: "completion" as const,
+      actor: {
+        kind: "human" as const,
+        userId: store.users.arda.id,
+        nameHint: "Arda",
+      },
+      title: "Completion accepted",
+      text: "Human acceptance recorded — the human got there first.",
+      toAgent: false,
+      evidence: null,
+    };
+    const github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/pulls/7": () => {
+        writeTask(store.dataRoot, store.slug, {
+          frontmatter: {
+            ...task().frontmatter,
+            stage: "done",
+            readiness: "ready",
+            waiting: "none",
+          },
+          goal: "g",
+          timeline: [humanCompletion],
+        });
+        return { body: { head: { sha: head } } };
+      },
+    });
+
+    const ctxWithGithub: TaskActionContext = {
+      dataRoot: store.dataRoot,
+      fetchImpl: github.fetchImpl,
+    };
+    const r = await operatorAcceptCompletion(
+      store.db,
+      ctxWithGithub,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+
+    expect(github.callsTo("GET /repos/akin-ozer/viberr/pulls/7")).toHaveLength(1);
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toMatch(/already Done/i);
+    // The human's completion stands alone — no operator event written over it.
+    expect(
+      task().timeline.filter((e) => e.type === "completion"),
+    ).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.accepted_completion" }),
+    ).toHaveLength(0);
+  });
+
   it("full autonomy does NOT accept a task with an OPEN blocked decision (F7-VAL1 mirror)", async () => {
     // The human accept path refuses a task with an open blocked packet; the
     // full-autonomy operator must refuse it too, or it silently buries the
@@ -2322,5 +2462,357 @@ describe("operatorPostComment honest outcome (G1/B-FD8)", () => {
     expect(result.outcome).toBe("done");
     expect(result.message).toBe("Comment posted to the timeline.");
     expect(task().timeline.some((e) => e.type === "comment")).toBe(true);
+  });
+});
+
+/**
+ * F21-16 (live VIB-5) — `get_task` shipped a bare `policy` map with nothing
+ * saying WHOSE policy it was, sitting right next to `deployedSpecialists`.
+ * After a human granted the Web Verifier profile web + browser, the operator
+ * read `use-web-search-fetch: off` out of that map — its OWN withheld egress —
+ * and generated a "Web egress grant did not take effect" packet about the
+ * specialist. The specialist's next run mounted the browser fine.
+ */
+/** Capability grants as the deployment file carries them. */
+const grants = (
+  modes: Record<string, CapabilityMode>,
+): { capabilityId: string; mode: CapabilityMode }[] =>
+  Object.entries(modes).map(([capabilityId, mode]) => ({ capabilityId, mode }));
+
+describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", () => {
+  /** Deploy an operator whose own egress is WITHHELD alongside a specialist
+   *  whose egress and browser are GRANTED — the exact live configuration. */
+  function deployScopedRoster(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            ...DEFAULT_POLICY,
+            ...grants({ "use-web-search-fetch": "off" }),
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "full",
+          },
+        },
+        {
+          profileId: "web-verifier",
+          capabilities: grants({
+            "use-web-search-fetch": "direct",
+            "use-browser": "direct",
+            "report-validation-verdict": "off",
+          }),
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Web Verifier",
+            role: "Live verification",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+        {
+          profileId: "quiet",
+          // P13-AP-06: an EMPTY grant list is a fully WITHHELD profile, not an
+          // unspecified one — its egress must read false, not the catalog
+          // default.
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Quiet",
+            role: "Docs",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  const snapshot = () =>
+    operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+
+  it("labels the operator's own policy and carries the note that stops the misread", () => {
+    // Canary: rename `operatorPolicy` back to `policy` (or drop the note) and
+    // this fails.
+    deployScopedRoster();
+    seedTask("impl");
+    const snap = snapshot();
+
+    expect(snap.operatorPolicy.scope).toBe("operator");
+    expect(snap.operatorPolicy.capabilities["use-web-search-fetch"]).toBe("off");
+    expect(snap.operatorPolicy.note).toContain("deployedSpecialists[].capabilities");
+    expect(snap.operatorPolicy.note).toContain("YOURS, the operator's");
+    // The payload no longer carries an unlabelled `policy` key at all.
+    expect("policy" in snap).toBe(false);
+  });
+
+  it("carries each specialist's OWN browser/web grants — the right place to look", () => {
+    deployScopedRoster();
+    seedTask("impl");
+    const byId = new Map(snapshot().deployedSpecialists.map((s) => [s.id, s]));
+
+    // The profile the human actually granted: both true, while the operator's
+    // own egress row above is `off`.
+    expect(byId.get("web-verifier")!.capabilities.web).toBe(true);
+    expect(byId.get("web-verifier")!.capabilities.browser).toBe(true);
+    // Verdict stays explicit-only (F10-14) — "supporting", not a reviewer.
+    expect(byId.get("web-verifier")!.capabilities.verdict).toBe(false);
+    // A withheld (empty-grants) profile must not inherit the catalog's
+    // granted-by-default egress.
+    expect(byId.get("quiet")!.capabilities.web).toBe(false);
+    expect(byId.get("quiet")!.capabilities.browser).toBe(false);
+  });
+
+  /**
+   * F21-17 — the drift fact the PR-closed recovery packet was missing. The
+   * operator was structurally blind to it: `pr` carried number/state/title only.
+   */
+  it("exposes the PR's unreviewed-commit drift (F21-17)", () => {
+    deployScopedRoster();
+    seedTask("review");
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    const file = readTaskFile(ref)!;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...file.parsed.frontmatter,
+        pr: {
+          number: 318,
+          state: "closed",
+          title: "PR",
+          revisionDrift: { aheadBy: 2, headSha: "cab10477beef1234" },
+        },
+      },
+      goal: file.parsed.goal,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    expect(snapshot().pr?.revisionDrift).toEqual({
+      aheadBy: 2,
+      headSha: "cab10477beef1234",
+    });
+  });
+});
+
+/**
+ * F21-6 — "Engaged … as a reviewer" was emitted for EVERY non-delivering
+ * engagement. The schema already distinguishes them (`!delivers &&
+ * verdictCapable` makes a required reviewer), and the execution profile renders
+ * the rest under "SUPPORTING AGENTS". Live, the verdict-Off Web Verifier was
+ * announced "as a reviewer" — a claim of acceptance-gating authority it does
+ * not hold.
+ */
+describe("supporting-engagement copy branches on verdict authority (F21-6)", () => {
+  function deployVerdictRoster(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: DEFAULT_POLICY,
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "full",
+          },
+        },
+        {
+          profileId: "reviewer",
+          capabilities: grants({ "report-validation-verdict": "direct" }),
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Rev",
+            role: "Code review",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+        {
+          profileId: "web-verifier",
+          capabilities: grants({ "use-browser": "direct" }),
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Web Verifier",
+            role: "Live verification",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  const engage = (profileId: string) =>
+    operatorAssignReviewer(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId },
+      authority("supervised"),
+    );
+
+  it("a verdict-capable profile is still engaged 'as a reviewer'", async () => {
+    // Canary: hardcode "a reviewer" in `supportingRoleWord` and the next test
+    // fails while this one passes — the pair is what pins the branch.
+    deployVerdictRoster();
+    seedTask("review");
+    const r = await engage("reviewer");
+    expect(r.message).toBe("Engaged Rev as a reviewer.");
+  });
+
+  it("a verdict-INCAPABLE profile is engaged 'as a supporting agent'", async () => {
+    deployVerdictRoster();
+    seedTask("review");
+    const r = await engage("web-verifier");
+    expect(r.message).toBe("Engaged Web Verifier as a supporting agent.");
+    expect(r.message).not.toContain("reviewer");
+  });
+
+  it("the RECOMMENDATION card carries the same distinction", async () => {
+    deployVerdictRoster();
+    seedTask("review");
+    const recommendOnly = resolveOperatorAuthority(
+      { dataRoot: store.dataRoot },
+      store.slug,
+      { autonomy: "supervised" },
+    );
+    recommendOnly.policy.set("summon-reviewers", "recommend");
+
+    const r = await operatorAssignReviewer(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "web-verifier" },
+      recommendOnly,
+    );
+    expect(r.outcome).toBe("recommended");
+    expect(r.message).toBe("Recommended engaging Web Verifier as a supporting agent.");
+    const card = task().frontmatter.recommendations.at(-1)!;
+    expect(card.label).toBe("Engage Web Verifier as a supporting agent");
+  });
+
+  it("prompting a verdict-incapable profile narrates it as supporting too", async () => {
+    deployVerdictRoster();
+    seedTask("review");
+    const r = await operatorPromptReviewer(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "web-verifier" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(r.message).toBe("Prompted supporting agent @Web Verifier and started its run.");
+    interruptRunningRuns("VIB-1");
+  });
+});
+
+/**
+ * R20-9 / ruling 84 — the delegated-ask disclosure was PROMPT-ONLY.
+ *
+ * When the operator consults an agent and then brings the question to a human
+ * itself, the timeline otherwise reads as if that agent never held the ask. A
+ * rule the model must remember is a rule it will eventually forget, so the
+ * toolkit remembers: a packet opened in the same run as a `prompt_agent` carries
+ * the disclosure whether or not the model wrote one.
+ */
+describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () => {
+  const PACKET_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
+    ...DEFAULT_POLICY,
+    { capabilityId: "generate-packets", mode: "direct" },
+  ];
+
+  async function toolkitFor() {
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    return buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("full"),
+    });
+  }
+
+  const openPacket = async (
+    toolkit: Awaited<ReturnType<typeof toolkitFor>>,
+    body: string | undefined,
+  ) => {
+    const tool = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    const options = [
+      { kind: "custom", title: "Postgres", recommended: true },
+      { kind: "custom", title: "SQLite" },
+    ];
+    const packetType = "input";
+    const title = "Which storage backend?";
+    // An ABSENT `body` is a different call from one carrying a body — the
+    // second test below is exactly the absent case.
+    await (body === undefined
+      ? tool.handler({ packetType, title, options }, {})
+      : tool.handler({ packetType, title, body, options }, {}));
+  };
+
+  it("a packet opened after prompting an agent DISCLOSES the consultation by name", async () => {
+    // Canary: drop the `consultationDisclosure()` append in
+    // `open_decision_packet` and the disclosure vanishes.
+    deployRoster(PACKET_POLICY);
+    seedTask("impl");
+    const toolkit = await toolkitFor();
+
+    const prompt = toolkit.tools.find((t) => t.name === "prompt_agent")!;
+    await prompt.handler(
+      { profileId: "developer", prompt: "Which storage backend does the repo use?", delivers: true },
+      {},
+    );
+    await openPacket(toolkit, "The repo supports both.");
+
+    const packet = task().packet!;
+    expect(packet.body).toContain("The repo supports both.");
+    expect(packet.body).toContain("the operator prompted Dev on this task");
+    expect(packet.body).toContain("not by that agent");
+    interruptRunningRuns("VIB-1");
+  });
+
+  it("discloses even when the model leaves the body empty", async () => {
+    deployRoster(PACKET_POLICY);
+    seedTask("impl");
+    const toolkit = await toolkitFor();
+    const prompt = toolkit.tools.find((t) => t.name === "prompt_agent")!;
+    await prompt.handler({ profileId: "developer", prompt: "check the repo", delivers: true }, {});
+    await openPacket(toolkit, undefined);
+
+    expect(task().packet!.body).toContain("the operator prompted Dev on this task");
+    interruptRunningRuns("VIB-1");
+  });
+
+  it("says nothing when no agent was consulted this run — the disclosure is a FACT, not decoration", async () => {
+    deployRoster(PACKET_POLICY);
+    seedTask("impl");
+    const toolkit = await toolkitFor();
+    await openPacket(toolkit, "Nobody was asked.");
+
+    const packet = task().packet!;
+    expect(packet.body).toBe("Nobody was asked.");
+    expect(packet.body).not.toContain("Disclosure");
   });
 });

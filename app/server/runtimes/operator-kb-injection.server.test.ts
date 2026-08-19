@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { authoredPacketOptions, buildOperatorSystemPrompt } from "./operator-run.server";
 import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
+import type { CapabilityMode } from "~/schemas/project-file.schema";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -413,5 +414,62 @@ describe("authoredPacketOptions — recommended index (P11-27)", () => {
       { kind: "edit_goal", title: "B", recommended: false },
       { kind: "custom", title: "C", recommended: false },
     ]);
+  });
+});
+
+/**
+ * F21-16 + F21-14 — the "Live authority" block is where the operator reads its
+ * own capability rows, and it is where BOTH live misreads happened.
+ *
+ * VIB-5: after a human granted the Web Verifier profile web + browser, the
+ * operator quoted `use-web-search-fetch: off` — its OWN withheld egress row,
+ * from an unlabelled `policy` map — as proof the SPECIALIST's grant "did not
+ * take effect". A fresh specialist run mounted the browser fine.
+ *
+ * VIB-3/UC-8: the same block's `transition-to-done: human` row produced "I
+ * can't accept completion myself… needs you", 60 seconds before the same
+ * full-autonomy operator accepted the task. That row governs the RAW stage
+ * transition; acceptance is `completion-for-acceptance`.
+ */
+describe("buildOperatorSystemPrompt — whose policy is this? (F21-16, F21-14)", () => {
+  const dataRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-op-scope-"));
+
+  const withPolicy = (
+    rows: Record<string, CapabilityMode>,
+  ): OperatorAuthority => ({
+    ...authorityWith([]),
+    policy: new Map(Object.entries(rows)),
+  });
+
+  it("labels the map as the OPERATOR's own and points elsewhere for an agent's grants", () => {
+    // Canary: restore the bare "# Live authority / Capability policy" heading
+    // and drop OPERATOR_POLICY_SCOPE_NOTE — every assertion fails.
+    const prompt = buildOperatorSystemPrompt(
+      withPolicy({ "use-web-search-fetch": "off", "stage-transitions": "direct" }),
+      dataRoot(),
+    );
+    expect(prompt).toContain("# Live authority — YOUR OWN capability policy");
+    expect(prompt).toContain("these are the OPERATOR's capabilities, not any agent's");
+    // The rows themselves still ship — the fix is labelling, not hiding.
+    expect(prompt).toContain("- use-web-search-fetch: off");
+    // …and the model is told where the OTHER scope lives.
+    expect(prompt).toContain("`deployedSpecialists[].capabilities`");
+    expect(prompt).toMatch(
+      /`use-web-search-fetch: off` here means YOUR web egress is withheld/,
+    );
+  });
+
+  it("states the acceptance exception: full autonomy + the grant IS the route to Done", () => {
+    const prompt = buildOperatorSystemPrompt(
+      withPolicy({
+        "completion-for-acceptance": "direct",
+        "transition-to-done": "human",
+      }),
+      dataRoot(),
+    );
+    expect(prompt).toContain("`completion-for-acceptance: direct` plus task autonomy `full`");
+    expect(prompt).toContain("sanctioned");
+    expect(prompt).toContain("`transition-to-done: human` is the RAW stage transition");
+    expect(prompt).toContain("never narrate that you cannot accept while you hold that grant");
   });
 });

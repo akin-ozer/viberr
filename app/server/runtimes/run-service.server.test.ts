@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { closeDb, shutdownDatabase } from "~/server/db/sqlite.server";
+import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeTask, baseTaskFrontmatter, type TestStore } from "../../../test-support/test-store";
 import { AppError } from "~/server/errors/app-error.server";
@@ -11,19 +13,24 @@ import {
   getRunLog,
   interruptRun,
   listRunsForTask,
+  MODEL_SUBSTITUTED_TAG,
   registerRunCompletion,
   repoWriteWithheldFromDenylist,
+  reserveRun,
   resumeRun,
   startRun,
 } from "./run-service.server";
-import { getRun, listRunLines } from "./run-store.server";
+import { getRun, listRunLines, listRunsForTaskRows } from "./run-store.server";
+import { defaultModelFor } from "./model-catalog.server";
+import { RUN_PHASE } from "./adapter.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
-import type { RunSpec, RuntimeAdapter } from "./adapter.server";
+import type { RunCallbacks, RunSpec, RuntimeAdapter } from "./adapter.server";
 import { setBackendAvailability, type AdapterSet } from "./runtime-registry.server";
 import {
   installFakeRuntime,
+  lastRunSpec,
   queueFakeRun,
   type FakeRun,
 } from "../../../test-support/fake-runtime";
@@ -1060,5 +1067,365 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
     });
     await settle();
     expect(specs[2]?.effort).toBe("xhigh");
+  });
+});
+
+/**
+ * R21-4 — the run row exists (and renders) BEFORE the provider process does.
+ *
+ * OBS-8, live: a create-trigger run spent 3+ minutes inside `git clone --depth 1`
+ * on a 113 MB repository BEFORE anything appeared on the task page — empty
+ * timeline, no Live-run strip, no phase, nothing moving. The work WAS underway;
+ * the product simply had no row to render it on, because the run row was only
+ * minted after the workspace was ready.
+ */
+describe("reserveRun — a live row while the workspace is prepared (R21-4)", () => {
+  it("renders as a running row with its preparation phase before any adapter starts", () => {
+    const reservation = reserveRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary-abc",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      agentName: "dev",
+      agentProfileId: "developer",
+      phase: RUN_PHASE.preparing,
+      step: "Cloning acme/app",
+    })!;
+    expect(reservation).not.toBeNull();
+
+    const [view] = listRunsForTask(store.db, store.slug, "VIB-1");
+    // `state: "running"` is what the Live-run strip filters on — a queued row
+    // would have kept the page blank, which is the defect.
+    expect(view).toMatchObject({
+      state: "running",
+      lifecycle: "running",
+      phase: "Preparing workspace",
+      step: "Cloning acme/app",
+    });
+    expect(view!.startedAt).toBe(reservation.startedAt);
+  });
+
+  it("startRun ADOPTS the reservation — one row, one thread, the original clock", async () => {
+    const reservation = reserveRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary-abc",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      agentProfileId: "developer",
+      phase: RUN_PHASE.preparing,
+    })!;
+    queueFakeRun(instantScript([{ t: "1", ev: "text", tag: "assistant", text: "hi" }]));
+
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      reservation,
+    });
+    await settle();
+
+    expect(runId).toBe(reservation.runId);
+    // ONE row: a second would show up beside the strip the human was watching.
+    expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(1);
+    const row = getRun(store.db, runId)!;
+    expect(row.thread_id).toBe("primary-abc");
+    // Elapsed covers the preparation the human already sat through.
+    expect(row.started_at).toBe(reservation.startedAt);
+    expect(row.state).toBe("finished");
+  });
+
+  it("abandon() releases the row (and the delivering single-flight slot) when preparation throws", () => {
+    const reservation = reserveRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary-abc",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      agentProfileId: "developer",
+      phase: RUN_PHASE.preparing,
+    })!;
+
+    reservation.abandon("clone blew up");
+
+    const row = getRun(store.db, reservation.runId)!;
+    expect(row.state).toBe("error");
+    expect(row.phase).toBeNull();
+    expect(row.finished_at).not.toBeNull();
+    // The unique index only binds on queued|running, so a second delivering run
+    // is startable again — the whole reason abandoning matters.
+    expect(
+      listRunsForTaskRows(store.db, store.slug, "VIB-1").filter(
+        (r) => r.kind === "primary" && (r.state === "running" || r.state === "queued"),
+      ),
+    ).toHaveLength(0);
+  });
+});
+
+/**
+ * C4-opres — a reserved row is INTERRUPTIBLE, and an interrupt is final.
+ *
+ * The reservation renders a `running` row minutes before the provider process
+ * exists, and the Live-run strip's Stop button acts on exactly that row: there is
+ * no adapter yet, so `interruptRun` takes its no-live-handle arm and writes the
+ * terminal state directly. The adoption then ran an upsert written for a row it
+ * believed only it could touch — reviving the run, spawning the process the human
+ * had just stopped, and erasing the recorded intervention.
+ */
+describe("a reservation interrupted while the workspace is prepared", () => {
+  function reserve() {
+    return reserveRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary-abc",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      agentProfileId: "developer",
+      phase: RUN_PHASE.preparing,
+      step: "Cloning acme/app",
+    })!;
+  }
+
+  const stop = (runId: string) =>
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+
+  it("startRun REFUSES the adoption instead of resurrecting the run", async () => {
+    // Canary: drop `assertRunReservationLive` from startRun and this goes green
+    // on a run that is `running` again with a live adapter behind it.
+    const reservation = reserve();
+    expect(stop(reservation.runId).outcome).toBe("interrupted");
+
+    queueFakeRun(instantScript([{ t: "1", ev: "text", tag: "assistant", text: "hi" }]));
+    await expect(
+      startTestRun(store.db, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        role: "developer",
+        kind: "primary",
+        backend: "claude",
+        model: "sonnet",
+        prompt: "go",
+        dataRoot: store.dataRoot,
+        reservation,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    await settle();
+
+    const row = getRun(store.db, reservation.runId)!;
+    // The human's stop stands, with the interrupter still recorded on it.
+    expect(row.state).toBe("interrupted");
+    expect(row.interrupted_by).toBe(store.users.arda.id);
+    // Nothing was spawned, and no second row appeared beside it.
+    expect(lastRunSpec()).toBeUndefined();
+    expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(1);
+  });
+
+  it("abandon() leaves the recorded interrupt alone", () => {
+    // The wrapper's catch releases the reservation when preparation throws —
+    // and the refusal above IS such a throw. Stamping `error` over `interrupted`
+    // would erase the one fact a human put there.
+    // Canary: drop the terminal check in `abandon` and the state reads "error".
+    const reservation = reserve();
+    stop(reservation.runId);
+
+    reservation.abandon("preparation stopped");
+
+    const row = getRun(store.db, reservation.runId)!;
+    expect(row.state).toBe("interrupted");
+    expect(row.interrupted_by).toBe(store.users.arda.id);
+  });
+});
+
+/**
+ * F21-24 (phase half) — a shutdown drain is not one fault per phase message.
+ *
+ * The line path already collapsed to a single warning; `phase` did not, so
+ * `docker restart` mid-run still sprayed "run phase persist failed" from
+ * `launch`'s own catch — one per stream message, saying the same thing the line
+ * path had just stopped saying. Nothing is retryable: the database will not
+ * reopen, and boot finalization recovers the run.
+ */
+describe("run phases during a shutdown drain (F21-24)", () => {
+  it("collapses to ONE warning with no per-phase errors", async () => {
+    // Canary: drop the drain guard from `sink.phase` and this reports 5 errors.
+    let callbacks: RunCallbacks | null = null;
+    const capture: RuntimeAdapter = {
+      backend: "claude",
+      start(spec, cb) {
+        callbacks = cb;
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: capture, codex: capture });
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
+    });
+    const cb = callbacks!;
+
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      shutdownDatabase();
+      // The live shape: SIGTERM closes the very handle this run is writing
+      // through, so every write from here throws rather than quietly no-opping.
+      store.db.close();
+      // Distinct phases so the 1s step throttle cannot swallow them. `onPhase`
+      // is optional on the callback type; `launch` always supplies it, and a
+      // run-service that stopped doing so is itself the regression.
+      const onPhase = cb.onPhase!;
+      for (let i = 0; i < 5; i++) onPhase(`phase-${i}`, `step-${i}`);
+      // …and the exit that follows the drain is silent for the same reason.
+      cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
+
+      expect(
+        error.mock.calls.filter(([msg]) => msg.includes("run phase persist failed")),
+      ).toHaveLength(0);
+      expect(
+        error.mock.calls.filter(([msg]) => msg.includes("run finalize persist failed")),
+      ).toHaveLength(0);
+      expect(
+        warn.mock.calls.filter(([msg]) => msg.includes("the database closed mid-run")),
+      ).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+      closeDb(); // clears the shutdown latch for the rest of the suite
+    }
+  });
+});
+
+/**
+ * F21-13 (run half) — a model belonging to the OTHER backend must not run
+ * silently on this one.
+ *
+ * Live: `backends: [claude]` + `model: gpt-5.6-terra` (saved through the
+ * editor race) ran the whole task on Claude's default model. Graceful, but
+ * silent: the agents page named Terra, the provider ran Sonnet, and no surface
+ * anywhere said a substitution had happened.
+ */
+describe("startRun — foreign model substitution is disclosed (F21-13)", () => {
+  it("runs the backend's default, records it, and opens the run log with the swap", async () => {
+    queueFakeRun(instantScript([{ t: "1", ev: "text", tag: "assistant", text: "hi" }]));
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "gpt-5.6-terra", // a Codex id on a Claude run
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    // The row names what ACTUALLY ran — a header naming a model the provider
+    // never saw is the lie this closes.
+    expect(getRun(store.db, runId)!.model).toBe(defaultModelFor("claude"));
+    const first = listRunLines(store.db, runId)[0]!;
+    expect(first.display.tag).toBe(MODEL_SUBSTITUTED_TAG);
+    expect(first.display.text).toContain("gpt-5.6-terra");
+    expect(first.display.text).toContain("Codex");
+    expect(first.display.text).toContain("Claude Code");
+    // And the spec the adapter received carries the substituted model, so the
+    // provider and the row can never disagree.
+    expect(lastRunSpec()!.model).toBe(defaultModelFor("claude"));
+  });
+
+  it("leaves a model the backend DOES know completely alone (no notice, no swap)", async () => {
+    queueFakeRun(instantScript([{ t: "1", ev: "text", tag: "assistant", text: "hi" }]));
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    expect(getRun(store.db, runId)!.model).toBe("claude-sonnet-4-5");
+    expect(
+      listRunLines(store.db, runId).some(
+        (l) => l.display.tag === MODEL_SUBSTITUTED_TAG,
+      ),
+    ).toBe(false);
+  });
+});
+
+/**
+ * R21-4 — phase writes are throttled. Adapters emit one per stream message; the
+ * strip only ever renders the latest, so a chatty run must not turn into one
+ * UPDATE per message.
+ */
+describe("run phase throttling (R21-4)", () => {
+  it("writes a CHANGED phase immediately and rate-limits step-only churn", async () => {
+    // A live handle the test drives — the run never exits, so `finalize` never
+    // nulls the phase and the row IS the observable.
+    let callbacks: Parameters<RuntimeAdapter["start"]>[1] | null = null;
+    const captureAdapter: RuntimeAdapter = {
+      backend: "claude",
+      start(spec, cb) {
+        callbacks = cb;
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    const adapters: AdapterSet = { claude: captureAdapter, codex: captureAdapter };
+    configureRunServiceForTests(adapters);
+
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    const cb = callbacks!;
+
+    cb.onPhase?.("Working", "Bash · one");
+    expect(getRun(store.db, runId)).toMatchObject({
+      phase: "Working",
+      step: "Bash · one",
+    });
+
+    // Same phase, immediately after: throttled — the row keeps the first step.
+    cb.onPhase?.("Working", "Bash · two");
+    expect(getRun(store.db, runId)!.step).toBe("Bash · one");
+
+    // A CHANGED phase is never swallowed by the throttle: the transitions are
+    // the informative part, and dropping "Finishing" would strand the strip on
+    // a step that already ended.
+    cb.onPhase?.("Finishing", null);
+    expect(getRun(store.db, runId)).toMatchObject({ phase: "Finishing", step: null });
+
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    await settle();
   });
 });

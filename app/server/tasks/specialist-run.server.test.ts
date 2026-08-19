@@ -36,7 +36,11 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
-import { getRun, listRunLines } from "~/server/runtimes/run-store.server";
+import {
+  getRun,
+  listRunLines,
+  listRunsForTaskRows,
+} from "~/server/runtimes/run-store.server";
 import type {
   RunCallbacks,
   RunHandle,
@@ -615,7 +619,14 @@ describe("assignReviewer / removeReviewer", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(result).toMatchObject({ profileId: "dev", alreadyEngaged: false });
+    expect(result).toMatchObject({
+      profileId: "dev",
+      alreadyEngaged: false,
+      // F21-6 (route half): the RESULT has to carry the capacity too, or every
+      // caller that announces the engagement (the task page's toast) has nothing
+      // to tell a reviewer from a supporting agent by.
+      verdictCapable: false,
+    });
 
     const file = readTaskFile({
       projectSlug: store.slug,
@@ -634,10 +645,59 @@ describe("assignReviewer / removeReviewer", () => {
       },
     ]);
     expect(file.parsed.timeline[0]!.text).toContain("Engaged **dev**");
-    expect(file.parsed.timeline[0]!.text).toContain("as a reviewer");
+    // F21-6: `dev` holds no verdict grant (verdictCapable: false above), so the
+    // engagement announcement must NOT call it a reviewer — "reviewer" is a
+    // claim about authority, and acceptance never waits on this agent. Live
+    // (VIB-1) a verdict=Off profile was announced "as a reviewer" while the
+    // execution profile listed it under SUPPORTING AGENTS.
+    expect(file.parsed.timeline[0]!.text).toContain("as a supporting agent.");
+    expect(file.parsed.timeline[0]!.text).not.toContain("as a reviewer");
     expect(
       listAuditEvents(store.db, { action: "task.reviewer.assigned" })[0]?.taskKey,
     ).toBe("VIB-1");
+  });
+
+  it("F21-6: a VERDICT-CAPABLE engagement is still announced as a reviewer", async () => {
+    // Same call, one grant different — the copy is the only thing that moves.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [
+            { capabilityId: "report-validation-verdict", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const result = await assignReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(supportingEngagements(file.parsed.frontmatter)[0]!.verdictCapable).toBe(true);
+    expect(file.parsed.timeline[0]!.text).toContain("as a reviewer.");
+    expect(result.verdictCapable).toBe(true);
   });
 
   it("is idempotent — a second assign is a no-op (alreadyEngaged)", async () => {
@@ -645,6 +705,9 @@ describe("assignReviewer / removeReviewer", () => {
     await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
     const again = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
     expect(again.alreadyEngaged).toBe(true);
+    // The EXISTING engagement's snapshot — the one the acceptance gate reads —
+    // so the "already engaged" answer names the same capacity the first one did.
+    expect(again.verdictCapable).toBe(false);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     expect(supportingEngagements(file.parsed.frontmatter)).toHaveLength(1);
   });
@@ -3024,5 +3087,113 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(inputs!.skills.granted).toEqual(["conventional-commits"]);
     expect(inputs!.skills.native).toEqual([]);
     expect(inputs!.skills.injected).toEqual(["conventional-commits"]);
+  });
+});
+
+/**
+ * R21-4 / OBS-8 — the workspace preparation is VISIBLE on the task page.
+ *
+ * Live: a create-trigger run spent 3+ minutes inside `git clone --depth 1` on a
+ * 113 MB repository BEFORE the run row existed. For that whole window the task
+ * showed an empty timeline, no Live-run strip and no phase — "input required ·
+ * agent working" next to nothing at all. The server was working; the product had
+ * no row to say so, because the row was only minted once the workspace was ready.
+ */
+describe("R21-4 — the run row exists while the workspace is prepared", () => {
+  const PROXY_KEYS = [
+    "https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY",
+    "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY",
+  ] as const;
+
+  /** A clone that fails instantly and offline (a proxy pointed at a dead port),
+   *  while still spawning a real `git` — so the await this test observes is a
+   *  genuine child process, not a resolved promise. */
+  async function withOfflineGit<T>(work: () => Promise<T>): Promise<T> {
+    const saved = PROXY_KEYS.map((k) => [k, process.env[k]] as const);
+    for (const key of PROXY_KEYS) {
+      process.env[key] = key.toLowerCase().startsWith("no_")
+        ? ""
+        : "http://127.0.0.1:1";
+    }
+    try {
+      return await work();
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  function deployWithRepo(): void {
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: "acme/widgets",
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("shows a running row phased 'Preparing workspace' during the clone, then adopts it", async () => {
+    deployWithRepo();
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const observed: { runId: string; phase: string | null; step: string | null }[] = [];
+    await withOfflineGit(async () => {
+      const pending = startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      // Poll while the clone's child process is in flight. Bounded, and it can
+      // only end early by the run finishing — which would itself be the failure
+      // this asserts against (nothing visible during preparation).
+      for (let i = 0; i < 200; i++) {
+        const row = listRunsForTaskRows(store.db, store.slug, "VIB-1")[0];
+        if (row?.phase === "Preparing workspace") {
+          observed.push({ runId: row.id, phase: row.phase, step: row.step });
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      const run = await pending;
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      interruptRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+        actor(store.users.arda),
+      );
+      return run;
+    });
+
+    expect(observed).toHaveLength(1);
+    // Named: a spinner over a blank line is what the human already had.
+    expect(observed[0]!.step).toBe("Cloning acme/widgets");
+    // ONE row for the whole thing — the reserved row IS the run's row, so the
+    // strip the human watched during the clone never blinks or duplicates.
+    const rows = listRunsForTaskRows(store.db, store.slug, "VIB-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe(observed[0]!.runId);
   });
 });

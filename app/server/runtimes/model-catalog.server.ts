@@ -228,6 +228,34 @@ export function isKnownModel(backend: RealBackend, model: string): boolean {
 }
 
 /**
+ * The backend that DOES recognize `model`, when the chosen `backend` does not —
+ * else null. F21-13.
+ *
+ * This is the precise shape of the live defect: the profile editor let Save race
+ * the backend-switch model reload, so `backends: [claude]` was persisted next to
+ * `model: gpt-5.6-terra`. Nothing rejected the pair; at run time
+ * `resolveClaudeModel` simply didn't recognize the id, returned undefined, and
+ * the SDK quietly ran its own default — the agents page said one thing and the
+ * run did another, with no trace anywhere.
+ *
+ * Deliberately NARROWER than `!isKnownModel(backend, model)`: the Claude side of
+ * the catalog is OPEN (a live `supportedModels()` id, a dated id, and on a cold
+ * process an id whose live cache entry has been evicted all pass through
+ * legitimately), so "unknown here" alone is not evidence of a mistake. "Known on
+ * the OTHER backend" is. Codex's catalog is closed, so a foreign check there is
+ * exact by construction.
+ */
+export function foreignModelBackend(
+  backend: RealBackend,
+  model: string | null | undefined,
+): RealBackend | null {
+  const m = (model ?? "").trim();
+  if (!m || isKnownModel(backend, m)) return null;
+  const other: RealBackend = backend === "codex" ? "claude" : "codex";
+  return isKnownModel(other, m) ? other : null;
+}
+
+/**
  * Resolve a stored profile model to a valid RUN model id for `backend`: the
  * stored value when it is a real catalog id, else the backend default. This is
  * the guard that stops a display-label placeholder (e.g. "codex-large ·

@@ -1,6 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import type { LogLine, RunKind, RunView } from "~/features/runtime/runtime-types";
+import type {
+  LogLine,
+  RunKind,
+  RunState,
+  RunView,
+} from "~/features/runtime/runtime-types";
 import {
   recordAudit,
   type AuditActor,
@@ -11,8 +16,19 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
-import type { RunHandle, RunMcpServers, RunSpec, RuntimeAdapter } from "./adapter.server";
-import { resolveRunEffort } from "./model-catalog.server";
+import {
+  RUN_PHASE,
+  type RunHandle,
+  type RunMcpServers,
+  type RunSpec,
+  type RuntimeAdapter,
+} from "./adapter.server";
+import {
+  defaultModelFor,
+  foreignModelBackend,
+  modelDisplayName,
+  resolveRunEffort,
+} from "./model-catalog.server";
 import { publishRunStateChanged } from "./run-events.server";
 import {
   projectRunsForTask,
@@ -30,6 +46,7 @@ import {
   runLineStats,
   upsertRun,
   type AgentRunRow,
+  type InsertRunInput,
 } from "./run-store.server";
 import { probeSessionContinuity } from "./session-export.server";
 import {
@@ -191,6 +208,13 @@ const SDK_LABEL = {
   codex: "Codex SDK",
 } satisfies Record<RealBackend, string>;
 
+/** The product's name for each backend, as every other human-facing string
+ *  spells it ("Claude Code" / "Codex"). */
+const BACKEND_LABEL = {
+  claude: "Claude Code",
+  codex: "Codex",
+} satisfies Record<RealBackend, string>;
+
 export interface StartRunInput {
   projectSlug: string;
   taskKey: string;
@@ -246,6 +270,171 @@ export interface StartRunInput {
   /** Per-run environment overlay (e.g. GIT_CEILING_DIRECTORIES to confine a
    *  specialist's git to its workspace). Merged on top of the adapter env. */
   env?: Record<string, string>;
+  /** R21-4: the row this run ALREADY has, from `reserveRun` — the caller showed
+   *  a live "Preparing workspace" strip while it cloned. `startRun` then adopts
+   *  that row (id, thread, started_at) instead of minting a second one. */
+  reservation?: RunReservation;
+}
+
+// ------------------------------------------------------- run reservation
+
+/**
+ * A run row that exists (and renders on the Live-run strip) BEFORE its provider
+ * process does — R21-4 / OBS-8.
+ *
+ * A cold task-repo clone took 3-12 minutes live on a 113 MB repository, and for
+ * that whole window the task page showed no run at all: empty timeline, no
+ * strip, nothing moving. The work IS underway, so the honest fix is a real run
+ * row in `running` state whose phase says what the server is doing.
+ *
+ * The reservation OWNS the row until `startRun` adopts it: a caller that throws
+ * mid-preparation must `abandon()` it, or the row stays `running` forever and
+ * (for a delivering run) holds the single-flight slot until boot finalization.
+ */
+export interface RunReservation {
+  runId: string;
+  threadId: string;
+  /** The instant the row went `running` — carried onto the launched run. */
+  startedAt: string;
+  /** Update the visible phase/step while preparing. */
+  phase(phase: string, step: string | null): void;
+  /** Preparation failed: finalize the row as `error` so nothing is stranded. */
+  abandon(reason: string): void;
+}
+
+export interface ReserveRunInput {
+  projectSlug: string;
+  taskKey: string;
+  threadId: string;
+  role: string;
+  kind: RunKind;
+  backend: RealBackend;
+  model: string;
+  agentName?: string | null;
+  agentProfileId: string;
+  /** The phase to show immediately (the caller is already working). */
+  phase: string;
+  step?: string | null;
+}
+
+/** The states a reserved row may still be adopted (or abandoned) from — every
+ *  other state is a terminal outcome some other writer already recorded. */
+const RESERVATION_LIVE_STATES: readonly RunState[] = ["queued", "running"];
+
+/**
+ * Refuse to go on when the reserved row is no longer this run's to take.
+ *
+ * C4-opres: `reserveRun` writes a `running` row minutes before the provider
+ * process exists, and that row is interruptible from the moment it renders — the
+ * Live-run strip's Stop button acts on exactly it. `interruptRun` then stamps
+ * `interrupted` (its no-live-handle arm: there is no adapter yet), and the
+ * adoption upsert, written for a row it believed only it could touch, REVIVED
+ * that run: state back to `running`, a provider process spawned, and a human's
+ * stop silently undone. Preparation checks here, and `startRun` checks again
+ * immediately before adopting, so the window closes on both sides.
+ *
+ * Throws `AppError` — a run that cannot start, which every caller already
+ * handles as a run-start failure (the route answers 409; `startAgentRun`
+ * releases the reservation and rethrows).
+ */
+export function assertRunReservationLive(db: DatabaseSync, runId: string): void {
+  const row = getRun(db, runId);
+  if (row && RESERVATION_LIVE_STATES.includes(row.state)) return;
+  throw new AppError({
+    code: ERROR_CODES.CONFLICT,
+    status: 409,
+    userMessage: row
+      ? "That run was stopped while its workspace was being prepared, so it was not started. Start a new run when you want it to go ahead."
+      : "That run's record disappeared while its workspace was being prepared, so it was not started. Start a new run.",
+  });
+}
+
+/**
+ * Claim a run row up front so the task page has something live to render while
+ * the server prepares the workspace. Never throws for display reasons — a
+ * reservation that cannot be written degrades to today's behavior (no strip),
+ * which must not be able to block a run from starting.
+ */
+export function reserveRun(
+  db: DatabaseSync,
+  input: ReserveRunInput,
+): RunReservation | null {
+  const runId = newId("run");
+  const startedAt = new Date().toISOString();
+  try {
+    upsertRun(db, {
+      id: runId,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      threadId: input.threadId,
+      role: input.role,
+      kind: input.kind,
+      backend: input.backend,
+      model: input.model,
+      sdk: SDK_LABEL[input.backend] ?? "",
+      agentName: input.agentName ?? null,
+      agentProfileId: input.agentProfileId,
+      state: "running",
+      phase: input.phase,
+      step: input.step ?? null,
+      startedAt,
+    });
+  } catch (error) {
+    logger.warn("run reservation could not be written — preparing invisibly", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return null;
+  }
+  const publish = (state: "running" | "error") => {
+    publishRunStateChanged({
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId,
+      threadId: input.threadId,
+      state,
+    });
+  };
+  publish("running");
+  return {
+    runId,
+    threadId: input.threadId,
+    startedAt,
+    phase(phase, step) {
+      try {
+        patchRun(db, runId, { phase, step });
+      } catch (error) {
+        logger.warn("run preparation phase could not be persisted", {
+          runId,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    },
+    abandon(reason) {
+      try {
+        // C4-opres: never demote a row another writer already finalized. A
+        // human's interrupt landing during preparation IS this run's outcome
+        // (and is why the preparation threw); stamping `error` over it would
+        // erase the recorded intervention — the same precedence rule the sink
+        // enforces at finalize (B-FD7).
+        const current = getRun(db, runId);
+        if (current && !RESERVATION_LIVE_STATES.includes(current.state)) return;
+        patchRun(db, runId, {
+          state: "error",
+          phase: null,
+          step: null,
+          finishedAt: new Date().toISOString(),
+        });
+        publish("error");
+      } catch (error) {
+        logger.error("reserved run could not be abandoned", {
+          runId,
+          reason,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    },
+  };
 }
 
 /** Runs started by the operator runtime itself (scheduling reactions). */
@@ -359,6 +548,10 @@ type RunStartedAudit = {
  */
 const sqliteErrorSchema = z.object({ errcode: z.number() });
 
+/** F21-13: the `meta` tag on the run's model-substitution disclosure line.
+ *  A durable classified tag (no column, no migration), like `run·line_lost`. */
+export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
+
 /**
  * Starts a run: selects the requested provider adapter, inserts the queued
  * row, wires the sink and adapter callbacks, and kicks the adapter.
@@ -376,28 +569,75 @@ export async function startRun(
   input: StartRunInput,
 ): Promise<{ runId: string }> {
   const state = getState();
-  const threadId = input.threadId ?? DEFAULT_THREAD[input.kind];
-  const runId = newId("run");
+  // R21-4: a reserved row already carries this run's identity — adopt it whole
+  // (id AND thread) so the strip the human has been watching becomes this run
+  // rather than a second row appearing beside it.
+  const reservation = input.reservation ?? null;
+  // C4-opres: the row must still be THIS run's to take. Nothing between this
+  // check and the adoption write below awaits, and one process owns the data
+  // root (db/writer-lock), so no other writer can slip a terminal state in
+  // between — the refusal IS the guard the upsert would otherwise need.
+  if (reservation) assertRunReservationLive(db, reservation.runId);
+  const threadId =
+    reservation?.threadId ?? input.threadId ?? DEFAULT_THREAD[input.kind];
+  const runId = reservation?.runId ?? newId("run");
   const workdir =
     input.workdir ?? taskDir(input.projectSlug, input.taskKey, input.dataRoot);
 
-  const selection = selectAdapter(input.backend, state.adapters);
-  try {
-    upsertRun(db, {
-      id: runId,
-      projectSlug: input.projectSlug,
+  // F21-13 (run half): a model id belonging to the OTHER backend used to reach
+  // the adapter untouched — `resolveClaudeModel` didn't recognize it, returned
+  // undefined, and the SDK ran its own default. The agents page said
+  // `gpt-5.6-terra`, the run was Sonnet, and nothing anywhere said so. Substitute
+  // the backend's default (Codex would otherwise 400 on a Claude id) and
+  // DISCLOSE it: the row stores what actually ran, and the run log opens with a
+  // line naming the swap. The save-time rejection is the primary fix
+  // (agent-profile-actions.server.ts); this is the net under it, for profiles
+  // saved before that guard and for any path that builds a spec by hand.
+  const foreignBackend = foreignModelBackend(input.backend, input.model);
+  const model = foreignBackend ? defaultModelFor(input.backend) : input.model;
+  const modelSubstitution = foreignBackend
+    ? `The agent's model **${modelDisplayName(foreignBackend, input.model)}** ` +
+      `(\`${input.model}\`) is a ${BACKEND_LABEL[foreignBackend]} model and cannot run on ` +
+      `${BACKEND_LABEL[input.backend]} — this run used \`${model}\` instead. ` +
+      "Pick a model from this backend's list on the agent profile."
+    : null;
+  if (modelSubstitution) {
+    logger.warn("run model is foreign to its backend — substituted", {
+      runId,
       taskKey: input.taskKey,
-      threadId,
-      role: input.role,
-      kind: input.kind,
       backend: input.backend,
-      model: input.model,
-      sdk: SDK_LABEL[input.backend] ?? "",
-      sessionId: input.resumeSessionId ?? null,
-      agentName: input.agentName ?? null,
-      agentProfileId: input.agentProfileId,
-      state: "queued",
+      requestedModel: input.model,
+      ranModel: model,
     });
+  }
+
+  const selection = selectAdapter(input.backend, state.adapters);
+  const runRow: InsertRunInput = {
+    id: runId,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    threadId,
+    role: input.role,
+    kind: input.kind,
+    backend: input.backend,
+    // The model that will ACTUALLY run (F21-13) — a run header naming a model
+    // the provider never saw is the lie this closes.
+    model,
+    sdk: SDK_LABEL[input.backend] ?? "",
+    sessionId: input.resumeSessionId ?? null,
+    agentName: input.agentName ?? null,
+    agentProfileId: input.agentProfileId,
+    // A reserved row is ALREADY running (that is the point) — re-stamping it
+    // `queued` would blink the strip off between preparation and the spawn, and
+    // would throw away the clock the human has been watching.
+    state: reservation ? "running" : "queued",
+  };
+  if (reservation) {
+    runRow.phase = RUN_PHASE.starting;
+    runRow.startedAt = reservation.startedAt;
+  }
+  try {
+    upsertRun(db, runRow);
   } catch (err) {
     const sqliteError = sqliteErrorSchema.safeParse(err);
     if (
@@ -452,7 +692,7 @@ export async function startRun(
     role: input.role,
     kind: input.kind,
     backend: input.backend,
-    model: input.model,
+    model,
     prompt: input.prompt,
     workdir,
     resumeSessionId: input.resumeSessionId ?? null,
@@ -494,11 +734,14 @@ export async function startRun(
   if (input.env && Object.keys(input.env).length) spec.env = input.env;
 
   if (selection.kind === "unavailable") {
-    failRunUnavailable(db, spec);
+    failRunUnavailable(db, spec, reservation?.startedAt);
     return { runId };
   }
 
-  launch(db, spec, selection.adapter);
+  const launchOpts: Parameters<typeof launch>[3] = {};
+  if (reservation) launchOpts.startedAt = reservation.startedAt;
+  if (modelSubstitution) launchOpts.notice = modelSubstitution;
+  launch(db, spec, selection.adapter, launchOpts);
   return { runId };
 }
 
@@ -510,9 +753,15 @@ export async function startRun(
  * identical to any other terminal run, so registered completion callbacks
  * fire immediately via the already-terminal path and the F8 escalation runs.
  */
-function failRunUnavailable(db: DatabaseSync, spec: RunSpec): void {
+function failRunUnavailable(
+  db: DatabaseSync,
+  spec: RunSpec,
+  startedAt?: string,
+): void {
   const sink = createRunSink(db, spec);
-  sink.markRunning();
+  // R21-4: a run that was RESERVED kept the human waiting through its workspace
+  // preparation — its clock started there, not here.
+  sink.markRunning(startedAt);
   const now = new Date().toISOString();
   const text = backendUnavailableMessage(spec.backend);
   sink.line({
@@ -836,7 +1085,18 @@ export async function resumeRun(
 }
 
 /** Wires the sink + adapter callbacks and starts the adapter process/timer. */
-function launch(db: DatabaseSync, spec: RunSpec, adapter: RuntimeAdapter): void {
+function launch(
+  db: DatabaseSync,
+  spec: RunSpec,
+  adapter: RuntimeAdapter,
+  opts: {
+    /** The RESERVED run's original instant (R21-4) — absent for a run that was
+     *  not reserved, which then starts its clock here. */
+    startedAt?: string;
+    /** F21-13: a disclosure line to open the run log with. */
+    notice?: string;
+  } = {},
+): void {
   const state = getState();
   const sink = createRunSink(db, spec);
 
@@ -844,8 +1104,41 @@ function launch(db: DatabaseSync, spec: RunSpec, adapter: RuntimeAdapter): void 
   // crash) so we skip tracking a handle for an already-terminal run.
   let exited = false;
 
-  // Mark running immediately (queued → running).
-  sink.markRunning();
+  // Mark running immediately (queued → running). A run that was RESERVED before
+  // its workspace was prepared (R21-4) keeps the instant it was reserved, so the
+  // strip's Elapsed covers the clone the human already sat through.
+  sink.markRunning(opts.startedAt);
+
+  // F21-13: the substitution disclosure is the FIRST line of the run log, so a
+  // human reading the console sees it before the agent's own output — the run
+  // header's model is the substituted one, and this says why.
+  if (opts.notice) {
+    const now = new Date().toISOString();
+    sink.line({
+      raw: JSON.stringify({
+        type: "notice",
+        source: "viberr",
+        reason: "model_substituted",
+        message: opts.notice,
+      }),
+      display: {
+        t: now.slice(11, 19),
+        ev: "meta",
+        tag: MODEL_SUBSTITUTED_TAG,
+        text: opts.notice,
+      },
+      facts: {},
+      occurredAt: now,
+    });
+  }
+
+  // R21-4: phase writes are throttled — a chatty run emits one per stream
+  // message, and the strip only ever renders the latest. A CHANGED phase is
+  // always written immediately (the transitions are the informative part);
+  // step-only churn within the same phase is rate-limited to one write/second.
+  let lastPhase: string | null = null;
+  let lastPhaseWriteMs = 0;
+  const PHASE_MIN_INTERVAL_MS = 1_000;
 
   // Every adapter callback fires asynchronously (timers, SDK streams), so all
   // persistence inside them must be caught-and-logged — a throw here has no
@@ -857,6 +1150,12 @@ function launch(db: DatabaseSync, spec: RunSpec, adapter: RuntimeAdapter): void 
     onLine: (line) => sink.line(line),
     onPhase: (phase, step) => {
       try {
+        const now = Date.now();
+        if (phase === lastPhase && now - lastPhaseWriteMs < PHASE_MIN_INTERVAL_MS) {
+          return;
+        }
+        lastPhase = phase;
+        lastPhaseWriteMs = now;
         sink.phase(phase, step);
       } catch (error) {
         logger.error("run phase persist failed", {

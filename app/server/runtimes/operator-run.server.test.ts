@@ -26,7 +26,7 @@ import {
   setBackendAvailability,
   type AdapterSet,
 } from "./runtime-registry.server";
-import { insertRunLine, upsertRun } from "./run-store.server";
+import { insertRunLine, listRunsForTaskRows, upsertRun } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import {
   executeStrandedCodexPlan,
@@ -35,6 +35,7 @@ import {
   runOperator,
 } from "./operator-run.server";
 import * as operatorPrompts from "./operator-run.server";
+import { readDefaultBranchFile } from "~/server/tasks/operator-repo-read.server";
 import type {
   OperatorAuthority,
   OperatorAutonomy,
@@ -684,6 +685,122 @@ describe("Codex structured operator completion", () => {
     );
   });
 
+  /**
+   * R20-9 / ruling 84 residual (band-3 follow-up) — the MECHANICAL
+   * delegated-ask disclosure rode the CLAUDE toolkit's `open_decision_packet`
+   * alone. The Codex plan executor is the other packet writer, and a plan whose
+   * actions are `prompt_agent` then `open_packet` — the exact shape the ruling
+   * is about — reached the human with nothing said about the consultation. Both
+   * writers now share one ledger + one writer (`operatorOpenPacketDisclosed`).
+   */
+  function deployWithDeveloper(promptMode: CapabilityMode): void {
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            ...OPERATOR_POLICY,
+            { capabilityId: "assign-primary-specialist", mode: promptMode },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+            autonomy: "full",
+          },
+        },
+        {
+          profileId: "developer",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Dev",
+            role: "Implementation",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  /** The ruling's shape: consult an agent, then take the question to a human. */
+  const PROMPT_THEN_PACKET = JSON.stringify({
+    reasoning: "",
+    actions: [
+      {
+        tool: "prompt_agent",
+        profileId: "developer",
+        delivers: true,
+        toStageId: null,
+        packetType: null,
+        text: "Which storage backend does the repo use?",
+        reason: null,
+        packetOptions: null,
+      },
+      {
+        tool: "open_packet",
+        profileId: null,
+        delivers: null,
+        toStageId: null,
+        packetType: "input",
+        text: "Which storage backend?",
+        reason: "The repo supports both.",
+        packetOptions: null,
+      },
+    ],
+  });
+
+  it("R20-9: a Codex plan that prompts then opens a packet DISCLOSES the consultation", async () => {
+    // Canary: drop the `consultedProfileIds` threading in executeCodexPlan (or
+    // call `operatorOpenPacket` there again) and the disclosure vanishes while
+    // the Claude toolkit's own tests still pass.
+    deployWithDeveloper("direct");
+    await start();
+    adapter.finish(store, PROMPT_THEN_PACKET, "finished");
+
+    await eventually(() => {
+      expect(task().packet).not.toBeNull();
+    });
+    const body = task().packet!.body ?? "";
+    // The model's own body survives; the FACT is appended to it.
+    expect(body).toContain("The repo supports both.");
+    expect(body).toContain("the operator prompted Dev on this task");
+    expect(body).toContain("not by that agent");
+  });
+
+  it("R20-9: a REFUSED prompt discloses nothing — it consulted nobody", async () => {
+    // The guard's other half: `noteConsultedProfile` records only `done`, so a
+    // hand-off the policy denied cannot manufacture a consultation that never
+    // happened — a different lie from the one the disclosure fixes.
+    deployWithDeveloper("off");
+    await start();
+    adapter.finish(store, PROMPT_THEN_PACKET, "finished");
+
+    await eventually(() => {
+      expect(task().packet).not.toBeNull();
+    });
+    expect(task().packet!.body).toBe("The repo supports both.");
+    expect(task().packet!.body ?? "").not.toContain("Disclosure");
+    // …and the denial itself is still narrated (P13-RT-03).
+    await eventually(() => {
+      const refusal = task().timeline.find((e) =>
+        e.text.includes("not carried out in full"),
+      );
+      expect(refusal).toBeDefined();
+      expect(refusal!.text).toContain("prompt_agent");
+    });
+  });
+
   // P14-LV-11: asked which backend it was on, an operator running on Claude
   // reported "Codex backend run" — it had no runtime identity at all, so it
   // echoed the premise in the task goal.
@@ -816,11 +933,11 @@ describe("pr-diverged turn instruction (both backends)", () => {
       openPacket: false,
       packet: null,
       recentTimeline: [],
-      pr: { number: 318, state: "closed", title: "PR" },
+      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null },
       branch: "vib-9",
       liveRuns: [],
       autonomy: "supervised",
-      policy: {},
+      operatorPolicy: { scope: "operator", note: "", capabilities: {} },
       ...over,
     };
   }
@@ -838,7 +955,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("merged out-of-band → acceptance is the next state, no packet demanded", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "merged", title: "PR" } }),
+      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null } }),
       "pr-diverged",
     );
     expect(prompt).toContain("merged OUT-OF-BAND");
@@ -848,7 +965,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("PR live again → withdraw the moot packet and continue", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "review", title: "PR" } }),
+      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null } }),
       "pr-diverged",
     );
     expect(prompt).toContain("live again");
@@ -870,6 +987,63 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(prompt).toContain("closed WITHOUT merging");
     expect(prompt).toContain("`archive_task` to archive the task");
     expect(prompt).toContain("deleteBranch: true");
+  });
+
+  /**
+   * F21-17 (live VIB-4) — the recovery packet said "review before closure was
+   * clean (Approve)" and offered "Rework and resubmit", never mentioning the
+   * unreviewed out-of-band commit the reconciler had already recorded. The
+   * ACCEPT ceremony was disclosing it on the same task (R17-1). The packet is
+   * model-authored, so the fix is the fact reaching the turn.
+   */
+  describe("F21-17 — the closed-PR packet carries the branch-drift fact", () => {
+    const drifted = (state: "closed" | "review" = "closed") =>
+      snapshot({
+        pr: {
+          number: 318,
+          state,
+          title: "PR",
+          revisionDrift: { aheadBy: 2, headSha: "cab10477beef1234" },
+        },
+      });
+
+    it("names the unreviewed commits and demands them as a packet observation", () => {
+      // Canary: drop `drift` from the closed-PR arm and every line fails.
+      const prompt = buildOperatorTurnPrompt(drifted(), "pr-diverged");
+      expect(prompt).toContain("2 commits");
+      expect(prompt).toContain("cab10477beef");
+      expect(prompt).toContain("UNREVIEWED");
+      expect(prompt).toContain("Unreviewed commits");
+      expect(prompt).toMatch(/never describe this PR as "reviewed clean"/);
+      // …and it must not turn the fact into a NEW false accusation (F21-21's
+      // failure mode, one finding over).
+      expect(prompt).toContain("Do not treat those commits as an out-of-band merge");
+    });
+
+    it("says nothing when the head equals the reviewed revision", () => {
+      const prompt = buildOperatorTurnPrompt(snapshot(), "pr-diverged");
+      expect(prompt).not.toContain("UNREVIEWED");
+      expect(prompt).not.toContain("Unreviewed commits");
+    });
+
+    it("carries it on the terminal-stage arm too, and on the Codex plan prompt", () => {
+      expect(
+        buildOperatorTurnPrompt(
+          snapshot({
+            stage: "done",
+            stageName: "Done",
+            pr: {
+              number: 318,
+              state: "closed",
+              title: "PR",
+              revisionDrift: { aheadBy: 1, headSha: "cab10477beef1234" },
+            },
+          }),
+          "pr-diverged",
+        ),
+      ).toContain("1 commit");
+      expect(buildCodexOperatorPrompt(drifted(), "pr-diverged")).toContain("UNREVIEWED");
+    });
   });
 });
 
@@ -925,7 +1099,7 @@ describe("stranded auto-stage resume", () => {
         branch: null,
         liveRuns: [],
         autonomy: "supervised",
-        policy: {},
+        operatorPolicy: { scope: "operator", note: "", capabilities: {} },
       },
       "create",
     );
@@ -1115,7 +1289,7 @@ describe("transition trigger carries from → to and who moved it", () => {
     branch: "vib-2",
     liveRuns: [],
     autonomy: "supervised",
-    policy: {},
+    operatorPolicy: { scope: "operator", note: "", capabilities: {} },
   });
 
   it("a HUMAN move names them, points at their steer, and says ASK (@tag) when unclear", () => {
@@ -1198,7 +1372,7 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     branch: null,
     liveRuns: [],
     autonomy: "supervised",
-    policy: {},
+    operatorPolicy: { scope: "operator", note: "", capabilities: {} },
     ...over,
   });
 
@@ -1210,6 +1384,73 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(prompt).toContain("2–4 concrete scopes");
     // Advancing requires SAYING why the goal is concrete.
     expect(prompt).toContain("name the deliverable and the acceptance signal");
+  });
+
+  /**
+   * Ruling 85 / R21-2 — VIB-1: the operator correctly found that no deployed
+   * profile held `browser` and offered three workarounds (write a Playwright
+   * script / capture it by hand / let the operator write the goal). The product
+   * SHIPS a grantable browser capability; the packet never said so, so the
+   * human's cheapest fix was the one path the packet hid.
+   */
+  it("R21-2: a capability gap must point at the config remedy, not only workarounds", () => {
+    // Canary: drop the CAPABILITY_GAP_REMEDY_INSTRUCTION append from
+    // `operatorTurnInstruction` and all four fail.
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
+    expect(prompt).toContain("CAPABILITY no deployed agent declares");
+    expect(prompt).toContain("grantable on an agent profile");
+    expect(prompt).toContain("Agents surface");
+    // The ruling's other half: it points, it never reconfigures.
+    expect(prompt).toContain("never change that configuration yourself");
+  });
+
+  it("R21-2: the Codex plan prompt carries the same remedy instruction", () => {
+    expect(operatorPrompts.buildCodexOperatorPrompt(snap(), "create")).toContain(
+      "grantable on an agent profile",
+    );
+  });
+
+  /**
+   * R21-2 residual (band-3 follow-up) — the remedy was emitted from
+   * `triageQualityGate`, so it reached the model only at the ENTRY stage and
+   * only on the triggers that splice that gate in. A capability gap is not a
+   * triage-time condition: the operator meets it at the work-stage hand-off and
+   * when an agent reports "I cannot drive a browser" — and at every one of those
+   * it was back to offering workarounds only.
+   */
+  it("R21-2 residual: the remedy is STAGE- and TRIGGER-independent, on BOTH builders", () => {
+    // Canary: move the append back inside `triageQualityGate` and every
+    // assertion below fails while the entry-stage tests above still pass.
+    const atWork = snap({
+      stage: "impl",
+      stageName: "In Progress",
+      goal: "Screenshot the live dashboard and attach it.",
+    });
+    // `agent-reply` is one of the branches that RETURNS before the stage gate —
+    // the shape the gap is most often discovered in.
+    const claudeTurn = operatorPrompts.buildOperatorTurnPrompt(atWork, "agent-reply");
+    expect(claudeTurn).not.toContain("TRIAGE QUALITY GATE");
+    expect(claudeTurn).toContain("CAPABILITY no deployed agent declares");
+    expect(claudeTurn).toContain("grantable on an agent profile");
+    expect(claudeTurn).toContain("Agents surface");
+    expect(claudeTurn).toContain("never change that configuration yourself");
+
+    const codexPlan = operatorPrompts.buildCodexOperatorPrompt(atWork, "transition");
+    expect(codexPlan).not.toContain("TRIAGE QUALITY GATE");
+    expect(codexPlan).toContain("CAPABILITY no deployed agent declares");
+    expect(codexPlan).toContain("grantable on an agent profile");
+    expect(codexPlan).toContain("never change that configuration yourself");
+  });
+
+  it("R21-2 residual: it survives the branches that answer a human or a packet", () => {
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it." });
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(atWork, "manual", "Can you screenshot it?", undefined, "Arda"),
+      operatorPrompts.buildOperatorTurnPrompt(atWork, "packet-resolved"),
+      operatorPrompts.buildOperatorTurnPrompt(atWork, "delivered"),
+    ]) {
+      expect(prompt).toContain("grantable on an agent profile");
+    }
   });
 
   it("F15-14: the gate is stage-scoped — a work stage never carries it", () => {
@@ -2397,5 +2638,220 @@ describe("R19-1 — the operator's read-only repository view", () => {
     const prompt = systemPrompt();
     expect(prompt).toContain("There is no repository checkout on this run");
     expect(prompt).toContain('as "the repository"');
+  });
+
+  /**
+   * R21-4 / OBS-8 (live VIB-3) — the operator's OWN clone spent 3+ minutes on a
+   * 113 MB repository before "operator run started" ever appeared, and for that
+   * whole window the task page said the operator "hasn't started its operator
+   * loop": a healthy drive was indistinguishable from a wedged one.
+   */
+  describe("R21-4 — the pre-run clone is visible", () => {
+    it("claims a live 'Preparing workspace' row before the clone, then adopts it", async () => {
+      // Canary: drop the `reserveRun` call in `runOperator` and nothing is
+      // observable during the clone; drop `spec.reservation` and a SECOND run
+      // row appears beside the reserved one (which then never finishes).
+      deploy("acme/widgets");
+      await makeOrigin();
+
+      const seen: { id: string; step: string | null }[] = [];
+      await withOrigin(origins, async () => {
+        const pending = drive();
+        // Poll while the clone's child processes are in flight. Bounded, and it
+        // can only end early by the drive finishing — which would itself be the
+        // failure this asserts against (nothing visible during preparation).
+        for (let i = 0; i < 400; i++) {
+          const row = listRunsForTaskRows(store7.db, store7.slug, "VIB-1")[0];
+          if (row?.phase === "Preparing workspace") {
+            seen.push({ id: row.id, step: row.step });
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 2));
+        }
+        return pending;
+      });
+
+      expect(seen).toHaveLength(1);
+      // Named: a spinner over a blank line is what the human already had.
+      expect(seen[0]!.step).toBe("Cloning acme/widgets");
+      // ONE row for the whole drive — the reserved row IS the run's row, so the
+      // strip the human watched never blinks or duplicates, and the launched
+      // run keeps the thread the reservation opened.
+      const rows = listRunsForTaskRows(store7.db, store7.slug, "VIB-1");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.id).toBe(seen[0]!.id);
+      expect(rows[0]!.state).toBe("running");
+      expect(adapter7.pending!.spec.threadId).toBe(rows[0]!.thread_id);
+    });
+
+    it("only a drive that must actually CLONE reserves a row", async () => {
+      // A reservation is worth a row when the human would otherwise stare at
+      // nothing for minutes. The reuse and no-repo arms return in microseconds,
+      // and a row for those is noise.
+      // Canary: return `target.repo` unconditionally from `pendingOperatorClone`
+      // and the last two expectations fail.
+      deploy("acme/widgets");
+      const ref = { projectSlug: store7.slug, taskKey: "VIB-1", dataRoot: store7.dataRoot };
+      expect(operatorPrompts.pendingOperatorClone(ref)).toBe("acme/widgets");
+
+      mkdirSync(path.join(checkoutDir(), ".git"), { recursive: true });
+      writeFileSync(path.join(checkoutDir(), ".git", "HEAD"), "ref: refs/heads/main\n");
+      expect(operatorPrompts.pendingOperatorClone(ref)).toBeNull();
+
+      deploy(null);
+      expect(operatorPrompts.pendingOperatorClone(ref)).toBeNull();
+    });
+  });
+
+  /**
+   * F21-21 (live VIB-7) — the checkout is the DELIVERING AGENT'S workspace, so
+   * once that agent commits it stands on the task branch. The operator read a
+   * row its own deliverer had just written, declared "the repository's DEFAULT
+   * branch already contains that exact row … landed outside the governed
+   * pipeline", and opened a blocking packet against a healthy flow. Main was
+   * row-free.
+   */
+  describe("F21-21 — the checkout is the TASK branch, not the default branch", () => {
+    it("the prompt says which branch the tree is on and points at the anchored read", async () => {
+      // Canary: restore "a read-only checkout … on its default branch" and drop
+      // the task-branch paragraph — every assertion here fails.
+      deploy("acme/widgets");
+      await makeOrigin();
+
+      await withOrigin(origins, () => drive());
+
+      const prompt = systemPrompt();
+      expect(prompt).toContain("SAME working tree the delivering agent uses");
+      expect(prompt).toContain("NOT on `main`");
+      expect(prompt).toContain("read_default_branch_file");
+      expect(prompt).toContain("never evidence that they landed out-of-band");
+      // The old claim must be gone: it is the sentence that licensed the
+      // accusation.
+      expect(prompt).not.toMatch(/checkout of the project repository on its default branch/);
+    });
+
+    it("offers `read_default_branch_file` when the run holds a checkout", async () => {
+      deploy("acme/widgets");
+      await makeOrigin();
+      await withOrigin(origins, () => drive());
+      expect(adapter7.pending!.spec.allowedTools).toContain(
+        "mcp__viberr__read_default_branch_file",
+      );
+    });
+
+    it("withholds it on a run with NO checkout — a read that could only fail", async () => {
+      deploy(null);
+      await drive();
+      expect(adapter7.pending!.spec.allowedTools).not.toContain(
+        "mcp__viberr__read_default_branch_file",
+      );
+    });
+
+    it("the anchored read answers from origin/main while the tree says otherwise", async () => {
+      // The mechanism, on the exact shape of the live incident: the deliverer's
+      // commits are IN THE TREE and NOT on main.
+      // Canary: point `readDefaultBranchFile` at the working tree (drop the
+      // `origin/<branch>:` ref) and both assertions flip.
+      deploy("acme/widgets");
+      await makeOrigin();
+      await withOrigin(origins, () => drive());
+
+      const dir = checkoutDir();
+      await exec("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
+      await exec("git", ["-C", dir, "config", "user.name", "T"]);
+      await exec("git", ["-C", dir, "checkout", "-qb", "vib-1"]);
+      writeFileSync(path.join(dir, "docs", "guide.md"), "the guide\nthe governed row\n");
+      writeFileSync(path.join(dir, "docs", "new.md"), "brand new\n");
+      await exec("git", ["-C", dir, "add", "-A"]);
+      await exec("git", ["-C", dir, "commit", "-qm", "the deliverer's work"]);
+
+      // What a `Read` of the checkout shows — the false-positive input.
+      expect(readFileSync(path.join(dir, "docs", "guide.md"), "utf8")).toContain(
+        "the governed row",
+      );
+
+      const reads = await withOrigin(origins, async () => ({
+        changed: await readDefaultBranchFile(store7.db, {
+          projectSlug: store7.slug,
+          dir,
+          defaultBranch: "main",
+          path: "docs/guide.md",
+        }),
+        added: await readDefaultBranchFile(store7.db, {
+          projectSlug: store7.slug,
+          dir,
+          defaultBranch: "main",
+          path: "docs/new.md",
+        }),
+      }));
+
+      expect(reads.changed.kind).toBe("found");
+      expect(reads.changed.kind === "found" && reads.changed.text).toContain("the guide");
+      expect(reads.changed.kind === "found" && reads.changed.text).not.toContain(
+        "the governed row",
+      );
+      // The whole point: a file only the task branch has is ABSENT from main.
+      expect(reads.added.kind).toBe("absent");
+    });
+
+    /**
+     * F21-3 — the operator's org MCP mounts were never pre-flighted. The
+     * specialist path got that in pass 20 (F20-10); the operator, which holds
+     * the highest-authority toolkit in the product, kept mounting whatever the
+     * registry row remembered and announcing tools it might never get. The
+     * in-code TODO said exactly this.
+     */
+    it("F21-3: a stdio MCP that cannot start is dropped from the mount and disclosed", async () => {
+      // Canary: drop the `verifyStdioMcpMountsForRun` await in
+      // `operatorMcpResolution` and both halves fail — the prompt announces the
+      // server and the toolkit mounts it.
+      const now = new Date().toISOString();
+      store7.db
+        .prepare(
+          `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at, up, tools_count)
+           VALUES (?, ?, 'stdio', ?, NULL, ?, ?, 1, 16)`,
+        )
+        .run(
+          "mcp_dead",
+          "dead-mcp",
+          // Nothing to spawn: the pre-flight fails fast and offline. The row
+          // above still claims "up · 16 tools", which is the F20-10 setup.
+          path.join(origins, "no-such-viberr-mcp-binary"),
+          now,
+          now,
+        );
+      deploy("acme/widgets", {
+        resources: { skills: [], mcps: ["dead-mcp"], kb: [] },
+      });
+      await makeOrigin();
+
+      await withOrigin(origins, () => drive());
+
+      const spec = adapter7.pending!.spec;
+      // The prompt does not claim it, and says why.
+      expect(spec.systemPrompt ?? "").not.toContain("Attached MCP servers: dead-mcp");
+      expect(spec.systemPrompt ?? "").toContain("Unavailable MCP servers");
+      expect(spec.systemPrompt ?? "").toContain("dead-mcp");
+      // …and the toolkit did not mount it either: the prompt and the mount are
+      // built from ONE resolution, so they cannot disagree.
+      expect(Object.keys(spec.mcpServers ?? {})).toEqual(["viberr"]);
+      expect(spec.allowedTools ?? []).not.toContain("mcp__dead-mcp");
+    });
+
+    it("refuses a path that is not a repository-relative file path", async () => {
+      deploy("acme/widgets");
+      await makeOrigin();
+      await withOrigin(origins, () => drive());
+
+      const bad = await readDefaultBranchFile(store7.db, {
+        projectSlug: store7.slug,
+        dir: checkoutDir(),
+        defaultBranch: "main",
+        // A ref-ish argument would let the read escape the default branch —
+        // which is the one thing this tool exists to pin down.
+        path: "vib-1:docs/guide.md",
+      });
+      expect(bad.kind).toBe("unavailable");
+    });
   });
 });

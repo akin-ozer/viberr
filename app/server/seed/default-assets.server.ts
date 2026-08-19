@@ -136,6 +136,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "128c0e733d181ce93c6b3c15c71e890fc629c592f39b08d03a44b6b77afd0d1c",
     "197eaf0b400f61d690d0ec32198fafbd120fa518ef27f00e13b4b427f8bf5856",
     "2693d1381b637cac935db3b2d95f9fd8f6e4a1eb6228ea3d331e8a890e8e7a32",
+    // pass-21 outgoing (F21-21 / F21-14 / F21-16 rewrite of the workspace,
+    // acceptance and policy-scope paragraphs).
+    "34a6ce3e9601f96ae5f49b403f4eca0cb5d6e356005b6780d8b1ce63a2c9b87d",
     "429216ebbe1d9b413608c34dd83e04794351915d1b9e2cc535f3e97b64c95a1b",
     "5340ad240553d280336600b1f3341931158a8b0926e487ace802d5e00bfa71ae",
     "70501e7100afef430d79e8d63497326b8e6504258a4743002217c920867cf96f",

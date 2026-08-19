@@ -10,6 +10,7 @@ import {
   curatedCatalog,
   defaultEffortFor,
   defaultModelFor,
+  foreignModelBackend,
   getModelCatalog,
   isKnownModel,
   modelDisplayName,
@@ -426,5 +427,42 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
       isAvailable: () => true,
     });
     expect(cleared.models[0]!.unavailable).toBeUndefined();
+  });
+});
+
+/**
+ * F21-13 — "this model belongs to the OTHER backend" is a different question
+ * from "this backend doesn't know this model", and only the first is evidence
+ * of a mistake.
+ *
+ * The Claude catalog is OPEN: a live `supportedModels()` id, a dated id, and an
+ * id whose live-cache entry has been evicted on a cold process all reach the
+ * validator legitimately. Rejecting on `!isKnownModel` alone would refuse saves
+ * the picker itself had offered (the P13-RT-07 failure, from the other side).
+ */
+describe("foreignModelBackend (F21-13)", () => {
+  afterEach(() => resetModelCatalogCache());
+
+  it("names the owning backend for a genuinely cross-backend id", () => {
+    // The live pair: `backends: [claude]` saved next to `model: gpt-5.6-terra`.
+    expect(foreignModelBackend("claude", "gpt-5.6-terra")).toBe("codex");
+    expect(foreignModelBackend("codex", "sonnet")).toBe("claude");
+    expect(foreignModelBackend("codex", "claude-sonnet-4-5")).toBe("claude");
+  });
+
+  it("is null for a model the chosen backend accepts", () => {
+    expect(foreignModelBackend("claude", "sonnet")).toBeNull();
+    expect(foreignModelBackend("claude", "claude-opus-4-5")).toBeNull();
+    expect(foreignModelBackend("codex", "gpt-5.6-terra")).toBeNull();
+  });
+
+  it("is null for an id NEITHER backend knows — unknown is not foreign", () => {
+    // A legacy display label, a typo, an id from a future catalog: none of these
+    // are evidence that the human picked the wrong backend, and the runtime
+    // already has honest paths for them (alias mapping / a real provider error).
+    expect(foreignModelBackend("claude", "claude-sonnet")).toBeNull();
+    expect(foreignModelBackend("codex", "gpt-9-imaginary")).toBeNull();
+    expect(foreignModelBackend("claude", "")).toBeNull();
+    expect(foreignModelBackend("claude", null)).toBeNull();
   });
 });
