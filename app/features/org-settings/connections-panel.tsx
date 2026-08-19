@@ -203,7 +203,8 @@ export function ConnectionsPanel({
     rowAction.submit({ intent: "connection-default", connectionId: id });
   const remove = (c: ConnectionRecord) => {
     if (c.def) {
-      push("Set another connection as default first");
+      // D5: a refusal must not render the success tick.
+      push("Set another connection as default first", "error");
       return;
     }
     setConfirm(c);
@@ -346,6 +347,8 @@ export function ConnectionsPanel({
       {confirm && (
         <ConfirmDelete
           what={confirm.owner}
+          // C6: the outcome, not a bare "Remove".
+          confirmLabel="Remove connection"
           detail={
             "Projects already created from " +
             confirm.owner +

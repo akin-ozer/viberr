@@ -49,6 +49,10 @@ for (const key of [
   "CODEX_API_KEY",
   "OPENAI_API_KEY",
   "VIBERR_CODEX_USE_CLI_AUTH",
+  // R19-19: a dev host may point this at a local Chrome; the browser-mount
+  // tests must see the deterministic "unset" shape (no --executable-path /
+  // --no-sandbox args), same hermeticity rule as the credentials above.
+  "VIBERR_BROWSER_EXECUTABLE",
 ] as const) {
   process.env[key] = "";
 }

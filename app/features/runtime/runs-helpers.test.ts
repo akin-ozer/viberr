@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentMessageProse,
   consoleCodeBlock,
   diffLineKind,
   fileChangeChips,
@@ -369,5 +370,60 @@ describe("diffLineKind (P19-RC1)", () => {
     // `+++ b/file` / `--- a/file` are headers, not content.
     expect(diffLineKind("+++ b/app/a.ts")).toBeNull();
     expect(diffLineKind("--- a/app/a.ts")).toBeNull();
+  });
+});
+
+describe("agentMessageProse (N20-18)", () => {
+  it("folds a Codex outcome envelope to its summary prose", () => {
+    const envelope = JSON.stringify({
+      evidence: null,
+      summary: "Implemented the parser and added tests.",
+      verdict: null,
+      question: null,
+    });
+    expect(agentMessageProse(L({ tag: "agent_message", text: envelope }))).toBe(
+      "Implemented the parser and added tests.",
+    );
+  });
+
+  it("appends a raised question — title, body, and options — after the summary", () => {
+    const envelope = JSON.stringify({
+      evidence: null,
+      summary: "Blocked on a colour choice.",
+      verdict: null,
+      question: {
+        title: "Amber or cobalt?",
+        body: "The mock shows both.",
+        options: [{ title: "amber" }, { title: "cobalt" }],
+      },
+    });
+    expect(agentMessageProse(L({ tag: "agent_message", text: envelope }))).toBe(
+      "Blocked on a colour choice.\n\n" +
+        "Question: Amber or cobalt? — The mock shows both. — Options: amber · cobalt",
+    );
+  });
+
+  it("renders a question-only envelope (summary null) as the question", () => {
+    const envelope = JSON.stringify({
+      evidence: null,
+      summary: null,
+      verdict: null,
+      question: { title: "Which target?" },
+    });
+    expect(agentMessageProse(L({ tag: "agent_message", text: envelope }))).toBe(
+      "Question: Which target?",
+    );
+  });
+
+  it("leaves a plain-prose agent_message alone (not every Codex reply is an envelope)", () => {
+    expect(agentMessageProse(L({ tag: "agent_message", text: "Done — all green." }))).toBeNull();
+  });
+
+  it("ignores non-envelope JSON and every non-agent_message line", () => {
+    // A bare JSON object the agent authored itself is not the outcome envelope.
+    expect(agentMessageProse(L({ tag: "agent_message", text: '{"foo":1}' }))).toBeNull();
+    // Claude's own prose event, and other event kinds, are untouched.
+    expect(agentMessageProse(L({ tag: "assistant", text: "hi" }))).toBeNull();
+    expect(agentMessageProse(L({ ev: "tool", tag: "command_execution", text: "ls" }))).toBeNull();
   });
 });

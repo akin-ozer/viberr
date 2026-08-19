@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
+import { isAppError } from "~/server/errors/app-error.server";
 import {
   kbDirPath,
   skillDirPath,
@@ -493,6 +494,74 @@ describe("github import", () => {
     }
     expect(existsSync(path.join(target.rootAbs, "docs", "readme.md"))).toBe(true);
     expect(existsSync(path.join(target.rootAbs, "docs", "broken.md"))).toBe(false);
+  });
+
+  it("F20-1: the collision scan is bounded — a mount that never yields a free name fails the import, it does not spin", async () => {
+    const { db, target } = await setupKb();
+    insertUser(db, {
+      id: "u_admin",
+      email: "admin@test.dev",
+      name: "Admin Test",
+      role: "admin",
+    });
+    const connectTransport = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "owner" },
+        headers: { "x-oauth-scopes": "repo, workflow" },
+      },
+      "GET /users/owner": { body: { public_repos: 1 } },
+    });
+    await createConnection(
+      db,
+      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: connectTransport.fetchImpl },
+    );
+    const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
+    const importTransport = fakeGithubFetch({
+      "GET /repos/owner/repo/git/trees/main": {
+        body: {
+          truncated: false,
+          tree: [{ path: "docs/readme.md", type: "blob", sha: "s1", size: 5 }],
+        },
+      },
+      "GET /repos/owner/repo/git/blobs/s1": {
+        body: { content: b64("# readme"), encoding: "base64" },
+      },
+    });
+
+    // Stand in for the ghost-inode shape deterministically: occupy `docs` and
+    // every suffix through the 32-attempt cap with FOREIGN folders (no import
+    // marker), so the scan can never settle on a free name. Under the old
+    // unbounded loop this pegged the event loop; now it must throw a typed error.
+    for (let n = 0; n <= 32; n++) {
+      mkdirSync(path.join(target.rootAbs, n === 0 ? "docs" : `docs-${n + 1}`), {
+        recursive: true,
+      });
+    }
+
+    const start = Date.now();
+    let caught: unknown;
+    try {
+      await importGithubSnapshot(
+        db,
+        target,
+        "https://github.com/owner/repo/tree/main/docs",
+        ACTOR,
+        { fetchImpl: importTransport.fetchImpl },
+      );
+    } catch (e) {
+      caught = e;
+    }
+    // A typed error naming the folder — not a spin. It returns immediately,
+    // nowhere near a hang.
+    expect(isAppError(caught)).toBe(true);
+    if (isAppError(caught)) {
+      expect(caught.status).toBe(503);
+      expect(caught.userMessage).toMatch(/after 32 attempts/i);
+      expect(caught.userMessage).toContain("docs");
+    }
+    expect(Date.now() - start).toBeLessThan(2000);
   });
 });
 

@@ -107,7 +107,11 @@ export function ArchiveConfirm({
             <span>
               {withdrawn.length > 0
                 ? `${withdrawn.join(" and ")} — restoring the task reopens the question.`
-                : "Nothing is pending on this task right now."}
+                : // C14: this row surveys the open packet + pending
+                  // recommendations only — it said "Nothing is pending on this
+                  // task right now" while a live run streamed behind the dialog.
+                  // Narrow the claim to what it actually looks at.
+                  "No open decision or pending recommendation to withdraw."}
             </span>
           </div>
         </div>

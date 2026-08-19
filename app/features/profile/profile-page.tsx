@@ -161,7 +161,10 @@ function ProfileIdentity({
           <div className="field">
             <label className="flabel" htmlFor="profile-email">
               Email{" "}
-              <span className="fhint">{signsInVia} · admins can edit</span>
+              <span className="fhint">
+                {signsInVia} · an org admin can change it in Org settings →
+                Users &amp; access
+              </span>
             </label>
             <input id="profile-email" type="text" value={user.email} disabled />
           </div>
@@ -487,7 +490,12 @@ function ProfileAccess({
           ))}
         </div>
       ) : (
-        <div className="empty">No project membership yet.</div>
+        // D8: absent → why it matters → next action (P16), not a bare label.
+        <div className="empty">
+          No project membership yet. A project role — assigned by an admin — is
+          what unlocks that project&rsquo;s board, tasks and the actions listed
+          above. Ask an admin to add you to a project.
+        </div>
       )}
       <div className="pol-note after last">
         <Icon name="lock" />

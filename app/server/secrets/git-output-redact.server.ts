@@ -56,12 +56,6 @@ const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 // eslint-disable-next-line no-control-regex
 const C0_CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
 
-/**
- * Below this length a "token" the caller handed us is a flag or a placeholder,
- * not a secret, and scrubbing it by value would mangle unrelated output.
- */
-const MIN_TOKEN_LEN = 8;
-
 /** The tail is where git states its verdict; the head is the command echo and,
  *  for a clone, the transfer progress. */
 const MAX_DETAIL_LINES = 8;
@@ -82,7 +76,16 @@ export function redactGitOutput(
   let out = text;
   // Layer 1 — by value. `split`/`join` needs no regex escaping, which matters:
   // a PAT is not guaranteed to be regex-inert.
-  if (opts.token && opts.token.length >= MIN_TOKEN_LEN) {
+  //
+  // F20-7: scrub the caller's credential at ANY length — the old
+  // `>= MIN_TOKEN_LEN` (8) floor let a short secret ride straight through into
+  // the MCP row error, the toast, and the persisted `last_error` (live: a
+  // 5-char `MCP_CREDENTIAL` printed as `CRED=xy7Qk`). The by-value pass is
+  // exact — it only ever removes the string the caller HANDED us, so a shorter
+  // value has nothing extra to mangle; the floor only ever protected a leak.
+  // The empty-string case is still guarded (falsy `opts.token`), because a
+  // split on "" would insert `[redacted]` between every character.
+  if (opts.token) {
     out = out.split(opts.token).join(REDACTED);
   }
   // Layer 2 — userinfo. Runs AFTER layer 1 so `x-access-token:<pat>@host`,
@@ -110,6 +113,48 @@ export function redactGitOutput(
   return kept.length > MAX_DETAIL_CHARS
     ? `…${kept.slice(-MAX_DETAIL_CHARS)}`
     : kept;
+}
+
+/**
+ * R20-3 (F20-4): one redacted SENTENCE from a Claude/Codex provider failure,
+ * for a packet observation line, a fenced timeline block and a log field.
+ *
+ * Ruling 69's argument transfers verbatim from git to the model runtimes: the
+ * credential never lives in argv (Codex gets it via `CodexOptions.apiKey`/env,
+ * Claude via `claudeSpawnEnv`), so the same value+shape scrub plus
+ * control-character stripping makes a provider's own complaint safe to surface.
+ * `redactGitOutput` already IS that shared child-process scrubber, so this
+ * layers on top of it: coerce the (possibly nested) error to text, scrub, keep
+ * the LAST non-empty line (the provider states its verdict at the tail, same as
+ * git — see MAX_DETAIL_CHARS's reasoning), and clamp shorter still, because the
+ * consumers (a packet observation, the 240-char delivery-reason convention from
+ * ruling 69) want one sentence, not eight lines.
+ */
+export const PROVIDER_TEXT_CHARS = 240;
+export function redactProviderText(
+  raw: unknown,
+  token?: string | null,
+): string {
+  // Walk `cause` the same three levels `classifyCodexFailure` does — the SDK
+  // wraps the real message a couple of layers down.
+  const parts: string[] = [];
+  let current: unknown = raw;
+  for (let depth = 0; depth < 3 && current != null; depth += 1) {
+    if (current instanceof Error) {
+      parts.push(current.message);
+      current = current.cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  const scrubbed = redactGitOutput(parts.join("\n"), { token });
+  if (!scrubbed) return "";
+  const lines = scrubbed.split("\n").filter((l) => l.trim() !== "");
+  const last = (lines.length ? lines[lines.length - 1]! : "").trim();
+  return last.length > PROVIDER_TEXT_CHARS
+    ? `…${last.slice(-PROVIDER_TEXT_CHARS)}`
+    : last;
 }
 
 /**

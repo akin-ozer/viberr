@@ -1,4 +1,4 @@
-import type { TaskDetail } from "~/server/projections/task-query.server";
+import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import { prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
@@ -52,6 +52,27 @@ export interface AcceptCeremony {
   label?: string;
 }
 
+/**
+ * D3 (rulings 14/53) — the exact task facts this one ceremony reads, declared
+ * STRUCTURALLY so BOTH acceptance surfaces render this single component instead
+ * of forking it. The task page passes its full `TaskDetail` (a superset); the
+ * board passes a projection `TaskSummary` plus the board's own stage list — the
+ * board summary carries every field below except `stages`, which it supplies
+ * from its columns. Ruling 14 forbids a per-surface fork; keeping the param a
+ * subset is what lets one implementation serve both without a cast.
+ */
+export interface AcceptConfirmTask {
+  key: string;
+  title: string;
+  /** Current stage id — positions the task within `stages`. */
+  stage: string;
+  /** Project stages in order (id + display name). */
+  stages: { id: string; name: string }[];
+  validation: Validation;
+  branch: string | null;
+  pr: PrRef | null;
+}
+
 function headingFor(mode: AcceptCeremonyMode, terminalName: string): string {
   switch (mode) {
     case "force":
@@ -82,6 +103,7 @@ export function AcceptConfirm({
   task,
   workRevisionSha,
   noChanges = false,
+  noPullRequest = false,
   defaultBranch,
   atBoundary = true,
   ceremony,
@@ -99,7 +121,7 @@ export function AcceptConfirm({
   onCancel,
   onConfirm,
 }: {
-  task: TaskDetail;
+  task: AcceptConfirmTask;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
   /** R17-2: a verified no-change completion. TWO shapes reach this, and the
@@ -107,6 +129,14 @@ export function AcceptConfirm({
    *  (F17-L9), and a verification-only task that never branched at all
    *  (F19-21). Neither has a PR. */
   noChanges?: boolean;
+  /** F20-6 (R20-2): the task has no review PR AND the completion did not claim
+   *  `noChanges` — so accepting will AUTO-DETECT a no-change completion by
+   *  re-probing the branch on GitHub (empty → closes with no changes; has work
+   *  → refused with the commit count). The dialog states exactly that instead
+   *  of promising a merge. Threaded as a prop (not derived from `!task.pr`) so
+   *  an ordinary PR-less accept still reads "closes without a merge" — the loader
+   *  decides which shape this is. */
+  noPullRequest?: boolean;
   /** The merge target — the project's default branch. */
   defaultBranch: string;
   /** `acceptance.atBoundary` — the task stands at the stage a completion is
@@ -249,6 +279,27 @@ export function AcceptConfirm({
                       nothing merges.
                     </>
                   )}
+                </>
+              ) : noPullRequest && !force ? (
+                // F20-6 (R20-2): no PR, and the completion never claimed "no
+                // changes" — the server auto-detects it by re-probing the branch
+                // AT acceptance. State what the click actually does; a loader-
+                // time GitHub probe on every task open is unaffordable, so this
+                // honest sentence is the alternative (it promises no merge).
+                // Not on the FORCE path — force bypasses the very refusal this
+                // sentence describes (its own Skips/Bypassing rows say what it
+                // does), so the "refused if commits" clause would contradict it.
+                <>
+                  <strong>Nothing to merge yet.</strong> This task has no review
+                  pull request. Accepting re-checks{" "}
+                  {task.branch ? (
+                    <span className="mono">{task.branch}</span>
+                  ) : (
+                    "the branch"
+                  )}{" "}
+                  on GitHub: if it carries no commits the task closes as{" "}
+                  <strong>completed with no changes</strong>; if it carries work
+                  the acceptance is refused and says how many commits.
                 </>
               ) : (
                 <>No linked pull request — the task closes without a merge.</>

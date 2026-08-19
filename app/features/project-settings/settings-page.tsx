@@ -18,6 +18,7 @@ import {
   PointerActivationConstraints,
 } from "@dnd-kit/dom";
 import { Avatar } from "~/ui/avatar";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -110,9 +111,12 @@ export function ProjectPanel({
         <div className="pol-note">
           <Icon name="lock" />
           <span>
+            {/* F20-16: name the REAL grant + tier. `edit-policy` is admin-only
+                (rbac.ts) and its label is "Edit workflow & policy"; the old
+                "Change project settings (project admin or maintainer)" invented a
+                grant and wrongly promised maintainers. Matches the Policy page. */}
             Read-only — editing project settings needs the{" "}
-            <strong>Change project settings</strong> grant (project admin or
-            maintainer).
+            <strong>Edit workflow &amp; policy</strong> grant (project admin).
           </span>
         </div>
       )}
@@ -653,6 +657,12 @@ export function StagesPanel({
   // The row the dragged stage would land immediately BEFORE (null = the end),
   // drawn as the `.stg-row.over` insertion line. Board parity: `beforeKey`.
   const [beforeId, setBeforeId] = useState<string | null>(null);
+  // D6: removing a stage is a governance change that writes an audit row — it
+  // was a single silent click while archiving a (reversible) task took a
+  // three-row ceremony. Confirm it, naming the outcome.
+  const [confirmRemove, setConfirmRemove] = useState<
+    { id: string; name: string } | null
+  >(null);
 
   const count = (id: string) => counts[id] ?? 0;
   const entryId = stages[0]?.id;
@@ -667,15 +677,20 @@ export function StagesPanel({
   const remove = (s: { id: string; name: string }) => {
     const locked = stageLockReason(s.id, stages);
     if (locked) {
-      push(`${s.name} can't be removed — ${locked}`);
+      // D5: a refusal must not render the success tick.
+      push(`${s.name} can't be removed — ${locked}`, "error");
       return;
     }
     const n = count(s.id);
     if (n > 0) {
-      push(`Move ${n} ${n === 1 ? "task" : "tasks"} out of ${s.name} first`);
+      push(
+        `Move ${n} ${n === 1 ? "task" : "tasks"} out of ${s.name} first`,
+        "error",
+      );
       return;
     }
-    onRemove(s.id);
+    // D6: cleared the client-side guards — now confirm the governance change.
+    setConfirmRemove({ id: s.id, name: s.name });
   };
 
   /** Drag and the Move menu land on the SAME governed submission. */
@@ -787,9 +802,10 @@ export function StagesPanel({
             </>
           ) : (
             <>
+              {/* F20-16: real grant + tier (see the identity card note). */}
               Read-only — editing the workflow stages needs the{" "}
-              <strong>Change project settings</strong> grant (project admin or
-              maintainer). Boundaries are shown in{" "}
+              <strong>Edit workflow &amp; policy</strong> grant (project admin).
+              Boundaries are shown in{" "}
               <button type="button" className="keybtn" onClick={onNavPolicy}>
                 Policy → Workflow rules
               </button>
@@ -797,6 +813,24 @@ export function StagesPanel({
           )}
         </span>
       </div>
+      {confirmRemove && (
+        <ConfirmDialog
+          title={`Remove the ${confirmRemove.name} stage?`}
+          body={
+            <>
+              <strong>{confirmRemove.name}</strong> is deleted from this
+              project&rsquo;s workflow and the transition chain re-wires around
+              it. The change is recorded in the audit trail.
+            </>
+          }
+          confirmLabel="Remove stage"
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={() => {
+            onRemove(confirmRemove.id);
+            setConfirmRemove(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -825,16 +859,20 @@ export function MembersPanel({
   const push = useToast();
   const [nm, setNm] = useState("");
   const [em, setEm] = useState("");
+  // D6: removing a person from a project writes a governance audit row and was a
+  // single silent click. Confirm it, naming who leaves and what survives.
+  const [confirmRemove, setConfirmRemove] = useState<MembershipView | null>(null);
 
   const invite = () => {
     const name = nm.trim();
     const email = em.trim().toLowerCase();
     if (!name || !email.includes("@")) {
-      push("Enter a name and a valid email");
+      // D5: a refusal must not render the success tick.
+      push("Enter a name and a valid email", "error");
       return;
     }
     if (members.some((m) => m.email.toLowerCase() === email)) {
-      push(`${email} is already a member`);
+      push(`${email} is already a member`, "error");
       return;
     }
     onInvite(name, email);
@@ -844,7 +882,8 @@ export function MembersPanel({
 
   const remove = (m: MembershipView) => {
     if (m.userId === meId) {
-      push(`You can't remove yourself from ${projectName}`);
+      // D5: a refusal must not render the success tick.
+      push(`You can't remove yourself from ${projectName}`, "error");
       return;
     }
     if (
@@ -855,10 +894,15 @@ export function MembersPanel({
         .length <= 1 &&
       !m.missing
     ) {
-      push(`${m.name} is the only admin — assign another admin in Policy first`);
+      // D5: a refusal must not render the success tick.
+      push(
+        `${m.name} is the only admin — assign another admin in Policy first`,
+        "error",
+      );
       return;
     }
-    onRemove(m);
+    // D6: guards cleared — confirm the governance change before it submits.
+    setConfirmRemove(m);
   };
 
   // LV-04/UI-29: memberships whose org account was deleted are counted and
@@ -998,6 +1042,23 @@ export function MembersPanel({
           </button>
         </span>
       </div>
+      {confirmRemove && (
+        <ConfirmDialog
+          title={`Remove ${confirmRemove.name} from ${projectName}?`}
+          body={
+            confirmRemove.missing
+              ? "This clears the stale membership left by a deleted org account. The audit history is untouched."
+              : "They lose access to this project. Their comments and decisions stay in the audit history, and any task they own returns to the operator for reassignment."
+          }
+          confirmLabel="Remove member"
+          busy={busy}
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={() => {
+            onRemove(confirmRemove);
+            setConfirmRemove(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1173,10 +1234,10 @@ export function RepoPanel({
         <div className="pol-note">
           <Icon name="lock" />
           <span>
+            {/* F20-16: real grant + tier (see the identity card note). */}
             Read-only — repairing the repository binding and changing the
             after-merge branch policy need the{" "}
-            <strong>Change project settings</strong> grant (project admin or
-            maintainer).
+            <strong>Edit workflow &amp; policy</strong> grant (project admin).
           </span>
         </div>
       )}

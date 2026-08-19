@@ -164,7 +164,8 @@ describe("claude adapter (SDK, injected fake query)", () => {
         is_error: true,
         num_turns: 3,
         usage: {},
-        result: "Claude AI usage limit reached|1750000000",
+        result:
+          "Claude AI usage limit reached|1750000000 sk-secretsentinel0123456789",
       },
     ]);
     const adapter = createClaudeAdapter({ queryFn: () => q });
@@ -177,9 +178,12 @@ describe("claude adapter (SDK, injected fake query)", () => {
     const reason = lines.find((l) => l.display?.tag === "run·error·quota");
     expect(reason).toBeTruthy();
     expect(reason!.display!.ev).toBe("err");
-    // Redaction-safe: the canonical sentence, never the provider's raw text.
+    // R20-3 (F20-4): the canonical sentence leads, and the provider's OWN words
+    // now ride behind the marker — with a token-shaped secret redacted by shape.
     expect(reason!.display!.text).toContain("usage quota");
-    expect(reason!.display!.text).not.toContain("1750000000");
+    expect(reason!.display!.text).toContain("The provider reported:");
+    expect(reason!.display!.text).toContain("Claude AI usage limit reached");
+    expect(reason!.display!.text).not.toContain("sk-secretsentinel0123456789");
   });
 
   it("an is_error result with no recognizable cause still lands a tagged line", async () => {

@@ -90,6 +90,63 @@ describe("the no-change row states what is true of THIS task", () => {
 });
 
 /**
+ * F20-6 (R20-2) — a PR-less task whose completion NEVER claimed `noChanges` is
+ * auto-detected at acceptance by re-probing the branch. The dialog cannot
+ * promise a merge (there is nothing to merge) and cannot promise the close
+ * either (the probe decides) — so it states exactly what the click will do.
+ */
+describe("F20-6: the no-PR auto-detect arm", () => {
+  const openAutoDetect = (task: Partial<TaskDetail>) => {
+    const { container } = render(
+      <AcceptConfirm
+        task={detail(task)}
+        workRevisionSha={null}
+        noChanges={false}
+        noPullRequest
+        defaultBranch="main"
+        ceremony={{ mode: "accept" }}
+        blockedReason={null}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    return (
+      container.ownerDocument.querySelector(
+        'dialog[data-screen-label="Accept completion dialog"]',
+      )?.textContent ?? ""
+    );
+  };
+
+  it("states the branch re-check and promises no merge", () => {
+    const text = openAutoDetect({ branch: "vib-151" });
+    expect(text).toContain("Nothing to merge yet");
+    expect(text).toContain("vib-151");
+    expect(text).toContain("completed with no changes");
+    // It must NOT fall back to the ordinary "closes without a merge" line, and
+    // it must NOT claim the merge is one-way (nothing merges here).
+    expect(text).not.toContain(
+      "No linked pull request — the task closes without a merge",
+    );
+    expect(text).not.toContain("Merging is one-way");
+  });
+
+  it("names the branch generically when the task never opened one", () => {
+    const text = openAutoDetect({ branch: null });
+    expect(text).toContain("Nothing to merge yet");
+    expect(text).toContain("re-checks the branch");
+  });
+
+  it("the flag is required — an ordinary no-PR accept still reads 'closes without a merge'", () => {
+    // Canary: derive `noPullRequest` from `!task.pr` inside the component and
+    // this ordinary accept would flip to the auto-detect copy.
+    const text = open({ noChanges: false, task: { branch: "vib-151" } });
+    expect(text).toContain("No linked pull request");
+    expect(text).not.toContain("Nothing to merge yet");
+  });
+});
+
+/**
  * F19-23 — the drift note's noun was switched with its count and the verb was
  * not, so a one-commit drift read "1 commit added since review; THEY MERGE
  * unreviewed". The server-side sentence was fixed; this dialog's own copy (and

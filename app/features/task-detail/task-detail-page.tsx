@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
@@ -19,6 +20,8 @@ import {
   OperatorRecommendations,
   type RecommendationView,
 } from "./operator-recommendations";
+import { AttachmentsPanel } from "./attachments-panel";
+import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
@@ -91,6 +94,8 @@ function recReachesAcceptance(
 
 export function TaskDetailPage({
   task,
+  attachments = [],
+  attachmentsBase = null,
   runtime,
   deployedSpecialists,
   operatorBackend,
@@ -121,6 +126,13 @@ export function TaskDetailPage({
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
+  /** R19-19: browser-produced files (loader; `[]` for non-members — the same
+   *  visibility bar as the run console). */
+  attachments?: TaskAttachmentEntry[];
+  /** `/projects/<slug>/tasks/<KEY>/attachments` — the serving route's base,
+   *  built by the route component (the one place that knows the params).
+   *  Null hides the panel and the evidence links (e.g. bare test renders). */
+  attachmentsBase?: string | null;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
   /** Deployed specialists the assign menu offers (loader). */
@@ -180,6 +192,10 @@ export function TaskDetailPage({
   const [releasing, setReleasing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [ask, setAsk] = useState(0);
+  // C8: "Scheduled re-runs" now sits BELOW the Execution profile and its empty
+  // form is collapsed behind a one-line disclosure on the common (no-schedule)
+  // case — this opens it. A task that already has a schedule renders expanded.
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const csrf = useCsrfToken();
 
   // G7: the page body is overflow:hidden and `.detail` is the actual scroll
@@ -283,6 +299,14 @@ export function TaskDetailPage({
   // action has to replay — a recommendation id, a packet option + its note, or
   // the stage the human picked out of the Current-state menu (F19-37).
   const [confirmAccept, setConfirmAccept] = useState<PendingAccept | null>(null);
+  // D6: two consequential single-click actions gained a confirm — interrupting a
+  // live run (discards its in-flight, uncommitted work) and dismissing an
+  // operator recommendation (withdraws a governed, audited decision). Both were
+  // one silent click while a reversible archive took a three-row ceremony.
+  const [confirmInterrupt, setConfirmInterrupt] = useState<string | null>(null);
+  const [confirmDismiss, setConfirmDismiss] = useState<
+    { recId: string; label: string } | null
+  >(null);
   const acceptFetcher = useFetcher<ActionResult>();
   useActionFeedback(acceptFetcher);
   const acceptBusy = acceptFetcher.state !== "idle";
@@ -404,6 +428,23 @@ export function TaskDetailPage({
     submitResolve(optionIndex, note);
   };
 
+  // F20-18: a contributor-OWNER may open the packet (owner exception) but every
+  // option re-checks a higher tier — hand the decision UP to a maintainer/admin
+  // instead of stranding them. The server (requestPacketMaintainerDecision)
+  // refuses when the caller already holds `resolve-packet`, so this is wired
+  // only for the owner-who-cannot-resolve-directly case.
+  const escalateFetcher = useFetcher<ActionResult>();
+  useActionFeedback(escalateFetcher);
+  const escalateBusy = escalateFetcher.state !== "idle";
+  const canEscalatePacket = isOwner && !canRunAgents;
+  const onRequestMaintainer = () => {
+    if (escalateBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "request-maintainer-decision");
+    escalateFetcher.submit(fd, { method: "post" });
+  };
+
   // Apply / dismiss an operator recommendation (apply is admin|maintainer; the
   // server re-checks). Lifted onto the page — with F19-3 an Apply can BE an
   // acceptance, so the click has to reach the page's confirm state rather than
@@ -434,13 +475,21 @@ export function TaskDetailPage({
     }
     submitApplyRec(recId);
   };
-  const onDismissRec = (recId: string) => {
+  const submitDismissRec = (recId: string) => {
     if (recBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "dismiss-recommendation");
     fd.set("recId", recId);
     recFetcher.submit(fd, { method: "post" });
+  };
+  // D6: dismissing withdraws a pending operator recommendation — confirm it,
+  // naming the recommendation. (Apply already routes through the accept confirm
+  // when it reaches acceptance; the harmless dismiss had no gate at all.)
+  const onDismissRec = (recId: string) => {
+    if (recBusy) return;
+    const rec = recommendations.find((r) => r.id === recId);
+    setConfirmDismiss({ recId, label: rec?.label ?? "this recommendation" });
   };
 
   // Manual stage change from the Current-state menu. Page-owned since F19-37 —
@@ -501,7 +550,8 @@ export function TaskDetailPage({
           <LiveRunPanel
             runtime={runtime}
             onViewLogs={onViewLogs}
-            onInterrupt={onInterrupt}
+            // D6: the button opens a confirm instead of interrupting on the click.
+            onInterrupt={(id) => setConfirmInterrupt(id)}
             canInterrupt={canInterrupt}
             interrupting={runBusy}
           />
@@ -535,6 +585,9 @@ export function TaskDetailPage({
             // `updateTaskGoal` itself enforces (E3).
             canEditGoal={canEditGoal}
             canArchive={canArchiveViaPacket}
+            // F20-6: discard_branch re-checks the same `approve-transition` tier
+            // the archive-with-branch-deletion needs (it destroys commits).
+            canDiscardBranch={canArchiveViaPacket}
           // UX19-9: what an `archive_task` resolution destroys — the branch its
           // `deleteBranch` variant deletes permanently, and the recommendations
           // the archive withdraws. The same two facts ArchiveConfirm is handed.
@@ -544,6 +597,10 @@ export function TaskDetailPage({
             pendingRecommendations: recommendations.length,
           }}
             onResolve={onResolve}
+            // F20-18: only the contributor-owner-who-cannot-resolve-directly
+            // gets the escalation affordance (the card shows it only when EVERY
+            // option is above their tier).
+            {...(canEscalatePacket ? { onRequestMaintainer } : {})}
             onAsk={() => setAsk((a) => a + 1)}
           />
         )}
@@ -554,17 +611,6 @@ export function TaskDetailPage({
           busy={recBusy}
           onApply={onApplyRec}
           onDismiss={onDismissRec}
-        />
-
-        <ScheduledActions
-          schedules={schedules}
-          canRunAgents={canRunAgents}
-          taskClosed={taskClosed}
-          // UX19-10: the same availability the operator run picker below uses,
-          // so the two operator pickers on one screen cannot offer different
-          // backends.
-          backendAvailable={backendAvailable}
-          configuredAutonomy={operatorAutonomy}
         />
 
         <ExecutionSection
@@ -584,6 +630,35 @@ export function TaskDetailPage({
           activeReviewerIds={activeReviewerIds}
           operatorRunActive={operatorRunActive}
         />
+
+        {/* C8: Scheduled re-runs used to sit directly under the goal, showing a
+            four-control form for nothing on the common case and pushing the
+            Execution profile (Run operator, delivering agent, reviewers, owner)
+            below the fold. It sits below Execution profile now, and its empty
+            form is collapsed behind a one-line disclosure — expanded only when a
+            schedule already exists (there is something to show) or the viewer
+            asks to add one. */}
+        {schedules.length > 0 || scheduleOpen ? (
+          <ScheduledActions
+            schedules={schedules}
+            canRunAgents={canRunAgents}
+            taskClosed={taskClosed}
+            // UX19-10: the same availability the operator run picker above uses,
+            // so the two operator pickers on one screen cannot offer different
+            // backends.
+            backendAvailable={backendAvailable}
+            configuredAutonomy={operatorAutonomy}
+          />
+        ) : canRunAgents && !taskClosed ? (
+          <button
+            type="button"
+            className="btn ghost sm panel-act"
+            onClick={() => setScheduleOpen(true)}
+          >
+            <Icon name="clock" />
+            Schedule a re-run
+          </button>
+        ) : null}
 
         {runtime.length > 0 && runsVisible ? (
           <AgentLogsPanel
@@ -616,6 +691,18 @@ export function TaskDetailPage({
           </section>
         ) : null}
 
+        {attachmentsBase ? (
+          <AttachmentsPanel
+            base={attachmentsBase}
+            attachments={attachments}
+            // D8: show an empty state (not nothing) when a browser-capable agent
+            // is deployed — its runs are what fill this panel.
+            browserExpected={deployedSpecialists.some(
+              (s) => s.capabilities?.browser,
+            )}
+          />
+        ) : null}
+
         <Timeline
           events={task.timeline}
           hasMore={timelineHasMore}
@@ -626,6 +713,12 @@ export function TaskDetailPage({
           mentionables={mentionables}
           onAgentLog={onAgentLog}
           taskClosed={taskClosed}
+          {...(attachmentsBase
+            ? {
+                attachmentNames: attachments.map((a) => a.name),
+                attachmentsBase,
+              }
+            : {})}
         />
       </div>
 
@@ -676,6 +769,11 @@ export function TaskDetailPage({
           task={task}
           workRevisionSha={workRevisionSha}
           noChanges={noChanges}
+          // F20-6 (R20-2): no PR + the completion never claimed no-change → the
+          // accept path auto-detects it by re-probing the branch. The dialog
+          // states that instead of promising a merge. `noChanges` (the flagged
+          // shape) still takes precedence when the completion DID claim it.
+          noPullRequest={!task.pr && !noChanges}
           defaultBranch={defaultBranch}
           // R19-5: a force-accept from before the boundary MAY skip the
           // remaining stages and the review gate — the dialog has to name which.
@@ -753,6 +851,42 @@ export function TaskDetailPage({
             onOwner("release");
           }}
           onOwner={onOwner}
+        />
+      )}
+
+      {/* D6: interrupt a live run — discards uncommitted in-flight work. */}
+      {confirmInterrupt && (
+        <ConfirmDialog
+          title="Interrupt this run?"
+          body="The agent stops where it is. Anything it has not already committed or delivered is lost — you can start a new run afterward."
+          confirmLabel="Interrupt run"
+          busy={runBusy}
+          onCancel={() => setConfirmInterrupt(null)}
+          onConfirm={() => {
+            onInterrupt(confirmInterrupt);
+            setConfirmInterrupt(null);
+          }}
+        />
+      )}
+
+      {/* D6: dismiss an operator recommendation — a governed, audited decision. */}
+      {confirmDismiss && (
+        <ConfirmDialog
+          title="Dismiss this recommendation?"
+          body={
+            <>
+              <strong>{confirmDismiss.label}</strong> is withdrawn without acting
+              on it. The dismissal is recorded on the timeline; the operator may
+              raise it again on its next run.
+            </>
+          }
+          confirmLabel="Dismiss recommendation"
+          busy={recBusy}
+          onCancel={() => setConfirmDismiss(null)}
+          onConfirm={() => {
+            submitDismissRec(confirmDismiss.recId);
+            setConfirmDismiss(null);
+          }}
         />
       )}
     </div>

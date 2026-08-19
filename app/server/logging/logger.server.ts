@@ -1,3 +1,4 @@
+import { writeSync } from "node:fs";
 import { currentCorrelation } from "./request-context.server";
 
 /**
@@ -80,6 +81,43 @@ function write(
     });
   }
   process.stdout.write(line + "\n");
+}
+
+/**
+ * F20-8(a): one fatal log line written SYNCHRONOUSLY to stderr (fd 2), for the
+ * crash paths that call `process.exit` on the very next line. The normal
+ * `logger.error` above is an async `process.stdout.write` to a pipe, which
+ * `process.exit` truncates — the 2026-08-14 outage went straight from a 200 line
+ * to the restart's lock refusal with ZERO diagnostic output in between. `writeSync`
+ * returns only once the OS has the bytes, so the diagnosis always survives the
+ * exit. Same JSON shape/correlation merge as `write`, minus the level gate (a
+ * FATAL is never filtered). Best-effort: a failed write (fd already closed during
+ * teardown) must never mask the fatal it is reporting.
+ */
+export function writeFatalSync(msg: string, fields?: LogFields): void {
+  const record: Record<string, unknown> = {
+    level: "error",
+    time: new Date().toISOString(),
+    msg,
+  };
+  assign(record, currentCorrelation());
+  assign(record, fields);
+  let line: string;
+  try {
+    line = JSON.stringify(record);
+  } catch {
+    line = JSON.stringify({
+      level: "error",
+      time: new Date().toISOString(),
+      msg,
+      loggingError: "fields were not serializable",
+    });
+  }
+  try {
+    writeSync(2, line + "\n");
+  } catch {
+    // stderr already closed during teardown — nothing further we can do.
+  }
 }
 
 function makeLogger(bound: LogFields | null): Logger {

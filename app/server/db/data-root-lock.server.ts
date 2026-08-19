@@ -13,7 +13,7 @@ import { hostname } from "node:os";
 import path from "node:path";
 import { getEnv, type Env } from "../config/env.server";
 import { getDataRoot } from "../files/file-store-root.server";
-import { logger } from "../logging/logger.server";
+import { logger, writeFatalSync } from "../logging/logger.server";
 
 /**
  * ONE app process per data root, EVER (B-FD1).
@@ -69,6 +69,19 @@ export interface LockHolder {
    * the liveness probe, which is the correct answer for them.
    */
   bootId?: string;
+  /**
+   * The holder pid's real start time (clock ticks since system boot, from
+   * `/proc/<pid>/stat`), recorded at acquisition. It exists to break the ONE tie
+   * the liveness probe cannot: when a lock names THIS process's own pid, asking
+   * `isAlive(self.pid)` is a self-probe that always answers "alive" (F20-8b). The
+   * app runs as pid 1 and compose pins the hostname, so a CRASHED predecessor
+   * leaves writer.lock naming pid 1 on this exact host, and the old code refused
+   * to boot forever. If the process now occupying that pid started at a different
+   * time than the lock recorded, the pid was recycled by a since-gone writer →
+   * reclaim. Absent off-Linux (no `/proc`) and on pre-F20-8 locks — both fall
+   * through to the liveness probe, unchanged.
+   */
+  procStartedAt?: number;
 }
 
 /** Why an existing lock could not simply be taken. */
@@ -209,6 +222,28 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+/**
+ * The start time (field 22 of `/proc/<pid>/stat`, clock ticks since system boot)
+ * of the process occupying `pid`, or null off-Linux / when it cannot be read.
+ * Used by {@link classifyLock} to tell a live holder from a recycled pid (F20-8b).
+ * The `comm` field can itself contain spaces and parentheses, so the parse starts
+ * after the LAST ')' — everything after it is space-separated and offset-stable.
+ */
+function readProcessStartTicks(pid: number): number | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const afterComm = stat.lastIndexOf(") ");
+    if (afterComm < 0) return null;
+    // Fields after `comm` begin at field 3 (state); starttime is field 22, so
+    // index 22 - 3 = 19 in this tail.
+    const fields = stat.slice(afterComm + 2).trim().split(/\s+/);
+    const ticks = Number(fields[19]);
+    return Number.isFinite(ticks) ? ticks : null;
+  } catch {
+    return null;
+  }
+}
+
 function readHolder(lockPath: string): LockHolder | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
@@ -216,12 +251,15 @@ function readHolder(lockPath: string): LockHolder | null {
     const { pid, hostname: host, startedAt } = parsed as Record<string, unknown>;
     if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
     if (typeof host !== "string" || host.length === 0) return null;
-    const { bootId } = parsed as Record<string, unknown>;
+    const { bootId, procStartedAt } = parsed as Record<string, unknown>;
     return {
       pid,
       hostname: host,
       startedAt: typeof startedAt === "string" ? startedAt : "",
       ...(typeof bootId === "string" && bootId ? { bootId } : {}),
+      ...(typeof procStartedAt === "number" && Number.isFinite(procStartedAt)
+        ? { procStartedAt }
+        : {}),
     };
   } catch {
     return null;
@@ -232,6 +270,7 @@ export function classifyLock(
   holder: LockHolder | null,
   self: LockHolder,
   isAlive: (pid: number) => boolean,
+  readProcStartTicks: (pid: number) => number | null = readProcessStartTicks,
 ): LockVerdict {
   if (!holder) return "unknown-holder";
   // A lock left behind by THIS very process (a re-entrant boot after an HMR
@@ -239,6 +278,32 @@ export function classifyLock(
   // per-process boot id, never by pid+hostname alone (see LockHolder.bootId).
   if (holder.bootId && holder.bootId === self.bootId) return "stale";
   if (holder.hostname !== self.hostname) return "held";
+  // F20-8(b): the container self-lockout. The app runs as pid 1 and compose pins
+  // the hostname, so a CRASHED predecessor leaves writer.lock naming pid 1 on this
+  // exact host. `isAlive(self.pid)` is then a self-probe — it always answers
+  // "alive" — so the old code refused to boot FOREVER (observed live: nine
+  // consecutive boot refusals, RestartCount 11, until the file was deleted by
+  // hand). When the holder names THIS process's own pid the liveness probe is
+  // worthless; decide by the pid's real start time instead. A process now sitting
+  // on our pid that started at a DIFFERENT time than the lock recorded means the
+  // pid was recycled by a since-gone writer → reclaim; a matching start time means
+  // the same instance genuinely still holds it → refuse. Only override with real
+  // evidence (a recorded + readable start time); with none — a pre-F20-8 lock or a
+  // platform without `/proc` — fall through to the liveness probe, unchanged, so
+  // every existing verdict is preserved.
+  //
+  // The realistic dual-writer shape the lock exists to stop is a host process vs a
+  // container: a DIFFERENT hostname, already refused above. A second LIVE writer
+  // that also happens to sit on our exact pid+hostname cannot be told apart from a
+  // crashed predecessor from inside one pid namespace, so this errs toward
+  // reclaiming rather than bricking — and that residual window is caught within one
+  // tick by the F18-5 ownership guard, which fails the loser closed.
+  if (holder.pid === self.pid && typeof holder.procStartedAt === "number") {
+    const current = readProcStartTicks(self.pid);
+    if (current !== null) {
+      return current === holder.procStartedAt ? "held" : "stale";
+    }
+  }
   return isAlive(holder.pid) ? "held" : "stale";
 }
 
@@ -345,11 +410,16 @@ export function acquireDataRootLock(
   mkdirSync(stateDir, { recursive: true });
   const lockPath = path.join(stateDir, DATA_ROOT_LOCK_FILENAME);
 
+  const ownStartTicks = readProcessStartTicks(process.pid);
   const self: LockHolder = options.self ?? {
     pid: process.pid,
     hostname: hostname(),
     startedAt: new Date().toISOString(),
     bootId: processBootId(),
+    // F20-8(b): so a restart can tell our crashed predecessor's recycled pid from
+    // a genuinely live holder. Omitted off-Linux (null), where pid 1 self-lockout
+    // does not arise.
+    ...(ownStartTicks !== null ? { procStartedAt: ownStartTicks } : {}),
   };
   const isAlive = options.isAlive ?? isProcessAlive;
   const force = options.force ?? false;
@@ -467,8 +537,12 @@ function loudlyShutDownOnStolenLock(
 ): void {
   // No `logger.fatal` exists (levels: debug/info/warn/error); this is the app's
   // fatal channel — a loud `error` line + a non-zero exit, mirroring the boot
-  // refusal's who/what/why so an operator reading stdout has the whole diagnosis.
-  logger.error(
+  // refusal's who/what/why so an operator reading the logs has the whole diagnosis.
+  // F20-8(a): `logger.error` is an async `process.stdout.write` and `process.exit`
+  // is on the next line, which truncates it — a silent death. `writeFatalSync`
+  // flushes the same line SYNCHRONOUSLY to stderr first, so the diagnosis always
+  // survives the exit.
+  writeFatalSync(
     `FATAL: this Viberr process no longer owns the data-root writer lock at ${lock.path} (${verdict}). ` +
       `The lock file was deleted or replaced while this process held it — another process may now be ` +
       `writing the same data root concurrently, which clobbers the SQLite WAL and silently loses ` +

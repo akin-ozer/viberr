@@ -130,6 +130,28 @@ describe("matchesBoardFilter", () => {
     expect(matchesBoardFilter(quiet, "all")).toBe(true);
     expect(isBoardFilterId("quiet")).toBe(true);
   });
+
+  /** D4: "degraded continuity" existed only on the task page's Continuity
+   *  Recovery panel; the board's default filters gained no way to ask for it. */
+  it('"continuity" ("Degraded continuity") selects on the projected fact, and only that', () => {
+    const degraded: FilterableTask = { ...base, continuity: "degraded" };
+    expect(matchesBoardFilter(degraded, "continuity")).toBe(true);
+    // A healthy task (null continuity) stays out — and so does the base fixture.
+    expect(matchesBoardFilter(base, "continuity")).toBe(false);
+    expect(
+      matchesBoardFilter({ ...base, continuity: null }, "continuity"),
+    ).toBe(false);
+    // It is its OWN state, not folded into "Blocked or waiting": a task can lose
+    // continuity while otherwise healthy (ready + validation none), and the risk
+    // predicate must still not claim it.
+    expect(matchesBoardFilter(degraded, "risk")).toBe(false);
+    expect(matchesBoardFilter(degraded, "all")).toBe(true);
+    // Archived wins the exclusion, like every non-"archived" filter (R14-3).
+    expect(
+      matchesBoardFilter({ ...degraded, archived: true }, "continuity"),
+    ).toBe(false);
+    expect(isBoardFilterId("continuity")).toBe(true);
+  });
 });
 
 const task: SearchableTask = {

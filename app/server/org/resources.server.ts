@@ -19,6 +19,8 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { startMcpWarmup } from "./mcp-warmup.server";
+import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   isSecretBox,
@@ -527,6 +529,37 @@ export interface McpView {
   /** true up · false down · null never probed / not probeable (stdio). */
   up: boolean | null;
   lastCheckedAt: string | null;
+  /**
+   * R19-17: why the last probe failed, in the command's own words (already
+   * scrubbed of the credential the child was spawned with). NULL when the
+   * server is up or was never probed — the reason used to live only in a toast,
+   * so the moment it faded a red dot was the whole story and the admin had to
+   * re-run the test to find out why again.
+   */
+  lastError: string | null;
+  /**
+   * R19-18: when set, a first-run install is running in the BACKGROUND for this
+   * server. The row reads "installing" rather than unreachable, and the
+   * settings page re-checks until the warm-up writes a real verdict.
+   */
+  warmingSince: string | null;
+  /**
+   * R20-4 (N20-2): when this server first answered a probe successfully (ISO),
+   * or NULL if it never has here. A NULL turns a timeout on an npx/uvx-style
+   * command into a plausible first-run INSTALL rather than a broken server.
+   *
+   * Optional so hand-built fixtures elsewhere stay valid; every real row from
+   * `mapMcp` sets it explicitly.
+   */
+  firstSuccessAt?: string | null;
+  /**
+   * R20-4 (N20-2): how many times the HEURISTIC (the command looks like an
+   * installer but printed nothing install-y, and the row has never succeeded)
+   * armed a background warm-up. Capped at 1, so a command that times out on
+   * EVERY probe still settles to `unreachable` instead of re-downloading
+   * forever. Optional for the same fixture reason as `firstSuccessAt`.
+   */
+  heuristicWarmups?: number;
 }
 
 interface McpRow {
@@ -538,6 +571,10 @@ interface McpRow {
   tools_count: number | null;
   up: number | null;
   last_checked_at: string | null;
+  last_error: string | null;
+  warming_since: string | null;
+  first_success_at: string | null;
+  heuristic_warmups: number | null;
 }
 
 function mapMcp(row: McpRow): McpView {
@@ -555,6 +592,10 @@ function mapMcp(row: McpRow): McpView {
     tools: row.tools_count,
     up: row.up === null ? null : row.up === 1,
     lastCheckedAt: row.last_checked_at,
+    lastError: row.last_error,
+    warmingSince: row.warming_since,
+    firstSuccessAt: row.first_success_at,
+    heuristicWarmups: row.heuristic_warmups ?? 0,
   };
 }
 
@@ -686,7 +727,9 @@ function openedForNewRow(
 }
 
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
-                        up, last_checked_at FROM org_mcp_servers`;
+                        up, last_checked_at, last_error, warming_since,
+                        first_success_at, heuristic_warmups
+                 FROM org_mcp_servers`;
 
 export function listMcpServers(db: DatabaseSync): McpView[] {
   const rows = db
@@ -716,10 +759,25 @@ export type McpProbeOutcome =
  * purpose (no dependency on the full ChildProcess type).
  */
 export interface McpChild {
-  stdin: { write(data: string): void; end(): void } | null;
+  stdin:
+    | {
+        write(data: string): void;
+        end(): void;
+        /** F20-8: a write to a child that already exited surfaces here as an
+         *  ASYNC 'error' (EPIPE); an unhandled one is a fatal uncaughtException. */
+        on?(event: "error", cb: (err: unknown) => void): void;
+      }
+    | null;
   stdout: { on(event: "data", cb: (chunk: unknown) => void): void } | null;
-  on(event: "error" | "exit", cb: (arg?: unknown) => void): void;
+  /** The failed command's OWN explanation — see `discoverStdioMcpTools`. */
+  stderr: { on(event: "data", cb: (chunk: unknown) => void): void } | null;
+  /** F20-22: the 'exit' handler reads `(code, signal)`; 'error' passes an Error. */
+  on(event: "error" | "exit", cb: (arg?: unknown, signal?: unknown) => void): void;
   kill(signal?: string): void;
+  /** F20-2: the child's OS pid, present on a real spawn — used to signal the
+   *  whole process GROUP so grandchildren (npx→node→chromium) are not orphaned
+   *  to pid 1. Absent on the test fakes (which model no grandchildren). */
+  pid?: number | null;
 }
 
 export type McpSpawn = (
@@ -731,21 +789,70 @@ export type McpSpawn = (
 export interface McpProbeOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** R19-18: budget for a BACKGROUND install started off this probe (tests
+   *  shorten it; production uses `WARMUP_CAP_MS`). */
+  capMs?: number;
   /** Injected spawn for stdio tool-count discovery (tests supply a fake). */
   spawnImpl?: McpSpawn;
 }
 
 const defaultSpawn: McpSpawn = (command, args, token) =>
   spawn(command, args, {
-    stdio: ["pipe", "pipe", "ignore"],
+    // stderr was "ignore" — discarded by the OS, so the one thing that
+    // explains a failure never reached us. See `discoverStdioMcpTools`.
+    stdio: ["pipe", "pipe", "pipe"],
+    // F20-2: lead a new process GROUP so the timeout teardown can signal the
+    // whole tree (`npx` → node → chromium helpers), not just the direct child.
+    // Node-as-pid-1 has no init to reap the orphans a bare `child.kill()` left,
+    // so a boot accumulated defunct chromium/crashpad zombies under pid 1.
+    detached: true,
     ...(token
       ? { env: { ...process.env, MCP_CREDENTIAL: token } }
       : {}),
   }) as unknown as McpChild;
 
+/**
+ * F20-2: tear down a spawned MCP child and everything it forked.
+ *
+ * A stdio MCP command is usually a package-manager runner (`npx`/`uvx`) that
+ * forks a node/python grandchild, and the browser MCP forks chromium helpers
+ * under that. `child.kill()` signals ONLY the direct child, orphaning the tree
+ * to pid 1 where node-as-init never reaps it. Spawned `detached: true`, the
+ * child leads its own group, so `process.kill(-pid, …)` reaches every member.
+ * Falls back to `child.kill()` when there is no pid (the test fakes) or the
+ * group is already gone.
+ */
+function killProcessTree(child: McpChild): void {
+  const pid = typeof child.pid === "number" ? child.pid : null;
+  if (pid !== null) {
+    try {
+      process.kill(-pid, "SIGTERM");
+      return;
+    } catch {
+      /* group already gone, or no such group — fall through to the direct kill */
+    }
+  }
+  try {
+    child.kill();
+  } catch {
+    /* already gone */
+  }
+}
+
 export type StdioDiscovery =
   | { kind: "up"; latencyMs: number; tools: number }
-  | { kind: "down"; reason: string };
+  | {
+      kind: "down";
+      reason: string;
+      /** R19-18: the command was mid first-run install when the probe gave up —
+       *  a candidate for a background warm-up, not a failure to report. */
+      installing?: boolean;
+      /** R20-4 (N20-2): the TIMEOUT fired on a command that fetches on first use
+       *  (`npx`/`bunx`/…), but the command printed nothing install-y. Only the
+       *  CALLER can decide whether this is really a first run (it holds the row),
+       *  so the probe reports the shape and stays DB-free. */
+      firstRunInstaller?: boolean;
+    };
 
 /**
  * Split a stdio MCP command line into argv, keeping quoted segments whole.
@@ -767,6 +874,24 @@ export function splitMcpCommand(target: string): string[] {
 }
 
 /**
+ * R20-4 (N20-2): a package-manager runner that FETCHES on first use.
+ *
+ * `uvx` announces itself on stderr and is already caught by `INSTALLING_RE`;
+ * `npx`/`bunx`/the `dlx` family are SILENT while the registry resolves, which
+ * is exactly the N20-2 gap — a cold probe timed out with no warm-up. Matched on
+ * argv, never the raw string, so `my-server --npx-mode` is not a false positive.
+ * Exported for its test.
+ */
+export function isFirstRunInstallerCommand(argv: string[]): boolean {
+  const bin = (argv[0] ?? "").split(/[\\/]/).pop()?.toLowerCase() ?? "";
+  const next = (argv[1] ?? "").toLowerCase();
+  if (["npx", "bunx", "uvx", "pipx"].includes(bin)) return true;
+  if (["pnpm", "yarn", "bun"].includes(bin) && (next === "dlx" || next === "x")) return true;
+  if (bin === "uv" && next === "tool") return true;
+  return false;
+}
+
+/**
  * Best-effort stdio MCP tool-count discovery: spawn the command and run a
  * minimal JSON-RPC `initialize` → `notifications/initialized` → `tools/list`
  * handshake over newline-delimited stdio, returning the tool count. Never
@@ -781,7 +906,15 @@ export async function discoverStdioMcpTools(
   const parts = splitMcpCommand(command);
   if (parts.length === 0) return { kind: "down", reason: "no command" };
   const spawnImpl = options.spawnImpl ?? defaultSpawn;
-  const timeoutMs = options.timeoutMs ?? 5000;
+  /**
+   * R19-17c: 5s was too short for the commands people actually register. `npx`
+   * and `uvx` FETCH on first use, and the probe would kill them before either
+   * had printed a word — so the row said a bare "timed out" about a command
+   * that was busy downloading. 20s is long enough that a first-run install has
+   * announced itself on stderr (which the reason then carries), and short
+   * enough to sit inside the save request that waits for it.
+   */
+  const timeoutMs = options.timeoutMs ?? 20_000;
   const started = Date.now();
 
   return new Promise<StdioDiscovery>((resolve) => {
@@ -792,28 +925,84 @@ export async function discoverStdioMcpTools(
       // without it reported "unreachable" in Settings for servers that work
       // perfectly inside a run.
       child = spawnImpl(parts[0]!, parts.slice(1), options.token ?? null);
-    } catch {
-      resolve({ kind: "down", reason: "command not found" });
+    } catch (err) {
+      resolve({
+        kind: "down",
+        reason:
+          err instanceof Error && err.message
+            ? `command not found — ${err.message}`
+            : "command not found",
+      });
       return;
     }
 
     let settled = false;
     let buffer = "";
+    /**
+     * What the command itself said. The probe used to answer a failure with
+     * five fixed words — "command not found", "failed to start", "exited before
+     * responding" — while the process had ALREADY explained itself on stderr and
+     * the spawn threw that channel away (`stdio: [...,"ignore"]`). Live, a
+     * `uvx` MCP server that crashed on an upstream import error reported
+     * "exited before responding", and the ImportError naming the exact symbol
+     * was unrecoverable from the app at all.
+     *
+     * Same shape as ruling 69 for git's stderr, and the same scrubber: the
+     * child is spawned WITH `MCP_CREDENTIAL` in its env (P13-KM-05), so a
+     * server that dumps its environment while dying would otherwise print the
+     * credential into a toast. `redactGitOutput` removes it BY VALUE — it is
+     * the shared child-process scrubber, named for the caller it was written
+     * for — and clamps to the TAIL, which is where a traceback's actual error
+     * sits.
+     */
+    let stderr = "";
+    const STDERR_CAP = 8000;
+    const withDetail = (base: string, extra?: string): string => {
+      const detail = redactGitOutput([extra, stderr].filter(Boolean).join("\n"), {
+        token: options.token ?? null,
+      });
+      return detail ? `${base} — ${detail}` : base;
+    };
     const finish = (result: StdioDiscovery) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try {
-        child.kill();
-      } catch {
-        /* already gone */
-      }
+      // F20-2: signal the whole process group, not just the direct child.
+      killProcessTree(child);
       resolve(result);
     };
-    const timer = setTimeout(
-      () => finish({ kind: "down", reason: "timed out" }),
-      timeoutMs,
-    );
+    child.stderr?.on("data", (chunk) => {
+      if (stderr.length < STDERR_CAP) stderr += String(chunk);
+    });
+
+    /**
+     * Package managers announce a first-run fetch before the server can
+     * possibly speak. Telling those two states apart is the difference between
+     * "this is broken" and "this is still downloading" — and only the second
+     * has a useful next step.
+     */
+    const INSTALLING_RE =
+      /\b(downloading|building|installing|resolving|fetching|added \d+ packages)\b/i;
+    const timer = setTimeout(() => {
+      const installing = INSTALLING_RE.test(stderr);
+      // R20-4 (N20-2): the command said nothing install-y, but it IS an
+      // npx/bunx-style runner that fetches on first use — a plausible first-run
+      // download rather than a broken server. Report the shape; only the caller
+      // (which holds the row) decides whether to warm it.
+      const firstRunInstaller = !installing && isFirstRunInstallerCommand(parts);
+      finish({
+        kind: "down",
+        ...(installing ? { installing: true } : {}),
+        ...(firstRunInstaller ? { firstRunInstaller: true } : {}),
+        reason: withDetail(
+          installing
+            ? `still installing after ${Math.round(timeoutMs / 1000)}s — the first run of this command fetches its dependencies`
+            : firstRunInstaller
+              ? `no response in ${Math.round(timeoutMs / 1000)}s — \`${parts[0]}\` fetches its package on first use, so this is probably still downloading`
+              : `timed out after ${Math.round(timeoutMs / 1000)}s`,
+        ),
+      });
+    }, timeoutMs);
 
     const send = (msg: unknown) => {
       try {
@@ -823,10 +1012,42 @@ export async function discoverStdioMcpTools(
       }
     };
 
-    child.on("error", () => finish({ kind: "down", reason: "failed to start" }));
-    child.on("exit", () =>
-      finish({ kind: "down", reason: "exited before responding" }),
+    // F20-8 (EPIPE): a write to a child that has ALREADY exited surfaces as an
+    // async 'error' on the stdin stream — the synchronous try/catch in `send()`
+    // cannot see it, so an unhandled EPIPE was a fatal uncaughtException that
+    // took the whole server down (live: 5/40 fast-exit iterations). Fold a
+    // broken pipe into the same `down` outcome the `exit` handler produces.
+    child.stdin?.on?.("error", () =>
+      finish({ kind: "down", reason: withDetail("exited before responding") }),
     );
+
+    // The spawn error itself is the most precise thing there is for a missing
+    // binary — `spawn uvx ENOENT` names the command that is not installed,
+    // where "failed to start" left the reader guessing.
+    child.on("error", (err) =>
+      finish({
+        kind: "down",
+        reason: withDetail(
+          "failed to start",
+          err instanceof Error ? err.message : undefined,
+        ),
+      }),
+    );
+    child.on("exit", (code, signal) => {
+      // F20-22: fold the exit status into the reason — the bare "exited before
+      // responding" dropped the `(code, signal)` Node already hands us. A signal
+      // means the kernel killed it (OOM/segfault); a non-zero code is the
+      // command's own verdict. Same R19-17 spirit as the stderr work: free
+      // information already in hand.
+      const codeNum = typeof code === "number" ? code : null;
+      const sig = typeof signal === "string" && signal ? signal : null;
+      const base = sig
+        ? `killed by ${sig}`
+        : codeNum !== null && codeNum !== 0
+          ? `exited before responding — exit code ${codeNum}`
+          : "exited before responding";
+      finish({ kind: "down", reason: withDetail(base) });
+    });
 
     const handle = (msg: {
       id?: unknown;
@@ -940,7 +1161,8 @@ export async function probeMcpTarget(
 /**
  * Every name Viberr's own in-process tooling owns: `viberr` is the operator's
  * governance server, `viberr_agent` the specialist toolkit (and `viberr-agent`
- * the hyphen spelling a Codex run would see). `saveMcpServer` refuses all three,
+ * the hyphen spelling a Codex run would see), `viberr_browser` the R19-19
+ * browser server (`viberr-browser` likewise). `saveMcpServer` refuses them all,
  * but a row created before that guard — or written straight into the DB — is
  * still on disk, and the catalog only skipped the first. It would then be
  * offered in the picker while every resolver skipped it: a grant that resolves
@@ -949,7 +1171,11 @@ export async function probeMcpTarget(
  */
 export function isReservedMcpName(name: string): boolean {
   return (
-    name === "viberr" || name === "viberr_agent" || name === "viberr-agent"
+    name === "viberr" ||
+    name === "viberr_agent" ||
+    name === "viberr-agent" ||
+    name === "viberr_browser" ||
+    name === "viberr-browser"
   );
 }
 
@@ -1110,6 +1336,17 @@ export async function saveMcpServer(
     // and the only way out was deleting and recreating the server.
     cred = null;
   } else if (rawCred) {
+    // F20-7: refuse a credential under 8 characters at save. A short secret is
+    // almost always a typo or a placeholder, and keeping it out of the row
+    // entirely is the belt to the by-value-scrub brace (git-output-redact now
+    // scrubs at ANY length) — the plaintext leak into `last_error` was live at
+    // 5 chars. A sealed box (never round-tripped by the UI, but handled here) is
+    // long by construction, so the floor only applies to fresh plaintext.
+    if (!isSecretBox(rawCred) && rawCred.length < 8) {
+      throw AppError.validation(
+        "That credential is too short — enter at least 8 characters, or leave it blank for no auth.",
+      );
+    }
     cred = isSecretBox(rawCred) ? rawCred : sealSecret(rawCred);
   } else if (input.id) {
     const existing = db
@@ -1164,6 +1401,29 @@ export async function saveMcpServer(
   const checkedAt: string | null = now;
   const up = disc.kind === "up" ? 1 : 0;
   const tools = disc.kind === "up" ? disc.tools : null;
+  // R19-17: a failure keeps its reason on the row; a success CLEARS it, so a
+  // stale explanation can never sit under a green dot.
+  const lastError = disc.kind === "up" ? null : disc.reason;
+  // R19-18: a command that was still fetching gets a background install rather
+  // than a red dot. Started AFTER the row is written, below, so the warm-up's
+  // own `warming_since` write cannot be overwritten by this save.
+  //
+  // R20-4 (N20-2): the EVIDENCE path (`installing === true`) is always warmable.
+  // The HEURISTIC path — the command printed nothing install-y, but it is an
+  // npx/bunx-style runner and this row has never succeeded here — is warmable
+  // too, but capped at ONE heuristic warm-up per row (the counter is bumped by
+  // `startMcpWarmup({ heuristic })`), so a command that never works still
+  // settles to `unreachable` instead of re-downloading forever.
+  const priorRow = input.id ? getMcpServer(db, input.id) : null;
+  const firstEver = !priorRow || priorRow.firstSuccessAt == null;
+  const heuristicWarmable =
+    disc.kind === "down" &&
+    disc.installing !== true &&
+    disc.firstRunInstaller === true &&
+    firstEver &&
+    (priorRow?.heuristicWarmups ?? 0) < 1;
+  const warmable =
+    disc.kind === "down" && (disc.installing === true || heuristicWarmable);
   const spawnNote = transport === "stdio" ? " · spawned per run" : "";
   const credNote = credOpened.unreadable
     ? " · its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
@@ -1172,7 +1432,13 @@ export async function saveMcpServer(
     (disc.kind === "up"
       ? `${name} saved — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} discovered${spawnNote}`
       : transport === "stdio"
-        ? `${name} saved — command didn't respond (${disc.reason}); check it`
+        // R19-17: the wrapper used to add "command didn't respond" in front of
+        // a reason that now says what actually happened, giving
+        // "didn't respond (exited before responding — …)". The reason speaks
+        // for itself; the prefix only has to say the server was saved anyway.
+        ? warmable
+          ? `${name} saved — installing in the background; this page updates when it finishes`
+          : `${name} saved, but it did not answer — ${disc.reason}`
         : `${name} saved — endpoint didn't answer as an MCP server (${disc.reason})`) +
     credNote;
 
@@ -1185,9 +1451,16 @@ export async function saveMcpServer(
     db.prepare(
       `UPDATE org_mcp_servers
        SET name = ?, transport = ?, target = ?, cred_ref = ?,
-           tools_count = ?, up = ?, last_checked_at = ?, updated_at = ?
+           tools_count = ?, up = ?, last_checked_at = ?, last_error = ?,
+           first_success_at = COALESCE(first_success_at, ?),
+           updated_at = ?
        WHERE id = ?`,
-    ).run(name, transport, target, cred, tools, up, checkedAt, now, id);
+      // R20-4: stamp the first-ever success idempotently — COALESCE keeps an
+      // earlier stamp, and a `down` write passes NULL (a no-op).
+    ).run(
+      name, transport, target, cred, tools, up, checkedAt, lastError,
+      up === 1 ? now : null, now, id,
+    );
     // P14-KM-01: an MCP grant is a NAME reference, and this was the one rename
     // leg that never rewrote it — KB and skill renames did, every delete dropped
     // its grants, but renaming a server left each profile pointing at a name the
@@ -1209,9 +1482,14 @@ export async function saveMcpServer(
     db.prepare(
       `INSERT INTO org_mcp_servers
          (id, name, transport, target, cred_ref, tools_count, up,
-          last_checked_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, name, transport, target, cred, tools, up, checkedAt, now, now);
+          last_checked_at, last_error, first_success_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      // R20-4: a brand-new row records its first success immediately when the
+      // save probe already answered up; otherwise NULL (never worked here yet).
+    ).run(
+      id, name, transport, target, cred, tools, up, checkedAt, lastError,
+      up === 1 ? now : null, now, now,
+    );
     recordAudit(db, {
       action: "org.mcp.added",
       actor,
@@ -1221,6 +1499,15 @@ export async function saveMcpServer(
     });
   }
 
+  if (warmable && transport === "stdio") {
+    startMcpWarmup(
+      db,
+      { id, name, target, token: plainCred },
+      // R20-4: only the HEURISTIC arm bumps the capped counter; the evidence
+      // arm (`installing === true`) is not a guess and is never capped.
+      { ...options, heuristic: heuristicWarmable },
+    );
+  }
   return { mcp: getMcpServer(db, id)!, toast };
 }
 
@@ -1257,9 +1544,12 @@ export async function testMcpServer(
   if (disc.kind === "up") {
     db.prepare(
       `UPDATE org_mcp_servers
-       SET up = 1, tools_count = ?, last_checked_at = ?, updated_at = ?
+       SET up = 1, tools_count = ?, last_checked_at = ?, last_error = NULL,
+           first_success_at = COALESCE(first_success_at, ?), updated_at = ?
        WHERE id = ?`,
-    ).run(disc.tools, now, now, id);
+      // R20-4: a passing retest is a first-ever success too — stamp it so a
+      // later cold probe of a working server is never mistaken for a first run.
+    ).run(disc.tools, now, now, now, id);
     const fresh = getMcpServer(db, id)!;
     return {
       mcp: fresh,
@@ -1268,9 +1558,41 @@ export async function testMcpServer(
   }
   db.prepare(
     `UPDATE org_mcp_servers
-     SET up = 0, tools_count = NULL, last_checked_at = ?, updated_at = ?
+     SET up = 0, tools_count = NULL, last_checked_at = ?, last_error = ?,
+         updated_at = ?
      WHERE id = ?`,
-  ).run(now, now, id);
+  ).run(now, disc.reason, now, id);
+  // R19-18: retesting a command that is mid first-run install hands it to the
+  // background runner instead of failing it again — retesting used to restart
+  // the same download and kill it at the same point, forever.
+  //
+  // R20-4 (N20-2): the same heuristic arm as `saveMcpServer` — a silent
+  // npx/bunx-style command that has never worked here gets ONE capped warm-up,
+  // read off the row we loaded before the `down` write (which touches neither
+  // `firstSuccessAt` nor `heuristicWarmups`).
+  const firstEver = existing.firstSuccessAt == null;
+  const heuristicWarmable =
+    disc.kind === "down" &&
+    disc.installing !== true &&
+    disc.firstRunInstaller === true &&
+    firstEver &&
+    (existing.heuristicWarmups ?? 0) < 1;
+  if (
+    existing.transport === "stdio" &&
+    disc.kind === "down" &&
+    (disc.installing === true || heuristicWarmable)
+  ) {
+    startMcpWarmup(
+      db,
+      { id, name: existing.name, target: existing.target, token },
+      { ...options, heuristic: heuristicWarmable },
+    );
+    const warming = getMcpServer(db, id)!;
+    return {
+      mcp: warming,
+      toast: `${warming.name} is installing in the background — this page updates when it finishes${credNote}`,
+    };
+  }
   const fresh = getMcpServer(db, id)!;
   return {
     mcp: fresh,
@@ -1297,6 +1619,32 @@ export async function deleteMcpServer(
     details: { name: existing.name },
   });
   return { toast: `${existing.name} removed` };
+}
+
+/**
+ * F20-10: flip a registry row to unreachable from a RUN that could not mount it.
+ *
+ * MCP health used to be learned ONLY from an explicit Add/Retest — so a server
+ * that dies at run-spawn (a half-installed npx tree, a crashed binary)
+ * contributed zero tools to the run while its row kept reading "up · N tools"
+ * from a probe hours old, and no surface said otherwise. This lets the run-mount
+ * path (`verifyStdioMcpMountsForRun`) record what it actually saw, in the same
+ * shape a failed `testMcpServer` writes, keyed by NAME (a run holds the grant
+ * name, not the row id). A no-op on an unknown name. `first_success_at` /
+ * `heuristic_warmups` are deliberately untouched — a mount failure is not a save.
+ */
+export function markMcpServerUnreachableFromRun(
+  db: DatabaseSync,
+  name: string,
+  reason: string,
+): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE org_mcp_servers
+       SET up = 0, tools_count = NULL, last_checked_at = ?, last_error = ?,
+           updated_at = ?
+     WHERE name = ?`,
+  ).run(now, reason, now, name);
 }
 
 // ---------------------------------------------------------------- skills

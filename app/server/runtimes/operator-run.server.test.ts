@@ -1730,6 +1730,70 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(adapter5.pending).not.toBeNull();
   });
 
+  /**
+   * R20-1 (F20-5) — a HUMAN-pressed "Run operator" while a decision packet is
+   * open is a paid no-op (coordination is paused). Refuse it, scoped to the
+   * `manual` trigger so machine recovery paths still run.
+   */
+  const seedWithOpenPacket = (): void => {
+    writeTask(store5.dataRoot, store5.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "blocked",
+        waiting: "human",
+        ownerUserId: store5.users.arda.id,
+      }),
+      goal: "Ship the parser.",
+      packet: {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Operator run failed — pick a recovery path",
+        body: "",
+        observations: [],
+        options: [{ kind: "block_on_policy", t: "Unblock", d: "", rec: true }],
+      } as never,
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+  };
+
+  it("R20-1: a MANUAL run is refused while a decision packet is open", async () => {
+    deployAgents([operatorAgent()]);
+    seedWithOpenPacket();
+
+    const result = await drive({ trigger: "manual" });
+
+    expect(result.refused).toBe("open-packet");
+    expect(result.runId).toBeNull();
+    expect(result.queued).toBe(false);
+    expect(adapter5.pending).toBeNull();
+    expect(operatorRuns()).toHaveLength(0);
+  });
+
+  it("R20-1: a MACHINE pr-diverged trigger still runs with a packet open (ruling 17 recovery)", async () => {
+    // Canary for the `manual` scoping: pr-diverged WITHDRAWS a moot packet, so
+    // it must NOT be refused. Remove the `=== "manual"` scoping in runOperator
+    // and this goes red.
+    deployAgents([operatorAgent()]);
+    seedWithOpenPacket();
+
+    const diverged = await drive({ trigger: "pr-diverged" });
+
+    expect(diverged.refused).toBeUndefined();
+    expect(adapter5.pending).not.toBeNull();
+  });
+
+  it("R20-1: a MACHINE agent-reply trigger still runs with a packet open", async () => {
+    // agent-reply reacts to a run already in flight — also never refused.
+    deployAgents([operatorAgent()]);
+    seedWithOpenPacket();
+
+    const replied = await drive({ trigger: "agent-reply", agentReply: "done" });
+
+    expect(replied.refused).toBeUndefined();
+    expect(adapter5.pending).not.toBeNull();
+  });
+
   it("F19-20: a scheduled trigger QUEUED behind a live drive is re-checked when it FIRES", async () => {
     // The wide window the claim-time check cannot cover: a trigger arriving
     // while a drive holds the lease is queued and fired on release with no

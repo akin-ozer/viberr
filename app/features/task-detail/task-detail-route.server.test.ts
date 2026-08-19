@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   setupAppTest,
   type AppTestContext,
@@ -319,6 +319,24 @@ describe("comment action — @agent routing detection", () => {
 /* ------------------------------------------------------- resolvePacket */
 
 describe("resolve-packet action — kind dispatch + RBAC", () => {
+  // R20-1 (F20-5): a confirmed recovery option now RESOLVES (clears) the packet,
+  // so each packet resolves at most once. Re-seed before every test in this
+  // block (runDemoSeed is idempotent — it overwrites the task files, resetting
+  // VIB-142/VIB-160's packets to open) so the tests no longer daisy-chain off
+  // one shared packet that the first successful resolve would clear.
+  beforeEach(async () => {
+    // R20-1 (F20-5): block_on_policy/request_edit now RESOLVE the packet and
+    // fire-and-forget a `packet-resolved` operator re-invoke (`void
+    // autoInvokeOperator`). Let any such re-invoke from the PRIOR test fully
+    // start (consume its queued `keepRunning` fake run, take the lease, then sit
+    // inert) BEFORE re-seeding, so it can't asynchronously clobber the fresh
+    // packet mid-test. Two macrotask hops drain the microtask + timer queues.
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    const { runDemoSeed } = await import("../../../test-support/demo-seed");
+    await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  });
+
   it("rejects a non-owner contributor accepting a completion packet (R6-2)", async () => {
     // Accepting a completion is admin|maintainer OR the task's owner (R6-2).
     // selin is a contributor and NOT VIB-142's owner, so the accept path denies.
@@ -337,22 +355,33 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
   });
 
-  it("block_on_policy: blocks + KEEPS the packet + navigates to settings", async () => {
+  it("block_on_policy (R20-1): UNBLOCKS, clears the packet, re-queues the operator, no settings nav", async () => {
+    // R20-1 (F20-5): the option's label promises an unblock, so it now records
+    // one — readiness→ready, waiting→agent, the packet clears, and the operator
+    // re-runs to re-check. It used to hold the task blocked, keep the packet
+    // open (re-accepting the same confirm forever), and deep-nav to settings.
+    queueFakeRun({
+      lines: [{ t: "", ev: "text", tag: "assistant", text: "re-checking" }],
+      keepRunning: true,
+    });
     const result = (await postIntent("VIB-142", ids.arda, {
       intent: "resolve-packet", option: "2",
     })) as { ok: true; kind: string; toast: string; navigateTo?: string };
     expect(result.kind).toBe("block_on_policy");
-    expect(result.toast).toBe("Task held on policy · opening repository settings");
-    expect(result.navigateTo).toBe("/projects/viberr-core/settings");
+    expect(result.toast).toBe(
+      "Policy / credential updated · the operator re-runs to re-check",
+    );
+    expect(result.navigateTo).toBeUndefined();
 
     const after = await runLoader("VIB-142", ids.arda);
-    expect(after.task.readiness).toBe("blocked");
-    expect(after.task.waiting).toBe("human");
-    expect(after.task.packet).not.toBeNull(); // held, not cleared
-    expect(after.task.timeline[0]).toMatchObject({ type: "blocked" });
-    expect(after.task.timeline[0]!.text).toBe(
-      "**Decision:** hold on policy. VIB-142 stays blocked until the project credential policy is updated.",
-    );
+    expect(after.task.readiness).toBe("ready");
+    expect(after.task.waiting).toBe("agent");
+    expect(after.task.packet).toBeNull(); // resolved, not held
+    // The re-queue may post its own events, so find the decision by type.
+    const decision = after.task.timeline.find((e) => e.type === "transition");
+    expect(decision).toBeDefined();
+    expect(decision!.text).toContain("policy / credential updated");
+    expect(decision!.text).toContain("unblocked");
   });
 
   it("request_edit: clears the packet, flips waiting to agent, writes option.ev", async () => {
@@ -381,6 +410,18 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
   });
 
   it("second resolve conflicts (409) instead of crashing", async () => {
+    // Self-contained now that each test starts from a fresh packet (beforeEach):
+    // resolve once (request_edit clears it + re-queues), then a second resolve
+    // of the now-cleared packet must 409, not crash.
+    queueFakeRun({
+      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
+      keepRunning: true,
+    });
+    const first = (await postIntent("VIB-142", ids.arda, {
+      intent: "resolve-packet", option: "1",
+    })) as { ok: true; kind: string };
+    expect(first.kind).toBe("request_edit");
+
     const result = (await postIntent("VIB-142", ids.arda, {
       intent: "resolve-packet", option: "1",
     })) as { data: { ok: false; error: string }; init: { status: number } };
@@ -388,7 +429,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(result.data.error).toBe("This packet was already resolved.");
   });
 
-  it("hold_runtime_debug on VIB-160 keeps the packet with blocked readiness", async () => {
+  it("hold_runtime_debug on VIB-160 (R20-1): stays blocked but RESOLVES the packet", async () => {
     const result = (await postIntent("VIB-160", ids.murat, {
       intent: "resolve-packet", option: "2",
     })) as { ok: true; kind: string; toast: string };
@@ -397,8 +438,10 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
       "Held for runtime debug — the session is recorded per audit policy",
     );
     const after = await runLoader("VIB-160", ids.murat);
+    // R20-1 (F20-5): still a hold (readiness stays blocked, no run starts), but
+    // the packet now CLEARS — it used to stay open and re-accept the same confirm.
     expect(after.task.readiness).toBe("blocked");
-    expect(after.task.packet).not.toBeNull();
+    expect(after.task.packet).toBeNull();
     expect(after.task.timeline[0]!.text).toContain(
       "**Decision:** hold for runtime debug. VIB-160 stays blocked",
     );
@@ -791,5 +834,77 @@ describe("task archive (R14-3)", () => {
     expect(restored.ok).toBe(true);
     expect(restored.toast).toContain("restored");
     expect((await runLoader("VIB-153", ids.murat)).archived).toBe(false);
+  });
+});
+
+/* --------------------------------------------------- F20-11 read-marking */
+
+describe("F20-11: task-view read-marking fires only on a genuine navigation", () => {
+  /** Run the loader against an arbitrary wire URL (a `.data` revalidation vs a
+   *  clean document path) so we can prove which one marks notifications seen. */
+  async function runLoaderAt(
+    key: string,
+    userId: string,
+    url: string,
+    headers?: Record<string, string>,
+  ) {
+    const { loader } = await import("~/routes/project.task");
+    const { cookie } = await app.cookieFor(userId);
+    return loader({
+      request: app.request(url, { cookie, headers }),
+      params: { slug: "viberr-core", key },
+      context: {},
+    } as never);
+  }
+
+  const readAt = (id: string) =>
+    (
+      app.db
+        .prepare(`SELECT read_at FROM notifications WHERE id = ?`)
+        .get(id) as { read_at: string | null } | undefined
+    )?.read_at ?? null;
+
+  it("a `.data` revalidation does NOT mark the viewer's rows seen (the parked-tab eat)", async () => {
+    const { createNotification } = await import(
+      "~/server/projections/notifications.server"
+    );
+    createNotification(app.db, {
+      id: "f2011_data",
+      userId: ids.arda,
+      kind: "packet",
+      ptype: "blocked",
+      text: "Blocked — decision needed",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+    });
+    // The SSE-driven revalidation shape: the single-fetch `.data` wire address.
+    await runLoaderAt(
+      "VIB-142",
+      ids.arda,
+      "/projects/viberr-core/tasks/VIB-142.data?_routes=routes/project.task",
+      { "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty" },
+    );
+    expect(readAt("f2011_data")).toBeNull();
+  });
+
+  it("a real document navigation DOES mark the viewer's rows seen (R19-15 preserved)", async () => {
+    const { createNotification } = await import(
+      "~/server/projections/notifications.server"
+    );
+    createNotification(app.db, {
+      id: "f2011_doc",
+      userId: ids.arda,
+      kind: "packet",
+      ptype: "blocked",
+      text: "Blocked — decision needed",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-148",
+    });
+    // A genuine top-level load: clean route path, `Sec-Fetch-Mode: navigate`.
+    await runLoaderAt("VIB-148", ids.arda, "/projects/viberr-core/tasks/VIB-148", {
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "document",
+    });
+    expect(readAt("f2011_doc")).not.toBeNull();
   });
 });

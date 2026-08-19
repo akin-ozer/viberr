@@ -18,7 +18,10 @@ import {
   getTaskDetail,
   getTaskSummary,
 } from "~/server/projections/task-query.server";
-import { markTaskNotificationsSeen } from "~/server/projections/notifications.server";
+import {
+  isTaskViewNavigation,
+  markTaskNotificationsSeen,
+} from "~/server/projections/notifications.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   applyRecommendation,
@@ -28,6 +31,7 @@ import {
   forceAcceptCompletion,
   manualDeliverForReview,
   releaseOwner,
+  requestPacketMaintainerDecision,
   resolveAcceptanceAffordance,
   resolvePacket,
   setOwner,
@@ -36,6 +40,7 @@ import {
   updateTaskGoal,
 } from "~/server/tasks/task-actions.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { listTaskAttachments } from "~/server/files/task-attachments.server";
 import {
   assignReviewer,
   assignSpecialist,
@@ -117,20 +122,27 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     });
   }
   // R19-15: opening the task IS seeing its notifications — mark this viewer's
-  // unread rows for it read here, loader-side. Loader-side is correct: the app
-  // uses no link prefetch (this loader runs only on a real view), the write is
-  // idempotent + monotonic, and the `notification.read` it emits converges —
-  // the revalidation it triggers marks nothing on its second pass and emits no
-  // further event, so no loop can sustain. Guarded because viewing a task must
-  // never 500 because read-marking hiccuped.
-  try {
-    markTaskNotificationsSeen(db, user.id, params.slug, params.key);
-  } catch (error) {
-    logger.warn("R19-15 task-view read-marking failed", {
-      projectSlug: params.slug,
-      taskKey: params.key,
-      error,
-    });
+  // unread rows for it read here, loader-side. The write is idempotent +
+  // monotonic, and the `notification.read` it emits converges — the second pass
+  // marks nothing and emits no further event, so no loop can sustain.
+  //
+  // F20-11: gate it on `isTaskViewNavigation`. This loader does NOT run "only on
+  // a real view" as once assumed — single fetch re-runs it as a `.data` GET on
+  // every SSE revalidation and after every POST on this page, so a parked
+  // background tab used to silently eat any notification that landed on this
+  // task (the bell never badged, even for "Blocked — decision needed" packets).
+  // Marking only on a genuine document navigation keeps the badge honest.
+  // Guarded because viewing a task must never 500 because read-marking hiccuped.
+  if (isTaskViewNavigation(request)) {
+    try {
+      markTaskNotificationsSeen(db, user.id, params.slug, params.key);
+    } catch (error) {
+      logger.warn("R19-15 task-view read-marking failed", {
+        projectSlug: params.slug,
+        taskKey: params.key,
+        error,
+      });
+    }
   }
   const limit = clampTimelineLimit(
     new URL(request.url).searchParams.get("events"),
@@ -238,8 +250,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     (taskFile?.parsed.frontmatter.ownerUserId === user.id &&
       roleCan(myProjectRole, "own-task"));
 
+  // R19-19: browser-produced files for this task. Same visibility bar as the
+  // run console (a screenshot shows whatever the agent saw) — non-members get
+  // an empty list, and the serving route re-checks membership itself.
+  const attachments = runsVisible
+    ? listTaskAttachments(params.slug, params.key)
+    : [];
+
   return {
     task: { ...detail, timeline: slice.events },
+    attachments,
     recommendations,
     schedules,
     archived,
@@ -417,7 +437,9 @@ export async function action({ request, params }: Route.ActionArgs) {
           option.kind === "accept_completion"
             ? `Completion accepted · ${taskKey} moved to Done`
             : option.kind === "block_on_policy"
-              ? "Task held on policy · opening repository settings"
+              ? // R20-1 (F20-5): the option UNBLOCKS + re-queues the operator now
+                // (it used to hold the task and deep-nav to settings).
+                "Policy / credential updated · the operator re-runs to re-check"
               : option.kind === "hold_runtime_debug"
                 ? "Held for runtime debug — the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
@@ -443,10 +465,26 @@ export async function action({ request, params }: Route.ActionArgs) {
                   : option.t,
               }
             : {}),
-          // Mock flow: blocking on policy opens the repository settings.
-          ...(option.kind === "block_on_policy"
-            ? { navigateTo: `/projects/${projectSlug}/settings` }
-            : {}),
+        };
+      }
+      case "request-maintainer-decision": {
+        // F20-18: a contributor-OWNER holds no option they can settle on this
+        // packet — hand the decision UP. The server notifies the maintainers +
+        // admins, records the ask on the timeline, and refuses (with a pointer)
+        // if the caller could actually resolve it themselves.
+        const note = String(formData.get("note") ?? "").slice(0, 2000);
+        const { notified } = await requestPacketMaintainerDecision(
+          db,
+          { projectSlug, taskKey, ...(note.trim() ? { note } : {}) },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast:
+            notified > 0
+              ? `Sent to ${notified} maintainer${notified === 1 ? "" : "s"} — they'll decide`
+              : "Sent — a maintainer will decide",
         };
       }
       case "complete-merge": {
@@ -854,7 +892,10 @@ export function meta({ loaderData, params }: Route.MetaArgs) {
   ];
 }
 
-export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
+export default function TaskDetailRoute({
+  loaderData,
+  params,
+}: Route.ComponentProps) {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   if (!layout) return null;
 
@@ -874,6 +915,8 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       // log selection (mock `key={task.key}` behavior, spec §1).
       key={loaderData.task.key}
       task={loaderData.task}
+      attachments={loaderData.attachments}
+      attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}

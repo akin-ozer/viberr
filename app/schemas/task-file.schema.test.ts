@@ -144,6 +144,53 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     ).toBe("failing");
   });
 
+  it("deriveValidation: a force-accept overrides the pending state with 'bypassed' (N20-14/§5c)", () => {
+    // The N20-14 repro: a delivered revision with no verdict recorded derives
+    // "changed" (= "awaiting verdict"). Once a human force-accepts past the gate,
+    // the durable `acceptance: "forced"` fact is the truth — the task is Done
+    // because the gate was bypassed, not because a verdict landed.
+    expect(
+      deriveValidation({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev1,
+        verdicts: [],
+        acceptance: "forced",
+      }),
+    ).toBe("bypassed");
+    // Canary: without the fact the same shape stays "changed" (awaiting verdict),
+    // so the escape is scoped to a real force-accept and nothing else.
+    expect(
+      deriveValidation({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev1,
+        verdicts: [],
+      }),
+    ).toBe("changed");
+  });
+
+  it("deriveValidation: a force-accept never erases a recorded verdict (N20-14)", () => {
+    // The bypass fact yields to real evidence, exactly as the no-change arm does:
+    // an approval stays "healthy" and a request-changes stays "failing" even on a
+    // force-accepted task, so whoever reads it still sees the review that
+    // actually happened.
+    expect(
+      deriveValidation({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev1,
+        verdicts: [verdict("reviewer", "approve")],
+        acceptance: "forced",
+      }),
+    ).toBe("healthy");
+    expect(
+      deriveValidation({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev1,
+        verdicts: [verdict("reviewer", "request_changes")],
+        acceptance: "forced",
+      }),
+    ).toBe("failing");
+  });
+
   it("deriveValidation: healthy only when EVERY required reviewer approves the current revision", () => {
     const base = { engagements: [deliverer, reviewerA, reviewerB], workRevision: rev1 };
     // Only one of two approved → still changed (pending).
@@ -278,6 +325,26 @@ describe("parseTaskFrontmatter (tolerant)", () => {
       { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
     ]);
     expect(result.unknown).toEqual({});
+  });
+
+  it("N20-14: the force-accept `acceptance` fact round-trips (and defaults absent)", () => {
+    const bare = parseTaskFrontmatter(valid, { fallbackKey: "VIB-142" });
+    expect(bare.diagnostics).toEqual([]);
+    expect(bare.frontmatter.acceptance).toBeUndefined();
+
+    const forced = parseTaskFrontmatter(
+      { ...valid, acceptance: "forced" },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(forced.diagnostics).toEqual([]);
+    expect(forced.frontmatter.acceptance).toBe("forced");
+
+    // An unknown value is tolerated (diagnostic + safe fallback), never a throw.
+    const bad = parseTaskFrontmatter(
+      { ...valid, acceptance: "waived" },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(bad.frontmatter.acceptance).toBeUndefined();
   });
 
   it("preserves unknown fields without diagnostics", () => {
@@ -575,6 +642,31 @@ describe("parseTaskPacket (tolerant)", () => {
     expect(diagnostics).toEqual([]);
     expect(packet?.options[0]?.kind).toBe("accept_completion");
     expect(packet?.options[1]?.ev).toBe("**Decision:** …");
+  });
+
+  it("F20-6: a discard_branch option parses with its kind intact", () => {
+    const { packet, diagnostics } = parseTaskPacket({
+      type: "input",
+      kind: "Completion report",
+      title: "Discard the empty branch, or refine the goal?",
+      options: [
+        { kind: "discard_branch", t: "Discard the empty vib-2 branch", d: "", rec: true },
+        { kind: "edit_goal", t: "Refine the goal", d: "", rec: false },
+      ],
+    });
+    expect(diagnostics).toEqual([]);
+    expect(packet?.options[0]?.kind).toBe("discard_branch");
+  });
+
+  it("F20-6: an unknown option kind still rejects the packet", () => {
+    const { packet, diagnostics } = parseTaskPacket({
+      type: "input",
+      kind: "Completion report",
+      title: "t",
+      options: [{ kind: "delete_everything", t: "nuke", d: "", rec: true }],
+    });
+    expect(packet).toBeNull();
+    expect(diagnostics[0]?.code).toBe("packet.invalid");
   });
 
   it("invalid packet → null + error diagnostic (never a throw)", () => {

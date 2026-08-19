@@ -16,6 +16,7 @@ function finishedClock(value: string, hydrated: boolean): string {
 }
 import { Pill } from "~/ui/pill";
 import {
+  agentMessageProse,
   consoleCodeBlock,
   diffLineKind,
   fileChangeChips,
@@ -798,6 +799,9 @@ export function AgentLogsPanel({
           const chip = raw ? null : toolChip(display);
           const files = raw ? null : fileChangeChips(display);
           const code = raw ? null : consoleCodeBlock(display);
+          // N20-18: a Codex final message is the raw outcome-envelope JSON;
+          // fold it to the prose it wraps so it reads like Claude's `assistant`.
+          const prose = raw ? null : agentMessageProse(display);
           return (
             <div className={"log-line " + display.ev} key={i}>
               <span className="lt">{clock}</span>
@@ -821,7 +825,7 @@ export function AgentLogsPanel({
                         ) : null}
                         {/* When the text IS the block below, printing it here
                             too would render the whole dump twice. */}
-                        {code ? null : display.text}
+                        {code ? null : (prose ?? display.text)}
                       </>
                     )}
                     {files ? (

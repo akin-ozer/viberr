@@ -1,9 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
 import {
+  discoverStdioMcpTools,
   getMcpCredentialState,
   listMcpServers,
+  markMcpServerUnreachableFromRun,
   splitMcpCommand,
+  type McpSpawn,
 } from "~/server/org/resources.server";
 
 /**
@@ -51,12 +54,19 @@ export function resolveSpecialistMcpServers(
   return resolveSpecialistMcpServersDetailed(db, mcpNames).servers;
 }
 
-/** Viberr's own in-process servers. They are built by the toolkit builders, are
+/** Viberr's own servers. They are built by the toolkit/browser builders, are
  *  refused as registry names at save (P13-KM-12), and must never be resolved
  *  from the registry even if a hand-edited row carries one — on Claude a row
  *  would shadow the real toolkit, on Codex it would not, so the two backends
- *  would disagree about what the agent can do (P14-KM-15). */
-const RESERVED_MCP_NAMES = new Set(["viberr", "viberr_agent", "viberr-agent"]);
+ *  would disagree about what the agent can do (P14-KM-15). `viberr_browser`
+ *  joins for R19-19: the browser is capability-mounted, never an org row. */
+const RESERVED_MCP_NAMES = new Set([
+  "viberr",
+  "viberr_agent",
+  "viberr-agent",
+  "viberr_browser",
+  "viberr-browser",
+]);
 
 /** A declared MCP grant that reached no run, or that is known to be down. */
 export interface UnresolvedMcpGrant {
@@ -171,6 +181,80 @@ export function resolveSpecialistMcpServersDetailed(
     // granted `broken-mcp` reported it "named in the initial context as an
     // attached MCP server" with "no callable tools ever surfaced for it".
     if (row.up === false) flagDown(name, row.lastCheckedAt ?? null);
+  }
+  return { servers, unresolved };
+}
+
+/**
+ * F20-10: verify the STDIO mounts actually START before a run trusts them.
+ *
+ * `resolveSpecialistMcpServersDetailed` mounts a stdio server whenever its row
+ * exists, trusting the row's health — but MCP health was only ever learned from
+ * an explicit Add/Retest, so a row reading "up · 16 tools" from a probe hours
+ * old was mounted and announced as usable even when the command now dies at
+ * spawn (live: a half-installed `npx` tree crashing in <1s with `Cannot find
+ * module 'ajv'`, contributing zero tools while every surface said healthy).
+ *
+ * This re-runs the real discovery handshake for each mounted stdio server. On a
+ * failure it (1) DROPS the server from the config so the run is not told it has
+ * tools it will never get, (2) joins the existing `unresolved` disclosure by
+ * name with `mounted: false` (a hard mount failure, distinct from the stale
+ * `mounted: true` "probe was old" note), and (3) writes the row-health back
+ * through {@link markMcpServerUnreachableFromRun} so Settings stops claiming the
+ * dead server is up. HTTP mounts are not spawned here and are left untouched.
+ *
+ * Best-effort and idempotent: a registry read failure returns the resolution
+ * unchanged, and a healthy server is left exactly as it was mounted.
+ *
+ * Wired into the specialist run path (`specialist-run.server.ts`, both the
+ * fresh mount and the resume mount). The operator caller
+ * (`operator-run.server.ts`) resolves org MCP the same way and should call this
+ * after resolving too — see the TODO left at its mount site.
+ */
+export async function verifyStdioMcpMountsForRun(
+  db: DatabaseSync,
+  resolution: SpecialistMcpResolution,
+  options: { spawnImpl?: McpSpawn; timeoutMs?: number } = {},
+): Promise<SpecialistMcpResolution> {
+  const names = Object.keys(resolution.servers);
+  if (names.length === 0) return resolution;
+  let registry: { name: string; transport: "HTTP" | "stdio"; target: string }[];
+  try {
+    registry = listMcpServers(db);
+  } catch {
+    return resolution;
+  }
+  const byName = new Map(registry.map((m) => [m.name, m]));
+  const servers = { ...resolution.servers };
+  const unresolved = [...resolution.unresolved];
+
+  for (const name of names) {
+    const row = byName.get(name);
+    if (!row || row.transport !== "stdio") continue; // HTTP is not spawned here
+    const credential = getMcpCredentialState(db, name);
+    const token = credential.state === "ok" ? credential.token : null;
+    const disc = await discoverStdioMcpTools(row.target, {
+      spawnImpl: options.spawnImpl,
+      timeoutMs: options.timeoutMs,
+      token,
+    });
+    if (disc.kind === "up") continue; // it starts — leave the mount as it was
+
+    // The mount failed at run-spawn: drop it, disclose it, and correct the row.
+    delete servers[name];
+    markMcpServerUnreachableFromRun(db, name, disc.reason);
+    const entry = {
+      name,
+      reason: `it failed to start for this run — ${disc.reason}`,
+      mounted: false,
+    };
+    const idx = unresolved.findIndex((u) => u.name === name);
+    if (idx >= 0) unresolved[idx] = entry;
+    else unresolved.push(entry);
+    logger.warn("org MCP server failed to start at run-mount — dropped and flagged", {
+      mcp: name,
+      reason: disc.reason,
+    });
   }
   return { servers, unresolved };
 }

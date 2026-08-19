@@ -10,6 +10,7 @@ export type BoardFilterId =
   | "agent"
   | "risk"
   | "quiet"
+  | "continuity"
   | "archived";
 
 export interface FilterableTask {
@@ -30,6 +31,9 @@ export interface FilterableTask {
    *  board must not re-derive a time-dependent verdict client-side, or the SSR
    *  pass and hydration would disagree about which cards the chip selects. */
   quiet?: boolean;
+  /** D4: 'degraded' when this task's runtime continuity was lost (projected
+   *  task fact — same state the Continuity Recovery panel shows on task detail). */
+  continuity?: string | null;
 }
 
 /** "Blocked or waiting" = work that CANNOT PROCEED: readiness blocked /
@@ -56,6 +60,12 @@ export function matchesBoardFilter(
   // failures start returning guesses. R16-2's rule — name the chip for what it
   // selects — applies to both.
   if (filter === "quiet") return task.quiet === true;
+  // D4: its OWN chip, not folded into "Blocked or waiting" — degraded continuity
+  // is a distinct, persistent state the UX spec names as a default filter, and
+  // R16-2's rule is to name a chip for exactly what it selects. A task can lose
+  // continuity while otherwise healthy (readiness ready, validation healthy), so
+  // the "Blocked or waiting" predicate would never have caught it.
+  if (filter === "continuity") return task.continuity === "degraded";
   if (filter === "risk") {
     return (
       task.readiness === "inconsistency_risk_detected" ||
@@ -148,6 +158,7 @@ export function isBoardFilterId(value: string | null): value is BoardFilterId {
     value === "agent" ||
     value === "risk" ||
     value === "quiet" ||
+    value === "continuity" ||
     value === "archived"
   );
 }

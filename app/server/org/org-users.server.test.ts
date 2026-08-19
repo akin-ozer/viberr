@@ -105,6 +105,26 @@ describe("whitelisting", () => {
     const view = listOrgUsers(db).find((u) => u.id === record.id)!;
     expect(view.status).toBe("active");
   });
+
+  it("F20-12: a passwordless LOCAL account reads setup-pending, never 'active'", () => {
+    const db = makeDb();
+    // Replicates the old project-invite mint / the live probe.nobody specimen: a
+    // local row with NO credential and pwreset not required. It can never sign in
+    // (no password, and OAuth is a different idp), so it must not render as a
+    // healthy account. Before the fix `statusOf` returned "active" here.
+    insertUser(db, {
+      id: "u_ghost",
+      email: "probe.nobody@viberr.dev",
+      name: "Probe Nobody",
+      role: "member",
+      idp: "local",
+    });
+    const record = findUserByEmail(db, "probe.nobody@viberr.dev")!;
+    expect(record.hasPassword).toBe(false);
+    expect(record.pwresetRequired).toBe(false);
+    const view = listOrgUsers(db).find((u) => u.id === "u_ghost")!;
+    expect(view.status).toBe("invited");
+  });
 });
 
 describe("edit / role / reset / remove", () => {

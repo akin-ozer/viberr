@@ -333,6 +333,47 @@ export function markTaskPacketApprovalRead(
 }
 
 /**
+ * F20-11: is this request a GENUINE top-level view of the task page — the one
+ * moment R19-15's "opening the task IS seeing its notifications" actually holds
+ * — as opposed to a background revalidation?
+ *
+ * The R19-15 loader used to mark-seen on EVERY run, justified by "this loader
+ * runs only on a real view". That premise was wrong: React Router 8 single
+ * fetch addresses every client-side data load to the `.data` wire URL
+ * (`/projects/<slug>/tasks/<key>.data?_routes=…`) — the SSE revalidation that
+ * fires on every task change, the revalidation after a POST on this page, and a
+ * client-side link navigation, ALL of them. So a task parked in a background
+ * tab silently consumed any notification that arrived for it within
+ * milliseconds, and the bell never badged (it swallowed four "Blocked —
+ * decision needed" packets in the live repro).
+ *
+ * Only a real top-level document load (typing the URL, a hard refresh,
+ * open-in-new-tab) arrives on the clean route path — never the `.data` wire
+ * address — and the browser stamps it `Sec-Fetch-Mode: navigate`. So the rule
+ * is: mark-seen iff the path is NOT the single-fetch `.data` address (the same
+ * framework signal `require-user.server.ts` keys off) and, when the browser
+ * sends `Sec-Fetch-Mode`, it says `navigate`.
+ *
+ * We deliberately do NOT mark on a client-side `.data` navigation: server-side
+ * it is indistinguishable from the background revalidation that caused F20-11,
+ * and erring toward an un-cleared bell (it over-counts a task you are looking
+ * at) is the SAFE direction — the old code erred toward silently eating an
+ * unseen governance packet. The bell popover already marks a row read on click
+ * (`top-bell.tsx`), so opening a task FROM a notification still clears it, and a
+ * full load / "Mark all read" clears the rest.
+ */
+export function isTaskViewNavigation(request: Request): boolean {
+  // Single-fetch data requests carry the `.data` suffix; a genuine SSR document
+  // load lands on the clean route path. This alone excludes every revalidation.
+  if (new URL(request.url).pathname.endsWith(".data")) return false;
+  // When the browser sends it, a top-level navigation is `Sec-Fetch-Mode:
+  // navigate` (any other same-origin fetch that reached a clean path is not);
+  // absent (tests / non-browser SSR) we rely on the `.data` signal above.
+  const mode = request.headers.get("Sec-Fetch-Mode");
+  return mode === null || mode === "navigate";
+}
+
+/**
  * R19-15: per-user VIEW side-effect — opening a task's page marks THIS
  * viewer's unread notifications for that (project, task) read, EVERY kind.
  * This is what lets the bell badge count genuinely-unseen items: a user who

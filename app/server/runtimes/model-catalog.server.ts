@@ -1,6 +1,8 @@
+import type { DatabaseSync } from "node:sqlite";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import { resolveClaudeConfigDir } from "./claude-config.server";
+import { unavailableModels } from "./model-availability.server";
 import {
   claudeSpawnEnv,
   isBackendAvailable,
@@ -48,6 +50,10 @@ export interface CatalogModel {
   supportsEffort: boolean;
   /** Effort levels valid for THIS model (subset of the backend efforts). */
   efforts?: string[];
+  /** R20-3 (F20-4): set when the PROVIDER refused this model for this
+   *  deployment's account (learned from a real run's failure, ruling 19). The
+   *  picker disables it and shows the reason; it clears on the next success. */
+  unavailable?: { reason: string; markedAt: string };
 }
 
 export interface ModelCatalog {
@@ -108,20 +114,29 @@ const CLAUDE_CURATED: ModelCatalog = {
  *  that already stored it keeps running on the tier it was configured with. */
 const CODEX_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 
+// F20-33: Terra is listed FIRST, so it is the fallback default
+// (`defaultModelFor("codex")` = `CODEX_MODELS[0]` — the "default is the first
+// model" invariant). Sol is the flagship, but a ChatGPT-plan Codex account 400s
+// on it ("The 'gpt-5.6-sol' model is not supported when using Codex with a
+// ChatGPT account."), and this fallback is what an operator (or any profile)
+// with no concrete Codex model resolves to — so a fresh operator-on-Codex must
+// land on Terra, the CLI default that actually runs, not Sol. Sol stays offered
+// (a profile can still pick it; F20-4 then marks it unavailable from a real
+// failure) — it is just no longer the default.
 const CODEX_MODELS: CatalogModel[] = [
-  {
-    value: "gpt-5.6-sol",
-    displayName: "GPT-5.6 Sol",
-    description:
-      "Flagship model for complex coding, research, and high-value work.",
-    supportsEffort: true,
-    efforts: [...CODEX_EFFORTS],
-  },
   {
     value: "gpt-5.6-terra",
     displayName: "GPT-5.6 Terra",
     description:
       "Balanced everyday workhorse with strong reasoning and tool use.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  {
+    value: "gpt-5.6-sol",
+    displayName: "GPT-5.6 Sol",
+    description:
+      "Flagship model for complex coding, research, and high-value work.",
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },
@@ -144,8 +159,8 @@ const CODEX_MODELS: CatalogModel[] = [
 const CODEX_CURATED: ModelCatalog = {
   models: CODEX_MODELS,
   efforts: [...CODEX_EFFORTS],
-  // Default = the first available model (a changeable starting point). Sol is
-  // the current recommended starting model for ChatGPT-plan Codex usage.
+  // Default = the first available model (a changeable starting point). F20-33
+  // put Terra first because Sol 400s on a ChatGPT-plan Codex account.
   defaultModel: CODEX_MODELS[0]!.value,
   defaultEffort: "medium",
 };
@@ -296,6 +311,33 @@ interface CatalogDeps {
   isAvailable?: (backend: RealBackend) => boolean;
   /** Live-fetch timeout in ms (default 15000). */
   timeoutMs?: number;
+  /** R20-3 (F20-4): the db to read `model_availability` marks from. When
+   *  present, each returned model is stamped `unavailable` per its row. The
+   *  read is per-request and applied AFTER `cloneCatalog`, so a mark that
+   *  changes takes effect on the next call with NO cache invalidation — the
+   *  TTL live cache never freezes an availability mark. */
+  db?: DatabaseSync;
+}
+
+/**
+ * Stamp `unavailable` onto a FRESH catalog copy from the `model_availability`
+ * table. Mutates in place — every caller passes a clone (curatedCatalog /
+ * cloneCatalog return fresh objects), so the shared curated constants and the
+ * cached live catalog are never touched.
+ */
+function stampUnavailability(
+  catalog: ModelCatalog,
+  backend: RealBackend,
+  db?: DatabaseSync,
+): ModelCatalog {
+  if (!db) return catalog;
+  const marks = unavailableModels(db, backend);
+  if (marks.size === 0) return catalog;
+  for (const m of catalog.models) {
+    const mark = marks.get(m.value);
+    if (mark) m.unavailable = { reason: mark.reason, markedAt: mark.markedAt };
+  }
+  return catalog;
 }
 
 const LIVE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -451,16 +493,19 @@ export async function getModelCatalog(
   backend: RealBackend,
   deps: CatalogDeps = {},
 ): Promise<ModelCatalog> {
-  if (backend === "codex") return curatedCatalog("codex");
+  // R20-3: `stampUnavailability` runs on the returned copy at EVERY exit, after
+  // the (unstamped) catalog is cached — so the mark is fresh per request.
+  const stamp = (c: ModelCatalog) => stampUnavailability(c, backend, deps.db);
+  if (backend === "codex") return stamp(curatedCatalog("codex"));
 
   const available = (deps.isAvailable ?? isBackendAvailable)("claude");
-  if (!available) return curatedCatalog("claude");
+  if (!available) return stamp(curatedCatalog("claude"));
 
   // Serve a fresh cached live result.
   const cache = getCache();
   const hit = cache.get("claude");
   if (hit && Date.now() - hit.at < LIVE_TTL_MS) {
-    return cloneCatalog(hit.catalog);
+    return stamp(cloneCatalog(hit.catalog));
   }
 
   try {
@@ -468,16 +513,16 @@ export async function getModelCatalog(
     const timeoutMs = deps.timeoutMs ?? LIVE_TIMEOUT_MS;
     const live = await fetchLiveClaudeModels(queryFn, timeoutMs);
     if (!Array.isArray(live) || live.length === 0) {
-      return curatedCatalog("claude");
+      return stamp(curatedCatalog("claude"));
     }
     const catalog = claudeCatalogFromLive(live);
     cache.set("claude", { at: Date.now(), catalog });
-    return cloneCatalog(catalog);
+    return stamp(cloneCatalog(catalog));
   } catch (error) {
     logger.info("model catalog live fetch failed — using curated", {
       backend,
       err: error instanceof Error ? error.message : String(error),
     });
-    return curatedCatalog("claude");
+    return stamp(curatedCatalog("claude"));
   }
 }

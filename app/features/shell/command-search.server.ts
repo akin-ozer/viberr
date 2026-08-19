@@ -37,8 +37,16 @@ export const COMMAND_GROUP_LIMIT = 6;
 const TASK_SCAN_LIMIT = 60;
 
 /** `%` and `_` are LIKE wildcards — a user typing them means the literal. */
+function escapeLike(query: string): string {
+  return query.replace(/[\\%_]/g, (c) => "\\" + c);
+}
+/** LIKE pattern matching the term ANYWHERE — the coarse WHERE filter. */
 function likeTerm(query: string): string {
-  return "%" + query.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  return "%" + escapeLike(query) + "%";
+}
+/** LIKE pattern matching the term as a PREFIX — the F20-28 key-prefix rank. */
+function likePrefix(query: string): string {
+  return escapeLike(query) + "%";
 }
 
 interface TaskRow {
@@ -64,7 +72,19 @@ interface TaskRow {
  * (board-page.tsx:820-822) — it is LABELLED, with the board's own word.
  */
 function archivedSub(sub: string, row: TaskRow): string {
-  return row.archived ? `${sub} · archived` : sub;
+  return withArchived(sub, row.archived !== 0);
+}
+
+/**
+ * F20-29: the board's own word for a terminal disposition, appended so an
+ * archived hit is never byte-identical to a live one. Tasks got this in F19-8
+ * (via `archivedSub`); a PROJECT hit dropped the `archived` flag it already
+ * carries on `HomeProjectCard`, so an archived project came back through the
+ * palette unmarked and the Home grid's "Archived" filing was the only surface
+ * that said so. Same word, same reason — one helper for both.
+ */
+function withArchived(sub: string, archived: boolean): string {
+  return archived ? `${sub} · archived` : sub;
 }
 
 export function searchWorkspace(
@@ -92,7 +112,10 @@ export function searchWorkspace(
       kind: "project" as const,
       id: `project:${p.slug}`,
       label: p.name,
-      sub: p.repo ?? p.slug,
+      // F20-29: carry the archived flag the card already has, the same way a
+      // task hit does — an archived project's board opens to an honest banner,
+      // so the row must not read as live.
+      sub: withArchived(p.repo ?? p.slug, p.archived),
       href: `/projects/${p.slug}/board`,
     }));
 
@@ -100,6 +123,7 @@ export function searchWorkspace(
   // so a second query would read the same rows twice.
   const placeholders = projects.map(() => "?").join(", ");
   const term = likeTerm(q);
+  const prefix = likePrefix(q);
   const rows = db
     .prepare(
       `SELECT project_slug, task_key, title, stage, branch, archived
@@ -108,10 +132,29 @@ export function searchWorkspace(
           AND ( LOWER(task_key) LIKE ? ESCAPE '\\'
              OR LOWER(title)    LIKE ? ESCAPE '\\'
              OR LOWER(branch)   LIKE ? ESCAPE '\\' )
-        ORDER BY updated_at DESC
+        -- F20-28: a viewer who types a FULL task key almost always wants THAT
+        -- task, not a newer one whose title merely mentions the key (e.g.
+        -- "VIB-1" also matches VIB-2's title "…verify the merged VIB-1 marker").
+        -- Rank an exact key match first, then a key-prefix match, and only then
+        -- fall back to recency — so title/branch ("fuzzy") matches are still
+        -- returned, just never ahead of the key the query names.
+        ORDER BY
+          CASE
+            WHEN LOWER(task_key) = ?                 THEN 0
+            WHEN LOWER(task_key) LIKE ? ESCAPE '\\'  THEN 1
+            ELSE 2
+          END,
+          updated_at DESC
         LIMIT ${TASK_SCAN_LIMIT}`,
     )
-    .all(...projects.map((p) => p.slug), term, term, term) as unknown as TaskRow[];
+    .all(
+      ...projects.map((p) => p.slug),
+      term,
+      term,
+      term,
+      q,
+      prefix,
+    ) as unknown as TaskRow[];
 
   const taskHits: CommandHit[] = [];
   const branchHits: CommandHit[] = [];

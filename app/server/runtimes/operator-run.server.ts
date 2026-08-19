@@ -70,7 +70,11 @@ import {
 } from "~/server/tasks/task-actions.server";
 import type { RealBackend } from "./runtime-registry.server";
 import { registerRunCompletion, startRun } from "./run-service.server";
-import { patchRun } from "./run-store.server";
+import { getRun, patchRun } from "./run-store.server";
+import {
+  noteModelAvailabilityFromFailure,
+  clearModelMark,
+} from "./model-availability.server";
 
 /**
  * Runs the operator through Claude or Codex. The operator is given its persona
@@ -115,6 +119,11 @@ export interface RunOperatorInput {
    *     delivery). Not a transition, so this is the seam that keeps an autonomous
    *     task moving — engage the reviewer / recommend the next step from the live
    *     snapshot (R18-2).
+   *   packet-resolved → PROCEED: a human just answered your decision packet
+   *     (R20-1 / F20-5). The decision and their note are in the turn instruction;
+   *     act on it. Never re-open the packet you were just answered on — if the
+   *     same condition still blocks you, say so in ONE typed event or open a
+   *     packet that names the NEW information.
    */
   trigger?:
     | "create"
@@ -123,8 +132,13 @@ export interface RunOperatorInput {
     | "goal-updated"
     | "pr-diverged"
     | "delivered"
+    | "packet-resolved"
     | "scheduled"
     | "manual";
+  /** packet-resolved trigger: the option the human chose and any note, so the
+   *  turn instruction can tell the operator exactly what was decided rather than
+   *  making it re-derive the answer from the timeline (R20-1). */
+  resolvedOption?: { kind: string; title: string; note?: string };
   /** `scheduled` trigger: the note the human wrote when they set the re-run
    *  ("re-check the flaky test"). It is the REASON the run exists, so it rides
    *  into the turn instruction — a scheduled run that arrives as a bare
@@ -176,13 +190,19 @@ export interface RunOperatorResult {
   backend: RealBackend;
   autonomy: OperatorAutonomy;
   /**
-   * F19-20: the trigger was REFUSED at fire time rather than driven. Only
-   * `terminal-stage` today — FR39's "a scheduled re-run never fires on a
-   * terminal stage", enforced where the run would actually start rather than
-   * only where it was scheduled. The caller owns the honesty follow-up (the
-   * schedule runner records the retirement on the task).
+   * The trigger was REFUSED at fire time rather than driven. The caller owns the
+   * honesty follow-up.
+   *   `terminal-stage` (F19-20) — FR39's "a scheduled re-run never fires on a
+   *     terminal stage", enforced where the run would actually start rather than
+   *     only where it was scheduled (the schedule runner records the retirement).
+   *   `open-packet` (R20-1 / F20-5) — a HUMAN pressed "Run operator" while a
+   *     decision packet is open, which is a paid no-op (coordination is paused
+   *     by the packet). Scoped to the `manual` trigger: machine triggers
+   *     legitimately run with a packet open (a `pr-diverged` recovery withdraws
+   *     a moot packet — ruling 17; `agent-reply` reacts to a run already in
+   *     flight). The route turns this into "resolve the decision first".
    */
-  refused?: "terminal-stage";
+  refused?: "terminal-stage" | "open-packet";
 }
 
 /**
@@ -957,6 +977,36 @@ export async function runOperator(
     }
   }
 
+  // R20-1 (F20-5): a HUMAN-pressed "Run operator" while a decision packet is
+  // open is a paid no-op — coordination is paused by the packet, so the run
+  // completes several turns and can take no action (live: 6 turns / $0.27, only
+  // get_task). Refuse it and say why. Scoped to `manual` on purpose: machine
+  // triggers legitimately run with a packet open — `pr-diverged` recovery
+  // WITHDRAWS a moot packet (ruling 17), and `agent-reply` reacts to a run that
+  // was already in flight. The packet already owns `waiting: "human"`, so there
+  // is no settle to do here.
+  if ((input.trigger ?? "manual") === "manual") {
+    const openPacket =
+      readTaskFile({
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
+      })?.parsed.packet ?? null;
+    if (openPacket) {
+      logger.info("manual operator run refused — a decision packet is open", {
+        taskKey: input.taskKey,
+        packet: openPacket.title,
+      });
+      return {
+        runId: null,
+        queued: false,
+        backend,
+        autonomy: authority.autonomy,
+        refused: "open-packet",
+      };
+    }
+  }
+
   // Single-flight per task (NFR16, B6): one operator coordinates a task at a
   // time. A trigger arriving while the lease is held — e.g. create-time
   // auto-invoke racing an "@operator …" comment — is QUEUED (machine triggers
@@ -1368,11 +1418,30 @@ function defaultPacketOptions(
   detail?: string;
   recommended?: boolean;
 }[] {
+  // R20-1 (F20-5): every "blocked" label says exactly what will happen. The old
+  // "…and unblock" recorded a HOLD and re-accepted the same confirm forever;
+  // now each option resolves the packet, and the two active ones re-run.
   return packetType === "blocked"
     ? [
-        { kind: "block_on_policy", title: "Update the policy / credential and unblock", recommended: true },
-        { kind: "redirect", title: "Redirect the specialist with new guidance" },
-        { kind: "hold_runtime_debug", title: "Hold for runtime debugging" },
+        {
+          kind: "block_on_policy",
+          title: "I've updated the policy / credential — unblock and re-run",
+          detail:
+            "Closes this decision and starts a fresh operator run. If it fails again you get a new decision packet.",
+          recommended: true,
+        },
+        {
+          kind: "redirect",
+          title: "Redirect the specialist with new guidance",
+          detail:
+            "Closes this decision and re-runs the operator with your note as its steer.",
+        },
+        {
+          kind: "hold_runtime_debug",
+          title: "Hold — pause coordination while I inspect the session",
+          detail:
+            "Closes this decision and starts NO run. The task stays blocked and waiting on you; use Run operator when you are ready.",
+        },
       ]
     : [
         { kind: "request_edit", title: "Send back to the specialist for changes", recommended: true },
@@ -1423,6 +1492,7 @@ async function startCodexOperatorRun(
     input.humanCommentBy,
     transitionContextOf(input),
     input.scheduleNote,
+    input.resolvedOption,
   );
   const orgMcpServers = mcp.servers;
 
@@ -2018,6 +2088,7 @@ async function startRealOperatorRun(
     input.humanCommentBy,
     transitionContextOf(input),
     input.scheduleNote,
+    input.resolvedOption,
   );
 
   const { runId } = await startRun(db, {
@@ -2061,6 +2132,13 @@ async function startRealOperatorRun(
     // fires `void runOperator(queued)`, so a successor drive read the snapshot
     // — and could open its own packet — while the blocked recovery packet was
     // still being written; whichever landed second silently replaced the other.
+    // R20-3 (F20-4): a coordinating run that reached completion proves its model
+    // is usable on this account — clear any stale unavailability mark (ruling
+    // 19: clearing on a real success is the re-probe, no synthetic check).
+    if (finished.state === "finished") {
+      const ranModel = getRun(db, runId)?.model ?? null;
+      if (ranModel) clearModelMark(db, input.backend ?? "claude", ranModel);
+    }
     const completion =
       finished.state === "error"
         ? escalateFailedOperatorRun(db, ctx, input, authority, runId)
@@ -2108,6 +2186,7 @@ async function escalateFailedOperatorRun(
           : reason?.kind === "unavailable"
             ? "the coordinating backend has no usable credential configured (the run was refused — no agent process started)"
             : "the coordinating run did not complete";
+    const providerText = reason?.providerText ?? "";
     logger.warn("real operator run failed — escalating", {
       taskKey: input.taskKey,
       runId,
@@ -2124,11 +2203,32 @@ async function escalateFailedOperatorRun(
         body:
           `The operator run did not complete — ${detail}. No coordination was ` +
           `performed. Retry on the other backend, fix the credential, or redirect ` +
-          `the task.`,
+          `the task.` +
+          // R20-3 (F20-4): the operator's OWN escalation used to drop the
+          // provider's words entirely; append the redacted sentence so a Codex
+          // model/account mismatch reads its real cause, not the generic advice.
+          (providerText ? `\n\nWhat the provider reported: ${providerText}` : ""),
+        // Same "Provider said" observation the specialist stuck-loop packet gets.
+        ...(providerText
+          ? {
+              observations: [
+                { k: "Provider said", v: providerText, code: true },
+              ],
+            }
+          : {}),
         options: defaultPacketOptions("blocked"),
       },
       authority,
     );
+    // R20-3: mark the model unavailable when the provider REFUSED it (no probe).
+    if (providerText) {
+      noteModelAvailabilityFromFailure(db, {
+        runId,
+        backend: input.backend ?? "claude",
+        model: getRun(db, runId)?.model ?? null,
+        providerText,
+      });
+    }
     // B3 made a second packet a refusal, so an escalation can legitimately
     // land on a task that already has an open decision (the human is already
     // being asked something). Never silent: the run still failed.
@@ -2198,7 +2298,14 @@ export interface OperatorMcpResolution {
   unhealthy: string[];
 }
 
-/** Resolve the operator's MCP grants once per run (see OperatorMcpResolution). */
+/** Resolve the operator's MCP grants once per run (see OperatorMcpResolution).
+ *
+ * TODO(pass20 F20-10): the specialist run path pre-flights its stdio mounts via
+ * `verifyStdioMcpMountsForRun` so a server that fails to START is dropped +
+ * disclosed + its row corrected. The operator resolves org MCP the same way and
+ * should do the same — make this async and `await verifyStdioMcpMountsForRun(db,
+ * { servers, unresolved })` before building the resolution. Deferred here because
+ * the operator run is a hot path this cluster otherwise owns. */
 function operatorMcpResolution(
   db: DatabaseSync,
   names: readonly string[],
@@ -2533,7 +2640,15 @@ function triageQualityGate(snapshot: OperatorTaskSnapshot): string {
     '"The documentation could be improved. Make it better." is a wish, not a goal: no file, no change, no acceptance criteria. ' +
     "While the goal is that vague you MUST NOT `transition_stage` forward: either `set_goal` with real scope when the task text, comments, and repository make it unambiguous, " +
     'or `open_decision_packet` (type "input") proposing 2–4 concrete scopes for the human to choose between. Reading the repository is not scoping — a scope you invented is the failure this gate exists to stop. ' +
-    "If the goal IS concrete, say why in the transition `reason`: name the deliverable and the acceptance signal. If you cannot write that sentence, it is not concrete. "
+    "If the goal IS concrete, say why in the transition `reason`: name the deliverable and the acceptance signal. If you cannot write that sentence, it is not concrete. " +
+    // R20-9 (F20-31): a goal may DELEGATE a clarifying question to the
+    // delivering agent ("first ask the human, via YOUR ask-human capability,
+    // whether…"). You may still gather that answer now with an input packet so
+    // work can start — but DISCLOSE the substitution: the answer was meant to be
+    // raised by that agent, so say in the packet body that you are gathering it
+    // on the delivering agent's behalf, or the timeline reads as if the agent
+    // never held the ask.
+    "If the goal DELEGATED a clarifying question to the delivering agent (e.g. \"first ask the human, via your ask-human capability, whether…\"), you may gather that answer yourself with an `open_decision_packet` (type \"input\") so work is not stalled — but SAY SO in the packet body: state that you are gathering it on the delivering agent's behalf, so the timeline is honest that you, not that agent, raised it. "
   );
 }
 
@@ -2545,6 +2660,7 @@ function operatorTurnInstruction(
   humanCommentBy?: string,
   transition?: TransitionContext,
   scheduleNote?: string,
+  resolvedOption?: { kind: string; title: string; note?: string },
 ): string {
   if (humanComment?.trim()) {
     const by = humanCommentBy?.trim();
@@ -2612,6 +2728,25 @@ function operatorTurnInstruction(
     return (
       `GitHub reports PR ${prNo} is live again — a closed PR was reopened or replaced (see the newest policy-engine note). ` +
       "If your open decision packet was about the closed PR, withdraw it with `resolve_decision_packet` — it is moot now. Then continue the current stage from the live snapshot (an already-approved review can move to `accept_completion` per policy). Do not duplicate work that is already in flight."
+    );
+  }
+
+  if (trigger === "packet-resolved") {
+    // R20-1 (F20-5): a human answered the decision packet, and the server
+    // re-queued you with the decision in hand. Act on it — do NOT re-open the
+    // packet you were just answered on.
+    const decided = resolvedOption
+      ? `**${resolvedOption.title}**` +
+        (resolvedOption.note
+          ? ` — the human added: "${resolvedOption.note}"`
+          : "")
+      : "their decision (see the newest timeline entry)";
+    return (
+      `A human just answered your decision packet: ${decided}. The packet is now resolved. ` +
+      "Act on that decision from the live snapshot and take the ONE coordination step it warrants " +
+      "(a policy/credential fix means re-check the work that was blocked; a redirect means re-prompt the delivering profile with the steer). " +
+      "Do NOT re-open the packet you were just answered on — if the SAME condition still blocks you, say so in ONE concise comment or open a packet that names the NEW information. " +
+      triageQualityGate(snapshot)
     );
   }
 
@@ -2684,6 +2819,7 @@ export function buildCodexOperatorPrompt(
   humanCommentBy?: string,
   transition?: TransitionContext,
   scheduleNote?: string,
+  resolvedOption?: { kind: string; title: string; note?: string },
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
@@ -2699,8 +2835,9 @@ export function buildCodexOperatorPrompt(
       humanCommentBy,
       transition,
       scheduleNote,
+      resolvedOption,
     ) +
-    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
+    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes. Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
   );
@@ -2715,6 +2852,7 @@ export function buildOperatorTurnPrompt(
   humanCommentBy?: string,
   transition?: TransitionContext,
   scheduleNote?: string,
+  resolvedOption?: { kind: string; title: string; note?: string },
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
@@ -2728,6 +2866,7 @@ export function buildOperatorTurnPrompt(
       humanCommentBy,
       transition,
       scheduleNote,
+      resolvedOption,
     )
   );
 }

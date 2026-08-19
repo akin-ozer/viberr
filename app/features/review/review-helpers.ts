@@ -32,6 +32,9 @@ export interface ReviewRowView {
   lastActivityAt: string | null;
   /** Gap-10: nothing recorded past this row's threshold and no run in flight. */
   quiet: boolean;
+  /** D4: 'degraded' when this task's runtime continuity was lost — the same
+   *  projected state the board card and the Continuity Recovery panel show. */
+  continuity: "degraded" | null;
 }
 
 /**

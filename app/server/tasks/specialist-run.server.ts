@@ -44,7 +44,11 @@ import {
   resolveTaskFilePath,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
-import { taskDir } from "~/server/files/file-store-root.server";
+import {
+  storeRelativePath,
+  taskAttachmentsDir,
+  taskDir,
+} from "~/server/files/file-store-root.server";
 import {
   KB_INJECTION_BUDGET,
   KB_PRECEDENCE_NOTE,
@@ -93,7 +97,15 @@ import {
   resolveSpecialistDisallowedTools,
   resolveUndeployedDisallowedTools,
 } from "./specialist-tool-policy";
-import { resolveSpecialistMcpServersDetailed } from "./specialist-mcp.server";
+import {
+  resolveSpecialistMcpServersDetailed,
+  verifyStdioMcpMountsForRun,
+} from "./specialist-mcp.server";
+import {
+  BROWSER_MCP_NAME,
+  browserPersonaSection,
+  resolveBrowserMcp,
+} from "./specialist-browser-mcp.server";
 import {
   CLONE_TIMEOUT_MS,
   cloneFailureLogDetails,
@@ -219,11 +231,20 @@ function deploymentGrants(
  * still announced it — live, an agent reported `vm-memory` as "mounted" and
  * found zero tools under it. The caller owes the run an honest prompt.
  */
-function mcpServersFor(
+async function mcpServersFor(
   db: DatabaseSync,
   names: string[],
-): { mcpServers?: Record<string, unknown>; unresolved: string[]; unhealthy: string[] } {
-  const { servers, unresolved } = resolveSpecialistMcpServersDetailed(db, names);
+): Promise<{ mcpServers?: Record<string, unknown>; unresolved: string[]; unhealthy: string[] }> {
+  // F20-10: a declared stdio server that fails to START (a half-installed npx
+  // tree crashing in <1s) used to be mounted anyway — the run was told it had
+  // tools it would never get, and every Settings surface kept calling it
+  // healthy. Pre-flight the stdio mounts against the real handshake so a dead
+  // one is DROPPED from the run, disclosed by name, and its row is corrected.
+  const resolution = await verifyStdioMcpMountsForRun(
+    db,
+    resolveSpecialistMcpServersDetailed(db, names),
+  );
+  const { servers, unresolved } = resolution;
   return {
     ...(Object.keys(servers).length ? { mcpServers: servers } : {}),
     // Only the grants that reached NO server; a mounted-but-unhealthy one is
@@ -1092,7 +1113,7 @@ export async function startAgentRun(
   // prompt announced a server the run had no tools for). The persona itself is
   // built AFTER the clone below, because the same rule now applies to skills:
   // which ones mount natively is only knowable once the workspace exists.
-  const resolvedMcps = mcpServersFor(db, mcpNames);
+  const resolvedMcps = await mcpServersFor(db, mcpNames);
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
@@ -1168,6 +1189,23 @@ export async function startAgentRun(
         })
       : { mounted: [] as string[], skipped: [] };
 
+  // R19-19: the browser mount resolves from the SAME grants the collaboration
+  // gates use — an unresolvable profile is withheld here for the same reason
+  // (R15-7: we can confirm nothing about it). Only for a real backend: the
+  // config would otherwise describe a child no engine will ever spawn.
+  const attachmentsDir = taskAttachmentsDir(
+    input.projectSlug,
+    input.taskKey,
+    ctx.dataRoot,
+  );
+  const browser = realBackend
+    ? resolveBrowserMcp({
+        grants: resolved ? resolved.capabilities : withheldAgentGrants(),
+        attachmentsDir,
+        backend,
+      })
+    : { server: null, refused: null };
+
   // The agent's run persona: its detailed definition + granted skills + KB docs.
   // Claude takes it as a system prompt; Codex receives the same persona through
   // the supported `developer_instructions` configuration channel. Skills that
@@ -1181,13 +1219,24 @@ export async function startAgentRun(
     skills,
     nativeSkills: skillMount.mounted,
     kb,
-    mcps: Object.keys(resolvedMcps.mcpServers ?? {}),
+    mcps: [
+      ...Object.keys(resolvedMcps.mcpServers ?? {}),
+      ...(browser.server ? [BROWSER_MCP_NAME] : []),
+    ],
     unresolvedMcps: resolvedMcps.unresolved,
     unhealthyMcps: resolvedMcps.unhealthy,
+    browser: browser.server
+      ? { attachmentsRel: storeRelativePath(attachmentsDir, ctx.dataRoot) }
+      : browser.refused
+        ? { refusedReason: browser.refused.reason }
+        : null,
     ...(resolved?.definition ? { definition: resolved.definition } : {}),
     dataRoot: ctx.dataRoot,
     unresolvedOut: unresolvedResources,
   });
+  // The refused pair joins the run-input disclosure (P19-G11) — a granted
+  // browser that silently reached no run would be the silent-resource class.
+  if (browser.refused) unresolvedResources.push(browser.refused);
 
   // No resolvable deployment ⇒ no grants ⇒ no delivery steps in the prompt.
   // Under the P14-LV-01 polarity an empty grant list is already fully withheld,
@@ -1314,6 +1363,19 @@ export async function startAgentRun(
           : "") +
         "}.",
     );
+    if (collab.ask) {
+      // F20-32: on Codex the ask-human capability IS this `question` field —
+      // there is no callable `ask_human` tool on this backend (the in-process
+      // toolkit is Claude-only). Live, a Codex developer whose GOAL told it to
+      // "ask the human, via your ask-human capability" went hunting for a tool,
+      // found none, and narrated "the ask-human capability is unavailable in
+      // this session, so I cannot obtain the required confirmation" — WHILE
+      // populating `question` to ask exactly that. Name the channel so the agent
+      // stops reporting a limitation that isn't real.
+      collabNotes.push(
+        '- Your ask-human capability on THIS backend is that `question` field: filling it in is how you raise a question for the humans — there is no separate ask_human tool here, so never say ask-human is unavailable. Set `question` when a human decision blocks you; the answer arrives on a later resumed run, not during this one, so note it and finish.',
+      );
+    }
   }
   const prompt = collabNotes.length
     ? `${basePrompt}\n\n## Collaboration\n\n${collabNotes.join("\n")}`
@@ -1354,6 +1416,10 @@ export async function startAgentRun(
       : null;
   const mergedMcpServers = {
     ...(declaredMcps.mcpServers ?? {}),
+    // R19-19: the browser sits between the org grants and the toolkit — a
+    // registry row can never shadow it (the name is refused at save), and it
+    // can never shadow viberr's own governance tools.
+    ...(browser.server ? { [BROWSER_MCP_NAME]: browser.server } : {}),
     ...(toolkit?.mcpServers ?? {}),
   };
   // P13-D-26: `collab.evidence` joins the gate. Codex has no `report_outcome`
@@ -1554,6 +1620,11 @@ export function buildSpecialistPersona(input: {
   unresolvedMcps?: string[];
   /** Mounted, but the last health check failed (P14-LV-09b). */
   unhealthyMcps?: string[];
+  /** R19-19: browser state — mounted (with the store-relative attachments path
+   *  for the guardrail text) or granted-but-refused (with the reason). The
+   *  section renders only when the server actually mounted, so prompt and tool
+   *  surface tell the same story (XS-4). */
+  browser?: { attachmentsRel: string } | { refusedReason: string } | null;
   /** The profile's own persona body (D6) — used when the store ships no
    *  agents/definitions/<id>.md override. Custom profiles finally run AS
    *  themselves instead of persona-less on the generic analyze prompt. */
@@ -1724,6 +1795,18 @@ export function buildSpecialistPersona(input: {
         `Your profile grants ${unresolved.join(", ")}, but ${it} NOT mounted on ` +
         `this run — no such server is in the org registry. Do not claim or ` +
         `attempt tools from ${they}; report the gap in your findings instead.`,
+    );
+  }
+  // R19-19: the browser guardrails ride the prompt ONLY when the server
+  // mounted; a granted-but-refused browser is named with its reason instead.
+  if (input.browser && "attachmentsRel" in input.browser) {
+    parts.push(browserPersonaSection(input.browser.attachmentsRel));
+  } else if (input.browser && "refusedReason" in input.browser) {
+    parts.push(
+      "\n\n---\n# Browser not mounted\n\n" +
+        `Your profile grants \`use-browser\`, but ${input.browser.refusedReason}. ` +
+        "Do not claim or attempt browser tools; report the gap if the task " +
+        "needed them.",
     );
   }
   // C1: the surviving half of the silent-resource class. An MCP grant that
@@ -2091,8 +2174,12 @@ export async function resolveResumeConfinement(
       input.profileId,
     );
     // P14-LV-09: resolve first, then describe what MOUNTED — the resumed run
-    // gets the same honest prompt as a fresh one.
-    const resumeMcps = resolveSpecialistMcpServersDetailed(db, resolved.mcps);
+    // gets the same honest prompt as a fresh one. F20-10: pre-flight the stdio
+    // mounts so a server that fails to start is dropped + disclosed here too.
+    const resumeMcps = await verifyStdioMcpMountsForRun(
+      db,
+      resolveSpecialistMcpServersDetailed(db, resolved.mcps),
+    );
     const mcpServers = resumeMcps.servers;
     // R18-1 parity: a resumed/@mention reviewer must keep the deliverer's KBs it
     // had on the fresh run, or it silently loses those conventions mid-thread.
@@ -2126,19 +2213,46 @@ export async function resolveResumeConfinement(
             ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
           })
         : { mounted: [] as string[], skipped: [] };
+    // R19-19: the browser re-mounts on resume from the same grants — a resumed
+    // run must not silently lose (or gain) the browser the fresh run had.
+    const resumeBrowser = input.backend
+      ? resolveBrowserMcp({
+          grants: resolved.capabilities,
+          attachmentsDir: taskAttachmentsDir(
+            input.projectSlug,
+            input.taskKey,
+            ctx.dataRoot,
+          ),
+          backend: input.backend,
+        })
+      : { server: null, refused: null };
     const resumeUnresolved: { name: string; reason: string }[] = [];
     const persona = buildSpecialistPersona({
       profileId: input.profileId,
       skills: resolved.skills,
       nativeSkills: skillMount.mounted,
       kb,
-      mcps: Object.keys(mcpServers),
+      mcps: [
+        ...Object.keys(mcpServers),
+        ...(resumeBrowser.server ? [BROWSER_MCP_NAME] : []),
+      ],
       unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
+      browser: resumeBrowser.server
+        ? {
+            attachmentsRel: storeRelativePath(
+              taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
+              ctx.dataRoot,
+            ),
+          }
+        : resumeBrowser.refused
+          ? { refusedReason: resumeBrowser.refused.reason }
+          : null,
       ...(resolved.definition ? { definition: resolved.definition } : {}),
       dataRoot: ctx.dataRoot,
       unresolvedOut: resumeUnresolved,
     });
+    if (resumeBrowser.refused) resumeUnresolved.push(resumeBrowser.refused);
     // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
     // the in-process toolkit on Claude, the outcome-envelope outputSchema on
     // Codex. Both key off the SAME collaboration grants the fresh run resolves.
@@ -2173,7 +2287,13 @@ export async function resolveResumeConfinement(
       // resumed agent keeps the channel it started with.
       outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
     }
-    const merged = { ...mcpServers, ...toolkitServers };
+    const merged = {
+      ...mcpServers,
+      ...(resumeBrowser.server
+        ? { [BROWSER_MCP_NAME]: resumeBrowser.server }
+        : {}),
+      ...toolkitServers,
+    };
     const cloneDir = taskCloneDir(ctx, input.projectSlug, input.taskKey);
     const disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
     return {
@@ -2521,6 +2641,9 @@ export interface DeployedSpecialistView {
     verdict: boolean;
     /** May raise ask-human question packets. */
     askHuman: boolean;
+    /** D8/R19-19: holds `use-browser` → its runs can save browser evidence into
+     *  the task's `attachments/`. */
+    browser: boolean;
   };
   /** Declared resources (skills/MCPs/KBs) — selection context. */
   resources: { skills: string[]; mcps: string[]; kb: string[] };
@@ -2633,6 +2756,11 @@ export function listDeployedSpecialists(
         // profile look review-capable and mis-picked the reviewer.
         verdict: granted("report-validation-verdict"),
         askHuman: effectiveCollabMode(grants, "ask-human") === "direct",
+        // D8/R19-19: whether this agent can drive a browser — the mount's own
+        // gate (`resolveBrowserMcp`), so a task with a browser-capable agent
+        // gets an attachments empty state ("evidence lands here; none yet")
+        // instead of nothing at all.
+        browser: effectiveCollabMode(grants, "use-browser") === "direct",
       },
       resources: {
         skills: resolved.skills,

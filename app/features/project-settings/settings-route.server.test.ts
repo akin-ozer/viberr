@@ -274,9 +274,10 @@ describe("members", () => {
       name: "Deniz Şahin",
       email: "deniz@viberr.dev",
     })) as { ok: boolean; toast: string };
+    // N20-6: no mailer exists — the toast names what happened, not a sent email.
     expect(result).toEqual({
       ok: true,
-      toast: "Invite sent to deniz@viberr.dev · joins as Viewer",
+      toast: "Added deniz@viberr.dev — joins as Viewer",
     });
     const { view } = await runLoader(ids.arda);
     const deniz = view.members.find((m) => m.userId === ids.deniz)!;

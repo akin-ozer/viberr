@@ -149,9 +149,11 @@ describe("ProjectPanel", () => {
         (f) => (f as HTMLInputElement).disabled,
       ),
     ).toBe(true);
-    // …and now it says why.
+    // …and now it says why. F20-16: the honest grant name + tier.
     expect(container.textContent).toContain("Read-only");
-    expect(container.textContent).toContain("Change project settings");
+    expect(container.textContent).toContain("Edit workflow & policy");
+    expect(container.textContent).toContain("project admin");
+    expect(container.textContent).not.toContain("Change project settings");
   });
 });
 
@@ -214,7 +216,13 @@ describe("StagesPanel", () => {
     fireEvent.click(removeButtons[0]!); // triage → locked
     fireEvent.click(removeButtons[3]!); // review → 2 tasks
     expect(onRemove).not.toHaveBeenCalled();
-    fireEvent.click(removeButtons[1]!); // ready → empty, unlocked
+    fireEvent.click(removeButtons[1]!); // ready → empty, unlocked → opens confirm
+    // D6: an empty unlocked stage now confirms before it dispatches (governance
+    // change, audit row). The click opens the confirm; onRemove fires on OK.
+    expect(onRemove).not.toHaveBeenCalled();
+    const confirm = container.querySelector("dialog.confirm-card")!;
+    expect(confirm.textContent).toContain("Remove the Ready stage?");
+    fireEvent.click(confirm.querySelector("button.btn.danger")!);
     expect(onRemove).toHaveBeenCalledWith("ready");
   });
 
@@ -260,7 +268,9 @@ describe("StagesPanel", () => {
       <StagesPanel {...base} canManage={false} onRename={() => {}} onRemove={() => {}} />,
     );
     expect(container.textContent).toContain("Read-only");
-    expect(container.textContent).toContain("Change project settings");
+    // F20-16: the honest grant name + tier.
+    expect(container.textContent).toContain("Edit workflow & policy");
+    expect(container.textContent).not.toContain("Change project settings");
     // The manage-only how-to must not be shown to someone who cannot do it.
     expect(container.textContent).not.toContain("Drag a row to reorder");
   });
@@ -480,7 +490,12 @@ describe("MembersPanel", () => {
     const removeButtons = container.querySelectorAll(".stg-x");
     fireEvent.click(removeButtons[0]!); // self
     expect(onRemove).not.toHaveBeenCalled();
-    fireEvent.click(removeButtons[1]!); // elif, now a viewer → allowed
+    fireEvent.click(removeButtons[1]!); // elif, now a viewer → opens confirm
+    // D6: removing a member confirms before it dispatches.
+    expect(onRemove).not.toHaveBeenCalled();
+    const confirm = container.querySelector("dialog.confirm-card")!;
+    expect(confirm.textContent).toContain("Remove");
+    fireEvent.click(confirm.querySelector("button.btn.danger")!);
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 

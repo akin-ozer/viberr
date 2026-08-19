@@ -52,6 +52,11 @@ export interface AgentProfileView {
    *  backend (a legacy placeholder like "codex-large · claude-sonnet") — the run
    *  substitutes the default and the UI flags it. */
   modelKnown: boolean;
+  /** R20-3 / F20-4: set when the model a run would resolve to was refused by the
+   *  provider for this account (learned from a real run's failure — ruling 19).
+   *  The card disables/flags it with the provider's own redacted sentence;
+   *  absent = unknown-but-offered, never "proven available". */
+  modelUnavailable?: { reason: string; markedAt: string };
   /** Reasoning/effort level ("" when unset) — the picker's stored effort. */
   effort: string;
   scope: string;

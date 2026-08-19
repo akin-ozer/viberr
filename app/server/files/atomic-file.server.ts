@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { AppError } from "~/server/errors/app-error.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 
 /**
  * Atomic file write: write to a sibling `*.tmp` file, then rename over the
@@ -26,11 +28,27 @@ export function writeFileAtomic(absPath: string, content: string): void {
       // Already gone, or the volume will not even allow the unlink — either way
       // the original error below is the useful one.
     }
-    if ((error as NodeJS.ErrnoException).code === "ENOSPC") {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOSPC") {
       throw new Error(
         `No space left on the data root — ${absPath} was not written`,
         { cause: error },
       );
+    }
+    // F20-1: a data-root mount that goes stale under a running container (a
+    // deleted VirtioFS bind-mount inode) fails writes/renames with ESTALE or
+    // EIO. This is the class that took the whole app down — the failing action
+    // pegged the event loop rather than erroring. Fail the write with a typed
+    // AppError naming the data root as unreachable; never retry or spin. The
+    // fix's job is to convert a silent hang into an honest, action-scoped error.
+    if (code === "ESTALE" || code === "EIO") {
+      throw new AppError({
+        code: ERROR_CODES.INTERNAL,
+        status: 503,
+        message: `${code} writing ${absPath} — data root unreachable`,
+        userMessage: `The data root is unreachable (${code}) — ${absPath} was not written. Check that the storage mount is healthy, then try again.`,
+        cause: error,
+      });
     }
     throw error;
   }

@@ -17,6 +17,7 @@ import type {
 } from "./adapter.server";
 import { SESSION_MISSING_RE } from "./session-export.server";
 import { projectEnvelope } from "./wire-format.server";
+import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
@@ -307,9 +308,14 @@ export function codexIdleTimeoutMs(): number {
 }
 
 /** CLI failures can include stderr and command lines. Those may contain
- * credentials, so logs retain the error class but never the raw message. */
+ * credentials, so the raw text is never logged unscrubbed — but R20-3 settled
+ * that a REDACTED provider complaint is loggable (ruling 69), so instead of
+ * discarding it we keep the scrubbed sentence. Falls back to the class-only
+ * message when the scrub finds nothing usable. */
 function safeCodexError(error: unknown): Error {
-  const safe = new Error("Codex SDK/CLI execution failed.");
+  const safe = new Error(
+    redactProviderText(error) || "Codex SDK/CLI execution failed.",
+  );
   safe.name = error instanceof Error ? error.name : "Error";
   return safe;
 }
@@ -341,7 +347,7 @@ export type CodexFailureKind =
 function classifyCodexFailure(
   error: unknown,
   phase: "start" | "execution",
-): { kind: CodexFailureKind; message: string } {
+): { kind: CodexFailureKind; message: string; providerText: string } {
   const parts: string[] = [];
   let current: unknown = error;
   for (let depth = 0; depth < 3 && current != null; depth += 1) {
@@ -354,6 +360,11 @@ function classifyCodexFailure(
     }
   }
   const raw = parts.join("\n");
+  // R20-3 (F20-4): the provider's OWN words, scrubbed. The canonical `message`
+  // stays generic (and the class rides the tag), but the redacted sentence is
+  // now surfaced beside it so a human can act on "model is not supported when
+  // using Codex with a ChatGPT account" instead of "review the configuration".
+  const providerText = redactProviderText(error);
   // P13-D-2 before the auth branch: a missing rollout is not a credential
   // problem, and telling a human to "review the configured subscription
   // credential" for it sends them to the one place that is definitely fine.
@@ -362,6 +373,7 @@ function classifyCodexFailure(
       kind: "session_missing",
       message:
         "The Codex session could not be resumed — its rollout no longer exists under $CODEX_HOME/sessions. Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+      providerText,
     };
   }
   if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
@@ -369,6 +381,7 @@ function classifyCodexFailure(
       kind: "quota",
       message:
         "Codex usage limit was reached. Retry after the subscription limit resets.",
+      providerText,
     };
   }
   if (
@@ -380,6 +393,7 @@ function classifyCodexFailure(
       kind: "auth",
       message:
         "Codex authentication failed. Review the configured subscription credential.",
+      providerText,
     };
   }
   return {
@@ -388,6 +402,7 @@ function classifyCodexFailure(
       phase === "start"
         ? "Codex could not start. Review its authentication and runtime configuration."
         : "Codex execution failed. Review its authentication and runtime configuration.",
+    providerText,
   };
 }
 
@@ -471,11 +486,22 @@ export function createCodexAdapter(
       const emitAdapterFailure = (
         message: string,
         kind: CodexFailureKind = "unknown",
+        providerText = "",
       ) => {
         if (emittedAdapterFailure) return;
         emittedAdapterFailure = true;
         sawFatalError = true;
-        const event = { type: "error", message } satisfies ThreadErrorEvent;
+        // R20-3: append the provider's redacted sentence once, when it adds
+        // something the canonical message does not already carry. The `err`
+        // line's text is what `runFailureReason` reads and splits on the marker.
+        const fullMessage =
+          providerText && !message.includes(providerText)
+            ? `${message}\n\nThe provider reported: ${providerText}`
+            : message;
+        const event = {
+          type: "error",
+          message: fullMessage,
+        } satisfies ThreadErrorEvent;
         const occurredAt = new Date().toISOString();
         const { display, facts } = projectEnvelope("codex", event, occurredAt);
         cb.onLine({
@@ -616,7 +642,7 @@ export function createCodexAdapter(
             err: safeCodexError(error),
           });
           const failure = classifyCodexFailure(error, "execution");
-          emitAdapterFailure(failure.message, failure.kind);
+          emitAdapterFailure(failure.message, failure.kind, failure.providerText);
           return settle("error");
         }
 
@@ -634,7 +660,7 @@ export function createCodexAdapter(
           err: safeCodexError(error),
         });
         const failure = classifyCodexFailure(error, "start");
-        emitAdapterFailure(failure.message, failure.kind);
+        emitAdapterFailure(failure.message, failure.kind, failure.providerText);
         settle("error");
       });
 

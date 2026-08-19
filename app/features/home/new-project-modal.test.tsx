@@ -79,6 +79,20 @@ describe("#14: the zero-connections note never hands a member a 403", () => {
   });
 });
 
+describe("N20-11: the repo field says the owner is fixed by the connection", () => {
+  it("names the connection owner and tells the typist to enter just the repo name", () => {
+    const { container } = renderModal({
+      connections: ["akin-ozer"],
+      connectionHealth: { "akin-ozer": "valid" },
+    });
+    const text = container.textContent ?? "";
+    expect(text).toContain("Owner is fixed by the");
+    expect(text).toContain("enter just the");
+    // The fixed owner is named, so a `owner/name` entry is visibly redundant.
+    expect(text).toContain("akin-ozer");
+  });
+});
+
 describe("#20: the server's refusal is announced, not just drawn", () => {
   it("renders the create failure in a live region", async () => {
     const { container, getByPlaceholderText, getByText } = renderModal(

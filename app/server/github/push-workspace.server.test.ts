@@ -1,4 +1,5 @@
-import { mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -11,7 +12,11 @@ import {
 } from "../../../test-support/test-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { taskDir } from "~/server/files/file-store-root.server";
-import { defaultExec, pushWorkspaceBranch } from "./push-workspace.server";
+import {
+  defaultExec,
+  discardLocalTaskBranch,
+  pushWorkspaceBranch,
+} from "./push-workspace.server";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -613,5 +618,147 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     expect(isNonFastForwardStderr("hint: (e.g., 'git pull ...') — fetch first")).toBe(true);
     expect(isNonFastForwardStderr("fatal: Authentication failed for 'https://…'")).toBe(false);
     expect(isNonFastForwardStderr("fatal: unable to access: Could not resolve host")).toBe(false);
+  });
+});
+
+describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
+  const REPO = () =>
+    path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "viberr");
+
+  function git(cwd: string, args: string[]): string {
+    return execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
+  }
+
+  /** A REAL git workspace at the repo dir findWorkspaceRepoDir resolves to. */
+  function initWorkspaceRepo(withTaskBranch: boolean): string {
+    const repoDir = REPO();
+    // beforeEach left a fake empty `.git`; start from a clean real repo.
+    rmSync(repoDir, { recursive: true, force: true });
+    mkdirSync(repoDir, { recursive: true });
+    git(repoDir, ["init", "-q", "-b", "main"]);
+    git(repoDir, ["config", "user.email", "t@viberr.local"]);
+    git(repoDir, ["config", "user.name", "Test"]);
+    writeFileSync(path.join(repoDir, "README.md"), "# repo\n");
+    git(repoDir, ["add", "-A"]);
+    git(repoDir, ["commit", "-q", "-m", "init"]);
+    if (withTaskBranch) {
+      git(repoDir, ["checkout", "-q", "-b", "vib-1-work"]);
+      writeFileSync(path.join(repoDir, "work.txt"), "work\n");
+      git(repoDir, ["add", "-A"]);
+      git(repoDir, ["commit", "-q", "-m", "work"]);
+      git(repoDir, ["checkout", "-q", "main"]);
+    }
+    return repoDir;
+  }
+
+  it("deletes a local, never-pushed task branch and reports its sha", async () => {
+    const repoDir = initWorkspaceRepo(true);
+    const out = await discardLocalTaskBranch({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      branch: "vib-1-work",
+      defaultBranch: "main",
+      dataRoot: store.dataRoot,
+    });
+    expect(out.status).toBe("deleted");
+    if (out.status === "deleted") {
+      expect(out.branch).toBe("vib-1-work");
+      expect(out.sha).toMatch(/^[0-9a-f]{40}$/);
+    }
+    // The branch is really gone.
+    expect(() =>
+      git(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
+    ).toThrow();
+  });
+
+  it("steps off the branch when HEAD is on it, then deletes", async () => {
+    const repoDir = initWorkspaceRepo(true);
+    git(repoDir, ["checkout", "-q", "vib-1-work"]); // HEAD now ON the branch
+    const out = await discardLocalTaskBranch({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      branch: "vib-1-work",
+      defaultBranch: "main",
+      dataRoot: store.dataRoot,
+    });
+    expect(out.status).toBe("deleted");
+    expect(git(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
+  });
+
+  it("reports not_found when the branch is not in the workspace", async () => {
+    initWorkspaceRepo(false); // no task branch created
+    const out = await discardLocalTaskBranch({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      branch: "vib-1-work",
+      defaultBranch: "main",
+      dataRoot: store.dataRoot,
+    });
+    expect(out.status).toBe("not_found");
+  });
+
+  it("ruling 17: refuses a branch that exists on the remote and keeps it local", async () => {
+    const repoDir = initWorkspaceRepo(true);
+    const remoteDir = path.join(store.dataRoot, "bare-origin.git");
+    mkdirSync(remoteDir, { recursive: true });
+    git(remoteDir, ["init", "-q", "--bare"]);
+    git(repoDir, ["remote", "add", "origin", remoteDir]);
+    git(repoDir, ["push", "-q", "origin", "vib-1-work"]);
+    const out = await discardLocalTaskBranch({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      branch: "vib-1-work",
+      defaultBranch: "main",
+      dataRoot: store.dataRoot,
+    });
+    expect(out.status).toBe("on_remote");
+    // A refused discard leaves the local branch intact.
+    expect(() =>
+      git(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
+    ).not.toThrow();
+  });
+
+  it("reports no_workspace when the task has no clone", async () => {
+    const out = await discardLocalTaskBranch({
+      projectSlug: store.slug,
+      taskKey: "VIB-404",
+      branch: "vib-404",
+      defaultBranch: "main",
+      dataRoot: store.dataRoot,
+    });
+    expect(out.status).toBe("no_workspace");
+  });
+
+  it("ruling 69: a failed git command carries git's REDACTED words", async () => {
+    // Fake exec: the branch delete fails with a token-bearing URL in stderr.
+    const exec = vi.fn(async (_file: string, args: string[]) => {
+      if (args.includes("--verify")) {
+        return { ok: true, stdout: "a".repeat(40), stderr: "" };
+      }
+      if (args.includes("ls-remote")) return { ok: false, stdout: "", stderr: "" };
+      if (args.includes("--abbrev-ref")) return { ok: true, stdout: "main", stderr: "" };
+      if (args.includes("branch") && args.includes("-D")) {
+        return {
+          ok: false,
+          stdout: "",
+          stderr:
+            "error: could not delete refs at https://ghp_SECRETTOKEN0123456789ABCDEF@github.com — locked",
+        };
+      }
+      return { ok: true, stdout: "", stderr: "" };
+    });
+    const out = await discardLocalTaskBranch({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      branch: "vib-1-work",
+      defaultBranch: "main",
+      dataRoot: store.dataRoot,
+      exec,
+    });
+    expect(out.status).toBe("failed");
+    if (out.status === "failed") {
+      expect(out.reason).toContain("could not delete");
+      expect(out.reason).not.toContain("ghp_SECRETTOKEN");
+    }
   });
 });

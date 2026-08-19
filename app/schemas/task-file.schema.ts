@@ -33,7 +33,13 @@ export type Readiness = (typeof READINESS_VALUES)[number];
 export const WAITING_VALUES = ["human", "agent", "none"] as const;
 export type Waiting = (typeof WAITING_VALUES)[number];
 
-export const VALIDATION_VALUES = ["healthy", "changed", "failing", "none"] as const;
+// N20-14 (§5c / C2): `bypassed` is a DERIVED display value produced only by
+// `deriveValidation` when a task carries the durable `acceptance: "forced"`
+// fact — a human accepted the completion past the verdict gate. It is not a
+// hand-authored source value (like the other four), but it rides the same
+// `validation` field the projection caches, so it must be a first-class member
+// of the enum for the round-trip and the derivation return type.
+export const VALIDATION_VALUES = ["healthy", "changed", "failing", "none", "bypassed"] as const;
 export type Validation = (typeof VALIDATION_VALUES)[number];
 
 /** The 10 timeline event types (cross-cutting contracts §1.3). Parsers keep
@@ -84,6 +90,13 @@ export const PACKET_OPTION_KINDS = [
   // work whose PR a human closed without merging. Resolution enforces the
   // same `approve-transition` authority as the Archive button.
   "archive_task",
+  // pass20 F20-6: 10th packet kind (decisions.md ruling 7 — count already updated by C-DOCS)
+  // Discard the task's LOCAL, never-pushed workspace branch — cleanup, not a
+  // disposition: the task stays on the board and closes through the ordinary
+  // no-change acceptance. Refuses when the branch exists on the remote (remote
+  // deletion stays ruling 17's archive-packet path). Resolution enforces
+  // `approve-transition` (it destroys commits).
+  "discard_branch",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -534,6 +547,13 @@ export const taskFrontmatterSchema = z.object({
   // LIVE remote read before any writer closes the task to Done, so a branch that
   // has since gained commits cannot ride a stale flag into Done (F19-21).
   noChanges: z.boolean().optional(),
+  // N20-14 (pass20 §5c): a durable record that this task reached Done through a
+  // force-accept — the human deliberately bypassed the verdict gate. Without it
+  // `deriveValidation` recomputes the pre-accept "awaiting verdict" state and a
+  // force-accepted Done task reads "accepted · awaiting verdict" on the hero and
+  // its card. This is the SERVER half only: the durable fact + its projection +
+  // TaskSummary. The "accepted · gate bypassed" display arm is C-VOCAB's.
+  acceptance: z.enum(["forced"]).nullable().optional(),
   github: githubCacheSchema.nullable(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
@@ -554,6 +574,9 @@ type ReviewState = {
   /** R19-8: this task was verified to have nothing to deliver. Optional so the
    *  existing call sites (which all pass whole frontmatter) need no change. */
   noChanges?: boolean;
+  /** N20-14 (§5c): `"forced"` when a human force-accepted this task past the
+   *  verdict gate — the durable override fact. Optional for the same reason. */
+  acceptance?: "forced" | null;
 };
 
 /** Supporting engagements that are REQUIRED reviewers (verdict-capable). Their
@@ -612,6 +635,19 @@ export function deriveValidation(
   // request-changes → `failing` above). Labelling that "none" would tell the
   // human "nothing owed" while the acceptance gate is genuinely holding on a
   // verdict — the F19-21 regression. It stays `changed` until the verdict lands.
+  // N20-14 (§5c) / C2: a force-accept is a durable human override of the verdict
+  // gate. Once it is recorded, re-deriving the pre-acceptance pending state
+  // ("awaiting verdict") is a false live obligation — the task reached Done
+  // because a human bypassed the gate, not because a verdict landed. Surface the
+  // override itself so a force-accepted, Done task never re-derives "awaiting
+  // verdict" on any surface that still renders its validation pill.
+  //
+  // Placed AFTER the real-verdict arms (`failing` / `healthy`) and the no-change
+  // arm's siblings but BEFORE `none`/`changed`, mirroring the no-change arm's
+  // rule that a recorded verdict is EVIDENCE and must not be erased: a reviewer
+  // who actually approved or requested changes still wins. Only the genuinely
+  // moot pending/none case yields to the bypass fact.
+  if (fm.acceptance === "forced") return "bypassed";
   if (fm.noChanges && required.length === 0) return "none";
   return "changed";
 }
@@ -798,6 +834,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   // existing task.md keeps its line verbatim instead of losing it on rewrite.
   "pr",
   "noChanges",
+  "acceptance",
   "github",
   "createdAt",
   "updatedAt",
@@ -1139,6 +1176,14 @@ export function parseTaskFrontmatter(
       "noChanges",
       data.noChanges,
       taskFrontmatterSchema.shape.noChanges,
+      undefined,
+    ),
+    // N20-14: absent means "not force-accepted" — never a diagnostic.
+    acceptance: tolerant(
+      diagnostics,
+      "acceptance",
+      data.acceptance,
+      taskFrontmatterSchema.shape.acceptance,
       undefined,
     ),
     github: tolerant(

@@ -84,7 +84,12 @@ function statusOf(user: UserRecord): OrgUserStatus {
   if (!user.lastLoginAt) {
     const idp = idpOf(user);
     if (idp === "github" || idp === "google") return "whitelisted";
-    if (user.pwresetRequired) return "invited";
+    // F20-12: a LOCAL account with no password can never sign in (no credential,
+    // and OAuth is a different idp) — surface it as setup-pending, not a healthy
+    // "active" row indistinguishable from a working account. `pwresetRequired`
+    // catches temp-password accounts; `!hasPassword` catches the passwordless
+    // ones the old invite path minted (e.g. the live `probe.nobody@viberr.dev`).
+    if (user.pwresetRequired || !user.hasPassword) return "invited";
   }
   return "active";
 }

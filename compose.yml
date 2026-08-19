@@ -8,6 +8,13 @@ services:
     # stranger to its own leftover lock. Pinned, a recreated container probes
     # its predecessor's pid and reclaims a lock the shutdown could not release.
     hostname: viberr
+    # F20-2: run an init (PID 1) that reaps orphaned children. The app runs as
+    # pid 1, and node-as-init never reaps the grandchildren an aborted SDK run or
+    # a killed MCP probe leaves behind — so a boot accumulated defunct
+    # chromium/crashpad zombies. docker-init handles every orphan regardless of
+    # which layer dropped it; the process-group teardown in resources.server is
+    # the belt to this brace.
+    init: true
     env_file: .env
     environment:
       # Force the container-internal values even when .env carries the dev

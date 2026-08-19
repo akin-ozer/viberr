@@ -1425,12 +1425,24 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 
 .gh-bar {
   display: flex; align-items: center; gap: .6rem;
+  /* C9 (pass-20): the repo slug is the card's identity; the state / checks /
+     review pills are a sibling group that must WRAP under it, never clip. Before
+     this the row was a single no-wrap line inside `.panel.flush`'s
+     `overflow: hidden`, so three pills plus a repo slug overran the 340px side
+     column at 1440px and the checks pill was sliced mid-word ("1/2 checks
+     faili"). Wrapping drops the pill group onto its own row instead. */
+  flex-wrap: wrap;
   padding: .7rem .85rem;
   background: var(--fg); color: #fff;
 }
-.gh-bar .ico { width: 18px; height: 18px; }
-.gh-bar .repo { font-family: var(--font-mono); font-size: .78rem; }
-.gh-bar .pill { margin-left: auto; }
+.gh-bar .ico { width: 18px; height: 18px; flex: none; }
+.gh-bar .repo { font-family: var(--font-mono); font-size: .78rem; min-width: 0; overflow-wrap: anywhere; }
+/* Only the FIRST pill pushes the group to the right of the header line; the rest
+   pack beside it (the flex `gap` spaces them) so the pills wrap together as one
+   right-anchored row rather than each claiming its own auto margin. `flex: none`
+   keeps every pill at its full width so its label never shrinks and clips. */
+.gh-bar .pill { margin-left: auto; flex: none; }
+.gh-bar .pill ~ .pill { margin-left: 0; }
 .gh-body { padding: .9rem 1rem 1rem; }
 .commit {
   display: flex; align-items: center; gap: .55rem;
@@ -1914,6 +1926,15 @@ dialog[data-closing]::backdrop {
 }
 .def-note .ico { width: 13px; height: 13px; margin-top: .15rem; flex: none; color: var(--placeholder); }
 .def-note code { font-family: var(--font-mono); font-size: .72rem; color: var(--muted); }
+/* F20-9 (R20-7): the Agents capability card carries the Policy page's reconciling
+   note for "Transition a task to Done" — a muted caption with a leading lock, so
+   the card reads as policy-truth beside the ACTS-DIRECTLY / RESERVED columns. */
+.cap-exception {
+  display: flex; align-items: flex-start; gap: .45rem;
+  margin: .1rem 0 .7rem; font-size: .76rem; line-height: 1.5; color: var(--faint);
+}
+.cap-exception svg { width: 13px; height: 13px; margin-top: .15rem; flex: none; color: var(--placeholder); }
+.cap-exception strong { color: var(--muted); font-weight: 600; }
 /* R15-12: unenforced capability lines, collapsed. Native <details> so keyboard
    and screen-reader behavior come for free — the panel already ships in the
    WCAG sweep and must not regress it. */
@@ -2632,7 +2653,22 @@ dialog[data-closing]::backdrop {
   box-shadow: var(--shadow-card);
 }
 .page-overlay-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
-.page-overlay .board-head { padding-right: 4.4rem; }
+/* N20-13 (pass-20): `.overlay-x` is pinned to the overlay's top-right corner
+   (position: absolute on the fixed, non-scrolling `.page-overlay`). The body
+   scrolls underneath it, so on a scrolled overlay (e.g. /profile scrolled to the
+   bottom) arbitrary content slid under the button and read as a clipped row. The
+   overlay's own header already reserves the button's gutter (`padding-right`);
+   pinning it with an opaque background turns it into an always-present strip that
+   scrolled content passes BEHIND — the close button now stays legible over its
+   reserved header at every scroll position instead of floating over live content.
+   z-index sits below `.overlay-x` (5) and above the scrolled body (auto). */
+.page-overlay .board-head {
+  padding-right: 4.4rem;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--bg);
+}
 .page-overlay .board-wrap { flex: none; }
 .page-overlay .policy-wrap { overflow: visible; padding-bottom: 1.6rem; }
 
@@ -3976,7 +4012,15 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .field-row { grid-template-columns: 1fr; }
   /* task detail: side panels move under the main column and go side-by-side */
   .detail { grid-template-columns: 1fr; }
-  .detail-side { flex-direction: row; flex-wrap: wrap; }
+  /* D2 (pass-20): the side column carries Current state — and with it the primary
+     "Accept completion → Done" button — plus Permissions. In source order it
+     follows `.detail-main`, whose LAST panel is the timeline, so a plain 1-up
+     stack dropped the app's most consequential action below every timeline entry.
+     `order: -1` lifts the current-state/acceptance column ahead of the timeline
+     VISUALLY at this breakpoint while leaving DOM order untouched, so a screen
+     reader still reads main → side (UX spec §Breakpoint Strategy). A CSS `order`
+     swap is deliberately preferred over a DOM reorder here (cheap, no markup). */
+  .detail-side { flex-direction: row; flex-wrap: wrap; order: -1; }
   .detail-side > * { flex: 1; min-width: 280px; }
   /* agents: the profile rail becomes a horizontal strip. The group labels ride
      along rather than hide: `.ag-group-label.ag-group-row` is not only a label,
@@ -4113,3 +4157,106 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    +/− , so the colour is reinforcement rather than the only signal. */
 .log-code .lk-line.lk-add { color: #86e0b4; }
 .log-code .lk-line.lk-del { color: #f0a3a3; }
+
+/* R19-17 — why an MCP server is unreachable, on the row itself.
+   The probe's reason used to live only in the toast it returned, so once that
+   faded a red dot was the whole story. Monospace because the content is a
+   command's own output (a traceback, a `spawn … ENOENT`), and clamped in
+   height so one Python stack cannot push the rest of the list off screen —
+   it scrolls rather than truncating, since the last line is usually the one
+   that names the cause. */
+.rsrc-main .rsrc-err {
+  display: block;
+  /* Tall enough for the WHOLE clamped reason: `redactGitOutput` already bounds
+     it to 8 lines, so a tighter box here would re-clip content that was
+     deliberately kept — and it keeps the TAIL, where a traceback names the
+     actual error. `overflow` stays for a long unwrapped path. */
+  max-height: 9.5rem;
+  overflow: auto;
+  margin-top: .3rem;
+  padding: .35rem .5rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 78%);
+  background: color-mix(in srgb, var(--coral-light), var(--surface) 55%);
+  color: var(--coral-dark);
+  font-size: .68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* R19-18 — an MCP server installing on first use. Its own state: not green
+   (nothing has answered yet) and not red (nothing is broken). The pulse says
+   work is happening without the row claiming a verdict it does not have;
+   reduced-motion readers get the colour alone, which is why the dot also
+   carries a `title`. */
+.stat-dot.warming { background: var(--blue); animation: warmPulse 1.6s ease-in-out infinite; }
+@keyframes warmPulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .stat-dot.warming { animation: none; }
+}
+
+/* ============================= P19-19 attachments =============================
+   R19-19: browser-produced files on the task page. Thumbnails are real <img>
+   content from the member-only serving route; the grid stays modest — this is
+   an evidence surface, not a gallery. */
+.attach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: .6rem;
+}
+.attach-thumb {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+  text-decoration: none;
+  color: var(--fg);
+}
+.attach-thumb:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.attach-thumb img {
+  display: block;
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  object-position: top;
+  background: color-mix(in srgb, var(--fg), transparent 96%);
+}
+.attach-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: .5rem;
+  padding: .4rem .55rem;
+  min-width: 0;
+}
+.attach-name {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-size { font-size: .7rem; color: var(--muted); flex: none; }
+.attach-file {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem .55rem;
+  margin-top: .45rem;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+  text-decoration: none;
+  color: var(--fg);
+}
+.attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.attach-file svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
+.attach-file .attach-name { flex: 1; }
+/* Evidence label token that names a real attachment (timeline.tsx linkify). */
+/* Same token text-links use (P13-D-18 precedent) — --blue on white is 3.84:1
+   and fails AA for normal text; --teal-dark clears it in both themes. */
+.tl-card .ev-row .ev-file { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; }
+.tl-card .ev-row .ev-file:hover { text-decoration-thickness: 2px; }

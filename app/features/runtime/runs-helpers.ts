@@ -405,6 +405,72 @@ export function diffLineKind(line: string): "add" | "del" | null {
 }
 
 /**
+ * N20-18 — a Codex run's FINAL message is the structured outcome envelope
+ * (`AGENT_OUTCOME_JSON_SCHEMA`), so its `agent_message` line carries raw JSON —
+ * `{"evidence":null,"summary":"…","verdict":null,"question":null}` — with the
+ * one line a reader wants (`summary`) buried between null fields. Claude's
+ * `assistant` event is plain prose for the same act, so the two backends read
+ * differently in the console. This folds the envelope back to the prose it
+ * wraps (P19-RC1 parity across backends): the `summary`, plus the `question` if
+ * one was raised.
+ *
+ * Touches ONLY a Codex `agent_message` whose text parses as an envelope object;
+ * a plain-prose `agent_message` (a developer with no structured channel) and
+ * every other line return null and render unchanged. Like every P19-RC1
+ * folding it must be a NO-OP under `raw` — the caller only invokes it when the
+ * `{ } raw` toggle is off, so that view stays the verbatim JSON.
+ */
+export function agentMessageProse(line: LogLine): string | null {
+  if (line.ev !== "text" || line.tag !== "agent_message") return null;
+  const text = line.text.trim();
+  // Cheap gate before JSON.parse: the envelope is always a brace object, and a
+  // prose report almost never starts with `{`.
+  if (!text.startsWith("{")) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const o = parsed as Record<string, unknown>;
+  // Envelope shape: the schema declares exactly summary/verdict/question/
+  // evidence. Require `summary` present AND a sibling envelope key, so an agent
+  // that legitimately reports a bare JSON object of its own is left alone.
+  const isEnvelope =
+    "summary" in o && ("verdict" in o || "question" in o || "evidence" in o);
+  if (!isEnvelope) return null;
+
+  const out: string[] = [];
+  if (typeof o.summary === "string" && o.summary.trim()) {
+    out.push(o.summary.trim());
+  }
+  const q = o.question;
+  if (typeof q === "object" && q !== null) {
+    const qq = q as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof qq.title === "string" && qq.title.trim()) parts.push(qq.title.trim());
+    if (typeof qq.body === "string" && qq.body.trim()) parts.push(qq.body.trim());
+    const options = Array.isArray(qq.options)
+      ? qq.options
+          .map((opt) =>
+            typeof opt === "object" && opt !== null && typeof (opt as Record<string, unknown>).title === "string"
+              ? String((opt as Record<string, unknown>).title).trim()
+              : "",
+          )
+          .filter(Boolean)
+      : [];
+    if (options.length) parts.push(`Options: ${options.join(" · ")}`);
+    if (parts.length) out.push(`Question: ${parts.join(" — ")}`);
+  }
+  // An envelope with nothing human-readable (every field null) is degenerate;
+  // returning null lets the raw JSON stand rather than blanking the row.
+  return out.length ? out.join("\n\n") : null;
+}
+
+/**
  * Elapsed seconds since `startedAt` (UTC ISO), recomputed every second on the
  * client clock (runs.md §7 replacement for `elapsed + tick`). Returns 0 when
  * no start time. Never trusts a shipped seconds count.

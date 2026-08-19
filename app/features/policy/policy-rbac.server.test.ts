@@ -25,6 +25,7 @@ import {
   applyRecommendation,
   forceAcceptCompletion,
   resolvePacket,
+  requestPacketMaintainerDecision,
   manualDeliverForReview,
 } from "~/server/tasks/task-actions.server";
 import {
@@ -1014,6 +1015,23 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
           manualDeliverForReview(store.db, { projectSlug: store.slug, taskKey }, actor, {
             dataRoot: store.dataRoot,
           }),
+      },
+    ],
+    requestPacketMaintainerDecision: [
+      {
+        // F20-18: a contributor-OWNER routes their own stranded packet UP to a
+        // maintainer. A non-owner (and a demoted/removed owner) hits the
+        // resolve-packet gate's 403 — the owner exception is per-task authority.
+        label: "requestPacketMaintainerDecision (owner escalates a stranded packet)",
+        stage: "impl",
+        packet: "edit_goal",
+        run: (taskKey, actor) =>
+          requestPacketMaintainerDecision(
+            store.db,
+            { projectSlug: store.slug, taskKey },
+            actor,
+            { dataRoot: store.dataRoot },
+          ),
       },
     ],
   };

@@ -20,7 +20,8 @@ import {
 import { startFileWatcher } from "./files/file-watch.service.server";
 import { startKbWatcher } from "./files/kb-watch.service.server";
 import { startGithubReconcilePoller } from "./github/reconcile-poller.server";
-import { logger } from "./logging/logger.server";
+import { reapStaleWarmups } from "~/server/org/mcp-warmup.server";
+import { logger, writeFatalSync } from "./logging/logger.server";
 import { getBuildInfo } from "./ops/build-info.server";
 import { formatBytes, measureDataRootSpace } from "./ops/disk-space.server";
 import {
@@ -40,6 +41,43 @@ import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.serve
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
+
+// Installed once (survives HMR via a well-known symbol), same pattern as BOOT_KEY.
+const CRASH_HANDLERS_KEY = Symbol.for("viberr.crashVisibilityInstalled");
+
+/**
+ * F20-8(a): make a fatal process death VISIBLE. On 2026-08-14 the app process
+ * vanished with zero output — `docker logs -t` went straight from a 200 request
+ * line to the restart's lock refusal, no stack, no signal, no FATAL line. Node's
+ * default prints an uncaught exception then exits, but the app's own `logger.error`
+ * is an async `process.stdout.write` that the following `process.exit` truncates,
+ * so nothing durable reached the log. These handlers flush ONE synchronous stderr
+ * line (`writeFatalSync` → `fs.writeSync(2, …)`, which returns only once the OS has
+ * the bytes) BEFORE exiting, so a crash is never silent again.
+ *
+ * Registering an `uncaughtException`/`unhandledRejection` handler SUPPRESSES Node's
+ * own crash-and-exit, so each handler exits itself to keep the fail-fast contract:
+ * a process that limps on after an uncaught error (half-torn state, a lock it may
+ * no longer own) is worse than one that dies loudly. Installed once, before any
+ * request — `bootServer` is awaited from `entry.server.tsx` module scope.
+ */
+export function installCrashVisibilityHandlers(): void {
+  const slot = globalThis as unknown as Record<symbol, boolean | undefined>;
+  if (slot[CRASH_HANDLERS_KEY]) return;
+  slot[CRASH_HANDLERS_KEY] = true;
+  process.on("uncaughtException", (error) => {
+    writeFatalSync("FATAL: uncaught exception — shutting down", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    process.exit(1);
+  });
+  process.on("unhandledRejection", (reason) => {
+    writeFatalSync("FATAL: unhandled promise rejection — shutting down", {
+      err: reason instanceof Error ? reason : new Error(String(reason)),
+    });
+    process.exit(1);
+  });
+}
 
 /**
  * Boot integrity report (Phase 10): data-root dirs + migration state +
@@ -118,6 +156,20 @@ export function logBootIntegrity(db: DatabaseSync): void {
  * Exported so the wiring is testable without booting a real server.
  */
 export function startStoreMaintenance(db: DatabaseSync): void {
+  try {
+    // R19-18: a background MCP install belongs to the process that started it,
+    // so a restart leaves rows flagged "installing" with no installer behind
+    // them. Clear them first — a stale flag is indistinguishable from a live
+    // one to the reader, and the row's own affordance (retest) restarts it.
+    const reaped = reapStaleWarmups(db);
+    if (reaped > 0) {
+      logger.info("cleared MCP installs interrupted by a restart", { reaped });
+    }
+  } catch (error) {
+    logger.error("could not clear interrupted MCP installs", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
   try {
     runMaintenancePass(db, { reason: "boot", reclaimWorkspaces: false });
   } catch (error) {
@@ -233,6 +285,9 @@ export function takeDataRootWriterLock(
  * Called from entry.server.tsx module scope; safe to call repeatedly.
  */
 export async function bootServer(): Promise<void> {
+  // F20-8(a): first of all, so even a failure DURING boot — before the lock, the
+  // db, the first request — dies loudly instead of vanishing.
+  installCrashVisibilityHandlers();
   const cache = globalThis as unknown as Record<symbol, boolean | undefined>;
   if (cache[BOOT_KEY]) return;
 

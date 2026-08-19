@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 
@@ -92,32 +93,31 @@ export function MiniModal({
 export function ConfirmDelete({
   what,
   detail,
+  confirmLabel,
   onCancel,
   onConfirm,
 }: {
   what: string;
   detail: string;
+  /** C6: the confirm button named a bare "Remove" — the only destructive
+   *  guardrail in org-settings whose button did not name what it removes,
+   *  against the hand-written ceremonies that say "Archive VIB-4". Each caller
+   *  now passes the outcome ("Remove MCP server"); the blast radius stays in
+   *  `detail` (resources-panel already counts the grants that drop). */
+  confirmLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  // Delegates to the shared consequence-confirm (D6) so org-settings and the
+  // task/project confirmation sites share one grammar and one chrome.
   return (
-    // role="alertdialog" on a native <dialog> keeps the stronger semantics.
-    <dialog ref={ref} className="confirm-card" role="alertdialog" aria-label={`Remove ${what}?`}>
-      <div className="confirm-icon">
-        <Icon name="alert" />
-      </div>
-      <h3>Remove {what}?</h3>
-      <p>{detail}</p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
-          Remove
-        </button>
-      </div>
-    </dialog>
+    <ConfirmDialog
+      title={`Remove ${what}?`}
+      body={detail}
+      confirmLabel={confirmLabel ?? `Remove ${what}`}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

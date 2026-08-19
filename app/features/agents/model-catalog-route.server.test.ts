@@ -79,8 +79,10 @@ describe("resources/model-catalog", () => {
   it("returns the curated codex catalog", async () => {
     const res = await runLoader("?backend=codex", ardaId);
     const body = (await res.json()) as { data: ModelCatalog };
+    // Sol is still OFFERED, but F20-33 makes Terra the default (Sol 400s on a
+    // ChatGPT-plan Codex account, so a model-less operator must not fall back to it).
     expect(body.data.models.map((m) => m.value)).toContain("gpt-5.6-sol");
-    expect(body.data.defaultModel).toBe("gpt-5.6-sol");
+    expect(body.data.defaultModel).toBe("gpt-5.6-terra");
     expect(body.data.efforts).toEqual(["low", "medium", "high", "xhigh"]);
   });
 
@@ -88,5 +90,32 @@ describe("resources/model-catalog", () => {
     const res = await runLoader("", ardaId);
     const body = (await res.json()) as { data: ModelCatalog };
     expect(body.data.defaultModel).toBe("sonnet");
+  });
+
+  // R20-3 / F20-4: the route threads the db so `getModelCatalog` stamps each
+  // model `unavailable` from the `model_availability` marks — the picker then
+  // disables + explains a model a real run proved this account can't use.
+  it("stamps a provider-refused model unavailable so the picker can disable it", async () => {
+    const { markModelUnavailable, clearModelMark } = await import(
+      "~/server/runtimes/model-availability.server"
+    );
+    markModelUnavailable(app.db, {
+      backend: "codex",
+      model: "gpt-5.6-sol",
+      reason:
+        "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+    });
+    try {
+      const res = await runLoader("?backend=codex", ardaId);
+      const body = (await res.json()) as { data: ModelCatalog };
+      const sol = body.data.models.find((m) => m.value === "gpt-5.6-sol");
+      expect(sol?.unavailable?.reason).toContain("not supported");
+      // An unmarked model carries no mark (unknown-but-offered, ruling 19).
+      expect(
+        body.data.models.find((m) => m.value === "gpt-5.6-terra")?.unavailable,
+      ).toBeUndefined();
+    } finally {
+      clearModelMark(app.db, "codex", "gpt-5.6-sol");
+    }
   });
 });

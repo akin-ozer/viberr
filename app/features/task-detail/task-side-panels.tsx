@@ -119,11 +119,12 @@ export function GithubTrace({
   const forceAcceptRow =
     forceAcceptReason && onForceAccept ? (
       <div className="force-accept">
-        {/* P13-D-19: `.hint` used to exist only as `.pj-new .hint`, so this line
-            rendered as an unstyled <p>; it is a global utility now. */}
-        <p className="hint">
-          Acceptance is blocked: {forceAcceptReason}
-        </p>
+        {/* C1: the refusal sentence has ONE owner — the Current-state panel,
+            where the Accept button lives. It used to render here too ("Acceptance
+            is blocked: …"), byte-identical to the Current-state deny-note ~350px
+            away; a prior pass fixed the two DISAGREEING and left them duplicates.
+            This panel keeps only the GitHub-side fact: the admin override itself,
+            whose button already names what it does. */}
         <button
           type="button"
           className="btn ghost sm full"
@@ -567,11 +568,18 @@ export function CurrentStatePanel({
               // F17-2: name WHERE the decision lives without asserting WHICH one
               // (that is state-dependent — a packet, a stage move, or acceptance).
               // A wrong specific hint would mislead; this tooltip is always true.
+              // C4: the copy is the ONE project-scope phrase the board's card and
+              // subtitle also use — "waiting on a human" ("Waiting on" + "a
+              // human") — collapsing the five spellings the app had for "a human
+              // owes something". This rail deliberately does NOT personalise to
+              // "you" (ruling 10 / R8-3 reserves the viewer-scoped "waiting on
+              // you" for surfaces that resolve the viewer, which this one never
+              // did); the project phrase is the correct one here.
               <span
                 className="by-human"
                 title="A human decision is needed — see the decision packet, the stage control, or the acceptance action on this page."
               >
-                Human decision
+                a human
               </span>
             ) : task.waiting === "agent" ? (
               <span className="by-agent">Agent work</span>

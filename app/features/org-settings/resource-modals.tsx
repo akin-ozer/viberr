@@ -159,6 +159,16 @@ export function McpModal({
             }}
             data-autofocus=""
           />
+          {/* N20-5: the name is slugified before saving (`_`→`-`, spaces
+              collapsed), so typing `viberr_browser` or "My Server" silently
+              becomes `viberr-browser` / `my-server` — and a reserved-name
+              refusal then quoted a name the admin never typed. Show the slug
+              the moment it differs, so the rewrite is never a surprise. */}
+          {slugify(name) && slugify(name) !== name.trim() && (
+            <span className="fhint mono">
+              will be saved as <b className="mono-b">{slugify(name)}</b>
+            </span>
+          )}
         </div>
         <div className="field">
           <span className="flabel">Transport</span>

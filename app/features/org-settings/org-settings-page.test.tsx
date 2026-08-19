@@ -91,7 +91,8 @@ describe("ConnectionsPanel", () => {
     expect(
       getByText(/Projects already created from hepapi keep their repos/),
     ).toBeTruthy();
-    fireEvent.click(getByText("Remove", { selector: "button.btn.danger" }));
+    // C6: the confirm button now names the outcome instead of a bare "Remove".
+    fireEvent.click(getByText("Remove connection", { selector: "button.btn.danger" }));
     await waitFor(() =>
       expect(lastForm).toMatchObject({
         intent: "connection-remove",
@@ -222,7 +223,8 @@ describe("UsersPanel", () => {
 
     fireEvent.click(getByLabelText("Remove Selin Aksoy"));
     expect(getByText(/Their comments and decisions stay in the audit history/)).toBeTruthy();
-    fireEvent.click(getByText("Remove", { selector: "button.btn.danger" }));
+    // C6: outcome-naming confirm label.
+    fireEvent.click(getByText("Remove member", { selector: "button.btn.danger" }));
     await waitFor(() =>
       expect(lastForm).toMatchObject({ intent: "user-remove", userId: "u_selin" }),
     );
@@ -320,9 +322,9 @@ const KBS: KbView[] = [
 ];
 const MCPS: McpView[] = [
   { id: "m1", name: "github-mcp", transport: "HTTP", target: "https://mcp.internal:7801/sse",
-    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString() },
+    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null },
   { id: "m2", name: "browserbase", transport: "HTTP", target: "https://mcp.internal:7809/sse",
-    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString() },
+    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null },
 ];
 const SKILLS: SkillView[] = [
   { id: "s1", name: "terraform-review", summary: "Module review checklist.",
@@ -370,6 +372,71 @@ describe("ResourcesPanel", () => {
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();
   });
 
+  it("R19-17: an unreachable MCP shows WHY on the row, not just a red dot", () => {
+    // The reason used to live only in the probe's toast, so once it faded the
+    // dot was the entire story and the cause was unrecoverable without
+    // re-running the test.
+    const failed: McpView[] = [
+      {
+        id: "m7",
+        name: "uvx-fetch",
+        transport: "stdio",
+        target: "uvx mcp-server-fetch",
+        hasCred: false,
+        tools: null,
+        up: false,
+        lastCheckedAt: new Date().toISOString(),
+        lastError:
+          "exited before responding — ImportError: cannot import name 'McpError' from 'mcp.shared.exceptions'",
+        warmingSince: null,
+      },
+    ];
+    const { container } = renderPanel(
+      <ResourcesPanel kbs={[]} mcps={failed} skills={[]} gagents={[]} stages={STAGES} />,
+    );
+    const err = container.querySelector(".rsrc-err")!;
+    expect(err).toBeTruthy();
+    expect(err.textContent).toContain("ImportError: cannot import name 'McpError'");
+  });
+
+  it("R19-18: an installing server reads as installing, not unreachable", () => {
+    // The row carries a stale `up: false` — the verdict of the probe that
+    // STARTED this install — and must not show it as the answer.
+    const warming: McpView[] = [
+      {
+        id: "m8",
+        name: "writing-tools",
+        transport: "stdio",
+        target: "uvx --from git+https://example.dev/w writing-tools-mcp",
+        hasCred: false,
+        tools: null,
+        up: false,
+        lastCheckedAt: new Date().toISOString(),
+        lastError: "still installing after 20s — …",
+        warmingSince: new Date().toISOString(),
+      },
+    ];
+    const { container } = renderPanel(
+      <ResourcesPanel kbs={[]} mcps={warming} skills={[]} gagents={[]} stages={STAGES} />,
+    );
+    // R20-4 (N20-2): softened to one copy for both the evidence and heuristic
+    // warm-up bases — the reader can act on neither distinction.
+    expect(container.textContent).toContain("first run — installing in the background");
+    expect(container.textContent).not.toContain("unreachable");
+    // Its own dot state, and no red error block shouting while it works.
+    expect(container.querySelector(".stat-dot.warming")).toBeTruthy();
+    expect(container.querySelector(".stat-dot.down")).toBeNull();
+    expect(container.querySelector(".rsrc-err")).toBeNull();
+  });
+
+  it("R19-17: a HEALTHY server shows no error line", () => {
+    // A stale reason under a green dot would be worse than none.
+    const { container } = renderPanel(
+      <ResourcesPanel kbs={[]} mcps={MCPS.filter((m) => m.up === true)} skills={[]} gagents={[]} stages={STAGES} />,
+    );
+    expect(container.querySelector(".rsrc-err")).toBeNull();
+  });
+
   it("A9/F17: an MCP whose stored credential no longer decrypts reads 'auth: unreadable', not 'configured'", () => {
     const brokenMcps: McpView[] = [
       {
@@ -379,6 +446,7 @@ describe("ResourcesPanel", () => {
         target: "https://mcp.internal:7810/sse",
         hasCred: true,
         credUnreadable: true,
+        lastError: null, warmingSince: null,
         tools: null,
         up: null,
         lastCheckedAt: new Date().toISOString(),
@@ -444,7 +512,7 @@ describe("ResourcesPanel", () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     const staleMcps: McpView[] = [
       { id: "m3", name: "notes-fixture", transport: "stdio", target: "node /tmp/notes.mjs",
-        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo },
+        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null, warmingSince: null },
     ];
     const { container } = renderPanel(
       <ResourcesPanel kbs={[]} mcps={staleMcps} skills={[]} gagents={[]} stages={STAGES} />,
@@ -462,7 +530,8 @@ describe("ResourcesPanel", () => {
     const { getByText, getByLabelText } = renderResources();
     fireEvent.click(getByLabelText("Delete Architecture notes"));
     expect(getByText(/The index is removed from the store/)).toBeTruthy();
-    fireEvent.click(getByText("Remove", { selector: "button.btn.danger" }));
+    // C6: outcome-naming confirm label per resource kind.
+    fireEvent.click(getByText("Remove knowledge base", { selector: "button.btn.danger" }));
     await waitFor(() =>
       expect(lastForm).toMatchObject({ intent: "kb-delete", kbId: "kb1" }),
     );
@@ -569,6 +638,26 @@ describe("ResourcesPanel", () => {
     fireEvent.click(getByLabelText("Edit github-mcp"));
     expect(getByText(/1 agent template grants/)).toBeTruthy();
     expect(getByText(/Renaming it rewrites their grants/)).toBeTruthy();
+  });
+
+  it("N20-5: the Add-MCP modal shows the slug the name will actually be saved as", () => {
+    const { getByText, container } = renderResources();
+    // Open the MCP panel's own "Add" button (KB/skills have one too).
+    const mcpPanel = [...container.querySelectorAll("section.panel")].find(
+      (s) => s.querySelector("h2")?.textContent === "MCP servers",
+    )!;
+    const addBtn = [...mcpPanel.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Add"),
+    )!;
+    fireEvent.click(addBtn);
+
+    // The name is slugified before saving (`_`→`-`), which silently rewrote what
+    // the admin typed — and the reserved-name refusal then quoted a name they
+    // never entered. The field now discloses the slug the moment it differs.
+    const nameInput = container.querySelector("#mcp-name") as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: "viberr_browser" } });
+    expect(getByText(/will be saved as/)).toBeTruthy();
+    expect(getByText("viberr-browser")).toBeTruthy();
   });
 
   it("P14-KM-10: the agent modal renders orphaned grants as removable red chips", () => {

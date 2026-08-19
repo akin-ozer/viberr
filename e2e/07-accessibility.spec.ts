@@ -120,7 +120,10 @@ const DIALOGS: {
     name: "create profile",
     path: "/projects/viberr-core/agents",
     ready: "main",
-    dialog: 'dialog[aria-label="New specialist profile"]',
+    // D-pass20: the create/edit modal's aria-label is "New agent profile" (the
+    // "specialist" wording moved to the button's own copy). The opener button is
+    // "New profile".
+    dialog: 'dialog[aria-label="New agent profile"]',
     async open(page) {
       await page.getByRole("button", { name: "New profile" }).click();
     },

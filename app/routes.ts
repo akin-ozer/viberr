@@ -1,20 +1,30 @@
-import { type RouteConfig, index, route } from "@react-router/dev/routes";
+import { type RouteConfig, index, layout, route } from "@react-router/dev/routes";
 
 export default [
   index("routes/_index.tsx"),
   route("login", "routes/login.tsx"),
   route("logout", "routes/logout.tsx"),
-  // OAuth is served by better-auth's own handler at /api/auth/callback/*.
-  // The real tabbed org-settings surface (org profile, members, resources).
-  route("org/settings", "routes/org.settings.tsx"),
 
   // better-auth request handler (sign-in/out, social, .well-known, getSession).
   // Splat so every /api/auth/* sub-path reaches better-auth's own router.
+  // (OAuth callbacks are served by better-auth at /api/auth/callback/*.)
   route("api/auth/*", "routes/api.auth.$.ts"),
 
-  // URL-addressable PageOverlay routes (shell spec §4.6 / home spec §5.11).
-  route("profile", "routes/profile.tsx"),
-  route("notifications", "routes/notifications.tsx"),
+  // F20-30: the top-level authenticated surfaces that render OUTSIDE the
+  // workspace layout — the org-settings tabs and the two URL-addressable
+  // PageOverlays (shell spec §4.6 / home spec §5.11). Without this wrapper the
+  // ⌘K palette — which `home-page.tsx` calls "one shortcut app-wide" — never
+  // reached them: a viewer on /profile had to navigate back to a shell first.
+  // The pathless layout keeps their URLs unchanged and mounts only the shortcut
+  // + palette; Home and the workspace mount it themselves, so nothing
+  // double-registers.
+  layout("routes/palette-shell.tsx", [
+    // The real tabbed org-settings surface (org profile, members, resources).
+    route("org/settings", "routes/org.settings.tsx"),
+    route("profile", "routes/profile.tsx"),
+    route("notifications", "routes/notifications.tsx"),
+  ]),
+
   // Resource actions (fetcher targets, no UI).
   route("notifications/read", "routes/notifications.read.tsx"),
   route("prefs/theme", "routes/prefs.theme.tsx"),
@@ -34,6 +44,13 @@ export default [
   // Session export — downloads a bash installer that carries a run's provider
   // transcript so the conversation can be resumed locally (same subscription).
   route("resources/session-export", "routes/resources.session-export.ts"),
+
+  // R19-19: one task attachment (browser-produced screenshot/PDF). A resource
+  // route OUTSIDE the workspace layout — it serves raw bytes, member-only.
+  route(
+    "projects/:slug/tasks/:key/attachments/:file",
+    "routes/task-attachment.ts",
+  ),
 
   // Bare /projects → home (the project list lives at `/`), not a 404 (N5).
   route("projects", "routes/projects.tsx"),

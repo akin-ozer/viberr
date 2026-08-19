@@ -82,6 +82,15 @@ const envSchema = z.object({
   // this machine can rule out.
   VIBERR_FORCE_DATA_ROOT_LOCK: z.string().optional(),
 
+  // R19-19: absolute path of the chromium binary the browser MCP server drives.
+  // The image sets it (/usr/bin/chromium); when set, the mount builder passes
+  // --executable-path AND --no-sandbox (docker's default seccomp blocks the
+  // user-namespace sandbox for non-root). Unset on a dev host, Playwright's own
+  // browser resolution applies — which may require `npx playwright install
+  // chromium` for the alpha playwright @playwright/mcp pins, or pointing this
+  // at a local Chrome build.
+  VIBERR_BROWSER_EXECUTABLE: z.string().min(1).optional(),
+
   // Optional OAuth providers — the login buttons stay disabled when unset.
   GITHUB_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GITHUB_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
@@ -189,4 +198,24 @@ export function getEnv(): Env {
 export function resetEnvCacheForTests(): void {
   const cache = globalThis as unknown as Record<symbol, Env | undefined>;
   cache[ENV_CACHE_KEY] = undefined;
+}
+
+/**
+ * N20-4 (§5a) — the app's absolute public origin, or `null` when it cannot be
+ * known here. Derived from `BETTER_AUTH_URL`, the only configured absolute
+ * origin: R19-16's request-derived `callbackOrigin` is unavailable off-request,
+ * and PR bodies are composed from background operator runs (no request to
+ * derive one from). Trimmed and trailing-slash-stripped; `null` unless it is an
+ * `http(s)` origin.
+ *
+ * A `null` result is honest, not a fallback to a relative path: a relative
+ * `/projects/…` link 404s on github.com (worse than none), so the composer
+ * omits the link and writes the plain store-relative task key instead.
+ */
+export function appOrigin(): string | null {
+  const raw = getEnv().BETTER_AUTH_URL;
+  if (!raw) return null;
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(trimmed)) return null;
+  return trimmed || null;
 }

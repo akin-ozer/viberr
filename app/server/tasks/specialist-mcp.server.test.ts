@@ -1,11 +1,69 @@
 import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
+import { listMcpServers, type McpSpawn } from "~/server/org/resources.server";
 import {
   resolveSpecialistMcpServers,
   resolveSpecialistMcpServersDetailed,
+  verifyStdioMcpMountsForRun,
 } from "./specialist-mcp.server";
+
+/** A stdio child that answers the JSON-RPC handshake with `tools` tools. */
+function handshakeSpawn(tools: number): McpSpawn {
+  return () => {
+    const out = new EventEmitter();
+    const emit = (o: unknown) =>
+      queueMicrotask(() => out.emit("data", Buffer.from(`${JSON.stringify(o)}\n`)));
+    return {
+      stdin: {
+        write(data: string) {
+          for (const line of data.split("\n")) {
+            const t = line.trim();
+            if (!t) continue;
+            const msg = JSON.parse(t) as { method?: string };
+            if (msg.method === "initialize") {
+              emit({ jsonrpc: "2.0", id: 1, result: { capabilities: {} } });
+            } else if (msg.method === "tools/list") {
+              emit({
+                jsonrpc: "2.0",
+                id: 2,
+                result: { tools: Array.from({ length: tools }, (_, i) => ({ name: `t${i}` })) },
+              });
+            }
+          }
+        },
+        end() {},
+      },
+      stdout: { on: (e, cb) => out.on(e, cb) },
+      stderr: { on() {} },
+      on() {},
+      kill() {},
+    };
+  };
+}
+
+/** A stdio child that dies at spawn the way a half-installed npx tree does. */
+function crashSpawn(stderrText: string): McpSpawn {
+  return () => {
+    const err = new EventEmitter();
+    const exit = new EventEmitter();
+    queueMicrotask(() => {
+      err.emit("data", Buffer.from(stderrText));
+      queueMicrotask(() => exit.emit("exit", 1));
+    });
+    return {
+      stdin: { write() {}, end() {} },
+      stdout: { on() {} },
+      stderr: { on: (e, cb) => err.on(e, cb) },
+      on: (e, cb) => {
+        if (e === "exit") exit.on("exit", cb as (a?: unknown, b?: unknown) => void);
+      },
+      kill() {},
+    };
+  };
+}
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -60,6 +118,18 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
     ]);
     expect(resolved.servers).toEqual({});
     // Reserved names are BUILT elsewhere, not broken grants — nothing to report.
+    expect(resolved.unresolved).toEqual([]);
+  });
+
+  it("R19-19: skips `viberr_browser` — the browser is capability-mounted, never an org row", () => {
+    const store = setupTestStore(ctx);
+    addMcp(store.db, "viberr_browser", "stdio", "evil-browser --headless");
+    addMcp(store.db, "viberr-browser", "stdio", "evil-browser --headless");
+    const resolved = resolveSpecialistMcpServersDetailed(store.db, [
+      "viberr_browser",
+      "viberr-browser",
+    ]);
+    expect(resolved.servers).toEqual({});
     expect(resolved.unresolved).toEqual([]);
   });
 
@@ -179,6 +249,55 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     expect(unresolved[0]!.reason).toContain(
       "VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS",
     );
+  });
+
+  it("F20-10: a stdio mount that dies at run-spawn is dropped, disclosed, and the row is flagged", async () => {
+    const store = setupTestStore(ctx);
+    addMcp(store.db, "everything", "stdio", "npx -y @mcp/server-everything");
+    addMcp(store.db, "billing-api", "HTTP", "https://mcp.example/sse");
+    // The registry row reads healthy from a stale Add/Retest (the F20-10 setup:
+    // health was learned from Add/Retest, never a run).
+    store.db
+      .prepare(`UPDATE org_mcp_servers SET up = 1, tools_count = 16 WHERE name = 'everything'`)
+      .run();
+
+    const resolved = resolveSpecialistMcpServersDetailed(store.db, [
+      "everything",
+      "billing-api",
+    ]);
+    expect(Object.keys(resolved.servers).sort()).toEqual(["billing-api", "everything"]);
+
+    const verified = await verifyStdioMcpMountsForRun(store.db, resolved, {
+      spawnImpl: crashSpawn("Error: Cannot find module 'ajv'\n"),
+      timeoutMs: 200,
+    });
+
+    // The dead stdio mount is gone; the HTTP mount (never spawned here) stays.
+    expect(Object.keys(verified.servers)).toEqual(["billing-api"]);
+    const entry = verified.unresolved.find((u) => u.name === "everything")!;
+    expect(entry.mounted).toBe(false); // a hard mount failure, not a stale probe
+    expect(entry.reason).toContain("failed to start for this run");
+    expect(entry.reason).toContain("Cannot find module 'ajv'");
+
+    // …and the registry row no longer claims to be up (resources.server write-back).
+    const row = listMcpServers(store.db).find((m) => m.name === "everything")!;
+    expect(row.up).toBe(false);
+    expect(row.tools).toBeNull();
+    expect(row.lastError).toContain("Cannot find module 'ajv'");
+  });
+
+  it("F20-10: a healthy stdio mount and a clean disclosure are left untouched", async () => {
+    const store = setupTestStore(ctx);
+    addMcp(store.db, "pg-ro", "stdio", "npx -y @mcp/server-postgres");
+    const resolved = resolveSpecialistMcpServersDetailed(store.db, ["pg-ro"]);
+    const verified = await verifyStdioMcpMountsForRun(store.db, resolved, {
+      spawnImpl: handshakeSpawn(3),
+      timeoutMs: 200,
+    });
+    expect(Object.keys(verified.servers)).toEqual(["pg-ro"]);
+    expect(verified.unresolved).toEqual([]);
+    // The row's health is left exactly as it was — a working mount proves nothing new.
+    expect(listMcpServers(store.db).find((m) => m.name === "pg-ro")!.up).toBeNull();
   });
 
   it("A9: rotation WORKS — a retired key in the env opens the box and re-seals it", async () => {

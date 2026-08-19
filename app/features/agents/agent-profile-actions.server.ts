@@ -68,6 +68,12 @@ export interface ProfileSaveResult {
   profileId: string;
   name: string;
   notice?: DeliveryGrantNotice;
+  /** F20-20: a governance-significant change the save just made — today, raising
+   *  an operator to FULL autonomy and/or granting it "Accept completion into
+   *  Done". Surfaced next to the success toast (the generic "updated" tick alone
+   *  hid that the operator can now close tasks without a human) and recorded as
+   *  its own audit event, not folded into the generic profile-updated row. */
+  governanceNotice?: { message: string };
 }
 
 export interface ProfileMutationContext {
@@ -157,10 +163,13 @@ const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
  * `human`. This is the enforcement point the catalog comment refers to; no
  * write path can persist an always-human grant an agent could act on.
  *
- * R7-5: for a SPECIALIST profile (`specialist: true`), a submitted `recommend`
- * is coerced to `direct` ('Allowed') — the specialist picker never offers
- * `recommend`, so this keeps a hostile/legacy form honest. The operator
- * (`specialist: false`) keeps its real `recommend` modes. */
+ * R20-6/F20-21: for a SPECIALIST profile (`specialist: true`), a submitted
+ * `recommend` normalizes DOWN to `off` (withheld) via
+ * `coerceSpecialistCapabilityMode` — the specialist picker never offers
+ * `recommend`, and widening a stray one to `direct` (the old R7-5 behavior) made
+ * a stored `recommend` render/count/enforce as `direct`. Normalizing to the SAFE
+ * direction keeps file = enforcement = display. The operator (`specialist:
+ * false`) keeps its real `recommend` modes. */
 function grantsFor(
   caps: Record<string, CapMode>,
   defaults: Readonly<Record<string, CapMode>>,
@@ -215,8 +224,9 @@ function grantsFor(
  * power, the exact opposite of what omitting the toggles means. Every governed
  * id is now materialized; only ids outside the curated set are ignored.
  *
- * Create is ALWAYS a specialist profile, so a submitted `recommend` coerces to
- * `direct` ('Allowed') per R7-5; always-human ids stay `human`. */
+ * Create is ALWAYS a specialist profile, so a submitted `recommend` normalizes
+ * to `off` (withheld) per R20-6/F20-21 — never up to `direct`; always-human ids
+ * stay `human`. */
 function createModalGrants(
   caps: Record<string, CapMode>,
 ): {
@@ -507,6 +517,22 @@ export async function updateAgentProfile(
   requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
   const delivery: { notice: DeliveryGrantNotice | null } = { notice: null };
+  // F20-20: capture the operator governance transition this save makes, so the
+  // audit + toast can name it instead of the generic "profile updated". Filled
+  // inside the writer callback where the prior view and the saved grants exist.
+  const gov: {
+    isOperator: boolean;
+    priorAutonomy: "supervised" | "full";
+    newAutonomy: "supervised" | "full";
+    priorDirectAccept: boolean;
+    newDirectAccept: boolean;
+  } = {
+    isOperator: false,
+    priorAutonomy: "supervised",
+    newAutonomy: "supervised",
+    priorDirectAccept: false,
+    newDirectAccept: false,
+  };
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -536,6 +562,24 @@ export async function updateAgentProfile(
     });
     delivery.notice = saved.notice;
     deployment.capabilities = [...saved.grants, ...preserved];
+
+    // F20-20: record the operator's autonomy + direct-accept transition. The
+    // stored autonomy is the definition value written below (`form.autonomy ??
+    // current.autonomy ?? "supervised"`), so read it the same way.
+    if (isOperator) {
+      const directAcceptOf = (
+        grants: { capabilityId: string; mode: string }[],
+      ) =>
+        grants.some(
+          (c) =>
+            c.capabilityId === "completion-for-acceptance" && c.mode === "direct",
+        );
+      gov.isOperator = true;
+      gov.priorAutonomy = current.autonomy ?? "supervised";
+      gov.newAutonomy = form.autonomy ?? current.autonomy ?? "supervised";
+      gov.priorDirectAccept = directAcceptOf(current.capabilities);
+      gov.newDirectAccept = directAcceptOf(saved.grants);
+    }
 
     // Full-definition override. Both kinds now store the picked backend + model
     // + effort (the operator no longer keeps the "orchestration runtime"
@@ -575,6 +619,21 @@ export async function updateAgentProfile(
   });
 
   reprojectProject(db, ctx, input.projectSlug);
+
+  // F20-20: raising an operator to FULL autonomy (or newly granting it "Accept
+  // completion into Done") lets it close tasks with no human — a governance
+  // decision that must be discoverable, not buried under a generic profile
+  // update. Stamp the transition on the update row's details AND write a
+  // dedicated audit event whenever it actually changes.
+  const autonomyElevatedToFull =
+    gov.isOperator && gov.newAutonomy === "full" && gov.priorAutonomy !== "full";
+  const directAcceptNewlyGranted =
+    gov.isOperator && gov.newDirectAccept && !gov.priorDirectAccept;
+  // The human-only-Done exception is LIVE after this save iff both hold (the
+  // exact `operator-actions.server.ts:2580` combination).
+  const directDoneLive =
+    gov.isOperator && gov.newAutonomy === "full" && gov.newDirectAccept;
+
   recordAudit(db, {
     action: "project.agent_profile.updated",
     actor: { userId: actor.userId, label: actor.label },
@@ -585,6 +644,13 @@ export async function updateAgentProfile(
       name: form.name,
       role: form.role,
       backend: form.backend,
+      ...(gov.isOperator
+        ? {
+            operatorAutonomy: gov.newAutonomy,
+            acceptCompletionIntoDone: gov.newDirectAccept ? "direct" : "off",
+            acceptCompletionActsDirectly: directDoneLive,
+          }
+        : {}),
       ...(delivery.notice
         ? {
             deliveryGrants: delivery.notice.kind,
@@ -593,10 +659,37 @@ export async function updateAgentProfile(
         : {}),
     },
   });
+
+  let governanceNotice: { message: string } | undefined;
+  if (autonomyElevatedToFull || directAcceptNewlyGranted) {
+    const message = directDoneLive
+      ? `${form.name} now runs at full autonomy with “Accept completion into Done” granted — it can move tasks to Done without a human.`
+      : autonomyElevatedToFull
+        ? `${form.name} autonomy raised to full — it performs approval-boundary transitions itself. “Accept completion into Done” still needs its direct grant to close tasks.`
+        : `“Accept completion into Done” granted to ${form.name} — it takes effect only at full autonomy (currently ${gov.newAutonomy}).`;
+    governanceNotice = { message };
+    recordAudit(db, {
+      action: "project.operator.autonomy_changed",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "agent_profile",
+      subjectId: input.profileId,
+      projectSlug: input.projectSlug,
+      details: {
+        name: form.name,
+        from: gov.priorAutonomy,
+        to: gov.newAutonomy,
+        acceptCompletionIntoDone: gov.newDirectAccept ? "direct" : "off",
+        directDoneLive,
+        message,
+      },
+    });
+  }
+
   return {
     profileId: input.profileId,
     name: form.name,
     ...(delivery.notice ? { notice: delivery.notice } : {}),
+    ...(governanceNotice ? { governanceNotice } : {}),
   };
 }
 

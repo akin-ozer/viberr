@@ -17,14 +17,18 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { WorkflowBoundary } from "~/schemas/project-file.schema";
 import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
+import { findUserByEmail } from "~/server/auth/user-store.server";
+import { listOrgUsers } from "~/server/org/org-users.server";
 import {
   addStage,
+  inviteMember,
   removeStage,
   renameStage,
   reorderStages,
   repairProjectRepo,
   repoFootprintTasks,
   setBranchCleanup,
+  NEW_STAGE_COLORS,
 } from "./settings-actions.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -224,6 +228,95 @@ describe("removeStage", () => {
   });
 });
 
+// F20-27 / F20-13 / N20-10 — the stage-write audit + disclosure + persisted color.
+describe("stage writes: audit names, boundary disclosure, hex color", () => {
+  it("F20-27: added records { id, name }; removed records { id, name } (renderer reads d.name)", async () => {
+    const store = setup();
+    const { stageId } = await addStage(
+      store.db,
+      { projectSlug: store.slug, name: "QA" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    const added = listAuditEvents(store.db, { action: "project.stage.added" });
+    expect(added).toHaveLength(1);
+    expect(added[0]!.details).toMatchObject({ id: stageId, name: "QA" });
+
+    await removeStage(
+      store.db,
+      { projectSlug: store.slug, stageId },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    const removed = listAuditEvents(store.db, { action: "project.stage.removed" });
+    expect(removed).toHaveLength(1);
+    expect(removed[0]!.details).toMatchObject({ id: stageId, name: "QA" });
+  });
+
+  it("F20-13: removing a stage that collapses two edges to a stricter hop discloses it (toast + audit)", async () => {
+    const store = setup();
+    // Default chain: ready→impl (auto) + impl→review (approval). Removing In
+    // Progress merges them to the STRICTER `approval` — a tightening the toast
+    // and audit must name, not swallow.
+    const { toast } = await removeStage(
+      store.db,
+      { projectSlug: store.slug, stageId: "impl" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(toast).toContain("Ready");
+    expect(toast).toContain("Review");
+    expect(toast).toContain("Human approval");
+    const removed = listAuditEvents(store.db, { action: "project.stage.removed" })[0]!;
+    // Contract with the renderer (C-WORKFLOW-POLICY): `tightened: { from, to,
+    // boundary }` as display NAMES + boundary id, alongside `{ id, name }`.
+    expect(removed.details).toMatchObject({
+      id: "impl",
+      name: "In Progress",
+      tightened: { from: "Ready", to: "Review", boundary: "approval" },
+    });
+  });
+
+  it("F20-13: a removal that keeps the same boundary is NOT reported as a tightening", async () => {
+    const store = setup();
+    // Add a stage before Done then remove it: both new edges inherit review→done's
+    // `human`, so the merge is `human`→`human` — no tightening.
+    const { stageId } = await addStage(
+      store.db,
+      { projectSlug: store.slug, name: "Sign-off" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    const { toast } = await removeStage(
+      store.db,
+      { projectSlug: store.slug, stageId },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(toast).toBe('Stage "Sign-off" removed');
+    const removed = listAuditEvents(store.db, { action: "project.stage.removed" })[0]!;
+    expect(removed.details).not.toHaveProperty("tightened");
+  });
+
+  it("N20-10: a new stage persists a HEX color, never a CSS var, into project.md", async () => {
+    const store = setup();
+    const { stageId } = await addStage(
+      store.db,
+      { projectSlug: store.slug, name: "QA" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    const stage = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.stages.find((s) => s.id === stageId)!;
+    expect(stage.color).toMatch(/^#[0-9a-f]{3,8}$/i);
+    expect(stage.color).not.toContain("var(");
+    // The whole palette is hex — the canonical file holds no stylesheet token.
+    for (const color of NEW_STAGE_COLORS) {
+      expect(color).toMatch(/^#[0-9a-f]{3,8}$/i);
+    }
+  });
+});
+
 describe("reorderStages", () => {
   it("re-points the chain at the new column order, each stage keeping its entry gate", async () => {
     const store = setup();
@@ -377,6 +470,61 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(0);
   });
 
+  it("F20-15: REFUSES a repo the credential can only READ — a project must be able to push", async () => {
+    const store = setupTestStore(ctx);
+    await misconfigure(store);
+    bindCredential(store);
+    // Repo is VISIBLE (res.ok) but the token's computed permissions say no push —
+    // the octocat/Hello-World live case. `res.ok` alone must not adopt it.
+    const gh = fakeGithubFetch({
+      [`GET /repos/octocat/Hello-World`]: {
+        body: {
+          full_name: "octocat/Hello-World",
+          default_branch: "master",
+          permissions: { admin: false, maintain: false, push: false },
+        },
+      },
+    });
+    await expect(
+      repairProjectRepo(
+        store.db,
+        { projectSlug: store.slug, repo: "octocat/Hello-World" },
+        admin(store),
+        { dataRoot: store.dataRoot },
+        { fetchImpl: gh.fetchImpl },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    // Nothing changed, nothing audited.
+    expect(
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed
+        .frontmatter.repo,
+    ).toBe("akin/viberr");
+    expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(0);
+  });
+
+  it("F20-15: ACCEPTS a repo the credential can push to (permissions.push true)", async () => {
+    const store = setupTestStore(ctx);
+    await misconfigure(store);
+    bindCredential(store);
+    const gh = fakeGithubFetch({
+      [`GET /repos/${REPO_OK}`]: {
+        body: {
+          full_name: REPO_OK,
+          default_branch: "main",
+          permissions: { admin: false, maintain: false, push: true },
+        },
+      },
+    });
+    const result = await repairProjectRepo(
+      store.db,
+      { projectSlug: store.slug, repo: REPO_OK },
+      admin(store),
+      { dataRoot: store.dataRoot },
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(result.changed).toBe(true);
+  });
+
   it("with NO credential bound the repair applies unprobed, saying so", async () => {
     const store = setupTestStore(ctx);
     await misconfigure(store);
@@ -520,5 +668,56 @@ describe("setBranchCleanup (R15-6)", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow();
+  });
+});
+
+// F20-12 / N20-6 — inviting an unknown email must mint a USABLE account and the
+// toast must not claim an email was sent (there is no mailer, ruling 13).
+describe("inviteMember", () => {
+  it("F20-12: an unknown email mints a temp-password account (usable + setup-pending), not a passwordless one", async () => {
+    const store = setup();
+    const result = await inviteMember(
+      store.db,
+      { projectSlug: store.slug, name: "New Person", email: "probe.nobody@viberr.dev" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    // A temp password was minted (the same ceremony Allow-access uses).
+    expect(result.tempPassword).toBeDefined();
+    expect(result.tempPassword!.length).toBeGreaterThanOrEqual(8);
+
+    const record = findUserByEmail(store.db, "probe.nobody@viberr.dev")!;
+    // Usable: a credential exists and a reset is required at first sign-in — so
+    // `statusOf` reads "setup pending", not the old healthy "active".
+    expect(record.hasPassword).toBe(true);
+    expect(record.pwresetRequired).toBe(true);
+    const view = listOrgUsers(store.db).find((u) => u.id === record.id)!;
+    expect(view.status).toBe("invited");
+  });
+
+  it("N20-6: the toast says what happened, never 'Invite sent' (no mailer)", async () => {
+    const store = setup();
+    const result = await inviteMember(
+      store.db,
+      { projectSlug: store.slug, name: "New Person", email: "someone@viberr.dev" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.toast).toContain("Added someone@viberr.dev");
+    expect(result.toast).toContain("Viewer");
+    expect(result.toast).not.toContain("Invite sent");
+  });
+
+  it("an already-registered email is added without minting a second account", async () => {
+    const store = setup();
+    const result = await inviteMember(
+      store.db,
+      { projectSlug: store.slug, name: "Deniz", email: store.users.deniz.email },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    // No new account → no temp password to hand over.
+    expect(result.tempPassword).toBeUndefined();
+    expect(result.toast).toBe(`Added ${store.users.deniz.email} — joins as Viewer`);
   });
 });

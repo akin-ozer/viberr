@@ -227,6 +227,8 @@ describe("acceptanceNoChangeCheck — the accept-time gate", () => {
       refusal: null,
       verification: null,
       branch: null,
+      // R20-2: an ordinary task (has a PR) fails noChangeCandidate → never probed.
+      autoDetected: false,
     });
     expect(requestSpy).not.toHaveBeenCalled();
   });

@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
@@ -46,6 +47,7 @@ import {
   prStatePill,
   reviewPill,
 } from "~/features/github/github-pills";
+import { AcceptConfirm } from "~/features/task-detail/accept-confirm";
 import { LocalRelative } from "~/ui/local-time";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
@@ -84,6 +86,23 @@ export interface BoardStage {
   name: string;
   color: string;
 }
+
+/** D9: visually-hidden style for the board's `aria-live` announcement region.
+ *  Inline for the same reason `skip-link.tsx` is — `app/app.css` carries no
+ *  visually-hidden utility (and its stylesheet is another cluster's to change),
+ *  so the region ships its own hiding. It must stay in the DOM (not `display:
+ *  none`) for a screen reader to read updates into it. */
+const SR_ONLY: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clipPath: "inset(50%)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
 
 /**
  * Gap-10: a board card's task, plus the two activity fields `listProjectTasks`
@@ -228,6 +247,19 @@ function WaitTag({ task }: { task: TaskSummary }) {
  */
 function StateSignals({ task }: { task: BoardTask }) {
   if (isArchived(task)) return null;
+  // C2 (⇄ N20-14 / UXO-1): the validation pill asserts a LIVE obligation
+  // ("awaiting verdict" / "validation failing"). UXO-1 withdrew it on archived
+  // cards (the early return above) because abandoned work owes nobody a verdict;
+  // the same is true of any TERMINAL task — an accepted/merged completion owes
+  // none either, and a force-accepted one would otherwise read
+  // "accepted · gate bypassed" (or the stale "awaiting verdict") beside a Done
+  // card. The task hero makes exactly this cut with the same predicate
+  // (task-main-sections.tsx `terminal`); the board card matches it. The PR-state
+  // pill below STAYS on a terminal task — "merge pending" is a real outstanding
+  // action (R16-6), not a live verdict claim — as does the readiness pill in the
+  // card top, whose value IS the terminal status.
+  const terminal =
+    task.displayReadiness === "accepted" || task.displayReadiness === "merged";
   return (
     <>
       {/* R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
@@ -279,10 +311,14 @@ function StateSignals({ task }: { task: BoardTask }) {
           was pixel-identical to a healthy one. Deliberate departure from the
           HTML mock (design/html-app/app/board.jsx), which omits it too.
           "none" stays silent so the card keeps its density; placement
-          mirrors the review queue's `.rq-meta` (PR → validation → wait). */}
-      {task.validation !== "none" && (
+          mirrors the review queue's `.rq-meta` (PR → validation → wait).
+          C2: withdrawn once the task is terminal — see `terminal` above. */}
+      {!terminal && task.validation !== "none" && (
         <ValidationPill value={task.validation} sm />
       )}
+      {/* D4: the continuity cue sits with the other supervision signals, before
+          the quiet/wait tags. Same component the list row shares (below). */}
+      <ContinuityTag task={task} />
       {/* Gap-10: the quiet cue sits after validation and before the wait tag,
           the order both board views share. */}
       <QuietTag task={task} />
@@ -328,6 +364,30 @@ function QuietTag({ task }: { task: BoardTask }) {
           renders a non-breaking space for one frame and fills in after
           hydration (app/ui/local-time.tsx). */}
       no activity · <LocalRelative iso={task.lastActivityAt} />
+    </Pill>
+  );
+}
+
+/**
+ * D4 — the runtime-continuity cue, and the whole point of projecting the state:
+ * "degraded continuity" existed only on the task page's Continuity Recovery
+ * panel, so a supervisor scanning the board could not see which tasks lost their
+ * provider session. It now carries the SAME state onto the card (UX spec §State
+ * Semantics: "Every state must mean the same thing everywhere it appears").
+ *
+ * Warning tone (`risk`), matching how the panel draws the same state — a lost
+ * conversation the agent had to re-anchor around is a real supervision signal,
+ * not a neutral fact like "no activity". The refresh glyph is the panel heading's
+ * own icon, so the cue reads as the same thing on both surfaces. It is a coarse
+ * "a break happened" flag; the panel still owns the recovery detail (which agent,
+ * whether it recovered), which lives in the run projection this card cannot see.
+ */
+function ContinuityTag({ task }: { task: BoardTask }) {
+  if (task.continuity !== "degraded") return null;
+  return (
+    <Pill kind="risk" sm>
+      <Icon name="refresh" />
+      degraded continuity
     </Pill>
   );
 }
@@ -458,10 +518,15 @@ function TaskCard({
         <div className="card-top">
           <span className="key">{task.key}</span>
           <span className="spacer" />
-          {/* F15-09: this slot used to swap in a second "agent working" pill
-              whenever the card's foot was ALREADY drawing one via WaitTag —
+          {/* F15-09 / C3: this slot used to swap in a second "agent working"
+              pill whenever the card's foot was ALREADY drawing one via WaitTag —
               the same claim twice, at the cost of the readiness the slot
-              exists for. Readiness here, wait state in the foot, once each.
+              exists for. Readiness here, wait state in the foot, once each — so
+              a live run on an `input_required` task shows BOTH "input required"
+              (this slot) and "agent working" (the foot), never one hiding the
+              other. C3 gave the task hero this same split (task-main-sections.tsx
+              agent-working pill beside the readiness one); the card is the surface
+              it was matched to.
 
               F19-8: an archived card says "archived" here instead — the same
               swap UXO-1 made in the task hero, for the same reason. Readiness
@@ -784,110 +849,36 @@ function ListView({
 /* ---------- New task modal (board spec §4.6) ---------- */
 
 /**
- * B1 / F19-27 — the board's acceptance confirm.
+ * D3 (rulings 14 + 53) — as much of `acceptanceRefusalReason`
+ * (task-actions.server.ts) as a board SUMMARY can answer, composed into the one
+ * `blockedReason` the shared ceremony renders.
  *
- * A human moving a card into the FINAL stage is not a bare move: the server
- * routes it through the full acceptance contract, which attempts a real **PR
- * merge** (`reorderTask` → `acceptCompletion`, task-actions.server.ts). Task
- * detail has always confirmed that ("Merging is one-way"), but the board's drag
- * and its keyboard Move menu committed it straight from the gesture, so the
- * most irreversible action in the product was also its most casual one. Ruling
- * 20 / FR27 want the dialog on EVERY acceptance path.
+ * `blockReason` alone is not "the" refusal: it is the projected revision gate
+ * (`acceptanceBlockReason`, rebuilder.server.ts), whose own docstring names the
+ * refusals it leaves OUT because they are per-reader state its consumers filter
+ * on first — the ARCHIVED task and the STAGE boundary. This dialog can rely on
+ * neither filter (it re-reads its task from the live payload, and the Move menu
+ * offers the terminal stage from ANY stage), so it asks them here, through the
+ * server's own shared predicates so the sentence cannot drift:
+ *   - `archivedTaskBlockedReason` — the SAME function the server calls;
+ *   - `closedPrBlockedReason` — asked ahead of `blockReason` only for R16-3
+ *     precedence (a terminal GitHub fact outranks every process gate);
+ *   - the STAGE gate — `acceptanceStageBlockedReason`, the one the task file
+ *     cannot answer (it turns on the PROJECT's workflow edges). Not guessed from
+ *     column ORDER (rulings 12/14): `TaskSummary.atAcceptanceBoundary` carries
+ *     the graph's answer, derived server-side through the same `resolveStageRoles`;
+ *   - the blocked-packet and conflicting-PR gates — belt-and-braces so a stale
+ *     projection fails CLOSED rather than opening a confident dialog on a click
+ *     the server refuses.
  *
- * F19-27 — this comment used to end "the board doesn't hold the PR/verdict
- * detail the task-detail dialog shows", and that was FALSE. The card's own
- * `TaskSummary` already carries `pr: PrRef` — number, state and
- * `revisionDrift.{headSha,aheadBy}` — plus `validation` and `blockReason`
- * (shared/mapping/task.server.ts), and this very file renders `task.pr.state`
- * and the ValidationPill on the card the human just dragged. So the dialog
- * asked for `taskKey` + `stageName`, and a PR whose head had drifted AHEAD of
- * the reviewed revision merged from the board with the divergence disclosed
- * nowhere — while ruling 42 requires it on "the accept dialog", and R18-7 says
- * board acceptance runs the identical contract. Every ruling-42 disclosure the
- * summary holds is drawn here now, in the task dialog's own row order and
- * vocabulary (`prStatePill`, ValidationPill — rulings 12/14).
- *
- * What genuinely is NOT on a board summary: the delivered revision sha
- * (`workRevision`), the project's default branch, and the `noChanges` flag —
- * all three are task-FILE frontmatter the task-detail loader reads directly and
- * `mapTaskProjectionRow` never projects. Those rows are the reason the footer
- * still points at the task page — a narrower, true version of the claim this
- * dialog used to make about all of them.
- *
- * The `noChanges` gap is the one that costs copy: R19-8 makes "completed with no
- * changes" a first-class acceptance, and the task dialog names it. Here that
- * task falls into the no-PR branch below, whose sentence is still TRUE of it
- * ("the task closes without a merge") but does not name the disposition.
- * Projecting `noChanges` into `TaskSummary` would close it — a shared/mapping
- * change, out of this file's reach.
+ * A refusal shown here is final — the board has no force-accept to bypass it.
  */
-function AcceptOnBoardConfirm({
-  task,
-  fromStageName,
-  stageName,
-  onCancel,
-  onConfirm,
-}: {
-  task: TaskSummary;
-  /** The stage the card is leaving — see the `mh-sub` copy below. */
-  fromStageName: string;
-  stageName: string;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const { ref: panelRef, close } = useDialog(onCancel);
-  const pr = task.pr;
-  const prPill = pr ? prStatePill(pr.state) : null;
-  const drift = pr?.revisionDrift ?? null;
-  /**
-   * Why the server would refuse THIS click — as much of `acceptanceRefusalReason`
-   * (task-actions.server.ts) as a board summary can answer.
-   *
-   * The row used to read `task.blockReason` alone and call that "the" refusal.
-   * It isn't: `blockReason` is the projected acceptance gate
-   * (`acceptanceBlockReason`, rebuilder.server.ts), and that function's own
-   * docstring names the two refusals which stay OUT of the column — the ARCHIVED
-   * task and the STAGE boundary — because both are per-reader state its
-   * consumers filter on before they ever read it (`archived = 0`, the resolved
-   * review stage). This dialog is the reader that can rely on neither filter: it
-   * re-reads its task from the live payload on every render, so a task archived
-   * elsewhere mid-gesture arrives here archived, and the Move menu it opens from
-   * offers the terminal stage from ANY stage. Both are therefore asked here,
-   * ahead of the column, through the server's own predicate where one is shared
-   * — `archivedTaskBlockedReason` is the SAME function `acceptanceRefusalReason`
-   * calls, so that sentence cannot drift.
-   *
-   * `closedPrBlockedReason` is asked HERE rather than left to `blockReason`
-   * (which opens with the same call) only for precedence: R16-3 puts that
-   * terminal GitHub fact above every process gate, and the stage gate below is a
-   * process gate. Same predicate, same sentence, so a task whose PR is closed
-   * reads identically either way.
-   *
-   * The two gates BELOW `blockReason` are belt-and-braces, not a second opinion:
-   * UX19-3 moved the open-blocked-packet and conflicting-PR gates into the column
-   * itself, which sits above them here and so answers first for any fresh row.
-   * They stay because a stale or missing projection must fail CLOSED — an
-   * unanswered gate opens a confident dialog on a click the server refuses,
-   * which is the whole shape of this finding. The packet predicate and sentence
-   * are the ones the task page and its side panels already use.
-   *
-   * The stage gate — `acceptanceStageBlockedReason`, "you are not at the boundary
-   * the workflow puts before Done" — is the one the task file cannot answer: it
-   * turns on the PROJECT's workflow edges. F19-27: it is not guessed at from the
-   * column ORDER either (that forked mapping would refuse a project whose graph
-   * really allows the edge — rulings 12/14). `TaskSummary.atAcceptanceBoundary`
-   * carries the fact instead, derived server-side from the same stages + edges
-   * through the same `resolveStageRoles` (shared/mapping/task.server.ts). Before
-   * that, a Triage → Done drag opened a dialog with NO blocked row and the
-   * server answered the click with a 409.
-   *
-   * So: a refusal shown here means the server will refuse this click — the board
-   * has no force-accept to bypass it. The absence of one is not the opposite
-   * promise (the three task-FILE facts named in the head comment are still only
-   * on the task page), which is why the head copy commits only to what a click
-   * DOES.
-   */
-  const refusal =
+function boardAcceptRefusal(
+  task: TaskSummary,
+  fromStageName: string,
+  terminalName: string,
+): string | null {
+  return (
     archivedTaskBlockedReason(task, task.key) ??
     closedPrBlockedReason(task, task.key) ??
     (task.atAcceptanceBoundary
@@ -895,97 +886,95 @@ function AcceptOnBoardConfirm({
       : // The server's own sentence names the resolved review stage; a summary
         // holds no stage roles, and "the boundary" is the truer phrasing anyway
         // for a graph with several edges into the terminal stage.
-        `${task.key} is at ${fromStageName}, not the boundary the workflow puts before ${stageName} — a completion can only be accepted from there. Move the task through the workflow first.`) ??
+        `${task.key} is at ${fromStageName}, not the boundary the workflow puts before ${terminalName} — a completion can only be accepted from there. Move the task through the workflow first.`) ??
     task.blockReason ??
     (task.readiness === "blocked" && task.packet?.type === "blocked"
       ? "An open blocked decision is holding this task."
       : null) ??
-    conflictingPrBlockedReason(task, task.key);
+    conflictingPrBlockedReason(task, task.key)
+  );
+}
+
+/**
+ * D3 (rulings 14 + 53) — the board's acceptance ceremony.
+ *
+ * A human moving a card into the FINAL stage is not a bare move: the server
+ * routes it through the full acceptance contract, which attempts a real PR
+ * merge (`reorderTask` → `acceptCompletion`, task-actions.server.ts). Ruling 53
+ * (R18-7) required this confirmation to "match the task-detail dialog"; ruling
+ * 14 forbids forking a shared surface per screen. The board nonetheless carried
+ * `AcceptOnBoardConfirm`, its OWN dialog, disclosing LESS than the task page:
+ * no merge target, no delivered-revision row, no verdict attribution, no
+ * no-change disposition.
+ *
+ * This renders the ONE shared `AcceptConfirm` (task-detail/accept-confirm), in
+ * its `stage-move` ceremony mode — the mode written for exactly this path (a
+ * human move into the terminal stage IS accepting completion, F19-37). The board
+ * maps its projection summary onto the component's structural `task` shape and
+ * supplies the stage list from its columns. The three task-FILE facts a board
+ * summary does not carry are passed honestly rather than invented:
+ *   - `workRevisionSha: null` → the shared "No delivered revision recorded." row
+ *     (the fork drew no revision row at all);
+ *   - `defaultBranch` → the merge target, threaded from the project record —
+ *     the fact the fork could not name and sent people to the task page for;
+ *   - `noChanges` / `noPullRequest: false` → the board cannot run the accept-time
+ *     branch re-probe the task-detail loader drives, so it keeps the plain no-PR
+ *     sentence rather than promising an auto-detect it can't perform.
+ * The refusals a board summary CAN answer are composed by `boardAcceptRefusal`.
+ */
+function AcceptOnBoardConfirm({
+  task,
+  stages,
+  fromStageName,
+  defaultBranch,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  task: TaskSummary;
+  /** Project stages in order — supplies the shared ceremony's stage list and
+   *  names the terminal (merge) stage. */
+  stages: BoardStage[];
+  /** The stage the card is leaving — named in the ceremony's Moving row. */
+  fromStageName: string;
+  /** The merge target (project default branch) — the fact a board summary lacks
+   *  and the fork could not name. */
+  defaultBranch: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const terminalName = stages[stages.length - 1]?.name ?? "Done";
   return (
-    <dialog className="modal-card modal-narrow" aria-label="Accept completion" ref={panelRef}>
-      <div className="modal-head">
-        <span className="agent-glyph lg">
-          <Icon name="check" />
-        </span>
-        <div className="mh-main">
-          <h2>Accept {task.key}?</h2>
-          {/* Naming the stage the card is LEAVING makes the shape of the move
-              visible in the first sentence: a drag from Triage straight to the
-              final stage skips the whole workflow, and reads nothing like an
-              acceptance at the boundary. The Blocked row below then says the
-              server will refuse it. */}
-          <div className="mh-sub">
-            Moving {task.key} from {fromStageName} into {stageName} accepts its
-            completion — Viberr merges the review pull request when GitHub is
-            reachable, and records the acceptance on the timeline. Merging is
-            one-way.
-          </div>
-        </div>
-        <button type="button" className="icon-btn modal-close" onClick={close} aria-label="Close">
-          <Icon name="x" />
-        </button>
-      </div>
-      <div className="modal-body tight">
-        <div className="packet-obs flush">
-          <div className="obs">
-            <span className="k">Merges</span>
-            <span>
-              {pr && prPill ? (
-                <Pill kind={prPill.kind} sm>
-                  PR #{pr.number} · {prPill.label}
-                </Pill>
-              ) : (
-                <>No linked pull request — the task closes without a merge.</>
-              )}
-            </span>
-          </div>
-          {/* Ruling 42 (R17-1): accepting may merge a head AHEAD of the reviewed
-              revision, but the extra commits ship unreviewed and the human must
-              see that before the one-way write — same row, same wording as the
-              task-detail dialog. */}
-          {drift && (
-            <div className="obs warn">
-              <span className="k">Merge head</span>
-              <span>
-                <span className="mono">{drift.headSha.slice(0, 12)}</span> —{" "}
-                {drift.aheadBy} commit{drift.aheadBy === 1 ? "" : "s"} added
-                since review;{" "}
-                {drift.aheadBy === 1 ? "it merges" : "they merge"} unreviewed.
-              </span>
-            </div>
-          )}
-          <div className="obs">
-            <span className="k">Verdict</span>
-            <span>
-              <ValidationPill value={task.validation} />
-            </span>
-          </div>
-          {/* Why the server would refuse this click, composed above — the
-              projected revision gate (P11-50) plus the four further refusals
-              `acceptanceRefusalReason` enforces on it. The board has no
-              force-accept, so a refusal shown here is final: saying so beats
-              spending the confirmation on an error toast. */}
-          {refusal && (
-            <div className="obs">
-              <span className="k">Blocked</span>
-              <span>{refusal}</span>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="modal-foot">
-        <span className="fine xs dim">
-          Open {task.key} for the reviewed revision, the merge target and the
-          full acceptance check.
-        </span>
-        <button type="button" className="btn ghost" onClick={close}>
-          Not yet
-        </button>
-        <button type="button" className="btn primary" onClick={onConfirm}>
-          Accept → {stageName}
-        </button>
-      </div>
-    </dialog>
+    <AcceptConfirm
+      task={{
+        key: task.key,
+        title: task.title,
+        stage: task.stage,
+        stages: stages.map((s) => ({ id: s.id, name: s.name })),
+        validation: task.validation,
+        branch: task.branch,
+        pr: task.pr,
+      }}
+      workRevisionSha={null}
+      noChanges={false}
+      noPullRequest={false}
+      defaultBranch={defaultBranch}
+      // The STAGE gate the summary CAN answer (F19-27). The board never
+      // force-accepts, so this jumps no stage on its own — the off-boundary
+      // sentence rides `blockedReason` below — but it keeps the shared
+      // component's own boundary reasoning honest.
+      atBoundary={task.atAcceptanceBoundary}
+      ceremony={{
+        mode: "stage-move",
+        label: `${fromStageName} → ${terminalName}`,
+      }}
+      verdictSatisfiedBy={null}
+      blockedReason={boardAcceptRefusal(task, fromStageName, terminalName)}
+      busy={busy}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -1168,6 +1157,14 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   // "quiet" rather than "stalled" because the detector observes an absence of
   // events; it does not diagnose a fault.
   { id: "quiet", label: "No activity", icon: "clock" },
+  // D4: the UX spec names "degraded continuity" a default filter, so a supervisor
+  // scanning the board can find the tasks whose provider session was lost — the
+  // Murat journey the spec tests begins "a continuity warning appears on the task
+  // OR board". Named for what it selects (R16-2). Like the Archived chip it only
+  // renders when the project has any such task (or the filter is active), because
+  // degraded continuity is rare and an always-empty chip on every board is the
+  // clutter the board's density rules fight (see FilterBar).
+  { id: "continuity", label: "Degraded continuity", icon: "refresh" },
   // R14-3: archived tasks are out of every other view; this is the way back to
   // them. The chip only renders when the project has any (see FilterBar).
   { id: "archived", label: "Archived", icon: "lock" },
@@ -1215,10 +1212,13 @@ function BoardHeader({
             decision" (project-wide, anyone) and Agents said "6 threads waiting
             on a human" (engagements, not tasks). Each number was right; the
             reader had no way to know they answered different questions. Every
-            one of them now names its scope. */}
+            one of them now names its scope.
+            C4: the phrase itself is the project-scope canonical "waiting on a
+            human" — the trailing "decision" was one of five near-duplicate
+            phrasings this pass collapsed to one-per-scope (the viewer-scope card
+            tag reads "waiting on you"). "in this project" keeps the scope. */}
         <div className="sub">
-          {countLine} · {waitingHuman} waiting on a human decision in this
-          project
+          {countLine} · {waitingHuman} waiting on a human in this project
         </div>
       </div>
       <div className="board-tools">
@@ -1272,6 +1272,7 @@ function FilterBar({
   query,
   waitingOnMe,
   quiet,
+  continuity,
   archived,
   setParam,
   onClear,
@@ -1287,6 +1288,9 @@ function FilterBar({
    *  flight. Two meanings one click apart is the vocabulary drift this pass has
    *  been removing; the chip now matches the pill it selects ("no activity"). */
   quiet: number;
+  /** D4: tasks whose runtime continuity is degraded — the "Degraded continuity"
+   *  chip's tally, and (like `archived`) whether the chip shows at all. */
+  continuity: number;
   /** R14-3: archived tasks in this project — the chip is the only way back to
    *  them, so it renders only when there are any (and always while it is on). */
   archived: number;
@@ -1296,7 +1300,11 @@ function FilterBar({
   return (
     <div className="filter-bar">
       {FILTERS.filter(
-        (f) => f.id !== "archived" || archived > 0 || filter === "archived",
+        (f) =>
+          (f.id !== "archived" || archived > 0 || filter === "archived") &&
+          // D4: same rarity gate as Archived — surface the continuity chip only
+          // when there is a degraded task to find (or the filter is already on).
+          (f.id !== "continuity" || continuity > 0 || filter === "continuity"),
       ).map((f) => (
         <button
           type="button"
@@ -1312,6 +1320,9 @@ function FilterBar({
           )}
           {f.id === "quiet" && quiet > 0 && (
             <span className="tally">· {quiet}</span>
+          )}
+          {f.id === "continuity" && continuity > 0 && (
+            <span className="tally">· {continuity}</span>
           )}
           {f.id === "archived" && archived > 0 && (
             <span className="tally">· {archived}</span>
@@ -1459,6 +1470,7 @@ export function BoardPage({
   canCreate,
   canTransition,
   canRescan,
+  defaultBranch = "main",
 }: {
   columns: BoardColumnData[];
   orphanTasks: BoardTask[];
@@ -1468,6 +1480,11 @@ export function BoardPage({
   /** Holders of `rescan-project` (admin|maintainer) — the server-checked gate
    *  for Re-scan; kept distinct from canTransition so the two can't drift. */
   canRescan: boolean;
+  /** D3: the project's default branch — the merge target the shared acceptance
+   *  ceremony names when a board move into the terminal stage is confirmed.
+   *  Defaults to "main" (the same fallback the task-detail page uses) so the
+   *  ceremony always names a real target even before the loader wires it. */
+  defaultBranch?: string;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawFilter = searchParams.get("filter");
@@ -1508,8 +1525,23 @@ export function BoardPage({
     beforeKey: string;
   } | null>(null);
   const finalStageId = columns[columns.length - 1]?.stage.id;
-  const finalStageName = columns[columns.length - 1]?.stage.name ?? "Done";
   const moveDone = useRef<unknown>(null);
+  /**
+   * D9 (WCAG 2.2 / UX spec §Accessibility Strategy) — the board's polite
+   * announcement region. Board drag is pointer-only and keyboard users move via
+   * the StageMenu (ruling 64 built the traversal half), but nothing ever spoke
+   * a requested move, a completed one, or a server refusal — including the 409
+   * the server answers an off-boundary move with, since the board is
+   * authoritative and never commits a move client-side. `announceMove` speaks
+   * the request; the transition-fetcher effect below speaks the outcome, reusing
+   * the server's own honest sentence (`d.toast` / `d.error`).
+   */
+  const [announce, setAnnounce] = useState("");
+  const announceMove = (taskKey: string, toStageId: string) => {
+    const name =
+      columns.find((c) => c.stage.id === toStageId)?.stage.name ?? toStageId;
+    setAnnounce(`Move requested: ${taskKey} to ${name}.`);
+  };
 
   // dnd-kit event flow → the same drag state machine the visuals always used.
   // A card target proposes "insert before that card"; onDragMove refines it
@@ -1587,6 +1619,7 @@ export function BoardPage({
       return;
     }
     setArrivedKey(active.key);
+    announceMove(active.key, resolution.to); // D9
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "reorder");
@@ -1599,6 +1632,7 @@ export function BoardPage({
   /** Commit a confirmed board acceptance (B1). */
   const submitReorder = (taskKey: string, to: string, beforeKey: string) => {
     setArrivedKey(taskKey);
+    announceMove(taskKey, to); // D9
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "reorder");
@@ -1629,12 +1663,17 @@ export function BoardPage({
     if (moveDone.current === transitionFetcher.data) return;
     moveDone.current = transitionFetcher.data;
     const d = transitionFetcher.data;
-    if (d.ok && d.toast) push(d.toast);
-    else if (!d.ok && d.error) {
+    if (d.ok && d.toast) {
+      push(d.toast);
+      setAnnounce(d.toast); // D9: the completed move, in the server's own words.
+    } else if (!d.ok && d.error) {
       // P13-D-10: a REJECTED stage transition is the worst place to render a
       // success tick — the card snaps back and the toast said "done".
       push(d.error, "error");
       setArrivedKey(null);
+      // D9: the refusal (incl. the server's 409 on an off-boundary move) is a
+      // consequential state change a screen-reader user must hear, not only see.
+      setAnnounce(`Move refused: ${d.error}`);
     }
   }, [transitionFetcher.state, transitionFetcher.data, push]);
 
@@ -1662,6 +1701,12 @@ export function BoardPage({
   // `isQuiet` already refuses archived and terminal tasks, and this keeps the
   // chip's tally reading the same population its filter draws.
   const quietCount = liveTasks.filter((t) => t.quiet === true).length;
+  // D4: counted over LIVE tasks, like the chips above — an archived task's
+  // continuity break is part of its record but it is out of every default view,
+  // so it neither draws the chip nor feeds its tally.
+  const continuityCount = liveTasks.filter(
+    (t) => t.continuity === "degraded",
+  ).length;
   const archivedCount = countArchived(allTasks);
   // The card in flight (for the drop-preview shown in the hovered column).
   const draggedTask = drag
@@ -1889,6 +1934,13 @@ export function BoardPage({
 
   return (
     <div className="board-wrap" data-screen-label="Board">
+      {/* D9: the board's polite announcement region — pickup/drop requests and
+          the server's own move outcome (including a refusal) spoken to assistive
+          tech, which the pointer-only drag and the toast never gave a keyboard
+          user. Visually hidden but kept in the DOM (see SR_ONLY). */}
+      <div style={SR_ONLY} role="status" aria-live="polite">
+        {announce}
+      </div>
       <BoardHeader
         shownCount={shownCount}
         // R14-3: the denominator follows the view. On the Archived filter the
@@ -1914,6 +1966,7 @@ export function BoardPage({
         query={query}
         waitingOnMe={waitingOnMe}
         quiet={quietCount}
+        continuity={continuityCount}
         archived={archivedCount}
         setParam={setParam}
         onClear={clearFilters}
@@ -1978,20 +2031,22 @@ export function BoardPage({
         />
       )}
 
-      {/* B1: the acceptance a board move really performs, confirmed. F19-27:
-          the card's own summary is what the dialog discloses from — looked up
-          fresh so a revalidation between the gesture and the confirmation
-          shows the CURRENT PR head, not the one the drag started on. A lookup
-          that MISSES is handled by the effect above (clear + toast), never by
-          this silent `&&`. */}
+      {/* B1 / D3: the acceptance a board move really performs, confirmed
+          through the ONE shared ceremony. F19-27: the card's own summary is what
+          the dialog discloses from — looked up fresh so a revalidation between
+          the gesture and the confirmation shows the CURRENT PR head, not the one
+          the drag started on. A lookup that MISSES is handled by the effect
+          above (clear + toast), never by this silent `&&`. */}
       {pendingAccept && pendingAcceptTask && (
         <AcceptOnBoardConfirm
           task={pendingAcceptTask}
+          stages={stages}
           fromStageName={
             stages.find((s) => s.id === pendingAcceptTask.stage)?.name ??
             pendingAcceptTask.stage
           }
-          stageName={finalStageName}
+          defaultBranch={defaultBranch}
+          busy={transitionFetcher.state !== "idle"}
           onCancel={() => setPendingAccept(null)}
           onConfirm={() => {
             const p = pendingAccept;

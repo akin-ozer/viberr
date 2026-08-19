@@ -5,6 +5,7 @@ import type {
   TaskDetail,
 } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
@@ -145,6 +146,20 @@ export function TaskHero({
     }
   }, [editGoalSignal, canEditGoal, task.goal, editGoalDraft]);
 
+  // C2 (⇄ N20-14/UXO-1): the validation pill asserts a LIVE obligation
+  // ("awaiting verdict"). UXO-1 withdrew it on archived tasks because abandoned
+  // work owes nobody a verdict; the exact same is true of any TERMINAL task —
+  // an accepted/merged completion owes nobody one either, and a force-accepted
+  // one would otherwise read "accepted · awaiting verdict". Extend the archived
+  // predicate to the same accepted/merged pair the rest of the app treats as
+  // terminal (task-side-panels.tsx `isTerminal`, task-detail-page.tsx
+  // `taskClosed`). The readiness pill stays for a terminal task: its value is
+  // "accepted"/"merged", a terminal STATUS, not a live claim.
+  const terminal =
+    archived ||
+    task.displayReadiness === "accepted" ||
+    task.displayReadiness === "merged";
+
   return (
     <div className="task-hero">
       <span className="key">{task.key}</span>
@@ -164,20 +179,28 @@ export function TaskHero({
           {stage?.name ?? ""}
         </Pill>
         {/* UXO-1: an ARCHIVED task is out of the flow — the archive confirm and
-            the acceptance panel both already say so. Its readiness and
-            validation pills, though, kept asserting live obligations: a task
-            archived mid-review still read "ready · awaiting verdict", i.e. that
-            someone still owes a verdict, when nobody does. The stage stays (it
-            answers "how far did this get?"); the two ACTIONABLE signals drop. */}
-        {!archived &&
-          (agentWorking && task.displayReadiness === "input_required" ? (
-            <Pill kind="agent" dot>
-              agent working
-            </Pill>
-          ) : (
-            <ReadinessPill value={task.displayReadiness} />
-          ))}
-        {!archived && <ValidationPill value={task.validation} />}
+            the acceptance panel both already say so. Its readiness pill kept
+            asserting a live obligation ("ready" = someone will act) that is
+            false on abandoned work, so it drops and the `archived` pill above
+            stands in its place. A terminal (accepted/merged) task keeps its
+            readiness pill: that value IS the terminal status, not a live claim. */}
+        {!archived && <ReadinessPill value={task.displayReadiness} />}
+        {/* C3: "agent working" gets its OWN slot instead of replacing the
+            readiness pill during a live run. The old swap hid the one readiness
+            value that most needs a human — `input_required` — so the same task
+            read "input required" on the board card and "agent working" on the
+            hero at the same instant. The readiness pill above now always shows
+            (matching the card); this pill sits beside it to note that a run is
+            in flight on that input-required state. */}
+        {!archived && agentWorking && task.displayReadiness === "input_required" && (
+          <Pill kind="agent" dot>
+            agent working
+          </Pill>
+        )}
+        {/* C2 (⇄ N20-14/UXO-1): the validation pill is a live obligation and is
+            withdrawn on every terminal task, not just archived ones — see the
+            `terminal` note above. */}
+        {!terminal && <ValidationPill value={task.validation} />}
         <span className="hero-file">
           <Icon name="file" />
           <span>{task.filePath}</span>
@@ -286,6 +309,9 @@ export function ScheduledActions({
   useActionFeedback(fetcher);
   const busy = fetcher.state !== "idle";
   const canSchedule = canRunAgents && !taskClosed;
+  // D6: cancelling a queued re-run (possibly one another member scheduled)
+  // removes a pending action — confirm it, naming when it was due.
+  const [confirmCancel, setConfirmCancel] = useState<TaskSchedule | null>(null);
   // UX19-10: same fallback formula as `OperatorRunControl` (P11-41) — the
   // picker never starts on an option that would fail fast. It used to be a flat
   // `defaultValue="claude"`, so on a Codex-only instance the two operator
@@ -323,8 +349,11 @@ export function ScheduledActions({
       </div>
 
       {schedules.length === 0 ? (
+        // D8: absent → why it matters → next action (P16), not a bare label.
         <p className="empty flush">
-          No scheduled operator re-runs.
+          {canSchedule
+            ? "No scheduled operator re-runs. Use the form below to have the operator revisit this task at a set time — handy when you're waiting on something external."
+            : "No scheduled operator re-runs. A re-run has the operator revisit this task at a set time; scheduling one needs the run-agents grant."}
         </p>
       ) : (
         <ul className="sched-list">
@@ -347,7 +376,8 @@ export function ScheduledActions({
                   type="button"
                   className="btn ghost sched-cancel"
                   disabled={busy}
-                  onClick={() => submit({ intent: "cancel-schedule", scheduleId: s.id })}
+                  // D6: opens a confirm instead of cancelling on the click.
+                  onClick={() => setConfirmCancel(s)}
                 >
                   Cancel
                 </button>
@@ -425,6 +455,32 @@ export function ScheduledActions({
           </button>
         </fetcher.Form>
       ) : null}
+
+      {confirmCancel && (
+        <ConfirmDialog
+          title="Cancel this scheduled re-run?"
+          body={
+            <>
+              The operator re-run due{" "}
+              <strong>
+                <LocalDayDotTime iso={confirmCancel.dueAt} />
+              </strong>
+              {confirmCancel.createdByLabel
+                ? ` (scheduled by ${confirmCancel.createdByLabel})`
+                : ""}{" "}
+              will not fire. You can schedule another below.
+            </>
+          }
+          confirmLabel="Cancel re-run"
+          cancelLabel="Keep it"
+          busy={busy}
+          onCancel={() => setConfirmCancel(null)}
+          onConfirm={() => {
+            submit({ intent: "cancel-schedule", scheduleId: confirmCancel.id });
+            setConfirmCancel(null);
+          }}
+        />
+      )}
     </section>
   );
 }

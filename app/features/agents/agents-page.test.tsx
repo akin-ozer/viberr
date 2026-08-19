@@ -25,6 +25,7 @@ import {
 } from "./agents-page";
 import { ToastProvider } from "~/ui/toast";
 import { capabilityById } from "~/shared/capabilities";
+import { TRANSITION_TO_DONE_EXCEPTION } from "~/features/policy/policy-data";
 
 afterEach(cleanup);
 
@@ -597,7 +598,8 @@ describe("LiveRoster", () => {
 
   it("renders the added empty state when nothing is engaged", () => {
     const { getByText } = render(<LiveRoster deployments={[]} onOpen={() => {}} />);
-    expect(getByText("No agents are currently engaged.")).toBeTruthy();
+    // D8: the empty state now orients the reader; the label is its opening.
+    expect(getByText(/No agents are currently engaged/)).toBeTruthy();
   });
 
   // P13-UI-27 residual: an id with no profile used to be printed raw, which
@@ -1574,10 +1576,15 @@ describe("UXA-15: the Agents page explains its read-only state", () => {
     return render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
   };
 
-  it("a contributor is told which grant is missing", () => {
+  it("a contributor is told which grant is missing, named as the Policy matrix names it (F20-16)", () => {
     const { container } = renderAs("contributor");
     expect(container.textContent).toContain("Read-only");
-    expect(container.textContent).toContain("Manage agents");
+    // F20-16: the REAL grant label (the Policy matrix's `manage-agents` row) and
+    // the REAL tier — admin only. The old copy invented "Manage agents … (project
+    // admin or maintainer)", telling a maintainer they held a grant this page refuses.
+    expect(container.textContent).toContain("Manage agent profiles");
+    expect(container.textContent).toContain("project admin");
+    expect(container.textContent).not.toContain("or maintainer");
     // The management affordances really are absent — the note explains that.
     expect(container.textContent).not.toContain("Add from library");
   });
@@ -1642,5 +1649,270 @@ describe("UX19-11: the delete-profile confirm states R15-7's real outcome", () =
     const dialog = renderConfirm([]);
     expect(dialog.textContent).toContain("The global base definition is unaffected.");
     expect(dialog.textContent).not.toContain("stay on the tasks");
+  });
+});
+
+/**
+ * F20-9 / D1 second half — the operator card sat "Accept completion into Done"
+ * under a granted bucket while "Transition a task to Done" sat under RESERVED
+ * FOR HUMANS, with no reconciliation. The Policy page carries exactly the note
+ * that resolves this; the Agents card now borrows the SAME canonical constant so
+ * the two surfaces cannot drift.
+ */
+describe("F20-9: the operator card carries the Transition-to-Done exception note", () => {
+  const renderDetail = (a: AgentProfileView) =>
+    render(
+      <ProfileDetail
+        a={a}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+
+  it("renders the imported Policy-page exception copy on the operator card", () => {
+    const { container } = renderDetail(
+      mkProfile({
+        id: "operator",
+        kind: "operator",
+        name: "Operator",
+        icon: "shield",
+        autonomy: "supervised",
+        actions: {
+          direct: [],
+          recommend: ["Accept completion into Done"],
+          forbidden: ["Transition a task to Done", "Change project policy"],
+        },
+        capabilities: [],
+      }),
+    );
+    const note = container.querySelector(".cap-exception")!;
+    expect(note).toBeTruthy();
+    expect(note.textContent).toContain("Transition a task to Done");
+    // The exact exported constant, never a restated paraphrase (single source).
+    expect(note.textContent).toContain(TRANSITION_TO_DONE_EXCEPTION);
+  });
+
+  it("does NOT render the operator-only note on a specialist card", () => {
+    // The Developer's forbidden bucket includes "Transition a task to Done", but
+    // the exception is the OPERATOR's — a specialist can never do it.
+    const { container } = renderDetail(mkProfile({}));
+    expect(container.querySelector(".cap-exception")).toBeNull();
+  });
+});
+
+/**
+ * R20-3 / F20-4 — a profile pinned to (or falling back to) a model a real run
+ * proved this account can't use renders a badge with the provider's own
+ * sentence, instead of a value that would 400 at the SDK.
+ */
+describe("F20-4: the model cell flags a provider-refused model", () => {
+  it("shows an 'unavailable' badge carrying the provider reason", () => {
+    const { getByText } = render(
+      <ProfileDetail
+        a={mkProfile({
+          backends: ["codex"],
+          model: "gpt-5.6-sol",
+          modelLabel: "GPT-5.6 Sol",
+          modelKnown: true,
+          modelUnavailable: {
+            reason:
+              "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+            markedAt: "2026-08-15T00:00:00.000Z",
+          },
+        })}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    const badge = getByText("unavailable");
+    expect(badge).toBeTruthy();
+    expect(badge.closest(".model-sub")!.getAttribute("title")).toContain(
+      "not supported",
+    );
+  });
+
+  it("shows no unavailable badge when the model is not marked", () => {
+    const { queryByText } = render(
+      <ProfileDetail
+        a={mkProfile({ backends: ["codex"], modelKnown: true })}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(queryByText("unavailable")).toBeNull();
+  });
+});
+
+/**
+ * C10 — the run/engagement status pills went through a shared mapper for the
+ * KIND but rendered the raw `d.status` text as the label. Routing both call
+ * sites through `DeploymentStatusPill` centralizes the vocabulary AND restores
+ * the article the board carries ("waiting on a human"), while the server-derived
+ * status VALUE is unchanged.
+ */
+describe("C10: deployment status renders through the shared pill mapper", () => {
+  it("the live roster reads 'waiting on a human', not the article-less raw status", () => {
+    const { container } = render(
+      <LiveRoster
+        deployments={[mkDeployment({ status: "waiting on human" })]}
+        onOpen={() => {}}
+      />,
+    );
+    expect(container.textContent).toContain("waiting on a human");
+    // The article-less raw form is gone from the rendered label.
+    expect(container.textContent).not.toContain("waiting on human");
+  });
+
+  it("the profile-detail deployment row uses the same pill", () => {
+    const { container } = render(
+      <ProfileDetail
+        a={mkProfile({})}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[mkDeployment({ status: "waiting on human" })]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    const pill = container.querySelector(".deploy-row .pill")!;
+    expect(pill.textContent).toContain("waiting on a human");
+  });
+});
+
+/**
+ * C11 — the task surface settled on "delivering agent" (UXA-6 / FR14), but the
+ * Agents page still called the group "Specialist profiles" with a "New
+ * specialist profile" button: three names for one object one click apart. The
+ * page drops the retired vocabulary and records the profile-vs-engagement split.
+ */
+describe("C11: the Agents page drops the retired 'specialist profile' vocabulary", () => {
+  it("names the group 'Agent profiles' and records the delivering/supporting split", () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[
+                mkProfile({ id: "operator", kind: "operator", name: "Operator" }),
+                mkProfile({}),
+              ]}
+              deployments={[]}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole="admin"
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/viberr-core/agents"]} />,
+    );
+    expect(container.textContent).toContain("Agent profiles");
+    // The delivering/supporting engagement split is stated on the page.
+    expect(container.textContent).toContain("delivering agent");
+    // None of the three retired phrasings survive.
+    expect(container.textContent).not.toContain("Specialist profiles");
+    expect(container.textContent).not.toContain("New specialist profile");
+  });
+});
+
+/**
+ * F20-4 (client half) — the model picker offers a model a real run proved this
+ * account can't use, but disables it and explains why, so an admin can't re-pin
+ * a profile to a value that would 400 at the SDK.
+ */
+describe("CreateProfileModal — a provider-refused model is disabled + explained", () => {
+  const UNAVAILABLE_CODEX: ModelCatalog = {
+    models: [
+      {
+        value: "gpt-5.6-terra",
+        displayName: "GPT-5.6 Terra",
+        description: "Workhorse.",
+        supportsEffort: true,
+        efforts: ["low", "medium", "high", "xhigh"],
+      },
+      {
+        value: "gpt-5.6-sol",
+        displayName: "GPT-5.6 Sol",
+        description: "Flagship.",
+        supportsEffort: true,
+        efforts: ["low", "medium", "high", "xhigh"],
+        unavailable: {
+          reason:
+            "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+          markedAt: "2026-08-15T00:00:00.000Z",
+        },
+      },
+    ],
+    efforts: ["low", "medium", "high", "xhigh"],
+    defaultModel: "gpt-5.6-terra",
+    defaultEffort: "medium",
+  };
+
+  it("disables the marked option and, when it is the seeded model, names the reason", async () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <CreateProfileModal
+            initial={mkProfile({
+              backends: ["codex"],
+              model: "gpt-5.6-sol",
+              effort: "high",
+            })}
+            stages={STAGES}
+            projectName="Viberr Core"
+            busy={false}
+            error={null}
+            onClose={() => {}}
+            onSubmit={() => {}}
+          />
+        ),
+      },
+      {
+        path: "/resources/model-catalog",
+        loader: () => ({ data: UNAVAILABLE_CODEX }),
+      },
+    ]);
+    const { container } = render(<Stub initialEntries={["/"]} />);
+
+    // The Sol option loads disabled, with the refusal on its label.
+    await waitFor(() => {
+      const opt = [...container.querySelectorAll("option")].find(
+        (o) => (o as HTMLOptionElement).value === "gpt-5.6-sol",
+      ) as HTMLOptionElement | undefined;
+      expect(opt?.disabled).toBe(true);
+      expect(opt?.textContent).toContain("unavailable for this account");
+    });
+    // The seeded model is the refused one, so the reason line renders in full.
+    const err = container.querySelector(".fhint.err")!;
+    expect(err).toBeTruthy();
+    expect(err.textContent).toContain("not supported");
+    expect(err.textContent).toContain("Pick another model.");
   });
 });

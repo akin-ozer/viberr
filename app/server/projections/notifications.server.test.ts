@@ -20,6 +20,7 @@ import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import {
   countUnreadNotifications,
   createNotification,
+  isTaskViewNavigation,
   listNotifications,
   markAllNotificationsRead,
   markNotificationsRead,
@@ -249,6 +250,48 @@ describe("R19-15: markTaskNotificationsSeen — viewing a task auto-reads its ro
     expect(markTaskNotificationsSeen(db, "u_1", "viberr-core", "VIB-142")).toBe(0);
     expect(events).toHaveLength(1);
     off();
+  });
+});
+
+describe("F20-11: isTaskViewNavigation — only a genuine document load marks seen", () => {
+  const req = (url: string, headers?: Record<string, string>) =>
+    new Request(new URL(url, "http://localhost:5173"), { headers });
+
+  it("TRUE for a clean top-level route path (SSR document load)", () => {
+    expect(isTaskViewNavigation(req("/projects/viberr-core/tasks/VIB-142"))).toBe(true);
+  });
+
+  it("TRUE for a browser navigation (Sec-Fetch-Mode: navigate)", () => {
+    expect(
+      isTaskViewNavigation(
+        req("/projects/viberr-core/tasks/VIB-142", {
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Dest": "document",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("FALSE for a single-fetch `.data` revalidation (the F20-11 background eat)", () => {
+    // The SSE-driven revalidation and the post-POST revalidation both land here.
+    expect(
+      isTaskViewNavigation(
+        req("/projects/viberr-core/tasks/VIB-142.data?_routes=routes/project.task", {
+          "Sec-Fetch-Mode": "cors",
+          "Sec-Fetch-Dest": "empty",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("FALSE for any non-navigation fetch that reaches a clean path", () => {
+    // Belt-and-suspenders: a same-origin fetch (not a top-level navigation) is
+    // never a "view", even without the `.data` suffix.
+    expect(
+      isTaskViewNavigation(
+        req("/projects/viberr-core/tasks/VIB-142", { "Sec-Fetch-Mode": "cors" }),
+      ),
+    ).toBe(false);
   });
 });
 

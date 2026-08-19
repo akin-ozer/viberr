@@ -260,6 +260,15 @@ function NewProjectRepoField({
           onChange={(e) => setRepo(e.target.value)}
         />
       </div>
+      {/* N20-11: the owner is fixed by the selected connection and the field is a
+          single segment — an owner-qualified entry like `octocat/Hello-World`
+          silently slugifies to a wrong repo under the fixed owner. Say so. */}
+      {effOwner && (
+        <span className="fhint">
+          Owner is fixed by the <b>{effOwner}</b> connection — enter just the
+          repository name.
+        </span>
+      )}
     </div>
   );
 }

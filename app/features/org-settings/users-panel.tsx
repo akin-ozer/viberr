@@ -802,6 +802,7 @@ export function UsersPanel({
       {confirm && confirm.kind === "user" && (
         <ConfirmDelete
           what={confirm.item.name}
+          confirmLabel="Remove member"
           detail="Their comments and decisions stay in the audit history. Task assignments return to the operator for reassignment."
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
@@ -813,6 +814,7 @@ export function UsersPanel({
       {confirm && confirm.kind === "domain" && (
         <ConfirmDelete
           what={confirm.item.domain}
+          confirmLabel="Remove domain"
           detail="New Google sign-ins from this domain are refused. Accounts that already signed in keep their access."
           onCancel={() => setConfirm(null)}
           onConfirm={() => {

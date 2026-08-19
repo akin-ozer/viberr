@@ -16,6 +16,7 @@ import {
   modelDisplayName,
   resolveRunModel,
 } from "~/server/runtimes/model-catalog.server";
+import { unavailableModels } from "~/server/runtimes/model-availability.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   absentDeliverReviewPrMode,
@@ -89,6 +90,36 @@ export function parseDeploymentDefinition(
   return def;
 }
 
+/** The one capability whose "acts directly" is ceilinged by operator autonomy —
+ * `completion-for-acceptance` (label "Accept completion into Done"). */
+const ACCEPT_COMPLETION_CAP_ID = "completion-for-acceptance";
+
+/**
+ * F20-9 / R20-7: the AUTONOMY CEILING, the display twin of the runtime gate at
+ * `operator-actions.server.ts:2580`
+ * (`authority.autonomy !== "full" || gate(...) !== "direct"`). `completion-for-
+ * acceptance` only ACTS DIRECTLY when the operator runs at FULL autonomy; under a
+ * supervised project the runtime posts a recommendation card a human applies, so
+ * a `direct` grant must render as `recommend` (RECOMMENDS ONLY), never ACTS
+ * DIRECTLY. This is `applyVerdictOutcomeGate` one axis over — the exact F15-06
+ * class D1/F20-9 was filed for. `operatorAutonomyState` (policy-data.ts) derives
+ * the same live-or-not condition for the Policy page, so both surfaces agree.
+ *
+ * A specialist never holds this capability (operator-only), and `autonomy` is
+ * `undefined` for a specialist, so the ceiling is a no-op there.
+ */
+function applyAutonomyCeiling<G extends { capabilityId: string; mode: string }>(
+  grants: readonly G[],
+  autonomy: "supervised" | "full" | undefined,
+): G[] {
+  if (autonomy === "full") return grants.map((g) => ({ ...g }));
+  return grants.map((g) =>
+    g.capabilityId === ACCEPT_COMPLETION_CAP_ID && g.mode === "direct"
+      ? ({ ...g, mode: "recommend" } as G)
+      : { ...g },
+  );
+}
+
 /** Id-based capability policy → the mock's display-label buckets.
  * Catalog labels first (stored order), then extras — order deviation from
  * the mock (extras were interleaved there) noted in the phase report.
@@ -96,10 +127,16 @@ export function parseDeploymentDefinition(
  * F15-06: the grants are read through `applyVerdictOutcomeGate` first, so the
  * ONE derivation every surface renders (profile detail, capability matrix,
  * policy counts) can never show a profile approving reviews it holds no verdict
- * authority for. */
+ * authority for.
+ *
+ * F20-9/R20-7: `autonomy` (the operator's configured autonomy; undefined for a
+ * specialist) applies the acceptance ceiling on top, so a supervised operator's
+ * "Accept completion into Done" renders under RECOMMENDS ONLY — mirroring the
+ * runtime gate — instead of ACTS DIRECTLY, authority the server refuses. */
 export function capabilitiesToActionLabels(
   capabilities: { capabilityId: string; mode: CapabilityMode }[],
   extras: { label: string; mode: CapabilityMode }[],
+  autonomy?: "supervised" | "full",
 ): { direct: string[]; recommend: string[]; forbidden: string[]; off: string[] } {
   const buckets = {
     direct: [] as string[],
@@ -118,9 +155,12 @@ export function capabilitiesToActionLabels(
       : mode === "off"
         ? buckets.off
         : buckets[mode];
-  for (const grant of applyVerdictOutcomeGate(capabilities)) {
+  for (const grant of applyAutonomyCeiling(
+    applyVerdictOutcomeGate(capabilities),
+    autonomy,
+  )) {
     const def = capabilityById(grant.capabilityId);
-    bucketOf(grant.mode).push(def ? def.label : grant.capabilityId);
+    bucketOf(grant.mode as CapabilityMode).push(def ? def.label : grant.capabilityId);
   }
   for (const extra of extras) {
     bucketOf(extra.mode).push(extra.label);
@@ -236,6 +276,17 @@ export function listLibraryProfiles(
 export const VIEW_WITHOUT_POLICY: CapabilityMode = "direct";
 
 /**
+ * R20-3 / F20-4: per-backend "the provider refused this model for this account"
+ * marks (from the `model_availability` table), keyed by model id. Absent ⇒ the
+ * view claims nothing about availability (a mark is earned only from a real run
+ * failure — ruling 19). Optional so the actions/test callers that read only
+ * kind/backend/model can skip the DB read entirely.
+ */
+export type ModelMarks = Partial<
+  Record<RealBackend, ReadonlyMap<string, { reason: string; markedAt: string }>>
+>;
+
+/**
  * Effective profile for ONE deployment entry (exported for actions/tests).
  *
  * `absentDeliverMode` (R15-9) is the mode the RUNTIME applies when the
@@ -250,6 +301,7 @@ export function effectiveProfileView(
   deployment: AgentDeployment,
   dataRoot: string | undefined,
   absentDeliverMode: CapabilityMode,
+  modelMarks?: ModelMarks,
 ): AgentProfileView {
   const template = readTemplate(deployment.profileId, dataRoot);
   const def = parseDeploymentDefinition(
@@ -300,11 +352,19 @@ export function effectiveProfileView(
     backends.find((b) => b === "codex" || b === "claude") === "codex"
       ? "codex"
       : "claude";
+  const runModel = resolveRunModel(primaryBackend, model);
   const modelKnown = isKnownModel(primaryBackend, model);
-  const modelLabel = modelDisplayName(
-    primaryBackend,
-    resolveRunModel(primaryBackend, model),
-  );
+  const modelLabel = modelDisplayName(primaryBackend, runModel);
+  // R20-3 / F20-4: the model a run would actually resolve to is flagged when a
+  // REAL run against it was refused by the provider for this account
+  // (model_availability). The badge names the provider's own redacted sentence;
+  // an absent mark claims nothing (unknown-but-offered, ruling 19).
+  const modelUnavailable = modelMarks?.[primaryBackend]?.get(runModel);
+  // Operator only: default autonomy (supervised unless the deployment sets it) —
+  // the ceiling `capabilitiesToActionLabels` applies to "Accept completion into
+  // Done" (F20-9), the same value the runtime gate reads.
+  const operatorAutonomy =
+    kind === "operator" ? (def?.autonomy ?? "supervised") : undefined;
   return {
     id: deployment.profileId,
     kind,
@@ -315,6 +375,7 @@ export function effectiveProfileView(
     model,
     modelLabel,
     modelKnown,
+    ...(modelUnavailable ? { modelUnavailable } : {}),
     effort: def?.effort ?? "",
     scope: def?.scope ?? template?.scope ?? "",
     // Short scannable copy (operator selection + cards): deployment override,
@@ -328,9 +389,12 @@ export function effectiveProfileView(
     definition: def?.persona ?? template?.description ?? "",
     stages: def?.stages ?? template?.stages ?? [],
     spanAll: def?.spanAll ?? template?.spanAll ?? false,
-    // Operator only: default autonomy (supervised unless the deployment sets it).
-    autonomy: kind === "operator" ? (def?.autonomy ?? "supervised") : undefined,
-    actions: capabilitiesToActionLabels(effectiveGrants, deployment.extras),
+    autonomy: operatorAutonomy,
+    actions: capabilitiesToActionLabels(
+      effectiveGrants,
+      deployment.extras,
+      operatorAutonomy,
+    ),
     capabilities,
     extras,
     resources: {
@@ -358,8 +422,15 @@ export function assembleAgentRoster(
   const deliverDefault = absentDeliverReviewPrMode(
     humanGatesPreWorkAdvance(project.stages, project.workflow),
   );
+  // R20-3 / F20-4: read the account's model-availability marks once per backend
+  // so a profile pinned to (or falling back to) a model a real run proved
+  // unusable renders the badge instead of a value that would 400 at the SDK.
+  const modelMarks: ModelMarks = {
+    codex: unavailableModels(db, "codex"),
+    claude: unavailableModels(db, "claude"),
+  };
   const views = project.agentPolicy.map((dep) =>
-    effectiveProfileView(dep, ctx.dataRoot, deliverDefault),
+    effectiveProfileView(dep, ctx.dataRoot, deliverDefault, modelMarks),
   );
   const operators = views.filter((v) => v.kind === "operator");
   const specialists = views.filter((v) => v.kind !== "operator");

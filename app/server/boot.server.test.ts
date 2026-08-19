@@ -64,6 +64,7 @@ vi.mock("./ops/maintenance.server", async () => {
 });
 
 const {
+  installCrashVisibilityHandlers,
   logBootIntegrity,
   reconcileRestartedWork,
   startStoreMaintenance,
@@ -148,6 +149,33 @@ describe("takeDataRootWriterLock (G1)", () => {
     // A forced boot really holds the root afterwards — give it back.
     const { releaseDataRootLock } = await import("./db/data-root-lock.server");
     releaseDataRootLock();
+  });
+});
+
+/**
+ * F20-8(a): a fatal death must be visible. The handlers themselves call
+ * `process.exit`, so the test spies on `process.on` (never registering a real
+ * exit-on-crash handler into the suite) and only asserts the wiring: both fatal
+ * channels are registered, exactly once.
+ */
+describe("installCrashVisibilityHandlers (F20-8a)", () => {
+  const GUARD = Symbol.for("viberr.crashVisibilityInstalled");
+  const slot = globalThis as unknown as Record<symbol, boolean | undefined>;
+
+  it("registers uncaughtException + unhandledRejection once, idempotently", () => {
+    slot[GUARD] = undefined; // pretend nothing has installed them yet
+    const on = vi.spyOn(process, "on").mockImplementation(() => process);
+    try {
+      installCrashVisibilityHandlers();
+      installCrashVisibilityHandlers(); // a second call must NOT stack a second pair
+      expect(on.mock.calls.map((c) => c[0])).toEqual([
+        "uncaughtException",
+        "unhandledRejection",
+      ]);
+    } finally {
+      on.mockRestore();
+      slot[GUARD] = undefined;
+    }
   });
 });
 

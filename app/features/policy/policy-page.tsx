@@ -22,9 +22,11 @@ import {
   ALWAYS_HUMAN_ROWS,
   BCLS,
   BOUNDARIES,
+  operatorAutonomyState,
   RBAC_ROWS,
   ROLE_IDS,
   ROLE_LABEL,
+  type OperatorAutonomyState,
 } from "./policy-data";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageFlowPath } from "~/shared/workflow/transitions";
@@ -82,7 +84,11 @@ export function HumanAccess({
     if (m.role === r) return;
     if (m.role === "admin" && r !== "admin" && counts.admin <= 1) {
       // Client mirror of the server guard (UX sugar — the action re-checks).
-      push(`${projectName} needs at least one admin — promote someone else first`);
+      // D5: a refusal must not render the success tick.
+      push(
+        `${projectName} needs at least one admin — promote someone else first`,
+        "error",
+      );
       return;
     }
     onSetRole(m, r);
@@ -236,8 +242,15 @@ export function HumanAccess({
           <strong>take or release their own task ownership</strong> (viewers are
           read + comment only; the owner is the task's human reviewer and
           acceptance authority, scoped to that task — a contributor who owns a
-          task <strong>may accept its completion</strong> even though the table
-          reserves that column for maintainers);{" "}
+          task <strong>may accept its completion</strong>, and{" "}
+          {/* N20-7: the owner exception covered acceptance but not the operator's
+              other packet options — task-actions.server.ts lets an owner resolve
+              the non-acceptance options too, an authority no surface stated. */}
+          <strong>
+            may resolve the non-acceptance options on a decision packet the
+            operator raises on that task
+          </strong>
+          , even though the table reserves those columns for maintainers);{" "}
           <strong>admins may release any owner</strong> — recorded in the audit
           trail; and <strong>org admins hold emergency project-admin
           authority on every project</strong> — even without membership — with
@@ -376,12 +389,17 @@ export function WorkflowRules({
   canManage,
   busy,
   onSetBoundary,
+  operator,
 }: {
   stages: { id: string; name: string; color: string }[];
   transitions: TransitionView[];
   canManage: boolean;
   busy: boolean;
   onSetBoundary: (t: TransitionView, boundary: "auto" | "approval" | "human") => void;
+  /** F20-19: the project's configured operator autonomy, so the human-accepts
+   *  note below can be read as live or configured-off. Optional so the panel
+   *  still renders the generic invariant when no roster is supplied. */
+  operator?: OperatorAutonomyState;
 }) {
   // Defensive stage lookup (policy spec §4.4 — a renamed/removed stage id
   // must never crash the panel).
@@ -520,11 +538,47 @@ export function WorkflowRules({
           exception is an operator running at <strong>full autonomy</strong> with{" "}
           <strong>Accept completion into Done</strong> set to{" "}
           <em>Direct</em> — an explicit, audited opt-in that lets that operator
-          close a task itself (it still refuses a failing-validation task). The
-          per-transition <strong>Human approval / Human only</strong> boundaries
-          below apply to <strong>human</strong> actors; an operator granted{" "}
-          <em>Direct</em> stage transitions crosses them itself, so treat those
-          settings as the rule for people, not for a direct-capability operator.
+          close a task itself (it still refuses a failing-validation task).{" "}
+          {/* F20-19: state whether that exception is actually live on THIS
+              project, so the conditional above reads as configured or not — the
+              autonomy value was previously visible only on the operator's
+              Agents card, leaving this page identical either way. */}
+          {operator && (
+            <>
+              <strong>On this project:</strong>{" "}
+              {operator.directDoneLive ? (
+                <>
+                  the operator
+                  {operator.operatorName ? ` (${operator.operatorName})` : ""} runs
+                  at <strong>full autonomy</strong> with that grant set to{" "}
+                  <em>Direct</em>, so the exception is{" "}
+                  <strong>active</strong> — it can close a passing task itself.{" "}
+                </>
+              ) : operator.present ? (
+                <>
+                  the operator
+                  {operator.operatorName ? ` (${operator.operatorName})` : ""} runs{" "}
+                  <strong>
+                    {operator.autonomy === "full"
+                      ? "at full autonomy without the Direct accept grant"
+                      : "supervised"}
+                  </strong>
+                  , so the exception is <strong>not active</strong> — every task
+                  still needs a human to accept completion into Done.{" "}
+                </>
+              ) : (
+                <>
+                  no operator is deployed, so completion stays human-authorized
+                  throughout.{" "}
+                </>
+              )}
+            </>
+          )}
+          The per-transition <strong>Human approval / Human only</strong>{" "}
+          boundaries below apply to <strong>human</strong> actors; an operator
+          granted <em>Direct</em> stage transitions crosses them itself, so treat
+          those settings as the rule for people, not for a direct-capability
+          operator.
         </span>
       </div>
     </div>
@@ -627,6 +681,7 @@ export function PolicyPage({
           canManage={canEditPolicy}
           busy={busy}
           onSetBoundary={onSetBoundary}
+          operator={operatorAutonomyState(data.profiles)}
         />
       </div>
 

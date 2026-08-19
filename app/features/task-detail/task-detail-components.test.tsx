@@ -993,9 +993,14 @@ function traceAcceptance(
 }
 
 describe("GithubTrace — admin force-accept (DG-2)", () => {
-  it("renders the block reason + Force-accept button when blocked AND onForceAccept is provided", () => {
+  it("renders the Force-accept button when blocked AND onForceAccept is provided", () => {
+    // C1: the block REASON no longer renders here — it has one owner, the
+    // Current-state panel. This panel carries only the GitHub-side fact: the
+    // admin override button itself, whose label already names what it does.
+    // Canary: bring back the `.force-accept .hint` sentence and this reads its
+    // absence (the duplicate returns).
     const onForceAccept = vi.fn();
-    const { container, getByText } = render(
+    const { container, queryByText } = render(
       <MemoryRouter>
         <GithubTrace
           githubHost={GH_HOST}
@@ -1008,7 +1013,8 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
         />
       </MemoryRouter>,
     );
-    expect(getByText(/Waiting on 1 required reviewer approval/)).toBeTruthy();
+    // The reason sentence stays out of this panel (it lives in Current state).
+    expect(queryByText(/Waiting on 1 required reviewer approval/)).toBeNull();
     const btn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Force accept"),
     ) as HTMLButtonElement;
@@ -1017,13 +1023,14 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(onForceAccept).toHaveBeenCalled();
   });
 
-  it("UX19-2: quotes the LIVE acceptance refusal, not the projection's revision-only blockReason", () => {
-    // The two panels disagreed by construction: `task.blockReason` carries only
-    // the revision dimension (the stage boundary is deliberately left out of
-    // that column), so this panel said "no approving verdict yet" while the
-    // Current-state panel one card down said "at In Progress, not Review".
-    // Canary: read `task.blockReason` here again and the stage sentence vanishes.
-    const { container, getByText, queryByText } = render(
+  it("UX19-2 / C1: the override button reads the LIVE affordance, and the reason stays with Current state", () => {
+    // The button's label/title come from the live `acceptance` (atBoundary),
+    // never the projection's revision-only `blockReason` — so a pre-boundary
+    // force-accept names the stages it skips. C1: the REFUSAL SENTENCE is not
+    // rendered here at all any more (one owner: Current-state); this panel only
+    // carries the GitHub-side override. Canary: read `task.blockReason` into a
+    // hint here again and both sentences reappear as a duplicate.
+    const { container, queryByText } = render(
       <MemoryRouter>
         <GithubTrace
           githubHost={GH_HOST}
@@ -1040,11 +1047,11 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
         />
       </MemoryRouter>,
     );
-    expect(getByText(/at In Progress, not Review/)).toBeTruthy();
+    // Neither the live refusal nor the projection's blockReason renders here.
+    expect(queryByText(/at In Progress, not Review/)).toBeNull();
     expect(queryByText(/no approving verdict yet/)).toBeNull();
-    // …and the offer stops promising a mere "review gate" override: from here it
-    // skips the remaining stages too (verified: force-accept pre-boundary really
-    // does jump In Progress → Done + merge).
+    // The override button, though, still reads the live affordance: from before
+    // the boundary it skips the remaining stages too, and says so.
     const btn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Force accept"),
     ) as HTMLButtonElement;
@@ -1869,13 +1876,223 @@ describe("UI-41: the release dialog only offers members who can OWN a task", () 
   });
 });
 
-/* ------------- packet observation key humanising (P13) ------------- */
+/* ------------- pass-20 packet governance (F20-6 / F20-17 / F20-18 / N20-16 / C7) --- */
+
+describe("DecisionPacket — pass-20 governance", () => {
+  const withOptions = (
+    options: Array<
+      Omit<PacketRender["options"][number], "rec"> & { rec?: boolean }
+    >,
+    over: Partial<PacketRender> = {},
+  ): PacketRender => ({
+    ...packet142,
+    ...over,
+    options: options.map((o) => ({ rec: false, ...o })) as PacketRender["options"],
+  });
+
+  const discardDialog = (container: HTMLElement) =>
+    container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Packet discard dialog"]',
+    );
+
+  it("F20-6: a discard_branch option asks first, names the branch, then resolves by index", () => {
+    const onResolve = vi.fn();
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          { kind: "discard_branch", t: "Discard the workspace branch", d: "Never pushed.", rec: true },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        canDiscardBranch
+        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0 }}
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    fireEvent.click(container.querySelector(".packet-actions .btn.primary")!);
+    // Nothing resolved on the first click — the confirm is up, naming the branch.
+    expect(onResolve).not.toHaveBeenCalled();
+    const dialog = discardDialog(container)!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.textContent).toContain("vib-1");
+    expect(dialog.textContent).toContain("cannot be undone");
+    expect(dialog.textContent).toContain("Nothing on GitHub changes");
+    fireEvent.click(
+      Array.from(dialog.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Discard vib-1"),
+      )!,
+    );
+    expect(onResolve).toHaveBeenCalledWith(0, "");
+  });
+
+  it("F20-6: discard_branch is blocked-with-reason below approve-transition", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          { kind: "discard_branch", t: "Discard the workspace branch", d: "Never pushed.", rec: true },
+          { kind: "request_edit", t: "Send it back", d: "", rec: false },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        canDiscardBranch={false}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
+    expect(opts[0]!.getAttribute("aria-disabled")).toBe("true");
+    expect(opts[0]!.textContent).toContain("your role can't discard the branch");
+  });
+
+  it("F20-17: a viewer who cannot resolve sees every option inert + one card-level deny note", () => {
+    const onResolve = vi.fn();
+    const { container } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve={false}
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive={false}
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
+    expect(opts.length).toBeGreaterThan(0);
+    // Canary: drop `|| !canResolve` from the option `blocked` and the un-gated
+    // options go interactive again with no Confirm behind them.
+    expect(
+      Array.from(opts).every((o) => o.getAttribute("aria-disabled") === "true"),
+    ).toBe(true);
+    const denies = container.querySelectorAll(".deny-note");
+    expect(denies).toHaveLength(1);
+    expect(denies[0]!.textContent).toContain(
+      "a maintainer, an admin, or this task",
+    );
+    // No Confirm (can't resolve), but Ask operator stays open to everyone.
+    expect(container.querySelector(".packet-actions .btn.primary")).toBeNull();
+    expect(container.querySelector(".packet-actions .btn.ghost")).not.toBeNull();
+  });
+
+  it("F20-18: an owner with EVERY option above their tier gets a 'Send to a maintainer' path", () => {
+    const onRequestMaintainer = vi.fn();
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          { kind: "edit_goal", t: "Refine the goal", d: "", rec: true },
+          { kind: "archive_task", t: "Archive the task", d: "" },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive={false}
+        canDiscardBranch={false}
+        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0 }}
+        onResolve={() => {}}
+        onRequestMaintainer={onRequestMaintainer}
+        onAsk={() => {}}
+      />,
+    );
+    expect(container.textContent).toContain("needs maintainer or admin authority");
+    const send = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Send to a maintainer"),
+    )!;
+    expect(send).toBeDefined();
+    fireEvent.click(send);
+    expect(onRequestMaintainer).toHaveBeenCalled();
+  });
+
+  it("F20-18: no escalation when at least one option is within reach", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          { kind: "custom", t: "Rework and re-run", d: "", rec: true },
+          { kind: "archive_task", t: "Archive the task", d: "" },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive={false}
+        onResolve={() => {}}
+        onRequestMaintainer={vi.fn()}
+        onAsk={() => {}}
+      />,
+    );
+    expect(
+      Array.from(container.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Send to a maintainer"),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("N20-16: the rec pill credits whoever RAISED the packet", () => {
+    const op = render(
+      <DecisionPacket packet={packet142} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolve={() => {}} onAsk={() => {}} />,
+    );
+    expect(op.container.querySelector(".rec-tag")!.textContent).toContain(
+      "operator pick",
+    );
+    cleanup();
+    // A developer's own ask_human packet is authored by the agent, not the
+    // operator — crediting "operator pick" there was the mislabel.
+    const dev = render(
+      <DecisionPacket packet={{ ...packet142, from: "Developer" }} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolve={() => {}} onAsk={() => {}} />,
+    );
+    const tag = dev.container.querySelector(".rec-tag")!;
+    expect(tag.textContent).toContain("recommended");
+    expect(tag.textContent).not.toContain("operator pick");
+  });
+
+  it("C7: drops an observation that only repeats the body sentence", () => {
+    const dupe = withOptions(packet142.options, {
+      body: "PR #143 was closed on GitHub without merging.",
+      observations: [
+        { k: "Signal", v: "PR #143 was closed on GitHub without merging.", code: false },
+        { k: "Stage", v: "Review", code: false },
+      ],
+    });
+    const { container } = render(
+      <DecisionPacket packet={dupe} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolve={() => {}} onAsk={() => {}} />,
+    );
+    const obs = container.querySelectorAll(".packet-obs .obs");
+    // The Signal row (byte-identical to the body) is gone; Stage remains.
+    expect(obs).toHaveLength(1);
+    expect(obs[0]!.textContent).toContain("Review");
+    // The body still renders exactly once.
+    expect(container.querySelector(".packet-lede")!.textContent).toContain(
+      "PR #143 was closed on GitHub without merging.",
+    );
+  });
+});
+
+/* ------------- packet observation key humanising (P13 / C7) ------------- */
 
 describe("observationLabel", () => {
   it("turns the operator's machine-ish keys into readable ones", () => {
     // Live packet rendered "PROMPT_AGENT ERROR" at a human (the row uppercases).
     expect(observationLabel("prompt_agent error")).toBe("prompt agent error");
     expect(observationLabel("stage")).toBe("stage");
+  });
+
+  it("C7: splits camelCase, rejects path-shaped keys, and caps length", () => {
+    // A camelCase key no longer renders as one screaming token ("NOCHANGES").
+    expect(observationLabel("noChanges")).toBe("no Changes");
+    // A file path used as a field label is not a label — neutralised.
+    expect(observationLabel("origin/main test-artifacts/pass20-vib1.txt")).toBe(
+      "detail",
+    );
+    // An over-long key is capped so it cannot blow out the row.
+    expect(observationLabel("x".repeat(60)).length).toBeLessThanOrEqual(40);
   });
 });
 
@@ -2060,6 +2277,77 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     fireEvent.click(getByText("bump"));
     const ta = container.querySelector("textarea.goal-textarea") as HTMLTextAreaElement;
     expect(ta.value).toContain("Bound the timeline payload");
+  });
+});
+
+describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
+  // C2 (⇄ N20-14/UXO-1): UXO-1 withdrew the live-obligation pills on archived
+  // tasks; the same is true of any TERMINAL task. An accepted, Done task owes
+  // nobody a verdict, so its validation pill (a live obligation) drops — while
+  // the readiness pill stays, because "accepted" is a terminal STATUS, not a
+  // live claim.
+  it("C2: an accepted (terminal) task withdraws the validation pill, keeps its stage + readiness", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "accepted", validation: "changed" })}
+        stage={{ id: "done", name: "Done", color: "#00b473" }}
+        canEditGoal
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("Done"); // stage stays — "how far did this get?"
+    expect(meta).toContain("accepted"); // the readiness pill is a terminal status
+    expect(meta).not.toContain("awaiting verdict"); // the withdrawn obligation
+  });
+
+  it("C2/N20-14: a force-accepted task never wears 'awaiting verdict' or a redundant bypass pill on the hero", () => {
+    // deriveValidation projects `bypassed` for a force-accept; the hero withdraws
+    // the validation pill for the terminal task, so neither the stale "awaiting
+    // verdict" nor a redundant "gate bypassed" sits next to "accepted".
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "accepted", validation: "bypassed" })}
+        stage={{ id: "done", name: "Done", color: "#00b473" }}
+        canEditGoal
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("accepted");
+    expect(meta).not.toContain("awaiting verdict");
+    expect(meta).not.toContain("gate bypassed");
+  });
+
+  // C3: a live run gives "agent working" its OWN slot instead of replacing the
+  // readiness pill — the old swap hid `input_required`, the value that most needs
+  // a human, so the board and the hero disagreed mid-run.
+  it("C3: a live run shows 'agent working' BESIDE the input-required readiness, not in its place", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "input_required", validation: "none" })}
+        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        canEditGoal
+        agentWorking
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("input required"); // no longer suppressed by the run
+    expect(meta).toContain("agent working"); // the live-run cue, in its own slot
+  });
+
+  // C12: an unrecognised readiness value must not greenwash. The lookup used to
+  // fall back to a green "ready" pill; it now falls back to a neutral "unknown".
+  it("C12: an unrecognised readiness value renders a neutral 'unknown' pill, never green 'ready'", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "in_review", validation: "none" })}
+        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        canEditGoal
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!;
+    expect(meta.textContent).toContain("unknown");
+    // The greenwash the fix forbids: a malformed value read as healthy.
+    expect(meta.querySelector(".pill.ready")).toBeNull();
   });
 });
 

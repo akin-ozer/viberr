@@ -198,8 +198,9 @@ One-paragraph goal statement (prose).
 `PACKET_OPTION_KINDS` in `app/schemas/task-file.schema.ts` is the source of truth for the
 option kinds; the list below mirrors it. *(Corrected 2026-08-06, pass 19 — N19-3. This block
 said "The 8 kinds" and omitted `archive_task`, which arrived with R14-3 (the task archive).
-`decisions.md` ruling 7 was corrected to nine on 2026-08-05; this sibling enumeration was the
-straggler. Nine is the count today — re-derive it from the schema rather than from here.)*
+Updated 2026-08-15, pass 20 — F20-6/R20-2 added `discard_branch` (decisions.md ruling 7), so
+the block that said "The 9 kinds" was itself the straggler. Ten is the count today —
+re-derive it from the schema rather than from here.)*
 
 ```yaml
 type: input                       # input | blocked (card tint)
@@ -212,11 +213,11 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 9 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 10 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
-    accept: true                  #   edit_goal | archive_task | custom
+    accept: true                  #   edit_goal | archive_task | discard_branch | custom
                                   # (acceptance path marker — human-only)
                                   # Source of truth: PACKET_OPTION_KINDS in
                                   # app/schemas/task-file.schema.ts.

@@ -22,6 +22,7 @@ const rowHuman: ReviewRowView = {
   blockReason: null,
   lastActivityAt: "2026-07-02T09:41:00.000Z",
   quiet: false,
+  continuity: null,
 };
 
 const rowAgent: ReviewRowView = {
@@ -36,6 +37,7 @@ const rowAgent: ReviewRowView = {
   blockReason: null,
   lastActivityAt: "2026-07-02T09:41:00.000Z",
   quiet: false,
+  continuity: null,
 };
 
 function renderQueue(
@@ -92,7 +94,7 @@ describe("ReviewQueuePage", () => {
     );
   });
 
-  it("rows carry key, subline, PR pill, validation pill and the divergent wait-tag copy", () => {
+  it("rows carry key, subline, PR pill, validation pill and the scoped wait-tag copy", () => {
     const { container } = renderQueue([rowHuman], [rowAgent]);
     const rows = container.querySelectorAll(".rq-row");
     expect(rows).toHaveLength(2);
@@ -102,9 +104,11 @@ describe("ReviewQueuePage", () => {
     expect(first.querySelector(".sub")!.textContent).toBe(
       "Completion report — Accept completion, or send back for one fix?",
     );
-    // "your acceptance" — deliberately NOT the board's "waiting on you".
+    // C4: the viewer-scoped canonical phrase — the same "waiting on you" the
+    // board card uses. (The panel HEADING still names the acceptance action;
+    // this per-row tag is a status, and shares the app's two-phrase vocabulary.)
     expect(first.querySelector(".wait-tag.human")!.textContent).toContain(
-      "your acceptance",
+      "waiting on you",
     );
     expect(first.textContent).toContain("PR #318");
     // validation `changed` names what is OWED, not the mechanism (owner
@@ -125,6 +129,26 @@ describe("ReviewQueuePage", () => {
     expect(second.querySelector(".wait-tag.agent .working")).toBeTruthy();
     // Merged PR renders the done pill kind.
     expect(second.querySelector(".pill.done")!.textContent).toBe("PR #311");
+  });
+
+  it("D4: a row whose task has degraded continuity carries the same cue the board card does", () => {
+    // The state used to live only on the task page's Continuity Recovery panel;
+    // the review boundary is exactly where a supervisor looks, so it surfaces
+    // here too — warning tone (risk pill), the panel's refresh glyph, one
+    // vocabulary. Canary: drop the `t.continuity === "degraded"` block and this
+    // (and the negative case below) go red.
+    const degraded: ReviewRowView = { ...rowHuman, continuity: "degraded" };
+    const { container } = renderQueue([degraded], []);
+    const row = container.querySelector(".rq-row")!;
+    expect(row.textContent).toContain("degraded continuity");
+    expect(row.querySelector(".rq-meta .pill.risk")).toBeTruthy();
+  });
+
+  it("D4: a healthy-continuity row shows no continuity cue", () => {
+    const { container } = renderQueue([rowHuman], []);
+    expect(container.querySelector(".rq-row")!.textContent).not.toContain(
+      "degraded continuity",
+    );
   });
 
   it("R15-11: every row names its primary action and where it goes", () => {
@@ -231,7 +255,7 @@ describe("ReviewQueuePage", () => {
         "Nothing waits on you. Completion reports land here when a task reaches the boundary.",
       ),
     ).toBeTruthy();
-    expect(getByText("No review work in flight.")).toBeTruthy();
+    expect(getByText(/No review work in flight/)).toBeTruthy();
     expect(
       getByText("0 tasks at the review boundary · 0 waiting on your acceptance"),
     ).toBeTruthy();
@@ -263,6 +287,7 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
       "VIB-9's delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.",
     lastActivityAt: "2026-07-02T09:41:00.000Z",
     quiet: false,
+    continuity: null,
   };
 
   it("the subline names the closed PR and the queue never advertises force-accept", () => {
@@ -399,8 +424,8 @@ describe("gap-10: a review row that has gone quiet says so", () => {
     expect(meta.textContent).toContain("no activity");
     expect(meta.querySelector(".pill.neutral")).toBeTruthy();
     // The row still says whose move it is — the cue adds time, it never replaces
-    // the wait state.
-    expect(meta.textContent).toContain("your acceptance");
+    // the wait state. C4: the viewer-scoped "waiting on you".
+    expect(meta.textContent).toContain("waiting on you");
   });
 
   it("says nothing on a row that is still moving", () => {

@@ -285,9 +285,9 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       role: "Schema changes",
       icon: "agents",
       backends: ["codex"],
-      // No picked model in FORM → per-backend catalog default (no more the
-      // old invalid hardcoded id).
-      model: "gpt-5.6-sol",
+      // No picked model in FORM → per-backend catalog default. F20-33 made the
+      // codex default Terra (Sol 400s on a ChatGPT-plan account).
+      model: "gpt-5.6-terra",
       effort: "medium",
       scope: "Created in Viberr Core",
       stages: ["ready", "impl"],
@@ -554,11 +554,13 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     }
   });
 
-  it("R7-5 — a specialist `recommend` grant coerces to `direct` ('Allowed') on create", async () => {
+  it("R20-6/F20-21 — a stray specialist `recommend` normalizes to `off` (withheld) on create", async () => {
     // The specialist picker no longer offers `recommend`, but a hostile/legacy
-    // form might still submit it. `recommend` is operator-only (runtime-
-    // identical to `direct` for a specialist; F7-CAP1), so it must persist as
-    // `direct`; `human`/`off` pass through unchanged.
+    // form might still submit it. R20-6: a specialist has no `recommend`, so a
+    // stray one normalizes DOWN to `off` (withheld, the SAFE direction) — never
+    // up to `direct` (the old F7-CAP1 widening, which F20-21 removed because it
+    // made a stored `recommend` render/count/enforce as `direct`); `human`/`off`
+    // pass through unchanged.
     const result = (await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
@@ -583,9 +585,9 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     )!;
     const mode = (id: string) =>
       created.capabilities.find((c) => c.capabilityId === id)?.mode;
-    // Both submitted `recommend` grants coerced to `direct`.
-    expect(mode("open-review-pr")).toBe("direct");
-    expect(mode("commit-push-branch")).toBe("direct");
+    // Both submitted `recommend` grants normalized to `off` (withheld).
+    expect(mode("open-review-pr")).toBe("off");
+    expect(mode("commit-push-branch")).toBe("off");
     // No specialist cap is ever stored/read as `recommend`.
     expect(created.capabilities.map((c) => c.mode)).not.toContain("recommend");
     // Non-recommend modes are untouched.
@@ -598,7 +600,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     });
   });
 
-  it("R7-5 — editing a specialist coerces a submitted `recommend` to `direct` (grantsFor path)", async () => {
+  it("R20-6/F20-21 — editing a specialist normalizes a submitted `recommend` to `off` (grantsFor path)", async () => {
     await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
@@ -631,8 +633,8 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     )!;
     const mode = (id: string) =>
       edited.capabilities.find((c) => c.capabilityId === id)?.mode;
-    expect(mode("open-review-pr")).toBe("direct");
-    expect(mode("commit-push-branch")).toBe("direct");
+    expect(mode("open-review-pr")).toBe("off");
+    expect(mode("commit-push-branch")).toBe("off");
     expect(edited.capabilities.map((c) => c.mode)).not.toContain("recommend");
 
     await postAction(ids.arda, {
@@ -1143,5 +1145,86 @@ describe("F15-05/06 — a brand-new profile claims no verdict authority", () => 
       path.join(app.dataRoot, "agents", "profiles", `${orgProfileId}.md`),
       { force: true },
     );
+  });
+});
+
+/**
+ * F20-20: raising the operator to FULL autonomy (and/or granting it "Accept
+ * completion into Done") lets it close tasks with no human — a governance
+ * decision that used to be audited as a generic "project.agent_profile.updated"
+ * row and never surfaced to the admin. It now writes an explicit
+ * `project.operator.autonomy_changed` event AND rides a governance notice.
+ */
+describe("F20-20 — an operator autonomy elevation is audited + surfaced, not generic", () => {
+  it("elevating supervised → full with direct-accept records a dedicated event and a notice", async () => {
+    const operatorForm = (
+      autonomy: "supervised" | "full",
+      accept: "recommend" | "direct",
+    ) =>
+      JSON.stringify({
+        name: "Operator",
+        role: "Task coordinator",
+        backend: "claude",
+        stages: ["triage", "ready", "impl", "review", "done"],
+        definition: "Operator.",
+        autonomy,
+        caps: { "completion-for-acceptance": accept },
+        resources: { skills: [], mcps: [], kb: [] },
+      });
+
+    // Baseline the operator to supervised (self-contained regardless of the
+    // order earlier tests left it in) — this is NOT an elevation, so no notice.
+    const baseline = (await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "operator",
+      payload: operatorForm("supervised", "recommend"),
+    })) as { ok: boolean; governanceNotice?: unknown };
+    expect(baseline.ok).toBe(true);
+    expect(baseline.governanceNotice).toBeUndefined();
+
+    // Now elevate to full + direct accept-completion: the exception goes live.
+    const elevated = (await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "operator",
+      payload: operatorForm("full", "direct"),
+    })) as { ok: boolean; governanceNotice?: { message: string } };
+    expect(elevated.ok).toBe(true);
+    expect(elevated.governanceNotice?.message).toContain("full autonomy");
+    expect(elevated.governanceNotice?.message).toContain("without a human");
+
+    // A dedicated, greppable audit event — not just the generic updated row.
+    // (`listAuditEvents` is newest-first, and an earlier test also elevates the
+    // operator, so match on the row's own shape rather than by position.)
+    const govRows = listAuditEvents(app.db, {
+      action: "project.operator.autonomy_changed",
+    }).filter((e) => e.subjectId === "operator");
+    expect(
+      govRows.some((e) => {
+        const d = (e.details ?? {}) as {
+          from?: string;
+          to?: string;
+          directDoneLive?: boolean;
+        };
+        return d.from === "supervised" && d.to === "full" && d.directDoneLive === true;
+      }),
+      "an autonomy_changed event records supervised→full with the exception live",
+    ).toBe(true);
+
+    // …and the generic update row now carries the explicit autonomy fact too.
+    const updated = listAuditEvents(app.db, {
+      action: "project.agent_profile.updated",
+    }).filter((e) => e.subjectId === "operator");
+    expect(
+      updated.some(
+        (e) => (e.details as { operatorAutonomy?: string })?.operatorAutonomy === "full",
+      ),
+    ).toBe(true);
+
+    // Restore supervised so later tests see the seeded posture.
+    await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "operator",
+      payload: operatorForm("supervised", "recommend"),
+    });
   });
 });

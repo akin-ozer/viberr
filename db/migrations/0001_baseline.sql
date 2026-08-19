@@ -91,6 +91,23 @@ CREATE TABLE task_projections (
   -- otherwise. Projected (P11-50) so the review-queue read model doesn't re-read
   -- task files on a loader path to recompute it.
   validation_block_reason TEXT,
+  -- N20-14 (pass20 §5c): the durable acceptance-override fact. 'forced' when a
+  -- human force-accepted this task past the verdict gate, NULL otherwise.
+  -- Projected so the hero/card display arm (C-VOCAB) reads it without re-reading
+  -- the task file, exactly like `validation` above.
+  acceptance TEXT CHECK (acceptance IN ('forced')),
+  -- D4 (pass20 C-CONTINUITY): runtime-continuity health as a TASK-LEVEL fact.
+  -- 'degraded' when this task's timeline carries a `continuity` event — a resumed
+  -- provider session whose transcript was gone, so the agent re-anchored on
+  -- `task.md` and continued fresh (run-service.server.ts `noteContinuityReset`).
+  -- NULL otherwise. The Continuity Recovery panel (continuity-recovery.tsx)
+  -- derives the same state client-side from the same event; projecting it here is
+  -- what lets the state mean the same thing on the board card, the board filter
+  -- and the review row (UX spec §State Semantics: "Every state must mean the same
+  -- thing everywhere it appears"; §Additional Patterns names a degraded-continuity
+  -- default filter). Persistent by design — the record survives in the timeline,
+  -- so the base-interface cue does too.
+  continuity TEXT CHECK (continuity IN ('degraded')),
   owner_user_id TEXT,
   specialist_json TEXT,
   reviewers_json TEXT NOT NULL DEFAULT '[]',
@@ -262,8 +279,43 @@ CREATE TABLE org_mcp_servers (
   tools_count INTEGER,                -- discovered tool count (NULL unknown)
   up INTEGER,                         -- 1 up · 0 down · NULL never probed
   last_checked_at TEXT,
+  -- R19-18: set while a first-run install runs in the BACKGROUND for this
+  -- server (ISO). A command that is still fetching its dependencies is not a
+  -- broken one, so the row shows "installing" rather than a red dot, and the
+  -- warm-up writes the real verdict when it settles.
+  warming_since TEXT,
+  -- R19-17: why the last probe failed, in the command's own words (scrubbed).
+  -- NULL when the server is up or was never probed — a stale reason next to a
+  -- green dot would be worse than none, so the up path CLEARS it.
+  last_error TEXT,
+  -- R20-4 (N20-2): when this server first answered a probe successfully (ISO).
+  -- NULL means it has never worked here — which is what makes a timeout on an
+  -- npx/uvx-style command a plausible first-run INSTALL rather than a broken
+  -- server. Stamped idempotently (COALESCE), never cleared.
+  first_success_at TEXT,
+  -- R20-4 (N20-2): how many times the HEURISTIC (stderr said nothing install-y,
+  -- but the command is an installer and the row has never succeeded) armed a
+  -- background warm-up. Capped at 1 so a command that times out on EVERY probe
+  -- still settles to `unreachable` instead of re-downloading forever — the
+  -- terminal condition R19-17c's honesty depends on.
+  heuristic_warmups INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+-- R20-3 (F20-4): a model the PROVIDER refused for this deployment's account.
+-- Org-level (unscoped, like org_mcp_servers): the credential is a deployment
+-- fact, not a project one. Written only from a REAL run's failure whose
+-- redacted text matches MODEL_UNSUPPORTED_RE; cleared by a real run's success.
+-- Never written by a synthetic probe (ruling 19). Presence of a row =
+-- unavailable; absence = unknown-but-offered (never "proven available", the
+-- claim we cannot make).
+CREATE TABLE model_availability (
+  backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+  model      TEXT NOT NULL,
+  reason     TEXT NOT NULL,        -- the provider's own redacted sentence
+  marked_at  TEXT NOT NULL,
+  run_id     TEXT,                 -- the run that proved it
+  PRIMARY KEY (backend, model)
 );
 CREATE TABLE org_skills (
   id TEXT PRIMARY KEY,

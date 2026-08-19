@@ -137,7 +137,14 @@ export function KbPanel({
             </span>
           </div>
         ))}
-        {kbs.length === 0 && <div className="empty">No knowledge bases yet.</div>}
+        {kbs.length === 0 && (
+          // D8: absent → why it matters → next action (P16), not a bare label.
+          <div className="empty">
+            No knowledge bases yet. A knowledge base is a folder of docs agents
+            read live while they work. Add one with <strong>New</strong> above,
+            then grant it to an agent profile.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -177,20 +184,34 @@ export function McpPanel({
           <div className="rsrc-row" key={m.id}>
             {(() => {
               const stale = m.up === true && isStaleCheck(m.lastCheckedAt);
+              // R19-18: a first-run install is neither up nor broken, and it
+              // outranks the stored `up` — that value is the verdict of the
+              // probe this install was started BY.
+              const warming = m.warmingSince !== null;
               return (
                 <span
                   className={
                     "stat-dot" +
-                    (stale ? " stale" : m.up === true ? " up" : m.up === false ? " down" : "")
+                    (warming
+                      ? " warming"
+                      : stale
+                        ? " stale"
+                        : m.up === true
+                          ? " up"
+                          : m.up === false
+                            ? " down"
+                            : "")
                   }
                   title={
-                    stale
-                      ? "last check passed but is stale — retest to confirm"
-                      : m.up === true
-                        ? "connected"
-                        : m.up === false
-                          ? "unreachable"
-                          : "not health-checked"
+                    warming
+                      ? "first run of this command — finishing in the background"
+                      : stale
+                        ? "last check passed but is stale — retest to confirm"
+                        : m.up === true
+                          ? "connected"
+                          : m.up === false
+                            ? "unreachable"
+                            : "not health-checked"
                   }
                 ></span>
               );
@@ -201,7 +222,14 @@ export function McpPanel({
                 {m.transport} · {m.target}
               </span>
               <span className="sub">
-                {m.up === true
+                {/* R20-4 (N20-2): softer than "installing on first use" because
+                    the row also reaches here on the HEURISTIC arm — an inference
+                    that an npx/uvx-style command is still fetching, not a
+                    reported install. One copy for both bases: the reader can act
+                    on neither distinction. */}
+                {m.warmingSince !== null
+                  ? "first run — installing in the background"
+                  : m.up === true
                   ? (m.tools !== null ? m.tools + " tools · " : "reachable · ") +
                     "checked " + rel(m.lastCheckedAt) +
                     (isStaleCheck(m.lastCheckedAt) ? " · stale, retest" : "")
@@ -232,6 +260,15 @@ export function McpPanel({
                     (usedBy(m.name) === 1 ? "" : "s")
                   : ""}
               </span>
+              {/* R19-17: WHY it is unreachable, in the command's own words.
+                  The reason used to exist only in the toast the probe returned,
+                  so the moment it faded a red dot was the entire story and the
+                  only way to see the cause again was to re-run the test. It is
+                  scrubbed of the credential the child was spawned with before
+                  it is ever stored (`discoverStdioMcpTools`). */}
+              {m.up === false && m.lastError && m.warmingSince === null && (
+                <span className="rsrc-err mono">{m.lastError}</span>
+              )}
             </span>
             <span className="rsrc-acts">
               <button
@@ -264,7 +301,14 @@ export function McpPanel({
             </span>
           </div>
         ))}
-        {mcps.length === 0 && <div className="empty">No MCP servers yet.</div>}
+        {mcps.length === 0 && (
+          // D8: absent → why it matters → next action (P16).
+          <div className="empty">
+            No MCP servers yet. An MCP server exposes external tools an agent can
+            call during a run. Add one with <strong>Add</strong> above, then
+            grant it to an agent profile.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -350,7 +394,14 @@ export function SkillPanel({
             </span>
           </div>
         ))}
-        {skills.length === 0 && <div className="empty">No skills yet.</div>}
+        {skills.length === 0 && (
+          // D8: absent → why it matters → next action (P16).
+          <div className="empty">
+            No skills yet. A skill packages instructions an agent loads on demand
+            while it works. Add one with <strong>New</strong> above, then grant
+            it to an agent profile.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -430,7 +481,14 @@ export function AgentPanel({
             </div>
           );
         })}
-        {gagents.length === 0 && <div className="empty">No global agent profiles yet.</div>}
+        {gagents.length === 0 && (
+          // D8: absent → why it matters → next action (P16).
+          <div className="empty">
+            No global agent profiles yet. A profile is a reusable agent
+            definition — its backend, model, skills and grants — that you can
+            deploy into any project. Create one with <strong>New</strong> above.
+          </div>
+        )}
       </div>
     </section>
   );
