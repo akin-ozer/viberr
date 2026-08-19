@@ -505,6 +505,12 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     // the owner-authority seam that `accept-completion` would skip.
     expect(submitted[0]!.intent).toBe("apply-recommendation");
     expect(submitted[0]!.recId).toBe("rec-1");
+    // Ruling 88: and it carries this dialog's own echo of the three facts it
+    // just stated. The server refuses the apply without it, so a submit that
+    // dropped the fields would look identical here and fail live.
+    expect(submitted[0]!.ackPr).toBe("review");
+    expect(submitted[0]!.ackRevision).toBe("none"); // no delivered revision
+    expect(submitted[0]!.ackVerdict).toBe("healthy");
   });
 
   it("F19-26: a plain TRANSITION recommendation whose target is the terminal stage confirms too — the gate is the target, not the kind", async () => {
@@ -585,6 +591,12 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("resolve-packet");
     expect(submitted[0]!.option).toBe("0");
+    // Ruling 88: the resolution carries the ceremony's echo — the packet
+    // identity the server pins says WHICH decision this is, not what the human
+    // saw merging.
+    expect(submitted[0]!.ackPr).toBe("review");
+    expect(submitted[0]!.ackRevision).toBe("none");
+    expect(submitted[0]!.ackVerdict).toBe("healthy");
   });
 
   it("every OTHER packet option still resolves in one click — none of them writes to GitHub", async () => {
@@ -596,6 +608,11 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("resolve-packet");
     expect(queryByText("Accept this completion?")).toBeNull();
+    // Ruling 88's scope, on the client: a decision that accepts nothing sends
+    // no acknowledgment, and the server asks it for none.
+    expect(submitted[0]!.ackPr).toBeUndefined();
+    expect(submitted[0]!.ackRevision).toBeUndefined();
+    expect(submitted[0]!.ackVerdict).toBeUndefined();
   });
 
   it("F19-37: the Current-state stage menu's move into the LAST stage asks first — the sixth writer", async () => {
@@ -2063,5 +2080,41 @@ describe("D6: consequential actions confirm before they act", () => {
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("run-interrupt");
     expect(submitted[0]!.runId).toBe("run_1");
+  });
+});
+
+/**
+ * U7 — D2's other half.
+ *
+ * UX spec §Breakpoint Strategy: *"the task detail's side-by-side regions stack,
+ * preserving reading order: current state, latest packet, next action, then the
+ * timeline."* Reading order is SOURCE order — it is what a screen reader
+ * announces and what Tab walks. Pass 20 lifted the side column at 1100px with
+ * `order: -1` and left the DOM alone, recording the departure in a CSS comment
+ * that cited this very sentence as its authority; below that width a sighted
+ * keyboard user then saw "Accept completion → Done" at the top of the page and
+ * reached it LAST, after every timeline entry (WCAG 2.2 SC 1.3.2 / 2.4.3).
+ *
+ * The columns are ordered in the markup now and placed by grid cell in app.css,
+ * so the desktop paint is unchanged while one order serves both. This asserts
+ * the order and its CONTENT — a swap that moved empty divs would pass on order
+ * alone.
+ */
+describe("U7: the task detail's reading order matches its stacking rule", () => {
+  it("puts the current-state / acceptance column ahead of the timeline in the DOM", () => {
+    const { container } = renderPage({});
+    const detail = container.querySelector(".detail")!;
+    const columns = Array.from(detail.children)
+      .map((el) => el.className)
+      .filter((c) => c === "detail-main" || c === "detail-side");
+    expect(columns).toEqual(["detail-side", "detail-main"]);
+
+    const side = detail.querySelector(".detail-side")!;
+    const main = detail.querySelector(".detail-main")!;
+    // The consequential action really is in the column that comes first…
+    expect(side.textContent).toContain("Accept completion → Done");
+    expect(main.textContent).not.toContain("Accept completion → Done");
+    // …and the timeline really is in the one that follows it.
+    expect(main.querySelector(".tl-list, .timeline, .tl-wrap")).not.toBeNull();
   });
 });

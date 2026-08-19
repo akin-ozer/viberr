@@ -14,6 +14,12 @@ export const ERROR_CODES = {
   /** A canonical store file parsed only with fallback defaults (hardStop) —
    *  writing to it would replace the human's content. */
   FILE_NOT_TRUSTED: "file_not_trusted",
+  /** Ruling 88 (F21-2): an acceptance arrived with NO disclosure acknowledgment
+   *  — the caller never confirmed what merges, so it is refused. */
+  ACCEPT_DISCLOSURE_MISSING: "accept_disclosure_missing",
+  /** Ruling 88 (F21-2): the acknowledgment describes a task state that is no
+   *  longer live — the ceremony has to be re-opened against what is true now. */
+  ACCEPT_DISCLOSURE_STALE: "accept_disclosure_stale",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

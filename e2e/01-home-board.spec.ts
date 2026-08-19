@@ -245,13 +245,30 @@ test("confirming a Done-stage drop still meets the verdict gate, and the board s
     'dialog[data-screen-label="Accept completion dialog"]',
   );
   await expect(confirm).toBeVisible();
+  // The ceremony DISCLOSES the gate before the click: VIB-142 delivered a
+  // revision its one required reviewer has not approved, so the Blocked row
+  // carries the projected `acceptanceBlockedReason` — the same sentence the
+  // server refuses the confirmed move with.
+  await expect(confirm).toContainText(
+    "Waiting on 1 required reviewer approval of the current revision.",
+  );
   // The shared ceremony's confirm reads "Move → Done" in its stage-move mode
   // (with "& merge" appended because VIB-142 carries a PR).
   await confirm.getByRole("button", { name: /^Move → Done/ }).click();
   await request;
 
+  // Any error toast used to satisfy this, and one of them was the WRONG
+  // refusal: VIB-142 really has delivered a revision, the board's ceremony
+  // disclosed "No delivered revision recorded." anyway, and ruling 88 made the
+  // server refuse that stale echo ("VIB-142 changed after the accept dialog was
+  // opened…") before the verdict gate this test is named for ever spoke. Pin the
+  // gate's own words, so a board move refused for the wrong reason — or for a
+  // broken ceremony — cannot pass as this behaviour.
   const toast = page.locator('.toast[data-kind="error"]');
-  await expect(toast).toBeVisible();
+  await expect(toast).toContainText(
+    "Waiting on 1 required reviewer approval of the current revision.",
+  );
+  await expect(toast).not.toContainText("changed after the accept dialog");
   await expect(
     column(page, "Review").locator(".card", { hasText: "VIB-142" }).first(),
   ).toBeVisible();

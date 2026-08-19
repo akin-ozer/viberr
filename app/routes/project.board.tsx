@@ -9,6 +9,7 @@ import {
 import { rescanProject } from "~/server/projections/rescan.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { createTask, reorderTask } from "~/server/tasks/task-actions.server";
+import { parseAcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import { roleCan } from "~/shared/rbac";
 import { BoardPage } from "~/features/board/board-page";
 
@@ -19,6 +20,22 @@ import { BoardPage } from "~/features/board/board-page";
  * createTask, RBAC inside), rescan (reconcile file store ↔ projections).
  * No optimistic UI for governed state — revalidation shows the new card.
  */
+
+/**
+ * Ruling 88 (F21-2) — the acceptance disclosure a board POST carries, or `null`
+ * when it carries none.
+ *
+ * `null` reaches the server rather than being swallowed here: it is the
+ * difference between "an HTTP caller sent no acknowledgment" (refused — the
+ * bare POST F21-2 found accepting silently) and "an in-process caller carries
+ * its own contract" (omitted). The parsing itself — the field names, and the
+ * strictness that reads a half-filled echo as no echo — is the ONE shared
+ * definition in `~/shared/acceptance-disclosure`, which the ceremony writes
+ * with; only the FormData read is local (as in routes/project.task).
+ */
+function acceptanceAck(formData: FormData) {
+  return parseAcceptanceDisclosure((field) => String(formData.get(field) ?? ""));
+}
 
 export async function action({ request, params }: Route.ActionArgs) {
   const { db, formData, actor, intent } = await requireFormAction(request);
@@ -60,6 +77,15 @@ export async function action({ request, params }: Route.ActionArgs) {
           taskKey: String(formData.get("taskKey") ?? ""),
           toStageId: String(formData.get("to") ?? ""),
           beforeKey: beforeRaw || null,
+          // Ruling 88 (F21-2): a drop on the FINAL column is an acceptance —
+          // the board's ceremony (ruling 53 / R18-7, the shared `AcceptConfirm`)
+          // has said so on screen for three passes while this POST carried
+          // nothing. The key rides on every reorder; `reorderTask` forwards it
+          // to `transitionStage`, which consults it on the terminal branch
+          // alone, so a rank write or an ordinary column move stays ack-free.
+          // Absent fields ⇒ `null` ⇒ a drop on Done that skipped the dialog is
+          // refused.
+          ack: acceptanceAck(formData),
         },
         actor,
       );

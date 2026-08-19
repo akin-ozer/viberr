@@ -1024,3 +1024,237 @@ describe("F20-11: task-view read-marking fires only on a genuine navigation", ()
     expect(readAt("f2011_doc")).not.toBeNull();
   });
 });
+
+/**
+ * F21-2 / ruling 88 — the acceptance disclosure at the HTTP door.
+ *
+ * The pass-21 finding: the R15-1 ceremony was client architecture only, so a
+ * POST that never opened `AcceptConfirm` accepted the completion and merged its
+ * PR with no disclosure at all. These two requests are that POST — the exact
+ * shape a stale tab, a replayed form or a console `fetch` sends — and the route
+ * refuses them before any gate, merge or audit row runs.
+ *
+ * The ordinary (non-terminal) `transition` above is the counterweight: it still
+ * carries no acknowledgment and still succeeds, because only a move that IS an
+ * acceptance is held to the ceremony.
+ */
+describe("acceptance disclosure (ruling 88) — the HTTP door", () => {
+  it("refuses an accept-completion POST that carries no acknowledgment", async () => {
+    // SAFETY: arda holds acceptance authority, so the refusal that answers is
+    // the disclosure — not RBAC, which is checked first and passes.
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "accept-completion",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("accept from the dialog");
+  });
+
+  it("refuses a force-accept POST that carries no acknowledgment", async () => {
+    // SAFETY: the disclosure guard raises an AppError, so the action answers on
+    // its refusal arm — `appErrorResponse`'s `{ ok: false, error }` + status.
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "force-accept",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("accept from the dialog");
+  });
+
+  it("refuses a stage move INTO the terminal stage that carries no acknowledgment", async () => {
+    // F19-37: the Current-state menu's last stage is the sixth acceptance
+    // writer — the same door, and the same demand.
+    // SAFETY: as above — a refused intent always answers on the refusal arm.
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "transition",
+      to: "done",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("accept from the dialog");
+  });
+});
+
+/**
+ * The INDIRECT acceptance doors at the same HTTP boundary: applying an operator
+ * recommendation that reaches acceptance, and resolving a packet's
+ * `accept_completion` option. Both render the same ceremony (`AcceptConfirm`,
+ * modes `apply-recommendation` and `packet`) and both used to accept — and
+ * merge — on a POST that carried nothing back from it. Their server-side pins
+ * (the recommendation id, the packet identity) say WHICH decision is being
+ * settled, never what the human was shown merging.
+ *
+ * The ordinary intents are the counterweight: an apply that is not an
+ * acceptance, and a non-accepting packet option, still POST bare and still
+ * succeed — proved at the server level in `task-actions.server.test.ts`.
+ */
+describe("acceptance disclosure (ruling 88) — the indirect HTTP doors", () => {
+  // The packet cases below consume VIB-142's open packet, and the earlier
+  // describes in this file resolve it too. Re-seed so each case starts from the
+  // seeded (open-packet) state rather than from whatever ran before it.
+  beforeEach(async () => {
+    const { runDemoSeed } = await import("../../../test-support/demo-seed");
+    await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  });
+
+  /** Put an `accept_completion` card on VIB-145 — the operator's own "accept
+   *  completion → Done" recommendation, which is what the Apply button applies. */
+  async function seedAcceptRecommendation(): Promise<void> {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: "viberr-core", taskKey: "VIB-145", dataRoot: app.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.recommendations = [
+          {
+            id: "rec-accept-145",
+            kind: "accept_completion",
+            toStageId: "done",
+            label: "Accept completion — move VIB-145 to Done",
+            detail: "",
+          },
+        ];
+      },
+    );
+  }
+
+  it("refuses an apply-recommendation POST that reaches acceptance with no acknowledgment", async () => {
+    // F19-3, live-proven: one Apply click merged an unreviewed head into main.
+    await seedAcceptRecommendation();
+    // SAFETY: arda holds acceptance authority, so the refusal that answers is
+    // the disclosure guard's AppError — the action's `appErrorResponse` arm,
+    // `{ ok: false, error }` plus a status — not RBAC and not the success shape.
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "apply-recommendation",
+      recId: "rec-accept-145",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("accept from the dialog");
+  });
+
+  it("refuses an apply-recommendation POST whose acknowledgment no longer matches", async () => {
+    // The card sat on screen while the task moved (R17-1 drift): the echo names
+    // a revision the task no longer carries, so the acceptance is refused rather
+    // than merged against a screen that stopped being true.
+    await seedAcceptRecommendation();
+    // SAFETY: as above — a stale echo is refused, so the action answers on its
+    // refusal arm.
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "apply-recommendation",
+      recId: "rec-accept-145",
+      ackPr: "review",
+      ackRevision: "9".repeat(40),
+      ackVerdict: "healthy",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(409);
+    expect(result.data.error).toContain("changed after the accept dialog");
+  });
+
+  it("refuses a resolve-packet POST on the accept_completion option with no acknowledgment", async () => {
+    // F19-7: VIB-142's packet option 0 IS the acceptance — "Confirm decision"
+    // runs the real merge.
+    // SAFETY: arda holds acceptance authority on VIB-142, so the resolution
+    // reaches the disclosure guard and is refused there — the action's refusal
+    // arm, never the resolve success shape.
+    const result = (await postIntent("VIB-142", ids.arda, {
+      intent: "resolve-packet",
+      option: "0",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("accept from the dialog");
+    // Refused before anything was decided — the packet is still open.
+    const detail = await runLoader("VIB-142", ids.arda);
+    expect(detail.task.packet).not.toBeNull();
+  });
+
+  it("refuses a resolve-packet POST whose acknowledgment no longer matches", async () => {
+    // SAFETY: as above — a refused resolution always answers on the refusal arm.
+    const result = (await postIntent("VIB-142", ids.arda, {
+      intent: "resolve-packet",
+      option: "0",
+      ackPr: "review",
+      ackRevision: "9".repeat(40),
+      ackVerdict: "healthy",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(409);
+    expect(result.data.error).toContain("changed after the accept dialog");
+  });
+});
+
+/**
+ * F21-6 (route half) — "reviewer" is a claim about AUTHORITY.
+ *
+ * Acceptance waits for a REVIEWER's approval; it never waits on a supporting
+ * agent. The engagement's timeline event learned that distinction with the tool
+ * half, but the toast a human reads on the very same click still said "as a
+ * reviewer" for every engagement — so the two surfaces answering one action made
+ * opposite claims about who gates the task.
+ *
+ * Last in this file on purpose: the supporting arm edits the project's deployed
+ * grants, which nothing after it should inherit.
+ */
+describe("assign-reviewer toast — reviewer vs supporting agent", () => {
+  it("says 'as a reviewer' for a verdict-capable engagement", async () => {
+    // The seeded Reviewer profile holds "Report a validation verdict" directly.
+    // SAFETY: VIB-153 sits at Implementation (the Reviewer's eligible stages are
+    // impl/review) and arda is a project admin, so this returns the success arm.
+    const result = (await postIntent("VIB-153", ids.arda, {
+      intent: "assign-reviewer", profileId: "reviewer",
+    })) as { ok: true; toast: string };
+    expect(result.toast).toBe("Engaged Reviewer as a reviewer");
+    // The timeline says exactly what the toast says — one action, one claim.
+    const after = await runLoader("VIB-153", ids.arda);
+    const engaged = after.task.timeline.find(
+      (e) => e.type === "agent" && e.text.includes("Engaged **Reviewer**"),
+    );
+    expect(engaged?.text).toContain("as a reviewer.");
+  });
+
+  it("says 'as a supporting agent' when the profile holds no verdict grant", async () => {
+    // Same profile, same click, one grant different — which is the whole point:
+    // the copy follows the authority, not the menu the human used.
+    // Canary: restore the unconditional `Engaged ${name} as a reviewer` and this
+    // fails while the timeline assertion below still passes — the exact split
+    // between the two surfaces that this closes.
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { writeProject } = await import("../../../test-support/test-store");
+    const { rebuildAll } = await import("~/server/projections/rebuilder.server");
+    const project = readProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot })!;
+    writeProject(
+      app.dataRoot,
+      {
+        ...project.parsed.frontmatter,
+        agents: project.parsed.frontmatter.agents.map((agent) =>
+          agent.profileId === "reviewer"
+            ? {
+                ...agent,
+                capabilities: agent.capabilities.map((grant) =>
+                  grant.capabilityId === "report-validation-verdict"
+                    ? { ...grant, mode: "human" as const }
+                    : grant,
+                ),
+              }
+            : agent,
+        ),
+      },
+      project.parsed.description,
+    );
+    rebuildAll(app.db, { dataRoot: app.dataRoot, force: true });
+
+    // SAFETY: VIB-145 sits at Review (also an eligible Reviewer stage) with no
+    // engagement for this profile, so this returns the success arm.
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "assign-reviewer", profileId: "reviewer",
+    })) as { ok: true; toast: string };
+    expect(result.toast).toBe("Engaged Reviewer as a supporting agent");
+    const after = await runLoader("VIB-145", ids.arda);
+    const engaged = after.task.timeline.find(
+      (e) => e.type === "agent" && e.text.includes("Engaged **Reviewer**"),
+    );
+    expect(engaged?.text).toContain("as a supporting agent.");
+
+    // Idempotent re-engage answers with the SAME capacity — it reads the
+    // engagement's snapshot, which is what acceptance consults.
+    // SAFETY: an already-engaged profile is a no-op on the success arm.
+    const again = (await postIntent("VIB-145", ids.arda, {
+      intent: "assign-reviewer", profileId: "reviewer",
+    })) as { ok: true; toast: string };
+    expect(again.toast).toBe("Reviewer is already engaged as a supporting agent");
+  });
+});

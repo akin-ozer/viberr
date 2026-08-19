@@ -151,3 +151,64 @@ describe("board action — a non-member never learns the project exists (E2)", (
     );
   });
 });
+
+/**
+ * F21-2 / ruling 88 — the board's drop on the FINAL column is an acceptance.
+ *
+ * `reorderTask` routes a move into the terminal stage through the full
+ * acceptance contract (→ `transitionStage` → `acceptCompletion` — the real,
+ * irreversible merge), and the board has fronted it with the shared
+ * `AcceptConfirm` ceremony since ruling 53 (R18-7). The POST behind that
+ * ceremony carried nothing back from it: a drag whose confirmation was never
+ * rendered — a stale tab, a replayed form, a script — merged to the default
+ * branch on an unadorned request. The ordinary column move above (`to: "impl"`,
+ * which the 403 case exercises) is the counterweight: only a move that IS an
+ * acceptance is held to the ceremony.
+ */
+describe("board reorder — the acceptance disclosure (ruling 88)", () => {
+  it("refuses a drop on the terminal column that carries no acknowledgment", async () => {
+    // SAFETY: arda is the project admin, so `reorder-board` and the acceptance
+    // authority both pass — the refusal that answers is the disclosure.
+    const result = reply(
+      await post("viberr-core", ids.arda, {
+        intent: "reorder",
+        taskKey: "VIB-142",
+        to: "done",
+        beforeKey: "",
+      }),
+    );
+    expect(result.status).toBe(400);
+    expect(result.error).toContain("accept from the dialog");
+  });
+
+  it("refuses a drop whose acknowledgment no longer matches the task", async () => {
+    // The card was dragged from a board rendered against an earlier state
+    // (R17-1 drift): the echo names a delivered revision the task does not
+    // carry, so nothing is accepted and nothing is merged.
+    const result = reply(
+      await post("viberr-core", ids.arda, {
+        intent: "reorder",
+        taskKey: "VIB-142",
+        to: "done",
+        beforeKey: "",
+        ackPr: "review",
+        ackRevision: "9".repeat(40),
+        ackVerdict: "healthy",
+      })
+    );
+    expect(result.status).toBe(409);
+    expect(result.error).toContain("changed after the accept dialog");
+  });
+
+  it("an ordinary column move still POSTs bare", async () => {
+    // Same intent, a non-terminal target: no acceptance, no ceremony, no echo.
+    const result = await post("viberr-core", ids.arda, {
+      intent: "reorder",
+      taskKey: "VIB-142",
+      to: "impl",
+      beforeKey: "",
+    });
+    expect(reply(result).status).toBeUndefined();
+    expect("stage" in result ? result.stage : null).toBe("impl");
+  });
+});

@@ -48,6 +48,10 @@ import {
   reviewPill,
 } from "~/features/github/github-pills";
 import { AcceptConfirm } from "~/features/task-detail/accept-confirm";
+import {
+  acceptanceDisclosureFields,
+  type AcceptanceDisclosure,
+} from "~/shared/acceptance-disclosure";
 import { LocalRelative } from "~/ui/local-time";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
@@ -910,16 +914,24 @@ function boardAcceptRefusal(
  * its `stage-move` ceremony mode — the mode written for exactly this path (a
  * human move into the terminal stage IS accepting completion, F19-37). The board
  * maps its projection summary onto the component's structural `task` shape and
- * supplies the stage list from its columns. The three task-FILE facts a board
- * summary does not carry are passed honestly rather than invented:
- *   - `workRevisionSha: null` → the shared "No delivered revision recorded." row
- *     (the fork drew no revision row at all);
+ * supplies the stage list from its columns. The task-FILE facts a board summary
+ * does not carry are passed honestly rather than invented:
  *   - `defaultBranch` → the merge target, threaded from the project record —
  *     the fact the fork could not name and sent people to the task page for;
  *   - `noChanges` / `noPullRequest: false` → the board cannot run the accept-time
  *     branch re-probe the task-detail loader drives, so it keeps the plain no-PR
  *     sentence rather than promising an auto-detect it can't perform.
  * The refusals a board summary CAN answer are composed by `boardAcceptRefusal`.
+ *
+ * The delivered REVISION used to be in that list — hardcoded `null`, so the
+ * ceremony always drew "No delivered revision recorded." — and once ruling 88
+ * made the confirmed click echo its own disclosure back, that hardcoded absence
+ * stopped being merely a thinner disclosure and became a dead door: the server
+ * compares the echo against the live task, so every board drop onto the terminal
+ * stage of a task that had actually DELIVERED was refused as stale. The revision
+ * is projected now (`TaskSummary.workRevisionSha`) and disclosed like every
+ * other fact — which is also what ruling 53 asked for. `?? null` keeps the
+ * honest-absence row for a task with nothing delivered.
  */
 function AcceptOnBoardConfirm({
   task,
@@ -941,7 +953,9 @@ function AcceptOnBoardConfirm({
   defaultBranch: string;
   busy: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
+  /** Ruling 88: the shared ceremony hands the confirmed click its own
+   *  disclosure — the board POSTs it, exactly like the task page. */
+  onConfirm: (disclosure: AcceptanceDisclosure) => void;
 }) {
   const terminalName = stages[stages.length - 1]?.name ?? "Done";
   return (
@@ -955,7 +969,7 @@ function AcceptOnBoardConfirm({
         branch: task.branch,
         pr: task.pr,
       }}
-      workRevisionSha={null}
+      workRevisionSha={task.workRevisionSha ?? null}
       noChanges={false}
       noPullRequest={false}
       defaultBranch={defaultBranch}
@@ -1634,7 +1648,16 @@ export function BoardPage({
   };
 
   /** Commit a confirmed board acceptance (B1). */
-  const submitReorder = (taskKey: string, to: string, beforeKey: string) => {
+  const submitReorder = (
+    taskKey: string,
+    to: string,
+    beforeKey: string,
+    // Ruling 88 (F21-2): set ONLY for a move onto the FINAL column, which the
+    // server reads as an acceptance (`reorderTask` → `transitionStage` →
+    // `acceptCompletion` — the real merge). It is the echo of what the ceremony
+    // above just displayed; without it the server refuses the acceptance.
+    disclosure?: AcceptanceDisclosure,
+  ) => {
     setArrivedKey(taskKey);
     announceMove(taskKey, to); // D9
     const fd = new FormData();
@@ -1643,6 +1666,13 @@ export function BoardPage({
     fd.set("taskKey", taskKey);
     fd.set("to", to);
     fd.set("beforeKey", beforeKey);
+    if (disclosure) {
+      for (const [field, value] of Object.entries(
+        acceptanceDisclosureFields(disclosure),
+      )) {
+        fd.set(field, value);
+      }
+    }
     transitionFetcher.submit(fd, { method: "post" });
   };
 
@@ -2052,10 +2082,13 @@ export function BoardPage({
           defaultBranch={defaultBranch}
           busy={transitionFetcher.state !== "idle"}
           onCancel={() => setPendingAccept(null)}
-          onConfirm={() => {
+          onConfirm={(disclosure) => {
             const p = pendingAccept;
             setPendingAccept(null);
-            submitReorder(p.taskKey, p.to, p.beforeKey);
+            // Ruling 88: the drop commits with the ceremony's own echo of what
+            // it disclosed — the same acknowledgment the task page's stage move
+            // sends, on the same server contract.
+            submitReorder(p.taskKey, p.to, p.beforeKey, disclosure);
           }}
         />
       )}

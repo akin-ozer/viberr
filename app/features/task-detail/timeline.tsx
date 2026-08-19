@@ -70,7 +70,9 @@ function CollapsibleComment({
     // max-height, so this stays correct in both states.
     const measure = () => setOverflowing(el.scrollHeight > COLLAPSE_MAX + 24);
     measure();
-    if (typeof ResizeObserver === "undefined") return;
+    // The first measure above is the whole contract on a host that provides no
+    // ResizeObserver (jsdom); only the re-measure on resize is lost.
+    if (!("ResizeObserver" in globalThis)) return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
