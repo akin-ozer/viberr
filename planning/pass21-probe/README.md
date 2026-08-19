@@ -28,3 +28,4 @@ the process, not to ship functionality.
 |---|------|-------------|
 | 1 | `README.md` | This protocol document — the first probe entry. |
 | 2 | out-of-band merge probe | VIB-7 |
+| 3 | pass-21 validation probe | VIB-10 |
