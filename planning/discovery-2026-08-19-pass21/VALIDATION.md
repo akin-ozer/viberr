@@ -42,3 +42,6 @@ Gates per band: `npx react-router typegen && npx tsc --noEmit` clean + full `npx
 - [x] Ruling 88 live: bare accept POST → 400 "needs the confirmation dialog… no record of what was shown"; ceremony accept then merged PR #174 (Done, branch auto-deleted).
 - [x] Full governed loop on the pass-21 build: VIB-10 create → phases visible → mirror-backed clone → Codex dev commit → PR #174 → reviewer approve → ceremony accept → REAL merge 20:58:03Z.
 - [x] Final gates: typegen+tsc clean; full suite 4082 green ×2; oxlint 0; lint first in CI verify.
+- [x] Rulings 89/90 (owner, 2026-08-20): triage gate stays behavioral — placeholder reworded and LIVE-VERIFIED post-rebuild ("…get flagged by the operator at triage"); FILES.md deleted per ruling 90 (git ls-files + architecture tree are the index). Gates re-run: board/docs/copy-ban 159 tests green, tsc 0, oxlint 0.
+- [x] Post-merge live round trip: @operator on closed VIB-10 answered with exact task-record facts (PR #174 merged, no revisionDrift, human acceptance) and tagged the asker.
+- [x] Post-fix UI re-inspection: agents-page subtitle defers to per-card provenance; Web Verifier "Created in viberr" vs Developer "Global base · customized for viberr"; "agent threads in a working state" (U12) — all live.
