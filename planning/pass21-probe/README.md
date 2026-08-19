@@ -27,3 +27,4 @@ the process, not to ship functionality.
 | # | File | Description |
 |---|------|-------------|
 | 1 | `README.md` | This protocol document — the first probe entry. |
+| 2 | out-of-band merge probe | VIB-7 |
