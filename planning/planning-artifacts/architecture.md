@@ -626,7 +626,6 @@ with their modules and elided below except where the file count matters.
 viberr/
 ├── README.md
 ├── CONTRIBUTING.md
-├── FILES.md                    # generated index of Git's tracked files
 ├── package.json
 ├── tsconfig.json
 ├── react-router.config.ts

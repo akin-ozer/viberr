@@ -1091,6 +1091,21 @@ it is regenerated from the filesystem rather than restated here.
     `app/features/task-detail/task-detail-page.tsx` and `app/features/board/board-page.tsx`; the
     server entries it must now reach are in `app/server/tasks/task-actions.server.ts`)
 
+89. **R21-6 (2026-08-20, U5/G4): the triage quality gate stays BEHAVIORAL — no mechanical
+    transition block on open packets.** The operator flags underspecified goals at triage (its
+    prompt's gate section) and a manual operator run refuses while a packet is open; that is the
+    gate. The owner declined hard-enforcing "no stage transition while an input-required packet is
+    open" — a human moving a task past an open packet is a deliberate act, not an accident to
+    prevent. The New-task placeholder was reworded to promise only what exists ("Underspecified
+    goals get flagged by the operator at triage" — `app/features/board/board-page.tsx`), closing
+    the U5 copy-vs-behavior gap from the honest side.
+
+90. **R21-7 (2026-08-20): `FILES.md` is DELETED, not regenerated.** It claimed to be "generated
+    from Git's tracked-file index" while trailing reality by ~1,000 files across ten passes — a
+    completeness promise nothing enforced. The tracked-file index is `git ls-files`; the annotated
+    tree lives in `planning/planning-artifacts/architecture.md`. A doc whose only job a command
+    does better earns deletion over another unenforced regeneration.
+
 ## Route map
 
 ```

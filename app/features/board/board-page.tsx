@@ -1113,7 +1113,7 @@ function NewTaskModal({
             id="new-task-goal"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
-            placeholder="One or two sentences. Underspecified goals get flagged at the triage quality gate."
+            placeholder="One or two sentences. Underspecified goals get flagged by the operator at triage."
           />
         </div>
       </div>
