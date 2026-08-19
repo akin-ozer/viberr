@@ -9,6 +9,7 @@ import {
   deliveringEngagement,
   deriveValidation,
   normalizeEvidenceRows,
+  sanitizeEventAttachmentNames,
   EVIDENCE_EMPTY_COLUMN,
   type EvidenceRow,
   type PacketOption,
@@ -1508,8 +1509,13 @@ export async function postAgentReplyComment(
     runId: string;
     actorRef: FileActorRef;
     replyText: string | null;
+    /** Files this run saved into the task's attachments/ dir — stamped onto
+     *  the reply so the producing message names its own files (an interrupted
+     *  run may still have captured screenshots). */
+    attachments?: string[] | null;
   },
 ): Promise<void> {
+  const attachments = sanitizeEventAttachmentNames(input.attachments);
   const prepared = await prepareAgentReplyEvent(
     db,
     ctx,
@@ -1517,14 +1523,14 @@ export async function postAgentReplyComment(
     input.actorRef,
     input.replyText,
   );
-  if (prepared.status === "empty") {
+  if (prepared.status === "empty" && !attachments) {
     logger.info("agent reply run produced no text — no comment posted", {
       taskKey: input.taskKey,
       runId: input.runId,
     });
     return;
   }
-  if (prepared.status === "dropped") {
+  if (prepared.status === "dropped" && !attachments) {
     logger.info("agent reply dropped by the meaningful-comment guardrail", {
       taskKey: input.taskKey,
       runId: input.runId,
@@ -1532,6 +1538,24 @@ export async function postAgentReplyComment(
     recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, true);
     return;
   }
+  // The event that carries the files: the reply itself when one survived, else
+  // a minimal note — files with no author would sit unattributed in the panel.
+  const event: TaskFileEvent =
+    prepared.status === "event"
+      ? prepared.event
+      : {
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: input.actorRef,
+          title: null,
+          text:
+            attachments && attachments.length === 1
+              ? "Saved 1 file to this task's attachments during the run."
+              : `Saved ${attachments?.length ?? 0} files to this task's attachments during the run.`,
+          toAgent: false,
+          evidence: null,
+        };
+  if (attachments) event.attachments = attachments;
   // G7/B-FD9: the compression-threshold guardrail must fire on a pure
   // agent-reply flood too — the exact case the anti-noise guardrail was built
   // for. It ran only on operator and human comment writes, so a run of agent
@@ -1546,7 +1570,7 @@ export async function postAgentReplyComment(
   // the reply landing before it re-reads the task. Errors are logged, never
   // propagated — the run finished and the transcript is in the logs.
   return updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(prepared.event);
+    parsed.timeline.unshift(event);
     if (compactOn) {
       parsed.timeline = compactTimelineEvents(
         parsed.timeline,
@@ -1564,18 +1588,26 @@ export async function postAgentReplyComment(
   })
     .then(() => {
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, false);
+      // The dropped flag stays honest on the attachments-only note: the REPLY
+      // was dropped/absent even though a producing event was written.
+      recordAgentRepliedAudit(
+        db,
+        input.projectSlug,
+        input.taskKey,
+        input.runId,
+        prepared.status !== "event",
+      );
       // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
       // inbox — same fan-out as human comments, with the agent as `from`
       // (under its OWN name, not the runtime label — NEW-5).
       notifyMentionedUsers(db, {
-        text: prepared.event.text,
+        text: event.text,
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         from: createActorResolver(db, {
           agentNames: agentNamesByProfile(db, input.projectSlug),
         })(input.actorRef),
-        occurredAt: prepared.event.occurredAt,
+        occurredAt: event.occurredAt,
       });
     })
     .catch((cause: unknown) => {
@@ -1900,10 +1932,15 @@ export async function recordAgentCompletion(
      *  (report_outcome) plus the derived delivery rows. They land on the
      *  verdict event when there is one, else on the agent's report. */
     evidence?: EvidenceRow[] | null;
+    /** Files this run saved into the task's attachments/ dir (browser
+     *  captures). Stamped onto the same event that carries the evidence, so
+     *  the producing message names its own files. */
+    attachments?: string[] | null;
   },
 ): Promise<void> {
   const { actorRef, runId, replyText, verdict, question } = input;
   const evidence = normalizeEvidenceRows(input.evidence);
+  const attachments = sanitizeEventAttachmentNames(input.attachments);
   const prepared = await prepareAgentReplyEvent(
     db,
     ctx,
@@ -1911,8 +1948,10 @@ export async function recordAgentCompletion(
     actorRef,
     replyText,
   );
-  // Nothing to record at all.
-  if (!verdict && !question && prepared.status !== "event") {
+  // Nothing to record at all. Attachments count as something: a run that saved
+  // files but produced no usable prose still gets a producing event below, or
+  // the files would sit in the panel with no author.
+  if (!verdict && !question && prepared.status !== "event" && !attachments) {
     // Still stamp the recovery-idempotency audit for a guardrail-dropped reply,
     // so boot recovery doesn't reprocess it forever.
     if (prepared.status === "dropped") {
@@ -2069,14 +2108,31 @@ export async function recordAgentCompletion(
       // P13-D-26: exactly ONE of the two carries the evidence rows — the
       // verdict event when there is a verdict (it IS the outcome), otherwise
       // the agent's report. Duplicating them across both would double the
-      // record for one outcome.
+      // record for one outcome. The run's saved files follow the same rule.
       if (prepared.status === "event") {
-        parsed.timeline.unshift(
-          evidence && !verdict ? { ...prepared.event, evidence } : prepared.event,
-        );
+        let replyEvent = prepared.event;
+        if (evidence && !verdict) replyEvent = { ...replyEvent, evidence };
+        if (attachments && !verdict) replyEvent = { ...replyEvent, attachments };
+        parsed.timeline.unshift(replyEvent);
+      } else if (attachments && !verdict) {
+        // Files with no usable reply to ride on: record the production itself,
+        // so the panel can still name who saved them and from which run.
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: actorRef,
+          title: null,
+          text:
+            attachments.length === 1
+              ? "Saved 1 file to this task's attachments during the run."
+              : `Saved ${attachments.length} files to this task's attachments during the run.`,
+          toAgent: false,
+          evidence: null,
+          attachments,
+        });
       }
       if (verdict) {
-        parsed.timeline.unshift({
+        const verdictEvent: TaskFileEvent = {
           occurredAt: new Date().toISOString(),
           type: "quality",
           // D8: the outcome is the AGENT'S judgment — attribute it honestly.
@@ -2085,7 +2141,9 @@ export async function recordAgentCompletion(
           text: `**Validation:** ${validation}. ${summary}`,
           toAgent: false,
           evidence,
-        });
+        };
+        if (attachments) verdictEvent.attachments = attachments;
+        parsed.timeline.unshift(verdictEvent);
       }
       // Ask-human question from the outcome envelope (Codex transport; the
       // Claude toolkit opens its packet live mid-run). One packet slot per
@@ -2309,6 +2367,22 @@ export async function applyAgentCompletionEffects(
   // The prior reply must predate THIS run so a mid-run post_comment from this
   // same run can't be mistaken for it (corrupting no-progress detection).
   const thisRunStartedAt = getRun(db, finished.id)?.started_at ?? null;
+  // Files this run saved into the task's attachments/ dir (browser captures):
+  // everything written at-or-after the run started. Stamped onto the producing
+  // event below so the panel can say who added each file and from which
+  // message; without a recorded start there is no honest window, so nothing is
+  // claimed.
+  const { attachmentNamesSince } = await import(
+    "~/server/files/task-attachments.server"
+  );
+  const runAttachments = thisRunStartedAt
+    ? attachmentNamesSince(
+        input.projectSlug,
+        input.taskKey,
+        thisRunStartedAt,
+        ctx.dataRoot,
+      )
+    : [];
   const prevReply = latestAgentReplyText(
     ctx,
     input.projectSlug,
@@ -2440,6 +2514,7 @@ export async function applyAgentCompletionEffects(
       verdict,
       question,
       evidence,
+      attachments: runAttachments,
     });
   } else {
     await postAgentReplyComment(db, ctx, {
@@ -2448,6 +2523,7 @@ export async function applyAgentCompletionEffects(
       runId: finished.id,
       actorRef,
       replyText,
+      attachments: runAttachments,
     });
   }
   // 1b. A run that ENDED IN ERROR (backend quota/auth/crash) previously left NO
@@ -2490,8 +2566,10 @@ export async function applyAgentCompletionEffects(
                 : failText
                   ? `${backendLabel} run failed: ${failText}`
                   : `the ${backendLabel} run ended in an error`;
+    // Files the run saved before it died still get their producer named.
+    const failureAttachments = sanitizeEventAttachmentNames(runAttachments);
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
+      const failureEvent: TaskFileEvent = {
         occurredAt: new Date().toISOString(),
         type: "blocked",
         actor: actorRef,
@@ -2519,7 +2597,9 @@ export async function applyAgentCompletionEffects(
         }`,
         toAgent: false,
         evidence: null,
-      });
+      };
+      if (failureAttachments) failureEvent.attachments = failureAttachments;
+      parsed.timeline.unshift(failureEvent);
     });
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     // R20-3 (F20-4): a model the provider REFUSED for this account is marked

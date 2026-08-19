@@ -190,24 +190,32 @@ function projectionValidationGaps(db: DatabaseSync): string[] {
  * Exported for the drift test beside `logBootIntegrity`.
  */
 export function projectionMissingColumns(db: DatabaseSync): string[] {
-  // SAFETY: `PRAGMA table_info` rows always carry a non-null TEXT `name`
-  // column; only `name` is read.
-  const live = db
-    .prepare(`PRAGMA table_info(task_projections)`)
-    .all() as Array<{ name: string }>;
-  // No table at all is the migration runner's problem, same stance as above.
-  if (live.length === 0) return [];
+  // The tables the rebuilder INSERTs into by explicit column list — a column
+  // added to the (squashed, forward-only) baseline never reaches an existing
+  // root, and the first reprojection then fails with 'no such column'.
+  const rebuilderTables = ["task_projections", "task_events"];
   const expectedDb = new DatabaseSync(":memory:");
   try {
     runMigrations(expectedDb);
-    // SAFETY: same `PRAGMA table_info` row shape as the live read above.
-    const expected = expectedDb
-      .prepare(`PRAGMA table_info(task_projections)`)
-      .all() as Array<{ name: string }>;
-    const liveNames = new Set(live.map((column) => column.name));
-    return expected
-      .map((column) => column.name)
-      .filter((name) => !liveNames.has(name));
+    const missing: string[] = [];
+    for (const table of rebuilderTables) {
+      // SAFETY: `PRAGMA table_info` rows always carry a non-null TEXT `name`
+      // column; only `name` is read.
+      const live = db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all() as Array<{ name: string }>;
+      // No table at all is the migration runner's problem, same stance as above.
+      if (live.length === 0) continue;
+      // SAFETY: same `PRAGMA table_info` row shape as the live read above.
+      const expected = expectedDb
+        .prepare(`PRAGMA table_info(${table})`)
+        .all() as Array<{ name: string }>;
+      const liveNames = new Set(live.map((column) => column.name));
+      for (const column of expected) {
+        if (!liveNames.has(column.name)) missing.push(`${table}.${column.name}`);
+      }
+    }
+    return missing;
   } finally {
     expectedDb.close();
   }
@@ -288,9 +296,9 @@ export function logBootIntegrity(db: DatabaseSync): void {
           "'projection rebuild failed'";
     drift.remedy =
       (missingColumns.length > 0 && validationGaps.length === 0
-        ? "additive drift only — `ALTER TABLE task_projections ADD COLUMN …` for " +
-          "each missing column matches the baseline without touching the " +
-          "non-derived rows. Otherwise (or to be certain): "
+        ? "additive drift only — `ALTER TABLE <table> ADD COLUMN <column>` for " +
+          "each table-qualified entry above matches the baseline without " +
+          "touching the non-derived rows. Otherwise (or to be certain): "
         : "") +
       "re-baseline the projection database: stop the app, delete " +
       "<dataRoot>/state/projection.sqlite* , restart — projection tables rebuild " +
@@ -299,7 +307,7 @@ export function logBootIntegrity(db: DatabaseSync): void {
       "first and expect to re-establish sign-ins. See docs/operations/deployment.md " +
       "§Re-baselining the projection database";
     logger.warn(
-      "projection schema drift — task_projections on this root lags the shipped baseline",
+      "projection schema drift — this root's rebuilder tables lag the shipped baseline",
       drift,
     );
   }

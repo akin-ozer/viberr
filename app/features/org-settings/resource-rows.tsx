@@ -354,7 +354,12 @@ export function SkillPanel({
                   {s.name}
                 </button>
               </b>
-              <span className="sub">{s.summary}</span>
+              {/* Long summaries clamp to three lines to keep the list scannable;
+                  the full text stays in the DOM (screen readers read it all) and
+                  on hover via title. The editor shows it in full. */}
+              <span className="sub clamp" title={s.summary}>
+                {s.summary}
+              </span>
               <span className="sub mono">
                 store://skills/{s.name}/ · {s.fileCount} file
                 {s.fileCount === 1 ? "" : "s"} · {updatedLabel(s.updatedAt)}
@@ -445,8 +450,13 @@ export function AgentPanel({
                 <b>{a.name}</b>
                 {/* P13-AP-09: the row subtitle is the SHORT blurb. It used to
                     render the markdown body — i.e. the agent's entire persona —
-                    so a seeded profile printed a 600-word system prompt here. */}
-                <span className="sub">{a.summary}</span>
+                    so a seeded profile printed a 600-word system prompt here.
+                    Even the blurb runs long on seeded profiles, so it clamps to
+                    three lines (full text in the DOM + title; editor has it
+                    whole). */}
+                <span className="sub clamp" title={a.summary}>
+                  {a.summary}
+                </span>
                 <span className="sub mono">
                   {a.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}
                   {/* P14-WL-06: the row right below already pluralizes

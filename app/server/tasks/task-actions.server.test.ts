@@ -23,7 +23,10 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
-import { getTaskDetail } from "~/server/projections/task-query.server";
+import {
+  attachmentProducers,
+  getTaskDetail,
+} from "~/server/projections/task-query.server";
 import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import {
@@ -2893,5 +2896,139 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     expect(
       listAuditEvents(store.db, { action: "task.packet.resolved" }),
     ).toHaveLength(0);
+  });
+});
+
+describe("recordAgentCompletion attachments (P21 — the producing message names its files)", () => {
+  function withVib1(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+  it("stamps the run's files onto the reply event and the producer map attributes them", async () => {
+    const store = prepared();
+    withVib1(store);
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: REVIEWER_REF,
+        runId: "run_att1",
+        replyText: "Captured the login page for the record.",
+        verdict: null,
+        question: null,
+        attachments: ["login-shot.png", "page-capture.yml"],
+      },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(file.timeline[0]?.type).toBe("comment");
+    expect(file.timeline[0]?.attachments).toEqual([
+      "login-shot.png",
+      "page-capture.yml",
+    ]);
+    // Projection closes the loop: the panel's producer map reads the event.
+    const producers = attachmentProducers(store.db, store.slug, "VIB-1");
+    expect(producers["login-shot.png"]?.occurredAt).toBe(
+      file.timeline[0]?.occurredAt,
+    );
+    expect(producers["login-shot.png"]?.actor).toBeTruthy();
+    expect(producers["page-capture.yml"]?.actor).toBe(
+      producers["login-shot.png"]?.actor,
+    );
+  });
+
+  it("a verdict outcome carries the files on the verdict event, not the reply (evidence rule)", async () => {
+    const store = prepared();
+    withVib1(store);
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: REVIEWER_REF,
+        runId: "run_att2",
+        replyText: "The change renders correctly. Approve.",
+        verdict: "approve",
+        question: null,
+        attachments: ["verdict-proof.png"],
+      },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(file.timeline[0]?.type).toBe("quality");
+    expect(file.timeline[0]?.attachments).toEqual(["verdict-proof.png"]);
+    expect(file.timeline[1]?.type).toBe("comment");
+    expect(file.timeline[1]?.attachments).toBeUndefined();
+  });
+
+  it("files with no usable reply still get a producing note event", async () => {
+    const store = prepared();
+    withVib1(store);
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: REVIEWER_REF,
+        runId: "run_att3",
+        replyText: null,
+        verdict: null,
+        question: null,
+        attachments: ["orphan-shot.png"],
+      },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(file.timeline[0]?.type).toBe("note");
+    expect(file.timeline[0]?.text).toContain("Saved 1 file");
+    expect(file.timeline[0]?.attachments).toEqual(["orphan-shot.png"]);
+  });
+
+  it("unwritable names are dropped before they can corrupt the file format", async () => {
+    const store = prepared();
+    withVib1(store);
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: REVIEWER_REF,
+        runId: "run_att4",
+        replyText: "One good file, two hostile names.",
+        verdict: null,
+        question: null,
+        attachments: ["ok.png", "../escape.png", "forged\nrow.png"],
+      },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(file.timeline[0]?.attachments).toEqual(["ok.png"]);
+    // The file still parses clean — nothing was forged.
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.diagnostics,
+    ).toEqual([]);
   });
 });

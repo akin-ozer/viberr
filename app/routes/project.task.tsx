@@ -15,6 +15,7 @@ import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import {
+  attachmentProducers,
   getTaskDetail,
   getTaskSummary,
 } from "~/server/projections/task-query.server";
@@ -264,6 +265,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return {
     task: { ...detail, timeline: slice.events },
     attachments,
+    // Who saved each attachment and when, from the events that claim names —
+    // same visibility bar as the list itself.
+    attachmentProducers: runsVisible
+      ? attachmentProducers(db, params.slug, params.key)
+      : {},
     recommendations,
     schedules,
     archived,
@@ -993,6 +999,7 @@ export default function TaskDetailRoute({
       key={loaderData.task.key}
       task={loaderData.task}
       attachments={loaderData.attachments}
+      attachmentProducers={loaderData.attachmentProducers}
       attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}

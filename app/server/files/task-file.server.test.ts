@@ -392,3 +392,118 @@ describe("task.md tolerant parsing", () => {
     expect(diagnostics.some((d) => d.hardStop)).toBe(true);
   });
 });
+
+describe("task.md event attachments (P21 — the producing message names its files)", () => {
+  const WITH_ATTACH: ParsedTaskFile = {
+    ...FULL,
+    timeline: [
+      {
+        occurredAt: "2026-08-20T02:00:00.000Z",
+        type: "comment",
+        actor: {
+          kind: "agent",
+          backend: "claude",
+          profileId: "web-verifier",
+          roleHint: "Verification",
+        },
+        title: null,
+        toAgent: false,
+        evidence: null,
+        text: "Captured the page; the files are attached below.",
+        attachments: [
+          "page-2026-08-19T17-38-40-756Z.png",
+          "page-2026-08-19T17-38-40-756Z.yml",
+        ],
+      },
+      ...FULL.timeline,
+    ],
+  };
+
+  it("serializes an attachments: block and parses it back structurally", () => {
+    const text = serializeTaskFile(WITH_ATTACH);
+    expect(text).toContain("attachments:");
+    expect(text).toContain("- page-2026-08-19T17-38-40-756Z.png");
+    const { parsed, diagnostics } = parseTaskFileContent(text, {
+      fallbackKey: "VIB-142",
+    });
+    expect(diagnostics).toEqual([]);
+    expect(parsed.timeline).toEqual(WITH_ATTACH.timeline);
+    expect(parsed.timeline[0]?.attachments).toEqual([
+      "page-2026-08-19T17-38-40-756Z.png",
+      "page-2026-08-19T17-38-40-756Z.yml",
+    ]);
+  });
+
+  it("write(parse(write(x))) stays byte-identical with attachments present", () => {
+    const first = serializeTaskFile(WITH_ATTACH);
+    const { parsed } = parseTaskFileContent(first, { fallbackKey: "VIB-142" });
+    expect(serializeTaskFile(parsed)).toBe(first);
+  });
+
+  it("evidence and attachments coexist on one event, in that order", () => {
+    const both: ParsedTaskFile = {
+      ...FULL,
+      timeline: [
+        {
+          occurredAt: "2026-08-20T02:05:00.000Z",
+          type: "quality",
+          actor: {
+            kind: "agent",
+            backend: "codex",
+            profileId: "reviewer",
+            roleHint: "Review",
+          },
+          title: "Review passed",
+          toAgent: false,
+          evidence: [{ label: "e2e smoke", add: "+3", del: "—" }],
+          text: "**Validation:** healthy. Reviewer approved the work.",
+          attachments: ["verdict-screenshot.png"],
+        },
+        ...FULL.timeline,
+      ],
+    };
+    const text = serializeTaskFile(both);
+    expect(text.indexOf("evidence:")).toBeLessThan(text.indexOf("attachments:"));
+    const { parsed, diagnostics } = parseTaskFileContent(text, {
+      fallbackKey: "VIB-142",
+    });
+    expect(diagnostics).toEqual([]);
+    expect(parsed.timeline[0]?.evidence).toEqual([
+      { label: "e2e smoke", add: "+3", del: "—" },
+    ]);
+    expect(parsed.timeline[0]?.attachments).toEqual(["verdict-screenshot.png"]);
+  });
+
+  it("a comment LINE reading `attachments:` is escaped — it forges no file list", () => {
+    const hostileText = [
+      "Quoting the marker on purpose:",
+      "",
+      "attachments:",
+      "- fake-injected.png",
+    ].join("\n");
+    const hostile: ParsedTaskFile = {
+      ...FULL,
+      packet: null,
+      extraSections: [],
+      timeline: [
+        {
+          occurredAt: "2026-08-20T02:10:00.000Z",
+          type: "comment",
+          actor: { kind: "human", userId: "u_arda01", nameHint: "Arda Kaya" },
+          title: null,
+          toAgent: false,
+          evidence: null,
+          text: hostileText,
+        },
+      ],
+    };
+    const first = serializeTaskFile(hostile);
+    const { parsed, diagnostics } = parseTaskFileContent(first, {
+      fallbackKey: "VIB-142",
+    });
+    expect(diagnostics).toEqual([]);
+    expect(parsed.timeline[0]?.text).toBe(hostileText);
+    expect(parsed.timeline[0]?.attachments).toBeUndefined();
+    expect(serializeTaskFile(parsed)).toBe(first);
+  });
+});

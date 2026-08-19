@@ -65,9 +65,11 @@ function NewProjectNameFields({
           Letters-only is the stored contract — `taskPrefix` is
           `/^[A-Za-z]+$/` in app/schemas/project-file.schema.ts. */}
       <div className="field">
+        {/* The hint lives BELOW the input (np-key-note), not on the label: in
+            the 130px column a label-line hint wraps to two lines, pushing this
+            input out of alignment with the project-name input beside it. */}
         <label className="flabel" htmlFor="np-key">
-          Task key{" "}
-          <span className="fhint">2–4 letters · task ids look like {(effKey || "PAY") + "-1"}</span>
+          Task key
         </label>
         <input
           id="np-key"
@@ -92,10 +94,10 @@ function NewProjectNameFields({
         />
         <div className="fhint" id="np-key-note">
           {keyStripped
-            ? "Only letters are kept — digits and symbols aren't allowed in a task key."
+            ? "Only letters are kept; digits and symbols aren't allowed in a task key."
             : effKey.length > 0 && effKey.length < 2
               ? "At least 2 letters."
-              : ""}
+              : `2-4 letters · ids look like ${(effKey || "PAY") + "-1"}`}
         </div>
       </div>
     </div>
@@ -552,7 +554,7 @@ export function NewProjectModal({
         <span className="mh-main">
           <h2>New project</h2>
           <div className="mh-sub">
-            One board, one repo, agents under policy from day one
+            One board and one repository, with agents under policy from the start
           </div>
         </span>
         <button

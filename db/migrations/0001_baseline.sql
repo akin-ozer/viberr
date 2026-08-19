@@ -177,7 +177,10 @@ CREATE TABLE task_events (
   title TEXT,
   text TEXT NOT NULL,
   to_agent INTEGER NOT NULL DEFAULT 0,
-  evidence_json TEXT
+  evidence_json TEXT,
+  -- Names of files the event's run saved into the task's attachments/ dir
+  -- (JSON array). The directory stays the truth; these attribute producers.
+  attachments_json TEXT
 );
 CREATE TABLE diagnostics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -315,9 +315,18 @@ describe("projectionMissingColumns (pass-21 live-validation catch)", () => {
       // Freshly migrated ⇒ healthy ⇒ nothing to report.
       expect(projectionMissingColumns(db)).toEqual([]);
       // An old root predating a baseline column addition (the real pass-21
-      // shape: work_revision_sha reached only fresh roots).
+      // shape: work_revision_sha reached only fresh roots). Names are
+      // table-qualified since the check grew a second rebuilder table.
       db.exec("ALTER TABLE task_projections DROP COLUMN work_revision_sha");
-      expect(projectionMissingColumns(db)).toEqual(["work_revision_sha"]);
+      expect(projectionMissingColumns(db)).toEqual([
+        "task_projections.work_revision_sha",
+      ]);
+      // Same trap, second table: the event INSERT names attachments_json.
+      db.exec("ALTER TABLE task_events DROP COLUMN attachments_json");
+      expect(projectionMissingColumns(db)).toEqual([
+        "task_projections.work_revision_sha",
+        "task_events.attachments_json",
+      ]);
     } finally {
       ctx.cleanup();
     }

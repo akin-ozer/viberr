@@ -73,6 +73,7 @@ function ev(partial: Partial<TimelineEventRender>): TimelineEventRender {
     text: "hello",
     toAgent: false,
     evidence: null,
+    attachments: null,
     ...partial,
   };
 }

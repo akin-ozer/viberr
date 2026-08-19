@@ -250,6 +250,26 @@ export function TimelineItem({
             )}
           </>
         )}
+        {/* Files this event's run saved (attachments panel shows the same names
+            with "added by …") — the producing message names its own files.
+            Chips need the serving base; without it (bare renders, withheld
+            lists) the names stay off rather than rendering dead links. */}
+        {ev.attachments && ev.attachments.length > 0 && attachmentsBase && (
+          <div className="tl-attach">
+            {ev.attachments.map((name) => (
+              <a
+                key={name}
+                className="tl-attach-chip"
+                href={`${attachmentsBase}/${encodeURIComponent(name)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Icon name="file" />
+                <span className="nm">{name}</span>
+              </a>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

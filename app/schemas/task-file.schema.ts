@@ -1364,6 +1364,45 @@ export function normalizeEvidenceRows(
   return out.length > 0 ? out : null;
 }
 
+/** Name/count caps for an event's `attachments:` list — REFERENCES into the
+ *  task's `attachments/` dir, so they stay small by construction (the files
+ *  themselves live on disk; the panel and the timeline chips resolve names
+ *  against the live directory). */
+export const EVENT_ATTACHMENTS_MAX = 20;
+const ATTACHMENT_NAME_MAX_CHARS = 200;
+
+/**
+ * Sanitize the attachment names a run produced into a list that round-trips
+ * through the task.md serializer (one `- <name>` line each; the parser trims
+ * the line, so a name that trims differently cannot survive) and that the
+ * serving route would accept (a path separator would 404 there anyway).
+ * Returns null when nothing usable survives — callers then omit the field.
+ */
+export function sanitizeEventAttachmentNames(
+  names: readonly string[] | null | undefined,
+): string[] | null {
+  if (!names || names.length === 0) return null;
+  const unwritable = (name: string): boolean => {
+    for (const ch of name) {
+      if (ch === "/" || ch === "\\") return true; // the serving route 404s these
+      const code = ch.codePointAt(0) ?? 0;
+      if (code < 0x20 || code === 0x7f) return true; // a newline would forge a row
+    }
+    return false;
+  };
+  const out: string[] = [];
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name || name !== raw) continue; // must round-trip the parser's trim
+    if (name.length > ATTACHMENT_NAME_MAX_CHARS) continue;
+    if (unwritable(name)) continue;
+    if (out.includes(name)) continue;
+    out.push(name);
+    if (out.length >= EVENT_ATTACHMENTS_MAX) break;
+  }
+  return out.length > 0 ? out : null;
+}
+
 /** One parsed `###` timeline entry. Newest-first in the file and here. */
 export interface TaskFileEvent {
   /** UTC ISO 8601. */
@@ -1379,6 +1418,10 @@ export interface TaskFileEvent {
   toAgent: boolean;
   /** Completion/verdict events only. add/del are signed display strings ("+14"). */
   evidence: EvidenceRow[] | null;
+  /** Files this event's run saved into the task's `attachments/` dir (browser
+   *  captures). Optional: most writers never produce files, and an absent field
+   *  serializes to nothing. Names only — the directory stays the truth. */
+  attachments?: string[];
 }
 
 /** Full parsed task file (see app/server/files/task-file.server.ts). */

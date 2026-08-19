@@ -1,6 +1,7 @@
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { prettySize } from "~/features/kb-browser/tree";
 import { Icon } from "~/ui/icon";
+import { LocalDayDotTime } from "~/ui/local-time";
 
 /**
  * R19-19 — the task's attachments: files an agent's browser saved
@@ -22,12 +23,17 @@ const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
 export function AttachmentsPanel({
   base,
   attachments,
+  producers = {},
   browserExpected = false,
 }: {
   /** `/projects/<slug>/tasks/<KEY>/attachments` — built by the route, which is
    *  the one place that actually knows the URL params. */
   base: string;
   attachments: TaskAttachmentEntry[];
+  /** Attachment name → who saved it (from the timeline event that claims the
+   *  name — the same event renders the file as a chip in place). A name with
+   *  no claiming event gets no producer line rather than a guess. */
+  producers?: Record<string, { actor: string; occurredAt: string }>;
   /** D8: a deployed agent holds `use-browser`, so browser evidence is promised
    *  for this task even before the first file lands. */
   browserExpected?: boolean;
@@ -77,6 +83,14 @@ export function AttachmentsPanel({
                 <span className="attach-name">{a.name}</span>
                 <span className="attach-size">{prettySize(a.size)}</span>
               </span>
+              {producers[a.name] && (
+                // The producing message renders the same file as a chip, so the
+                // time here is what ties the two together on a long timeline.
+                <span className="attach-by">
+                  added by {producers[a.name].actor} ·{" "}
+                  <LocalDayDotTime iso={producers[a.name].occurredAt} />
+                </span>
+              )}
             </a>
           ))}
         </div>
@@ -91,6 +105,12 @@ export function AttachmentsPanel({
         >
           <Icon name="file" />
           <span className="attach-name">{a.name}</span>
+          {producers[a.name] && (
+            <span className="attach-by">
+              by {producers[a.name].actor} ·{" "}
+              <LocalDayDotTime iso={producers[a.name].occurredAt} />
+            </span>
+          )}
           <span className="attach-size">{prettySize(a.size)}</span>
         </a>
       ))}

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   attachmentContentType,
+  attachmentNamesSince,
   listTaskAttachments,
   resolveTaskAttachment,
 } from "./task-attachments.server";
@@ -84,5 +85,32 @@ describe("attachmentContentType", () => {
       expect(inline).toBe(false);
       expect(type).toBe("application/octet-stream");
     }
+  });
+});
+
+describe("attachmentNamesSince (P21 — a run's own files)", () => {
+  it("names files written at-or-after the run start, newest first", () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    seed({
+      "before-run.png": { at: Date.parse("2026-08-20T01:00:00.000Z") },
+      "during-1.png": { at: Date.parse("2026-08-20T02:00:00.000Z") },
+      "during-2.yml": { at: Date.parse("2026-08-20T02:30:00.000Z") },
+    });
+    expect(
+      attachmentNamesSince("p1", "VIB-1", "2026-08-20T01:30:00.000Z", root),
+    ).toEqual(["during-2.yml", "during-1.png"]);
+  });
+
+  it("claims nothing on an unparseable window start", () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    seed({ "shot.png": { at: Date.parse("2026-08-20T02:00:00.000Z") } });
+    expect(attachmentNamesSince("p1", "VIB-1", "not-a-date", root)).toEqual([]);
+  });
+
+  it("returns [] when the task has no attachments dir", () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    expect(
+      attachmentNamesSince("p1", "VIB-1", "2026-08-20T00:00:00.000Z", root),
+    ).toEqual([]);
   });
 });

@@ -586,8 +586,9 @@ export function rebuildTaskFile(
   const insertEvent = db.prepare(
     `INSERT INTO task_events
        (project_slug, task_key, position, occurred_at, type, actor_kind,
-        actor_ref, actor_json, title, text, to_agent, evidence_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        actor_ref, actor_json, title, text, to_agent, evidence_json,
+        attachments_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   parsed.timeline.forEach((event, position) => {
     // Tolerantly-kept unrecognized authors project as system actors so their
@@ -623,6 +624,9 @@ export function rebuildTaskFile(
       event.text,
       event.toAgent ? 1 : 0,
       event.evidence ? JSON.stringify(event.evidence) : null,
+      event.attachments && event.attachments.length > 0
+        ? JSON.stringify(event.attachments)
+        : null,
     );
   });
 

@@ -629,7 +629,7 @@ describe("the new-task dialog does not accuse an untouched form", () => {
   it("offers guidance, not an error, before the title is touched", () => {
     const { container } = openDialog();
     const hint = container.querySelector(".foot-hint")!;
-    expect(hint.textContent).toBe("The task key is assigned on create.");
+    expect(hint.textContent).toBe("The task key is assigned automatically.");
     expect(hint.className).not.toContain("err");
   });
 
@@ -647,7 +647,7 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     fireEvent.blur(input);
     fireEvent.change(input, { target: { value: "A real title" } });
     const hint = container.querySelector(".foot-hint")!;
-    expect(hint.textContent).toBe("The task key is assigned on create.");
+    expect(hint.textContent).toBe("The task key is assigned automatically.");
     expect(hint.className).not.toContain("err");
   });
 });

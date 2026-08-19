@@ -1061,8 +1061,8 @@ function NewTaskModal({
         <div className="mh-main">
           <h2>New task</h2>
           <div className="mh-sub">
-            Creates a canonical task file in the store — agents anchor on it
-            from the first event.
+            Creates the task as a single file in the store. Agents read that
+            file and work from it.
           </div>
         </div>
         <button
@@ -1098,22 +1098,22 @@ function NewTaskModal({
               choice the server would refuse. */}
           <span className="flabel">Stage</span>
           <span className="fine sm">
-            Starts in {entryStageName} — the triage gate is where the goal is
-            refined before work begins.
+            Starts in {entryStageName}. The goal gets refined at triage before
+            any work begins.
           </span>
         </div>
         <div className="field">
           <label className="flabel" htmlFor="new-task-goal">
             Goal
             <span className="fhint">
-              what done means — the operator and specialists anchor on this
+              what counts as done, for the operator and the agents
             </span>
           </label>
           <textarea
             id="new-task-goal"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
-            placeholder="One or two sentences. Underspecified goals get flagged by the operator at triage."
+            placeholder="One or two sentences. A vague goal gets flagged by the operator at triage."
           />
         </div>
       </div>
@@ -1127,7 +1127,7 @@ function NewTaskModal({
             ? serverError
             : titleTouched && !valid
               ? "A title is required."
-              : "The task key is assigned on create."}
+              : "The task key is assigned automatically."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>

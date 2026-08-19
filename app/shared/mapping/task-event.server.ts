@@ -23,6 +23,7 @@ export type TaskEventRow = {
   text: string;
   to_agent: 0 | 1;
   evidence_json: string | null;
+  attachments_json: string | null;
 };
 
 /** The evidence rows a completion/verdict event carries, as stored. */
@@ -48,6 +49,9 @@ export interface TimelineEventRender {
   /** Outcome events (completion / verdict / an agent's report — P13-D-26);
    *  add/del are short signed display strings ("+14", "−4") and may be empty. */
   evidence: EvidenceRowRender[] | null;
+  /** Files the event's run saved into the task's attachments/ dir — names
+   *  only, rendered as chips linking to the serving route. */
+  attachments: string[] | null;
 }
 
 export function mapTaskEventRow(row: TaskEventRow): TimelineEventRender {
@@ -67,6 +71,12 @@ export function mapTaskEventRow(row: TaskEventRow): TimelineEventRender {
     toAgent: row.to_agent === 1,
     evidence: row.evidence_json
       ? (JSON.parse(row.evidence_json) as EvidenceRowRender[])
+      : null,
+    // SAFETY: same single-writer invariant as the two columns above —
+    // `rebuilder.server.ts` inserts `JSON.stringify(event.attachments)`, whose
+    // source is the parsed event's `string[]` by construction.
+    attachments: row.attachments_json
+      ? (JSON.parse(row.attachments_json) as string[])
       : null,
   };
 }

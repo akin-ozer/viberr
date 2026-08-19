@@ -99,6 +99,7 @@ function recReachesAcceptance(
 export function TaskDetailPage({
   task,
   attachments = [],
+  attachmentProducers = {},
   attachmentsBase = null,
   runtime,
   deployedSpecialists,
@@ -133,6 +134,9 @@ export function TaskDetailPage({
   /** R19-19: browser-produced files (loader; `[]` for non-members — the same
    *  visibility bar as the run console). */
   attachments?: TaskAttachmentEntry[];
+  /** Attachment name → who saved it and when (from the events that claim
+   *  names). Names no event claims are absent — the panel omits the line. */
+  attachmentProducers?: Record<string, { actor: string; occurredAt: string }>;
   /** `/projects/<slug>/tasks/<KEY>/attachments` — the serving route's base,
    *  built by the route component (the one place that knows the params).
    *  Null hides the panel and the evidence links (e.g. bare test renders). */
@@ -801,6 +805,7 @@ export function TaskDetailPage({
           <AttachmentsPanel
             base={attachmentsBase}
             attachments={attachments}
+            producers={attachmentProducers}
             // D8: show an empty state (not nothing) when a browser-capable agent
             // is deployed — its runs are what fill this panel.
             browserExpected={deployedSpecialists.some(

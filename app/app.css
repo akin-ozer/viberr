@@ -198,6 +198,20 @@ div.top-search:focus-within,
   letter-spacing: -.01em;
 }
 
+/* Three-line prose clamp for list rows (resource summaries, agent blurbs).
+   Visual only: the full text stays in the DOM for screen readers, and the
+   sites that use it also carry the full text in `title`. The display needs
+   !important: a clamp only works as a -webkit-box, and component rules like
+   `.rsrc-main .sub { display: block }` outweigh a one-class utility — losing
+   the box model silently un-clamps. */
+.clamp {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
 /* P13-D-19: `muted` and `hint` were used as utility classes in TSX but existed
    only as a variable (--muted) and as one scoped rule (`.pj-new .hint`, whose
    own markup had since gone), so both rendered at full weight and full size.
@@ -2134,9 +2148,14 @@ dialog[data-closing]::backdrop {
 .pcap-counts .cs .d { width: .5rem; height: .5rem; border-radius: 50%; flex: none; }
 
 .human-only { display: flex; flex-direction: column; gap: .5rem; margin-top: .95rem; padding-top: .9rem; border-top: 1px solid var(--hairline); }
-.ho-row { display: flex; align-items: center; gap: .5rem; font-size: .83rem; color: var(--fg); }
-.ho-row .ico { width: 13px; height: 13px; color: var(--coral-dark); flex: none; }
-.ho-row .pill { margin-left: auto; }
+/* Anchored to the FIRST text line, not the block center: a row whose exception
+   clause wraps ("Transition a task to Done · except …") used to float its lock
+   and pill midway between the two lines, aligned with neither. The margins
+   re-center each against one 18px line (icon 13px, pill ~17px), so single-line
+   rows render exactly as before. */
+.ho-row { display: flex; align-items: flex-start; gap: .5rem; font-size: .83rem; color: var(--fg); }
+.ho-row .ico { width: 13px; height: 13px; color: var(--coral-dark); flex: none; margin-top: 2.5px; }
+.ho-row .pill { margin-left: auto; flex: none; margin-top: .5px; }
 /* P16-UI-02: the "· except <case>" clause on an always-reserved-for-humans row.
    It had no rule, so it rendered as a UA-italic <em> at full --fg weight and
    competed with the rule it qualifies. It is a footnote: same size, secondary
@@ -4289,6 +4308,21 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
 .attach-file svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
 .attach-file .attach-name { flex: 1; }
+/* Who put the file there, from the producing event (attachments panel). */
+.attach-by { font-size: .68rem; color: var(--muted); }
+.attach-thumb .attach-by { padding: 0 .55rem .4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-file .attach-by { flex: none; }
+/* Files an event produced, as chips under the message (timeline). */
+.tl-attach { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .45rem; }
+.tl-attach-chip {
+  display: inline-flex; align-items: center; gap: .4rem; max-width: 100%;
+  padding: .3rem .55rem; border: 1px solid var(--hairline); border-radius: var(--radius-chip);
+  background: var(--surface); text-decoration: none; color: var(--fg);
+  font-family: var(--font-mono); font-size: .72rem;
+}
+.tl-attach-chip:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.tl-attach-chip svg { width: 13px; height: 13px; color: var(--muted); flex: none; }
+.tl-attach-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Evidence label token that names a real attachment (timeline.tsx linkify). */
 /* Same token text-links use (P13-D-18 precedent) — --blue on white is 3.84:1
    and fails AA for normal text; --teal-dark clears it in both themes. */
