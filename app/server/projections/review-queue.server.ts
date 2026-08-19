@@ -134,6 +134,8 @@ export function getReviewQueue(
 
   // Newest event per task in one shot (position 0 = newest, file order).
   const latestByKey = new Map<string, string>();
+  // SAFETY: both selected columns, `task_events.task_key` and
+  // `task_events.text`, are TEXT NOT NULL (0001_baseline.sql).
   const latestRows = db
     .prepare(
       `SELECT task_key, text FROM task_events
@@ -142,41 +144,42 @@ export function getReviewQueue(
     .all(slug) as { task_key: string; text: string }[];
   for (const row of latestRows) latestByKey.set(row.task_key, row.text);
 
-  const rows: ReviewQueueRow[] = inReview.map((t) => ({
-    key: t.key,
-    title: t.title,
-    waiting: t.waiting,
-    packet: t.packet ? { kind: t.packet.kind, title: t.packet.title } : null,
-    latestEventText: latestByKey.get(t.key) ?? null,
-    pr: t.pr
-      ? {
-          number: t.pr.number,
-          // F19-32: pass the parsed state THROUGH. The old ladder preserved
-          // `merged`/`closed` (NEW-1: a coerced closed PR hid that the work was
-          // rejected) and folded everything else into "review" — which made
-          // `accepted` (merge pending) indistinguishable from an open PR on the
-          // one surface ruling 40 names alongside the board. The schema's own
-          // `.catch("review")` is what handles an unknown token, so there is
-          // nothing left for a second coercion here to defend against.
-          state: t.pr.state,
-          // Omitted rather than nulled when GitHub was never asked — the key's
-          // absence is the "never read" signal the file format itself uses.
-          ...(t.pr.mergeable ? { mergeable: t.pr.mergeable } : {}),
-          ...(t.pr.revisionDrift
-            ? { revisionDrift: { aheadBy: t.pr.revisionDrift.aheadBy } }
-            : {}),
-        }
-      : null,
-    validation: t.validation,
-    blockReason: t.blockReason,
-    // Gap-10: annotated once, by `listProjectTasks` — the board and this queue
-    // must not answer "when did anything last happen here" two different ways.
-    lastActivityAt: t.lastActivityAt,
-    quiet: t.quiet,
-    // D4: the projected continuity fact, carried straight through so the review
-    // row flags degraded continuity the same way the board card does.
-    continuity: t.continuity,
-  }));
+  const rows: ReviewQueueRow[] = inReview.map((t) => {
+    let pr: ReviewQueueRow["pr"] = null;
+    if (t.pr) {
+      // F19-32: pass the parsed state THROUGH. The old ladder preserved
+      // `merged`/`closed` (NEW-1: a coerced closed PR hid that the work was
+      // rejected) and folded everything else into "review" — which made
+      // `accepted` (merge pending) indistinguishable from an open PR on the
+      // one surface ruling 40 names alongside the board. The schema's own
+      // `.catch("review")` is what handles an unknown token, so there is
+      // nothing left for a second coercion here to defend against.
+      pr = { number: t.pr.number, state: t.pr.state };
+      // Omitted rather than nulled when GitHub was never asked — the key's
+      // absence is the "never read" signal the file format itself uses.
+      if (t.pr.mergeable) pr.mergeable = t.pr.mergeable;
+      if (t.pr.revisionDrift) {
+        pr.revisionDrift = { aheadBy: t.pr.revisionDrift.aheadBy };
+      }
+    }
+    return {
+      key: t.key,
+      title: t.title,
+      waiting: t.waiting,
+      packet: t.packet ? { kind: t.packet.kind, title: t.packet.title } : null,
+      latestEventText: latestByKey.get(t.key) ?? null,
+      pr,
+      validation: t.validation,
+      blockReason: t.blockReason,
+      // Gap-10: annotated once, by `listProjectTasks` — the board and this queue
+      // must not answer "when did anything last happen here" two different ways.
+      lastActivityAt: t.lastActivityAt,
+      quiet: t.quiet,
+      // D4: the projected continuity fact, carried straight through so the review
+      // row flags degraded continuity the same way the board card does.
+      continuity: t.continuity,
+    };
+  });
 
   // R8-3: "Waiting on your acceptance" is member-scoped by ACCEPTANCE AUTHORITY,
   // not by decision-object presence — a review-stage task waiting on a human can
@@ -186,6 +189,9 @@ export function getReviewQueue(
   // which requires the own-task role). Fail closed: an id with no membership row
   // — a non-member, a deleted account, or (a JS caller) no id at all — holds
   // neither role, so nothing is acceptance-ready for them.
+  // SAFETY: `project_members.role` is CHECK-constrained to exactly
+  // PROJECT_ROLES ('admin' | 'maintainer' | 'contributor' | 'viewer') by
+  // 0001_baseline.sql; the row is undefined when the viewer is not a member.
   const viewerRole: ProjectRole | null = opts.viewerUserId
     ? ((
         db

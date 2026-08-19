@@ -495,8 +495,11 @@ export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;
 
 // -------------------------------------------------------- frontmatter
 
-/** Strict target shape — what a fully valid task.md frontmatter parses to. */
-export const taskFrontmatterSchema = z.object({
+/** The field schemas, named so the tolerant parser below can reach them
+ *  directly: it validates ONE field at a time (a bad field falls back with a
+ *  diagnostic instead of dropping the task), so it never runs the composed
+ *  object schema. */
+const taskFrontmatterFields = {
   key: z.string().regex(/^[A-Za-z]+-\d+$/),
   title: z.string().min(1),
   stage: z.string().min(1),
@@ -560,7 +563,10 @@ export const taskFrontmatterSchema = z.object({
   /** Board position within a stage — a sparse rank for drag-to-reorder. Null
    *  falls back to the task-key number (the pre-reorder default order). */
   boardRank: z.number().nullable(),
-});
+};
+
+/** Strict target shape — what a fully valid task.md frontmatter parses to. */
+export const taskFrontmatterSchema = z.object(taskFrontmatterFields);
 export type TaskFrontmatter = z.infer<typeof taskFrontmatterSchema>;
 
 // ------------------------------------------- review-state derivation (F10-15)
@@ -774,6 +780,13 @@ export function archivedTaskMoveBlockedReason(
   return `${taskKey} is archived — restore it before moving it between stages.`;
 }
 
+/** The revision a delivered head lands on, plus whether it is a NEW review
+ *  subject (`changed: false` keeps every prior verdict valid). */
+export interface NextWorkRevision {
+  revision: WorkRevision;
+  changed: boolean;
+}
+
 /** Compute the next work revision for a freshly delivered head. A head with the
  *  SAME tree (or same head when the tree is unavailable) as the current revision
  *  is the SAME review subject — no new revision, so prior verdicts are NOT
@@ -789,7 +802,7 @@ export function nextWorkRevision(
     sourceProfileId: string | null;
     createdAt: string;
   },
-): { revision: WorkRevision; changed: boolean } {
+): NextWorkRevision {
   const sameSubject =
     current != null &&
     (input.treeSha != null && current.treeSha != null
@@ -841,27 +854,40 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "boardRank",
 ];
 
+/** Membership index for the unknown-key sweep below, which tests arbitrary YAML
+ *  keys — a string lookup here keeps the exported list itself typed. */
+const TASK_FRONTMATTER_KEY_SET: ReadonlySet<string> = new Set(TASK_FRONTMATTER_KEYS);
+
+/** The frontmatter mapping as YAML handed it over: keys exactly as written,
+ * every value still undecoded (the field schemas above do the decoding, one
+ * field at a time). This is also the contract for the leftover keys the writer
+ * round-trips back into the file verbatim — those are never parsed at all, so
+ * their values stay whatever YAML produced. */
+const rawFrontmatterSchema = z.record(z.string(), z.unknown());
+export type RawFrontmatter = z.infer<typeof rawFrontmatterSchema>;
+
 export interface TolerantTaskFrontmatterResult {
   frontmatter: TaskFrontmatter;
   /** Unknown fields, preserved verbatim for round-trip writes. */
-  unknown: Record<string, unknown>;
+  unknown: RawFrontmatter;
   diagnostics: FileDiagnostic[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+/** What the tolerant parse reads out of a task.md: the canonical fields plus
+ *  the two legacy engagement slots `parseEngagements` absorbs. */
+type ReadableFrontmatterKey = keyof TaskFrontmatter | "specialist" | "reviewers";
 
-/** Runs `schema` over `value`; on failure records a diagnostic and returns
+/** Runs `schema` over `data[path]`; on failure records a diagnostic and returns
  * `fallback`. Absent (undefined) values only diagnose when `required`. */
 function tolerant<T>(
   diagnostics: FileDiagnostic[],
-  path: string,
-  value: unknown,
+  data: RawFrontmatter,
+  path: ReadableFrontmatterKey,
   schema: z.ZodType<T>,
   fallback: T,
   options: { required?: boolean; severity?: "info" | "warning" } = {},
 ): T {
+  const value = data[path];
   if (value === undefined) {
     if (options.required) {
       const make = options.severity === "info" ? diagInfo : diagWarning;
@@ -901,15 +927,15 @@ function tolerant<T>(
  */
 function parseEngagements(
   diagnostics: FileDiagnostic[],
-  data: Record<string, unknown>,
+  data: RawFrontmatter,
 ): Engagement[] {
   let engagements: Engagement[];
   if (data.engagements !== undefined) {
     engagements = tolerant(
       diagnostics,
+      data,
       "engagements",
-      data.engagements,
-      taskFrontmatterSchema.shape.engagements,
+      taskFrontmatterFields.engagements,
       [],
     );
   } else {
@@ -918,8 +944,8 @@ function parseEngagements(
     engagements = [];
     const specialist = tolerant(
       diagnostics,
+      data,
       "specialist",
-      data.specialist,
       agentRefSchema.nullable(),
       null,
     );
@@ -927,10 +953,14 @@ function parseEngagements(
       engagements.push({ ...specialist, delivers: true, verdictCapable: false });
     // `reviewers` is the current legacy name; `consultants` is the older alias
     // it replaced, so a stale `consultants` never shadows a live `reviewers`.
+    const withReviewers: RawFrontmatter = {
+      ...data,
+      reviewers: data.reviewers ?? data.consultants,
+    };
     const reviewers = tolerant(
       diagnostics,
+      withReviewers,
       "reviewers",
-      data.reviewers ?? data.consultants,
       z.array(agentRefSchema),
       [],
     );
@@ -981,29 +1011,20 @@ function parseEngagements(
 }
 
 /**
- * Tolerant frontmatter parse. `fallbackKey` (the task directory name) rescues
- * files whose `key` field is missing/invalid.
+ * Tolerant frontmatter parse. `data` is the frontmatter mapping the reader
+ * decoded off disk — a file whose frontmatter is not a mapping arrives here
+ * empty, so every field falls back to its default. `fallbackKey` (the task
+ * directory name) rescues files whose `key` field is missing/invalid.
  */
 export function parseTaskFrontmatter(
-  raw: unknown,
+  data: RawFrontmatter,
   context: { fallbackKey?: string } = {},
 ): TolerantTaskFrontmatterResult {
   const diagnostics: FileDiagnostic[] = [];
-  const data: Record<string, unknown> = isRecord(raw) ? raw : {};
-  if (!isRecord(raw)) {
-    diagnostics.push(
-      diagError(
-        "frontmatter.not_a_map",
-        "Frontmatter is not a YAML mapping — all fields fall back to defaults.",
-        undefined,
-        true,
-      ),
-    );
-  }
 
   // key — identity; unidentifiable without a directory-name fallback.
   let key: string;
-  const keyResult = taskFrontmatterSchema.shape.key.safeParse(data.key);
+  const keyResult = taskFrontmatterFields.key.safeParse(data.key);
   if (keyResult.success) {
     key = keyResult.data;
     if (context.fallbackKey && key !== context.fallbackKey) {
@@ -1049,7 +1070,7 @@ export function parseTaskFrontmatter(
   // first / last-known stage would need the project's stage list and belongs to
   // the projection layer, not this context-free parser.)
   let stage: string;
-  const stageResult = taskFrontmatterSchema.shape.stage.safeParse(data.stage);
+  const stageResult = taskFrontmatterFields.stage.safeParse(data.stage);
   if (stageResult.success) {
     stage = stageResult.data;
   } else {
@@ -1069,200 +1090,165 @@ export function parseTaskFrontmatter(
     key,
     title: tolerant(
       diagnostics,
+      data,
       "title",
-      data.title,
-      taskFrontmatterSchema.shape.title,
+      taskFrontmatterFields.title,
       key,
       { required: true },
     ),
     stage,
     readiness: tolerant(
       diagnostics,
+      data,
       "readiness",
-      data.readiness,
       z.enum(READINESS_VALUES),
       "ready",
       { required: true },
     ),
     waiting: tolerant(
       diagnostics,
+      data,
       "waiting",
-      data.waiting,
       z.enum(WAITING_VALUES),
       "none",
       { required: true },
     ),
     ownerUserId: tolerant(
       diagnostics,
+      data,
       "ownerUserId",
-      data.ownerUserId,
-      taskFrontmatterSchema.shape.ownerUserId,
+      taskFrontmatterFields.ownerUserId,
       null,
     ),
     engagements: parseEngagements(diagnostics, data),
     operator: tolerant(
       diagnostics,
+      data,
       "operator",
-      data.operator,
-      taskFrontmatterSchema.shape.operator,
+      taskFrontmatterFields.operator,
       null,
     ),
     recommendations: tolerant(
       diagnostics,
+      data,
       "recommendations",
-      data.recommendations,
-      taskFrontmatterSchema.shape.recommendations,
+      taskFrontmatterFields.recommendations,
       [],
     ),
     // schedules — absent on tasks that predate O-3 → empty, silently (mirrors
     // recommendations: a missing optional array is not a diagnostic).
     schedules: tolerant(
       diagnostics,
+      data,
       "schedules",
-      data.schedules,
-      taskFrontmatterSchema.shape.schedules,
+      taskFrontmatterFields.schedules,
       [],
     ),
     // urgent is an optional boolean by contract — absent means false, silently.
     urgent: tolerant(
       diagnostics,
+      data,
       "urgent",
-      data.urgent,
-      taskFrontmatterSchema.shape.urgent,
+      taskFrontmatterFields.urgent,
       false,
     ),
     // archived, likewise: absent means "not archived" and is not a diagnostic.
     archived: tolerant(
       diagnostics,
+      data,
       "archived",
-      data.archived,
-      taskFrontmatterSchema.shape.archived,
+      taskFrontmatterFields.archived,
       false,
     ),
     validation: tolerant(
       diagnostics,
+      data,
       "validation",
-      data.validation,
       z.enum(VALIDATION_VALUES),
       "none",
       { required: true, severity: "info" },
     ),
     workRevision: tolerant(
       diagnostics,
+      data,
       "workRevision",
-      data.workRevision,
-      taskFrontmatterSchema.shape.workRevision,
+      taskFrontmatterFields.workRevision,
       null,
     ),
     verdicts: tolerant(
       diagnostics,
+      data,
       "verdicts",
-      data.verdicts,
-      taskFrontmatterSchema.shape.verdicts,
+      taskFrontmatterFields.verdicts,
       [],
     ),
     branch: tolerant(
       diagnostics,
+      data,
       "branch",
-      data.branch,
-      taskFrontmatterSchema.shape.branch,
+      taskFrontmatterFields.branch,
       null,
     ),
     // P13-D-5: no `repo` read — the task-level override is gone.
-    pr: tolerant(diagnostics, "pr", data.pr, taskFrontmatterSchema.shape.pr, null),
+    pr: tolerant(diagnostics, data, "pr", taskFrontmatterFields.pr, null),
     // R17-2: absent means "not a no-change completion" — never a diagnostic.
     noChanges: tolerant(
       diagnostics,
+      data,
       "noChanges",
-      data.noChanges,
-      taskFrontmatterSchema.shape.noChanges,
+      taskFrontmatterFields.noChanges,
       undefined,
     ),
     // N20-14: absent means "not force-accepted" — never a diagnostic.
     acceptance: tolerant(
       diagnostics,
+      data,
       "acceptance",
-      data.acceptance,
-      taskFrontmatterSchema.shape.acceptance,
+      taskFrontmatterFields.acceptance,
       undefined,
     ),
     github: tolerant(
       diagnostics,
+      data,
       "github",
-      data.github,
-      taskFrontmatterSchema.shape.github,
+      taskFrontmatterFields.github,
       null,
     ),
     createdAt: tolerant(
       diagnostics,
+      data,
       "createdAt",
-      data.createdAt,
-      taskFrontmatterSchema.shape.createdAt,
+      taskFrontmatterFields.createdAt,
       null,
     ),
     updatedAt: tolerant(
       diagnostics,
+      data,
       "updatedAt",
-      data.updatedAt,
-      taskFrontmatterSchema.shape.updatedAt,
+      taskFrontmatterFields.updatedAt,
       null,
     ),
     boardRank: tolerant(
       diagnostics,
+      data,
       "boardRank",
-      data.boardRank,
-      taskFrontmatterSchema.shape.boardRank,
+      taskFrontmatterFields.boardRank,
       null,
     ),
   };
 
-  const unknown: Record<string, unknown> = {};
+  const unknown: RawFrontmatter = {};
   for (const [k, v] of Object.entries(data)) {
     // Legacy engagement slots (`specialist`/`reviewers` and the older
     // `consultants` alias) are absorbed into `engagements` above; don't
     // preserve them as "unknown" or a rewrite would emit both forms.
     if (k === "consultants" || k === "specialist" || k === "reviewers") continue;
-    if (!(TASK_FRONTMATTER_KEYS as readonly string[]).includes(k)) {
+    if (!TASK_FRONTMATTER_KEY_SET.has(k)) {
       unknown[k] = v;
     }
   }
 
   return { frontmatter, unknown, diagnostics };
-}
-
-/** Tolerant packet parse (the fenced yaml block under `## Packet`). Returns
- * null + diagnostics when the block cannot be salvaged. */
-export function parseTaskPacket(raw: unknown): {
-  packet: TaskPacket | null;
-  diagnostics: FileDiagnostic[];
-} {
-  if (raw === undefined || raw === null) return { packet: null, diagnostics: [] };
-  const result = taskPacketSchema.safeParse(raw);
-  if (result.success) {
-    const diagnostics: FileDiagnostic[] = [];
-    const recCount = result.data.options.filter((o) => o.rec).length;
-    if (result.data.options.length > 0 && recCount !== 1) {
-      diagnostics.push(
-        diagInfo(
-          "packet.rec_count",
-          `Packet has ${recCount} recommended options (expected exactly 1).`,
-          "packet.options",
-        ),
-      );
-    }
-    return { packet: result.data, diagnostics };
-  }
-  const issue = result.error.issues[0];
-  return {
-    packet: null,
-    diagnostics: [
-      diagError(
-        "packet.invalid",
-        `Packet block is invalid at \`${issue?.path.join(".") || "packet"}\` (${issue?.message ?? "unparseable"}) — packet ignored.`,
-        "packet",
-      ),
-    ],
-  };
 }
 
 // ------------------------------------------------------- actor refs
@@ -1334,6 +1320,13 @@ const EVIDENCE_COUNT_MAX_CHARS = 16;
  */
 export const EVIDENCE_EMPTY_COLUMN = "—";
 
+/** One cell of an agent- or server-supplied row, as it arrives: unparsed JSON.
+ *  A string passes through, an absent cell reads empty, and any other value is
+ *  rendered rather than dropped (a count routinely arrives as a number). */
+const evidenceCellSchema = z
+  .string()
+  .catch(({ value }) => (value == null ? "" : String(value)));
+
 /**
  * Sanitize agent- or server-supplied evidence into rows that round-trip through
  * the task.md serializer. Each row is ONE line of the form
@@ -1346,19 +1339,26 @@ export function normalizeEvidenceRows(
   rows: readonly { label?: unknown; add?: unknown; del?: unknown }[] | null | undefined,
 ): EvidenceRow[] | null {
   if (!rows || rows.length === 0) return null;
-  const flat = (v: unknown, max: number, stripSeparator: boolean): string => {
-    let s = typeof v === "string" ? v : v == null ? "" : String(v);
-    s = s.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  const flat = (text: string, max: number, stripSeparator: boolean): string => {
+    let s = text.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
     if (stripSeparator) s = s.split(" · ").join(" ").replace(/\s+/g, " ").trim();
     return s.length > max ? `${s.slice(0, max - 1)}…` : s;
   };
   const out: EvidenceRow[] = [];
   for (const row of rows) {
-    const label = flat(row.label, EVIDENCE_LABEL_MAX_CHARS, false);
+    const label = flat(
+      evidenceCellSchema.parse(row.label),
+      EVIDENCE_LABEL_MAX_CHARS,
+      false,
+    );
     if (!label) continue; // an unlabeled row cites nothing
-    const column = (v: unknown) =>
-      flat(v, EVIDENCE_COUNT_MAX_CHARS, true) || EVIDENCE_EMPTY_COLUMN;
-    out.push({ label, add: column(row.add), del: column(row.del) });
+    const column = (cell: string) =>
+      flat(cell, EVIDENCE_COUNT_MAX_CHARS, true) || EVIDENCE_EMPTY_COLUMN;
+    out.push({
+      label,
+      add: column(evidenceCellSchema.parse(row.add)),
+      del: column(evidenceCellSchema.parse(row.del)),
+    });
     if (out.length >= EVIDENCE_MAX_ROWS) break;
   }
   return out.length > 0 ? out : null;
@@ -1384,7 +1384,7 @@ export interface TaskFileEvent {
 /** Full parsed task file (see app/server/files/task-file.server.ts). */
 export interface ParsedTaskFile {
   frontmatter: TaskFrontmatter;
-  unknownFrontmatter: Record<string, unknown>;
+  unknownFrontmatter: RawFrontmatter;
   goal: string;
   packet: TaskPacket | null;
   /** Newest first. */

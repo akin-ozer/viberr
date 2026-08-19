@@ -49,10 +49,13 @@ const TOAST_EXIT_MS = 200;
  */
 const TOAST_STACK_CAP = 4;
 
-export function useToasts(): {
+/** What the provider wires together: the live stack and its one pusher. */
+export interface ToastStack {
   toasts: Toast[];
   push: (text: string, kind?: ToastKind) => void;
-} {
+}
+
+export function useToasts(): ToastStack {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 

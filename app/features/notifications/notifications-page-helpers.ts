@@ -11,19 +11,22 @@ export interface NotificationPageItem extends NotificationView {
 
 export type NotificationFilter = "all" | "unread";
 
+/** The two streams the page renders, and the count its header states. */
+export interface NotificationSplit {
+  needs: NotificationPageItem[];
+  rest: NotificationPageItem[];
+  /** UI-54: pending decisions IGNORING the All/Unread filter — what the panel
+   *  header must count. */
+  needsTotal: number;
+}
+
 /** "Waiting on you" holds only LIVE pending decisions (F7-NOTIF1): a packet/
  * approval row whose decision was since resolved falls through to the
  * ordinary stream — never deleted, never auto-read. */
 export function splitNotifications(
   items: NotificationPageItem[],
   f: NotificationFilter,
-): {
-  needs: NotificationPageItem[];
-  rest: NotificationPageItem[];
-  /** UI-54: pending decisions IGNORING the All/Unread filter — what the panel
-   *  header must count. */
-  needsTotal: number;
-} {
+): NotificationSplit {
   const match = (n: NotificationPageItem) => (f === "unread" ? n.unread : true);
   const needsYou = (n: NotificationPageItem) =>
     (n.kind === "packet" || n.kind === "approval") && n.waitingOnYou;

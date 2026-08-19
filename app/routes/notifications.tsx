@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { useLocation, useNavigate, useFetcher } from "react-router";
+import { z } from "zod";
 import type { Route } from "./+types/notifications";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -25,9 +26,17 @@ import type { NotificationPageItem } from "~/features/notifications/notification
  * for real, cross-project included (ruling 9 seeded the stub projects).
  */
 
-export function meta(_: Route.MetaArgs) {
+export function meta() {
   return [{ title: "Notifications · Viberr" }];
 }
+
+/** Overlay routes are opened from the shell with the path to return to in
+ *  history state (top-bell, user-menu). Browser history state survives reloads
+ *  and back/forward and is not the app's to trust, so it is parsed here rather
+ *  than asserted. */
+const overlayReturnState = z
+  .object({ returnTo: z.string().optional().catch(undefined) })
+  .catch({});
 
 /** Most-recent notifications the page loads. The list is capped (no paging
  *  past it), so the loader over-fetches by one to detect when the window is
@@ -77,15 +86,13 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   // it renders without the workspace shell underneath).
   useLiveUpdates([sseScopes.user()]);
 
-  const items = notifications as NotificationPageItem[];
-
   const close = () => {
-    const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+    const { returnTo } = overlayReturnState.parse(location.state);
     navigate(returnTo ?? "/");
   };
 
   const markRead = (id: string) => {
-    const item = items.find((n) => n.id === id);
+    const item = notifications.find((n) => n.id === id);
     if (!item || !item.unread) return; // monotonic — nothing to do
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -113,7 +120,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   return (
     <PageOverlay label="Notifications" onClose={close}>
       <NotificationsPage
-        items={items}
+        items={notifications}
         unread={unread}
         truncated={truncated}
         limit={limit}

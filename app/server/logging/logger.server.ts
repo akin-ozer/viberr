@@ -19,10 +19,22 @@ import { currentCorrelation } from "./request-context.server";
  * clash, so a domain id a call site passes is never silently overwritten.
  */
 
-const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
+/** Ascending severity — a level's INDEX is the threshold comparison. */
+const LEVELS = ["debug", "info", "warn", "error"] as const;
 
-type LogLevel = keyof typeof LEVELS;
-type LogFields = Record<string, unknown>;
+type LogLevel = (typeof LEVELS)[number];
+/** JSON-serializable log values, plus `Error` (flattened by `assign`) and
+ *  `undefined` (dropped by JSON.stringify) — the shapes call sites really pass. */
+export type LogValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | Error
+  | readonly LogValue[]
+  | { readonly [key: string]: LogValue };
+type LogFields = Record<string, LogValue>;
 
 export interface Logger {
   debug(msg: string, fields?: LogFields): void;
@@ -36,21 +48,19 @@ export interface Logger {
 
 function minLevel(): LogLevel {
   const raw = process.env.LOG_LEVEL;
-  if (raw && raw in LEVELS) return raw as LogLevel;
+  const configured = LEVELS.find((level) => level === raw);
+  if (configured !== undefined) return configured;
   return process.env.NODE_ENV === "production" ? "info" : "debug";
 }
 
-function serializeField(value: unknown): unknown {
-  if (value instanceof Error) {
-    return { name: value.name, message: value.message, stack: value.stack };
-  }
-  return value;
-}
-
-function assign(record: Record<string, unknown>, fields?: LogFields): void {
+function assign(record: LogFields, fields?: LogFields): void {
   if (!fields) return;
   for (const [key, value] of Object.entries(fields)) {
-    record[key] = serializeField(value);
+    // An Error survives JSON.stringify as `{}` — keep the diagnosis instead.
+    record[key] =
+      value instanceof Error
+        ? { name: value.name, message: value.message, stack: value.stack }
+        : value;
   }
 }
 
@@ -60,8 +70,8 @@ function write(
   bound: LogFields | null,
   fields?: LogFields,
 ): void {
-  if (LEVELS[level] < LEVELS[minLevel()]) return;
-  const record: Record<string, unknown> = {
+  if (LEVELS.indexOf(level) < LEVELS.indexOf(minLevel())) return;
+  const record = {
     level,
     time: new Date().toISOString(),
     msg,
@@ -83,6 +93,10 @@ function write(
   process.stdout.write(line + "\n");
 }
 
+/** The one `node:fs` call this module makes: bytes onto a descriptor, returning
+ *  how many the OS took. */
+export type SyncWriter = (fd: number, data: string) => number;
+
 /**
  * F20-8(a): one fatal log line written SYNCHRONOUSLY to stderr (fd 2), for the
  * crash paths that call `process.exit` on the very next line. The normal
@@ -93,9 +107,18 @@ function write(
  * exit. Same JSON shape/correlation merge as `write`, minus the level gate (a
  * FATAL is never filtered). Best-effort: a failed write (fd already closed during
  * teardown) must never mask the fatal it is reporting.
+ *
+ * `sync` is the sink hook for tests (same shape as the GitHub client's
+ * `fetchImpl`), defaulting to the real `writeSync`: it is what lets a test read
+ * the exact bytes and the descriptor they went to, which are the two things
+ * that make this different from `logger.error`.
  */
-export function writeFatalSync(msg: string, fields?: LogFields): void {
-  const record: Record<string, unknown> = {
+export function writeFatalSync(
+  msg: string,
+  fields?: LogFields,
+  sync: SyncWriter = writeSync,
+): void {
+  const record = {
     level: "error",
     time: new Date().toISOString(),
     msg,
@@ -114,7 +137,7 @@ export function writeFatalSync(msg: string, fields?: LogFields): void {
     });
   }
   try {
-    writeSync(2, line + "\n");
+    sync(2, line + "\n");
   } catch {
     // stderr already closed during teardown — nothing further we can do.
   }
@@ -129,7 +152,7 @@ function makeLogger(bound: LogFields | null): Logger {
     info: log("info"),
     warn: log("warn"),
     error: log("error"),
-    child: (extra: LogFields) => makeLogger({ ...(bound ?? {}), ...extra }),
+    child: (extra: LogFields) => makeLogger({ ...bound, ...extra }),
   };
 }
 

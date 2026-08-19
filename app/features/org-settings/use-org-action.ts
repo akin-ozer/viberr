@@ -10,9 +10,21 @@ import { useToast } from "~/ui/toast";
  * `onResult` for custom handling (inline `.cred-warn`, close-on-success).
  */
 
-export type OrgActionData =
-  | ({ ok: true; toast?: string } & Record<string, unknown>)
-  | { ok: false; error: string };
+/**
+ * What the org-settings action hands back on success. `toast` is the
+ * server-computed copy the default handler pushes; the credential pair is the
+ * one payload a panel reads beyond it — `user-invite` and `user-reset-password`
+ * mint a local password that is shown ONCE, so the account it belongs to rides
+ * along with it.
+ */
+export interface OrgActionSuccess {
+  ok: true;
+  toast?: string;
+  tempPassword?: string;
+  email?: string;
+}
+
+export type OrgActionData = OrgActionSuccess | { ok: false; error: string };
 
 export const ORG_SETTINGS_ACTION = "/org/settings";
 

@@ -1,6 +1,10 @@
 import { existsSync, rmSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { z } from "zod";
+import {
+  recordAudit,
+  type AuditDetails,
+} from "~/server/audit/audit-recorder.server";
 import { createUser } from "~/server/auth/user-admin.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -18,7 +22,10 @@ import {
   BRANCH_CLEANUP_GUARDRAIL_DESC,
   BRANCH_CLEANUP_GUARDRAIL_ID,
 } from "~/server/github/branch-cleanup.server";
-import { getProjectGithubContext } from "~/server/github/github-context.server";
+import {
+  getProjectGithubContext,
+  type GithubContextOptions,
+} from "~/server/github/github-context.server";
 import { invalidateRepoAccess } from "~/features/github/github-query.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -38,30 +45,61 @@ import { countLiveAdmins, removedAccountLabel } from "./membership.server";
  * exists to push branches and open PRs, so a repo the credential can only READ
  * is not deliverable. Mirrors the (module-private) `repoWritable` in
  * pat-validator.server.ts; kept local so this file stays decoupled from it.
- * Tri-state on purpose: `null` (permissions absent) is "unknown", never a
- * refusal — only a PROVEN read-only repo (push === false) is rejected.
+ *
+ * `push` stays tri-state on purpose: absent or unreadable is "unknown", never a
+ * refusal — only a PROVEN read-only repo (push === false) is rejected. `admin`
+ * and `maintain` need no third state: either GitHub asserted one or it did not.
  */
-interface RepoPermissions {
-  admin?: boolean;
-  maintain?: boolean;
-  push?: boolean;
-}
-function repoPushable(permissions: RepoPermissions | undefined): boolean | null {
-  if (!permissions || typeof permissions !== "object") return null;
-  if (permissions.admin === true || permissions.maintain === true || permissions.push === true) {
+const repoPermissionsSchema = z.object({
+  admin: z.boolean().catch(false),
+  maintain: z.boolean().catch(false),
+  push: z.boolean().nullable().catch(null),
+});
+type RepoPermissions = z.infer<typeof repoPermissionsSchema>;
+
+/**
+ * The two `GET /repos/{owner}/{repo}` fields the repair reads. `request<T>`
+ * names an expected payload, it does not check one, so it is decoded here.
+ * Tolerant at every level — an unreadable field reads as "unknown" and the
+ * repair falls back to the same behaviour it had before the probe existed.
+ */
+const repoProbeSchema = z
+  .object({
+    default_branch: z.string().min(1).nullable().catch(null),
+    permissions: repoPermissionsSchema.nullable().catch(null),
+  })
+  .catch({ default_branch: null, permissions: null });
+
+function repoPushable(permissions: RepoPermissions | null): boolean | null {
+  if (!permissions) return null;
+  if (permissions.admin || permissions.maintain || permissions.push === true) {
     return true;
   }
   if (permissions.push === false) return false;
   return null;
 }
 
+/** `SELECT COUNT(*) AS n` — an aggregate with no GROUP BY, so sqlite answers
+ *  with exactly one row carrying the single integer column `n`. */
+const countRow = z.object({ n: z.number() });
+
+/** The two `users` reads this file makes. Both columns are NOT NULL in
+ *  0001_baseline.sql, so a row that does not decode is no row at all — which is
+ *  exactly how a deleted account has to read here (see removeMember). */
+const memberNameRow = z.object({ name: z.string() });
+const disabledFlagRow = z.object({ disabled: z.number() });
+
 /** Boundary → the label the Policy page uses (policy-data.ts BOUNDARIES). */
-const BOUNDARY_LABEL: Record<Boundary, string> = {
+const BOUNDARY_LABEL = {
   auto: "Auto-advance",
   approval: "Human approval",
   human: "Human only",
-};
-const BOUNDARY_RANK: Record<Boundary, number> = { auto: 0, approval: 1, human: 2 };
+} satisfies Record<Boundary, string>;
+const BOUNDARY_RANK = {
+  auto: 0,
+  approval: 1,
+  human: 2,
+} satisfies Record<Boundary, number>;
 
 /**
  * Project-settings mutations (project-settings spec §5): identity, the
@@ -105,6 +143,14 @@ export const NEW_STAGE_COLORS = [
   "#187574",
 ] as const;
 
+/** The option bag `assertProjectAction` takes. Named here so `allowArchived`
+ *  can be set only when it was asked for — the guard reads its ABSENCE as
+ *  "archived projects are refused". */
+interface ProjectAuthorityOptions {
+  dataRoot?: string;
+  allowArchived?: boolean;
+}
+
 function requireProjectAction(
   db: DatabaseSync,
   ctx: SettingsMutationContext,
@@ -114,13 +160,12 @@ function requireProjectAction(
   what: string,
   opts: { allowArchived?: boolean } = {},
 ): { projectName: string } {
+  const authorityOpts: ProjectAuthorityOptions = { dataRoot: ctx.dataRoot };
+  if (opts.allowArchived) authorityOpts.allowArchived = true;
   // Single canonical guard (project-authority.server): settings mutations name
   // their honest action id — `edit-policy` for identity/stages/repo/archive/
   // delete, `manage-members` for membership CRUD (both admin tier today).
-  return assertProjectAction(db, action, projectSlug, actor, what, {
-    dataRoot: ctx.dataRoot,
-    ...(opts.allowArchived ? { allowArchived: true } : {}),
-  });
+  return assertProjectAction(db, action, projectSlug, actor, what, authorityOpts);
 }
 
 function projectRef(ctx: SettingsMutationContext, projectSlug: string) {
@@ -272,8 +317,8 @@ export function repoFootprintTasks(db: DatabaseSync, projectSlug: string): numbe
          AND (pr_json IS NOT NULL
               OR COALESCE(json_array_length(json_extract(github_json, '$.commits')), 0) > 0)`,
     )
-    .get(projectSlug) as { n: number };
-  return row.n;
+    .get(projectSlug);
+  return countRow.parse(row).n;
 }
 
 /**
@@ -336,31 +381,26 @@ export async function repairProjectRepo(
   // Verify the target with the BOUND credential before anything is written.
   // No credential → nothing to probe with; the repair applies and the
   // credential card keeps saying so.
-  const gh = getProjectGithubContext(db, input.projectSlug, {
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  });
+  const ghOptions: GithubContextOptions = {};
+  if (options.fetchImpl) ghOptions.fetchImpl = options.fetchImpl;
+  const gh = getProjectGithubContext(db, input.projectSlug, ghOptions);
   let probed = false;
   let defaultBranch: string | null = null;
   if (gh.status === "ok") {
-    const res = await gh.client.request<{
-      default_branch?: string;
-      permissions?: RepoPermissions;
-    }>("GET", `/repos/${repo}`);
+    const res = await gh.client.request("GET", `/repos/${repo}`);
     if (res.ok) {
+      const probe = repoProbeSchema.parse(res.data);
       // F20-15: `res.ok` proves the credential can SEE the repo, not push to it.
       // Adopting a read-only-visible repo silently defers the failure to first
       // delivery (live: repairing to a foreign public repo succeeded). Refuse a
       // PROVEN read-only target; an unknown/absent permissions block still passes.
-      if (repoPushable(res.data.permissions) === false) {
+      if (repoPushable(probe.permissions) === false) {
         throw AppError.validation(
           `The attached credential can see ${repo} but cannot push to it — a project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then repair again. Nothing was changed.`,
         );
       }
       probed = true;
-      defaultBranch =
-        typeof res.data.default_branch === "string" && res.data.default_branch
-          ? res.data.default_branch
-          : null;
+      defaultBranch = probe.default_branch;
     } else if (res.kind === "network") {
       throw AppError.validation(
         `GitHub is unreachable (${res.message}) — the repair was NOT applied. Try again when it is.`,
@@ -387,19 +427,16 @@ export async function repairProjectRepo(
   reprojectProject(db, ctx, input.projectSlug);
   // The 30 s memoized repo-access probe still describes the OLD repo.
   invalidateRepoAccess(db, input.projectSlug);
+  const details: AuditDetails = { from, to: repo, probed };
+  if (defaultBranch) details.defaultBranch = defaultBranch;
+  if (footprint > 0) details.footprintTasks = footprint;
   recordAudit(db, {
     action: "project.repo.updated",
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "project",
     subjectId: input.projectSlug,
     projectSlug: input.projectSlug,
-    details: {
-      from,
-      to: repo,
-      probed,
-      ...(defaultBranch ? { defaultBranch } : {}),
-      ...(footprint > 0 ? { footprintTasks: footprint } : {}),
-    },
+    details,
   });
 
   return {
@@ -508,6 +545,12 @@ export async function addStage(
   };
 }
 
+/** What a stage removal has to disclose besides the removal itself (F20-13):
+ *  the re-joined hop, in stage NAMES, and the boundary it now carries. */
+interface StageRemovalOutcome {
+  tightening: { from: string; to: string; boundary: Boundary } | null;
+}
+
 export async function removeStage(
   db: DatabaseSync,
   input: { projectSlug: string; stageId: string },
@@ -518,14 +561,13 @@ export async function removeStage(
 
   // Non-empty guard re-checked at ACTION time from projections (spec §5.2 —
   // client counts can be stale).
-  const count = (
-    db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM task_projections
+  const countRowValue = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM task_projections
           WHERE project_slug = ? AND stage = ?`,
-      )
-      .get(input.projectSlug, input.stageId) as { n: number }
-  ).n;
+    )
+    .get(input.projectSlug, input.stageId);
+  const count = countRow.parse(countRowValue).n;
 
   let stageName = input.stageId;
   // F20-13: removing a stage collapses its two edges into one that carries the
@@ -537,9 +579,7 @@ export async function removeStage(
   // Assigned inside the closure below; a holder keeps TS control-flow from
   // narrowing a closure-only-assigned `let` back to its `null` initializer at
   // the outer use sites (which made the `tightening ? …` branch `never`).
-  const removal: {
-    tightening: { from: string; to: string; boundary: Boundary } | null;
-  } = { tightening: null };
+  const removal: StageRemovalOutcome = { tightening: null };
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     const stagesBefore = parsed.frontmatter.stages;
     const idx = stagesBefore.findIndex((s) => s.id === input.stageId);
@@ -623,30 +663,26 @@ export async function removeStage(
   });
 
   reprojectProject(db, ctx, input.projectSlug);
+  // F20-27: `{ id, name }` is the contract the activity renderer reads
+  // (`d.name`). F20-13: when the removal retightened a hop, also record
+  // `tightened: { from, to, boundary }` — stage NAMES + boundary id — what the
+  // renderer (C-WORKFLOW-POLICY, activity-feed.server.ts) reads to disclose it.
+  // `{ id, name }` stays always-present.
+  const details: AuditDetails = { id: input.stageId, name: stageName };
+  if (removal.tightening) {
+    details.tightened = {
+      from: removal.tightening.from,
+      to: removal.tightening.to,
+      boundary: removal.tightening.boundary,
+    };
+  }
   recordAudit(db, {
     action: "project.stage.removed",
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "stage",
     subjectId: input.stageId,
     projectSlug: input.projectSlug,
-    // F20-27: `{ id, name }` is the contract the activity renderer reads
-    // (`d.name`). F20-13: when the removal retightened a hop, also record
-    // `tightened: { from, to, boundary }` — stage NAMES + boundary id — the shape
-    // the renderer (C-WORKFLOW-POLICY, activity-feed.server.ts) reads to disclose
-    // it. `{ id, name }` stays always-present.
-    details: {
-      id: input.stageId,
-      name: stageName,
-      ...(removal.tightening
-        ? {
-            tightened: {
-              from: removal.tightening.from,
-              to: removal.tightening.to,
-              boundary: removal.tightening.boundary,
-            },
-          }
-        : {}),
-    },
+    details,
   });
   return {
     toast: removal.tightening
@@ -715,6 +751,15 @@ export async function reorderStages(
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+export interface InviteMemberResult {
+  toast: string;
+  userId: string;
+  /** Present ONLY when the invite minted the account (F20-12) — its absence is
+   *  how a caller tells "existing user added" from "new account, credential
+   *  still to hand over". */
+  tempPassword?: string;
+}
+
 /**
  * Invite (spec §5.3): registered email → membership entry (role viewer).
  * Unregistered email → a NEW account is minted first, then the entry.
@@ -735,7 +780,7 @@ export async function inviteMember(
   input: { projectSlug: string; name: string; email: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
-): Promise<{ toast: string; userId: string; tempPassword?: string }> {
+): Promise<InviteMemberResult> {
   // Honest action id (pass-7 seam 4): inviting IS member management, not a
   // policy edit — `manage-members`, same admin tier as before.
   requireProjectAction(db, ctx, "manage-members", input.projectSlug, actor, "manage members & roles");
@@ -787,7 +832,9 @@ export async function inviteMember(
   const toast = tempPassword
     ? `Added ${email} — joins as Viewer. Set their sign-in password in Users & access.`
     : `Added ${email} — joins as Viewer`;
-  return { toast, userId, ...(tempPassword ? { tempPassword } : {}) };
+  const result: InviteMemberResult = { toast, userId };
+  if (tempPassword) result.tempPassword = tempPassword;
+  return result;
 }
 
 export async function removeMember(
@@ -811,12 +858,14 @@ export async function removeMember(
     throw AppError.conflict(`You can't remove yourself from ${projectName}`);
   }
 
-  const userRow = db
-    .prepare(`SELECT name, email FROM users WHERE id = ?`)
-    .get(input.targetUserId) as { name: string; email: string } | undefined;
+  const userRow = memberNameRow.safeParse(
+    db.prepare(`SELECT name, email FROM users WHERE id = ?`).get(input.targetUserId),
+  );
   // LV-04: an org-deleted member is named honestly in the toast instead of
   // echoing the raw `u_…` id back at the admin removing it.
-  const displayName = userRow?.name ?? removedAccountLabel(input.targetUserId);
+  const displayName = userRow.success
+    ? userRow.data.name
+    : removedAccountLabel(input.targetUserId);
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     const member = parsed.frontmatter.members.find(
@@ -833,10 +882,10 @@ export async function removeMember(
       // removal, Policy pointed back to Members to do it). `targetLive` is false
       // for a deleted/disabled account, so a ghost admin is always removable; a
       // real last live admin is still protected.
-      const targetRow = db
-        .prepare(`SELECT disabled FROM users WHERE id = ?`)
-        .get(input.targetUserId) as { disabled: number } | undefined;
-      const targetLive = !!targetRow && targetRow.disabled !== 1;
+      const targetRow = disabledFlagRow.safeParse(
+        db.prepare(`SELECT disabled FROM users WHERE id = ?`).get(input.targetUserId),
+      );
+      const targetLive = targetRow.success && targetRow.data.disabled !== 1;
       const admins = countLiveAdmins(db, parsed.frontmatter.members);
       if (targetLive && admins <= 1) {
         throw AppError.conflict(

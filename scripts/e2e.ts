@@ -13,9 +13,15 @@
  */
 import { spawn } from "node:child_process";
 import process from "node:process";
+import { z } from "zod";
 
 const PROJECT = "viberr-e2e";
 const COMPOSE = ["compose", "-f", "compose.e2e.yml", "-p", PROJECT];
+
+/** `/resources/health` answers `{ ok: true }` once the app is serving. Anything
+ *  else — an error body, a proxy's HTML, a half-started reply — is "not up yet",
+ *  which is what the polling loop does with a failed parse. */
+const healthBody = z.object({ ok: z.boolean().catch(false) }).catch({ ok: false });
 
 function run(
   command: string,
@@ -44,8 +50,7 @@ async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
       if (response.status === 200) {
-        const body = (await response.json()) as { ok?: boolean };
-        if (body.ok === true) return;
+        if (healthBody.parse(await response.json()).ok) return;
       }
     } catch {
       // not up yet

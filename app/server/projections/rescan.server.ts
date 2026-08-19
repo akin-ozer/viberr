@@ -1,6 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, type AuditActor, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
-import { rebuildAll, rebuildProject, type RescanSummary } from "./rebuilder.server";
+import {
+  rebuildAll,
+  rebuildProject,
+  type RebuildOptions,
+  type RescanSummary,
+} from "./rebuilder.server";
 
 /**
  * Manual instance-wide rescan — reconciles the whole file-native store with the
@@ -11,10 +16,11 @@ export function rescanProjections(
   db: DatabaseSync,
   options: { dataRoot?: string; force?: boolean; actor?: AuditActor } = {},
 ): RescanSummary {
-  const summary = rebuildAll(db, {
-    dataRoot: options.dataRoot,
-    ...(options.force !== undefined ? { force: options.force } : {}),
-  });
+  // `force` is only ever SET when the caller named it — an unasked-for rescan
+  // must inherit the rebuilder's own default, not a literal `undefined`.
+  const rebuildOptions: RebuildOptions = { dataRoot: options.dataRoot };
+  if (options.force !== undefined) rebuildOptions.force = options.force;
+  const summary = rebuildAll(db, rebuildOptions);
   recordAudit(db, {
     action: "projection.rescan",
     actor: options.actor ?? SYSTEM_ACTOR,
@@ -34,10 +40,10 @@ export function rescanProject(
   slug: string,
   options: { dataRoot?: string; force?: boolean; actor?: AuditActor } = {},
 ): RescanSummary {
-  const summary = rebuildProject(db, slug, {
-    dataRoot: options.dataRoot,
-    ...(options.force !== undefined ? { force: options.force } : {}),
-  });
+  // Same as above: an unset `force` stays absent so the rebuilder decides.
+  const rebuildOptions: RebuildOptions = { dataRoot: options.dataRoot };
+  if (options.force !== undefined) rebuildOptions.force = options.force;
+  const summary = rebuildProject(db, slug, rebuildOptions);
   recordAudit(db, {
     action: "projection.rescan",
     actor: options.actor ?? SYSTEM_ACTOR,

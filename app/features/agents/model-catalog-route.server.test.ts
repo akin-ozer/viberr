@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
 import {
   setupAppTest,
   type AppTestContext,
@@ -40,32 +41,42 @@ afterAll(async () => {
   app.cleanup();
 });
 
+/** The wire body: the route wraps the catalog in `{ data }`. */
+interface ModelCatalogBody {
+  data: ModelCatalog;
+}
+
 async function runLoader(
   query: string,
   userId?: string,
 ): Promise<Response> {
   const { loader } = await import("~/routes/resources.model-catalog");
   const cookie = userId ? (await app.cookieFor(userId)).cookie : undefined;
-  return (await loader({
-    request: app.request(
-      `/resources/model-catalog${query}`,
-      cookie ? { cookie } : {},
-    ),
+  const request = app.request(
+    `/resources/model-catalog${query}`,
+    cookie ? { cookie } : {},
+  );
+  return await loader({
+    request,
+    url: new URL(request.url),
     params: {},
-    context: {},
-  } as never)) as Response;
+    pattern: "/resources/model-catalog",
+    context: new RouterContextProvider(),
+  });
 }
 
 describe("resources/model-catalog", () => {
   it("redirects signed-out users to /login", async () => {
     const thrown = await runLoader("?backend=claude").catch((e) => e);
     expect(thrown).toBeInstanceOf(Response);
+    // SAFETY: the assertion above has already failed the test unless `thrown`
+    // is the redirect Response `requireUser` throws for a signed-out request.
     expect((thrown as Response).status).toBe(302);
   });
 
   it("returns the curated claude catalog for a signed-in user", async () => {
     const res = await runLoader("?backend=claude", ardaId);
-    const body = (await res.json()) as { data: ModelCatalog };
+    const body: ModelCatalogBody = await res.json();
     expect(body.data.models.map((m) => m.value)).toEqual([
       "sonnet",
       "opus",
@@ -78,7 +89,7 @@ describe("resources/model-catalog", () => {
 
   it("returns the curated codex catalog", async () => {
     const res = await runLoader("?backend=codex", ardaId);
-    const body = (await res.json()) as { data: ModelCatalog };
+    const body: ModelCatalogBody = await res.json();
     // Sol is still OFFERED, but F20-33 makes Terra the default (Sol 400s on a
     // ChatGPT-plan Codex account, so a model-less operator must not fall back to it).
     expect(body.data.models.map((m) => m.value)).toContain("gpt-5.6-sol");
@@ -88,7 +99,7 @@ describe("resources/model-catalog", () => {
 
   it("defaults an unknown/missing backend to claude", async () => {
     const res = await runLoader("", ardaId);
-    const body = (await res.json()) as { data: ModelCatalog };
+    const body: ModelCatalogBody = await res.json();
     expect(body.data.defaultModel).toBe("sonnet");
   });
 
@@ -107,7 +118,7 @@ describe("resources/model-catalog", () => {
     });
     try {
       const res = await runLoader("?backend=codex", ardaId);
-      const body = (await res.json()) as { data: ModelCatalog };
+      const body: ModelCatalogBody = await res.json();
       const sol = body.data.models.find((m) => m.value === "gpt-5.6-sol");
       expect(sol?.unavailable?.reason).toContain("not supported");
       // An unmarked model carries no mark (unknown-but-offered, ruling 19).

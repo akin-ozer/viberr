@@ -8,6 +8,9 @@ afterEach(cleanup);
 /** What a sighted reader sees: everything except the visually-hidden AT-only
  *  labels (P16-UI-20). */
 function visibleText(container: HTMLElement): string {
+  // SAFETY: `cloneNode` is declared on `Node` and typed as returning one, but a
+  // deep clone is always an instance of the interface it was taken from — and
+  // `container` is the HTMLElement testing-library rendered into.
   const clone = container.cloneNode(true) as HTMLElement;
   for (const vh of clone.querySelectorAll(".mention-vh")) vh.remove();
   return clone.textContent ?? "";

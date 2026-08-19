@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
+import { z } from "zod";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
@@ -16,8 +18,15 @@ import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
  * not a secret from its own members.
  */
 
+/** The seeded people these cases POST as. */
+interface SeededUserIds {
+  arda: string;
+  selin: string;
+  deniz: string;
+}
+
 let app: AppTestContext;
-let ids: { arda: string; selin: string; deniz: string };
+let ids: SeededUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -32,25 +41,56 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-type Refusal = { init?: { status: number }; data?: unknown };
+/**
+ * A guard refuses by THROWING React Router's `data(message, { status })`, so
+ * the rejection reaches the test untyped and is parsed where it lands.
+ */
+const thrownRefusalSchema = z.object({
+  data: z.unknown(),
+  init: z.object({ status: z.number() }).nullish(),
+});
+
+/** Un-interpolated match pattern, the way React Router reports it. */
+const BOARD_PATTERN = "/projects/:slug/board";
+
+type BoardActionResult = Awaited<
+  ReturnType<typeof import("~/routes/project.board").action>
+>;
 
 async function post(
   slug: string,
   userId: string,
   fields: Record<string, string>,
-): Promise<unknown> {
+): Promise<BoardActionResult> {
   const { action } = await import("~/routes/project.board");
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
+  const request = app.request(`/projects/${slug}/board`, {
+    method: "POST",
+    cookie,
+    body: new URLSearchParams({ _csrf: csrf, ...fields }),
+  });
   return action({
-    request: app.request(`/projects/${slug}/board`, {
-      method: "POST",
-      cookie,
-      body: new URLSearchParams({ _csrf: csrf, ...fields }),
-    }),
+    request,
+    url: new URL(request.url),
     params: { slug },
-    context: {},
-  } as never);
+    pattern: BOARD_PATTERN,
+    context: new RouterContextProvider(),
+  });
+}
+
+/**
+ * The action answers on one of two envelopes: a bare success object, or
+ * `data(payload, init)`. A case that reads a single member reads it through
+ * this projection — a member the actual branch does not carry comes back
+ * `undefined` and fails its assertion, rather than being asserted into
+ * existence.
+ */
+function reply(result: BoardActionResult) {
+  return {
+    status: "init" in result ? result.init?.status : undefined,
+    error: "data" in result ? result.data.error : undefined,
+  };
 }
 
 const INTENTS: Record<string, string>[] = [
@@ -63,30 +103,31 @@ const INTENTS: Record<string, string>[] = [
 describe("board action — a non-member never learns the project exists (E2)", () => {
   for (const fields of INTENTS) {
     it(`${fields.intent}: refused as an unknown slug, not forbidden`, async () => {
-      const thrown = (await post("viberr-core", ids.deniz, fields).catch(
+      const thrown: unknown = await post("viberr-core", ids.deniz, fields).catch(
         (e) => e,
-      )) as Refusal;
-      expect(thrown?.init?.status).toBe(404);
-      expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
+      );
+      const refusal = thrownRefusalSchema.parse(thrown);
+      expect(refusal.init?.status).toBe(404);
+      expect(String(refusal.data)).toBe("No project at projects/viberr-core.");
     });
   }
 
   it("a member reaches the intent switch", async () => {
-    const result = (await post("viberr-core", ids.arda, {
-      intent: "no-such-intent",
-    })) as { init: { status: number }; data: { error: string } };
-    expect(result.init.status).toBe(400);
-    expect(result.data.error).toBe("Unknown action.");
+    const result = reply(
+      await post("viberr-core", ids.arda, { intent: "no-such-intent" }),
+    );
+    expect(result.status).toBe(400);
+    expect(result.error).toBe("Unknown action.");
   });
 
   it("an org admin passes as the audited D2 override", async () => {
     const { updateUserFields } = await import("~/server/auth/user-store.server");
     updateUserFields(app.db, ids.deniz, { role: "admin" });
     try {
-      const result = (await post("viberr-core", ids.deniz, {
-        intent: "no-such-intent",
-      })) as { init: { status: number } };
-      expect(result.init.status).toBe(400);
+      const result = reply(
+        await post("viberr-core", ids.deniz, { intent: "no-such-intent" }),
+      );
+      expect(result.status).toBe(400);
     } finally {
       updateUserFields(app.db, ids.deniz, { role: "member" });
     }
@@ -96,14 +137,16 @@ describe("board action — a non-member never learns the project exists (E2)", (
     // The secrecy rule is about non-members. Selin is a contributor here, so she
     // may open the board and must be told plainly why she cannot reorder it —
     // turning THAT into a 404 would be a different lie.
-    const result = (await post("viberr-core", ids.selin, {
-      intent: "reorder",
-      taskKey: "VIB-142",
-      to: "impl",
-      beforeKey: "",
-    })) as { init: { status: number }; data: { error: string } };
-    expect(result.init.status).toBe(403);
-    expect(result.data.error).toMatch(
+    const result = reply(
+      await post("viberr-core", ids.selin, {
+        intent: "reorder",
+        taskKey: "VIB-142",
+        to: "impl",
+        beforeKey: "",
+      }),
+    );
+    expect(result.status).toBe(403);
+    expect(result.error).toMatch(
       /role \(contributor\) cannot reorder the board/i,
     );
   });

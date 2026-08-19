@@ -3,7 +3,12 @@ import {
   capabilitiesToActionLabels,
   effectiveProfileView,
 } from "./agents-query.server";
-import type { CapabilityMode } from "~/schemas/project-file.schema";
+import type {
+  AgentDeployment,
+  AgentDeploymentDefinition,
+  CapabilityGrant,
+  CapabilityMode,
+} from "~/schemas/project-file.schema";
 import { absentDeliverReviewPrMode } from "~/shared/capabilities";
 
 const cap = (capabilityId: string, mode: CapabilityMode) => ({ capabilityId, mode });
@@ -120,17 +125,21 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
     const opDeployment = (
       autonomy: "supervised" | "full" | undefined,
       mode: CapabilityMode,
-    ) =>
-      ({
+    ): AgentDeployment => {
+      // The third case below is a deployment that never PERSISTED an autonomy —
+      // an absent key, not a null one — so the key is set only when given.
+      const definition: AgentDeploymentDefinition = {
+        kind: "operator",
+        name: "Operator",
+      };
+      if (autonomy) definition.autonomy = autonomy;
+      return {
         profileId: "operator",
-        capabilities: [{ capabilityId: "completion-for-acceptance", mode }],
+        capabilities: [cap("completion-for-acceptance", mode)],
         extras: [],
-        definition: {
-          kind: "operator",
-          name: "Operator",
-          ...(autonomy ? { autonomy } : {}),
-        },
-      }) as never;
+        definition,
+      };
+    };
 
     const supervised = effectiveProfileView(
       opDeployment("supervised", "direct"),
@@ -169,18 +178,17 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
  */
 describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant", () => {
   const operatorDeployment = (
-    capabilities: { capabilityId: string; mode: CapabilityMode }[],
-  ) =>
-    ({
-      profileId: "operator",
-      capabilities,
-      extras: [],
-      definition: { kind: "operator", name: "Operator", role: "Task coordinator" },
-    }) as never;
+    capabilities: CapabilityGrant[],
+  ): AgentDeployment => ({
+    profileId: "operator",
+    capabilities,
+    extras: [],
+    definition: { kind: "operator", name: "Operator", role: "Task coordinator" },
+  });
 
   const noGrant = [
-    { capabilityId: "assign-primary-specialist", mode: "direct" as CapabilityMode },
-    { capabilityId: "stage-transitions", mode: "recommend" as CapabilityMode },
+    cap("assign-primary-specialist", "direct"),
+    cap("stage-transitions", "recommend"),
   ];
 
   it("materializes the grant at the mode the runtime applies when it is absent", () => {

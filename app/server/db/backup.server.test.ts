@@ -80,11 +80,15 @@ describe("createBackup", () => {
     );
     const fromNaive = new DatabaseSync(naive, { readOnly: true });
     try {
+      // SAFETY: `SELECT count(*) c` always returns exactly one row whose only
+      // column is that integer, so `get` cannot come back undefined here.
       expect(
         (fromBackup.prepare(`SELECT count(*) c FROM users`).get() as { c: number }).c,
       ).toBe(2);
       // …and this is what the prose procedure would have handed you: the
       // main file has not even got the SCHEMA yet, let alone the rows.
+      // SAFETY: the SELECT names one column, and `sqlite_master.name` is TEXT
+      // on every row a `type = 'table'` filter can return.
       const naiveTables = (
         fromNaive
           .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
@@ -196,10 +200,14 @@ describe("restoreBackup", () => {
 
     const restored = new DatabaseSync(projectionPathIn(f.dataRoot), { readOnly: true });
     try {
+      // SAFETY: the SELECT names one column, 0001_baseline declares
+      // `users.email` TEXT NOT NULL, and the restored backup holds two users —
+      // so the first row exists and carries this shape.
       expect(
         (restored.prepare(`SELECT email FROM users`).get() as { email: string }).email,
       ).toBe("arda@viberr.dev");
       // The restore itself is on the record.
+      // SAFETY: as above — a count(*) row always exists and carries `c`.
       expect(
         (
           restored
@@ -298,6 +306,7 @@ describe("restoreStoreFile", () => {
     expect(result.displacedTo).toMatch(/task\.md\.broken-/);
     expect(readFileSync(result.displacedTo!, "utf8")).toContain("title: broken");
     // The database is untouched — the whole point of a single-file restore.
+    // SAFETY: as above — a count(*) row always exists and carries `c`.
     expect(
       (f.db.prepare(`SELECT count(*) c FROM users`).get() as { c: number }).c,
     ).toBe(2);

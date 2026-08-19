@@ -42,29 +42,35 @@ export interface ResolvedOAuthCredentials {
   clientSecret: string;
 }
 
-interface DbRow {
-  provider: string;
+/**
+ * The row as db/migrations/0001_baseline.sql declares it: `provider` under a
+ * CHECK that admits only 'github' and 'google', client_id/client_secret/
+ * enabled/created_at/updated_at NOT NULL, verified_at/verified_detail nullable.
+ */
+type DbRow = {
+  provider: OAuthProvider;
   client_id: string;
   client_secret: string;
   enabled: number;
   verified_at: string | null;
   verified_detail: string | null;
   updated_at: string;
-}
+};
 
 const PROVIDERS: readonly OAuthProvider[] = ["github", "google"];
 
 function readRow(db: DatabaseSync, provider: OAuthProvider): DbRow | null {
-  return (
-    (db
-      .prepare(`SELECT * FROM oauth_providers WHERE provider = ?`)
-      .get(provider) as unknown as DbRow | undefined) ?? null
-  );
+  // SAFETY: the migration cited on DbRow pins every column it names, and this
+  // is a `SELECT *` of that table.
+  const row = db
+    .prepare(`SELECT * FROM oauth_providers WHERE provider = ?`)
+    .get(provider) as DbRow | undefined;
+  return row ?? null;
 }
 
 function toView(row: DbRow): OAuthProviderRow {
   return {
-    provider: row.provider as OAuthProvider,
+    provider: row.provider,
     clientId: row.client_id,
     enabled: row.enabled === 1,
     verifiedAt: row.verified_at,
@@ -75,11 +81,12 @@ function toView(row: DbRow): OAuthProviderRow {
 
 /** Every configured provider row — never the secret. */
 export function listOAuthProviderRows(db: DatabaseSync): OAuthProviderRow[] {
-  return (
-    db
-      .prepare(`SELECT * FROM oauth_providers ORDER BY provider`)
-      .all() as unknown as DbRow[]
-  ).map(toView);
+  // SAFETY: the migration cited on DbRow pins every column it names, and this
+  // is a `SELECT *` of that same table.
+  const rows = db
+    .prepare(`SELECT * FROM oauth_providers ORDER BY provider`)
+    .all() as DbRow[];
+  return rows.map(toView);
 }
 
 export function getOAuthProviderRow(
@@ -330,11 +337,15 @@ export function resolveOAuthProvider(
   };
 }
 
-/** Both providers, resolved — what `getAuth` hands to better-auth. */
-export function resolveOAuthProviders(db: DatabaseSync): {
+export interface ResolvedOAuthProviders {
   github: ResolvedOAuthCredentials | null;
   google: ResolvedOAuthCredentials | null;
-} {
+}
+
+/** Both providers, resolved — what `getAuth` hands to better-auth. */
+export function resolveOAuthProviders(
+  db: DatabaseSync,
+): ResolvedOAuthProviders {
   return {
     github: resolveOAuthProvider(db, "github").credentials,
     google: resolveOAuthProvider(db, "google").credentials,

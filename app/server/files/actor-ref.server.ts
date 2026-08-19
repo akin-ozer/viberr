@@ -104,7 +104,9 @@ export function decodeActorRef(raw: string): FileActorRef {
   if (agent) {
     return {
       kind: "agent",
-      backend: agent[1] as "codex" | "claude",
+      // The backend group is a two-way alternation, so this comparison is
+      // total — the ref never reached here with a third backend.
+      backend: agent[1] === "codex" ? "codex" : "claude",
       profileId: agent[2]!,
       roleHint: agent[3] ?? null,
     };

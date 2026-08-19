@@ -69,14 +69,17 @@ export interface DecisionsForUser {
   overrideEligible: DecisionRef[];
 }
 
-interface OpenDecisionRow {
+/** The columns the open-decision query below selects. A type alias, not an
+ *  interface, so the row assertion is checked against SQLite's output types
+ *  instead of having to launder the rows through `unknown` first. */
+type OpenDecisionRow = {
   project_slug: string;
   task_key: string;
   stage: string;
   owner_user_id: string | null;
   has_packet: number;
   recommendation_count: number;
-}
+};
 
 export function decisionsRequiring(
   db: DatabaseSync,
@@ -86,6 +89,9 @@ export function decisionsRequiring(
   const orgAdmin = isOrgAdmin(db, userId);
 
   // This user's project role per project (null = not a member).
+  // SAFETY: `project_members.role` is CHECK-constrained to exactly
+  // PROJECT_ROLES ('admin' | 'maintainer' | 'contributor' | 'viewer') by
+  // 0001_baseline.sql, and `project_slug` is TEXT NOT NULL.
   const roleBySlug = new Map<string, ProjectRole>(
     (
       db
@@ -109,6 +115,9 @@ export function decisionsRequiring(
     projects.map((p) => [p.slug, resolveStageRoles(p.stages, p.workflow).reviewId]),
   );
 
+  // SAFETY: the four selected `task_projections` columns are TEXT NOT NULL
+  // except the nullable `owner_user_id`; `has_packet` is a SQL boolean (0/1)
+  // and `recommendation_count` is INTEGER NOT NULL (0001_baseline.sql).
   const rows = db
     .prepare(
       `SELECT project_slug, task_key, stage, owner_user_id,
@@ -123,7 +132,7 @@ export function decisionsRequiring(
           AND archived = 0
           ${opts.projectSlug ? "AND project_slug = ?" : ""}`,
     )
-    .all(...(opts.projectSlug ? [opts.projectSlug] : [])) as unknown as OpenDecisionRow[];
+    .all(...(opts.projectSlug ? [opts.projectSlug] : [])) as OpenDecisionRow[];
 
   // B-FD5: acceptance-ready review-stage tasks — the class that carries no
   // decision OBJECT. Predicate parity with the review queue's `isReady`
@@ -140,6 +149,8 @@ export function decisionsRequiring(
   // while the queue correctly filed the same task under "Still in review". Both
   // refusals now live in the projected column itself, so the ONE predicate below
   // is again the whole gate and the two readers cannot drift.
+  // SAFETY: same table as above — `project_slug`, `task_key` and `stage` are
+  // TEXT NOT NULL, `owner_user_id` is the one nullable column selected.
   const acceptanceRows = db
     .prepare(
       `SELECT project_slug, task_key, stage, owner_user_id
@@ -150,7 +161,7 @@ export function decisionsRequiring(
           AND (pr_json IS NULL OR json_extract(pr_json, '$.state') <> 'closed')
           ${opts.projectSlug ? "AND project_slug = ?" : ""}`,
     )
-    .all(...(opts.projectSlug ? [opts.projectSlug] : [])) as unknown as {
+    .all(...(opts.projectSlug ? [opts.projectSlug] : [])) as {
     project_slug: string;
     task_key: string;
     stage: string;

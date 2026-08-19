@@ -5,18 +5,32 @@ import { ErrorBoundary } from "./root";
 
 afterEach(cleanup);
 
+/** What a guard can throw as a route error's `data`: user-facing page copy, the
+ *  router's own null for an unmatched URL, or a JSON error body. */
+type ThrownErrorData = string | null | { error?: { code: string } };
+
 /**
  * Shape-matches react-router's ErrorResponse — what `isRouteErrorResponse`
  * duck-types (status + statusText + internal + data). Loader `throw
  * data("<message>", { status })` reaches the boundary in exactly this form.
  */
-function routeError(status: number, data: unknown, statusText = "") {
+interface RouteErrorResponse {
+  status: number;
+  statusText: string;
+  internal: boolean;
+  data: ThrownErrorData;
+}
+
+function routeError(
+  status: number,
+  data: ThrownErrorData,
+  statusText = "",
+): RouteErrorResponse {
   return { status, statusText, internal: false, data };
 }
 
-function renderBoundary(error: unknown) {
-  const props = { error, params: {} } as Parameters<typeof ErrorBoundary>[0];
-  return render(<ErrorBoundary {...props} />);
+function renderBoundary(error: RouteErrorResponse) {
+  return render(<ErrorBoundary error={error} params={{}} />);
 }
 
 describe("root ErrorBoundary (route error responses)", () => {

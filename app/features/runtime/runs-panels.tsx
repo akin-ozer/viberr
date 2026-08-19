@@ -348,11 +348,11 @@ function SessionIdChip({
  * still be able to tell an added file from a deleted one. The `title` carries
  * the word itself for anyone who needs it spelled out.
  */
-const FILE_KIND_MARK: Record<"add" | "update" | "delete", string> = {
+const FILE_KIND_MARK = {
   add: "+",
   update: "~",
   delete: "−",
-};
+} satisfies Record<"add" | "update" | "delete", string>;
 
 /**
  * P19-RC1 — multi-line command output and diffs, lifted out of the grid row

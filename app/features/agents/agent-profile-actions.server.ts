@@ -80,6 +80,60 @@ export interface ProfileMutationContext {
   dataRoot?: string;
 }
 
+/** What one grant-deciding pass produced: the grants to persist, plus the
+ * delivery-headline decision it had to make (`null` when there was none). */
+interface GrantDecision {
+  grants: { capabilityId: string; mode: CapabilityMode }[];
+  notice: DeliveryGrantNotice | null;
+}
+
+/** A holder, not a `let`: the notice is decided inside the file-writer
+ * callback, and narrowing would otherwise type the result as `null` here. */
+interface DeliveryNoticeHolder {
+  notice: DeliveryGrantNotice | null;
+}
+
+/** F20-20: the operator governance transition one save makes — read before the
+ * write, filled after it, so the audit + toast can name what changed. */
+interface OperatorGovernanceTransition {
+  isOperator: boolean;
+  priorAutonomy: "supervised" | "full";
+  newAutonomy: "supervised" | "full";
+  priorDirectAccept: boolean;
+  newDirectAccept: boolean;
+}
+
+/** Audit `details` for the three profile-save rows. The delivery keys are
+ * ABSENT unless the save actually decided a delivery headline (B-AG1) — the
+ * presence of the key IS the disclosure, so they are set, never defaulted. */
+type ProfileCreatedAuditDetails = {
+  name: string;
+  role: string;
+  backend: "codex" | "claude";
+  projectName: string;
+  deliveryGrants?: DeliveryGrantNotice["kind"];
+  deliveryNote?: string;
+};
+
+type ProfileDeployedAuditDetails = {
+  name: string;
+  source: "library";
+  projectName: string;
+  deliveryGrants?: DeliveryGrantNotice["kind"];
+  deliveryNote?: string;
+};
+
+type ProfileUpdatedAuditDetails = {
+  name: string;
+  role: string;
+  backend: "codex" | "claude";
+  operatorAutonomy?: "supervised" | "full";
+  acceptCompletionIntoDone?: "direct" | "off";
+  acceptCompletionActsDirectly?: boolean;
+  deliveryGrants?: DeliveryGrantNotice["kind"];
+  deliveryNote?: string;
+};
+
 const modeSchema = z.enum(["direct", "recommend", "human", "off"]);
 
 // Per-backend fallbacks when the form omits a picked model/effort (older
@@ -114,6 +168,18 @@ const profileFormSchema = z.object({
 
 export type ProfileFormInput = z.infer<typeof profileFormSchema>;
 
+/** The submitted profile form as the transport delivered it: any value
+ *  `JSON.parse` can hand back. The route decodes the transport, `parseForm`
+ *  judges the content — so the type that travels between them is "decoded
+ *  JSON", not "anything at all". */
+export type SubmittedProfileForm =
+  | string
+  | number
+  | boolean
+  | null
+  | SubmittedProfileForm[]
+  | { [key: string]: SubmittedProfileForm };
+
 function requireProjectAction(
   db: DatabaseSync,
   ctx: ProfileMutationContext,
@@ -141,7 +207,7 @@ function reprojectProject(
   });
 }
 
-function parseForm(raw: unknown): ProfileFormInput {
+function parseForm(raw: SubmittedProfileForm): ProfileFormInput {
   const parsed = profileFormSchema.safeParse(raw);
   if (!parsed.success) {
     throw AppError.validation(
@@ -174,10 +240,7 @@ function grantsFor(
   caps: Record<string, CapMode>,
   defaults: Readonly<Record<string, CapMode>>,
   { specialist }: { specialist: boolean },
-): {
-  grants: { capabilityId: string; mode: CapabilityMode }[];
-  notice: DeliveryGrantNotice | null;
-} {
+): GrantDecision {
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
   for (const [capabilityId, def] of Object.entries(defaults)) {
     let mode = caps[capabilityId] ?? def;
@@ -197,7 +260,7 @@ function grantsFor(
     // only when it SEES an explicit `off`/`human` grant, so a dropped `off` read
     // back as "unspecified" and left the tool available. Storing it makes the
     // withholding real (the operator gate already treats stored-off = deny).
-    grants.push({ capabilityId, mode: mode as CapabilityMode });
+    grants.push({ capabilityId, mode });
   }
   // F14: never persist a deliverer whose headline `execute-code-or-write-repo`
   // is merely ABSENT while its scoped delivery grants are actionable (the edit
@@ -227,12 +290,7 @@ function grantsFor(
  * Create is ALWAYS a specialist profile, so a submitted `recommend` normalizes
  * to `off` (withheld) per R20-6/F20-21 — never up to `direct`; always-human ids
  * stay `human`. */
-function createModalGrants(
-  caps: Record<string, CapMode>,
-): {
-  grants: { capabilityId: string; mode: CapabilityMode }[];
-  notice: DeliveryGrantNotice | null;
-} {
+function createModalGrants(caps: Record<string, CapMode>): GrantDecision {
   // The delivery headline is decided from what the form SUBMITTED, before the
   // omitted ids are materialized as `off` below — otherwise the editor artifact
   // (scoped delivery submitted, headline key absent: the shape that produced
@@ -260,7 +318,7 @@ function createModalGrants(
             ? "direct"
             : "off"
           : coerceSpecialistCapabilityMode(submitted);
-    grants.push({ capabilityId, mode: mode as CapabilityMode });
+    grants.push({ capabilityId, mode });
   }
   // F14: a deliverer must hold the headline repo-write capability (master gate).
   // The headline is materialized above, so this only re-checks and reports.
@@ -271,7 +329,7 @@ function createModalGrants(
 
 export async function createAgentProfile(
   db: DatabaseSync,
-  input: { projectSlug: string; form: unknown },
+  input: { projectSlug: string; form: SubmittedProfileForm },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<ProfileSaveResult> {
@@ -284,9 +342,7 @@ export async function createAgentProfile(
   };
 
   let profileId = "";
-  // A holder, not a `let`: the grants are decided inside the file-writer
-  // callback, and narrowing would otherwise type the result as `null` here.
-  const delivery: { notice: DeliveryGrantNotice | null } = { notice: null };
+  const delivery: DeliveryNoticeHolder = { notice: null };
   await updateProjectFile(ref, (parsed) => {
     const taken = new Set(parsed.frontmatter.agents.map((a) => a.profileId));
     // Server-generated slug id with a uniqueness check (agents spec §4.5) —
@@ -318,49 +374,50 @@ export async function createAgentProfile(
       desc:
         form.definition.trim() ||
         `${form.name} — a ${form.role.toLowerCase()} specialist.`,
-      // The long persona (D6) — the run's system-prompt material.
-      ...(form.persona.trim() ? { persona: form.persona.trim() } : {}),
-      stages: form.stages,
-      resources: form.resources,
     };
+    // The long persona (D6) — the run's system-prompt material. Written only
+    // when the form carries one, in its catalog position, so an empty box
+    // leaves the key absent rather than storing "".
+    const persona = form.persona.trim();
+    if (persona) definition.persona = persona;
+    definition.stages = form.stages;
+    definition.resources = form.resources;
+
     const created = createModalGrants(form.caps);
     delivery.notice = created.notice;
     const deployment: AgentDeployment = {
       profileId,
       capabilities: created.grants,
       extras: [],
+      definition,
     };
-    (deployment as Record<string, unknown>).definition = definition;
     parsed.frontmatter.agents.push(deployment);
   });
 
   reprojectProject(db, ctx, input.projectSlug);
+  const details: ProfileCreatedAuditDetails = {
+    name: form.name,
+    role: form.role,
+    backend: form.backend,
+    projectName,
+  };
+  // B-AG1: a delivery-headline decision the save made (or refused to make)
+  // is never silent — the audit row carries it and the caller shows it.
+  if (delivery.notice) {
+    details.deliveryGrants = delivery.notice.kind;
+    details.deliveryNote = delivery.notice.message;
+  }
   recordAudit(db, {
     action: "project.agent_profile.created",
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "agent_profile",
     subjectId: profileId,
     projectSlug: input.projectSlug,
-    details: {
-      name: form.name,
-      role: form.role,
-      backend: form.backend,
-      projectName,
-      // B-AG1: a delivery-headline decision the save made (or refused to make)
-      // is never silent — the audit row carries it and the caller shows it.
-      ...(delivery.notice
-        ? {
-            deliveryGrants: delivery.notice.kind,
-            deliveryNote: delivery.notice.message,
-          }
-        : {}),
-    },
+    details,
   });
-  return {
-    profileId,
-    name: form.name,
-    ...(delivery.notice ? { notice: delivery.notice } : {}),
-  };
+  const result: ProfileSaveResult = { profileId, name: form.name };
+  if (delivery.notice) result.notice = delivery.notice;
+  return result;
 }
 
 // --------------------------------------------------- deploy from library
@@ -436,9 +493,9 @@ export async function deployAgentProfileFromLibrary(
       : conservativeGrantsFor("agent")
     ).map((g) => ({
       capabilityId: g.capabilityId,
-      mode: (ALWAYS_HUMAN.has(g.capabilityId)
+      mode: ALWAYS_HUMAN.has(g.capabilityId)
         ? "human"
-        : coerceSpecialistCapabilityMode(g.mode)) as CapabilityMode,
+        : coerceSpecialistCapabilityMode(g.mode),
     })),
   );
 
@@ -461,72 +518,66 @@ export async function deployAgentProfileFromLibrary(
         effort: defaultEffortFor(backend),
         scope: `Added from the global library to ${project.frontmatter.name}`,
         desc: fm.desc || parsed.description,
-        ...(parsed.description ? { persona: parsed.description } : {}),
-        stages: fm.stages,
-        spanAll: fm.spanAll,
-        resources: {
-          skills: fm.resources.skills,
-          mcps: fm.resources.mcps,
-          kb: fm.resources.kb,
-        },
       };
+      // The template's markdown body becomes the deployment's persona — absent
+      // when the template has none, so the key stays off the record entirely.
+      if (parsed.description) definition.persona = parsed.description;
+      definition.stages = fm.stages;
+      definition.spanAll = fm.spanAll;
+      definition.resources = {
+        skills: fm.resources.skills,
+        mcps: fm.resources.mcps,
+        kb: fm.resources.kb,
+      };
+
       const deployment: AgentDeployment = {
         profileId,
         capabilities: deployDelivery.grants,
         extras: fm.extras.map((e) => ({ label: e.label, mode: e.mode })),
+        definition,
       };
-      (deployment as Record<string, unknown>).definition = definition;
       project.frontmatter.agents.push(deployment);
     },
   );
 
   reprojectProject(db, ctx, input.projectSlug);
+  const details: ProfileDeployedAuditDetails = {
+    name: fm.name,
+    source: "library",
+    projectName,
+  };
+  if (deployDelivery.notice) {
+    details.deliveryGrants = deployDelivery.notice.kind;
+    details.deliveryNote = deployDelivery.notice.message;
+  }
   recordAudit(db, {
     action: "project.agent_profile.deployed",
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "agent_profile",
     subjectId: profileId,
     projectSlug: input.projectSlug,
-    details: {
-      name: fm.name,
-      source: "library",
-      projectName,
-      ...(deployDelivery.notice
-        ? {
-            deliveryGrants: deployDelivery.notice.kind,
-            deliveryNote: deployDelivery.notice.message,
-          }
-        : {}),
-    },
+    details,
   });
-  return {
-    profileId,
-    name: fm.name,
-    ...(deployDelivery.notice ? { notice: deployDelivery.notice } : {}),
-  };
+  const result: ProfileSaveResult = { profileId, name: fm.name };
+  if (deployDelivery.notice) result.notice = deployDelivery.notice;
+  return result;
 }
 
 // ------------------------------------------------------------------ update
 
 export async function updateAgentProfile(
   db: DatabaseSync,
-  input: { projectSlug: string; profileId: string; form: unknown },
+  input: { projectSlug: string; profileId: string; form: SubmittedProfileForm },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<ProfileSaveResult> {
   requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
-  const delivery: { notice: DeliveryGrantNotice | null } = { notice: null };
+  const delivery: DeliveryNoticeHolder = { notice: null };
   // F20-20: capture the operator governance transition this save makes, so the
   // audit + toast can name it instead of the generic "profile updated". Filled
   // inside the writer callback where the prior view and the saved grants exist.
-  const gov: {
-    isOperator: boolean;
-    priorAutonomy: "supervised" | "full";
-    newAutonomy: "supervised" | "full";
-    priorDirectAccept: boolean;
-    newDirectAccept: boolean;
-  } = {
+  const gov: OperatorGovernanceTransition = {
     isOperator: false,
     priorAutonomy: "supervised",
     newAutonomy: "supervised",
@@ -612,10 +663,13 @@ export async function updateAgentProfile(
           : {}),
       stages: form.stages,
       spanAll: current.spanAll,
-      ...(isOperator ? { autonomy: form.autonomy ?? current.autonomy ?? "supervised" } : {}),
-      resources: form.resources,
     };
-    (deployment as Record<string, unknown>).definition = definition;
+    // Operator only: a specialist definition carries no `autonomy` key at all.
+    if (isOperator) {
+      definition.autonomy = form.autonomy ?? current.autonomy ?? "supervised";
+    }
+    definition.resources = form.resources;
+    deployment.definition = definition;
   });
 
   reprojectProject(db, ctx, input.projectSlug);
@@ -634,30 +688,27 @@ export async function updateAgentProfile(
   const directDoneLive =
     gov.isOperator && gov.newAutonomy === "full" && gov.newDirectAccept;
 
+  const details: ProfileUpdatedAuditDetails = {
+    name: form.name,
+    role: form.role,
+    backend: form.backend,
+  };
+  if (gov.isOperator) {
+    details.operatorAutonomy = gov.newAutonomy;
+    details.acceptCompletionIntoDone = gov.newDirectAccept ? "direct" : "off";
+    details.acceptCompletionActsDirectly = directDoneLive;
+  }
+  if (delivery.notice) {
+    details.deliveryGrants = delivery.notice.kind;
+    details.deliveryNote = delivery.notice.message;
+  }
   recordAudit(db, {
     action: "project.agent_profile.updated",
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "agent_profile",
     subjectId: input.profileId,
     projectSlug: input.projectSlug,
-    details: {
-      name: form.name,
-      role: form.role,
-      backend: form.backend,
-      ...(gov.isOperator
-        ? {
-            operatorAutonomy: gov.newAutonomy,
-            acceptCompletionIntoDone: gov.newDirectAccept ? "direct" : "off",
-            acceptCompletionActsDirectly: directDoneLive,
-          }
-        : {}),
-      ...(delivery.notice
-        ? {
-            deliveryGrants: delivery.notice.kind,
-            deliveryNote: delivery.notice.message,
-          }
-        : {}),
-    },
+    details,
   });
 
   let governanceNotice: { message: string } | undefined;
@@ -685,12 +736,13 @@ export async function updateAgentProfile(
     });
   }
 
-  return {
+  const result: ProfileSaveResult = {
     profileId: input.profileId,
     name: form.name,
-    ...(delivery.notice ? { notice: delivery.notice } : {}),
-    ...(governanceNotice ? { governanceNotice } : {}),
   };
+  if (delivery.notice) result.notice = delivery.notice;
+  if (governanceNotice) result.governanceNotice = governanceNotice;
+  return result;
 }
 
 // ------------------------------------------------------------------ delete

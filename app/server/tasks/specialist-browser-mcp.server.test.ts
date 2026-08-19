@@ -53,7 +53,7 @@ describe("R19-19 resolveBrowserMcp", () => {
       backend: "claude",
     });
     expect(r.refused).toBeNull();
-    const server = r.server as { command: string; args: string[] };
+    const server = r.server!;
     expect(server.command).toBe(process.execPath);
     expect(server.args[0]).toMatch(/@playwright[\\/]mcp[\\/]cli\.js$/);
     // The CLI entry must actually exist — the config names a real file, not a
@@ -106,12 +106,12 @@ describe("R19-19 resolveBrowserMcp", () => {
       grants: [g("use-browser", "direct")],
       attachmentsDir: dir,
       backend: "claude",
-    }).server as { args: string[] };
+    }).server!;
     const codex = resolveBrowserMcp({
       grants: [g("use-browser", "direct")],
       attachmentsDir: dir,
       backend: "codex",
-    }).server as { args: string[] };
+    }).server!;
     expect(claude.args).not.toContain("--image-responses");
     expect(codex.args[codex.args.indexOf("--image-responses") + 1]).toBe("omit");
     rmSync(path.dirname(dir), { recursive: true, force: true });
@@ -125,7 +125,7 @@ describe("R19-19 resolveBrowserMcp", () => {
       grants: [g("use-browser", "direct")],
       attachmentsDir: dir,
       backend: "claude",
-    }).server as { args: string[] };
+    }).server!;
     expect(server.args[server.args.indexOf("--executable-path") + 1]).toBe(
       "/usr/bin/chromium",
     );

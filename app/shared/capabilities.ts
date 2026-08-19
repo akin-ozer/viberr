@@ -306,6 +306,11 @@ export function applyVerdictOutcomeGate<
   // Same polarity as `effectiveCollabMode`: only an explicit `direct` carries
   // verdict authority (absent and `recommend` fall to the catalog default, off).
   if (verdict === "direct") return grants.map((g) => ({ ...g }));
+  // SAFETY: the spread carries every other property of `g` through unchanged,
+  // so the only claim the assertion makes is that `"off"` inhabits `G["mode"]`.
+  // Every caller instantiates G with the full `CapabilityMode` union (or plain
+  // `string` in the tests) — `off` is one of its four members, and a narrower
+  // mode type would not survive the grant round-trip through project.md anyway.
   return grants.map((g) =>
     VERDICT_OUTCOMES.has(g.capabilityId) && g.mode !== "human"
       ? ({ ...g, mode: "off" } as G)
@@ -357,6 +362,13 @@ export interface DeliveryGrantNotice {
   message: string;
 }
 
+/** The grants to persist, plus what the headline decision was — `notice` is
+ *  null when the stored grants already agreed and nothing was decided. */
+export interface RepairedDeliveryGrants<G> {
+  grants: G[];
+  notice: DeliveryGrantNotice | null;
+}
+
 /**
  * Materialize the delivery headline for a profile whose scoped delivery grants
  * are actionable but whose `execute-code-or-write-repo` grant is ABSENT.
@@ -377,7 +389,7 @@ export interface DeliveryGrantNotice {
  */
 export function repairDeliveryGrants<
   G extends { capabilityId: string; mode: string },
->(grants: readonly G[]): { grants: G[]; notice: DeliveryGrantNotice | null } {
+>(grants: readonly G[]): RepairedDeliveryGrants<G> {
   const actionable = (m: string | undefined) =>
     m === "direct" || m === "recommend";
   const byCapId = new Map(grants.map((g) => [g.capabilityId, g.mode]));
@@ -406,6 +418,12 @@ export function repairDeliveryGrants<
     };
   }
   const out = grants.map((g) => ({ ...g }));
+  // SAFETY: a grant IS the pair below — every caller instantiates G as
+  // `{ capabilityId, mode }` (the record persisted to project.md's
+  // `capabilities`, with `mode` the full `CapabilityMode` union), so the literal
+  // is a complete G and `direct` inhabits its mode. A G carrying a third
+  // property would make this an incomplete grant, which is why the constraint
+  // above names both members.
   out.push({ capabilityId: "execute-code-or-write-repo", mode: "direct" } as G);
   return {
     grants: out,

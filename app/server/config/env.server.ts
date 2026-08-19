@@ -1,10 +1,14 @@
 import { loadEnvFile } from "node:process";
 import { z } from "zod";
 
+/** No `.env` at all is the normal case (container, CI, a shell-exported env) —
+ *  any OTHER failure is a real configuration fault and must reach the operator. */
+const missingEnvFile = z.object({ code: z.literal("ENOENT") });
+
 try {
   loadEnvFile();
 } catch (error) {
-  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  if (!missingEnvFile.safeParse(error).success) throw error;
 }
 
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -180,12 +184,24 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
 // Cached across dev-server HMR module reloads via a well-known global symbol.
 const ENV_CACHE_KEY = Symbol.for("viberr.env");
 
+interface EnvSlot {
+  [ENV_CACHE_KEY]?: Env;
+}
+
+function envSlot(): EnvSlot {
+  // SAFETY: `globalThis` carries no static type for a symbol-keyed slot. The key
+  // is module-private, and the only writes to it anywhere in the process are the
+  // two below (`getEnv` stores what it just parsed, `resetEnvCacheForTests`
+  // clears it), so the slot holds a parsed Env or nothing.
+  return globalThis as EnvSlot;
+}
+
 /**
  * Parses process.env exactly once per process and caches the result.
  * Call at boot so a bad configuration fails fast with a clear message.
  */
 export function getEnv(): Env {
-  const cache = globalThis as unknown as Record<symbol, Env | undefined>;
+  const cache = envSlot();
   let env = cache[ENV_CACHE_KEY];
   if (!env) {
     env = parseEnv(process.env);
@@ -196,8 +212,7 @@ export function getEnv(): Env {
 
 /** Test-only: clears the process-wide env cache. */
 export function resetEnvCacheForTests(): void {
-  const cache = globalThis as unknown as Record<symbol, Env | undefined>;
-  cache[ENV_CACHE_KEY] = undefined;
+  envSlot()[ENV_CACHE_KEY] = undefined;
 }
 
 /**

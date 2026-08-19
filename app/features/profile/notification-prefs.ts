@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 
 /**
@@ -22,36 +23,43 @@ export const NOTIF_PREF_CATEGORIES = [
 
 export type NotifPrefCategory = (typeof NOTIF_PREF_CATEGORIES)[number];
 
-export interface NotifChannelPrefs {
+export type NotifChannelPrefs = {
   app: boolean;
-}
+};
 
 export type NotifPrefs = Record<NotifPrefCategory, NotifChannelPrefs>;
 
 /** Every routing category ON by default — the model is opt-OUT (a user only
- *  ever stores a pref when they silence a category). */
-export const DEFAULT_NOTIF_PREFS: NotifPrefs = {
-  packets: { app: true },
-  approvals: { app: true },
-  mentions: { app: true },
-  policy: { app: true },
-  quality: { app: true },
-};
+ *  ever stores a pref when they silence a category). A factory, not a shared
+ *  constant, because `mergeNotifPrefs` hands its fallback straight to callers:
+ *  the exported default must never be reachable (and mutable) through one. */
+function defaultNotifPrefs() {
+  return {
+    packets: { app: true },
+    approvals: { app: true },
+    mentions: { app: true },
+    policy: { app: true },
+    quality: { app: true },
+  } satisfies NotifPrefs;
+}
+
+export const DEFAULT_NOTIF_PREFS = defaultNotifPrefs();
 
 /**
  * The EXPLICIT singular-kind → plural-category map (contracts §4). Every
- * `notifications.kind` routes through exactly one pref category; a `Record`
- * keyed by `NotificationKind` makes adding a kind a compile error until it is
- * mapped. This is the single source consulted before a notification is
- * inserted (createNotification) — off category ⇒ the row is never written.
+ * `notifications.kind` routes through exactly one pref category; `satisfies`
+ * against a `Record` keyed by `NotificationKind` makes adding a kind a compile
+ * error until it is mapped. This is the single source consulted before a
+ * notification is inserted (createNotification) — off category ⇒ the row is
+ * never written.
  */
-const KIND_TO_CATEGORY: Record<NotificationKind, NotifPrefCategory> = {
+const KIND_TO_CATEGORY = {
   packet: "packets",
   approval: "approvals",
   mention: "mentions",
   policy: "policy",
   quality: "quality",
-};
+} satisfies Record<NotificationKind, NotifPrefCategory>;
 
 export function notifCategoryForKind(kind: NotificationKind): NotifPrefCategory {
   return KIND_TO_CATEGORY[kind];
@@ -90,31 +98,46 @@ export const PROFILE_NTF: {
   },
 ];
 
-export function isNotifPrefCategory(
-  value: unknown,
-): value is NotifPrefCategory {
-  return (
-    typeof value === "string" &&
-    (NOTIF_PREF_CATEGORIES as readonly string[]).includes(value)
-  );
+const notifPrefCategorySchema = z.enum(NOTIF_PREF_CATEGORIES);
+
+export function isNotifPrefCategory(value: string): value is NotifPrefCategory {
+  return notifPrefCategorySchema.safeParse(value).success;
 }
+
+/**
+ * What the pref store can hand back for this key. `user_prefs.value_json` is
+ * TEXT that `getPref` runs through `JSON.parse`, so any JSON value can arrive —
+ * including a record an older build wrote under a different set of keys.
+ * `mergeNotifPrefs` is the decode boundary that turns it into `NotifPrefs`.
+ */
+export type StoredPrefJson =
+  | StoredPrefJson[]
+  | boolean
+  | number
+  | string
+  | { [key: string]: StoredPrefJson }
+  | null;
+
+/** A category whose stored entry does not decode reads as ON — the model is
+ *  opt-OUT, so an unreadable entry must never silence a category. */
+const storedChannelPrefsSchema = z
+  .object({ app: z.boolean() })
+  .catch(() => ({ app: true }));
+
+/** Tolerant decode of a stored (possibly partial/malformed) pref value:
+ *  unknown keys are dropped by `z.object`'s strip, and the per-category
+ *  `.catch` keeps one junk entry from discarding the other four. */
+const storedNotifPrefsSchema = z.object({
+  packets: storedChannelPrefsSchema,
+  approvals: storedChannelPrefsSchema,
+  mentions: storedChannelPrefsSchema,
+  policy: storedChannelPrefsSchema,
+  quality: storedChannelPrefsSchema,
+});
 
 /** Tolerant merge of a stored (possibly partial/malformed) pref value over
  * the defaults — unknown keys dropped, missing keys defaulted. */
-export function mergeNotifPrefs(raw: unknown): NotifPrefs {
-  const merged: NotifPrefs = {
-    packets: { ...DEFAULT_NOTIF_PREFS.packets },
-    approvals: { ...DEFAULT_NOTIF_PREFS.approvals },
-    mentions: { ...DEFAULT_NOTIF_PREFS.mentions },
-    policy: { ...DEFAULT_NOTIF_PREFS.policy },
-    quality: { ...DEFAULT_NOTIF_PREFS.quality },
-  };
-  if (raw === null || typeof raw !== "object") return merged;
-  for (const category of NOTIF_PREF_CATEGORIES) {
-    const entry = (raw as Record<string, unknown>)[category];
-    if (entry === null || typeof entry !== "object") continue;
-    const { app } = entry as Record<string, unknown>;
-    if (typeof app === "boolean") merged[category].app = app;
-  }
-  return merged;
+export function mergeNotifPrefs(raw: StoredPrefJson | null): NotifPrefs {
+  const parsed = storedNotifPrefsSchema.safeParse(raw);
+  return parsed.success ? parsed.data : defaultNotifPrefs();
 }

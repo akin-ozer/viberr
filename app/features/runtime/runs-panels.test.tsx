@@ -417,9 +417,10 @@ describe("P13-D-11: the console pages backwards", () => {
         headSeq: 927,
       },
     });
-  const older = (patch: Partial<OlderLogState> = {}): Record<string, OlderLogState> => ({
-    primary: { hasMore: true, withheld: 528, loading: false, error: null, ...patch },
-  });
+  const older = (patch: Partial<OlderLogState> = {}) =>
+    ({
+      primary: { hasMore: true, withheld: 528, loading: false, error: null, ...patch },
+    }) satisfies Record<string, OlderLogState>;
   const rows = (n: number, prefix: string): StreamedLine[] =>
     Array.from({ length: n }, (_, i) => ({
       display: { t: "1", ev: "text" as const, tag: "assistant", text: `${prefix}${i}` },
@@ -482,7 +483,7 @@ describe("P13-D-11: the console pages backwards", () => {
         onLoadOlder={() => {}}
       />,
     );
-    const box = container.querySelector(".console") as HTMLElement;
+    const box = container.querySelector<HTMLElement>(".console")!;
     let height = 1000;
     Object.defineProperty(box, "scrollHeight", { get: () => height, configurable: true });
     Object.defineProperty(box, "clientHeight", { get: () => 320, configurable: true });

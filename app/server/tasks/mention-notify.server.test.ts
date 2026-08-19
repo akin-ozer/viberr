@@ -48,7 +48,7 @@ const OPERATOR_FROM: ActorRender = { kind: "agent", name: "Operator" };
 function notificationRows(store: TestStore) {
   return store.db
     .prepare(`SELECT user_id, kind, text, actor_json FROM notifications ORDER BY user_id`)
-    .all() as { user_id: string; kind: string; text: string; actor_json: string | null }[];
+    .all();
 }
 
 describe("notifyMentionedUsers", () => {
@@ -68,7 +68,7 @@ describe("notifyMentionedUsers", () => {
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row.kind).toBe("mention");
-      expect(JSON.parse(row.actor_json!)).toEqual(OPERATOR_FROM);
+      expect(JSON.parse(String(row.actor_json))).toEqual(OPERATOR_FROM);
     }
   });
 
@@ -130,7 +130,7 @@ describe("notifyMentionedUsers", () => {
       from: OPERATOR_FROM,
     });
     const [row] = notificationRows(store);
-    expect(row!.text.length).toBeLessThan(300);
+    expect(String(row!.text).length).toBeLessThan(300);
     expect(row!.text).toContain("mentioned you");
     expect(row!.text).toContain("…");
   });
@@ -321,7 +321,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
               model: "sonnet",
             },
           },
-        ] as never,
+        ],
       });
     }
     writeTask(store.dataRoot, store.slug, {
@@ -512,7 +512,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
    * construction and fan out separately, which is exactly why site count and
    * writer count are pinned apart.
    */
-  const COMMENT_WRITER_SITES: Readonly<Record<string, number>> = {
+  const COMMENT_WRITER_SITES = {
     "server/tasks/task-actions.server.ts": 3,
     "server/tasks/operator-actions.server.ts": 2,
     "server/tasks/agent-toolkit.server.ts": 1,
@@ -521,7 +521,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     // they were written). Re-notifying on a fold would ping people for a
     // housekeeping pass.
     "server/tasks/timeline-compaction.server.ts": 1,
-  };
+  } satisfies Readonly<Record<string, number>>;
   const NO_FANOUT_BY_DESIGN = new Set([
     "server/tasks/timeline-compaction.server.ts",
   ]);

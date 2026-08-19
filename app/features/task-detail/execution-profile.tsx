@@ -219,10 +219,18 @@ function OwnerControl({
   // Q5 tiering (XS-12): only contributor+ may take/hold ownership — a viewer is
   // read + comment only, so its take/hand-off buttons would just 403. Gate the
   // controls the same way the server does rather than render a button that fails.
+  //
+  // SAFETY: `myRole` is the project layout loader's own value (routes/project.tsx
+  // — `project_members.role`, which 0001_baseline CHECK-constrains to exactly the
+  // four project roles, or "admin" for the org-admin override, or null); the prop
+  // chain down to here is what widens it to `string`. `roleCan` denies any value
+  // outside the four regardless, so the widening can only ever under-grant.
   const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
   // E3: managing SOMEONE ELSE's owner seat is `release-any-ownership` — what
   // `setOwner`/`releaseOwner` actually check. `myRole === "admin"` was a copy of
   // one row of the matrix that would drift the moment the row moved.
+  //
+  // SAFETY: same loader-sourced `myRole` as `canOwn` above.
   const canManageOthersOwnership = roleCan(
     myRole as ProjectRole | null,
     "release-any-ownership",
@@ -257,6 +265,10 @@ function OwnerControl({
   // F10-13 — only members who can actually OWN a task (contributor or above).
   // The server rejects a hand-off to a viewer ("own-task"), so the picker must
   // not offer one.
+  //
+  // SAFETY: `members` is built in routes/project.task.tsx from the layout's
+  // `board.members`, whose `role` is the CHECK-constrained `project_members.role`
+  // — the same four values, widened to `string` by `TaskMemberView`.
   const candidates = canHandOff
     ? members.filter(
         (m) =>

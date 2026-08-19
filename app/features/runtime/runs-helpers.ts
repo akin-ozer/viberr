@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { z } from "zod";
 import type { PillKind } from "~/ui/pill";
 import type { ConsoleEntry } from "./log-noise";
 import {
@@ -16,23 +17,26 @@ import {
  * mock's `tick*42` is banned; tokens come from real usage on the RunView).
  */
 
-/** state → { kind, label } for pills/states (runs.md §2). */
-export const RUN_STATE: Record<
-  RunView["state"],
-  { kind: PillKind; label: string }
-> = {
+/** How one run is painted in the logs strip: the pill's colour and its word. */
+export interface RunStateBadge {
+  kind: PillKind;
+  label: string;
+}
+
+/** state → the badge for pills/states (runs.md §2). */
+export const RUN_STATE = {
   running: { kind: "agent", label: "running" },
   idle: { kind: "neutral", label: "idle" },
   done: { kind: "done", label: "finished" },
   error: { kind: "blocked", label: "continuity error" },
-};
+} satisfies Record<RunView["state"], RunStateBadge>;
 
 /**
  * The logs pill for a run: uses RUN_STATE, but a run interrupted by a human
  * shows a neutral "interrupted · by <actor>" footer/pill (ruling 11) — the
  * render state of an interrupted run is idle-shaped.
  */
-export function runStatePill(run: RunView): { kind: PillKind; label: string } {
+export function runStatePill(run: RunView): RunStateBadge {
   if (run.lifecycle === "interrupted") {
     return {
       kind: "neutral",
@@ -145,13 +149,16 @@ export function runInputRows(inputs: RunInputs): RunInputRow[] {
         : " — no repository attached to this project"),
   });
 
-  rows.push({
+  const anchor: RunInputRow = {
     tag: "anchor",
     text:
       inputs.anchor ??
       "No canonical task state was sent to this run — it saw the goal and its directive only.",
-    ...(inputs.anchor ? { pre: true } : {}),
-  });
+  };
+  // Only the canonical text is verbatim; the stand-in sentence is prose and
+  // must reflow like every other row.
+  if (inputs.anchor) anchor.pre = true;
+  rows.push(anchor);
 
   rows.push({
     tag: "persona",
@@ -296,9 +303,9 @@ export function groupThoughts<T extends { display: LogLine }>(
     out.push({ kind: "thought", lines: [entry.line] });
   }
   // Unfold the runs that never grew past one line.
-  return out.map((block) =>
+  return out.map((block): ConsoleBlock<T> =>
     block.kind === "thought" && block.lines.length === 1
-      ? ({ kind: "line", line: block.lines[0]! } as ConsoleBlock<T>)
+      ? { kind: "line", line: block.lines[0]! }
       : block,
   );
 }
@@ -404,6 +411,45 @@ export function diffLineKind(line: string): "add" | "del" | null {
   return null;
 }
 
+/* The outcome envelope as the CONSOLE needs to read it — decoded once, at the
+ * boundary where the provider's raw JSON arrives.
+ *
+ * Deliberately per-field tolerant: an agent that fills one field with junk must
+ * not cost the reader the fields that are fine, so every field catches to
+ * `null` instead of failing the whole record. `.min(1)` on the prose fields is
+ * the old truthiness guard — a stored `""` is nothing to show, not a blank
+ * line. `verdict`/`evidence` are read for PRESENCE only (they are the sibling
+ * keys that mark a payload as an envelope at all), so they accept any JSON
+ * value, which is exactly what a key check accepted before.
+ */
+
+/** Text worth rendering: trimmed, and not empty once trimmed. */
+const prose = z.string().trim().min(1);
+
+const outcomeQuestionSchema = z.object({
+  title: prose.nullable().catch(null).optional(),
+  body: prose.nullable().catch(null).optional(),
+  options: z
+    .array(
+      z
+        .object({ title: z.string() })
+        .transform((option) => option.title.trim())
+        .catch(""),
+    )
+    // A junk CHOICE drops out of the list; it never costs the reader the others.
+    .transform((titles) => titles.filter(Boolean))
+    .nullable()
+    .catch(null)
+    .optional(),
+});
+
+const outcomeEnvelopeSchema = z.object({
+  summary: prose.nullable().catch(null).optional(),
+  question: outcomeQuestionSchema.nullable().catch(null).optional(),
+  verdict: z.json().optional(),
+  evidence: z.json().optional(),
+});
+
 /**
  * N20-18 — a Codex run's FINAL message is the structured outcome envelope
  * (`AGENT_OUTCOME_JSON_SCHEMA`), so its `agent_message` line carries raw JSON —
@@ -426,43 +472,38 @@ export function agentMessageProse(line: LogLine): string | null {
   // Cheap gate before JSON.parse: the envelope is always a brace object, and a
   // prose report almost never starts with `{`.
   if (!text.startsWith("{")) return null;
-  let parsed: unknown;
+  let json: unknown;
   try {
-    parsed = JSON.parse(text);
+    json = JSON.parse(text);
   } catch {
     return null;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return null;
-  }
-  const o = parsed as Record<string, unknown>;
+  const parsed = outcomeEnvelopeSchema.safeParse(json);
+  // Only a JSON OBJECT can fail: every field carries its own `.catch`.
+  if (!parsed.success) return null;
+  const envelope = parsed.data;
   // Envelope shape: the schema declares exactly summary/verdict/question/
   // evidence. Require `summary` present AND a sibling envelope key, so an agent
-  // that legitimately reports a bare JSON object of its own is left alone.
+  // that legitimately reports a bare JSON object of its own is left alone. JSON
+  // carries no `undefined`, so an absent key is the only way a parsed field can
+  // be one.
   const isEnvelope =
-    "summary" in o && ("verdict" in o || "question" in o || "evidence" in o);
+    envelope.summary !== undefined &&
+    (envelope.verdict !== undefined ||
+      envelope.question !== undefined ||
+      envelope.evidence !== undefined);
   if (!isEnvelope) return null;
 
   const out: string[] = [];
-  if (typeof o.summary === "string" && o.summary.trim()) {
-    out.push(o.summary.trim());
-  }
-  const q = o.question;
-  if (typeof q === "object" && q !== null) {
-    const qq = q as Record<string, unknown>;
+  if (envelope.summary) out.push(envelope.summary);
+  const question = envelope.question;
+  if (question) {
     const parts: string[] = [];
-    if (typeof qq.title === "string" && qq.title.trim()) parts.push(qq.title.trim());
-    if (typeof qq.body === "string" && qq.body.trim()) parts.push(qq.body.trim());
-    const options = Array.isArray(qq.options)
-      ? qq.options
-          .map((opt) =>
-            typeof opt === "object" && opt !== null && typeof (opt as Record<string, unknown>).title === "string"
-              ? String((opt as Record<string, unknown>).title).trim()
-              : "",
-          )
-          .filter(Boolean)
-      : [];
-    if (options.length) parts.push(`Options: ${options.join(" · ")}`);
+    if (question.title) parts.push(question.title);
+    if (question.body) parts.push(question.body);
+    if (question.options?.length) {
+      parts.push(`Options: ${question.options.join(" · ")}`);
+    }
     if (parts.length) out.push(`Question: ${parts.join(" — ")}`);
   }
   // An envelope with nothing human-readable (every field null) is degenerate;

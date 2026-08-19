@@ -45,6 +45,6 @@ export async function action({ request }: Route.ActionArgs) {
   return { ok: true as const, changed: markNotificationsRead(db, ctx.user.id, ids) };
 }
 
-export function loader(_: Route.LoaderArgs) {
+export function loader() {
   throw redirect("/notifications");
 }

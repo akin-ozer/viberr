@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { resolveOAuthProvider } from "~/server/auth/oauth-providers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
@@ -25,6 +26,11 @@ import {
 
 export type MotionPreference = "full" | "reduce";
 export type TimelineDefault = "all" | "typed" | "comment";
+
+/** Decoders for the two scalar pref keys — a stored value outside the
+ *  vocabulary reads as null from `getPref`, i.e. as the default. */
+const motionPrefSchema = z.enum(["full", "reduce"]);
+const timelineDefaultSchema = z.enum(["all", "typed", "comment"]);
 
 export const MOTION_PREF_KEY = "motion";
 /** Phase-5 contract: routes/project.task.tsx reads this same key. */
@@ -70,6 +76,15 @@ export interface ProfileView {
   };
 }
 
+/** The membership columns {@link listUserMemberships} reads. `role` is the raw
+ *  stored value — a row whose role is outside the canonical four is dropped
+ *  rather than trusted. */
+type MembershipRow = {
+  slug: string;
+  role: string;
+  name: string;
+};
+
 /** Memberships ordered most-active project first (task count DESC, then
  * name) — the first entry drives the "visible to X members" toast and the
  * Policy/Settings links, so it should be the project the user actually
@@ -78,6 +93,10 @@ export function listUserMemberships(
   db: DatabaseSync,
   userId: string,
 ): ProfileMembership[] {
+  // SAFETY: the three names the row type lists are exactly the three the SELECT
+  // aliases, and 0001_baseline declares `project_members.project_slug`/`role`
+  // and `projects.name` NOT NULL. `task_count` orders the result and is not
+  // read, so it is deliberately absent from the row contract.
   const rows = db
     .prepare(
       `SELECT pm.project_slug AS slug, pm.role, p.name,
@@ -86,10 +105,10 @@ export function listUserMemberships(
        FROM project_members pm JOIN projects p ON p.slug = pm.project_slug
        WHERE pm.user_id = ? ORDER BY task_count DESC, p.name ASC`,
     )
-    .all(userId) as { slug: string; role: string; name: string }[];
+    .all(userId) as MembershipRow[];
   return rows
-    .filter((r): r is { slug: string; role: ProjectRole; name: string } =>
-      (ROLE_IDS as readonly string[]).includes(r.role),
+    .filter((r): r is MembershipRow & { role: ProjectRole } =>
+      ROLE_IDS.some((id) => id === r.role),
     )
     .map((r) => ({ slug: r.slug, name: r.name, role: r.role }));
 }
@@ -120,17 +139,14 @@ export function getMotionPref(
   db: DatabaseSync,
   userId: string,
 ): MotionPreference {
-  return getPref<string>(db, userId, MOTION_PREF_KEY) === "reduce"
-    ? "reduce"
-    : "full";
+  return getPref(db, userId, MOTION_PREF_KEY, motionPrefSchema) ?? "full";
 }
 
 export function getTimelineDefaultPref(
   db: DatabaseSync,
   userId: string,
 ): TimelineDefault {
-  const raw = getPref<string>(db, userId, TL_DEFAULT_PREF_KEY);
-  return raw === "typed" || raw === "comment" ? raw : "all";
+  return getPref(db, userId, TL_DEFAULT_PREF_KEY, timelineDefaultSchema) ?? "all";
 }
 
 export function getProfileView(

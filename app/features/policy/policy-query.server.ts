@@ -53,6 +53,10 @@ export function latestPolicyChange(
   projectSlug: string,
 ): { by: string; at: string } | null {
   const placeholders = POLICY_AUDIT_ACTIONS.map(() => "?").join(", ");
+  // SAFETY: 0001_baseline declares all three projected `audit_events` columns
+  // TEXT — `occurred_at` and `actor_label` NOT NULL, `actor_user_id` nullable
+  // (the system/operator actors record no user id). `LIMIT 1` yields at most
+  // one row, and none at all for a project with no policy audit yet.
   const row = db
     .prepare(
       `SELECT occurred_at, actor_user_id, actor_label FROM audit_events
@@ -63,6 +67,9 @@ export function latestPolicyChange(
     | { occurred_at: string; actor_user_id: string | null; actor_label: string }
     | undefined;
   if (!row) return null;
+  // SAFETY: `users.name` is TEXT NOT NULL and `id` is the primary key, so the
+  // lookup answers with exactly that one column or with no row at all — an
+  // actor whose account has since been deleted falls back to `actor_label`.
   const user = row.actor_user_id
     ? (db.prepare(`SELECT name FROM users WHERE id = ?`).get(row.actor_user_id) as
         | { name: string }

@@ -18,50 +18,48 @@ import { installFakeRuntime } from "../../../test-support/fake-runtime";
  * autonomous task never strands `waiting:human` after the review PR opens;
  * SUPERVISED delivery deliberately does not (the human is the driver).
  *
- * The re-trigger reaches `runOperator` via `autoInvokeOperator`'s dynamic import,
- * so we mock the downstream operator-run module (mocking task-actions itself would
- * not intercept the same-module internal call). push-workspace + pr-open are mocked
- * to drive `performDelivery` straight to the `result.status === "ok"` branch with a
- * NEWLY-opened PR, without git or GitHub.
+ * The re-trigger reaches `runOperator` via `autoInvokeOperator`, which reads
+ * the delivery ctx's `deps` seam before its dynamic import — so the stub is
+ * injected there rather than by mocking the downstream module. push-workspace +
+ * pr-open ride the same seam, driving `performDelivery` straight to the
+ * `result.status === "ok"` branch with a NEWLY-opened PR, without git or
+ * GitHub. Every double is typed against the REAL export, and the real modules
+ * stay loaded for everything the seam doesn't name.
  */
-
-// NO `importOriginal()` here. Spreading the real module made its evaluation
-// race the mock registry: `autoInvokeOperator` reaches `runOperator` through a
-// DYNAMIC import, and on some module-graph orders that import resolved the REAL
-// function while the test file held the mocked one — so the assertion measured
-// which module instance won a cache, not whether delivery re-queued the
-// operator. Declaring every export the code under test needs keeps one instance.
-vi.mock("~/server/runtimes/operator-run.server", () => ({
-  runOperator: vi.fn(async () => ({
-    runId: null,
-    queued: true,
-    backend: "claude" as const,
-    autonomy: "full" as const,
-  })),
-  resetOperatorLeasesForTests: () => {},
-}));
-
-vi.mock("~/server/github/push-workspace.server", () => ({
-  pushWorkspaceBranch: vi.fn(async () => ({ status: "pushed", branch: "vib-1" })),
-}));
-
-const openTaskPrMock = vi.fn(async () => ({
-  status: "ok" as const,
-  prNumber: 7,
-  created: true,
-  url: "http://x/pull/7",
-}));
-vi.mock("~/server/github/pr-open.server", () => ({
-  openTaskPr: (...args: unknown[]) => openTaskPrMock(...(args as [])),
-}));
-
-import { runOperator } from "~/server/runtimes/operator-run.server";
+import type { runOperator } from "~/server/runtimes/operator-run.server";
+import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { openTaskPr } from "~/server/github/pr-open.server";
+import type { TaskPacket } from "~/schemas/task-file.schema";
 import {
   performDelivery,
   OPERATOR_TASK_ACTOR,
 } from "./task-actions.server";
 
-const runOp = vi.mocked(runOperator);
+const runOp = vi.fn<typeof runOperator>(async () => ({
+  runId: null,
+  queued: true,
+  backend: "claude" as const,
+  autonomy: "full" as const,
+}));
+
+const pushMock = vi.fn<typeof pushWorkspaceBranch>(async () => ({
+  status: "pushed",
+  branch: "vib-1",
+  commits: 1,
+}));
+
+const openTaskPrMock = vi.fn<typeof openTaskPr>(async () => ({
+  status: "ok",
+  prNumber: 7,
+  created: true,
+  url: "http://x/pull/7",
+}));
+
+const DEPS = {
+  pushWorkspaceBranch: pushMock,
+  openTaskPr: openTaskPrMock,
+  runOperator: runOp,
+};
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -85,7 +83,7 @@ function deployOperator(autonomy: "full" | "supervised"): void {
           autonomy,
         },
       },
-    ] as never,
+    ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
@@ -125,8 +123,8 @@ async function flush(): Promise<void> {
 /**
  * Wait for a fire-and-forget effect to actually land.
  *
- * A fixed `flush()` cannot express this: `autoInvokeOperator` awaits TWO
- * dynamic imports before it ever reaches `runOperator`, and on a cold module
+ * A fixed `flush()` cannot express this: `autoInvokeOperator` awaits a
+ * dynamic import before it ever reaches `runOperator`, and on a cold module
  * graph those resolve well past a 5ms timer — so the fixed wait passed or
  * failed depending on what the rest of the suite had already imported. That is
  * a test that reports module-load timing, not behavior. Poll the condition
@@ -144,15 +142,11 @@ async function waitFor(
   }
 }
 
-beforeEach(async () => {
+beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   resetSseBrokerForTests();
   installFakeRuntime();
-  const { resetOperatorLeasesForTests } = await import(
-    "~/server/runtimes/operator-run.server"
-  );
-  resetOperatorLeasesForTests();
   runOp.mockClear();
   openTaskPrMock.mockClear();
   openTaskPrMock.mockResolvedValue({
@@ -174,7 +168,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
     seedTask();
     const outcome = await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot },
+      { dataRoot: store.dataRoot, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,
@@ -194,7 +188,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
     seedTask();
     const outcome = await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot, operatorAuthorized: true },
+      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,
@@ -226,7 +220,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
     seedTask();
     const outcome = await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot },
+      { dataRoot: store.dataRoot, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,
@@ -242,13 +236,13 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
       repo: "akin-ozer/viberr",
-      agents: [] as never,
+      agents: [],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     seedTask();
     const outcome = await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot },
+      { dataRoot: store.dataRoot, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,
@@ -265,7 +259,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
  * (`hold_runtime_debug` asked for no run). Reuses the same `runOperator` mock.
  */
 describe("R20-1 — a settled recovery decision re-queues the operator", () => {
-  const FAILURE_PACKET = {
+  const FAILURE_PACKET: TaskPacket = {
     type: "blocked",
     kind: "Blocked decision",
     from: "operator",
@@ -276,7 +270,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
       { kind: "block_on_policy", t: "Unblock and re-run", d: "", rec: true },
       { kind: "hold_runtime_debug", t: "Hold", d: "", rec: false },
     ],
-  } as never;
+  };
 
   it("block_on_policy re-queues runOperator with trigger 'packet-resolved'", async () => {
     deployOperator("supervised");
@@ -286,7 +280,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
       { userId: store.users.arda.id, label: store.users.arda.email },
-      { dataRoot: store.dataRoot },
+      { dataRoot: store.dataRoot, deps: DEPS },
     );
     await waitFor(() => runOp.mock.calls.length > 0, "the re-queued operator run");
     expect(runOp).toHaveBeenCalledTimes(1);
@@ -306,7 +300,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
       { userId: store.users.arda.id, label: store.users.arda.email },
-      { dataRoot: store.dataRoot },
+      { dataRoot: store.dataRoot, deps: DEPS },
     );
     await flush();
     expect(runOp).not.toHaveBeenCalled();
@@ -335,7 +329,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
     });
     await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot, operatorAuthorized: true },
+      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,
@@ -364,7 +358,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
     );
     await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot, operatorAuthorized: true },
+      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,
@@ -386,7 +380,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
     seedTask();
     await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot },
+      { dataRoot: store.dataRoot, deps: DEPS },
       store.slug,
       "VIB-1",
       { userId: store.users.arda.id, label: store.users.arda.email },
@@ -400,7 +394,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
     seedTask({ stage: "review" });
     await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot, operatorAuthorized: true },
+      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,
@@ -420,7 +414,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
     seedTask();
     await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot, operatorAuthorized: true },
+      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,

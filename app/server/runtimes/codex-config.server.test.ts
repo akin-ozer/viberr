@@ -32,7 +32,7 @@ afterEach(() => {
 
 describe("resolveCodexHome / resolveCodexAuthSource", () => {
   it("runs get an app-owned home under the data root, never the login dir", () => {
-    const env = { VIBERR_DATA_ROOT: "/data" } as NodeJS.ProcessEnv;
+    const env: NodeJS.ProcessEnv = { VIBERR_DATA_ROOT: "/data" };
     expect(resolveCodexHome(env)).toBe("/data/runtimes/codex-home");
     // No CODEX_HOME → the login lives in the conventional personal dir, which
     // is exactly the dir a run must NOT execute in.
@@ -43,19 +43,19 @@ describe("resolveCodexHome / resolveCodexAuthSource", () => {
   it("the container's existing CODEX_HOME recipe still resolves to one dir", () => {
     // Dockerfile: CODEX_HOME=/data/runtimes/codex-home, VIBERR_DATA_ROOT=/data.
     // The documented "copy auth.json here" recipe must keep working unchanged.
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       VIBERR_DATA_ROOT: "/data",
       CODEX_HOME: "/data/runtimes/codex-home",
-    } as NodeJS.ProcessEnv;
+    };
     expect(resolveCodexHome(env)).toBe(resolveCodexAuthSource(env));
     expect(codexSessionRoots(env)).toEqual(["/data/runtimes/codex-home"]);
   });
 
   it("searches the login dir too, so pre-split transcripts stay exportable", () => {
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       VIBERR_DATA_ROOT: "/data",
       CODEX_HOME: "/home/dev/.codex",
-    } as NodeJS.ProcessEnv;
+    };
     expect(codexSessionRoots(env)).toEqual([
       "/data/runtimes/codex-home",
       "/home/dev/.codex",
@@ -73,11 +73,11 @@ describe("prepareCodexHome", () => {
     mkdirSync(path.join(login, "skills", "github-yeet"), { recursive: true });
     writeFileSync(path.join(login, "config.toml"), '[mcp_servers.host_only]\ncommand = "x"\n');
 
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       VIBERR_DATA_ROOT: path.join(root, "data"),
       CODEX_HOME: login,
       VIBERR_CODEX_USE_CLI_AUTH: "1",
-    } as NodeJS.ProcessEnv;
+    };
     const result = prepareCodexHome(env);
 
     expect(result.home).toBe(path.join(root, "data", "runtimes", "codex-home"));
@@ -98,11 +98,11 @@ describe("prepareCodexHome", () => {
     const login = path.join(root, "login-codex");
     mkdirSync(login, { recursive: true });
     writeFileSync(path.join(login, "auth.json"), "{}");
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       VIBERR_DATA_ROOT: path.join(root, "data"),
       CODEX_HOME: login,
       VIBERR_CODEX_USE_CLI_AUTH: "1",
-    } as NodeJS.ProcessEnv;
+    };
 
     expect(prepareCodexHome(env).authMirrored).toBe(true);
     expect(prepareCodexHome(env).authMirrored).toBe(false);
@@ -121,11 +121,11 @@ describe("prepareCodexHome", () => {
     const old = new Date(Date.now() - 60_000);
     utimesSync(path.join(home, "auth.json"), old, old);
 
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       VIBERR_DATA_ROOT: path.join(root, "data"),
       CODEX_HOME: login,
       VIBERR_CODEX_USE_CLI_AUTH: "1",
-    } as NodeJS.ProcessEnv;
+    };
     expect(prepareCodexHome(env).authMirrored).toBe(true);
     expect(readFileSync(path.join(home, "auth.json"), "utf8")).toBe(
       '{"tokens":"fresh"}',
@@ -134,11 +134,11 @@ describe("prepareCodexHome", () => {
 
   it("no login to mirror is not an error — the run home still exists", () => {
     const root = tmp();
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       VIBERR_DATA_ROOT: path.join(root, "data"),
       CODEX_HOME: path.join(root, "nope"),
       VIBERR_CODEX_USE_CLI_AUTH: "1",
-    } as NodeJS.ProcessEnv;
+    };
     const result = prepareCodexHome(env);
     expect(result.authMirrored).toBe(false);
     expect(lstatSync(result.home).isDirectory()).toBe(true);
@@ -153,10 +153,10 @@ describe("prepareCodexHome", () => {
     const login = path.join(root, "login-codex");
     mkdirSync(login, { recursive: true });
     writeFileSync(path.join(login, "auth.json"), "{}");
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       VIBERR_DATA_ROOT: path.join(root, "data"),
       CODEX_HOME: login,
-    } as NodeJS.ProcessEnv;
+    };
     const result = prepareCodexHome(env);
     expect(result.authMirrored).toBe(false);
     expect(() => lstatSync(result.home)).toThrow();

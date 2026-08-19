@@ -314,8 +314,7 @@ function StoreTree({
         placeholder="folder name"
         aria-label="New folder name"
         onKeyDown={(e) => {
-          if (e.key === "Enter")
-            onCreateFolder(path, (e.target as HTMLInputElement).value);
+          if (e.key === "Enter") onCreateFolder(path, e.currentTarget.value);
           if (e.key === "Escape") {
             // preventDefault aborts the dialog's native close request, so
             // Escape here dismisses only this row — not the whole modal.
@@ -342,7 +341,10 @@ function StoreTree({
       onDragOver={(e) => overDir(e, "")}
       onDrop={(e) => dropInto(e, [])}
       onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+        // Leaving for anything that is not a node inside the tree (including
+        // leaving the window, where `relatedTarget` is null) clears the target.
+        const entered = e.relatedTarget;
+        if (!(entered instanceof Node) || !e.currentTarget.contains(entered)) {
           setDropTgt(null);
         }
       }}
@@ -535,6 +537,25 @@ function DeleteConfirm({
 }
 
 /**
+ * The org-settings action's reply, as this browser reads it — mirrors
+ * `SettingsOk` and the `{ ok: false, error }` failure in routes/org.settings.tsx.
+ * Every field beyond `ok` is per-intent and is OMITTED unless that intent
+ * produced one, so each handler keys on the key being there.
+ */
+interface StoreActionReply {
+  ok?: boolean;
+  toast?: string;
+  /** `store-upload`: a second toast when a SKILL.md body was captured. */
+  captureToast?: string;
+  /** `store-read-doc`: the document body and whether the read was cut short. */
+  text?: string;
+  truncated?: boolean;
+  /** `store-import-github`: the store-relative folder the snapshot landed in. */
+  folder?: string;
+  error?: string;
+}
+
+/**
  * All store mutations behind the modal: the two fetcher POSTs to the
  * org-settings action (file ops + GitHub import), the file-ops toast
  * effect, and the hidden-input upload plumbing. The GitHub-import
@@ -548,8 +569,8 @@ function useStoreOps(
 ) {
   const push = useToast();
   const csrf = useCsrfToken();
-  const opsFetcher = useFetcher<Record<string, unknown>>();
-  const ghFetcher = useFetcher<Record<string, unknown>>();
+  const opsFetcher = useFetcher<StoreActionReply>();
+  const ghFetcher = useFetcher<StoreActionReply>();
   const [gh, dispatchGh] = useReducer(ghImportReducer, ghImportInitial);
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
@@ -566,12 +587,7 @@ function useStoreOps(
     if (opsFetcher.state !== "idle" || !opsFetcher.data) return;
     if (handledOps.current === opsFetcher.data) return;
     handledOps.current = opsFetcher.data;
-    const d = opsFetcher.data as {
-      ok?: boolean;
-      toast?: string;
-      captureToast?: string;
-      error?: string;
-    };
+    const d = opsFetcher.data;
     setUploading(0);
     if (d.ok) {
       if (d.toast) push(d.toast);
@@ -740,8 +756,8 @@ function useDocEditor(
   onSaved: (path: string) => void,
 ) {
   const csrf = useCsrfToken();
-  const readFetcher = useFetcher<Record<string, unknown>>();
-  const saveFetcher = useFetcher<Record<string, unknown>>();
+  const readFetcher = useFetcher<StoreActionReply>();
+  const saveFetcher = useFetcher<StoreActionReply>();
   const [doc, setDoc] = useState<DocDraft | null>(null);
   /** A save the user has confirmed will replace an existing file (UI-59). */
   const [confirmReplace, setConfirmReplace] = useState(false);
@@ -754,12 +770,7 @@ function useDocEditor(
     if (readFetcher.state !== "idle" || !readFetcher.data) return;
     if (handledRead.current === readFetcher.data) return;
     handledRead.current = readFetcher.data;
-    const d = readFetcher.data as {
-      ok?: boolean;
-      text?: string;
-      truncated?: boolean;
-      error?: string;
-    };
+    const d = readFetcher.data;
     setDoc((prev) =>
       prev
         ? d.ok
@@ -774,7 +785,7 @@ function useDocEditor(
     if (saveFetcher.state !== "idle" || !saveFetcher.data) return;
     if (handledSave.current === saveFetcher.data) return;
     handledSave.current = saveFetcher.data;
-    const d = saveFetcher.data as { ok?: boolean; toast?: string; error?: string };
+    const d = saveFetcher.data;
     if (d.ok) {
       setConfirmReplace(false);
       setDoc(null);
@@ -807,19 +818,21 @@ function useDocEditor(
 
   const save = (overwrite: boolean) => {
     if (!doc || saving) return;
-    saveFetcher.submit(
-      {
-        _csrf: csrf,
-        intent: "store-write-doc",
-        kind: resource.kind,
-        id: resource.id,
-        path: JSON.stringify(doc.dir),
-        name: doc.name.trim(),
-        body: doc.body,
-        ...(overwrite ? { overwrite: "1" } : {}),
-      },
-      { method: "post", action },
-    );
+    const fields = {
+      _csrf: csrf,
+      intent: "store-write-doc",
+      kind: resource.kind,
+      id: resource.id,
+      path: JSON.stringify(doc.dir),
+      name: doc.name.trim(),
+      body: doc.body,
+    };
+    // Only a confirmed replace carries the field: the action reads it as
+    // `overwrite === "1"`, so it is sent or absent, never blank.
+    saveFetcher.submit(overwrite ? { ...fields, overwrite: "1" } : fields, {
+      method: "post",
+      action,
+    });
   };
 
   return {
@@ -943,12 +956,7 @@ export function StoreBrowser({
     if (ghFetcher.state !== "idle" || !ghFetcher.data) return;
     if (handledGh.current === ghFetcher.data) return;
     handledGh.current = ghFetcher.data;
-    const d = ghFetcher.data as {
-      ok?: boolean;
-      toast?: string;
-      folder?: string;
-      error?: string;
-    };
+    const d = ghFetcher.data;
     if (d.ok) {
       if (d.toast) push(d.toast);
       if (d.folder) {

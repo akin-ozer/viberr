@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { z } from "zod";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
 import { Icon } from "~/ui/icon";
@@ -133,6 +134,15 @@ function isSessionMissingLine(line: LogLine): boolean {
 }
 
 /**
+ * The one field this panel reads out of a marker line's wire envelope. Every
+ * other key an adapter writes is irrelevant here, and a blank id is the same as
+ * none — the panel must not print `session <empty>`.
+ */
+const deadSessionEnvelope = z.object({
+  session_id: z.string().trim().min(1),
+});
+
+/**
  * The dead session id from the marker line's STORED wire envelope. Structured,
  * not scraped: `recordSessionMissing` writes `{type:"error", source:"viberr",
  * reason:"session_missing", session_id, message}` and `raw[]` is index-aligned
@@ -143,9 +153,8 @@ function deadSessionId(run: RunView, index: number): string | null {
   const raw = run.raw[index];
   if (!raw) return null;
   try {
-    const envelope = JSON.parse(raw) as Record<string, unknown>;
-    const sid = envelope["session_id"];
-    return typeof sid === "string" && sid.trim() !== "" ? sid.trim() : null;
+    const envelope = deadSessionEnvelope.safeParse(JSON.parse(raw));
+    return envelope.success ? envelope.data.session_id : null;
   } catch {
     return null;
   }
@@ -187,8 +196,14 @@ export function deriveContinuityLoss(input: {
   return { occurredAt: event?.occurredAt ?? null, agents };
 }
 
+/** The panel's headline state, as the header pill renders it. */
+interface ContinuityStatus {
+  kind: PillKind;
+  label: string;
+}
+
 /** Pill text carries the state; colour never carries it alone (spec §state semantics). */
-function statusPill(agents: ContinuityAgent[]): { kind: PillKind; label: string } {
+function statusPill(agents: ContinuityAgent[]): ContinuityStatus {
   if (agents.length === 0) return { kind: "risk", label: "context lost" };
   if (agents.some((a) => a.progress === "running"))
     return { kind: "risk", label: "re-anchored · running" };

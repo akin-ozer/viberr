@@ -44,11 +44,14 @@ interface RailData {
 async function railCounts(): Promise<RailData> {
   const { loader } = await import("~/routes/project");
   const { cookie } = await app.cookieFor(ardaId);
-  return (await loader({
+  // SAFETY: the loader reads only `request` and `params.slug`; the rest of the
+  // generated `Route.LoaderArgs` (the router context provider, its matches) is
+  // untouched on every path this file exercises.
+  return loader({
     request: app.request("/projects/viberr-core/board", { cookie }),
     params: { slug: "viberr-core" },
     context: {},
-  } as never)) as RailData;
+  } as never);
 }
 
 /** Every task the loader shipped, archived ones included (the raw list the

@@ -35,6 +35,11 @@ export const RECONCILE_TASK_AUDIT_ACTION = "github.reconcile.task";
  *  instead of trusting this one alone. */
 export const RECONCILE_PROJECT_AUDIT_ACTION = "github.reconcile.project";
 
+/** The single aggregate column both reconcile-check reads select. */
+interface ReconcileCheckRow {
+  latest: string | null;
+}
+
 /**
  * ISO of the newest COMPLETED reconcile pass for one task; null when none is on
  * record (never checked, or every pass is older than the retention window).
@@ -48,13 +53,16 @@ export function latestTaskReconcileCheckAt(
   projectSlug: string,
   taskKey: string,
 ): string | null {
+  // SAFETY: a bare `MAX(...) AS latest` aggregate is a one-row, one-column
+  // result — SQLite returns exactly one row whose `latest` is the newest
+  // `occurred_at` (a TEXT column) or NULL when no row matched.
   const row = db
     .prepare(
       `SELECT MAX(occurred_at) AS latest FROM audit_events
        WHERE action = ? AND project_slug = ? AND task_key = ?`,
     )
     .get(RECONCILE_TASK_AUDIT_ACTION, projectSlug, taskKey) as
-    | { latest: string | null }
+    | ReconcileCheckRow
     | undefined;
   return row?.latest ?? null;
 }
@@ -73,6 +81,7 @@ export function latestProjectReconcileCheckAt(
   db: DatabaseSync,
   projectSlug: string,
 ): string | null {
+  // SAFETY: same one-row aggregate as `latestTaskReconcileCheckAt` above.
   const row = db
     .prepare(
       `SELECT MAX(occurred_at) AS latest FROM audit_events
@@ -82,6 +91,6 @@ export function latestProjectReconcileCheckAt(
       projectSlug,
       RECONCILE_TASK_AUDIT_ACTION,
       RECONCILE_PROJECT_AUDIT_ACTION,
-    ) as { latest: string | null } | undefined;
+    ) as ReconcileCheckRow | undefined;
   return row?.latest ?? null;
 }

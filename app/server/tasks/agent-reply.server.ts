@@ -542,6 +542,25 @@ export type RunFailureKind =
   | "session_missing"
   | "unknown";
 
+/** The classes an adapter can tag on its own `err` line (`error·quota`), and
+ *  the single list the tag is matched against. */
+const TAGGED_FAILURE_KINDS = [
+  "quota",
+  "auth",
+  "unavailable",
+  "max_turns",
+  "idle_timeout",
+  "session_missing",
+  "unknown",
+] as const satisfies readonly RunFailureKind[];
+
+export interface RunFailure {
+  kind: RunFailureKind;
+  text: string;
+  /** R20-3: the provider's own redacted sentence, when the adapter sent one. */
+  providerText?: string;
+}
+
 /**
  * A human-readable failure reason for a run that ended in `error` (F8): the last
  * error line the backend emitted (e.g. a Codex "usage limit" message, an auth
@@ -553,7 +572,7 @@ export type RunFailureKind =
 export function runFailureReason(
   db: DatabaseSync,
   runId: string,
-): { kind: RunFailureKind; text: string; providerText?: string } | null {
+): RunFailure | null {
   const lines = listRunLines(db, runId).map((l) => l.display);
   let last: LogLine | null = null;
   for (const l of lines) {
@@ -580,16 +599,9 @@ export function runFailureReason(
   // "authenticate"), so re-classifying the prose would drop codex quota/auth
   // failures to `unknown`. Backends that emit no class (plain err lines) still
   // fall through to the prose regexes below.
-  const tagged =
-    /·(quota|auth|unavailable|max_turns|idle_timeout|session_missing|unknown)$/.exec(
-      last.tag ?? "",
-    );
-  if (tagged)
-    return {
-      kind: tagged[1] as RunFailureKind,
-      text,
-      ...(providerText ? { providerText } : {}),
-    };
+  const tag = last.tag ?? "";
+  const taggedKind = TAGGED_FAILURE_KINDS.find((k) => tag.endsWith(`·${k}`));
+  if (taggedKind) return withProviderText({ kind: taggedKind, text }, providerText);
   const kind: RunFailureKind =
     // P13-D-2 first: a vanished session is NOT an auth problem, and "no
     // conversation found" would otherwise fall through to `unknown` and be
@@ -603,7 +615,14 @@ export function runFailureReason(
           : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
             ? "auth"
             : "unknown";
-  return { kind, text, ...(providerText ? { providerText } : {}) };
+  return withProviderText({ kind, text }, providerText);
+}
+
+/** `providerText` is absent unless the adapter actually sent one — an empty
+ *  string would render as an empty "The provider reported:" block. */
+function withProviderText(failure: RunFailure, providerText: string): RunFailure {
+  if (providerText) failure.providerText = providerText;
+  return failure;
 }
 
 // -------------------------------------------------------- resume workdir

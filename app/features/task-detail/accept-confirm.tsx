@@ -92,12 +92,20 @@ function headingFor(mode: AcceptCeremonyMode, terminalName: string): string {
   }
 }
 
-/** Row key for the clicked affordance, per indirect path. */
-const SUBJECT_KEY: Partial<Record<AcceptCeremonyMode, string>> = {
-  "apply-recommendation": "Applying",
-  packet: "Decision",
-  "stage-move": "Moving",
-};
+/** Row key for the clicked affordance — only the indirect paths have one, so
+ *  the direct modes answer with nothing and the row does not render. */
+function subjectKeyFor(mode: AcceptCeremonyMode): string | undefined {
+  switch (mode) {
+    case "apply-recommendation":
+      return "Applying";
+    case "packet":
+      return "Decision";
+    case "stage-move":
+      return "Moving";
+    default:
+      return undefined;
+  }
+}
 
 export function AcceptConfirm({
   task,
@@ -158,7 +166,7 @@ export function AcceptConfirm({
   const mergeOnly = mode === "complete-merge";
   const terminalName =
     task.stages.length > 0 ? task.stages[task.stages.length - 1]!.name : "Done";
-  const subjectKey = SUBJECT_KEY[mode];
+  const subjectKey = subjectKeyFor(mode);
   // R19-5: force-accept MAY skip the remaining stages AND the review gate — the
   // owner ruled the skip legal and the SILENCE about it the defect. So enumerate
   // exactly what is being jumped: every stage between where the task stands and

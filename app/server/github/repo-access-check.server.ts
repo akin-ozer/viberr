@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import {
   getProjectGithubContext,
   type GithubContextOptions,
@@ -27,11 +28,15 @@ export type RepoAccessResult =
   | { status: "forbidden"; repo: string; message: string }
   | { status: "network_unavailable"; repo: string };
 
-interface GhRepo {
-  full_name: string;
-  private: boolean;
-  default_branch: string;
-}
+/** `GET /repos/{r}` — every field is read with a fallback, so each parses to
+ *  `undefined` on drift and the reads degrade exactly as they always did. */
+const ghRepoSchema = z
+  .object({
+    full_name: z.string().optional().catch(undefined),
+    private: z.boolean().optional().catch(undefined),
+    default_branch: z.string().optional().catch(undefined),
+  })
+  .catch({});
 
 export async function checkRepoAccess(
   db: DatabaseSync,
@@ -41,7 +46,7 @@ export async function checkRepoAccess(
   const ctx = getProjectGithubContext(db, projectSlug, options);
   if (ctx.status !== "ok") return ctx;
 
-  const result = await ctx.client.request<GhRepo>("GET", `/repos/${ctx.repo}`);
+  const result = await ctx.client.request("GET", `/repos/${ctx.repo}`, ghRepoSchema);
   if (result.ok) {
     return {
       status: "connected",

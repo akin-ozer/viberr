@@ -76,7 +76,8 @@ describe("connectionPill (spec §7.9c: never claim connected when degraded)", ()
 });
 
 describe("checksPill / reviewPill (P13-D-28)", () => {
-  const checks = (o: Partial<{ total: number; passing: number; failing: number; pending: number }>) => {
+  type ChecksRollup = Parameters<typeof checksPill>[0];
+  const checks = (o: Partial<Omit<ChecksRollup, "state">>): ChecksRollup => {
     const total = o.total ?? 3;
     const failing = o.failing ?? 0;
     const pending = o.pending ?? 0;
@@ -85,10 +86,7 @@ describe("checksPill / reviewPill (P13-D-28)", () => {
       failing,
       pending,
       passing: o.passing ?? total - failing - pending,
-      state: (failing > 0 ? "failing" : pending > 0 ? "pending" : "passing") as
-        | "passing"
-        | "failing"
-        | "pending",
+      state: failing > 0 ? "failing" : pending > 0 ? "pending" : "passing",
     };
   };
 

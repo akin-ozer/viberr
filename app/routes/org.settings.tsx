@@ -1,4 +1,5 @@
 import { data } from "react-router";
+import { z } from "zod";
 import type { Route } from "./+types/org.settings";
 import { OrgSettingsPage } from "~/features/org-settings/org-settings-page";
 import { assertCsrf } from "~/server/auth/csrf.server";
@@ -76,7 +77,7 @@ import {
  * multipart with per-file relative paths (structure-preserving).
  */
 
-export function meta(_: Route.MetaArgs) {
+export function meta() {
   return [{ title: "Instance settings" }];
 }
 
@@ -92,10 +93,36 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
-type Ok = { ok: true; toast?: string } & Record<string, unknown>;
+/**
+ * The success reply every intent in this action answers with. `toast` is the
+ * server-computed copy the default client handler pushes; every other field is
+ * a per-intent payload a specific panel reads. All of them are OMITTED unless
+ * that intent produced one — the panels key their follow-up UI on the key being
+ * there, not on its value.
+ */
+type SettingsOk = {
+  ok: true;
+  toast?: string;
+  /** `user-invite` / `user-reset-password`: the one-time local password, shown
+   *  once, with the account it belongs to. */
+  tempPassword?: string;
+  email?: string;
+  /** `store-upload`: a second toast when a SKILL.md body was captured. */
+  captureToast?: string;
+  /** `store-read-doc`: the document body and whether the read was cut short. */
+  text?: string;
+  truncated?: boolean;
+  /** `store-import-github`: the store-relative folder the snapshot landed in. */
+  folder?: string;
+};
 
-function ok(toast?: string, extra: Record<string, unknown> = {}): Ok {
-  return { ok: true, ...(toast ? { toast } : {}), ...extra };
+/** The per-intent half of `SettingsOk` — what a case hands `ok()` beyond copy. */
+type SettingsOkPayload = Omit<SettingsOk, "ok" | "toast">;
+
+function ok(toast?: string, extra: SettingsOkPayload = {}): SettingsOk {
+  const reply: SettingsOk = { ok: true };
+  if (toast) reply.toast = toast;
+  return { ...reply, ...extra };
 }
 
 function fail(error: string, status = 400) {
@@ -114,16 +141,21 @@ function providerLabel(provider: OAuthProvider): string {
   return provider === "github" ? "GitHub" : "Google";
 }
 
+/** Store paths travel as a JSON array of segments. Anything that is not a list
+ *  of strings names no path, and a junk MEMBER is dropped rather than voiding
+ *  the whole path the admin actually browsed to. */
+const storePath = z
+  .array(z.string().nullable().catch(null))
+  .transform((segments) => segments.filter((seg) => seg !== null))
+  .catch([]);
+
 function parseJsonStringArray(raw: string): string[] {
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) {
-      return parsed.filter((x): x is string => typeof x === "string");
-    }
+    return storePath.parse(JSON.parse(raw));
   } catch {
-    // fall through
+    // Not JSON at all — the field named no path.
+    return [];
   }
-  return [];
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -464,14 +496,11 @@ export async function action({ request }: Route.ActionArgs) {
             ? `Folder “${result.topLevelDirs.join(", ")}” uploaded as-is — ${result.added} file${result.added === 1 ? "" : "s"}`
             : `${result.added} file${result.added === 1 ? "" : "s"} added to ${atPath}`) +
           skippedNote;
-        return ok(toast, {
-          ...(result.capturedSkillMd
-            ? {
-                captureToast:
-                  "SKILL.md content captured — fully editable in the skill editor",
-              }
-            : {}),
-        });
+        const uploaded: SettingsOkPayload = {};
+        if (result.capturedSkillMd)
+          uploaded.captureToast =
+            "SKILL.md content captured — fully editable in the skill editor";
+        return ok(toast, uploaded);
       }
       case "store-write-doc": {
         const target = resolveStoreTarget(db, field("kind"), field("id"));

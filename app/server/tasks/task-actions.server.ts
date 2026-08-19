@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import {
   acceptanceBlockedReason,
   archivedTaskBlockedReason,
@@ -47,6 +48,7 @@ import {
 import {
   OPERATOR_AUDIT_ACTOR,
   recordAudit,
+  type AuditEventInput,
 } from "~/server/audit/audit-recorder.server";
 import {
   agentRoleDisplay,
@@ -73,6 +75,7 @@ import {
   loadProjectContext,
   OPERATOR_NOTIFY_FROM,
   type TaskActor,
+  type TaskWatcherNotice,
   type TaskMutationContext,
   type ProjectContext,
 } from "./task-mutation.server";
@@ -92,6 +95,20 @@ import { getTaskSummary } from "~/server/projections/task-query.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { agentNamesByProfile, getRun } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import type {
+  runOperator,
+  RunOperatorInput,
+} from "~/server/runtimes/operator-run.server";
+import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type {
+  openTaskPr,
+  OpenTaskPrContext,
+} from "~/server/github/pr-open.server";
+import type {
+  mergeTaskPr,
+  GithubActionContext,
+} from "~/server/github/github-reconciler.server";
+import type { GithubContextOptions } from "~/server/github/github-context.server";
 import { PROVIDER_TEXT_CHARS } from "~/server/secrets/git-output-redact.server";
 import {
   noteModelAvailabilityFromFailure,
@@ -177,6 +194,28 @@ export { OPERATOR_AUDIT_ACTOR };
 export const OPERATOR_TASK_ACTOR: TaskActor = {
   userId: "operator",
   label: "operator",
+};
+
+/**
+ * Injectable impls for the delivery/acceptance collaborators this module
+ * reaches through dynamic imports — the ctx-borne analogue of the `fetchImpl`
+ * hook the github contexts already take (tests only). An absent field resolves
+ * to the real module at the call site, exactly as before.
+ */
+export interface TaskActionDeps {
+  pushWorkspaceBranch?: typeof pushWorkspaceBranch;
+  openTaskPr?: typeof openTaskPr;
+  mergeTaskPr?: typeof mergeTaskPr;
+  runOperator?: typeof runOperator;
+}
+
+/** The mutation ctx plus the test seams: the impls above, and the mock
+ *  transport threaded into every GitHub read this module (or a helper it
+ *  calls, e.g. `probeNothingToDeliver`) performs. Production callers pass a
+ *  plain {@link TaskMutationContext}; both fields default to the real thing. */
+export type TaskActionContext = TaskMutationContext & {
+  deps?: TaskActionDeps;
+  fetchImpl?: typeof fetch;
 };
 
 // ---------------------------------------------------------------- helpers
@@ -292,11 +331,25 @@ function requireDecisionAuthority(
   requireAction(db, project, actor, "resolve-packet", what);
 }
 
+/** `.get()` hands back an undeclared row, so each reader decodes the one column
+ *  it selected and falls back when the user (or the column) is not there. */
+const userNameRowSchema = z.object({ name: z.string() });
+const avatarToneRowSchema = z.object({ avatar_tone: z.string() });
+
 function userName(db: DatabaseSync, userId: string): string {
-  const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
-    | { name: string }
-    | undefined;
-  return row?.name ?? userId;
+  const row = userNameRowSchema.safeParse(
+    db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId),
+  );
+  return row.success ? row.data.name : userId;
+}
+
+/** The user's avatar tint for a notification's `from` render; "" when the user
+ *  is gone or never picked one. */
+function avatarTone(db: DatabaseSync, userId: string): string {
+  const row = avatarToneRowSchema.safeParse(
+    db.prepare(`SELECT avatar_tone FROM users WHERE id = ?`).get(userId),
+  );
+  return row.success ? row.data.avatar_tone : "";
 }
 
 function humanActorRef(db: DatabaseSync, actor: TaskActor) {
@@ -553,9 +606,12 @@ async function answerAskingAgent(
   try {
     const { agentMentionHandle } = await import("./agent-reply.server");
     const { listDeployedSpecialists } = await import("./specialist-run.server");
-    const deployed = listDeployedSpecialists(input.projectSlug, {
-      ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-    }).find((a: { id: string }) => a.id === input.profileId);
+    const specialistCtx: TaskMutationContext = {};
+    if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
+    const deployed = listDeployedSpecialists(
+      input.projectSlug,
+      specialistCtx,
+    ).find((a: { id: string }) => a.id === input.profileId);
     if (!deployed) return false;
 
     // Address the agent by the SAME handle a human would type, so resolution
@@ -601,7 +657,7 @@ async function answerAskingAgent(
  *  divergence as prose only a human ever acts on. */
 export async function autoInvokeOperator(
   db: DatabaseSync,
-  ctx: TaskMutationContext,
+  ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
   trigger:
@@ -627,22 +683,23 @@ export async function autoInvokeOperator(
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
     const authority = resolveOperatorAuthority(ctx, projectSlug);
     if (!authority.deployed) return; // no operator in this project — nothing to run
-    const { runOperator } = await import("~/server/runtimes/operator-run.server");
-    await runOperator(db, {
+    const runOperator =
+      ctx.deps?.runOperator ??
+      (await import("~/server/runtimes/operator-run.server")).runOperator;
+    const runInput: RunOperatorInput = {
       projectSlug,
       taskKey,
       trigger,
-      ...(transitionDepth !== undefined ? { transitionDepth } : {}),
-      ...(transition
-        ? {
-            transitionFromName: transition.fromName,
-            transitionToName: transition.toName,
-            transitionByHuman: transition.byHuman,
-          }
-        : {}),
-      ...(resolvedOption ? { resolvedOption } : {}),
       dataRoot: ctx.dataRoot,
-    });
+    };
+    if (transitionDepth !== undefined) runInput.transitionDepth = transitionDepth;
+    if (transition) {
+      runInput.transitionFromName = transition.fromName;
+      runInput.transitionToName = transition.toName;
+      runInput.transitionByHuman = transition.byHuman;
+    }
+    if (resolvedOption) runInput.resolvedOption = resolvedOption;
+    await runOperator(db, runInput);
   } catch (error) {
     logger.error("auto operator invocation failed", {
       taskKey,
@@ -785,11 +842,7 @@ export async function appendComment(
       userId: actor.userId,
       name: actorName,
       initials: initialsOfName(actorName),
-      tone:
-        (db
-          .prepare(`SELECT avatar_tone FROM users WHERE id = ?`)
-          .get(actor.userId) as { avatar_tone: string | null } | undefined)
-          ?.avatar_tone ?? "",
+      tone: avatarTone(db, actor.userId),
     },
   });
 
@@ -991,7 +1044,7 @@ export async function commentToAgent(
   //    the routed tint when an agent was resolved.
   const base = await appendComment(
     db,
-    { ...input, ...(target ? { forceToAgent: true } : {}) },
+    target ? { ...input, forceToAgent: true } : input,
     actor,
     ctx,
   );
@@ -1108,7 +1161,7 @@ export async function commentToAgent(
   }
 
   // The follow-up prompt built from the comment (autonomous reply).
-  const followUp = specialistReplyDirective({
+  const directive: Parameters<typeof specialistReplyDirective>[0] = {
     commenterName,
     taskKey: input.taskKey,
     title,
@@ -1116,8 +1169,9 @@ export async function commentToAgent(
     // A supporting engagement never delivers, so its directive says so instead
     // of naming push/PR rules that don't apply to it (P13-RT-05).
     delivers: target.isPrimary,
-    ...(anchor ? { anchor } : {}),
-  });
+  };
+  if (anchor) directive.anchor = anchor;
+  const followUp = specialistReplyDirective(directive);
 
   const { resumeRun } = await import(
     "~/server/runtimes/run-service.server"
@@ -1148,25 +1202,16 @@ export async function commentToAgent(
       role: target.role,
       delivers: target.isPrimary,
     });
-    const resumed = await resumeRun(db, {
+    const resume: Parameters<typeof resumeRun>[1] = {
       runId: target.session.id,
       prompt: followUp,
       workdir,
       disallowedTools: confinement.disallowedTools,
       env: confinement.env,
-      // The workspace mount survives between runs, but the SDK options do not —
-      // re-arm the native skills filter or the resumed run enables none.
-      ...(confinement.skills ? { skills: confinement.skills } : {}),
-      ...(confinement.mcpServers ? { mcpServers: confinement.mcpServers } : {}),
-      ...(confinement.systemPrompt ? { systemPrompt: confinement.systemPrompt } : {}),
-      // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
-      // structured verdict/questions instead of falling back to the prose regex.
-      ...(confinement.outputSchema ? { outputSchema: confinement.outputSchema } : {}),
       // Apply the agent's CURRENT profile model/effort on resume — not the
       // stale value on the prior run row (editing an agent to a new model
       // must take effect when its session is resumed via a comment).
       model: target.model,
-      ...(target.effort ? { effort: target.effort } : {}),
       // Stamp the agent's identity so the reply run groups under (and labels)
       // the agent's own Agent-logs entry ("dev"), even when resuming a seeded
       // session row that predates the identity columns.
@@ -1175,7 +1220,17 @@ export async function commentToAgent(
       autonomous: true,
       dataRoot: ctx.dataRoot,
       actor: { userId: actor.userId, label: actor.label },
-    });
+    };
+    // The workspace mount survives between runs, but the SDK options do not —
+    // re-arm the native skills filter or the resumed run enables none.
+    if (confinement.skills) resume.skills = confinement.skills;
+    if (confinement.mcpServers) resume.mcpServers = confinement.mcpServers;
+    if (confinement.systemPrompt) resume.systemPrompt = confinement.systemPrompt;
+    // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
+    // structured verdict/questions instead of falling back to the prose regex.
+    if (confinement.outputSchema) resume.outputSchema = confinement.outputSchema;
+    if (target.effort) resume.effort = target.effort;
+    const resumed = await resumeRun(db, resume);
     runId = resumed.runId;
     resumeOutcomeKey = confinement.outcomeKey;
     triggered = "resumed";
@@ -1258,7 +1313,7 @@ export async function commentToAgent(
   //    @mention dropped the verdict/reconcile and never re-engaged the operator).
   if (triggered === "resumed") {
     await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
-    await registerAgentCompletion(db, ctx, {
+    const completion: Parameters<typeof registerAgentCompletion>[2] = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       runId,
@@ -1266,7 +1321,6 @@ export async function commentToAgent(
       profileId: target.profileId,
       role: target.role,
       delivers: target.isPrimary,
-      ...(resumeOutcomeKey ? { outcomeKey: resumeOutcomeKey } : {}),
       workdir: null,
       // P14-RT-12: ONE handle derivation. This path lower-cased the display
       // name (multi-word → `@docs writer`, which only resolves for a reader that
@@ -1277,8 +1331,10 @@ export async function commentToAgent(
         profileId: target.profileId,
         name: target.name,
       }),
-      ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
-    });
+    };
+    if (resumeOutcomeKey) completion.outcomeKey = resumeOutcomeKey;
+    if (ctx.operatorRun) completion.operatorRun = ctx.operatorRun;
+    await registerAgentCompletion(db, ctx, completion);
   }
 
   // BUG 3: the Agent-logs selection id for the reply run's grouped entry. The
@@ -1512,11 +1568,11 @@ export async function postAgentReplyComment(
         occurredAt: prepared.event.occurredAt,
       });
     })
-    .catch((error: unknown) => {
+    .catch((cause: unknown) => {
       logger.error("agent reply comment write failed", {
         taskKey: input.taskKey,
         runId: input.runId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: cause instanceof Error ? cause : new Error(String(cause)),
       });
     });
 }
@@ -1583,6 +1639,14 @@ async function openStuckLoopPacket(
     const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
     const extra = input.extraOptions ?? [];
     const extraRecommended = extra.some((o) => o.recommended);
+    const redirect: import("./operator-actions.server").OperatorPacketOptionInput =
+      {
+        kind: "redirect",
+        title: "Redirect with sharper guidance",
+        detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
+      };
+    // A recommended extra (the backend retry) takes the recommendation from here.
+    if (!extraRecommended) redirect.recommended = true;
     const result = await operatorOpenPacket(
       db,
       ctx,
@@ -1601,12 +1665,7 @@ async function openStuckLoopPacket(
         ],
         options: [
           ...extra,
-          {
-            kind: "redirect",
-            title: "Redirect with sharper guidance",
-            detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
-            ...(extraRecommended ? {} : { recommended: true }),
-          },
+          redirect,
           {
             kind: "request_edit",
             title: "Send back for another attempt",
@@ -1817,7 +1876,7 @@ export function deliveredWorkEvidence(fm: {
 /** Atomically record a finished run's reply, verdict, and human question. */
 export async function recordAgentCompletion(
   db: DatabaseSync,
-  ctx: TaskMutationContext,
+  ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
   input: {
@@ -2191,11 +2250,11 @@ export async function registerAgentCompletion(
     void applyAgentCompletionEffects(db, ctx, input, {
       id: finished.id,
       state: finished.state,
-    }).catch((error: unknown) => {
+    }).catch((cause: unknown) => {
       logger.error("agent-run completion handler failed", {
         taskKey: input.taskKey,
         runId: finished.id,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: cause instanceof Error ? cause : new Error(String(cause)),
       });
     });
   }, db);
@@ -2489,14 +2548,15 @@ export async function applyAgentCompletionEffects(
             },
           ]
         : [];
-    await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
+    const stuck: Parameters<typeof openStuckLoopPacket>[2] = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       agentHandle: input.agentHandle,
       reason: `The ${input.role} ${roleLabel} run failed — ${reasonText}.`,
-      ...(retryOption.length ? { extraOptions: retryOption } : {}),
-      ...(providerText ? { providerText } : {}),
-    });
+    };
+    if (retryOption.length) stuck.extraOptions = retryOption;
+    if (providerText) stuck.providerText = providerText;
+    await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, stuck);
     notifyTaskWatchers(
       db,
       {
@@ -2539,16 +2599,17 @@ export async function applyAgentCompletionEffects(
     const { reconcileWorkspaceDelivery } = await import(
       "~/server/github/workspace-delivery.server"
     );
-    await reconcileWorkspaceDelivery({
+    const reconcile: Parameters<typeof reconcileWorkspaceDelivery>[0] = {
       db,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       backend: input.backend,
       profileId: input.profileId,
       role: input.role,
-      ...(input.workdir ? { workdir: input.workdir } : {}),
       dataRoot: ctx.dataRoot,
-    }).catch((error) => {
+    };
+    if (input.workdir) reconcile.workdir = input.workdir;
+    await reconcileWorkspaceDelivery(reconcile).catch((error) => {
       // F13: best-effort (must not break completion) but no longer SILENT — a
       // delivery-reconcile failure (git/network) was invisible, so a broken
       // branch/PR link went undiagnosed. Surface it for operators.
@@ -2649,21 +2710,22 @@ export async function applyAgentCompletionEffects(
     return;
   }
   const { runOperator } = await import("~/server/runtimes/operator-run.server");
-  await runOperator(db, {
+  const reactInput: RunOperatorInput = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     trigger: "agent-reply",
     reactDepth: currentDepth + 1,
     backend: reactBackend,
     autonomy: reactAutonomy,
-    // Hand the reply DIRECTLY to the react turn. The operator used to depend
-    // on the timeline comment for the agent's report — when that comment went
-    // missing (stale bind-mount read, guardrail drop), the operator re-prompted
-    // the next agent with no findings ("pull up the reviewer's comments…").
-    // The run store is the source of truth for the reply; the prompt carries it.
-    ...(replyText ? { agentReply: replyText } : {}),
     dataRoot: ctx.dataRoot,
-  });
+  };
+  // Hand the reply DIRECTLY to the react turn. The operator used to depend on
+  // the timeline comment for the agent's report — when that comment went
+  // missing (stale bind-mount read, guardrail drop), the operator re-prompted
+  // the next agent with no findings ("pull up the reviewer's comments…").
+  // The run store is the source of truth for the reply; the prompt carries it.
+  if (replyText) reactInput.agentReply = replyText;
+  await runOperator(db, reactInput);
 }
 
 /** Flip a task from `waiting: agent` back to `waiting: human` once no further
@@ -3061,7 +3123,7 @@ export async function transitionStage(
     recommendationAuthorized?: boolean;
   },
   actor: TaskActor,
-  ctx: TaskMutationContext = {},
+  ctx: TaskActionContext = {},
 ): Promise<TaskSummary> {
   const project = loadProjectContext(ctx, input.projectSlug);
 
@@ -3240,6 +3302,13 @@ export async function transitionStage(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
+  const transitionDetails: NonNullable<AuditEventInput["details"]> = {
+    from: fromStageId,
+    to: input.toStageId,
+    boundary: boundary?.boundary ?? "manual",
+  };
+  if (input.manual) transitionDetails.manual = true;
+  if (ctx.operatorAuthorized) transitionDetails.by = "operator";
   recordAudit(db, {
     action: "task.transition",
     actor: ctx.operatorAuthorized
@@ -3249,13 +3318,7 @@ export async function transitionStage(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      from: fromStageId,
-      to: input.toStageId,
-      boundary: boundary?.boundary ?? "manual",
-      ...(input.manual ? { manual: true } : {}),
-      ...(ctx.operatorAuthorized ? { by: "operator" } : {}),
-    },
+    details: transitionDetails,
   });
 
   // Approving a requested transition resolves its approval notifications.
@@ -3395,9 +3458,24 @@ export async function resolveDeliveryPushGrant(
  * branch cannot be read, this returns null and the delivery says so — an
  * unverifiable base is not a verified no-change.
  */
+/** GitHub's commit JSON, decoded rather than asserted. The head sha and the
+ *  tree sha carry SEPARATE tolerance so a commit whose `tree` is missing or
+ *  junk still yields the revision — the tree is an extra (`null` when it can't
+ *  be read), the head is the subject (the whole read is `null` without it). */
+const commitRevisionSchema = z
+  .object({
+    sha: z.string().min(1),
+    commit: z
+      .object({ tree: z.object({ sha: z.string().min(1) }) })
+      .nullable()
+      .catch(null),
+  })
+  .nullable()
+  .catch(null);
+
 async function resolveNoChangeBaseRevision(
   db: DatabaseSync,
-  ctx: TaskMutationContext,
+  ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
 ): Promise<WorkRevision | null> {
@@ -3405,24 +3483,27 @@ async function resolveNoChangeBaseRevision(
     const { getProjectGithubContext } = await import(
       "~/server/github/github-context.server"
     );
-    const gh = getProjectGithubContext(db, projectSlug);
+    // Optional key: set only when a caller supplied a transport (tests), so
+    // the client falls back to global fetch on every production path.
+    const ghOptions: GithubContextOptions = {};
+    if (ctx.fetchImpl) ghOptions.fetchImpl = ctx.fetchImpl;
+    const gh = getProjectGithubContext(db, projectSlug, ghOptions);
     if (gh.status !== "ok") return null;
-    const res = await gh.client.request<{
-      sha?: string;
-      commit?: { tree?: { sha?: string } };
-    }>("GET", `/repos/${gh.repo}/commits/${gh.defaultBranch}`);
+    const res = await gh.client.request(
+      "GET",
+      `/repos/${gh.repo}/commits/${gh.defaultBranch}`,
+      commitRevisionSchema,
+    );
     if (!res.ok) return null;
-    const headSha = res.data?.sha;
-    if (typeof headSha !== "string" || headSha === "") return null;
-    const treeSha = res.data?.commit?.tree?.sha;
+    if (!res.data) return null;
     const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     const deliverer = file
       ? deliveringEngagement(file.parsed.frontmatter)
       : null;
     return {
       id: newId("rev"),
-      headSha,
-      treeSha: typeof treeSha === "string" && treeSha ? treeSha : null,
+      headSha: res.data.sha,
+      treeSha: res.data.commit?.tree.sha ?? null,
       branch: gh.defaultBranch,
       createdAt: new Date().toISOString(),
       // R19-8: this is a VERIFICATION revision — the base a reviewer judges on a
@@ -3481,7 +3562,7 @@ export type DeliveryOutcome =
  */
 export async function performDelivery(
   db: DatabaseSync,
-  ctx: TaskMutationContext,
+  ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
   actor: TaskActor,
@@ -3491,9 +3572,9 @@ export async function performDelivery(
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
     // 1. Push the workspace commits to the remote task branch.
-    const { pushWorkspaceBranch } = await import(
-      "~/server/github/push-workspace.server"
-    );
+    const pushWorkspaceBranch =
+      ctx.deps?.pushWorkspaceBranch ??
+      (await import("~/server/github/push-workspace.server")).pushWorkspaceBranch;
     const push = await pushWorkspaceBranch({
       db,
       projectSlug,
@@ -3730,15 +3811,16 @@ export async function performDelivery(
         const { reconcileWorkspaceDelivery } = await import(
           "~/server/github/workspace-delivery.server"
         );
-        await reconcileWorkspaceDelivery({
+        const reconcile: Parameters<typeof reconcileWorkspaceDelivery>[0] = {
           db,
           projectSlug,
           taskKey,
           profileId: deliverer.profileId,
-          ...(deliverer.backend ? { backend: deliverer.backend } : {}),
-          ...(deliverer.role ? { role: deliverer.role } : {}),
           ...dataCtx,
-        });
+        };
+        if (deliverer.backend) reconcile.backend = deliverer.backend;
+        if (deliverer.role) reconcile.role = deliverer.role;
+        await reconcileWorkspaceDelivery(reconcile);
       }
     } catch (reconcileErr) {
       logger.warn("post-push delivery reconcile failed (best-effort)", {
@@ -3751,7 +3833,11 @@ export async function performDelivery(
     }
 
     // 2. Open (or reuse) the review PR now that the remote carries the diff.
-    const { openTaskPr } = await import("~/server/github/pr-open.server");
+    const openTaskPr =
+      ctx.deps?.openTaskPr ??
+      (await import("~/server/github/pr-open.server")).openTaskPr;
+    const prCtx: OpenTaskPrContext = { ...dataCtx };
+    if (ctx.fetchImpl) prCtx.fetchImpl = ctx.fetchImpl;
     const result = await openTaskPr(
       db,
       { projectSlug, taskKey },
@@ -3760,7 +3846,7 @@ export async function performDelivery(
         label: actor.label,
         operatorAuthorized: ctx.operatorAuthorized === true,
       },
-      dataCtx,
+      prCtx,
     );
     if (result.status === "ok") {
       // R17-2: a real PR now stands for review — clear any stale no-change flag
@@ -3932,7 +4018,7 @@ export async function manualDeliverForReview(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: TaskActor,
-  ctx: TaskMutationContext = {},
+  ctx: TaskActionContext = {},
 ): Promise<DeliveryOutcome> {
   const project = loadProjectContext(ctx, input.projectSlug);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
@@ -3964,10 +4050,10 @@ export async function manualDeliverForReview(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      status: outcome.status,
-      ...(outcome.status === "delivered" ? { prNumber: outcome.prNumber } : {}),
-    },
+    details:
+      outcome.status === "delivered"
+        ? { status: outcome.status, prNumber: outcome.prNumber }
+        : { status: outcome.status },
   });
   return outcome;
 }
@@ -4197,7 +4283,7 @@ const UNREACHABLE_MERGE_CAUSE =
  */
 async function attemptAcceptanceMerge(
   db: DatabaseSync,
-  ctx: TaskMutationContext,
+  ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
   actor: TaskActor,
@@ -4209,13 +4295,17 @@ async function attemptAcceptanceMerge(
 ): Promise<AcceptanceMergeOutcome> {
   if (!actor.userId) return { kind: "pending", cause: UNREACHABLE_MERGE_CAUSE };
   try {
-    const { mergeTaskPr } = await import("~/server/github/github-reconciler.server");
+    const mergeTaskPr =
+      ctx.deps?.mergeTaskPr ??
+      (await import("~/server/github/github-reconciler.server")).mergeTaskPr;
     beforeMerge?.();
+    const mergeCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
+    if (ctx.fetchImpl) mergeCtx.fetchImpl = ctx.fetchImpl;
     const result = await mergeTaskPr(
       db,
       { projectSlug, taskKey },
       { userId: actor.userId, label: actor.label },
-      { dataRoot: ctx.dataRoot },
+      mergeCtx,
     );
     switch (result.status) {
       case "merged":
@@ -4490,10 +4580,13 @@ export async function setTaskArchived(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      stage: existing.parsed.frontmatter.stage,
-      ...(withdrawn.length > 0 ? { withdrawn: withdrawn.length } : {}),
-    },
+    details:
+      withdrawn.length > 0
+        ? {
+            stage: existing.parsed.frontmatter.stage,
+            withdrawn: withdrawn.length,
+          }
+        : { stage: existing.parsed.frontmatter.stage },
   });
 
   return {
@@ -4537,7 +4630,7 @@ export async function resolvePacket(
     note?: string;
   },
   actor: TaskActor,
-  ctx: TaskMutationContext = {},
+  ctx: TaskActionContext = {},
 ): Promise<{ task: TaskSummary; option: PacketOption }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
@@ -5015,11 +5108,10 @@ export async function resolvePacket(
   ];
   const requeue = !NO_REQUEUE.includes(option.kind);
   if (requeue) {
-    const resolvedOption = {
-      kind: option.kind,
-      title: option.t,
-      ...(input.note?.trim() ? { note: input.note.trim() } : {}),
-    };
+    const decisionNote = input.note?.trim();
+    const resolvedOption = decisionNote
+      ? { kind: option.kind, title: option.t, note: decisionNote }
+      : { kind: option.kind, title: option.t };
     // R15-14: when an AGENT raised this question (request_edit / redirect /
     // custom on an "Agent question" packet), the answer belongs to that agent,
     // not to a courier. Route it to the asker first, through the same machinery
@@ -5033,18 +5125,17 @@ export async function resolvePacket(
     let answeredAsker = false;
     if (sentBackToAgent) {
       const askedBy =
-        packet.kind === "Agent question" && typeof packet.askedBy === "string"
-          ? packet.askedBy.trim()
-          : "";
+        packet.kind === "Agent question" ? (packet.askedBy?.trim() ?? "") : "";
       if (askedBy) {
-        answeredAsker = await answerAskingAgent(db, ctx, {
+        const answer: Parameters<typeof answerAskingAgent>[2] = {
           projectSlug: input.projectSlug,
           taskKey: input.taskKey,
           profileId: askedBy,
           question: packet.title,
           decision: option.t,
-          ...(input.note?.trim() ? { note: input.note.trim() } : {}),
-        }, actor);
+        };
+        if (decisionNote) answer.note = decisionNote;
+        answeredAsker = await answerAskingAgent(db, ctx, answer, actor);
       }
     }
     // No asker (an operator/policy packet), or its session is gone / the profile
@@ -5134,13 +5225,14 @@ export async function resolvePacket(
         const { discardLocalTaskBranch } = await import(
           "~/server/github/push-workspace.server"
         );
-        const local = await discardLocalTaskBranch({
+        const discard: Parameters<typeof discardLocalTaskBranch>[0] = {
           projectSlug: input.projectSlug,
           taskKey: input.taskKey,
           branch: localBranch,
           defaultBranch,
-          ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-        });
+        };
+        if (ctx.dataRoot) discard.dataRoot = ctx.dataRoot;
+        const local = await discardLocalTaskBranch(discard);
         if (local.status === "deleted") {
           await updateTaskFile(
             taskRef(ctx, input.projectSlug, input.taskKey),
@@ -5208,13 +5300,14 @@ export async function resolvePacket(
       const { discardLocalTaskBranch } = await import(
         "~/server/github/push-workspace.server"
       );
-      const outcome = await discardLocalTaskBranch({
+      const discard: Parameters<typeof discardLocalTaskBranch>[0] = {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         branch,
         defaultBranch,
-        ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-      });
+      };
+      if (ctx.dataRoot) discard.dataRoot = ctx.dataRoot;
+      const outcome = await discardLocalTaskBranch(discard);
       const noteText =
         outcome.status === "deleted"
           ? `Branch \`${outcome.branch}\` (\`${outcome.sha.slice(0, 12)}\`) was deleted from this ` +
@@ -5276,19 +5369,14 @@ export async function resolvePacket(
     const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
     try {
       const { startAgentRun } = await import("./specialist-run.server");
-      await startAgentRun(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          ...(typeof option.profileId === "string" && option.profileId
-            ? { profileId: option.profileId }
-            : {}),
-          backendOverride: target,
-        },
-        OPERATOR_TASK_ACTOR,
-        opCtx,
-      );
+      const retry: Parameters<typeof startAgentRun>[1] = {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        backendOverride: target,
+      };
+      // Absent on a primary-specialist retry; a reviewer retry names its profile.
+      if (option.profileId) retry.profileId = option.profileId;
+      await startAgentRun(db, retry, OPERATOR_TASK_ACTOR, opCtx);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("retry_other_backend start failed", {
@@ -5399,36 +5487,27 @@ export async function requestPacketMaintainerDecision(
   // Notification `from` is an ActorRender (a render shape), not the FileActorRef
   // the timeline event carries — build the human render when we have a user id.
   const fromName = actor.userId ? userName(db, actor.userId) : ownerLabel;
-  const notified = notifyTaskWatchers(
-    db,
-    {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      kind: "packet",
-      ptype: packet.type === "blocked" ? "blocked" : "input",
-      title: `Decision needs a maintainer: ${packet.title}`,
-      text: noteText,
-      occurredAt,
-      ...(actor.userId
-        ? {
-            from: {
-              kind: "human" as const,
-              userId: actor.userId,
-              name: fromName,
-              initials: initialsOfName(fromName),
-              tone:
-                (db
-                  .prepare(`SELECT avatar_tone FROM users WHERE id = ?`)
-                  .get(actor.userId) as { avatar_tone: string | null } | undefined)
-                  ?.avatar_tone ?? "",
-            },
-            // Don't notify the owner about their own ask.
-            exceptUserId: actor.userId,
-          }
-        : {}),
-    },
-    ctx,
-  );
+  const notice: TaskWatcherNotice = {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    kind: "packet",
+    ptype: packet.type === "blocked" ? "blocked" : "input",
+    title: `Decision needs a maintainer: ${packet.title}`,
+    text: noteText,
+    occurredAt,
+  };
+  if (actor.userId) {
+    notice.from = {
+      kind: "human",
+      userId: actor.userId,
+      name: fromName,
+      initials: initialsOfName(fromName),
+      tone: avatarTone(db, actor.userId),
+    };
+    // Don't notify the owner about their own ask.
+    notice.exceptUserId = actor.userId;
+  }
+  const notified = notifyTaskWatchers(db, notice, ctx);
 
   recordAudit(db, {
     action: "task.packet.escalated",
@@ -5624,7 +5703,7 @@ export interface AcceptancePrHeadCheck {
  */
 export async function acceptancePrHeadCheck(
   db: DatabaseSync,
-  ctx: TaskMutationContext,
+  ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
 ): Promise<AcceptancePrHeadCheck> {
@@ -5660,10 +5739,21 @@ function assertVerifiedHeadStillApplies(
   );
 }
 
+/** The one field this check reads off GitHub's pull JSON — `null` when the
+ *  body doesn't carry it (treated as unknown below, never a refusal). */
+const pullHeadShaSchema = z
+  .object({ head: z.object({ sha: z.string().min(1) }) })
+  .nullable()
+  .catch(null);
+
+/** `GET /compare/…` — only `status` is read; a body that doesn't carry a
+ *  string one degrades to "no status", exactly as the raw read did. */
+const compareStatusSchema = z.object({ status: z.string().optional() }).catch({});
+
 /** @see acceptancePrHeadCheck — the refusal alone, for callers that need no pin. */
 export async function acceptancePrHeadMismatch(
   db: DatabaseSync,
-  ctx: TaskMutationContext,
+  ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
 ): Promise<string | null> {
@@ -5676,24 +5766,29 @@ export async function acceptancePrHeadMismatch(
     const { getProjectGithubContext } = await import(
       "~/server/github/github-context.server"
     );
-    const gh = getProjectGithubContext(db, projectSlug);
+    // Optional key: set only when a caller supplied a transport (tests).
+    const ghOptions: GithubContextOptions = {};
+    if (ctx.fetchImpl) ghOptions.fetchImpl = ctx.fetchImpl;
+    const gh = getProjectGithubContext(db, projectSlug, ghOptions);
     if (gh.status !== "ok") return null;
-    const live = await gh.client.request<{ head?: { sha?: string } }>(
+    const live = await gh.client.request(
       "GET",
       `/repos/${gh.repo}/pulls/${pr.number}`,
+      pullHeadShaSchema,
     );
     if (!live.ok) return null;
-    const headSha = live.data?.head?.sha;
-    if (typeof headSha !== "string" || headSha === "") return null;
+    if (!live.data) return null;
+    const headSha = live.data.head.sha;
     if (headSha === rev.headSha) return null;
     // Not identical — a head that CONTAINS the delivered commit (e.g. the
     // delivery plus an auto-commit) is still reviewing the delivered work.
-    const cmp = await gh.client.request<{ status?: string }>(
+    const cmp = await gh.client.request(
       "GET",
       `/repos/${gh.repo}/compare/${rev.headSha}...${headSha}`,
+      compareStatusSchema,
     );
     if (!cmp.ok) return null; // could not compare — unknown, not a refusal
-    if (cmp.data?.status === "ahead" || cmp.data?.status === "identical") {
+    if (cmp.data.status === "ahead" || cmp.data.status === "identical") {
       return null;
     }
     return (
@@ -5911,7 +6006,7 @@ export function revisionDriftNote(fm: TaskFrontmatter): string {
  */
 export async function applyAcceptanceWrite(
   db: DatabaseSync,
-  ctx: TaskMutationContext,
+  ctx: TaskActionContext,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -6019,7 +6114,7 @@ async function acceptCompletion(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; force?: boolean },
   actor: TaskActor,
-  ctx: TaskMutationContext = {},
+  ctx: TaskActionContext = {},
 ): Promise<void> {
   const project = loadProjectContext(ctx, input.projectSlug);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
@@ -6181,7 +6276,7 @@ async function acceptCompletion(
         toAgent: false,
         evidence: null,
       };
-  await applyAcceptanceWrite(db, ctx, {
+  const acceptance: Parameters<typeof applyAcceptanceWrite>[2] = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     doneStageId,
@@ -6189,8 +6284,12 @@ async function acceptCompletion(
     event,
     headCheck,
     noChangeCheck: noChange,
-    ...(input.force ? { skipInLockRecheck: true, forced: true } : {}),
-  });
+  };
+  if (input.force) {
+    acceptance.skipInLockRecheck = true;
+    acceptance.forced = true;
+  }
+  await applyAcceptanceWrite(db, ctx, acceptance);
 
   recordAudit(db, {
     action: "task.transition",
@@ -6213,7 +6312,7 @@ export async function forceAcceptCompletion(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: TaskActor,
-  ctx: TaskMutationContext = {},
+  ctx: TaskActionContext = {},
 ): Promise<{ task: TaskSummary }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   requireAction(
@@ -6283,7 +6382,7 @@ export async function completeTaskMerge(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: TaskActor,
-  ctx: TaskMutationContext = {},
+  ctx: TaskActionContext = {},
 ): Promise<{ task: TaskSummary; merged: boolean; message: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   if (!actor.userId) {
@@ -6326,12 +6425,16 @@ export async function completeTaskMerge(
   );
   if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
 
-  const { mergeTaskPr } = await import("~/server/github/github-reconciler.server");
+  const mergeTaskPr =
+    ctx.deps?.mergeTaskPr ??
+    (await import("~/server/github/github-reconciler.server")).mergeTaskPr;
+  const mergeCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
+  if (ctx.fetchImpl) mergeCtx.fetchImpl = ctx.fetchImpl;
   const result = await mergeTaskPr(
     db,
     { projectSlug: input.projectSlug, taskKey: input.taskKey },
     { userId: actor.userId, label: actor.label },
-    { dataRoot: ctx.dataRoot },
+    mergeCtx,
   );
 
   if (result.status === "merged") {
@@ -6363,7 +6466,7 @@ export async function applyRecommendation(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; recId: string },
   actor: TaskActor,
-  ctx: TaskMutationContext = {},
+  ctx: TaskActionContext = {},
 ): Promise<{ task: TaskSummary; label: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   // Applying an operator recommendation resolves a pending governance decision
@@ -6468,20 +6571,14 @@ export async function applyRecommendation(
       (w) =>
         w.from === existing.parsed.frontmatter.stage && w.to === rec.toStageId,
     );
-    await transitionStage(
-      db,
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        toStageId: rec.toStageId,
-        ...(declaredEdge ? {} : { manual: true }),
-        ...(asCoordination("approve-transition")
-          ? { recommendationAuthorized: true }
-          : {}),
-      },
-      actor,
-      ctx,
-    );
+    const move: Parameters<typeof transitionStage>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      toStageId: rec.toStageId,
+    };
+    if (!declaredEdge) move.manual = true;
+    if (asCoordination("approve-transition")) move.recommendationAuthorized = true;
+    await transitionStage(db, move, actor, ctx);
   } else if (rec.kind === "delivery") {
     // R15-2: the operator recommended DELIVERY (push + review PR) — applying it
     // performs the delivery under the human's authorization. A failed delivery

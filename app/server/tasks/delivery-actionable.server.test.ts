@@ -14,7 +14,15 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 import { listNotifications } from "~/server/projections/notifications.server";
-import type { Recommendation, TaskPacket } from "~/schemas/task-file.schema";
+import type {
+  ParsedTaskFile,
+  Recommendation,
+  TaskFrontmatter,
+  TaskPacket,
+} from "~/schemas/task-file.schema";
+import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { openTaskPr } from "~/server/github/pr-open.server";
+import type { runOperator } from "~/server/runtimes/operator-run.server";
 
 /**
  * F19-1 — a SUCCESSFUL delivery must leave the task with an actionable next
@@ -34,47 +42,42 @@ import type { Recommendation, TaskPacket } from "~/schemas/task-file.schema";
  * nothing else made the task actionable. The default test project IS VC-1's
  * shape: `impl → review` at an `approval` boundary (GOVERNED_TEMPLATE).
  *
- * push-workspace + pr-open are mocked so `performDelivery` reaches the
- * `result.status === "ok"` branch without git or GitHub; operator-run is mocked
- * because R18-2's full-autonomy re-queue reaches `runOperator` through
- * `autoInvokeOperator`'s dynamic import.
+ * push-workspace + pr-open are stubbed through `performDelivery`'s ctx `deps`
+ * seam so it reaches the `result.status === "ok"` branch without git or GitHub;
+ * operator-run is stubbed the same way because R18-2's full-autonomy re-queue
+ * reaches `runOperator` through `autoInvokeOperator`, which reads the seam
+ * before its dynamic import. Every double is typed against the REAL export, so
+ * every `mockResolvedValue` below has to be a member of the actual result
+ * union — and the real modules stay loaded for everything the seam doesn't
+ * name.
  */
-
-// NO `importOriginal()` spread here. `autoInvokeOperator` reaches `runOperator`
-// through a DYNAMIC import, and spreading the real module let that import race
-// the mock registry — on a cold module graph it resolved the REAL function while
-// the test held the mocked one, so G/H measured which module instance won a
-// cache, not whether delivery re-queued. Declaring every export the code under
-// test needs keeps one instance (same reasoning as delivery-requeue's mock).
-vi.mock("~/server/runtimes/operator-run.server", () => ({
-  runOperator: vi.fn(async () => ({
-    runId: null,
-    queued: true,
-    backend: "claude" as const,
-    autonomy: "full" as const,
-  })),
-  resetOperatorLeasesForTests: () => {},
+const pushMock = vi.fn<typeof pushWorkspaceBranch>(async () => ({
+  status: "pushed",
+  branch: "vib-1",
+  commits: 1,
 }));
 
-const pushMock = vi.fn(async () => ({ status: "pushed", branch: "vib-1" }));
-vi.mock("~/server/github/push-workspace.server", () => ({
-  pushWorkspaceBranch: (...args: unknown[]) => pushMock(...(args as [])),
-}));
-
-const openTaskPrMock = vi.fn(async () => ({
-  status: "ok" as const,
+const openTaskPrMock = vi.fn<typeof openTaskPr>(async () => ({
+  status: "ok",
   prNumber: 147,
   created: true,
   url: "http://x/pull/147",
 }));
-vi.mock("~/server/github/pr-open.server", () => ({
-  openTaskPr: (...args: unknown[]) => openTaskPrMock(...(args as [])),
+
+const runOp = vi.fn<typeof runOperator>(async () => ({
+  runId: null,
+  queued: true,
+  backend: "claude" as const,
+  autonomy: "full" as const,
 }));
 
-import { runOperator } from "~/server/runtimes/operator-run.server";
-import { performDelivery, OPERATOR_TASK_ACTOR } from "./task-actions.server";
+const DEPS = {
+  pushWorkspaceBranch: pushMock,
+  openTaskPr: openTaskPrMock,
+  runOperator: runOp,
+};
 
-const runOp = vi.mocked(runOperator);
+import { performDelivery, OPERATOR_TASK_ACTOR } from "./task-actions.server";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -98,7 +101,7 @@ function deployOperator(autonomy: "full" | "supervised"): void {
           autonomy,
         },
       },
-    ] as never,
+    ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
@@ -111,17 +114,21 @@ function seedTask(
     packet?: TaskPacket | null;
   } = {},
 ): void {
-  writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter("VIB-1", {
-      stage: patch.stage ?? "impl",
-      readiness: "ready",
-      ownerUserId: store.users.arda.id,
-      title: "Add the KB grounding probe",
-      ...(patch.recommendations ? { recommendations: patch.recommendations } : {}),
-    }),
+  // `recommendations` and `packet` are set only when the case supplies them —
+  // an absent key inherits the fixture default, a present one overrides it.
+  const frontmatterPatch: Partial<TaskFrontmatter> = {
+    stage: patch.stage ?? "impl",
+    readiness: "ready",
+    ownerUserId: store.users.arda.id,
+    title: "Add the KB grounding probe",
+  };
+  if (patch.recommendations) frontmatterPatch.recommendations = patch.recommendations;
+  const file: Partial<ParsedTaskFile> & { frontmatter: TaskFrontmatter } = {
+    frontmatter: baseTaskFrontmatter("VIB-1", frontmatterPatch),
     goal: "Prove a delivered task is actionable without the operator volunteering it.",
-    ...(patch.packet ? { packet: patch.packet } : {}),
-  });
+  };
+  if (patch.packet) file.packet = patch.packet;
+  writeTask(store.dataRoot, store.slug, file);
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
@@ -133,7 +140,7 @@ async function deliver(): Promise<string> {
   // clicks Deliver reaches `performDelivery` without it and gets no card.
   const outcome = await performDelivery(
     store.db,
-    { dataRoot: store.dataRoot, operatorAuthorized: true },
+    { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
     store.slug,
     "VIB-1",
     OPERATOR_TASK_ACTOR,
@@ -154,9 +161,9 @@ async function flush(): Promise<void> {
   await new Promise((r) => setTimeout(r, 5));
 }
 
-/** Poll a fire-and-forget effect to completion. `autoInvokeOperator` awaits two
- *  dynamic imports before it reaches `runOperator`; on a cold module graph those
- *  resolve past a fixed 5ms flush, so a fixed wait reports module-load timing,
+/** Poll a fire-and-forget effect to completion. `autoInvokeOperator` awaits a
+ *  dynamic import before it reaches `runOperator`; on a cold module graph that
+ *  resolves past a fixed 5ms flush, so a fixed wait reports module-load timing,
  *  not behaviour. Poll instead, with a ceiling that still fails loudly. */
 async function waitFor(
   cond: () => boolean,
@@ -170,18 +177,14 @@ async function waitFor(
   }
 }
 
-beforeEach(async () => {
+beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   resetSseBrokerForTests();
   installFakeRuntime();
-  const { resetOperatorLeasesForTests } = await import(
-    "~/server/runtimes/operator-run.server"
-  );
-  resetOperatorLeasesForTests();
   runOp.mockClear();
   pushMock.mockClear();
-  pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1" });
+  pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1 });
   openTaskPrMock.mockClear();
   openTaskPrMock.mockResolvedValue({
     status: "ok",
@@ -273,9 +276,8 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
     seedTask();
     pushMock.mockResolvedValue({
       status: "push_failed",
-      branch: "vib-1",
       reason: "remote rejected",
-    } as never);
+    });
     expect(await deliver()).toBe("push_failed");
     expect(recs()).toHaveLength(0);
   });
@@ -288,9 +290,9 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
     // it the outcome is a genuine failure, not the no-change path.
     pushMock.mockResolvedValue({
       status: "no_commits",
-      branch: "vib-1",
+      reason: "no commits ahead of the default branch",
       defaultBranchEvidence: { verified: true },
-    } as never);
+    });
     expect(await deliver()).toBe("nothing_to_review");
     expect(recs()).toHaveLength(0);
   });

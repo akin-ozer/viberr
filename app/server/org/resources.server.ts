@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type SpawnOptions } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { StoreNode } from "~/features/kb-browser/tree";
 import { countKbFiles } from "~/features/kb-browser/tree";
 import {
@@ -186,12 +187,17 @@ export interface KbView {
   uri: string;
 }
 
-interface KbRow {
+type KbRow = {
   id: string;
   name: string;
   dir: string;
   refresh: string;
   last_indexed_at: string | null;
+};
+
+/** Is a stored `refresh` column one of the two modes the product offers? */
+function isKbRefreshMode(value: string): value is KbRefreshMode {
+  return KB_REFRESH_MODES.some((mode) => mode === value);
 }
 
 /** Builds a KB view from a disk folder, layering a metadata row when given. */
@@ -205,10 +211,7 @@ function buildKb(
     id: row ? row.id : diskId(dir),
     name: row ? row.name : dir,
     dir,
-    refresh:
-      row && (KB_REFRESH_MODES as readonly string[]).includes(row.refresh)
-        ? (row.refresh as KbRefreshMode)
-        : "on change",
+    refresh: row && isKbRefreshMode(row.refresh) ? row.refresh : "on change",
     lastIndexedAt: row ? row.last_indexed_at : null,
     tree,
     fileCount: countKbFiles(tree),
@@ -239,9 +242,12 @@ export function listKnowledgeBases(
   db: DatabaseSync,
   ctx: OrgSeedContext = {},
 ): KbView[] {
+  // SAFETY: `KB_SQL` selects exactly the five `org_knowledge_bases` columns
+  // `KbRow` declares, and the baseline DDL makes every one but
+  // `last_indexed_at` NOT NULL TEXT (0001_baseline.sql).
   const rows = db
     .prepare(`${KB_SQL} ORDER BY created_at ASC, id ASC`)
-    .all() as unknown as KbRow[];
+    .all() as KbRow[];
   const rowByDir = new Map(rows.map((r) => [r.dir, r]));
   const dirs = unionDiskAndRows(
     rows.map((r) => r.dir),
@@ -255,6 +261,7 @@ export function getKnowledgeBase(
   id: string,
   ctx: OrgSeedContext = {},
 ): KbView | null {
+  // SAFETY: same `KB_SQL` column guarantee as `listKnowledgeBases`.
   const row = db.prepare(`${KB_SQL} WHERE id = ?`).get(id) as KbRow | undefined;
   if (row) return buildKb(row.dir, row, ctx);
   const dir = diskNameFromId(id);
@@ -263,6 +270,14 @@ export function getKnowledgeBase(
   }
   return null;
 }
+
+/** Audit payload for a KB create (see `adopted` at the write below). */
+type KbCreateAudit = {
+  name: string;
+  dir: string;
+  refresh: KbRefreshMode;
+  adopted?: boolean;
+};
 
 export async function saveKnowledgeBase(
   db: DatabaseSync,
@@ -275,15 +290,12 @@ export async function saveKnowledgeBase(
   if (name.length < 2 || !dir) {
     throw AppError.validation("Give the knowledge base a name.");
   }
-  const refresh = (KB_REFRESH_MODES as readonly string[]).includes(
-    input.refresh,
-  )
-    ? input.refresh
-    : "on change";
+  const refresh = isKbRefreshMode(input.refresh) ? input.refresh : "on change";
   const now = new Date().toISOString();
 
   // Resolve the edit subject: a metadata row (by id) OR a disk-only folder
   // (synthetic id). A brand-new create has neither.
+  // SAFETY: same `KB_SQL` column guarantee as `listKnowledgeBases`.
   const existing = input.id
     ? (db.prepare(`${KB_SQL} WHERE id = ?`).get(input.id) as KbRow | undefined)
     : undefined;
@@ -369,12 +381,16 @@ export async function saveKnowledgeBase(
        (id, name, dir, refresh, last_indexed_at, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(id, name, dir, refresh, now, now, now);
+  // `adopted` is present only when this create took over a folder that was
+  // already on disk — a plain create carries no such key at all.
+  const details: KbCreateAudit = { name, dir, refresh };
+  if (oldDir) details.adopted = true;
   recordAudit(db, {
     action: oldDir ? "org.kb.updated" : "org.kb.created",
     actor,
     subjectKind: "org_kb",
     subjectId: id,
-    details: { name, dir, refresh, ...(oldDir ? { adopted: true } : {}) },
+    details,
   });
   await rewriteReferences();
   return {
@@ -410,6 +426,12 @@ export async function deleteKnowledgeBase(
   return { toast: `${kb.name} deleted — agents lose it on next context load` };
 }
 
+/** What a re-index reports back: the docs a run can read, plus the toast. */
+interface KbReindexResult {
+  docCount: number;
+  toast: string;
+}
+
 /** Honest re-index: re-scan the folder, refresh counts + the timestamp. A
  * disk-only folder is adopted into a metadata row so the timestamp sticks. */
 export function reindexKnowledgeBase(
@@ -417,10 +439,13 @@ export function reindexKnowledgeBase(
   id: string,
   actor: AuditActor,
   ctx: OrgSeedContext = {},
-): { docCount: number; toast: string } {
+): KbReindexResult {
   const kb = getKnowledgeBase(db, id, ctx);
   if (!kb) throw AppError.notFound("No such knowledge base.");
   const now = new Date().toISOString();
+  // SAFETY: `id` is the TEXT PRIMARY KEY of `org_knowledge_bases`
+  // (0001_baseline.sql), so the one selected column is a string when a row
+  // matches at all.
   const existing = db
     .prepare(`SELECT id FROM org_knowledge_bases WHERE dir = ?`)
     .get(kb.dir) as { id: string } | undefined;
@@ -469,6 +494,8 @@ export function reindexKnowledgeBaseByDir(
   dir: string,
   ctx: OrgSeedContext = {},
 ): { name: string; docCount: number } | null {
+  // SAFETY: `id`, `name` and `refresh` are all NOT NULL TEXT on
+  // `org_knowledge_bases` (0001_baseline.sql).
   let row = db
     .prepare(`SELECT id, name, refresh FROM org_knowledge_bases WHERE dir = ?`)
     .get(dir) as { id: string; name: string; refresh: string } | undefined;
@@ -562,7 +589,7 @@ export interface McpView {
   heuristicWarmups?: number;
 }
 
-interface McpRow {
+type McpRow = {
   id: string;
   name: string;
   transport: string;
@@ -575,7 +602,7 @@ interface McpRow {
   warming_since: string | null;
   first_success_at: string | null;
   heuristic_warmups: number | null;
-}
+};
 
 function mapMcp(row: McpRow): McpView {
   return {
@@ -631,6 +658,8 @@ export function getMcpCredentialState(
   db: DatabaseSync,
   name: string,
 ): McpCredentialState {
+  // SAFETY: `id` is the TEXT PRIMARY KEY and `cred_ref` a nullable TEXT column
+  // of `org_mcp_servers` (0001_baseline.sql).
   const row = db
     .prepare(`SELECT id, cred_ref FROM org_mcp_servers WHERE name = ?`)
     .get(name) as { id: string; cred_ref: string | null } | undefined;
@@ -694,6 +723,16 @@ function openMcpCredential(
   }
 }
 
+/**
+ * What opening a row's sealed credential yielded for a probe: the plaintext
+ * when it opened, and whether a credential IS configured but unopenable — which
+ * the toast names, because a run refuses to mount such a server at all.
+ */
+interface ProbeCredential {
+  token: string | null;
+  unreadable: boolean;
+}
+
 /** Open a sealed credential for a PROBE. Unlike a run, a probe MAY continue
  *  unauthenticated — but it reports which it did, so a green/red dot is never
  *  measured against a different credential than the run would use. */
@@ -702,7 +741,7 @@ function safeOpenSecret(
   id: string,
   name: string,
   sealed: string,
-): { token: string | null; unreadable: boolean } {
+): ProbeCredential {
   const state = openMcpCredential(db, id, name, sealed);
   if (state.state === "ok") return { token: state.token, unreadable: false };
   return { token: null, unreadable: state.state === "unreadable" };
@@ -710,10 +749,7 @@ function safeOpenSecret(
 
 /** The same open for a row that does not exist yet (a CREATE): there is nothing
  *  to lazily re-seal into, so this is a plain read with the same reporting. */
-function openedForNewRow(
-  sealed: string,
-  name: string,
-): { token: string | null; unreadable: boolean } {
+function openedForNewRow(sealed: string, name: string): ProbeCredential {
   if (!isSecretBox(sealed)) return { token: null, unreadable: true };
   try {
     return { token: openSecretRotating(sealed).plaintext, unreadable: false };
@@ -732,9 +768,12 @@ const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
                  FROM org_mcp_servers`;
 
 export function listMcpServers(db: DatabaseSync): McpView[] {
+  // SAFETY: `MCP_SQL` selects exactly the twelve `org_mcp_servers` columns
+  // `McpRow` declares; the baseline DDL types each one as the column this row
+  // reads (0001_baseline.sql), NOT NULL on id/name/transport/target.
   const rows = db
     .prepare(`${MCP_SQL} ORDER BY created_at ASC, id ASC`)
-    .all() as unknown as McpRow[];
+    .all() as McpRow[];
   return rows.map(mapMcp);
 }
 
@@ -742,6 +781,7 @@ export function getMcpServer(
   db: DatabaseSync,
   id: string,
 ): McpView | null {
+  // SAFETY: same `MCP_SQL` column guarantee as `listMcpServers`.
   const row = db.prepare(`${MCP_SQL} WHERE id = ?`).get(id) as
     | McpRow
     | undefined;
@@ -764,21 +804,36 @@ export interface McpChild {
         write(data: string): void;
         end(): void;
         /** F20-8: a write to a child that already exited surfaces here as an
-         *  ASYNC 'error' (EPIPE); an unhandled one is a fatal uncaughtException. */
-        on?(event: "error", cb: (err: unknown) => void): void;
+         *  ASYNC 'error' (EPIPE); an unhandled one is a fatal uncaughtException.
+         *  Node emits an `Error` on a stream's 'error' — the probe folds every
+         *  one into the same `down` outcome without reading it. */
+        on?(event: "error", cb: (err: Error) => void): void;
       }
     | null;
-  stdout: { on(event: "data", cb: (chunk: unknown) => void): void } | null;
+  stdout: { on(event: "data", cb: McpStreamListener): void } | null;
   /** The failed command's OWN explanation — see `discoverStdioMcpTools`. */
-  stderr: { on(event: "data", cb: (chunk: unknown) => void): void } | null;
+  stderr: { on(event: "data", cb: McpStreamListener): void } | null;
   /** F20-22: the 'exit' handler reads `(code, signal)`; 'error' passes an Error. */
-  on(event: "error" | "exit", cb: (arg?: unknown, signal?: unknown) => void): void;
-  kill(signal?: string): void;
+  on(event: "error" | "exit", cb: McpChildEndListener): void;
+  kill(signal?: NodeJS.Signals): void;
   /** F20-2: the child's OS pid, present on a real spawn — used to signal the
    *  whole process GROUP so grandchildren (npx→node→chromium) are not orphaned
    *  to pid 1. Absent on the test fakes (which model no grandchildren). */
   pid?: number | null;
 }
+
+/** A stdio chunk as Node delivers it: a Buffer, or a string on an encoded stream. */
+type McpStreamListener = (chunk: string | Uint8Array) => void;
+
+/**
+ * One listener for both terminal events, because the probe answers them the
+ * same way: 'error' hands it the spawn failure, 'exit' the `(code, signal)`
+ * Node reports for a child that started and then stopped.
+ */
+type McpChildEndListener = (
+  codeOrError?: Error | number | null,
+  signal?: NodeJS.Signals | null,
+) => void;
 
 export type McpSpawn = (
   command: string,
@@ -796,8 +851,8 @@ export interface McpProbeOptions {
   spawnImpl?: McpSpawn;
 }
 
-const defaultSpawn: McpSpawn = (command, args, token) =>
-  spawn(command, args, {
+const defaultSpawn: McpSpawn = (command, args, token) => {
+  const options: SpawnOptions = {
     // stderr was "ignore" — discarded by the OS, so the one thing that
     // explains a failure never reached us. See `discoverStdioMcpTools`.
     stdio: ["pipe", "pipe", "pipe"],
@@ -806,10 +861,12 @@ const defaultSpawn: McpSpawn = (command, args, token) =>
     // Node-as-pid-1 has no init to reap the orphans a bare `child.kill()` left,
     // so a boot accumulated defunct chromium/crashpad zombies under pid 1.
     detached: true,
-    ...(token
-      ? { env: { ...process.env, MCP_CREDENTIAL: token } }
-      : {}),
-  }) as unknown as McpChild;
+  };
+  // The credential reaches the child through its env (P13-KM-05); without one
+  // the child inherits this process's env untouched, so `env` stays absent.
+  if (token) options.env = { ...process.env, MCP_CREDENTIAL: token };
+  return spawn(command, args, options);
+};
 
 /**
  * F20-2: tear down a spawned MCP child and everything it forked.
@@ -823,7 +880,7 @@ const defaultSpawn: McpSpawn = (command, args, token) =>
  * group is already gone.
  */
 function killProcessTree(child: McpChild): void {
-  const pid = typeof child.pid === "number" ? child.pid : null;
+  const pid = child.pid ?? null;
   if (pid !== null) {
     try {
       process.kill(-pid, "SIGTERM");
@@ -839,20 +896,24 @@ function killProcessTree(child: McpChild): void {
   }
 }
 
+/** The `down` half of a discovery, named so a caller can build one field by
+ *  field instead of spreading conditionals into it. */
+interface StdioDiscoveryFailure {
+  kind: "down";
+  reason: string;
+  /** R19-18: the command was mid first-run install when the probe gave up —
+   *  a candidate for a background warm-up, not a failure to report. */
+  installing?: boolean;
+  /** R20-4 (N20-2): the TIMEOUT fired on a command that fetches on first use
+   *  (`npx`/`bunx`/…), but the command printed nothing install-y. Only the
+   *  CALLER can decide whether this is really a first run (it holds the row),
+   *  so the probe reports it and stays DB-free. */
+  firstRunInstaller?: boolean;
+}
+
 export type StdioDiscovery =
   | { kind: "up"; latencyMs: number; tools: number }
-  | {
-      kind: "down";
-      reason: string;
-      /** R19-18: the command was mid first-run install when the probe gave up —
-       *  a candidate for a background warm-up, not a failure to report. */
-      installing?: boolean;
-      /** R20-4 (N20-2): the TIMEOUT fired on a command that fetches on first use
-       *  (`npx`/`bunx`/…), but the command printed nothing install-y. Only the
-       *  CALLER can decide whether this is really a first run (it holds the row),
-       *  so the probe reports the shape and stays DB-free. */
-      firstRunInstaller?: boolean;
-    };
+  | StdioDiscoveryFailure;
 
 /**
  * Split a stdio MCP command line into argv, keeping quoted segments whole.
@@ -990,10 +1051,8 @@ export async function discoverStdioMcpTools(
       // download rather than a broken server. Report the shape; only the caller
       // (which holds the row) decides whether to warm it.
       const firstRunInstaller = !installing && isFirstRunInstallerCommand(parts);
-      finish({
+      const timedOut: StdioDiscoveryFailure = {
         kind: "down",
-        ...(installing ? { installing: true } : {}),
-        ...(firstRunInstaller ? { firstRunInstaller: true } : {}),
         reason: withDetail(
           installing
             ? `still installing after ${Math.round(timeoutMs / 1000)}s — the first run of this command fetches its dependencies`
@@ -1001,10 +1060,15 @@ export async function discoverStdioMcpTools(
               ? `no response in ${Math.round(timeoutMs / 1000)}s — \`${parts[0]}\` fetches its package on first use, so this is probably still downloading`
               : `timed out after ${Math.round(timeoutMs / 1000)}s`,
         ),
-      });
+      };
+      // Both flags are claims about THIS timeout, so each key is present only
+      // when the probe actually saw the evidence for it.
+      if (installing) timedOut.installing = true;
+      if (firstRunInstaller) timedOut.firstRunInstaller = true;
+      finish(timedOut);
     }, timeoutMs);
 
-    const send = (msg: unknown) => {
+    const send = (msg: McpHandshakeRequest) => {
       try {
         child.stdin?.write(`${JSON.stringify(msg)}\n`);
       } catch {
@@ -1039,8 +1103,8 @@ export async function discoverStdioMcpTools(
       // means the kernel killed it (OOM/segfault); a non-zero code is the
       // command's own verdict. Same R19-17 spirit as the stderr work: free
       // information already in hand.
-      const codeNum = typeof code === "number" ? code : null;
-      const sig = typeof signal === "string" && signal ? signal : null;
+      const codeNum = code instanceof Error ? null : (code ?? null);
+      const sig = signal ?? null;
       const base = sig
         ? `killed by ${sig}`
         : codeNum !== null && codeNum !== 0
@@ -1069,7 +1133,7 @@ export async function discoverStdioMcpTools(
       }
     };
 
-    child.stdout?.on("data", (chunk: unknown) => {
+    child.stdout?.on("data", (chunk) => {
       buffer += String(chunk);
       let nl: number;
       while ((nl = buffer.indexOf("\n")) >= 0) {
@@ -1116,6 +1180,59 @@ const MCP_CLIENT_CAPABILITIES = {
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 const MCP_CLIENT_INFO = { name: "viberr", version: "1.0.0" };
+
+/**
+ * Every JSON-RPC request the discovery handshake sends — its whole vocabulary,
+ * shared by the stdio and HTTP paths. Not a general RPC client: anything else
+ * would be a message no MCP server here is asked for.
+ */
+type McpHandshakeRequest =
+  | {
+      jsonrpc: "2.0";
+      id: number;
+      method: "initialize";
+      params: {
+        protocolVersion: string;
+        capabilities: typeof MCP_CLIENT_CAPABILITIES;
+        clientInfo: typeof MCP_CLIENT_INFO;
+      };
+    }
+  | { jsonrpc: "2.0"; method: "notifications/initialized" }
+  | { jsonrpc: "2.0"; id: number; method: "tools/list"; params: Record<string, never> };
+
+/** The `tools/list` result envelope, read only for how many tools it listed. */
+const mcpToolListSchema = z.object({ tools: z.array(z.unknown()) });
+
+/**
+ * One JSON-RPC message off an MCP endpoint, decoded at the wire into the only
+ * two facts the handshake asks of it: whether it carried a `result` at all (an
+ * `initialize` answered with an `error` — or with no result member — is not an
+ * MCP server), and how many tools that result listed.
+ *
+ * Tolerant per FIELD, like the hand decode it replaces: a `result` that is not
+ * a tool listing decodes to `tools: null` ("answered, but not with a tool
+ * list") instead of failing the whole message.
+ */
+const mcpMessageSchema = z
+  .object({ result: z.unknown().optional() })
+  .transform((message) => ({
+    // JSON never yields `undefined`, so this is exactly "the body has a
+    // `result` member".
+    answered: message.result !== undefined,
+    tools: mcpToolListSchema.safeParse(message.result).data?.tools.length ?? null,
+  }));
+
+type McpMessage = z.infer<typeof mcpMessageSchema>;
+
+/** The JSON-RPC message in one body/SSE frame, or null when it is not one. */
+function parseMcpMessage(text: string): McpMessage | null {
+  try {
+    const parsed = mcpMessageSchema.safeParse(JSON.parse(text));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Reachability probe for an HTTP target. Kept for the "is anything listening"
@@ -1211,31 +1328,33 @@ export async function discoverHttpMcpTools(
   const started = Date.now();
   let sessionId: string | null = null;
 
-  const rpc = async (body: unknown): Promise<Response> => {
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-      "mcp-protocol-version": MCP_PROTOCOL_VERSION,
-    };
-    if (sessionId) headers["mcp-session-id"] = sessionId;
-    if (options.token) headers.authorization = `Bearer ${options.token}`;
+  const rpc = async (body: McpHandshakeRequest): Promise<Response> => {
+    const headers = new Map([
+      ["content-type", "application/json"],
+      ["accept", "application/json, text/event-stream"],
+      ["mcp-protocol-version", MCP_PROTOCOL_VERSION],
+    ]);
+    // Both are conditional: the session id only exists after `initialize`
+    // answers with one, and an uncredentialed server is asked anonymously.
+    if (sessionId) headers.set("mcp-session-id", sessionId);
+    if (options.token) headers.set("authorization", `Bearer ${options.token}`);
     return fetchImpl(url.toString(), {
       method: "POST",
-      headers,
+      headers: Object.fromEntries(headers),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
   };
 
   /** Body → the first JSON-RPC message, whether raw JSON or SSE-framed. */
-  const readMessage = async (res: Response): Promise<Record<string, unknown> | null> => {
+  const readMessage = async (res: Response): Promise<McpMessage | null> => {
     const text = await res.text();
     if (!text.trim()) return null;
-    const direct = safeJson(text);
+    const direct = parseMcpMessage(text);
     if (direct) return direct;
     for (const line of text.split(/\r?\n/)) {
       if (!line.startsWith("data:")) continue;
-      const parsed = safeJson(line.slice(5).trim());
+      const parsed = parseMcpMessage(line.slice(5).trim());
       if (parsed) return parsed;
     }
     return null;
@@ -1263,7 +1382,7 @@ export async function discoverHttpMcpTools(
     }
     sessionId = initRes.headers.get("mcp-session-id");
     const initMsg = await readMessage(initRes);
-    if (!initMsg || !("result" in initMsg)) {
+    if (!initMsg?.answered) {
       return { kind: "down", reason: "responded, but not with MCP initialize" };
     }
 
@@ -1279,28 +1398,17 @@ export async function discoverHttpMcpTools(
       return { kind: "down", reason: `tools/list answered ${listRes.status}` };
     }
     const listMsg = await readMessage(listRes);
-    const tools = (listMsg?.result as { tools?: unknown } | undefined)?.tools;
-    if (!Array.isArray(tools)) {
+    const tools = listMsg?.tools ?? null;
+    if (tools === null) {
       return { kind: "down", reason: "no tools in response" };
     }
-    return { kind: "up", latencyMs: Date.now() - started, tools: tools.length };
+    return { kind: "up", latencyMs: Date.now() - started, tools };
   } catch (error) {
     const reason =
       error instanceof Error && error.name === "TimeoutError"
         ? "connection timed out"
         : "connection refused";
     return { kind: "down", reason };
-  }
-}
-
-function safeJson(text: string): Record<string, unknown> | null {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
   }
 }
 
@@ -1349,6 +1457,8 @@ export async function saveMcpServer(
     }
     cred = isSecretBox(rawCred) ? rawCred : sealSecret(rawCred);
   } else if (input.id) {
+    // SAFETY: `cred_ref` is a nullable TEXT column of `org_mcp_servers`
+    // (0001_baseline.sql).
     const existing = db
       .prepare(`SELECT cred_ref FROM org_mcp_servers WHERE id = ?`)
       .get(input.id) as { cred_ref: string | null } | undefined;
@@ -1372,6 +1482,8 @@ export async function saveMcpServer(
     );
   }
 
+  // SAFETY: `id` is the TEXT PRIMARY KEY of `org_mcp_servers`
+  // (0001_baseline.sql), so a matching row hands back a string.
   const clash = db
     .prepare(`SELECT id FROM org_mcp_servers WHERE name = ? AND id != ?`)
     .get(name, input.id ?? "") as { id: string } | undefined;
@@ -1523,6 +1635,8 @@ export async function testMcpServer(
   // BOTH transports run the real MCP handshake (P13-LV-10) with the server's
   // credential when it has one (P13-KM-05), so "healthy" means "answered as an
   // MCP server", not "something replied to a GET".
+  // SAFETY: `cred_ref` is a nullable TEXT column of `org_mcp_servers`
+  // (0001_baseline.sql).
   const sealed = db
     .prepare(`SELECT cred_ref FROM org_mcp_servers WHERE id = ?`)
     .get(id) as { cred_ref: string | null } | undefined;
@@ -1663,12 +1777,12 @@ export interface SkillView {
   uri: string;
 }
 
-interface SkillRow {
+type SkillRow = {
   id: string;
   name: string;
   summary: string;
   updated_at: string;
-}
+};
 
 /**
  * The editor reads the SAME contained path the injector does.
@@ -1793,9 +1907,11 @@ export function listSkills(
   db: DatabaseSync,
   ctx: OrgSeedContext = {},
 ): SkillView[] {
+  // SAFETY: `SKILL_SQL` selects exactly the four `org_skills` columns
+  // `SkillRow` declares, every one NOT NULL TEXT (0001_baseline.sql).
   const rows = db
     .prepare(`${SKILL_SQL} ORDER BY created_at ASC, id ASC`)
-    .all() as unknown as SkillRow[];
+    .all() as SkillRow[];
   const rowByName = new Map(rows.map((r) => [r.name, r]));
   const names = unionDiskAndRows(
     rows.map((r) => r.name),
@@ -1809,6 +1925,7 @@ export function getSkill(
   id: string,
   ctx: OrgSeedContext = {},
 ): SkillView | null {
+  // SAFETY: same `SKILL_SQL` column guarantee as `listSkills`.
   const row = db.prepare(`${SKILL_SQL} WHERE id = ?`).get(id) as
     | SkillRow
     | undefined;
@@ -1819,6 +1936,13 @@ export function getSkill(
   }
   return null;
 }
+
+/** Audit payload for a skill create (see the write below for both flags). */
+type SkillCreateAudit = {
+  name: string;
+  adopted?: boolean;
+  filesMode?: boolean;
+};
 
 export async function saveSkill(
   db: DatabaseSync,
@@ -1850,6 +1974,7 @@ export async function saveSkill(
 
   // Resolve the edit subject: a metadata row (by id) OR a disk-only folder
   // (synthetic id). A brand-new create has neither.
+  // SAFETY: same `SKILL_SQL` column guarantee as `listSkills`.
   const existing = input.id
     ? (db.prepare(`${SKILL_SQL} WHERE id = ?`).get(input.id) as
         | SkillRow
@@ -1947,16 +2072,17 @@ export async function saveSkill(
     `INSERT INTO org_skills (id, name, summary, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?)`,
   ).run(id, name, summary, now, now);
+  // Each key is present only when it is true of THIS create: `adopted` when it
+  // took over a folder already on disk, `filesMode` when no SKILL.md was written.
+  const details: SkillCreateAudit = { name };
+  if (oldName) details.adopted = true;
+  if (filesMode) details.filesMode = true;
   recordAudit(db, {
     action: oldName ? "org.skill.updated" : "org.skill.created",
     actor,
     subjectKind: "org_skill",
     subjectId: id,
-    details: {
-      name,
-      ...(oldName ? { adopted: true } : {}),
-      ...(filesMode ? { filesMode: true } : {}),
-    },
+    details,
   });
   return {
     skill: getSkill(db, id, ctx)!,

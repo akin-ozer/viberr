@@ -111,7 +111,7 @@ function deployRoster(
         extras: [],
         definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet" },
       },
-    ] as never,
+    ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
@@ -479,6 +479,14 @@ describe("operatorAssignSpecialist", () => {
     expect(rendered).not.toMatch(/primary specialist/i);
   });
 
+  /** The routing trace `traceAgentSelection` records, as this test reads it. */
+  type AgentSelectionTrace = {
+    chosen: string;
+    delivers: boolean;
+    reason: string | null;
+    candidates: { profileId: string; chosen: boolean; eligibleForStage: boolean }[];
+  };
+
   it("F10-35: records a routing trace — candidates considered, chosen, reason", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
@@ -498,12 +506,10 @@ describe("operatorAssignSpecialist", () => {
       action: "task.operator.agent_selected",
     })[0];
     expect(trace).toBeTruthy();
-    const d = trace!.details as {
-      chosen: string;
-      delivers: boolean;
-      reason: string | null;
-      candidates: { profileId: string; chosen: boolean; eligibleForStage: boolean }[];
-    };
+    // SAFETY: `task.operator.agent_selected` has ONE writer (traceAgentSelection
+    // in operator-actions.server.ts), and it records exactly these four fields —
+    // `candidates` straight off the deployed-specialist map.
+    const d = trace!.details as AgentSelectionTrace;
     expect(d.chosen).toBe("developer");
     expect(d.delivers).toBe(true);
     expect(d.reason).toBe("Dev fits the impl stage.");
@@ -1964,7 +1970,7 @@ function deployWithoutOperator(): void {
           model: "sonnet",
         },
       },
-    ] as never,
+    ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
@@ -2040,7 +2046,7 @@ describe("B1 — an operator-authored retry_other_backend names the OTHER backen
       model: "sonnet",
       sdk: "Claude Agent SDK",
       state: "error",
-    } as Parameters<typeof upsertRun>[1]);
+    });
 
     expect((await openRetryPacket()).outcome).toBe("done");
     const retry = task().packet!.options.find((o) => o.kind === "retry_other_backend")!;
@@ -2254,7 +2260,7 @@ describe("operatorPostComment honest outcome (G1/B-FD8)", () => {
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
       guardrails: ids.map((id) => ({ id, desc: `${id} on`, on: true })),
-    } as never);
+    });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 

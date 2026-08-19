@@ -44,7 +44,7 @@ function seedRun(id: string, over: Partial<Parameters<typeof upsertRun>[1]> = {}
     agentProfileId: "operator",
     model: "sonnet", sdk: "Claude Agent SDK", state: "running",
     startedAt: new Date().toISOString(), ...over,
-  } as Parameters<typeof upsertRun>[1]);
+  });
 }
 
 describe("finalizeOrphanedRuns (F-RUN1)", () => {
@@ -97,6 +97,8 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(res.reinvoked).toBe(0);
     expect(res.capped).toBe(1);
     // No new re-invoke audit row was written (count stays at the cap).
+    // SAFETY: `SELECT COUNT(*) AS n` always returns exactly one row whose only
+    // column is that integer, so `get` cannot come back undefined here.
     const n = (
       store.db
         .prepare(
@@ -151,7 +153,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
 
   function countReplayAudits(runId: string): number {
     return listAuditEvents(store.db, { action: "run.recovery.reply_replayed" }).filter(
-      (e) => (e.details as { runId?: string } | null)?.runId === runId,
+      (e) => e.details?.runId === runId,
     ).length;
   }
 
@@ -185,6 +187,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(res.recovered).toBe(1);
     // The staged envelope was TAKEN by its key (consumed once) — proof the
     // recovery path reached it via the persisted outcome_key.
+    // SAFETY: as above — a COUNT(*) row always exists and carries `n`.
     const remaining = store.db
       .prepare(`SELECT COUNT(*) AS n FROM staged_outcomes WHERE outcome_key = 'oc_staged'`)
       .get() as { n: number };
@@ -226,7 +229,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     // The run was NEVER reacted to: no reply audit landed.
     expect(
       listAuditEvents(store.db, { action: "task.agent.replied" }).filter(
-        (e) => (e.details as { runId?: string } | null)?.runId === "run_loop",
+        (e) => e.details?.runId === "run_loop",
       ).length,
     ).toBe(0);
   });
@@ -298,7 +301,7 @@ describe("recoverStrandedOperatorPlans (P14-RT-08)", () => {
             model: defaultModelFor("codex"),
           },
         },
-      ] as never,
+      ],
     });
   }
 

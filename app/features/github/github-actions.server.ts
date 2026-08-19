@@ -1,13 +1,18 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import {
   ensureConnectionFresh,
   getConnection,
   getDefaultConnection,
+  type FreshnessOptions,
 } from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { slugify } from "~/shared/ids/slugify";
-import { createGithubClient } from "~/server/github/github-client.server";
+import {
+  createGithubClient,
+  type GithubClientOptions,
+} from "~/server/github/github-client.server";
 import {
   reconcileProject,
   type GithubActionContext,
@@ -18,7 +23,10 @@ import {
   getProjectCredential,
   setProjectCredential,
 } from "~/server/secrets/pat-store.server";
-import { revalidateProjectCredential } from "~/server/secrets/pat-validator.server";
+import {
+  revalidateProjectCredential,
+  type RevalidateContext,
+} from "~/server/secrets/pat-validator.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { grantScopeToast, reconcileToast } from "./github-copy";
 import { invalidateRepoAccess } from "./github-query.server";
@@ -32,6 +40,12 @@ import { invalidateRepoAccess } from "./github-query.server";
  * Kept out of the route module so tests can inject `fetchImpl` (the route
  * itself has no transport hook by design).
  */
+
+/** The data-root + transport hooks a credential call threads through. */
+export interface CredentialCallContext {
+  dataRoot?: string;
+  fetchImpl?: typeof fetch;
+}
 
 export interface GithubActionOutcome {
   ok: true;
@@ -128,13 +142,12 @@ export async function proveAttachedCredential(
   db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
-  ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
+  ctx: CredentialCallContext = {},
 ): Promise<void> {
+  const options: RevalidateContext = { dataRoot: ctx.dataRoot };
+  if (ctx.fetchImpl) options.fetchImpl = ctx.fetchImpl;
   try {
-    await revalidateProjectCredential(db, projectSlug, actor, {
-      dataRoot: ctx.dataRoot,
-      ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-    });
+    await revalidateProjectCredential(db, projectSlug, actor, options);
   } catch {
     // tolerated — the credential works; chips upgrade on the next re-check
   }
@@ -167,11 +180,10 @@ async function probeRepoWithConnection(
   if (!token) {
     return { status: "unverified", detail: "its stored token could not be read" };
   }
-  const client = createGithubClient({
-    token,
-    ...(fetchImpl ? { fetchImpl } : {}),
-  });
-  const result = await client.request<unknown>("GET", `/repos/${repo}`);
+  const clientOptions: GithubClientOptions = { token };
+  if (fetchImpl) clientOptions.fetchImpl = fetchImpl;
+  const client = createGithubClient(clientOptions);
+  const result = await client.request("GET", `/repos/${repo}`, z.unknown());
   if (result.ok) return { status: "reachable" };
   if (result.kind === "network") {
     return {
@@ -241,9 +253,9 @@ export async function runSetCredential(
   // B-GH7: binding is a token USE. A connection whose cached "valid" has gone
   // stale gets re-proved here, so a token revoked on github.com is refused now
   // instead of being handed to a project as if it were healthy.
-  const fresh = await ensureConnectionFresh(db, connection.id, {
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  const freshOptions: FreshnessOptions = {};
+  if (ctx.fetchImpl) freshOptions.fetchImpl = ctx.fetchImpl;
+  const fresh = await ensureConnectionFresh(db, connection.id, freshOptions);
   // Only GitHub's own rejection refuses the bind — a never-validated connection
   // keeps its historical benefit of the doubt.
   if (fresh && fresh.validationState === "failed") {
@@ -279,10 +291,9 @@ export async function runSetCredential(
   // LV-05: the connection pill is derived from a 30 s memoized `checkRepoAccess`
   // probe. Without this the row kept saying "no credential" after a full reload.
   invalidateRepoAccess(db, projectSlug);
-  await proveAttachedCredential(db, projectSlug, actor, {
-    dataRoot: ctx.dataRoot,
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  const proveCtx: CredentialCallContext = { dataRoot: ctx.dataRoot };
+  if (ctx.fetchImpl) proveCtx.fetchImpl = ctx.fetchImpl;
+  await proveAttachedCredential(db, projectSlug, actor, proveCtx);
   const head = wasBound
     ? `Credential rotated to ${connection.owner}'s connection`
     : `Credential attached from ${connection.owner}'s connection`;

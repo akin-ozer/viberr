@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { taskDir } from "~/server/files/file-store-root.server";
@@ -41,6 +42,12 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
+
+/** The two columns these cases read back off a notification row. */
+const notificationReadRowSchema = z.object({
+  id: z.string(),
+  read_at: z.string().nullable(),
+});
 
 function actor(user: { id: string; email: string }) {
   return { userId: user.id, label: user.email };
@@ -333,7 +340,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
     // The override is audited with the exact reason it bypassed.
     const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
     expect(forced).toHaveLength(1);
-    expect((forced[0]!.details as { bypassed?: string }).bypassed).toContain("request");
+    expect(forced[0]!.details!.bypassed).toContain("request");
     // N20-14 (§5c): the bypass is also a DURABLE frontmatter fact, so the
     // hero/card don't recompute "awaiting verdict" onto the force-accepted Done
     // task. The audit row alone was not enough (deriveValidation re-derived it).
@@ -602,9 +609,15 @@ describe("transitionStage boundary enforcement", () => {
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
-    const row = store.db
-      .prepare(`SELECT read_at FROM notifications WHERE id = 'n-test-approval'`)
-      .get() as { read_at: string | null };
+    const row = notificationReadRowSchema
+      .pick({ read_at: true })
+      .parse(
+        store.db
+          .prepare(
+            `SELECT read_at FROM notifications WHERE id = 'n-test-approval'`,
+          )
+          .get(),
+      );
     expect(row.read_at).not.toBeNull();
   });
 });
@@ -697,7 +710,7 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(typeof file.parsed.frontmatter.boardRank).toBe("number");
+    expect(file.parsed.frontmatter.boardRank).toBeTypeOf("number");
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(stageOrder(store, "impl")).toEqual(["VIB-2", "VIB-3", "VIB-1"]);
 
@@ -1324,7 +1337,7 @@ describe("resolvePacket kind matrix", () => {
     ).toThrow();
     const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
     expect(
-      discarded.some((a) => (a.details as { basis?: string }).basis === "archive_cleanup"),
+      discarded.some((a) => a.details!.basis === "archive_cleanup"),
     ).toBe(true);
   });
 
@@ -1572,7 +1585,8 @@ describe("resolvePacket kind matrix", () => {
     );
     const rows = store.db
       .prepare(`SELECT id, read_at FROM notifications ORDER BY id`)
-      .all() as { id: string; read_at: string | null }[];
+      .all()
+      .map((row) => notificationReadRowSchema.parse(row));
     expect(rows.find((r) => r.id === "n-test-packet")?.read_at).not.toBeNull();
     // mention rows are NOT auto-read by packet resolution
     expect(rows.find((r) => r.id === "n-test-mention")?.read_at).toBeNull();

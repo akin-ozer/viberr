@@ -22,6 +22,11 @@ import type { MiddlewareFunction } from "react-router";
  * ever put in front) is reused so the id survives the hop.
  */
 
+/** What a correlation field may hold: a log record is JSON, and correlation is
+ *  the request's IDENTIFIERS (userId, runId, taskKey) plus counts/flags — never
+ *  a payload. Anything richer belongs in the call site's own `fields`. */
+export type CorrelationValue = string | number | boolean | null | undefined;
+
 /** Correlation fields merged into every log record made inside the context.
  *  Mutable: `bindCorrelation` adds ids (userId, runId, taskKey) as a request
  *  learns them, and every LATER record in that request carries them. */
@@ -29,7 +34,7 @@ export interface RequestCorrelation {
   requestId: string;
   method?: string;
   path?: string;
-  [field: string]: unknown;
+  [field: string]: CorrelationValue;
 }
 
 const storage = new AsyncLocalStorage<RequestCorrelation>();
@@ -51,11 +56,14 @@ export function correlationFor(request: Request): RequestCorrelation {
   } catch {
     path = undefined;
   }
-  return {
+  const correlation: RequestCorrelation = {
     requestId: inbound && inbound.length <= 128 ? inbound : newRequestId(),
     method: request.method,
-    ...(path ? { path } : {}),
   };
+  // A URL that would not parse has no path to correlate on — the key stays
+  // ABSENT so the log record does not carry an empty `path`.
+  if (path) correlation.path = path;
+  return correlation;
 }
 
 /** Runs `fn` with `correlation` bound to the current async execution. */
@@ -88,7 +96,9 @@ export function currentRequestId(): string | null {
  * runtime starts). No-op outside a request context, so call sites never need a
  * guard. `requestId` cannot be overwritten.
  */
-export function bindCorrelation(fields: Record<string, unknown>): void {
+export function bindCorrelation(
+  fields: Record<string, CorrelationValue>,
+): void {
   const store = storage.getStore();
   if (!store) return;
   for (const [key, value] of Object.entries(fields)) {

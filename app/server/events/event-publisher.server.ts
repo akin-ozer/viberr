@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { Readiness } from "~/schemas/task-file.schema";
+import { z } from "zod";
+import { READINESS_VALUES, type Readiness } from "~/schemas/task-file.schema";
 import { sseEventSchema, type SseEvent } from "~/schemas/sse-event.schema";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
@@ -125,7 +126,11 @@ export function translateProjectionEvent(
           route: { userId: e.userId },
         },
       ];
-    case "violation.updated":
+    case "violation.updated": {
+      // A project-scoped violation carries no task key: the route must stay
+      // project-wide rather than name an empty task.
+      const route: SseRoute = { projectSlug: e.projectSlug };
+      if (e.taskKey) route.taskKey = e.taskKey;
       return [
         {
           event: {
@@ -134,14 +139,22 @@ export function translateProjectionEvent(
             occurredAt: e.occurredAt,
             data: { projectSlug: e.projectSlug, taskKey: e.taskKey },
           },
-          route: {
-            projectSlug: e.projectSlug,
-            ...(e.taskKey ? { taskKey: e.taskKey } : {}),
-          },
+          route,
         },
       ];
+    }
   }
 }
+
+/** The two projected columns this publisher reads back, parsed at the DB
+ *  boundary: `stage` and `readiness` are both NOT NULL in the baseline schema
+ *  and `readiness` carries a CHECK over exactly `READINESS_VALUES`, so a row
+ *  that fails this parse is a corrupt projection — the publisher's caller logs
+ *  it rather than putting an invented fact on the wire. */
+const taskFactsRowSchema = z.object({
+  stage: z.string(),
+  readiness: z.enum(READINESS_VALUES),
+});
 
 export function readTaskFacts(
   db: DatabaseSync,
@@ -153,10 +166,8 @@ export function readTaskFacts(
       `SELECT stage, readiness FROM task_projections
        WHERE project_slug = ? AND task_key = ?`,
     )
-    .get(projectSlug, taskKey) as
-    | { stage: string; readiness: Readiness }
-    | undefined;
-  return row ? { stage: row.stage, readiness: row.readiness } : null;
+    .get(projectSlug, taskKey);
+  return row ? taskFactsRowSchema.parse(row) : null;
 }
 
 // -------------------------------------------------------------- lifecycle
@@ -167,12 +178,25 @@ interface PublisherState {
 
 const PUBLISHER_KEY = Symbol.for("viberr.eventPublisher");
 
+/** The single `globalThis` slot this module owns — the subscription survives an
+ *  HMR module reload, which a module-level variable would not. */
+interface PublisherHost {
+  [PUBLISHER_KEY]?: PublisherState;
+}
+
+function publisherHost(): PublisherHost {
+  // SAFETY: `PUBLISHER_KEY` is a registry symbol under a viberr-namespaced name
+  // that only `startEventPublisher` / `stopEventPublisherForTests` below read or
+  // write, so the slot holds either the state they put there or nothing at all.
+  return globalThis as PublisherHost;
+}
+
 /**
  * Starts the emitter→broker bridge (idempotent, HMR-safe). Called from
  * bootServer(). Uses getDb() lazily so it works before/without any request.
  */
 export function startEventPublisher(): void {
-  const cache = globalThis as unknown as Record<symbol, PublisherState | undefined>;
+  const cache = publisherHost();
   if (cache[PUBLISHER_KEY]) return;
 
   const unsubscribe = onProjectionEvent((e) => {
@@ -199,7 +223,7 @@ export function startEventPublisher(): void {
 
 /** Test-only: detach from the emitter. */
 export function stopEventPublisherForTests(): void {
-  const cache = globalThis as unknown as Record<symbol, PublisherState | undefined>;
+  const cache = publisherHost();
   cache[PUBLISHER_KEY]?.unsubscribe();
   cache[PUBLISHER_KEY] = undefined;
 }

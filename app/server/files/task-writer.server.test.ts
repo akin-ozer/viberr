@@ -14,6 +14,7 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import type { TaskFileEvent } from "~/schemas/task-file.schema";
+import { AppError } from "~/server/errors/app-error.server";
 import {
   readTaskFile,
   resolveTaskFilePath,
@@ -173,8 +174,9 @@ Context nobody wants to lose.
       thrown = error;
     }
     // The refusal names the task and the parse error, and points at the doctor.
-    expect((thrown as { code?: string }).code).toBe("file_not_trusted");
-    const userMessage = (thrown as { userMessage?: string }).userMessage ?? "";
+    if (!(thrown instanceof AppError)) throw thrown;
+    expect(thrown.code).toBe("file_not_trusted");
+    const userMessage = thrown.userMessage;
     expect(userMessage).toContain("VIB-8");
     expect(userMessage).toMatch(/unparseable/i);
     expect(userMessage).toContain("npm run store:check");

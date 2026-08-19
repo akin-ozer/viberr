@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   recordAudit,
   type AuditActor,
+  type AuditEventInput,
   SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
@@ -41,7 +42,7 @@ export interface ScopeViolationRecord {
   resolvedBy: string | null;
 }
 
-interface ScopeViolationRow {
+type ScopeViolationRow = {
   id: string;
   project_slug: string;
   task_key: string | null;
@@ -51,7 +52,7 @@ interface ScopeViolationRow {
   created_at: string;
   resolved_at: string | null;
   resolved_by: string | null;
-}
+};
 
 function mapRow(row: ScopeViolationRow): ScopeViolationRecord {
   return {
@@ -76,6 +77,8 @@ export function countOpenPolicyViolations(
   db: DatabaseSync,
   projectSlug: string,
 ): number {
+  // SAFETY: a `COUNT(*)` aggregate yields exactly one row whose `n` is the
+  // integer SQLite counted — 0 when nothing matched, never no row.
   const row = db
     .prepare(
       `SELECT COUNT(*) AS n FROM scope_violations
@@ -91,6 +94,9 @@ export function listScopeViolations(
   projectSlug: string,
   options: { status?: ScopeViolationStatus } = {},
 ): ScopeViolationRecord[] {
+  // SAFETY: ScopeViolationRow mirrors the nine `scope_violations` columns
+  // 0001_baseline declares, so `SELECT *` yields exactly it — including the
+  // CHECK that restricts `status` to the two ScopeViolationStatus values.
   const rows = (
     options.status
       ? db
@@ -107,7 +113,7 @@ export function listScopeViolations(
              ORDER BY created_at DESC, id DESC`,
           )
           .all(projectSlug)
-  ) as unknown as ScopeViolationRow[];
+  ) as ScopeViolationRow[];
   return rows.map(mapRow);
 }
 
@@ -115,6 +121,7 @@ export function getScopeViolation(
   db: DatabaseSync,
   id: string,
 ): ScopeViolationRecord | null {
+  // SAFETY: same `SELECT *` / column-list correspondence as listScopeViolations.
   const row = db
     .prepare(`SELECT * FROM scope_violations WHERE id = ?`)
     .get(id) as ScopeViolationRow | undefined;
@@ -128,6 +135,7 @@ export function findOpenScopeViolation(
   scope: string,
   taskKey: string | null,
 ): ScopeViolationRecord | null {
+  // SAFETY: same `SELECT *` / column-list correspondence as listScopeViolations.
   const row = db
     .prepare(
       `SELECT * FROM scope_violations
@@ -148,6 +156,13 @@ export interface OpenScopeViolationInput {
   actor?: AuditActor;
 }
 
+/** What `openScopeViolation` reports back: the row that now holds the
+ * violation, and whether this call is what opened it. */
+export interface OpenScopeViolationOutcome {
+  violation: ScopeViolationRecord;
+  created: boolean;
+}
+
 /**
  * Opens a violation. Idempotent: an existing OPEN row for the same
  * (project, scope, task) is returned with `created: false` and nothing is
@@ -156,7 +171,7 @@ export interface OpenScopeViolationInput {
 export function openScopeViolation(
   db: DatabaseSync,
   input: OpenScopeViolationInput,
-): { violation: ScopeViolationRecord; created: boolean } {
+): OpenScopeViolationOutcome {
   const taskKey = input.taskKey ?? null;
   const existing = findOpenScopeViolation(
     db,
@@ -190,15 +205,18 @@ export function openScopeViolation(
     record.detail,
     record.createdAt,
   );
-  recordAudit(db, {
+  const opened: AuditEventInput = {
     action: "github.scope_violation.opened",
     actor: input.actor ?? SYSTEM_ACTOR,
     subjectKind: "scope_violation",
     subjectId: record.id,
     projectSlug: record.projectSlug,
-    ...(record.taskKey ? { taskKey: record.taskKey } : {}),
     details: { scope: record.scope },
-  });
+  };
+  // A project-wide violation carries no task ref at all — the audit row must not
+  // claim one (ruling 5: rows carry their task, and only when they have one).
+  if (record.taskKey) opened.taskKey = record.taskKey;
+  recordAudit(db, opened);
   emitProjectionEvent({
     type: "violation.updated",
     projectSlug: record.projectSlug,
@@ -234,15 +252,16 @@ export function resolveScopeViolation(
     resolvedAt: now,
     resolvedBy: actor.userId ?? actor.label,
   };
-  recordAudit(db, {
+  const resolvedAudit: AuditEventInput = {
     action: "github.scope_violation.resolved",
     actor,
     subjectKind: "scope_violation",
     subjectId: id,
     projectSlug: violation.projectSlug,
-    ...(violation.taskKey ? { taskKey: violation.taskKey } : {}),
     details: { scope: violation.scope },
-  });
+  };
+  if (violation.taskKey) resolvedAudit.taskKey = violation.taskKey;
+  recordAudit(db, resolvedAudit);
   emitProjectionEvent({
     type: "violation.updated",
     projectSlug: violation.projectSlug,

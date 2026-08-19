@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import type {
   CodexOptions,
   RunStreamedResult,
@@ -18,20 +19,59 @@ import { insertRunLine, upsertRun } from "./run-store.server";
 import { runFailureReason } from "../tasks/agent-reply.server";
 import { resetEnvCacheForTests } from "../config/env.server";
 
+/**
+ * The seam that lets a fake stream carry events the SDK's own type forbids.
+ * That is the point: the adapter consumes a stream it did not write, so these
+ * tests feed it malformed, unknown and never-yielding streams on purpose.
+ */
 function asSdkEvents(
-  events: AsyncGenerator<unknown, void>,
+  events: AsyncIterable<unknown>,
 ): RunStreamedResult["events"] {
+  // SAFETY: nothing in this file dereferences an event as a `ThreadEvent` —
+  // every one is handed straight to the adapter, whose whole job is to decode
+  // (or survive) whatever the provider streamed.
   return events as RunStreamedResult["events"];
 }
 
-/** A fake Codex client: yields the given ThreadEvents, honors abort signal,
- *  and records the options passed to startThread. */
-function fakeCodex(events: unknown[]): {
+/**
+ * A stream that rejects on its first pull: the SDK's shape when the request
+ * fails before a single event arrives. Written as an explicit iterator because
+ * a stream that only ever throws is not a generator — it has nothing to yield.
+ */
+function failingEvents(error: Error): RunStreamedResult["events"] {
+  return asSdkEvents({
+    [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(error) }),
+  });
+}
+
+/**
+ * A stream whose first pull never settles until `signal` aborts — the idle
+ * guard is the only thing that can end the run.
+ */
+function stalledEvents(signal?: AbortSignal): RunStreamedResult["events"] {
+  return asSdkEvents({
+    [Symbol.asyncIterator]: () => ({
+      next: () =>
+        new Promise<IteratorResult<unknown>>((_resolve, reject) => {
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    }),
+  });
+}
+
+/** A fake Codex client plus the options each entry point recorded. */
+interface FakeCodex {
   factory: (options?: CodexOptions) => CodexClient;
   startOptions: () => ThreadOptions | undefined;
   resumeOptions: () => ThreadOptions | undefined;
   factoryOptions: () => CodexOptions | undefined;
-} {
+}
+
+/** A fake Codex client: yields the given ThreadEvents, honors abort signal,
+ *  and records the options passed to startThread. */
+function fakeCodex(events: unknown[]): FakeCodex {
   let startOpts: ThreadOptions | undefined;
   let resumeOpts: ThreadOptions | undefined;
   let factoryOpts: CodexOptions | undefined;
@@ -210,10 +250,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    const revOpts = reviewer.startOptions() as {
-      sandboxMode?: string;
-      networkAccessEnabled?: boolean;
-    };
+    const revOpts = reviewer.startOptions()!;
     expect(revOpts.sandboxMode).toBe("read-only");
     expect(revOpts.networkAccessEnabled).toBeUndefined();
   });
@@ -232,11 +269,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    const withheldOpts = withheld.startOptions() as {
-      webSearchMode?: string;
-      networkAccessEnabled?: boolean;
-      sandboxMode?: string;
-    };
+    const withheldOpts = withheld.startOptions()!;
     expect(withheldOpts.webSearchMode).toBe("disabled");
     // Only the WEB SEARCH tool goes: declared MCP servers and the workspace's
     // own tooling still need the network, and a delivering run still writes.
@@ -249,9 +282,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
       onExit: () => {},
     });
     await drain();
-    expect(
-      (granted.startOptions() as { webSearchMode?: string }).webSearchMode,
-    ).toBeUndefined();
+    expect(granted.startOptions()!.webSearchMode).toBeUndefined();
   });
 
   it("keeps subscription auth in the CLI env but out of generated shells", async () => {
@@ -333,7 +364,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
     const events = [
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
     ];
-    let factoryOpts: { env?: Record<string, string> } | undefined;
+    let factoryOpts: CodexOptions | undefined;
     const client: CodexClient = {
       startThread: (o) => {
         void o;
@@ -357,8 +388,8 @@ describe("codex adapter (SDK, injected fake client)", () => {
         },
       }),
     };
-    const factory = (opts?: unknown) => {
-      factoryOpts = opts as { env?: Record<string, string> } | undefined;
+    const factory = (opts?: CodexOptions) => {
+      factoryOpts = opts;
       return client;
     };
     createCodexAdapter({ codexFactory: factory }).start(
@@ -482,10 +513,8 @@ describe("codex adapter (SDK, injected fake client)", () => {
       id: "thread-1",
       async runStreamed() {
         return {
-          events: asSdkEvents(
-            (async function* () {
-              throw new Error("request failed with sk-secretsentinel0123456789");
-            })(),
+          events: failingEvents(
+            new Error("request failed with sk-secretsentinel0123456789"),
           ),
         };
       },
@@ -520,10 +549,8 @@ describe("codex adapter (SDK, injected fake client)", () => {
       id: "thread-1",
       async runStreamed() {
         return {
-          events: asSdkEvents(
-            (async function* () {
-              throw new Error("401 unauthorized for token sk-secretsentinel0123456789");
-            })(),
+          events: failingEvents(
+            new Error("401 unauthorized for token sk-secretsentinel0123456789"),
           ),
         };
       },
@@ -554,10 +581,10 @@ describe("codex adapter (SDK, injected fake client)", () => {
       id: "thread-1",
       async runStreamed() {
         return {
-          events: asSdkEvents(
-            (async function* () {
-              throw new Error("429 rate limit: internal request id sk-secretsentinel0123456789");
-            })(),
+          events: failingEvents(
+            new Error(
+              "429 rate limit: internal request id sk-secretsentinel0123456789",
+            ),
           ),
         };
       },
@@ -657,11 +684,7 @@ describe("codex failure classification survives redaction into runFailureReason 
       id: "thread-1",
       async runStreamed() {
         return {
-          events: asSdkEvents(
-            (async function* () {
-              throw new Error(message);
-            })(),
-          ),
+          events: failingEvents(new Error(message)),
         };
       },
     };
@@ -763,10 +786,8 @@ describe("codex failure classification survives redaction into runFailureReason 
       id: "thread-1",
       async runStreamed() {
         return {
-          events: asSdkEvents(
-            (async function* () {
-              throw new Error("usage limit exceeded — sk-secretsentinel0123456789");
-            })(),
+          events: failingEvents(
+            new Error("usage limit exceeded — sk-secretsentinel0123456789"),
           ),
         };
       },
@@ -933,6 +954,10 @@ describe("git identity reaches the model's shell (P13-RT-10)", () => {
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
+    // SAFETY: the SDK types every config leaf as its recursive value union, but
+    // this leaf is one the ADAPTER writes: `codexConfigForRun` builds
+    // `shell_environment_policy` and names `set` only when there is something to
+    // export, as a string table (`ShellExportedEnv`).
     const policy = run.factoryOptions()?.config?.shell_environment_policy as {
       set?: Record<string, string>;
     };
@@ -958,16 +983,8 @@ describe("codex idle timeout classifies as a hang, not a generic failure (P13-RT
       async runStreamed(_input, turnOptions) {
         const signal = turnOptions?.signal;
         return {
-          events: asSdkEvents(
-            (async function* () {
-              // Never yields — the idle guard is the only thing that settles it.
-              await new Promise((_resolve, reject) => {
-                signal?.addEventListener("abort", () =>
-                  reject(new DOMException("aborted", "AbortError")),
-                );
-              });
-            })(),
-          ),
+          // Never emits — the idle guard is the only thing that settles it.
+          events: stalledEvents(signal),
         };
       },
     };
@@ -995,9 +1012,16 @@ describe("D5 — the verified SDK version is a fact, not a claim", () => {
   /** The repo's DECLARED `@openai/codex-sdk` range, base version only. */
   async function declaredSdkVersion(): Promise<string> {
     const { readFileSync } = await import("node:fs");
-    const pkg = JSON.parse(
-      readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
-    ) as { dependencies: Record<string, string> };
+    const pkg = z
+      .object({ dependencies: z.record(z.string(), z.string()) })
+      .parse(
+        JSON.parse(
+          readFileSync(
+            new URL("../../../package.json", import.meta.url),
+            "utf8",
+          ),
+        ),
+      );
     return pkg.dependencies["@openai/codex-sdk"]!.replace(/^[\^~]/, "");
   }
 
@@ -1067,9 +1091,12 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
 
   it("mounts a credentialed org MCP server UNAUTHENTICATED — the token is dropped, not the server", async () => {
     const config = await configWith({ mcpServers: CREDENTIALED_SERVERS });
-    const servers = (config?.mcp_servers ?? {}) as Record<
-      string,
-      Record<string, unknown>
+    // SAFETY: `mcp_servers` is a leaf the ADAPTER writes — one table per
+    // declared server (see the mcpServers translation in codex-runtime.server) —
+    // so reading it back as a config table is the shape it was written as. The
+    // assertions below check the whole table, so nothing may be stripped here.
+    const servers = (config?.mcp_servers ?? {}) as NonNullable<
+      CodexOptions["config"]
     >;
 
     // The server still mounts (dropping it silently would be the dishonest fix).

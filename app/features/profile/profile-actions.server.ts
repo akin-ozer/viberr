@@ -42,13 +42,18 @@ export interface ProfileActor {
   label: string;
 }
 
+/** What a profile mutation hands the route: the one line it toasts. */
+export interface ProfileToast {
+  toast: string;
+}
+
 /** Name/Title blur-commit. Toast copy is the mock's, parameterized with
  * the first membership's project name (single-project mock literal). */
 export function updateProfileIdentity(
   db: DatabaseSync,
   actor: ProfileActor,
   input: { name: string; title: string },
-): { toast: string } {
+): ProfileToast {
   const name = input.name.trim();
   if (!name) {
     throw AppError.validation("Display name can't be empty.");
@@ -169,7 +174,7 @@ export async function changeOwnPassword(
 export function disconnectGithubIdentity(
   db: DatabaseSync,
   actor: ProfileActor,
-): { toast: string } {
+): ProfileToast {
   const user = findUserById(db, actor.userId);
   if (!user) throw AppError.notFound("Account not found.");
   if (user.idp !== "github") {

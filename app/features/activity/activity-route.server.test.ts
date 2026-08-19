@@ -3,7 +3,6 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import type { ActivityStreamRowView, AuditLogEntryView } from "./feed-helpers";
 
 /**
  * Route-level tests for /projects/:slug/activity against the seeded demo
@@ -26,6 +25,9 @@ afterAll(() => app.cleanup());
 
 async function runLoader(slug: string, cookie?: string) {
   const { loader } = await import("~/routes/project.activity");
+  // SAFETY: the loader reads only `request` and `params.slug`; the rest of the
+  // generated `Route.LoaderArgs` (the router context provider, its matches) is
+  // untouched on every path this file exercises.
   return loader({
     request: app.request(
       `/projects/${slug}/activity`,
@@ -40,6 +42,7 @@ describe("/projects/:slug/activity", () => {
   it("redirects signed-out users to /login", async () => {
     const thrown = await runLoader("viberr-core").catch((e) => e);
     expect(thrown).toBeInstanceOf(Response);
+    // SAFETY: the assertion above already failed the test if it is not one.
     expect((thrown as Response).status).toBe(302);
   });
 
@@ -51,11 +54,7 @@ describe("/projects/:slug/activity", () => {
 
   it("returns the flattened seeded stream, newest first, with real actors", async () => {
     const { cookie } = await app.cookieFor(ardaId);
-    const result = (await runLoader("viberr-core", cookie)) as {
-      projectName: string;
-      stream: ActivityStreamRowView[];
-      audit: AuditLogEntryView[];
-    };
+    const result = await runLoader("viberr-core", cookie);
 
     expect(result.projectName).toBe("Viberr Core");
     // All 32 seeded events across the 10 tasks, one flat feed.
@@ -79,9 +78,7 @@ describe("/projects/:slug/activity", () => {
 
   it("audit panel carries the seeded open violation from scope_violations", async () => {
     const { cookie } = await app.cookieFor(ardaId);
-    const result = (await runLoader("viberr-core", cookie)) as {
-      audit: AuditLogEntryView[];
-    };
+    const result = await runLoader("viberr-core", cookie);
     const violation = result.audit.find((e) => e.kind === "violation");
     expect(violation).toBeDefined();
     expect(violation!.status).toBe("open");
@@ -93,10 +90,7 @@ describe("/projects/:slug/activity", () => {
 
   it("stub projects load their own task's stream (DEP-31 lives there now)", async () => {
     const { cookie } = await app.cookieFor(ardaId);
-    const result = (await runLoader("deploy-pipeline", cookie)) as {
-      stream: ActivityStreamRowView[];
-      audit: AuditLogEntryView[];
-    };
+    const result = await runLoader("deploy-pipeline", cookie);
     // The stub project carries a real task (DEP-31) so its cross-project
     // notification navigates to a real record — the stream shows its events
     // and nothing from other projects.

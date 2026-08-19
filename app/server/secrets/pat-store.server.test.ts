@@ -54,6 +54,8 @@ describe("pat-store", () => {
     expect(pat.label).toBe("viberr-bot · fine-grained PAT");
 
     // Encrypted at rest: the raw row never contains the token.
+    // SAFETY: the SELECT list is the single `github_pats.encrypted_token` column
+    // (TEXT NOT NULL), read back by the id `createPat` just returned.
     const row = store.db
       .prepare(`SELECT encrypted_token FROM github_pats WHERE id = ?`)
       .get(pat.id) as { encrypted_token: string };

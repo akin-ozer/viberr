@@ -79,10 +79,10 @@ export interface ProjectMemberIds {
   userId: string;
 }
 
-interface UserHandleRow {
+type UserHandleRow = {
   id: string;
   name: string | null;
-}
+};
 
 /**
  * Resolve a GitHub login to a Viberr user id — case-insensitively, and only
@@ -96,13 +96,16 @@ export function resolveGithubHandle(
 ): { kind: "found"; userId: string; name: string } | { kind: "none" } | { kind: "ambiguous" } {
   const handle = login.trim().toLowerCase().replace(/^@/, "");
   if (!handle) return { kind: "none" };
+  // SAFETY: both selected columns are declared TEXT on `users`
+  // (0001_baseline.sql — `name` NOT NULL, so the nullable read below is a
+  // defensive widening), and `all` returns one object per matching row.
   const rows = db
     .prepare(
       `SELECT id, name FROM users
         WHERE lower(github_handle) = ? AND disabled = 0
         ORDER BY id ASC`,
     )
-    .all(handle) as unknown as UserHandleRow[];
+    .all(handle) as UserHandleRow[];
   if (rows.length === 0) return { kind: "none" };
   if (rows.length > 1) return { kind: "ambiguous" };
   const row = rows[0]!;
@@ -163,13 +166,13 @@ export function derivePrHumanApproval(input: {
     };
   });
   if (classified.length === 0) return null;
-  const rank: Record<PrApprovalStatus, number> = {
+  const rank = {
     counted: 0,
     stale_revision: 1,
     not_a_member: 2,
     ambiguous_handle: 3,
     unlinked_handle: 4,
-  };
+  } satisfies Record<PrApprovalStatus, number>;
   return classified.sort((a, b) => rank[a.status] - rank[b.status])[0]!;
 }
 
@@ -177,7 +180,9 @@ export function derivePrHumanApproval(input: {
  *  Never throws: a hand-edited task.md must not break a read path. */
 export function readPrHumanApproval(pr: PrRef | null | undefined): PrHumanApproval | null {
   if (!pr) return null;
-  const raw = (pr as unknown as Record<string, unknown>)[PR_HUMAN_APPROVAL_KEY];
+  // `pr` is a LOOSE schema — unknown keys survive parsing, which is what lets
+  // this record ride along on the ref without a schema change.
+  const raw = pr[PR_HUMAN_APPROVAL_KEY];
   if (raw === undefined || raw === null) return null;
   const parsed = prHumanApprovalSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;

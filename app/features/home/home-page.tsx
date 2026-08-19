@@ -101,9 +101,11 @@ export function HomePage({
 
   // Optimistic prefs: reflect an in-flight pin/view submit immediately.
   const optimistic = prefsFetcher.formData;
+  const pendingView =
+    optimistic?.get("intent") === "view" ? optimistic.get("view") : null;
   const view: "grid" | "list" =
-    optimistic?.get("intent") === "view"
-      ? (optimistic.get("view") as "grid" | "list")
+    pendingView === "grid" || pendingView === "list"
+      ? pendingView
       : data.prefs.view;
   const stars = useMemo(() => {
     const s = { ...data.prefs.stars };

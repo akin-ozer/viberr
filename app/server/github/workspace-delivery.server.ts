@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type {
   FileActorRef,
   PrRef,
@@ -72,6 +73,21 @@ export type CommandExec = (
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * What a rejected `execFile` promise carries. Node hangs these fields on the
+ * error object rather than any declared type, so each is decoded on its own: a
+ * rejection whose `stderr` came back as a Buffer must still yield the exit code.
+ * `stderr: null` means the rejection carried no usable text and the caller falls
+ * back to the error's own message.
+ */
+const execFileRejection = z
+  .object({
+    stdout: z.string().catch(""),
+    stderr: z.string().nullable().catch(null),
+    code: z.number().nullable().catch(null),
+  })
+  .catch(() => ({ stdout: "", stderr: null, code: null }));
+
 const defaultExec: CommandExec = async (file, args, opts) => {
   try {
     const { stdout } = await execFileAsync(file, args, {
@@ -81,17 +97,14 @@ const defaultExec: CommandExec = async (file, args, opts) => {
     });
     return { ok: true, stdout: stdout.toString() };
   } catch (error) {
-    const err = error as { stdout?: unknown; stderr?: unknown; code?: number };
+    const rejection = execFileRejection.parse(error);
     return {
       ok: false,
-      stdout: typeof err.stdout === "string" ? err.stdout : "",
+      stdout: rejection.stdout,
       stderr:
-        typeof err.stderr === "string"
-          ? err.stderr
-          : error instanceof Error
-            ? error.message
-            : String(error),
-      code: typeof err.code === "number" ? err.code : null,
+        rejection.stderr ??
+        (error instanceof Error ? error.message : String(error)),
+      code: rejection.code,
     };
   }
 };
@@ -154,8 +167,8 @@ function githubEvent(actor: FileActorRef, text: string): TaskFileEvent {
 
 /** Map `gh`'s GraphQL PR-state enum (OPEN|CLOSED|MERGED) to the task-file cache
  *  vocabulary (open → "review") so it matches the server delivery path. */
-function mapGhStateToCache(raw: unknown): PrCacheState {
-  const s = String(raw ?? "OPEN").toUpperCase();
+function mapGhStateToCache(raw: string | null): PrCacheState {
+  const s = (raw ?? "OPEN").toUpperCase();
   if (s === "MERGED") return "merged";
   if (s === "CLOSED") return "closed";
   return "review";
@@ -175,18 +188,37 @@ function parseOneline(stdout: string): { sha: string; msg: string }[] {
     });
 }
 
-function safeJsonObject(stdout: string): Record<string, unknown> | null {
+/**
+ * What `gh pr view --json number,state,title,headRefOid` prints, decoded at the
+ * process boundary. `gh` is the AGENT's own binary at whatever version its
+ * workspace carries, so every field is decoded on its own: a field it stopped
+ * printing (or prints differently) must not cost us the PR number, the one value
+ * this reconciler cannot proceed without. A payload that is not an object at all
+ * decodes to the all-absent case, which reads exactly like "gh found no PR".
+ */
+const ghPrPayload = z.preprocess(
+  // `gh pr view --json` prints an object; `gh pr list --json` an array.
+  (payload) => (Array.isArray(payload) ? payload[0] : payload),
+  z
+    .object({
+      number: z.number().nullable().catch(null),
+      state: z.string().nullable().catch(null),
+      title: z.string().catch(""),
+      /** The adoption rule's subject (R16-1). */
+      headRefOid: z.string().nullable().catch(null),
+    })
+    .catch(() => ({ number: null, state: null, title: "", headRefOid: null })),
+);
+
+type GhPrFacts = z.infer<typeof ghPrPayload>;
+
+/** Decode one `gh pr view` invocation; output that is not JSON at all joins the
+ *  all-absent case above. */
+function parseGhPr(stdout: string): GhPrFacts {
   try {
-    const parsed: unknown = JSON.parse(stdout);
-    // `gh pr view --json` returns an object; `gh pr list --json` an array.
-    if (Array.isArray(parsed)) {
-      return (parsed[0] as Record<string, unknown> | undefined) ?? null;
-    }
-    return parsed && typeof parsed === "object"
-      ? (parsed as Record<string, unknown>)
-      : null;
+    return ghPrPayload.parse(JSON.parse(stdout));
   } catch {
-    return null;
+    return ghPrPayload.parse(null);
   }
 }
 
@@ -455,15 +487,15 @@ export async function reconcileWorkspaceDelivery(
         { cwd: repoDir, timeoutMs: 8_000 },
       );
       if (prRes.ok && prRes.stdout.trim()) {
-        const obj = safeJsonObject(prRes.stdout);
-        const number = obj && typeof obj.number === "number" ? obj.number : null;
+        const view = parseGhPr(prRes.stdout);
+        const number = view.number;
         if (number !== null) {
           // `gh` returns the GraphQL enum OPEN|CLOSED|MERGED; map it to the
           // SAME cache vocabulary the server delivery path uses (open →
           // "review"). Comparing/writing gh's raw "open" against the
           // canonical "review" would treat an already-linked PR as new and
           // ping-pong the state on every reconcile.
-          const liveState = mapGhStateToCache(obj?.state);
+          const liveState = mapGhStateToCache(view.state);
           const cur = fm.pr;
           const samePr = !!cur && cur.number === number;
           // R16-1 — this is the path that bound merged PR #113 to a brand-new
@@ -475,8 +507,7 @@ export async function reconcileWorkspaceDelivery(
             ? { adopt: true as const }
             : decidePrAdoption({
                 state: liveState,
-                prHeadSha:
-                  typeof obj?.headRefOid === "string" ? obj.headRefOid : null,
+                prHeadSha: view.headRefOid,
                 revisionHeadSha:
                   workRevisionPatch?.headSha ?? fm.workRevision?.headSha ?? null,
               });
@@ -534,7 +565,7 @@ export async function reconcileWorkspaceDelivery(
               samePr && cur.state === "accepted" && liveState === "review"
                 ? "accepted"
                 : liveState,
-            title: typeof obj?.title === "string" ? obj.title : "",
+            title: view.title,
           };
           const stale =
             !cur || cur.number !== detected.number || cur.state !== detected.state;

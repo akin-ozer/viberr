@@ -14,7 +14,12 @@ import {
   resolveStageOrder,
   stageMoveOptions,
 } from "./settings-page";
-import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { roleCan, type ProjectRole, type RbacAction } from "~/shared/rbac";
+
+/** The one action id `roleCan` may answer true for; null delegates to the real one. */
+interface GrantOnlyGate {
+  action: RbacAction | null;
+}
 
 /**
  * E3: `edit-policy`, `manage-members` and `grant-github-scope` are three
@@ -26,16 +31,17 @@ import { roleCan, type ProjectRole } from "~/shared/rbac";
  * the id it actually asks for and no other. Left null it delegates to the real
  * implementation, so every other test in this file sees production behaviour.
  */
-const { grantOnly } = vi.hoisted(() => ({
-  grantOnly: { action: null as string | null },
-}));
+const { grantOnly } = vi.hoisted(() => {
+  const grantOnly: GrantOnlyGate = { action: null };
+  return { grantOnly };
+});
 vi.mock("~/shared/rbac", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/shared/rbac")>();
   return {
     ...actual,
-    roleCan: (role: ProjectRole | null | undefined, action: string) =>
+    roleCan: (role: ProjectRole | null | undefined, action: RbacAction) =>
       grantOnly.action === null
-        ? actual.roleCan(role, action as Parameters<typeof actual.roleCan>[1])
+        ? actual.roleCan(role, action)
         : action === grantOnly.action,
   };
 });
@@ -131,6 +137,9 @@ describe("ProjectPanel", () => {
     const { getByDisplayValue } = render(
       <ProjectPanel project={PROJECT} canManage onSave={() => {}} />,
     );
+    // SAFETY: the prefix field is the `<input>` ProjectPanel renders for
+    // `project.prefix`; RTL's bound queries are typed `HTMLElement` for every
+    // element kind, so the input-only `value` read below needs the narrowing.
     const prefix = getByDisplayValue("VIB") as HTMLInputElement;
     fireEvent.change(prefix, { target: { value: "corex" } });
     expect(prefix.value).toBe("CORE");
@@ -145,9 +154,11 @@ describe("ProjectPanel", () => {
     );
     // Still inert…
     expect(
-      Array.from(container.querySelectorAll("input, textarea")).every(
-        (f) => (f as HTMLInputElement).disabled,
-      ),
+      Array.from(
+        container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          "input, textarea",
+        ),
+      ).every((f) => f.disabled),
     ).toBe(true);
     // …and now it says why. F20-16: the honest grant name + tier.
     expect(container.textContent).toContain("Read-only");
@@ -192,7 +203,11 @@ describe("StagesPanel", () => {
     const { container, getByLabelText } = render(
       <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
     );
+    // SAFETY: "Remove <stage>" is the aria-label StagesPanel puts on the
+    // `<button class="stg-x">` remove control, and only on that control — RTL's
+    // bound queries type every hit as `HTMLElement`.
     const entry = getByLabelText("Remove Triage") as HTMLButtonElement;
+    // SAFETY: the terminal stage's remove control, same label contract.
     const terminal = getByLabelText("Remove Done") as HTMLButtonElement;
     expect(entry.disabled).toBe(true);
     expect(terminal.disabled).toBe(true);
@@ -202,6 +217,7 @@ describe("StagesPanel", () => {
 
     // A middle stage stays actionable for a manager (the client-side non-empty
     // guard lives in the handler, not in `disabled`).
+    // SAFETY: same remove-control label as above, for a middle stage.
     const middle = getByLabelText("Remove Ready") as HTMLButtonElement;
     expect(middle.disabled).toBe(false);
     expect(container.querySelectorAll(".stg-x:disabled")).toHaveLength(2);
@@ -238,10 +254,10 @@ describe("StagesPanel", () => {
         onRemove={() => {}}
       />,
     );
-    const input = container.querySelector(".stg-input") as HTMLInputElement;
+    const input = container.querySelector<HTMLInputElement>(".stg-input");
     expect(input).not.toBeNull();
-    fireEvent.change(input, { target: { value: "Groomed" } });
-    fireEvent.blur(input);
+    fireEvent.change(input!, { target: { value: "Groomed" } });
+    fireEvent.blur(input!);
     expect(onRename).toHaveBeenCalledWith("ready", "Groomed");
     expect(setEditingId).toHaveBeenCalledWith(null);
   });
@@ -252,8 +268,8 @@ describe("StagesPanel", () => {
     );
     expect(queryByText("Add stage")).toBeNull();
     expect(
-      Array.from(container.querySelectorAll(".stg-x")).every(
-        (b) => (b as HTMLButtonElement).disabled,
+      Array.from(container.querySelectorAll<HTMLButtonElement>(".stg-x")).every(
+        (b) => b.disabled,
       ),
     ).toBe(true);
     // No Move control either — reordering is a manage action.
@@ -337,6 +353,9 @@ describe("StagesPanel", () => {
       const { getByLabelText } = render(
         <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
       );
+      // SAFETY: "Move <stage> — currently stage N of M" is the aria-label of
+      // the row's `<button>` menu trigger; the test needs the element identity
+      // back as a focus target, which RTL hands over as a bare `HTMLElement`.
       const trigger = getByLabelText(
         "Move In Progress — currently stage 3 of 5",
       ) as HTMLButtonElement;
@@ -507,8 +526,14 @@ describe("MembersPanel", () => {
     fireEvent.click(getByText("Invite"));
     expect(onInvite).not.toHaveBeenCalled(); // empty form → client toast only
 
+    // SAFETY: both placeholders belong to the invite row's two `<input>`s —
+    // MembersPanel renders no other node carrying them — so the `value` reads
+    // after the submit are sound on RTL's `HTMLElement`-typed hits.
     const nameInput = getByPlaceholderText("Full name") as HTMLInputElement;
-    const emailInput = getByPlaceholderText("email@company.dev") as HTMLInputElement;
+    // SAFETY: the invite row's second `<input>`, per the same contract.
+    const emailInput = getByPlaceholderText(
+      "email@company.dev",
+    ) as HTMLInputElement;
     fireEvent.change(nameInput, { target: { value: "Deniz Şahin" } });
     fireEvent.change(emailInput, { target: { value: "Deniz@viberr.dev" } });
     fireEvent.keyDown(emailInput, { key: "Enter" }); // email field submits
@@ -545,7 +570,11 @@ describe("MembersPanel", () => {
     }
 
     // The whole point: the name is still on screen once the field is filled.
+    // SAFETY: the two labels asserted above are `<label for>`-bound to the
+    // invite row's `<input>`s, which is what makes `.id` and `fireEvent.change`
+    // below meaningful; RTL types the hits as `HTMLElement`.
     const name = getByLabelText(/Full name/) as HTMLInputElement;
+    // SAFETY: the invite row's email `<input>`, per the same label binding.
     const email = getByLabelText(/Email/) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Deniz Şahin" } });
     fireEvent.change(email, { target: { value: "deniz@viberr.dev" } });
@@ -869,8 +898,8 @@ describe("DangerZone", () => {
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
 
     const confirmButton = Array.from(
-      container.querySelectorAll(".confirm-actions .btn.danger"),
-    )[0] as HTMLButtonElement;
+      container.querySelectorAll<HTMLButtonElement>(".confirm-actions .btn.danger"),
+    )[0]!;
     expect(confirmButton.disabled).toBe(true); // name not typed yet
 
     fireEvent.change(getByPlaceholderText("Viberr Core"), {
@@ -914,8 +943,12 @@ describe("DangerZone", () => {
       ).container;
 
     const viewer = dz("viewer");
-    const viewerArchive = viewer.querySelector(".dz-row .btn.ghost") as HTMLButtonElement;
-    const viewerDelete = viewer.querySelector(".dz-row .btn.danger") as HTMLButtonElement;
+    const viewerArchive = viewer.querySelector<HTMLButtonElement>(
+      ".dz-row .btn.ghost",
+    )!;
+    const viewerDelete = viewer.querySelector<HTMLButtonElement>(
+      ".dz-row .btn.danger",
+    )!;
     expect(viewerArchive.disabled).toBe(true);
     expect(viewerDelete.disabled).toBe(true);
     // The denial is explained rather than left as unexplained dimming.
@@ -925,12 +958,12 @@ describe("DangerZone", () => {
     cleanup();
 
     const admin = dz("admin");
-    expect((admin.querySelector(".dz-row .btn.ghost") as HTMLButtonElement).disabled).toBe(
-      false,
-    );
-    expect((admin.querySelector(".dz-row .btn.danger") as HTMLButtonElement).disabled).toBe(
-      false,
-    );
+    expect(
+      admin.querySelector<HTMLButtonElement>(".dz-row .btn.ghost")!.disabled,
+    ).toBe(false);
+    expect(
+      admin.querySelector<HTMLButtonElement>(".dz-row .btn.danger")!.disabled,
+    ).toBe(false);
   });
 
   // RU-3: the danger-zone gate must track the SAME ACTION_ROLES entry the server
@@ -952,8 +985,12 @@ describe("DangerZone", () => {
         />,
       );
       const expectedEnabled = roleCan(role, "edit-policy");
-      const archive = container.querySelector(".dz-row .btn.ghost") as HTMLButtonElement;
-      const del = container.querySelector(".dz-row .btn.danger") as HTMLButtonElement;
+      const archive = container.querySelector<HTMLButtonElement>(
+        ".dz-row .btn.ghost",
+      )!;
+      const del = container.querySelector<HTMLButtonElement>(
+        ".dz-row .btn.danger",
+      )!;
       expect(archive.disabled).toBe(!expectedEnabled);
       expect(del.disabled).toBe(!expectedEnabled);
       cleanup();
@@ -997,7 +1034,7 @@ describe("SettingsPage — each panel gates on the action its own server guard c
     return {
       // ProjectPanel: identity inputs are present either way, enabled only for
       // a manager — so read the property, not presence.
-      identity: !(container.querySelector("#set-project-name") as HTMLInputElement)
+      identity: !container.querySelector<HTMLInputElement>("#set-project-name")!
         .disabled,
       stages: Boolean(
         Array.from(container.querySelectorAll("button")).find(
@@ -1080,16 +1117,16 @@ describe("SettingsPage — each panel gates on the action its own server guard c
   // mere presence.
   it("the after-merge branch-cleanup toggle follows edit-policy, not manage-members", () => {
     grantOnly.action = "manage-members";
-    const shut = renderPage().container.querySelector(
+    const shut = renderPage().container.querySelector<HTMLInputElement>(
       '.kv-row input[type="checkbox"]',
-    ) as HTMLInputElement;
+    )!;
     expect(shut.disabled).toBe(true);
     cleanup();
 
     grantOnly.action = "edit-policy";
-    const open = renderPage().container.querySelector(
+    const open = renderPage().container.querySelector<HTMLInputElement>(
       '.kv-row input[type="checkbox"]',
-    ) as HTMLInputElement;
+    )!;
     expect(open.disabled).toBe(false);
   });
 });
@@ -1172,8 +1209,12 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     const container = renderPageAs("admin");
     expect(dangerHeading(container)).not.toBeNull();
     expect(container.querySelector(".danger-panel")).not.toBeNull();
-    const archive = container.querySelector(".dz-row .btn.ghost") as HTMLButtonElement;
-    const del = container.querySelector(".dz-row .btn.danger") as HTMLButtonElement;
+    const archive = container.querySelector<HTMLButtonElement>(
+      ".dz-row .btn.ghost",
+    )!;
+    const del = container.querySelector<HTMLButtonElement>(
+      ".dz-row .btn.danger",
+    )!;
     expect(archive.disabled).toBe(false);
     expect(del.disabled).toBe(false);
   });

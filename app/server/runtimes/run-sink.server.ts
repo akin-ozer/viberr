@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { LogLine, RunBackend, RunState } from "~/features/runtime/runtime-types";
 import { logger } from "~/server/logging/logger.server";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
@@ -9,10 +10,11 @@ import {
   insertRunLine,
   nextSeq,
   patchRun,
+  type RunPatch,
 } from "./run-store.server";
 import {
   REDACTED,
-  TOKEN_SHAPE_SOURCE,
+  TOKEN_PATTERN_SOURCE,
 } from "~/server/secrets/git-output-redact.server";
 
 /** Terminal run states — reaching one is the run's final answer. */
@@ -36,12 +38,22 @@ export function resolveTerminalState(
   return current !== null && TERMINAL_STATES.includes(current) ? current : desired;
 }
 
+/** `agent_runs.state` as stored: the column's CHECK constraint admits exactly
+ *  these five values, so anything else is not a lifecycle this code can reason
+ *  about — and is treated like an unreadable row below. */
+const storedRunStateSchema = z.enum([
+  "queued",
+  "running",
+  "finished",
+  "error",
+  "interrupted",
+] as const satisfies readonly RunState[]);
+
 function currentRunState(db: DatabaseSync, runId: string): RunState | null {
   try {
-    const row = db
-      .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
-      .get(runId) as { state: RunState } | undefined;
-    return row?.state ?? null;
+    const row = db.prepare(`SELECT state FROM agent_runs WHERE id = ?`).get(runId);
+    const parsed = storedRunStateSchema.safeParse(row?.state);
+    return parsed.success ? parsed.data : null;
   } catch {
     // An unreadable row must not stop a run from finalizing; the desired state
     // is then the best information available.
@@ -86,13 +98,14 @@ export const LINE_LOST_TAG = "run·line_lost";
  *   1. exact values — every credential-shaped variable in THIS process's env
  *      (same regex the spawn filter uses), which by construction includes the
  *      values the app injected;
- *   2. token SHAPES — provider/PAT prefixes that are secrets wherever they came
- *      from (a PAT the agent minted itself, a key a human pasted into a prompt).
+ *   2. token PATTERNS — provider/PAT prefixes that are secrets wherever they
+ *      came from (a PAT the agent minted itself, a key a human pasted into a
+ *      prompt).
  *
  * Deliberately NOT a generic entropy heuristic: mangling ordinary output is a
  * worse failure than the leak. Nothing else is touched.
  *
- * `REDACTED` and the token SHAPES are the single canonical copy in
+ * `REDACTED` and the token PATTERNS are the single canonical copy in
  * `git-output-redact.server` (which scrubs git's own output the same way); this
  * run-log path imports them so the two can never drift.
  */
@@ -118,13 +131,13 @@ export function createLineRedactor(
 ): (text: string) => string {
   const values = new Set<string>();
   for (const [key, value] of Object.entries(env)) {
-    if (typeof value !== "string" || value.length < MIN_SECRET_VALUE_LEN) continue;
+    if (value === undefined || value.length < MIN_SECRET_VALUE_LEN) continue;
     if (!CREDENTIAL_ENV_RE.test(key)) continue;
     values.add(value);
   }
   // Longest first so a credential that contains another one is fully replaced.
   const literals = [...values].sort((a, b) => b.length - a.length).map(escapeRegExp);
-  const re = new RegExp([...literals, TOKEN_SHAPE_SOURCE].join("|"), "g");
+  const re = new RegExp([...literals, TOKEN_PATTERN_SOURCE].join("|"), "g");
   // `replace` with a /g regex always scans from 0 and returns the SAME string
   // when nothing matched — so the no-secret path costs one scan and no alloc.
   return (text: string) => (text ? text.replace(re, REDACTED) : text);
@@ -141,6 +154,10 @@ function redactDisplay(
 ): LogLine {
   const json = JSON.stringify(display);
   const clean = redact(json);
+  // SAFETY: `clean` is `display`'s own serialization with secret substrings —
+  // which only ever occur INSIDE its string values — swapped for a marker
+  // carrying no quote or backslash. The document structure is therefore
+  // untouched, so what parses back is the same LogLine with shorter strings.
   return clean === json ? display : (JSON.parse(clean) as LogLine);
 }
 
@@ -249,13 +266,13 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
         // Capture facts before persisting so the row reflects them.
         const f = line.facts;
         if (f.sessionId) sessionId = f.sessionId;
-        if (typeof f.turns === "number" && f.turns > turns) turns = f.turns;
+        if (f.turns != null && f.turns > turns) turns = f.turns;
         if (f.usage) {
           inputTokens = Math.max(inputTokens, f.usage.input_tokens);
           cachedInputTokens = Math.max(cachedInputTokens, f.usage.cached_input_tokens);
           outputTokens = Math.max(outputTokens, f.usage.output_tokens);
         }
-        if (typeof f.costUsd === "number") totalCostUsd = f.costUsd;
+        if (f.costUsd != null) totalCostUsd = f.costUsd;
 
         // 0. P13-U-1: scrub injected credentials + token-shaped secrets BEFORE
         //    anything is persisted — the raw .jsonl and the DB row are both
@@ -329,14 +346,12 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
           adapterOutcome: desired,
         });
       }
-      patchRun(db, spec.runId, {
-        state,
-        ...(state === desired ? { finishedAt: new Date().toISOString() } : {}),
-        sessionId,
-        phase: null,
-        step: null,
-        ...(byInterrupt ? { interruptedBy: byInterrupt.userId } : {}),
-      });
+      const patch: RunPatch = { state, sessionId, phase: null, step: null };
+      // Only the writer whose outcome WON stamps the finish time — the recorded
+      // one already carries the real instant (B-FD7 above).
+      if (state === desired) patch.finishedAt = new Date().toISOString();
+      if (byInterrupt) patch.interruptedBy = byInterrupt.userId;
+      patchRun(db, spec.runId, patch);
       publishState(state);
     },
   };

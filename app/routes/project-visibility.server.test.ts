@@ -3,6 +3,8 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
+import type { action as taskAction } from "~/routes/project.task";
+import type { action as policyAction } from "~/routes/project.policy";
 
 /**
  * R15-4 on the ACTION side (`requireVisibleProject`).
@@ -16,7 +18,28 @@ import {
  */
 
 let app: AppTestContext;
-let ids: { arda: string; deniz: string };
+let ids: SeededUserIds;
+
+/** The seeded humans every request in this file is issued as. */
+interface SeededUserIds {
+  arda: string;
+  deniz: string;
+}
+
+/** What either gated action resolves to; each case narrows to the arm it drives. */
+type GatedActionData =
+  | Awaited<ReturnType<typeof taskAction>>
+  | Awaited<ReturnType<typeof policyAction>>;
+
+/**
+ * The one export this harness drives on a gated route module. `never` for the
+ * args is what lets both actions sit behind one contract: they are generated
+ * with route-specific `ActionArgs`, and the harness hands them the two fields
+ * they actually destructure (see `post`).
+ */
+type GatedRouteModule = {
+  action: (args: never) => Promise<GatedActionData>;
+};
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -35,7 +58,7 @@ type Refusal = { init?: { status: number }; data?: unknown };
 const GATED: {
   name: string;
   path: string;
-  module: () => Promise<{ action: unknown }>;
+  module: () => Promise<GatedRouteModule>;
   params: Record<string, string>;
 }[] = [
   {
@@ -56,12 +79,14 @@ async function post(
   route: (typeof GATED)[number],
   userId: string,
   fields: Record<string, string>,
-): Promise<unknown> {
-  const { action } = (await route.module()) as {
-    action: (args: unknown) => Promise<unknown>;
-  };
+): Promise<GatedActionData> {
+  const { action } = await route.module();
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
+  // SAFETY: both gated actions destructure `request` and `params` and nothing
+  // else; React Router's generated `ActionArgs` additionally carries the
+  // framework's `context` provider, which no path under test reads. `as never`
+  // supplies the two fields they do read without standing a router up.
   return action({
     request: app.request(route.path, {
       method: "POST",
@@ -70,12 +95,16 @@ async function post(
     }),
     params: route.params,
     context: {},
-  });
+  } as never);
 }
 
 describe("requireVisibleProject — every project-scoped action", () => {
   for (const route of GATED) {
     it(`${route.name}: a non-member is refused as an unknown slug`, async () => {
+      // SAFETY: deniz is not a member, so `requireVisibleProject` throws the
+      // unknown-slug 404 envelope OUTSIDE the action's try — the catch below
+      // receives what was thrown, never a returned arm, so both fields stay
+      // optional.
       const thrown = (await post(route, ids.deniz, {
         intent: "no-such-intent",
       }).catch((e) => e)) as Refusal;
@@ -86,6 +115,9 @@ describe("requireVisibleProject — every project-scoped action", () => {
     });
 
     it(`${route.name}: a member reaches the intent switch`, async () => {
+      // SAFETY: arda is a member, so the gate passes and an unrecognised intent
+      // falls through to each action's shared `data({ ok: false, error }, 400)`
+      // arm — the only arm this request can reach.
       const result = (await post(route, ids.arda, {
         intent: "no-such-intent",
       })) as { init: { status: number }; data: { error: string } };
@@ -99,6 +131,8 @@ describe("requireVisibleProject — every project-scoped action", () => {
       );
       updateUserFields(app.db, ids.deniz, { role: "admin" });
       try {
+        // SAFETY: as an org admin deniz clears the D2 override, so this lands on
+        // the same unknown-intent `data(..., 400)` arm a member reaches.
         const result = (await post(route, ids.deniz, {
           intent: "no-such-intent",
         })) as { init: { status: number } };

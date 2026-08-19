@@ -39,16 +39,25 @@ export function getProjectionDbPath(): string {
 // Singleton survives dev-server HMR module reloads via a well-known symbol.
 const DB_CACHE_KEY = Symbol.for("viberr.db");
 
+interface DbSlot {
+  [DB_CACHE_KEY]?: DatabaseSync;
+}
+
+function dbSlot(): DbSlot {
+  // SAFETY: `globalThis` carries no static type for a symbol-keyed slot. The key
+  // is module-private, and the only writes to it anywhere in the process are the
+  // two below (`getDb` stores the handle it just opened, `closeDb` clears it), so
+  // nothing else can put another shape there.
+  return globalThis as DbSlot;
+}
+
 /**
  * Returns the process-wide app database handle. On first call it opens
  * ${VIBERR_DATA_ROOT}/state/projection.sqlite and applies any pending
  * migrations from db/migrations/.
  */
 export function getDb(): DatabaseSync {
-  const cache = globalThis as unknown as Record<
-    symbol,
-    DatabaseSync | undefined
-  >;
+  const cache = dbSlot();
   let db = cache[DB_CACHE_KEY];
   if (!db || !db.isOpen) {
     const dbPath = getProjectionDbPath();
@@ -66,10 +75,7 @@ export function getDb(): DatabaseSync {
 
 /** Closes and forgets the cached handle (tests / graceful shutdown). */
 export function closeDb(): void {
-  const cache = globalThis as unknown as Record<
-    symbol,
-    DatabaseSync | undefined
-  >;
+  const cache = dbSlot();
   const db = cache[DB_CACHE_KEY];
   if (db?.isOpen) db.close();
   cache[DB_CACHE_KEY] = undefined;
@@ -94,10 +100,7 @@ export function closeDb(): void {
  * a shutdown path must never throw and abort the rest of the shutdown.
  */
 export function shutdownDatabase(): void {
-  const cache = globalThis as unknown as Record<
-    symbol,
-    DatabaseSync | undefined
-  >;
+  const cache = dbSlot();
   const db = cache[DB_CACHE_KEY];
   if (!db?.isOpen) return;
   try {

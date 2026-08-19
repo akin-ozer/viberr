@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
 import {
   setupAppTest,
   type AppTestContext,
@@ -30,40 +31,69 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
+/** The args the framework hands a server loader/action for `/` — every field
+ *  carries the real value it would carry in a request, so the route functions
+ *  can be called directly. */
+function homeRouteArgs(request: Request) {
+  return {
+    request,
+    url: new URL(request.url),
+    params: {},
+    pattern: "/",
+    context: new RouterContextProvider(),
+  };
+}
+
 async function runHomeLoader(cookie: string) {
   const { loader } = await import("~/routes/_index");
-  return loader({
-    request: app.request("/", { cookie }),
-    params: {},
-    context: {},
-  } as never) as Promise<{
-    org: {
-      knowledgeBases: number;
-      mcpServers: number;
-      skills: number;
-      globalAgents: number;
-    };
-  }>;
+  return loader(homeRouteArgs(app.request("/", { cookie })));
 }
+
+/** Every branch of the home action: a bare payload on success, a react-router
+ *  `data(body, init)` wrapper on every refusal. */
+type HomeActionResult = Awaited<
+  ReturnType<typeof import("~/routes/_index").action>
+>;
 
 async function postHome(
   userId: string,
   fields: Record<string, string>,
-): Promise<Response | Record<string, unknown>> {
+): Promise<HomeActionResult> {
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
   const body = new URLSearchParams({ _csrf: csrf, ...fields });
   const { action } = await import("~/routes/_index");
-  return action({
-    request: app.request("/", {
-      method: "POST",
-      cookie,
-      body,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    }),
-    params: {},
-    context: {},
-  } as never) as Promise<Response | Record<string, unknown>>;
+  return action(
+    homeRouteArgs(
+      app.request("/", {
+        method: "POST",
+        cookie,
+        body,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }),
+    ),
+  );
+}
+
+/** A refusal carries the status in the `data(body, init)` wrapper; a success
+ *  never has one, so anything unwrapped here took a branch the caller did not
+ *  expect and should say so rather than read `undefined` off the wrong shape. */
+function refusal(result: HomeActionResult) {
+  if (!("init" in result)) {
+    throw new Error(`expected a refusal, got ${JSON.stringify(result)}`);
+  }
+  return result;
+}
+
+/** The rescan/rebuild intents are the only branches answering a projection
+ *  summary (`{ ok, projects, tasks, errors, … }`). */
+function projectionRun(result: HomeActionResult) {
+  if (!("projects" in result)) {
+    throw new Error(
+      `expected a projection summary, got ${JSON.stringify(result)}`,
+    );
+  }
+  return result;
 }
 
 describe("home org tile counts (Phase 10)", () => {
@@ -109,35 +139,28 @@ describe("home org tile counts (Phase 10)", () => {
 describe("rebuild-projections intent (Phase 10 recovery)", () => {
   it("refuses non-admins with a 403", async () => {
     const result = await postHome(denizId, { intent: "rebuild-projections" });
-    const status = (result as { init?: { status?: number } }).init?.status;
+    const status = refusal(result).init?.status;
     expect(status).toBe(403);
   });
 
   it("admin rebuild drops + re-projects to identical counts and audits", async () => {
+    // SAFETY: `SELECT count(*) c` is an aggregate with no GROUP BY — sqlite
+    // answers it with exactly one row carrying the single integer column `c`.
+    const rowCount = (table: string) =>
+      (app.db.prepare(`SELECT count(*) c FROM ${table}`).get() as { c: number })
+        .c;
     const counts = () => ({
-      projects: (
-        app.db.prepare(`SELECT count(*) c FROM projects`).get() as {
-          c: number;
-        }
-      ).c,
-      tasks: (
-        app.db.prepare(`SELECT count(*) c FROM task_projections`).get() as {
-          c: number;
-        }
-      ).c,
-      events: (
-        app.db.prepare(`SELECT count(*) c FROM task_events`).get() as {
-          c: number;
-        }
-      ).c,
+      projects: rowCount("projects"),
+      tasks: rowCount("task_projections"),
+      events: rowCount("task_events"),
     });
     const before = counts();
     expect(before.projects).toBe(3); // seeded demo dataset
     expect(before.tasks).toBe(12);
 
-    const result = (await postHome(ardaId, {
-      intent: "rebuild-projections",
-    })) as { ok: boolean; projects: number; tasks: number; errors: number };
+    const result = projectionRun(
+      await postHome(ardaId, { intent: "rebuild-projections" }),
+    );
     expect(result.ok).toBe(true);
     expect(result.projects).toBe(before.projects);
     expect(result.tasks).toBe(before.tasks);
@@ -159,27 +182,23 @@ describe("rebuild-projections intent (Phase 10 recovery)", () => {
     );
     resetSingleFlight();
 
-    const first = (await postHome(ardaId, {
-      intent: "rebuild-projections",
-    })) as { ok: boolean };
+    const first = projectionRun(
+      await postHome(ardaId, { intent: "rebuild-projections" }),
+    );
     expect(first.ok).toBe(true);
 
-    const second = (await postHome(ardaId, {
-      intent: "rebuild-projections",
-    })) as { data: { ok: boolean; error: string }; init: { status: number } };
-    expect(second.init.status).toBe(429);
+    const second = refusal(
+      await postHome(ardaId, { intent: "rebuild-projections" }),
+    );
+    expect(second.init?.status).toBe(429);
     expect(second.data.ok).toBe(false);
     expect(second.data.error).toContain("try again in");
 
     // Independent cooldowns: the rebuild's does not swallow the re-scan.
-    const rescan = (await postHome(ardaId, { intent: "rescan" })) as {
-      ok: boolean;
-    };
+    const rescan = projectionRun(await postHome(ardaId, { intent: "rescan" }));
     expect(rescan.ok).toBe(true);
-    const rescanAgain = (await postHome(ardaId, { intent: "rescan" })) as {
-      init: { status: number };
-    };
-    expect(rescanAgain.init.status).toBe(429);
+    const rescanAgain = refusal(await postHome(ardaId, { intent: "rescan" }));
+    expect(rescanAgain.init?.status).toBe(429);
 
     resetSingleFlight();
   });
@@ -188,16 +207,16 @@ describe("rebuild-projections intent (Phase 10 recovery)", () => {
 describe("/resources/health (Phase 10 ops probe)", () => {
   it("returns ok + projection counts + watcher liveness, no auth required", async () => {
     const { loader } = await import("~/routes/resources.health");
-    const response = (await loader()) as {
-      data: { ok: boolean; projections: { projects: number; tasks: number }; watcher: boolean };
-      init?: { status?: number };
-    };
-    // react-router data() wrapper — unwrap tolerantly.
-    const body = (response as { data?: unknown }).data ?? response;
+    // react-router `data(body, init)` wrapper — the probe payload is `.data`.
+    const { data: body } = await loader();
     expect(body).toMatchObject({
       ok: true,
       projections: { projects: 3, tasks: 12 },
     });
-    expect(typeof (body as { watcher: boolean }).watcher).toBe("boolean");
+    // The `down` branch (SQLite unreadable) answers `ok`/`status` only, so
+    // `watcher` is present exactly when the assertion above holds — branch on
+    // the `ok` discriminant the payload carries, not on the key's presence.
+    if (!body.ok) throw new Error("the probe answered its `down` branch");
+    expect(body.watcher).toBeTypeOf("boolean");
   });
 });

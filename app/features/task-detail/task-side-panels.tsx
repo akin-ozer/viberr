@@ -5,7 +5,7 @@ import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { LocalRelative } from "~/ui/local-time";
-import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
@@ -15,6 +15,13 @@ import type { OwnerAction, TaskMemberView } from "./execution-profile";
  * → current state → permissions. Split out of `task-detail-page.tsx` (pass 16,
  * pure structural refactor — no behaviour or copy change).
  */
+
+/** The layout hands these panels `myRole` as a raw string. Decode it to the
+ *  domain role once, so every matrix read asks about a role the matrix knows —
+ *  anything else is no role at all, exactly as `roleCan` already treats it. */
+function viewerRole(myRole: string | null): ProjectRole | null {
+  return PROJECT_ROLES.find((role) => role === myRole) ?? null;
+}
 
 export function GithubTrace({
   task,
@@ -368,7 +375,7 @@ export function PolicyPanel({
     stages.length >= 2 ? stages[stages.length - 2]!.name : "the review stage";
   const terminalName =
     stages.length >= 1 ? stages[stages.length - 1]!.name : "the final stage";
-  const r = (myRole as ProjectRole | null) ?? null;
+  const r = viewerRole(myRole);
   const role = myRole || "viewer";
   // Render exactly what the canonical matrix (app/shared/rbac.ts) enforces for
   // THIS viewer's role — no aspirational copy that the server would 403.
@@ -509,15 +516,13 @@ export function CurrentStatePanel({
   // operator recommendation does, so it posts the **Transition:** timeline
   // comment and hands the task to the operator at its new stage. The submission
   // itself is the page's (`onTransition`) — see F19-37 on the prop.
-  const canTransition = roleCan(myRole as ProjectRole | null, "approve-transition");
-  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  const role = viewerRole(myRole);
+  const canTransition = roleCan(role, "approve-transition");
+  const canOwn = roleCan(role, "own-task");
   // E3: releasing SOMEONE ELSE's seat is `release-any-ownership`, which is what
   // `releaseOwner` enforces — this asked `myRole === "admin"`, a hardcoded copy
   // of one row of the matrix.
-  const canReleaseAnyOwner = roleCan(
-    myRole as ProjectRole | null,
-    "release-any-ownership",
-  );
+  const canReleaseAnyOwner = roleCan(role, "release-any-ownership");
   const owner = task.owner && task.owner.kind === "human" ? task.owner : null;
   const ownerMine = !!(owner && owner.userId === meId);
   const acceptBusy = acceptSubmitting || dispositionBusy;

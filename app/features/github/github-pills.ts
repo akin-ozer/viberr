@@ -27,12 +27,12 @@ export interface PillView {
  */
 export type SyncState = "merged" | "behind_main" | "synced" | "unknown";
 
-export const SYNC_PILL: Record<SyncState, PillView> = {
+export const SYNC_PILL = {
   merged: { kind: "done", label: "merged" },
   behind_main: { kind: "risk", label: "behind main" },
   synced: { kind: "ready", label: "synced" },
   unknown: { kind: "neutral", label: "not compared" },
-};
+} satisfies Record<SyncState, PillView>;
 
 export function syncPill(state: SyncState): PillView {
   return SYNC_PILL[state] ?? SYNC_PILL.unknown;

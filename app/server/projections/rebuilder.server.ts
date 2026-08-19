@@ -139,6 +139,8 @@ interface ProjectContextRow {
 }
 
 function getMemberIds(db: DatabaseSync, slug: string): Set<string> {
+  // SAFETY: the statement selects the single `user_id` column, which
+  // 0001_baseline declares NOT NULL on `project_members`.
   const rows = db
     .prepare(`SELECT user_id FROM project_members WHERE project_slug = ?`)
     .all(slug) as { user_id: string }[];
@@ -173,6 +175,8 @@ export function rebuildProjectFile(
 
   const content = readFileSync(absPath, "utf8");
   const contentHash = sha256(content);
+  // SAFETY: `content_hash` is a single NOT NULL column on `projects`; an
+  // unprojected slug yields no row, which the union already admits.
   const existing = db
     .prepare(`SELECT content_hash FROM projects WHERE slug = ?`)
     .get(slug) as { content_hash: string } | undefined;
@@ -378,6 +382,8 @@ export function rebuildTaskFile(
 
   const content = readFileSync(absPath, "utf8");
   const contentHash = sha256(content);
+  // SAFETY: `content_hash` is a single NOT NULL column on `task_projections`;
+  // an unprojected task yields no row.
   const existing = db
     .prepare(
       `SELECT content_hash FROM task_projections WHERE project_slug = ? AND task_key = ?`,
@@ -408,9 +414,15 @@ export function rebuildTaskFile(
 
   // Project context (already-projected row): stages for reference checks,
   // default repo, member ids for guest flags.
+  // SAFETY: the SELECT names exactly ProjectContextRow's three members;
+  // 0001_baseline declares `slug` and `stages_json` NOT NULL and `repo`
+  // nullable, which is how the row types them.
   const project = db
     .prepare(`SELECT slug, repo, stages_json FROM projects WHERE slug = ?`)
     .get(slug) as ProjectContextRow | undefined;
+  // SAFETY: `stages_json` has ONE writer — rebuildProjectFile above stores
+  // `JSON.stringify(fm.stages)`, and every stage the project-file schema parses
+  // carries an `id`. Only the ids are read here.
   const stageIds: string[] = project
     ? (JSON.parse(project.stages_json) as { id: string }[]).map((s) => s.id)
     : [];
@@ -452,10 +464,14 @@ export function rebuildTaskFile(
   const memberIds = project ? getMemberIds(db, slug) : undefined;
   // Agent events render under the agent's OWN name (e.g. "Reviewer"), not the
   // backend/runtime label — resolved from this project's run rows.
-  const resolveActor = createActorResolver(db, {
-    ...(memberIds ? { projectMemberIds: memberIds } : {}),
+  const actorOptions: Parameters<typeof createActorResolver>[1] = {
     agentNames: agentNamesByProfile(db, slug),
-  });
+  };
+  // Only a project that HAS a row has members; without one the resolver must
+  // fall back to its no-project-context behaviour, which an explicitly empty
+  // set would not give it.
+  if (memberIds) actorOptions.projectMemberIds = memberIds;
+  const resolveActor = createActorResolver(db, actorOptions);
 
   const commentCount = parsed.timeline.filter((e) => e.type === "comment").length;
 
@@ -722,6 +738,7 @@ export function rebuildProject(
   }
 
   // Prune ONLY this project's task rows whose backing files are gone.
+  // SAFETY: `task_key` is a single NOT NULL column (half the primary key).
   const taskRows = db
     .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
     .all(slug) as { task_key: string }[];
@@ -822,6 +839,7 @@ export function rebuildAll(
   }
 
   // Prune rows whose backing files are gone.
+  // SAFETY: `slug` is the `projects` primary key — a single NOT NULL column.
   const projectRows = db.prepare(`SELECT slug FROM projects`).all() as {
     slug: string;
   }[];
@@ -830,6 +848,8 @@ export function rebuildAll(
       track(rebuildProjectFile(db, row.slug, options));
     }
   }
+  // SAFETY: the two selected columns are the `task_projections` primary key,
+  // both NOT NULL.
   const taskRows = db
     .prepare(`SELECT project_slug, task_key FROM task_projections`)
     .all() as { project_slug: string; task_key: string }[];

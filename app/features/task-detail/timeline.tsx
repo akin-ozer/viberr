@@ -122,7 +122,7 @@ function EvidenceLabel({
   return (
     <span>
       {parts.map((part, i) => {
-        const clean = part.replace(/^[`"'(\[]+|[`"'),.;:\]]+$/g, "");
+        const clean = part.replace(/^[`"'([]+|[`"'),.;:\]]+$/g, "");
         if (!clean || !attachments.has(clean)) return part;
         const at = part.indexOf(clean);
         return (

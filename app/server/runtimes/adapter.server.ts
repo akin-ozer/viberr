@@ -1,4 +1,6 @@
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { LogLine, RunBackend, RunKind } from "~/features/runtime/runtime-types";
+import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
 import type { EnvelopeFacts } from "./wire-format.server";
 
 /**
@@ -8,6 +10,16 @@ import type { EnvelopeFacts } from "./wire-format.server";
  * persists (raw .jsonl append + DB row with computed display_json) THEN
  * publishes `run.log-appended` and `run.state-changed`.
  */
+
+/** The MCP servers a run mounts, keyed by declared name: the portable
+ *  HTTP/stdio configs `resolveSpecialistMcpServers` builds (both backends)
+ *  plus Claude-only in-process SDK instances such as the operator's
+ *  `{ viberr: createSdkMcpServer(...) }`. The one shape every producer emits
+ *  and `StartRunInput`/`ResumeRunInput`/`ResumeConfinement` enforce. */
+export type RunMcpServers = Record<
+  string,
+  McpSdkServerConfigWithInstance | SpecialistMcpServerConfig
+>;
 
 /** What the service asks an adapter to run. */
 export interface RunSpec {
@@ -39,7 +51,13 @@ export interface RunSpec {
   systemPrompt?: string;
   /** MCP servers keyed by name. Portable HTTP/stdio configs work on both
    *  backends; Claude additionally supports in-process SDK servers such as the
-   *  operator's `{ viberr: createSdkMcpServer(...) }`. */
+   *  operator's `{ viberr: createSdkMcpServer(...) }`.
+   *
+   *  Typed loose, not as `RunMcpServers`: every governed caller reaches this
+   *  through `StartRunInput`/`ResumeRunInput`, which DO enforce that union —
+   *  but the adapters' own tolerance tests hand this field deliberately
+   *  malformed configs to prove each backend degrades safely (codex zod-drops
+   *  a bad declaration instead of crashing the run). */
   mcpServers?: Record<string, unknown>;
   /** Claude-only allowlist for automatic tool approval. */
   allowedTools?: string[];

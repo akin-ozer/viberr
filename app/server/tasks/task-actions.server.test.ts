@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -45,37 +46,62 @@ import {
 import type { TaskPacket } from "~/schemas/task-file.schema";
 
 /**
- * `performDelivery` reaches the push through a dynamic import, and nothing else
- * in this file touches that module — so the mock is inert for every other test
- * here and lets the push-failure branch run without git or a remote.
+ * `performDelivery`'s push is stubbed through its ctx `deps` seam — typed
+ * against the real export, and inert for every test that doesn't hand the
+ * seam over — so the push-failure branches run without git or a remote.
+ *
+ * F19-21 additionally needs GitHub to answer with the default-branch head (the
+ * base the no-change revision anchors to): those tests seed a real credential
+ * and run the REAL `getProjectGithubContext` over the canned transport
+ * (`okGithub` below). With nothing seeded the context degrades to
+ * `no_pat_configured`, so every other test behaves exactly as it always did.
  */
-const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
-vi.mock("~/server/github/push-workspace.server", () => ({
-  pushWorkspaceBranch: pushMock,
-}));
+import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import {
+  fakeGithubFetch,
+  type FakeGithub,
+} from "../../../test-support/fake-github";
+import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import type { TaskActionContext } from "./task-actions.server";
 
-/**
- * F19-21 needs GitHub to answer with the default-branch head (the base the
- * no-change revision anchors to). The default is the DEGRADED answer — the same
- * one the real resolver returns for a project with no stored credential — so
- * every other test in this file behaves exactly as it did before the mock
- * existed; the no-change tests opt in to the `ok` context explicitly.
- */
-const { ghCtxMock } = vi.hoisted(() => ({
-  ghCtxMock: vi.fn((): unknown => ({
-    status: "no_pat_configured" as const,
-    repo: null,
-  })),
-}));
-vi.mock("~/server/github/github-context.server", () => ({
-  getProjectGithubContext: ghCtxMock,
-}));
+const pushMock = vi.fn<typeof pushWorkspaceBranch>();
+let github: FakeGithub | null = null;
+
+/** The delivery/acceptance ctx for this file: the push double rides the `deps`
+ *  seam, and the canned transport rides along once a test installed one. */
+function deliveryCtx(store: TestStore): TaskActionContext {
+  const callCtx: TaskActionContext = {
+    dataRoot: store.dataRoot,
+    deps: { pushWorkspaceBranch: pushMock },
+  };
+  if (github) callCtx.fetchImpl = github.fetchImpl;
+  return callCtx;
+}
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 function actor(user: { id: string; email: string }) {
   return { userId: user.id, label: user.email };
+}
+
+/**
+ * sqlite hands its rows back as untyped cells, so every read below names the
+ * columns it expects: a drifted SELECT fails on the decode instead of reading
+ * `undefined` through a cast.
+ */
+function selectRows<T>(
+  db: TestStore["db"],
+  sql: string,
+  row: z.ZodType<T>,
+): T[] {
+  return z.array(row).parse(db.prepare(sql).all());
+}
+
+/** `SELECT count(*) … c` — an aggregate with no GROUP BY, so exactly one row
+ *  carrying the single integer column `c`. */
+function countRow(db: TestStore["db"], sql: string): { c: number } {
+  return z.object({ c: z.number() }).parse(db.prepare(sql).get());
 }
 
 describe("packetIdentity (F10-09 — replacement detection)", () => {
@@ -454,9 +480,16 @@ describe("appendComment", () => {
       { dataRoot: store.dataRoot },
     );
     expect(result.mentionedUserIds).toEqual([store.users.selin.id]);
-    const rows = store.db
-      .prepare(`SELECT user_id, kind, task_key, read_at FROM notifications`)
-      .all() as { user_id: string; kind: string; task_key: string; read_at: string | null }[];
+    const rows = selectRows(
+      store.db,
+      `SELECT user_id, kind, task_key, read_at FROM notifications`,
+      z.object({
+        user_id: z.string(),
+        kind: z.string(),
+        task_key: z.string(),
+        read_at: z.string().nullable(),
+      }),
+    );
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       user_id: store.users.selin.id,
@@ -508,7 +541,7 @@ describe("appendComment", () => {
       timeline.find((e) => e.type === "comment")!.text,
     ).toBe(`@${firstName} can you take the acceptance gate?`);
     expect(
-      store.db.prepare(`SELECT COUNT(*) c FROM notifications`).get() as { c: number },
+      countRow(store.db, `SELECT COUNT(*) c FROM notifications`),
     ).toMatchObject({ c: 0 });
   });
 
@@ -526,9 +559,15 @@ describe("appendComment", () => {
       replyText: `@${store.users.arda.name.split(" ")[0]} the review is clean — over to you for acceptance.`,
     });
 
-    const rows = store.db
-      .prepare(`SELECT user_id, kind, actor_json FROM notifications`)
-      .all() as { user_id: string; kind: string; actor_json: string | null }[];
+    const rows = selectRows(
+      store.db,
+      `SELECT user_id, kind, actor_json FROM notifications`,
+      z.object({
+        user_id: z.string(),
+        kind: z.string(),
+        actor_json: z.string().nullable(),
+      }),
+    );
     expect(rows).toHaveLength(1);
     expect(rows[0]!.user_id).toBe(store.users.arda.id);
     expect(rows[0]!.kind).toBe("mention");
@@ -548,7 +587,7 @@ describe("appendComment", () => {
       guardrails: [
         { id: "compression-threshold", desc: "compress long timelines", on: true, value: 10, unit: "events" },
       ],
-    } as never);
+    });
     // Seed a flood of routine AGENT comments — no operator or human write.
     const flood: TaskFileEvent[] = Array.from({ length: 15 }, (_, i) => ({
       occurredAt: `2026-08-04T00:${String(i).padStart(2, "0")}:00.000Z`,
@@ -599,7 +638,7 @@ describe("appendComment", () => {
       guardrails: [
         { id: "compression-threshold", desc: "compress long timelines", on: true, value, unit: "events" },
       ],
-    } as never);
+    });
   }
 
   /** Routine OPERATOR comments — foldable narration, no human prose. Written
@@ -716,7 +755,7 @@ describe("appendComment", () => {
     expect(reply.text).toContain("the review is clean");
     expect(reply.text).toContain("nobody was notified");
     expect(
-      store.db.prepare(`SELECT COUNT(*) c FROM notifications`).get() as { c: number },
+      countRow(store.db, `SELECT COUNT(*) c FROM notifications`),
     ).toMatchObject({ c: 0 });
   });
 
@@ -736,7 +775,7 @@ describe("appendComment", () => {
       guardrails: [
         { id: "meaningful-comment", desc: "drop trivial chatter", on: true },
       ],
-    } as never);
+    });
     withTask(store);
 
     await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
@@ -789,14 +828,16 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
       ),
     ).rejects.toBeTruthy();
 
-    const rows = store.db
-      .prepare(`SELECT user_id, kind, actor_json, text FROM notifications`)
-      .all() as {
-      user_id: string;
-      kind: string;
-      actor_json: string | null;
-      text: string;
-    }[];
+    const rows = selectRows(
+      store.db,
+      `SELECT user_id, kind, actor_json, text FROM notifications`,
+      z.object({
+        user_id: z.string(),
+        kind: z.string(),
+        actor_json: z.string().nullable(),
+        text: z.string(),
+      }),
+    );
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ user_id: store.users.arda.id, kind: "mention" });
     // Attributed to the operator, like its narration comments.
@@ -846,7 +887,7 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
     expect(posted.text).toContain("coordinate with");
     expect(posted.text).toContain("nobody was notified");
     expect(
-      store.db.prepare(`SELECT COUNT(*) c FROM notifications`).get() as { c: number },
+      countRow(store.db, `SELECT COUNT(*) c FROM notifications`),
     ).toMatchObject({ c: 0 });
   });
 });
@@ -1063,9 +1104,11 @@ describe("notification routing (FIX #4)", () => {
     expect(notified.sort()).toEqual(
       [store.users.arda.id, store.users.selin.id].sort(),
     );
-    const rows = store.db
-      .prepare(`SELECT user_id FROM notifications WHERE kind = 'approval'`)
-      .all() as { user_id: string }[];
+    const rows = selectRows(
+      store.db,
+      `SELECT user_id FROM notifications WHERE kind = 'approval'`,
+      z.object({ user_id: z.string() }),
+    );
     expect(rows.map((r) => r.user_id)).not.toContain(store.users.murat.id);
   });
 });
@@ -1115,9 +1158,11 @@ describe("reviewer quality notification (FIX #6)", () => {
     });
 
     // A `quality` notification reached the owner + supervisors (real run, not seed).
-    const rows = store.db
-      .prepare(`SELECT user_id FROM notifications WHERE kind = 'quality'`)
-      .all() as { user_id: string }[];
+    const rows = selectRows(
+      store.db,
+      `SELECT user_id FROM notifications WHERE kind = 'quality'`,
+      z.object({ user_id: z.string() }),
+    );
     expect(rows.map((r) => r.user_id).sort()).toEqual(
       [store.users.arda.id, store.users.murat.id, store.users.selin.id].sort(),
     );
@@ -1144,9 +1189,10 @@ describe("reviewer quality notification (FIX #6)", () => {
       text: "Here are some thoughts on the structure.",
     });
     // …and no quality notification.
-    const quality = store.db
-      .prepare(`SELECT count(*) AS c FROM notifications WHERE kind = 'quality'`)
-      .get() as { c: number };
+    const quality = countRow(
+      store.db,
+      `SELECT count(*) AS c FROM notifications WHERE kind = 'quality'`,
+    );
     expect(quality.c).toBe(0);
   });
 });
@@ -1360,9 +1406,10 @@ describe("owner-assign is a clean ownership mutation — no operator side effect
       ),
     ).toBe(false);
     // …and NO operator run is fired on ownership.
-    const opRuns = store.db
-      .prepare(`SELECT count(*) AS c FROM agent_runs WHERE kind = 'operator'`)
-      .get() as { c: number };
+    const opRuns = countRow(
+      store.db,
+      `SELECT count(*) AS c FROM agent_runs WHERE kind = 'operator'`,
+    );
     expect(opRuns.c).toBe(0);
   });
 });
@@ -1455,7 +1502,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
 
     const outcome = await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot },
+      deliveryCtx(store),
       store.slug,
       "VIB-1",
       actor(store.users.arda),
@@ -1483,14 +1530,16 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
 
     await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot },
+      deliveryCtx(store),
       store.slug,
       "VIB-1",
       actor(store.users.arda),
     );
-    const rows = store.db
-      .prepare(`SELECT text FROM notifications WHERE kind = 'policy'`)
-      .all() as { text: string }[];
+    const rows = selectRows(
+      store.db,
+      `SELECT text FROM notifications WHERE kind = 'policy'`,
+      z.object({ text: z.string() }),
+    );
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.text).toContain("could not be pushed");
@@ -1508,7 +1557,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
 
     await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot },
+      deliveryCtx(store),
       store.slug,
       "VIB-1",
       actor(store.users.arda),
@@ -1517,6 +1566,36 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
     expect(text).toContain("no project credential");
     expect(text).not.toContain("```");
     expect(text).not.toContain("What the push reported");
+  });
+});
+
+describe("the delivery deps seam defaults to the real modules", () => {
+  it("an un-injected performDelivery runs the real push-workspace (no workspace → honest failure)", async () => {
+    pushMock.mockClear(); // earlier tests in this file drove the double
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    // A ctx with NO deps: the seam's absent-field path resolves the real
+    // push-workspace, which honestly reports the missing workspace clone
+    // before it ever reaches a credential or the network.
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    expect(outcome.status).toBe("failed");
+    expect(outcome.status === "failed" ? outcome.message : "").toContain(
+      "no workspace clone",
+    );
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });
 
@@ -1559,34 +1638,31 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     defaultBranchEvidence: { verified: true as const },
   };
 
-  /** GitHub answering with the project's default-branch head. Serves BOTH reads
-   *  the no-change flow makes: the delivery-time base read (`commits/main`, for
-   *  `resolveNoChangeBaseRevision`'s minted revision) AND the accept-time base
-   *  ref read (`git/ref/heads/main`, for B's live `probeNothingToDeliver`). The
-   *  task branch ref 404s, which is the probe's `no_branch` basis. */
-  function okGithub(sha: string = BASE_SHA): void {
-    const ok = (data: unknown) => ({
-      ok: true as const,
-      status: 200,
-      data,
-      etag: null,
-      rateLimit: { limit: null, remaining: null, reset: null },
-      scopesHeader: null,
-      tokenExpiration: null,
-    });
-    ghCtxMock.mockReturnValue({
-      status: "ok",
-      repo: "akin-ozer/viberr",
-      owner: "akin-ozer",
-      defaultBranch: "main",
-      patId: "pat_test",
-      client: {
-        request: async (_method: string, path: string) =>
-          path === "/repos/akin-ozer/viberr/commits/main"
-            ? ok({ sha, commit: { tree: { sha: BASE_TREE } } })
-            : path === "/repos/akin-ozer/viberr/git/ref/heads/main"
-              ? ok({ object: { sha } })
-              : { ok: false, kind: "http", status: 404, message: "not found" },
+  /** GitHub answering with the project's default-branch head — a real
+   *  credential on the project's repo, served by the canned transport. Serves
+   *  BOTH reads the no-change flow makes: the delivery-time base read
+   *  (`commits/main`, for `resolveNoChangeBaseRevision`'s minted revision) AND
+   *  the accept-time base ref read (`git/ref/heads/main`, for B's live
+   *  `probeNothingToDeliver`). The task branch ref 404s (the transport's
+   *  unrouted default), which is the probe's `no_branch` basis. */
+  function okGithub(store: TestStore, sha: string = BASE_SHA): void {
+    const patActor = actor(store.users.arda);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_nochange0002" },
+      patActor,
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      patActor,
+    );
+    github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/commits/main": {
+        body: { sha, commit: { tree: { sha: BASE_TREE } } },
+      },
+      "GET /repos/akin-ozer/viberr/git/ref/heads/main": {
+        body: { object: { sha } },
       },
     });
   }
@@ -1618,7 +1694,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   async function deliver(store: TestStore) {
     return performDelivery(
       store.db,
-      { dataRoot: store.dataRoot },
+      deliveryCtx(store),
       store.slug,
       "VIB-1",
       actor(store.users.arda),
@@ -1626,13 +1702,13 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   }
 
   afterEach(() => {
-    ghCtxMock.mockReturnValue({ status: "no_pat_configured", repo: null });
+    github = null;
   });
 
   it("records the verified zero-diff and mints the base-anchored revision", async () => {
     const store = prepared();
     seedVerifyOnly(store);
-    okGithub();
+    okGithub(store);
     pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
 
     const outcome = await deliver(store);
@@ -1662,7 +1738,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   it("closes to Done with no PR and no merge once the required reviewer approves", async () => {
     const store = prepared();
     seedVerifyOnly(store);
-    okGithub();
+    okGithub(store);
     pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
     await deliver(store);
 
@@ -1678,7 +1754,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
       actor(store.users.arda),
-      { dataRoot: store.dataRoot },
+      deliveryCtx(store),
     );
 
     const done = fm(store);
@@ -1699,7 +1775,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   it("still refuses acceptance while the required reviewer has not approved", async () => {
     const store = prepared();
     seedVerifyOnly(store);
-    okGithub();
+    okGithub(store);
     pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
     await deliver(store);
 
@@ -1711,7 +1787,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
         actor(store.users.arda),
-        { dataRoot: store.dataRoot },
+        deliveryCtx(store),
       ),
     ).rejects.toThrow("Waiting on 1 required reviewer approval of the current revision.");
     expect(fm(store).stage).toBe("review");
@@ -1741,7 +1817,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    okGithub();
+    okGithub(store);
     pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
 
     const outcome = await deliver(store);
@@ -1757,7 +1833,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   it("a MISSING workspace is never a verified no-change — nothing was inspected", async () => {
     const store = prepared();
     seedVerifyOnly(store);
-    okGithub();
+    okGithub(store);
     pushMock.mockResolvedValueOnce({
       status: "no_workspace",
       reason: "no workspace git repo",
@@ -1811,7 +1887,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
       it(`${c.name} stays a genuine delivery failure`, async () => {
         const store = prepared();
         seedVerifyOnly(store);
-        okGithub();
+        okGithub(store);
         pushMock.mockResolvedValueOnce({
           status: "no_branch",
           reason: `HEAD is on the default branch (main) and ${c.why}`,
@@ -1843,7 +1919,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     it("a `no_commits` push whose tree stayed DIRTY is not a verified no-change", async () => {
       const store = prepared();
       seedVerifyOnly(store);
-      okGithub();
+      okGithub(store);
       pushMock.mockResolvedValueOnce({
         status: "no_commits",
         reason: "no local commits ahead of the default branch",
@@ -1865,7 +1941,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     it("MISSING evidence is not verified evidence — an older/other caller cannot opt in by omission", async () => {
       const store = prepared();
       seedVerifyOnly(store);
-      okGithub();
+      okGithub(store);
       pushMock.mockResolvedValueOnce({
         status: "no_branch",
         reason: "HEAD is detached, so there is no branch to push",
@@ -1917,13 +1993,13 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
       actor(store.users.arda),
-      { dataRoot: store.dataRoot },
+      deliveryCtx(store),
     );
 
-  // Restore the hoisted degraded default after any test opts into an `ok`
-  // context (there is no auto-reset between tests in this file).
+  // Drop the canned transport after any test opts into a reachable GitHub
+  // (there is no auto-reset between tests in this file).
   afterEach(() => {
-    ghCtxMock.mockReturnValue({ status: "no_pat_configured", repo: null });
+    github = null;
   });
 
   it("refuses a task with an OPEN PR that no verdict approved", async () => {
@@ -1954,25 +2030,20 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
     // the default-branch head reads, so the probe verifies and this test keeps
     // exercising the R15-1 verdict-gate bypass it was written for.
     const BASE = "abc0123456789def0123456789abcdef01234567";
-    ghCtxMock.mockReturnValue({
-      status: "ok",
-      repo: "akin-ozer/viberr",
-      owner: "akin-ozer",
-      defaultBranch: "main",
-      patId: "pat_test",
-      client: {
-        request: async (_m: string, path: string) =>
-          path === "/repos/akin-ozer/viberr/git/ref/heads/main"
-            ? {
-                ok: true,
-                status: 200,
-                data: { object: { sha: BASE } },
-                etag: null,
-                rateLimit: { limit: null, remaining: null, reset: null },
-                scopesHeader: null,
-                tokenExpiration: null,
-              }
-            : { ok: false, kind: "http", status: 404, message: "not found" },
+    const patActor = actor(store.users.arda);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_nochange0003" },
+      patActor,
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      patActor,
+    );
+    github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/git/ref/heads/main": {
+        body: { object: { sha: BASE } },
       },
     });
 

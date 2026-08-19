@@ -19,7 +19,7 @@ function postRequest(options: {
   headerToken?: string;
   /** Send no origin signal at all — the shape a non-browser caller produces. */
   bare?: boolean;
-} = {}): { request: Request; formData: FormData } {
+} = {}) {
   const headers = new Headers();
   // Every app form post is a same-origin browser POST, which always carries at
   // least Origin — so that is the default here, and a case that wants the
@@ -102,6 +102,8 @@ describe("assertTrustedOrigin", () => {
         thrown = error;
       }
       expect(thrown).toBeInstanceOf(Response);
+      // SAFETY: the assertion above throws unless `thrown` is a Response, so
+      // reaching this line means the catch binding is one.
       expect((thrown as Response).status).toBe(403);
     }
   });
@@ -118,6 +120,8 @@ describe("assertTrustedOrigin", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(Response);
+    // SAFETY: the assertion above throws unless `thrown` is a Response, so
+    // reaching this line means the catch binding is one.
     expect((thrown as Response).status).toBe(403);
   });
 });

@@ -16,10 +16,7 @@ import type { StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
  * TEST FIXTURE so those tests keep their coverage without the product shipping
  * a preset that cannot be worked.
  */
-export const CUSTOM_3_STAGE_BOARD: {
-  stages: StageDef[];
-  workflow: WorkflowBoundary[];
-} = {
+export const CUSTOM_3_STAGE_BOARD = {
   stages: [
     { id: "todo", name: "To do", color: "#a5a8b5" },
     { id: "doing", name: "In progress", color: "#7b61ff" },
@@ -41,4 +38,4 @@ export const CUSTOM_3_STAGE_BOARD: {
       locked: true,
     },
   ],
-};
+} satisfies { stages: StageDef[]; workflow: WorkflowBoundary[] };

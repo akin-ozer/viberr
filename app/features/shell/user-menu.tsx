@@ -29,11 +29,11 @@ export interface MenuUser {
   avatarTone: string;
 }
 
-const NEXT_THEME: Record<ThemePreference, ThemePreference> = {
+const NEXT_THEME = {
   light: "dark",
   dark: "system",
   system: "light",
-};
+} satisfies Record<ThemePreference, ThemePreference>;
 
 function themeLabel(theme: ThemePreference): string {
   return theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light";

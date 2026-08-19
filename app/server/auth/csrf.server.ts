@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { z } from "zod";
 import { getEnv } from "../config/env.server";
 
 /**
@@ -15,6 +16,10 @@ import { getEnv } from "../config/env.server";
  */
 
 export const CSRF_FIELD_NAME = "_csrf";
+
+/** A submitted token is a non-empty string; a file part, a missing field or an
+ *  empty value all mean "no token was sent" and are refused as such. */
+const csrfFieldSchema = z.string().min(1);
 
 /** Pure token derivation — deterministic per session. Exported for tests. */
 export function csrfTokenForSession(sessionId: string, secret: string): string {
@@ -108,8 +113,8 @@ export async function assertCsrfWithSecret(
     provided = headerToken;
   } else {
     const form = formData ?? (await request.clone().formData());
-    const field = form.get(CSRF_FIELD_NAME);
-    provided = typeof field === "string" ? field : null;
+    const field = csrfFieldSchema.safeParse(form.get(CSRF_FIELD_NAME));
+    provided = field.success ? field.data : null;
   }
   if (!provided) throw forbidden("Missing CSRF token.");
 

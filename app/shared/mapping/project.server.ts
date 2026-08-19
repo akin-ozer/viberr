@@ -12,7 +12,10 @@ import type {
  * `project_members` projection tables (docs/architecture/decisions.md "Data & naming").
  */
 
-export interface ProjectRow {
+/** A type alias, not an interface, so a `SELECT`-row assertion is checked
+ *  against SQLite's own output types instead of being laundered through
+ *  `unknown` first (only a type alias gets the implicit index signature). */
+export type ProjectRow = {
   slug: string;
   name: string;
   archived: 0 | 1;
@@ -28,7 +31,7 @@ export interface ProjectRow {
   source_path: string;
   content_hash: string;
   parsed_at: string;
-}
+};
 
 export interface ProjectRecord {
   slug: string;
@@ -50,6 +53,11 @@ export interface ProjectRecord {
 }
 
 export function mapProjectRow(row: ProjectRow): ProjectRecord {
+  // SAFETY: the five `*_json` columns have ONE writer — `rebuildProjectFile`
+  // (server/projections/rebuilder.server.ts) stores `JSON.stringify` of the
+  // frontmatter `parseProjectFileContent` just produced, so each column holds
+  // exactly the schema type named below. `credential_policy_json` is the one
+  // nullable column of the five and its null is checked before the parse.
   return {
     slug: row.slug,
     name: row.name,
@@ -71,11 +79,12 @@ export function mapProjectRow(row: ProjectRow): ProjectRecord {
   };
 }
 
-export interface ProjectMemberRow {
+/** Type alias for the same reason as ProjectRow above. */
+export type ProjectMemberRow = {
   project_slug: string;
   user_id: string;
   role: ProjectRole;
-}
+};
 
 export interface ProjectMemberRecord {
   projectSlug: string;

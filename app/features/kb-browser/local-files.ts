@@ -34,9 +34,10 @@ export function entriesFromFileList(files: FileList | File[]): UploadSelection {
   const out: UploadEntry[] = [];
   let skipped = 0;
   for (const file of Array.from(files)) {
-    const rel =
-      (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
-      file.name;
+    // `webkitRelativePath` is "" for a plain picker and the in-folder path for a
+    // `webkitdirectory` one — the fallback covers both it and a File
+    // implementation that omits the property.
+    const rel = file.webkitRelativePath || file.name;
     if (!rel || hasDotSegment(rel)) {
       skipped += 1;
       continue;
@@ -115,13 +116,12 @@ export async function entriesFromDataTransfer(
   const items = Array.from(dt.items ?? []);
   const entries: FileSystemEntryLike[] = [];
   for (const item of items) {
-    const getEntry = (
-      item as DataTransferItem & {
-        webkitGetAsEntry?: () => FileSystemEntryLike | null;
-      }
-    ).webkitGetAsEntry;
+    const getEntry = item.webkitGetAsEntry;
+    // Feature detection, not a shape check: `webkitGetAsEntry` is non-standard,
+    // so a browser (or jsdom) without it must fall through to the flat list
+    // below rather than throw.
     if (typeof getEntry !== "function") continue;
-    const entry = getEntry.call(item) as FileSystemEntryLike | null;
+    const entry = getEntry.call(item);
     if (entry) entries.push(entry);
   }
   if (entries.length > 0) {

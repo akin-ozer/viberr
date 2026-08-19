@@ -10,6 +10,8 @@
  * recorded, so tests can assert on them.
  */
 
+import { z } from "zod";
+
 export interface FakeCall {
   method: string;
   url: URL;
@@ -38,44 +40,57 @@ export interface FakeGithub {
   callsTo(key: string): FakeCall[];
 }
 
+/** A JSON string body, the only body shape the services under test send. */
+const jsonRequestBody = z.string();
+/** A response body given verbatim rather than JSON-serialized. */
+const verbatimResponseBody = z.string();
+
+/** Resolve the two responder forms once, where `routes` enters, so the request
+ *  path below has a single kind of thing to call. */
+function responderFns(
+  routes: Record<string, FakeResponder>,
+): Map<string, (call: FakeCall) => FakeResponseSpec> {
+  return new Map(
+    Object.entries(routes).map(([key, responder]) => [
+      key,
+      responder instanceof Function ? responder : () => responder,
+    ]),
+  );
+}
+
 export function fakeGithubFetch(
   routes: Record<string, FakeResponder>,
 ): FakeGithub {
   const calls: FakeCall[] = [];
   const perRoute = new Map<string, number>();
+  const responders = responderFns(routes);
 
-  const fetchImpl = (async (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> => {
-    const url = new URL(
-      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-    );
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
     const method = (init?.method ?? "GET").toUpperCase();
     const key = `${method} ${url.pathname}`;
     const attempt = (perRoute.get(key) ?? 0) + 1;
     perRoute.set(key, attempt);
 
+    // `Headers` is the platform's own decoder for every `HeadersInit` form and
+    // lower-cases the names on the way in, which is the shape callers assert on.
     const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(
-      (init?.headers ?? {}) as Record<string, string>,
-    )) {
-      headers[k.toLowerCase()] = v;
+    for (const [name, value] of new Headers(init?.headers)) {
+      headers[name] = value;
     }
+    const sentBody = jsonRequestBody.safeParse(init?.body);
     const call: FakeCall = {
       method,
       url,
       headers,
-      body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      body: sentBody.success ? JSON.parse(sentBody.data) : null,
       attempt,
     };
     calls.push(call);
 
-    const responder = routes[key];
+    const responder = responders.get(key);
     const spec: FakeResponseSpec = responder
-      ? typeof responder === "function"
-        ? responder(call)
-        : responder
+      ? responder(call)
       : { status: 404, body: { message: "Not Found" } };
 
     const status = spec.status ?? 200;
@@ -83,17 +98,18 @@ export function fakeGithubFetch(
     if (status === 204 || status === 304) {
       return new Response(null, { status, headers: responseHeaders });
     }
+    const verbatim = verbatimResponseBody.safeParse(spec.body);
     const bodyText =
       spec.body === undefined
         ? ""
-        : typeof spec.body === "string"
-          ? spec.body
+        : verbatim.success
+          ? verbatim.data
           : JSON.stringify(spec.body);
     if (!responseHeaders.has("content-type") && bodyText) {
       responseHeaders.set("content-type", "application/json");
     }
     return new Response(bodyText, { status, headers: responseHeaders });
-  }) as typeof fetch;
+  };
 
   return {
     fetchImpl,
@@ -106,7 +122,7 @@ export function fakeGithubFetch(
 
 /** A fetch that always fails at the network level. */
 export function unreachableFetch(message = "getaddrinfo ENOTFOUND api.github.com"): typeof fetch {
-  return (async () => {
+  return async () => {
     throw new TypeError(message);
-  }) as typeof fetch;
+  };
 }

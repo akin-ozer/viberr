@@ -22,9 +22,19 @@ import { NewProjectModal } from "./new-project-modal";
 
 afterEach(cleanup);
 
+/** The create-project action's reply, as NewProjectModal's own fetcher declares it. */
+interface CreateProjectReply {
+  ok: boolean;
+  key?: string;
+  slug?: string;
+  storePath?: string;
+  repoWarning?: string | null;
+  error?: string;
+}
+
 function renderModal(
   props: Partial<Parameters<typeof NewProjectModal>[0]> = {},
-  action: () => Promise<unknown> = async () => ({ ok: true }),
+  action: () => Promise<CreateProjectReply> = async () => ({ ok: true }),
 ) {
   const Stub = createRoutesStub([
     {

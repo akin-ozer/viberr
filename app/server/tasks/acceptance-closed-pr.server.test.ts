@@ -74,7 +74,7 @@ function deployOperator(): void {
           autonomy: "full",
         },
       },
-    ] as never,
+    ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }

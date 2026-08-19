@@ -16,12 +16,12 @@ import { useDialog } from "~/ui/use-dialog";
  * THIS board"), and it now says so.
  */
 
-const GROUP_LABEL: Record<CommandHitKind, string> = {
+const GROUP_LABEL = {
   project: "Projects",
   task: "Tasks",
   branch: "Branches",
   agent: "Agents",
-};
+} as const satisfies Record<CommandHitKind, string>;
 
 const GROUP_ICON = {
   project: "board",

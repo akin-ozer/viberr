@@ -40,14 +40,14 @@ import {
   setTransitionBoundary,
 } from "~/features/policy/policy-actions.server";
 import { insertUser } from "~/server/auth/user-store.server";
-import { isAppError } from "~/server/errors/app-error.server";
+import { isAppError, type AppError } from "~/server/errors/app-error.server";
 import { ROLE_RANK, RBAC_DEFINITIONS, PROJECT_ROLES,
   roleCan, rolesForAction, type ProjectRole, type RbacAction } from "~/shared/rbac";
 import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
 import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
-import type { TaskPacket } from "~/schemas/task-file.schema";
+import type { TaskFrontmatter, TaskPacket } from "~/schemas/task-file.schema";
 import { listAuditEvents } from "../../../test-support/audit-log";
 
 /**
@@ -83,18 +83,24 @@ const OVERRIDE_AUDIT_ACTION = "project.org_admin.override";
 /** The Done-equivalent stage of the template every test project is built from. */
 const TERMINAL_STAGE = GOVERNED_TEMPLATE.stages[GOVERNED_TEMPLATE.stages.length - 1]!.id;
 
+/** How every helper here identifies one of the fixture users. */
+interface TestUserRef {
+  id: string;
+  email: string;
+}
+
 let ctx: TestDbContext;
 let store: TestStore;
-let orgAdmin: { id: string; email: string };
+let orgAdmin: TestUserRef;
 
-function actorOf(u: { id: string; email: string }) {
+function actorOf(u: TestUserRef) {
   return { userId: u.id, label: u.email };
 }
 
 type Actor = ReturnType<typeof actorOf>;
 
 /** Run `fn` and classify: true = guard ALLOWED (passed), false = guard DENIED (403). */
-async function guardAllowed(fn: () => Promise<unknown>): Promise<boolean> {
+async function guardAllowed<T>(fn: () => Promise<T>): Promise<boolean> {
   try {
     await fn();
     return true; // action completed → the guard let it through
@@ -138,7 +144,7 @@ function usersByRole() {
     maintainer: store.users.murat,
     contributor: store.users.selin,
     viewer: store.users.elif,
-  } as Record<ProjectRole, { id: string; email: string }>;
+  } satisfies Record<ProjectRole, TestUserRef>;
 }
 
 /**
@@ -150,7 +156,7 @@ function usersByRole() {
  * which is where the per-role answer is actually decided — and which needs the
  * test store's dataRoot, so the route wrapper cannot be called from this suite.
  */
-function visibilityGate(user: { id: string; email: string }, what = "act on this project") {
+function visibilityGate(user: TestUserRef, what = "act on this project") {
   return assertProjectAction(store.db, "any-member", store.slug, actorOf(user), what, {
     dataRoot: store.dataRoot,
     allowArchived: true,
@@ -158,10 +164,7 @@ function visibilityGate(user: { id: string; email: string }, what = "act on this
 }
 
 /** The composition every project-scoped action uses: visibility, then work. */
-async function commentAs(
-  user: { id: string; email: string },
-  text: string,
-): Promise<unknown> {
+async function commentAs(user: TestUserRef, text: string) {
   visibilityGate(user);
   return appendComment(
     store.db,
@@ -192,7 +195,7 @@ function resetTaskStage(stage: string) {
 }
 
 /** Rewrite VIB-1 with an owner + rebuild (for the ownership guards). */
-function resetTaskOwner(ownerUserId: string, patch: Record<string, unknown> = {}) {
+function resetTaskOwner(ownerUserId: string, patch: Partial<TaskFrontmatter> = {}) {
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", {
       stage: "impl",
@@ -206,7 +209,7 @@ function resetTaskOwner(ownerUserId: string, patch: Record<string, unknown> = {}
 }
 
 /** A SECOND task, so "authority on my task" can be told apart from "authority". */
-function writeOtherTask(key: string, patch: Record<string, unknown> = {}) {
+function writeOtherTask(key: string, patch: Partial<TaskFrontmatter> = {}) {
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter(key, {
       stage: "impl",
@@ -221,8 +224,9 @@ function writeOtherTask(key: string, patch: Record<string, unknown> = {}) {
 interface MatrixDriver {
   /** How this action is reached in the shipping server code. */
   label: string;
-  /** The REAL server function, driven as `actor`. */
-  run: (actor: Actor) => Promise<unknown>;
+  /** The REAL server function, driven as `actor`. Its result is never read —
+   *  the matrix records only whether the call threw. */
+  run: (actor: Actor) => Promise<void>;
   /** Restore state before each actor so a successful mutation by an earlier
    *  (allowed) actor can't turn a later actor's attempt into a state-dependent
    *  no-op that bypasses the gate (e.g. an idempotent same-stage transition). */
@@ -240,7 +244,7 @@ interface MatrixDriver {
  * driver here is a TYPE error, and `covers every action in the matrix` fails at
  * runtime too (for the case where someone widens the type instead).
  */
-function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
+function matrixDrivers() {
   let taskN = 0;
   let inviteN = 0;
   return {
@@ -252,11 +256,12 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
     view: [
       {
         label: "assertProjectAction any-member (the read gate every project surface uses)",
-        run: async (actor) =>
-          assertProjectAction(store.db, "any-member", store.slug, actor, "read this project", {
+        run: async (actor) => {
+          await assertProjectAction(store.db, "any-member", store.slug, actor, "read this project", {
             dataRoot: store.dataRoot,
             allowArchived: true,
-          }),
+          });
+        },
         auditAction: "any-member",
       },
     ],
@@ -268,7 +273,7 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
             dataRoot: store.dataRoot,
             allowArchived: true,
           });
-          return appendComment(
+          await appendComment(
             store.db,
             {
               projectSlug: store.slug,
@@ -285,8 +290,8 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
     "create-task": [
       {
         label: "createTask",
-        run: (actor) =>
-          createTask(
+        run: async (actor) => {
+          await createTask(
             store.db,
             {
               projectSlug: store.slug,
@@ -295,19 +300,21 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
             },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "own-task": [
       {
         label: "setOwner (take ownership)",
-        run: (actor) =>
-          setOwner(
+        run: async (actor) => {
+          await setOwner(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: actor.userId },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "approve-transition": [
@@ -316,26 +323,28 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
         // Reset to impl before each actor so every attempt is a real impl→ready
         // move that hits the gate (not an idempotent same-stage no-op after an
         // earlier win).
-        run: (actor) =>
-          transitionStage(
+        run: async (actor) => {
+          await transitionStage(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
         reset: () => resetTaskStage("impl"),
       },
     ],
     "resolve-packet": [
       {
         label: "dismissRecommendation",
-        run: (actor) =>
-          dismissRecommendation(
+        run: async (actor) => {
+          await dismissRecommendation(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-1", recId: "nope" },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
       {
         // F20: a bogus recId only reaches the notFound/conflict read AFTER the
@@ -344,13 +353,14 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
         // leak) while maintainer+ pass and fail downstream. That is the dismiss
         // symmetry F20 restored.
         label: "applyRecommendation (authorized BEFORE the task read — F20)",
-        run: (actor) =>
-          applyRecommendation(
+        run: async (actor) => {
+          await applyRecommendation(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-1", recId: "nope" },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "accept-completion": [
@@ -358,13 +368,14 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
         // VIB-1 has no owner, so the R6-2 owner exception cannot mask the tier,
         // and no PR, so maintainer+ pass the guard and fail downstream (non-403).
         label: "completeTaskMerge (merge-pending acceptance)",
-        run: (actor) =>
-          completeTaskMerge(
+        run: async (actor) => {
+          await completeTaskMerge(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-1" },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
       {
         // The Stage-dropdown / board-drag route into Done: a HUMAN manual move
@@ -374,8 +385,8 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
         // Pass 19 found this path skipping the acceptance DISCLOSURE; this pins
         // that it never skips the acceptance AUTHORITY.
         label: `transitionStage manual → ${TERMINAL_STAGE} (acceptance contract)`,
-        run: (actor) =>
-          transitionStage(
+        run: async (actor) => {
+          await transitionStage(
             store.db,
             {
               projectSlug: store.slug,
@@ -385,15 +396,16 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
             },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
         reset: () => resetTaskStage("review"),
       },
     ],
     "update-goal": [
       {
         label: "updateTaskGoal",
-        run: (actor) =>
-          updateTaskGoal(
+        run: async (actor) => {
+          await updateTaskGoal(
             store.db,
             {
               projectSlug: store.slug,
@@ -402,74 +414,80 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
             },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "run-agents": [
       {
         label: "assignSpecialist",
-        run: (actor) =>
-          assignSpecialist(
+        run: async (actor) => {
+          await assignSpecialist(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-1", profileId: "does-not-exist" },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "reorder-board": [
       {
         label: "reorderTask",
-        run: (actor) =>
-          reorderTask(
+        run: async (actor) => {
+          await reorderTask(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: null },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "reconcile-github": [
       {
         // R8-4: aligned with rescan-project (was contributor+).
         label: "assertProjectAction reconcile-github",
-        run: async (actor) =>
-          assertProjectAction(
+        run: async (actor) => {
+          await assertProjectAction(
             store.db,
             "reconcile-github",
             store.slug,
             actor,
             "reconcile with GitHub",
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "grant-github-scope": [
       {
         label: "assertProjectAction grant-github-scope",
-        run: async (actor) =>
-          assertProjectAction(
+        run: async (actor) => {
+          await assertProjectAction(
             store.db,
             "grant-github-scope",
             store.slug,
             actor,
             "change the credential",
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "rescan-project": [
       {
         label: "assertProjectAction rescan-project (action id, not a hardcoded role list)",
-        run: async (actor) =>
-          assertProjectAction(
+        run: async (actor) => {
+          await assertProjectAction(
             store.db,
             "rescan-project",
             store.slug,
             actor,
             "re-scan the project",
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "release-any-ownership": [
@@ -482,18 +500,19 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
         // attempt takes the idempotent "nothing to release" branch, which only
         // needs membership.
         label: "releaseOwner (releasing SOMEONE ELSE's seat)",
-        run: (actor) =>
-          releaseOwner(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actor, {
+        run: async (actor) => {
+          await releaseOwner(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actor, {
             dataRoot: store.dataRoot,
-          }),
+          });
+        },
         reset: () => resetTaskOwner(store.users.deniz.id),
       },
     ],
     "manage-members": [
       {
         label: "inviteMember",
-        run: (actor) =>
-          inviteMember(
+        run: async (actor) => {
+          await inviteMember(
             store.db,
             {
               projectSlug: store.slug,
@@ -502,7 +521,8 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
             },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "manage-agents": [
@@ -510,17 +530,18 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
         // An empty form only reaches its validation error AFTER the guard, so
         // the matrix reads the guard cleanly (403 = denied, validation = allowed).
         label: "createAgentProfile",
-        run: (actor) =>
-          createAgentProfile(store.db, { projectSlug: store.slug, form: {} }, actor, {
+        run: async (actor) => {
+          await createAgentProfile(store.db, { projectSlug: store.slug, form: {} }, actor, {
             dataRoot: store.dataRoot,
-          }),
+          });
+        },
       },
     ],
     "edit-policy": [
       {
         label: "updateProjectIdentity",
-        run: (actor) =>
-          updateProjectIdentity(
+        run: async (actor) => {
+          await updateProjectIdentity(
             store.db,
             {
               projectSlug: store.slug,
@@ -530,7 +551,8 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
             },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
       {
         // The WORKFLOW half of edit-policy, and the one the always-human
@@ -540,8 +562,8 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
         // not the consequence, so on its own it never proved this door was
         // locked to contributors.
         label: "setTransitionBoundary (the workflow-boundary path)",
-        run: (actor) =>
-          setTransitionBoundary(
+        run: async (actor) => {
+          await setTransitionBoundary(
             store.db,
             {
               projectSlug: store.slug,
@@ -551,7 +573,8 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
             },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     "force-accept-completion": [
@@ -560,16 +583,17 @@ function matrixDrivers(): Record<RbacAction, MatrixDriver[]> {
         // bypasses the review gate (DG-2) — so its tier is the one that must
         // never widen by accident.
         label: "forceAcceptCompletion",
-        run: (actor) =>
-          forceAcceptCompletion(
+        run: async (actor) => {
+          await forceAcceptCompletion(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-1" },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
-  };
+  } satisfies Record<RbacAction, MatrixDriver[]>;
 }
 
 /**
@@ -581,7 +605,7 @@ async function assertMatchesMatrix(action: RbacAction, driver: MatrixDriver) {
   const where = `${action} via ${driver.label}`;
   const allowed = new Set(rolesForAction(action));
   const byRole = usersByRole();
-  for (const role of Object.keys(byRole) as ProjectRole[]) {
+  for (const role of PROJECT_ROLES) {
     driver.reset?.();
     const got = await guardAllowed(() => driver.run(actorOf(byRole[role])));
     expect(
@@ -639,8 +663,7 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
     for (const a of actions) {
       const roles = rolesForAction(a).map((r) => ROLE_RANK[r]).sort((x, y) => x - y);
       const floor = roles[0]!;
-      const holders = (["viewer", "contributor", "maintainer", "admin"] as ProjectRole[])
-        .filter((r) => ROLE_RANK[r] >= floor);
+      const holders = PROJECT_ROLES.filter((r) => ROLE_RANK[r] >= floor);
       expect(new Set(rolesForAction(a)), `action ${a} must be a rank floor`).toEqual(
         new Set(holders),
       );
@@ -682,7 +705,7 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
     );
     for (const [action, list] of Object.entries(drivers)) {
       expect(list.length, `action "${action}" has no server driver`).toBeGreaterThan(0);
-      for (const d of list) expect(typeof d.run).toBe("function");
+      for (const d of list) expect(d.run).toBeTypeOf("function");
     }
   });
 
@@ -904,22 +927,24 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
     stage: string;
     /** The packet both tasks carry, when the driver resolves one. */
     packet?: "edit_goal" | "accept_completion";
-    run: (taskKey: string, actor: Actor) => Promise<unknown>;
+    /** The result is never read — only whether the consult threw. */
+    run: (taskKey: string, actor: Actor) => Promise<void>;
   }
 
   /**
    * Keyed by the FUNCTION the consult lives in, so the source scan below can
    * compare this table against the real call sites.
    */
-  const OWNER_CONSUMERS: Record<string, OwnerConsumerDriver[]> = {
+  const OWNER_CONSUMERS = {
     completeTaskMerge: [
       {
         label: "completeTaskMerge (merge-pending acceptance)",
         stage: "review",
-        run: (taskKey, actor) =>
-          completeTaskMerge(store.db, { projectSlug: store.slug, taskKey }, actor, {
+        run: async (taskKey, actor) => {
+          await completeTaskMerge(store.db, { projectSlug: store.slug, taskKey }, actor, {
             dataRoot: store.dataRoot,
-          }),
+          });
+        },
       },
     ],
     transitionStage: [
@@ -929,13 +954,14 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
         // requireAcceptCompletion.
         label: "transitionStage across a mid-graph human boundary (impl → review)",
         stage: "impl",
-        run: (taskKey, actor) =>
-          transitionStage(
+        run: async (taskKey, actor) => {
+          await transitionStage(
             store.db,
             { projectSlug: store.slug, taskKey, toStageId: "review" },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     acceptCompletion: [
@@ -944,13 +970,14 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
         // the private acceptCompletion and its own re-check.
         label: `manual transition → ${TERMINAL_STAGE} (the acceptance contract)`,
         stage: "review",
-        run: (taskKey, actor) =>
-          transitionStage(
+        run: async (taskKey, actor) => {
+          await transitionStage(
             store.db,
             { projectSlug: store.slug, taskKey, toStageId: TERMINAL_STAGE, manual: true },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     resolvePacket: [
@@ -958,51 +985,55 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
         label: "resolvePacket, non-acceptance option (the packet is addressed to the owner)",
         stage: "impl",
         packet: "edit_goal",
-        run: (taskKey, actor) =>
-          resolvePacket(
+        run: async (taskKey, actor) => {
+          await resolvePacket(
             store.db,
             { projectSlug: store.slug, taskKey, optionIndex: 0 },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
       {
         label: "resolvePacket, accept_completion option (acceptance through the packet)",
         stage: "review",
         packet: "accept_completion",
-        run: (taskKey, actor) =>
-          resolvePacket(
+        run: async (taskKey, actor) => {
+          await resolvePacket(
             store.db,
             { projectSlug: store.slug, taskKey, optionIndex: 0 },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     applyRecommendation: [
       {
         label: "applyRecommendation (authorized before the recommendation read)",
         stage: "impl",
-        run: (taskKey, actor) =>
-          applyRecommendation(
+        run: async (taskKey, actor) => {
+          await applyRecommendation(
             store.db,
             { projectSlug: store.slug, taskKey, recId: "nope" },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     dismissRecommendation: [
       {
         label: "dismissRecommendation",
         stage: "impl",
-        run: (taskKey, actor) =>
-          dismissRecommendation(
+        run: async (taskKey, actor) => {
+          await dismissRecommendation(
             store.db,
             { projectSlug: store.slug, taskKey, recId: "nope" },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
     manualDeliverForReview: [
@@ -1011,10 +1042,11 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
         // else needs run-agents (maintainer+).
         label: "manualDeliverForReview (the GitHub panel's deliver button)",
         stage: "impl",
-        run: (taskKey, actor) =>
-          manualDeliverForReview(store.db, { projectSlug: store.slug, taskKey }, actor, {
+        run: async (taskKey, actor) => {
+          await manualDeliverForReview(store.db, { projectSlug: store.slug, taskKey }, actor, {
             dataRoot: store.dataRoot,
-          }),
+          });
+        },
       },
     ],
     requestPacketMaintainerDecision: [
@@ -1025,22 +1057,23 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
         label: "requestPacketMaintainerDecision (owner escalates a stranded packet)",
         stage: "impl",
         packet: "edit_goal",
-        run: (taskKey, actor) =>
-          requestPacketMaintainerDecision(
+        run: async (taskKey, actor) => {
+          await requestPacketMaintainerDecision(
             store.db,
             { projectSlug: store.slug, taskKey },
             actor,
             { dataRoot: store.dataRoot },
-          ),
+          );
+        },
       },
     ],
-  };
+  } satisfies Record<string, OwnerConsumerDriver[]>;
 
   async function attempt(
     driver: OwnerConsumerDriver,
-    owner: { id: string; email: string },
+    owner: TestUserRef,
     taskKey: string,
-    actor: { id: string; email: string },
+    actor: TestUserRef,
   ): Promise<boolean> {
     seedPair(owner.id, driver.stage, driver.packet ? probePacket(driver.packet) : null);
     return guardAllowed(() => driver.run(taskKey, actorOf(actor)));
@@ -1152,8 +1185,10 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
  * is a hand-editable file, and the runtime must not trust what it says here.
  */
 describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", () => {
-  const grant = (capabilityId: string, mode: CapabilityGrant["mode"]) =>
-    ({ capabilityId, mode }) as CapabilityGrant;
+  const grant = (
+    capabilityId: string,
+    mode: CapabilityGrant["mode"],
+  ): CapabilityGrant => ({ capabilityId, mode });
 
   it("the set is exactly the three structural locks — each with a server invariant below", () => {
     // Dropping an id from this constant unlocks it EVERYWHERE at once (the
@@ -1585,13 +1620,15 @@ describe("B-WF7: reorder-board and approve-transition stay one tier", () => {
  * BEFORE the write, so "denied" means the timeline never took the comment.
  */
 describe("view + comment are enforced as MEMBERSHIP, not as a role tier", () => {
-  /** Run and return what was thrown (or undefined). */
-  async function caught(fn: () => unknown): Promise<unknown> {
+  /** Run and return the refusal it threw: the `AppError` every guard raises,
+   *  `null` for a throw of any other kind, `undefined` when nothing threw — the
+   *  three stay distinct so `isAppError` below still tells them apart. */
+  async function caught<T>(fn: () => T): Promise<AppError | null | undefined> {
     try {
       await fn();
       return undefined;
     } catch (error) {
-      return error;
+      return isAppError(error) ? error : null;
     }
   }
 
@@ -1605,16 +1642,14 @@ describe("view + comment are enforced as MEMBERSHIP, not as a role tier", () => 
 
   it("every role reaches the project; a non-member is refused by the same gate", async () => {
     const byRole = usersByRole();
-    for (const role of Object.keys(byRole) as ProjectRole[]) {
+    for (const role of PROJECT_ROLES) {
       const grant = visibilityGate(byRole[role]);
       expect(grant.role, `role "${role}" must be able to open the project`).toBe(role);
       expect(grant.isOrgAdminOverride).toBe(false);
     }
-    const refusal = (await caught(() => visibilityGate(store.users.deniz))) as {
-      status?: number;
-    };
+    const refusal = await caught(() => visibilityGate(store.users.deniz));
     expect(isAppError(refusal)).toBe(true);
-    expect(refusal.status).toBe(403); // the ROUTE turns this into the 404
+    expect(refusal?.status).toBe(403); // the ROUTE turns this into the 404
     // The D2 override reaches reads too (audited, per F19-30).
     const override = visibilityGate(orgAdmin);
     expect(override.role).toBe("admin");
@@ -1625,11 +1660,11 @@ describe("view + comment are enforced as MEMBERSHIP, not as a role tier", () => 
     expect(await caught(() => commentAs(store.users.elif, "Viewer says hello"))).toBeUndefined();
     expect(commentTexts()).toContain("Viewer says hello");
 
-    const refusal = (await caught(() =>
+    const refusal = await caught(() =>
       commentAs(store.users.deniz, "Non-member says hello"),
-    )) as { status?: number };
+    );
     expect(isAppError(refusal)).toBe(true);
-    expect(refusal.status).toBe(403); // → the route's unknown-slug 404
+    expect(refusal?.status).toBe(403); // → the route's unknown-slug 404
     // The comment path itself carries no authorization (task-actions §7.7) —
     // `requireVisibleProject` IS its access control, so "refused" has to mean
     // the timeline never took the write.
@@ -1648,7 +1683,7 @@ describe("the matrix itself is pinned, not just the call sites", () => {
    * now requires editing this table too, which is the point — a role tier is a
    * policy decision, so it should never move as a side effect of a refactor.
    */
-  const EXPECTED_TIERS: Record<RbacAction, ProjectRole[]> = {
+  const EXPECTED_TIERS = {
     view: ["admin", "maintainer", "contributor", "viewer"],
     comment: ["admin", "maintainer", "contributor", "viewer"],
     "create-task": ["admin", "maintainer", "contributor"],
@@ -1667,7 +1702,7 @@ describe("the matrix itself is pinned, not just the call sites", () => {
     "manage-agents": ["admin"],
     "edit-policy": ["admin"],
     "force-accept-completion": ["admin"],
-  };
+  } satisfies Record<RbacAction, ProjectRole[]>;
 
   it("every action holds exactly the roles the policy decision assigned it", () => {
     const actual = Object.fromEntries(

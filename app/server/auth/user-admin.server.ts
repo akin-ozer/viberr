@@ -18,6 +18,7 @@ import {
   insertUser,
   normalizeEmail,
   updateUserFields,
+  type UserFieldPatch,
 } from "./user-store.server";
 
 /**
@@ -142,12 +143,14 @@ export function updateUser(
     throw AppError.conflict("Cannot demote or disable the last active admin.");
   }
 
-  const updated = updateUserFields(db, userId, {
-    ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
-    ...(patch.title !== undefined ? { title: patch.title } : {}),
-    ...(patch.role !== undefined ? { role: patch.role } : {}),
-    ...(patch.disabled !== undefined ? { disabled: patch.disabled } : {}),
-  });
+  // Only the fields the caller actually sent reach the UPDATE — an absent key
+  // means "leave this column alone", which is not the same as clearing it.
+  const fields: UserFieldPatch = {};
+  if (patch.name !== undefined) fields.name = patch.name.trim();
+  if (patch.title !== undefined) fields.title = patch.title;
+  if (patch.role !== undefined) fields.role = patch.role;
+  if (patch.disabled !== undefined) fields.disabled = patch.disabled;
+  const updated = updateUserFields(db, userId, fields);
   if (!updated) throw AppError.notFound("No such user.", { userId });
 
   if (patch.disabled === true && !existing.disabled) {
@@ -176,13 +179,16 @@ export function updateUser(
       actor,
       subjectKind: "user",
       subjectId: userId,
-      details: {
-        email: existing.email,
-        fields: changedFields,
-        ...(patch.role !== undefined && patch.role !== existing.role
-          ? { roleFrom: existing.role, roleTo: patch.role }
-          : {}),
-      },
+      // A role change names both ends; any other edit only lists its fields.
+      details:
+        patch.role !== undefined && patch.role !== existing.role
+          ? {
+              email: existing.email,
+              fields: changedFields,
+              roleFrom: existing.role,
+              roleTo: patch.role,
+            }
+          : { email: existing.email, fields: changedFields },
     });
   }
   return updated;

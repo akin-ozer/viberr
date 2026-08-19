@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 
 /**
  * Provenance READ layer (P13-D-16; `architecture.md` server/provenance).
@@ -19,28 +20,37 @@ import type { DatabaseSync } from "node:sqlite";
 /** The reconciler's per-task observation (branch compare + PR state). */
 export const RECONCILE_ACTION = "github.reconcile";
 
+/** `details_json` is a small JSON OBJECT of facts (ids, counts, paths) — see
+ *  the secret-free contract on `provenance-recorder.server.ts`. Anything else
+ *  the column holds (a scalar, an array, unparseable text) is not a details bag
+ *  and reads as absent, the way unparseable text always did. */
+const provenanceDetailsSchema = z.record(z.string(), z.json());
+
+export type ProvenanceDetails = z.infer<typeof provenanceDetailsSchema>;
+
 export interface ProvenanceRow {
   id: number;
   sourcePath: string;
   contentHash: string | null;
   observedAt: string;
   action: string;
-  details: Record<string, unknown> | null;
+  details: ProvenanceDetails | null;
 }
 
-interface RawRow {
+type RawRow = {
   id: number;
   source_path: string;
   content_hash: string | null;
   observed_at: string;
   action: string;
   details_json: string | null;
-}
+};
 
-function parseDetails(json: string | null): Record<string, unknown> | null {
+function parseDetails(json: string | null): ProvenanceDetails | null {
   if (!json) return null;
   try {
-    return JSON.parse(json) as Record<string, unknown>;
+    const parsed = provenanceDetailsSchema.safeParse(JSON.parse(json));
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
@@ -75,6 +85,9 @@ export function listProvenance(
   options: { sourcePath: string; action?: string; limit?: number },
 ): ProvenanceRow[] {
   const limit = options.limit ?? 50;
+  // SAFETY: `provenance` (0001_baseline.sql) declares every column this row
+  // maps — `id` INTEGER PRIMARY KEY, `source_path`/`observed_at`/`action` TEXT
+  // NOT NULL, `content_hash`/`details_json` nullable TEXT.
   const rows = (
     options.action
       ? db
@@ -89,7 +102,7 @@ export function listProvenance(
              ORDER BY id DESC LIMIT ?`,
           )
           .all(options.sourcePath, limit)
-  ) as unknown as RawRow[];
+  ) as RawRow[];
   return rows.map(mapRow);
 }
 
@@ -98,6 +111,7 @@ export function latestProvenance(
   db: DatabaseSync,
   options: { sourcePath: string; action: string },
 ): ProvenanceRow | null {
+  // SAFETY: same column guarantees as {@link listProvenance}.
   const row = db
     .prepare(
       `SELECT * FROM provenance WHERE source_path = ? AND action = ?
@@ -116,6 +130,10 @@ export function latestProvenance(
  * Factory: the statement is prepared ONCE and many branch rows are mapped
  * through it, instead of re-preparing per row inside a `.map` (pass-4 WI-10).
  */
+/** The one field a `github.reconcile` row is read for. A row whose `behindBy`
+ *  is missing or not a number is "never compared", exactly as before. */
+const reconcileDetailsSchema = z.object({ behindBy: z.number() });
+
 export function createReconcileBehindByLookup(
   db: DatabaseSync,
 ): (sourcePath: string) => number | null {
@@ -125,11 +143,15 @@ export function createReconcileBehindByLookup(
      ORDER BY id DESC LIMIT 1`,
   );
   return (sourcePath: string): number | null => {
+    // SAFETY: `provenance.details_json` is a nullable TEXT column
+    // (0001_baseline.sql), and it is the only column selected here.
     const row = stmt.get(sourcePath, RECONCILE_ACTION) as
       | { details_json: string | null }
       | undefined;
-    const behindBy = parseDetails(row?.details_json ?? null)?.behindBy;
-    return typeof behindBy === "number" ? behindBy : null;
+    const details = parseDetails(row?.details_json ?? null);
+    if (details === null) return null;
+    const reconciled = reconcileDetailsSchema.safeParse(details);
+    return reconciled.success ? reconciled.data.behindBy : null;
   };
 }
 
@@ -152,6 +174,8 @@ export function latestProjectReconcileAt(
   db: DatabaseSync,
   projectSlug: string,
 ): string | null {
+  // SAFETY: `MAX()` over the nullable-when-empty TEXT column `observed_at`
+  // yields TEXT or NULL, and the aggregate always returns exactly one row.
   const row = db
     .prepare(
       `SELECT MAX(observed_at) AS latest FROM provenance
@@ -173,6 +197,7 @@ export function latestTaskReconcileAt(
   projectSlug: string,
   taskKey: string,
 ): string | null {
+  // SAFETY: same aggregate guarantee as {@link latestProjectReconcileAt}.
   const row = db
     .prepare(
       `SELECT MAX(observed_at) AS latest FROM provenance

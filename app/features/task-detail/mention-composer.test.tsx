@@ -45,12 +45,27 @@ const MENTIONABLES: Mentionables = {
   ],
 };
 
-function renderComposer(
-  opts: {
-    action?: () => unknown | Promise<unknown>;
-    onPosted?: (text: string) => void;
-  } = {},
-) {
+/** What the stubbed comment action answers: the composer reads `ok` and, on a
+ *  refusal, renders `error` in its inline alert. */
+interface ComposerActionReply {
+  ok: boolean;
+  error?: string;
+}
+
+interface ComposerOptions {
+  /** Replace the stub action's reply (default `{ ok: true }`). */
+  action?: () => ComposerActionReply | Promise<ComposerActionReply>;
+  onPosted?: (text: string) => void;
+}
+
+/** Lexical stamps the live editor onto its contenteditable host element, and
+ *  that handle is how these tests drive the REAL editor (jsdom cannot
+ *  synthesize typing into a contenteditable). */
+interface LexicalHost extends HTMLElement {
+  __lexicalEditor: LexicalEditor;
+}
+
+function renderComposer(opts: ComposerOptions = {}) {
   const Host = () => {
     const [ask, setAsk] = useState(0);
     return (
@@ -82,11 +97,11 @@ function renderComposer(
     },
   ]);
   const utils = render(<Stub initialEntries={["/t"]} />);
-  const ce = utils.container.querySelector(
+  const ce = utils.container.querySelector<LexicalHost>(
     '[contenteditable="true"]',
-  ) as HTMLElement;
-  const editor = (ce as unknown as { __lexicalEditor: LexicalEditor })
-    .__lexicalEditor;
+  );
+  if (!ce) throw new Error("renderComposer: no composer rendered");
+  const editor = ce.__lexicalEditor;
   expect(editor).toBeTruthy();
   return { ...utils, ce, editor };
 }
@@ -206,8 +221,8 @@ describe("comment composer @-mention autocomplete", () => {
     await waitFor(() => expect(listbox()).toBeTruthy());
     const devRow = Array.from(document.querySelectorAll('[role="option"]')).find(
       (o) => o.textContent?.includes("dev"),
-    ) as HTMLElement;
-    fireEvent.click(devRow);
+    );
+    fireEvent.click(devRow!);
     await waitFor(() => expect(readText(editor)).toBe("@dev "));
   });
 
@@ -368,7 +383,7 @@ describe("Timeline empty state (UI-40)", () => {
     id: 1,
     type: "transition",
     occurredAt: new Date().toISOString(),
-    actor: { kind: "agent", name: "Operator" } as TimelineEventRender["actor"],
+    actor: { kind: "agent", name: "Operator" },
     title: null,
     text: "Moved to Review",
     toAgent: false,

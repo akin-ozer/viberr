@@ -15,7 +15,7 @@ import {
  * 256 KB read cap — landed verbatim in every operator and specialist prompt.
  */
 
-function freshSkill(name = "craft"): { dataRoot: string; skillDir: string } {
+function freshSkill(name = "craft") {
   const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-skill-"));
   const skillDir = path.join(dataRoot, "skills", name);
   mkdirSync(skillDir, { recursive: true });

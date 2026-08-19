@@ -50,7 +50,7 @@ export function OrgSettingsPage({
   // KB/MCP/skill line. Profiles are disclosed in the tooltip instead of being
   // silently added to a number labelled "Agent resources".
   const resourceCount = view.kbs.length + view.mcps.length + view.skills.length;
-  const counts: Record<OrgSettingsTab, number> = {
+  const counts = {
     connections: view.connections.length,
     users: view.users.length,
     // The count is LIVE methods, not configured rows: a provider saved but not
@@ -58,8 +58,8 @@ export function OrgSettingsPage({
     // opposite of the card underneath.
     sso: view.authProviders.filter((p) => p.active).length,
     resources: resourceCount,
-  };
-  const countHint: Record<OrgSettingsTab, string> = {
+  } satisfies Record<OrgSettingsTab, number>;
+  const countHint = {
     connections: countLabel(view.connections.length, "GitHub connection"),
     users: countLabel(view.users.length, "user"),
     sso: countLabel(
@@ -75,7 +75,7 @@ export function OrgSettingsPage({
       countLabel(view.skills.length, "skill"),
     ].join(" · ") +
       ` — plus ${countLabel(view.gagents.length, "agent profile")}`,
-  };
+  } satisfies Record<OrgSettingsTab, string>;
 
   return (
     <main className="home-shell" data-screen-label="Instance settings">

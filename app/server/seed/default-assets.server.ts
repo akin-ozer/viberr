@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 /**
  * The shipped default agent assets, read from `assets/` at runtime.
  *
@@ -64,10 +65,10 @@ import {
 // profile-template body; the definition-file precedence is removed
 // (specialist-run.server.ts). Only the operator keeps a dedicated definition
 // (it is a system profile with its own persona path).
-const SPECIALIST_PERSONA_BY_ID: Record<string, string> = {
-  developer: splitFrontmatter(developerDefinitionMd).body.trim(),
-  reviewer: splitFrontmatter(reviewerDefinitionMd).body.trim(),
-};
+const SPECIALIST_PERSONA_BY_ID = new Map<string, string>([
+  ["developer", splitFrontmatter(developerDefinitionMd).body.trim()],
+  ["reviewer", splitFrontmatter(reviewerDefinitionMd).body.trim()],
+]);
 
 /**
  * Ships Viberr's DEFAULT agent assets — the operator PLUS the base specialists
@@ -84,7 +85,7 @@ const SPECIALIST_PERSONA_BY_ID: Record<string, string> = {
  */
 
 /** The base specialist profile ids shipped into every store (built-in agents). */
-const DEFAULT_SPECIALIST_IDS = ["developer", "reviewer"] as const;
+const DEFAULT_SPECIALIST_IDS: ReadonlySet<string> = new Set(["developer", "reviewer"]);
 
 /** Static prose assets bundled from `assets/` (skills + definitions + operator
  *  profile template). */
@@ -124,7 +125,12 @@ const SHIPPED_MANIFEST_REL = path.join("state", "shipped-assets.json");
  * manifest onward need no maintenance — they carry their own record. A hash we
  * cannot recognize only ever fails SAFE: the store copy is preserved.
  */
-export const PRIOR_SHIPPED_HASHES: Record<string, readonly string[]> = {
+interface PriorShippedHashes {
+  /** Store-relative asset path → every hash this app has ever shipped for it. */
+  readonly [assetRel: string]: readonly string[];
+}
+
+export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "operator.md")]: [
     "03a4f8b7a1c2ed9e7414654e5086288e6dcc187b48f9bd16b1ef141b3eca4f34",
     "128c0e733d181ce93c6b3c15c71e890fc629c592f39b08d03a44b6b77afd0d1c",
@@ -183,29 +189,46 @@ export function assetHash(content: string): string {
 export function shippedCopyIsUnedited(
   rel: string,
   onDiskHash: string,
-  manifest: Record<string, string>,
+  manifest: ShippedAssetManifest,
 ): boolean {
   if (manifest[rel] === onDiskHash) return true;
   return (PRIOR_SHIPPED_HASHES[rel] ?? []).includes(onDiskHash);
 }
 
+/** What this app last wrote into the store, per store-relative asset path. */
+export interface ShippedAssetManifest {
+  [assetRel: string]: string;
+}
+
+/**
+ * The manifest file's contents. Tolerant PER ENTRY, exactly as the hand-rolled
+ * decoder it replaces was: an entry whose value is not a hash string is dropped
+ * (that asset is then simply unknown to the manifest and falls back to the
+ * historical list), never the whole file. A non-object file fails the parse and
+ * leaves an empty manifest.
+ */
+const shippedManifestSchema = z
+  .record(z.string(), z.string().nullable().catch(null))
+  .transform((entries) => {
+    const manifest: ShippedAssetManifest = {};
+    for (const [rel, hash] of Object.entries(entries)) {
+      if (hash !== null) manifest[rel] = hash;
+    }
+    return manifest;
+  });
+
 /** The store's shipped-asset manifest; `{}` when absent or unreadable. */
-function readShippedManifest(store: string): Record<string, string> {
+function readShippedManifest(store: string): ShippedAssetManifest {
   try {
     const raw = readFileSync(path.join(store, SHIPPED_MANIFEST_REL), "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out: Record<string, string> = {};
-    for (const [rel, hash] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof hash === "string") out[rel] = hash;
-    }
-    return out;
+    const parsed = shippedManifestSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : {};
   } catch {
     return {};
   }
 }
 
-function writeShippedManifest(store: string, manifest: Record<string, string>): void {
+function writeShippedManifest(store: string, manifest: ShippedAssetManifest): void {
   try {
     const dest = path.join(store, SHIPPED_MANIFEST_REL);
     mkdirSync(path.dirname(dest), { recursive: true });
@@ -254,7 +277,7 @@ export function builtinAgentProfileTemplate(
       },
     },
     description:
-      SPECIALIST_PERSONA_BY_ID[profile.frontmatter.id] ?? profile.description,
+      SPECIALIST_PERSONA_BY_ID.get(profile.frontmatter.id) ?? profile.description,
   });
 }
 
@@ -266,7 +289,7 @@ export function builtinAgentProfileTemplate(
  */
 function specialistProfileAssets(): { rel: string; content: string }[] {
   return SEED_AGENT_PROFILES.filter((p) =>
-    (DEFAULT_SPECIALIST_IDS as readonly string[]).includes(p.frontmatter.id),
+    DEFAULT_SPECIALIST_IDS.has(p.frontmatter.id),
   ).map((p) => ({
     rel: path.join("agents", "profiles", `${p.frontmatter.id}.md`),
     content: builtinAgentProfileTemplate(p),

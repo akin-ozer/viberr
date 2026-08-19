@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -9,6 +10,14 @@ import {
   stopKbWatcher,
 } from "./kb-watch.service.server";
 import { reindexKnowledgeBaseByDir, saveKnowledgeBase } from "~/server/org/resources.server";
+
+/** node:sqlite hands back an untyped column bag, so the one column these tests
+ *  read is fetched through a single place rather than re-named per call site. */
+function lastIndexedAt(db: DatabaseSync): SQLOutputValue {
+  return db
+    .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
+    .get()!.last_indexed_at;
+}
 
 describe("kbDirOfChange", () => {
   const root = "/data/kb";
@@ -51,10 +60,7 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     writeFileSync(path.join(dataRoot, "kb", "notes", "b.md"), "more");
     const result = reindexKnowledgeBaseByDir(db, "notes", { dataRoot });
     expect(result).toEqual({ name: "Notes", docCount: 2 });
-    const row = db
-      .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
-      .get() as { last_indexed_at: string };
-    expect(row.last_indexed_at).not.toBeNull();
+    expect(lastIndexedAt(db)).not.toBeNull();
   });
 
   it("skips a 'manual' KB (pinned to explicit re-scan)", async () => {
@@ -135,10 +141,10 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
     // healthy run pays nothing for the headroom.
     kbFile(dataRoot, "notes", "b.md", "more");
     const deadline = Date.now() + 30_000;
-    let after = { last_indexed_at: OLD as string | null };
+    let after: SQLOutputValue = OLD;
     let lastTouch = Date.now();
     let touches = 0;
-    while (after.last_indexed_at === OLD && Date.now() < deadline) {
+    while (after === OLD && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 50));
       // macOS can DROP (not just delay) a coalesced FSEvent outright when the
       // whole machine is churning temp dirs — observed under back-to-back full
@@ -150,21 +156,19 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
         touches += 1;
         kbFile(dataRoot, "notes", "b.md", `more v${touches}`);
       }
-      after = db
-        .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
-        .get() as { last_indexed_at: string | null };
+      after = lastIndexedAt(db);
     }
 
     // Distinguish "the OS never delivered the event" from "the wiring is
     // broken" — otherwise a real regression and a slow machine produce the
     // identical failure message and the next person guesses.
     expect(
-      after.last_indexed_at,
+      after,
       isKbWatcherAlive()
         ? "watcher alive but no re-index within 30s — FSEvents never delivered, or the debounce/re-index path is broken"
         : "the watcher handle died before the change landed",
     ).not.toBe(OLD);
-    expect(after.last_indexed_at).not.toBeNull();
+    expect(after).not.toBeNull();
   }, 45_000);
 
   it("is a HMR-safe singleton — a second start on the same root reuses the watcher", () => {

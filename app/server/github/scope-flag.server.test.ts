@@ -13,6 +13,8 @@ afterEach(ctx.cleanup);
 
 /** All `policy` notification recipient ids, sorted. */
 function policyRecipients(db: ReturnType<typeof setupTestStore>["db"]): string[] {
+  // SAFETY: the SELECT list is the single `notifications.user_id` column, TEXT
+  // NOT NULL in 0001_baseline — every row sqlite returns carries a string.
   return (
     db
       .prepare(`SELECT user_id FROM notifications WHERE kind = 'policy'`)

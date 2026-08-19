@@ -48,6 +48,9 @@ export function getSettingsViewData(
   const project = getProject(db, projectSlug);
   if (!project) return null;
 
+  // SAFETY: `task_projections.stage` is TEXT NOT NULL in 0001_baseline, and
+  // `COUNT(*)` grouped by it always answers with an integer — so every row of
+  // this projection carries exactly the two named columns.
   const counts = db
     .prepare(
       // R14-3: archived tasks are off the board, so the stage rows here must not

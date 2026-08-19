@@ -48,7 +48,7 @@ function upsertCredential(
     .prepare(
       `SELECT id FROM account WHERE userId = ? AND providerId = ?`,
     )
-    .get(userId, CREDENTIAL_PROVIDER) as { id: string } | undefined;
+    .get(userId, CREDENTIAL_PROVIDER);
   if (account) {
     db.prepare(`UPDATE account SET password = ?, updatedAt = ? WHERE id = ?`).run(
       passwordHash,
@@ -72,9 +72,7 @@ export function provisionIdentity(db: DatabaseSync, u: IdentityInput): void {
   const now = nowIso();
   const email = normalizeEmail(u.email);
 
-  const existing = db
-    .prepare(`SELECT id FROM "user" WHERE id = ?`)
-    .get(u.id) as { id: string } | undefined;
+  const existing = db.prepare(`SELECT id FROM "user" WHERE id = ?`).get(u.id);
   if (!existing) {
     db.prepare(
       `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
@@ -103,6 +101,10 @@ export function credentialPasswordHash(
   db: DatabaseSync,
   userId: string,
 ): string | null {
+  // SAFETY: the WHERE clause excludes NULL, and the only writers of
+  // `account.password` — upsertCredential above and better-auth's own
+  // credential handler — store the `<saltHex>:<keyHex>` string documented
+  // below, so a projected row always carries a string.
   const row = db
     .prepare(
       `SELECT password FROM account
@@ -122,7 +124,7 @@ export function credentialPasswordHash(
  * via the custom `password.verify` hook.
  */
 export function isBetterAuthPasswordHash(hash: string | null | undefined): boolean {
-  return typeof hash === "string" && /^[0-9a-f]+:[0-9a-f]+$/i.test(hash);
+  return /^[0-9a-f]+:[0-9a-f]+$/i.test(hash ?? "");
 }
 
 /** Syncs a user's email onto their better-auth identity (admin email edit). */

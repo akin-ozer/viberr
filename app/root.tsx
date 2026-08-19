@@ -12,6 +12,7 @@ import "@fontsource/manrope/800.css";
 import "./app.css";
 
 import { useEffect } from "react";
+import { z } from "zod";
 import {
   data,
   isRouteErrorResponse,
@@ -64,7 +65,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   // truth; SSR renders <html data-motion> directly so the [data-motion]
   // CSS hook applies without a flash. Signed-out pages default to "full".
   const motion: "full" | "reduce" =
-    auth && getPref<string>(getDb(), auth.user.id, "motion") === "reduce"
+    auth && getPref(getDb(), auth.user.id, "motion") === "reduce"
       ? "reduce"
       : "full";
   const payload = {
@@ -175,6 +176,10 @@ export default function App() {
   );
 }
 
+/** Guards throw `data("<user message>", { status })`, so a route error's `data`
+ *  is user-facing copy when — and only when — it came through as a string. */
+const thrownMessage = z.string().catch("");
+
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   let title = "Something went wrong";
   let detail = "An unexpected error occurred.";
@@ -182,10 +187,9 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
 
   if (isRouteErrorResponse(error)) {
     title = error.status === 404 ? "Page not found" : `Error ${error.status}`;
-    // Guards throw `data("<user message>", { status })` (e.g. the 403 from
-    // requireProjectMember) — that string IS the page copy. statusText is
-    // transport boilerplate, so it is only a fallback.
-    const thrown = typeof error.data === "string" ? error.data.trim() : "";
+    // The thrown string (e.g. the 403 from requireProjectMember) IS the page
+    // copy. statusText is transport boilerplate, so it is only a fallback.
+    const thrown = thrownMessage.parse(error.data).trim();
     detail =
       thrown ||
       (error.status === 404

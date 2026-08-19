@@ -6,7 +6,6 @@ import {
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
-  type TestStore,
 } from "../../../test-support/test-store";
 import {
   fakeGithubFetch,
@@ -49,7 +48,7 @@ afterEach(() => {
 
 const REPO_PATH = "/repos/akin-ozer/viberr";
 
-function setup(): { store: TestStore; actor: { userId: string; label: string } } {
+function setup() {
   const store = setupTestStore(ctx);
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-301", {
@@ -72,7 +71,7 @@ function setup(): { store: TestStore; actor: { userId: string; label: string } }
 }
 
 /** A repository nothing is happening in: every pass reads the same facts. */
-function quietRoutes(): Record<string, FakeResponder> {
+function quietRoutes() {
   return {
     [`GET ${REPO_PATH}/compare/main...vib-301-workspace`]: {
       body: {
@@ -115,7 +114,7 @@ function quietRoutes(): Record<string, FakeResponder> {
     [`GET ${REPO_PATH}/commits/headsha318/check-runs`]: {
       body: { total_count: 1, check_runs: [{ status: "completed", conclusion: "success" }] },
     },
-  };
+  } satisfies Record<string, FakeResponder>;
 }
 
 describe("F19-22 premise: an unchanged poller tick checks without recording a change", () => {

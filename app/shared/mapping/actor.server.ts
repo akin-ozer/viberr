@@ -37,6 +37,10 @@ export type ActorRender =
   | { kind: "agent"; name: "Operator" }
   | { kind: "system"; name: string };
 
+/** The human variant, named so it can be built in steps (the `guest` marker is
+ *  set only for a non-member — see `createActorResolver`). */
+type HumanActorRender = Extract<ActorRender, { kind: "human" }>;
+
 /** First letters of the first two words, uppercased ("Deniz Şahin" → "DŞ"). */
 export function initialsOfName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -71,6 +75,9 @@ export function createActorRenderOverlay(
     if (actor.kind !== "human") return actor;
     let row = cache.get(actor.userId);
     if (row === undefined) {
+      // SAFETY: UserDisplayRow names exactly the three columns the statement
+      // above selects — `users.id`/`name` are NOT NULL and `avatar_tone` is the
+      // nullable one, per 0001_baseline. An id with no account yields no row.
       row = (stmt.get(actor.userId) as UserDisplayRow | undefined) ?? null;
       cache.set(actor.userId, row);
     }
@@ -121,6 +128,8 @@ export function createActorResolver(
       case "human": {
         let row = cache.get(ref.userId);
         if (row === undefined) {
+          // SAFETY: same statement, same three-column correspondence as
+          // `createActorRenderOverlay` above.
           row = (stmt.get(ref.userId) as UserDisplayRow | undefined) ?? null;
           cache.set(ref.userId, row);
         }
@@ -128,14 +137,16 @@ export function createActorResolver(
         const guest =
           options.projectMemberIds !== undefined &&
           !options.projectMemberIds.has(ref.userId);
-        return {
+        const render: HumanActorRender = {
           kind: "human",
           userId: ref.userId,
           name,
           initials: initialsOfName(name),
           tone: row?.avatar_tone ?? "",
-          ...(guest ? { guest: true as const } : {}),
         };
+        // `guest` is a marker: the key is ABSENT for a member, never `false`.
+        if (guest) render.guest = true;
+        return render;
       }
     }
   };

@@ -181,7 +181,7 @@ describe("UI-29: the last-admin guard counts LIVE accounts only", () => {
         { userId: "u_ghost_admin", role: "admin" }, // no users row → ghost
         { userId: store.users.arda.id, role: "viewer" }, // live org admin, viewer here
       ],
-    } as never);
+    });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     // countLiveAdmins sees ZERO live admins (the only admin is a ghost).

@@ -7,7 +7,11 @@ import { defineConfig, searchForWorkspaceRoot } from "vite";
 try {
   loadEnvFile();
 } catch (error) {
-  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  // No `.env` at all is the normal case in CI and in the container image;
+  // anything else (unreadable file, bad syntax) is a real failure.
+  const missing =
+    error instanceof Error && "code" in error && error.code === "ENOENT";
+  if (!missing) throw error;
 }
 
 // Resolve the active runtime data root the same way the app does

@@ -73,8 +73,8 @@ export function useDismiss<T extends HTMLElement = HTMLElement>(
     // focus and, for a menu whose items unmount on selection, can land on
     // whatever slid under the cursor.
     const onDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
       if (ref.current?.contains(target)) return;
       if (alsoRef.current?.some((r) => r.current?.contains(target))) return;
       dismiss();

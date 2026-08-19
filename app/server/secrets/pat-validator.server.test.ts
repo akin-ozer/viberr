@@ -589,6 +589,9 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
       ),
     });
     // …and reprojected into task_events.
+    // SAFETY: the SELECT list is the single `task_events.text` column (TEXT NOT
+    // NULL), and the timeline assertion above already failed the test unless the
+    // event was written and reprojected at position 0.
     const eventRow = store.db
       .prepare(
         `SELECT text FROM task_events

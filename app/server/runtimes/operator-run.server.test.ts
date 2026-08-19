@@ -7,7 +7,11 @@ import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import type { CapabilityMode } from "~/schemas/project-file.schema";
+import type {
+  AgentDeployment,
+  AgentDeploymentDefinition,
+  CapabilityMode,
+} from "~/schemas/project-file.schema";
 import type {
   RunCallbacks,
   RunExit,
@@ -34,6 +38,7 @@ import * as operatorPrompts from "./operator-run.server";
 import type {
   OperatorAuthority,
   OperatorAutonomy,
+  OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
@@ -91,7 +96,17 @@ const OPERATOR_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
   { capabilityId: "stage-transitions", mode: "recommend" },
 ];
 
-function transitionAction(extra: Record<string, unknown> = {}) {
+/** What a case overrides on the `transition_stage` plan action it feeds the
+ *  operator: a real field, or the undeclared property the strict plan schema
+ *  must reject. */
+interface PlanActionPatch {
+  toStageId?: string;
+  reason?: string;
+  /** Not part of the plan schema — the strict-object rejection probe. */
+  unexpected?: boolean;
+}
+
+function transitionAction(extra: PlanActionPatch = {}) {
   return {
     tool: "transition_stage",
     profileId: null,
@@ -157,7 +172,7 @@ describe("Codex structured operator completion", () => {
             autonomy: "full",
           },
         },
-      ] as never,
+      ],
     });
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -231,7 +246,7 @@ describe("Codex structured operator completion", () => {
             model: defaultModelFor("codex"),
           },
         },
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -298,7 +313,7 @@ describe("Codex structured operator completion", () => {
             model: defaultModelFor("codex"),
           },
         },
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -414,7 +429,7 @@ describe("Codex structured operator completion", () => {
             model: defaultModelFor("codex"),
           },
         },
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -654,7 +669,7 @@ describe("Codex structured operator completion", () => {
             resources: { skills: [], kb: [], mcps: ["ops-readonly"] },
           },
         },
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -779,8 +794,8 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
 
 describe("pr-diverged turn instruction (both backends)", () => {
   function snapshot(
-    over: Partial<import("~/server/tasks/operator-actions.server").OperatorTaskSnapshot> = {},
-  ): import("~/server/tasks/operator-actions.server").OperatorTaskSnapshot {
+    over: Partial<OperatorTaskSnapshot> = {},
+  ): OperatorTaskSnapshot {
     return {
       key: "VIB-9",
       title: "T",
@@ -804,7 +819,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       pr: { number: 318, state: "closed", title: "PR" },
       branch: "vib-9",
       liveRuns: [],
-      autonomy: "supervised" as OperatorAutonomy,
+      autonomy: "supervised",
       policy: {},
       ...over,
     };
@@ -871,8 +886,8 @@ describe("stranded auto-stage resume", () => {
     const base = {
       archived: false,
       stage: "triage",
-      packet: null as unknown,
-      recommendations: [] as unknown[],
+      packet: null,
+      recommendations: [],
     };
     const { operatorLeftTaskStranded } = operatorPrompts;
     expect(operatorLeftTaskStranded(base, wf)).toBe(true);
@@ -945,7 +960,7 @@ describe("stranded auto-stage resume", () => {
               model: defaultModelFor("codex"),
             },
           },
-        ] as never,
+        ],
       });
       // The live stranding shape: fresh task at the AUTO triage stage.
       writeTask(store2.dataRoot, store2.slug, {
@@ -975,7 +990,8 @@ describe("stranded auto-stage resume", () => {
     const operatorRuns = () =>
       store2.db
         .prepare(`SELECT id, state FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
-        .all() as { id: string; state: string }[];
+        .all()
+        .map((row) => ({ id: String(row.id), state: String(row.state) }));
 
     it("a drive that ends doing NOTHING at an auto stage is resumed; a pending decision ends the chain", async () => {
       await runOperator(store2.db, {
@@ -1075,7 +1091,7 @@ describe("stranded auto-stage resume", () => {
 /* -------- transition context in the turn prompt (owner ruling 2026-07-26) -------- */
 
 describe("transition trigger carries from → to and who moved it", () => {
-  const snap = () => ({
+  const snap = (): OperatorTaskSnapshot => ({
     key: "VIB-2",
     title: "t",
     goal: "Write the post.",
@@ -1098,7 +1114,7 @@ describe("transition trigger carries from → to and who moved it", () => {
     pr: null,
     branch: "vib-2",
     liveRuns: [],
-    autonomy: "supervised" as OperatorAutonomy,
+    autonomy: "supervised",
     policy: {},
   });
 
@@ -1154,8 +1170,8 @@ describe("transition trigger carries from → to and who moved it", () => {
 
 describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
   const snap = (
-    over: Partial<import("~/server/tasks/operator-actions.server").OperatorTaskSnapshot> = {},
-  ): import("~/server/tasks/operator-actions.server").OperatorTaskSnapshot => ({
+    over: Partial<OperatorTaskSnapshot> = {},
+  ): OperatorTaskSnapshot => ({
     key: "VIB-6",
     title: "Improve the docs",
     // The live goal that sailed through the gate: no file, no change, no
@@ -1181,7 +1197,7 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     pr: null,
     branch: null,
     liveRuns: [],
-    autonomy: "supervised" as OperatorAutonomy,
+    autonomy: "supervised",
     policy: {},
     ...over,
   });
@@ -1312,7 +1328,7 @@ describe("pending trigger queue", () => {
             model: defaultModelFor("codex"),
           },
         },
-      ] as never,
+      ],
     });
   };
 
@@ -1359,7 +1375,8 @@ describe("pending trigger queue", () => {
   const operatorRuns = () =>
     store3.db
       .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
-      .all() as { id: string }[];
+      .all()
+      .map((row) => ({ id: String(row.id) }));
 
   it("B-OP2: a queued @operator question survives a later machine trigger", async () => {
     await drive({ trigger: "manual" });
@@ -1481,7 +1498,7 @@ describe("stranded codex plan recovery", () => {
             model: defaultModelFor("codex"),
           },
         },
-      ] as never,
+      ],
     });
     // The cross-boot shape: an AUTO stage (triage → ready) the restart left
     // idle, with no packet and no recommendation for a human to act on.
@@ -1524,7 +1541,7 @@ describe("stranded codex plan recovery", () => {
       state: "finished",
       startedAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
-    } as Parameters<typeof upsertRun>[1]);
+    });
     insertRunLine(store4.db, {
       runId: "run_prev_boot",
       seq: 0,
@@ -1553,7 +1570,8 @@ describe("stranded codex plan recovery", () => {
     await eventually(() => {
       const runs = store4.db
         .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
-        .all() as { id: string }[];
+        .all()
+        .map((row) => ({ id: String(row.id) }));
       expect(runs).toHaveLength(2);
       expect(adapter4.pending).not.toBeNull();
     });
@@ -1579,7 +1597,7 @@ describe("runOperator — authority, ordering, orphans", () => {
   let store5: TestStore;
   let adapter5: ProbeAdapter;
 
-  const deployAgents = (agents: unknown[]): void => {
+  const deployAgents = (agents: AgentDeployment[]): void => {
     const project = readProjectFile({
       projectSlug: store5.slug,
       dataRoot: store5.dataRoot,
@@ -1587,12 +1605,14 @@ describe("runOperator — authority, ordering, orphans", () => {
     writeProject(store5.dataRoot, {
       ...project.parsed.frontmatter,
       repo: null,
-      agents: agents as never,
+      agents,
     });
     rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
   };
 
-  const operatorAgent = (over: Record<string, unknown> = {}) => ({
+  const operatorAgent = (
+    over: AgentDeploymentDefinition = {},
+  ): AgentDeployment => ({
     profileId: "operator",
     capabilities: OPERATOR_POLICY,
     extras: [],
@@ -1628,7 +1648,8 @@ describe("runOperator — authority, ordering, orphans", () => {
   const operatorRuns = () =>
     store5.db
       .prepare(`SELECT id, state FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
-      .all() as { id: string; state: string }[];
+      .all()
+      .map((row) => ({ id: String(row.id), state: String(row.state) }));
 
   const drive = (over: Partial<Parameters<typeof runOperator>[1]> = {}) =>
     runOperator(store5.db, {
@@ -1752,7 +1773,7 @@ describe("runOperator — authority, ordering, orphans", () => {
         body: "",
         observations: [],
         options: [{ kind: "block_on_policy", t: "Unblock", d: "", rec: true }],
-      } as never,
+      },
     });
     rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
   };
@@ -1903,7 +1924,7 @@ describe("runOperator — authority, ordering, orphans", () => {
       model: "sonnet",
       sdk: "Claude Agent SDK",
       state: "running",
-    } as Parameters<typeof upsertRun>[1]);
+    });
     // The row predates this process — the fact that makes it an orphan.
     store5.db
       .prepare(`UPDATE agent_runs SET created_at = ? WHERE id = ?`)
@@ -1955,7 +1976,7 @@ describe("runOperator — authority, ordering, orphans", () => {
       sdk: "Codex SDK",
       state: "finished",
       finishedAt: new Date().toISOString(),
-    } as Parameters<typeof upsertRun>[1]);
+    });
     const warn = vi.spyOn(logger, "warn");
 
     await executeStrandedCodexPlan(
@@ -2006,7 +2027,7 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
             model: defaultModelFor("codex"),
           },
         },
-      ] as never,
+      ],
     });
     // An AUTO stage with nothing pending — the stranded shape the backstop
     // resumes, so the ONLY thing bounding the chain is the cap.
@@ -2036,7 +2057,8 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
   const runs = () =>
     store6.db
       .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
-      .all() as { id: string }[];
+      .all()
+      .map((row) => ({ id: String(row.id) }));
 
   const driveAtDepth = async (transitionDepth: number): Promise<void> => {
     await runOperator(store6.db, {
@@ -2112,7 +2134,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
 
   const deploy = (
     repo: string | null,
-    definitionOver: Record<string, unknown> = {},
+    definitionOver: AgentDeploymentDefinition = {},
   ): void => {
     const project = readProjectFile({
       projectSlug: store7.slug,
@@ -2134,7 +2156,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
             ...definitionOver,
           },
         },
-      ] as never,
+      ],
     });
     writeTask(store7.dataRoot, store7.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {

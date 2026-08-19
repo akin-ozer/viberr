@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { isAppError } from "~/server/errors/app-error.server";
 import {
   isSecretBox,
@@ -11,7 +12,15 @@ import {
 
 const key = randomBytes(32);
 
-function expectSecretBoxError(fn: () => unknown): void {
+/** The sealed box as `sealSecret` writes it: `v1$iv$ct$tag`, four parts. */
+const sealedPartsSchema = z.tuple([
+  z.string(),
+  z.string(),
+  z.string(),
+  z.string(),
+]);
+
+function expectSecretBoxError(fn: () => void): void {
   try {
     fn();
     expect.unreachable("expected a secret_box_invalid AppError");
@@ -50,7 +59,7 @@ describe("secret-box", () => {
 
   it("rejects tampered ciphertext, tag and iv", () => {
     const box = sealSecret("github_pat_TAMPER_ME", key);
-    const [v, iv, ct, tag] = box.split("$") as [string, string, string, string];
+    const [v, iv, ct, tag] = sealedPartsSchema.parse(box.split("$"));
 
     const flip = (b64: string): string => {
       const buf = Buffer.from(b64, "base64");
@@ -130,15 +139,15 @@ describe("secret-box key rotation (A9)", () => {
     expect(
       previousSecretKeys({
         VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS: `${a.toString("base64")}, ${b.toString("base64")}`,
-      } as NodeJS.ProcessEnv).map((k) => k.toString("base64")),
+      }).map((k) => k.toString("base64")),
     ).toEqual([a.toString("base64"), b.toString("base64")]);
     // Wrong-length / empty entries are skipped rather than thrown about — an
     // error message must never hint at key material.
     expect(
       previousSecretKeys({
         VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS: `,${Buffer.alloc(8).toString("base64")},`,
-      } as NodeJS.ProcessEnv),
+      }),
     ).toEqual([]);
-    expect(previousSecretKeys({} as NodeJS.ProcessEnv)).toEqual([]);
+    expect(previousSecretKeys({})).toEqual([]);
   });
 });

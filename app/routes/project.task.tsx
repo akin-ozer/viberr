@@ -53,7 +53,10 @@ import { githubWebHost } from "~/server/github/github-client.server";
 import { latestTaskReconcileAt } from "~/server/provenance/provenance-query.server";
 import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
-import { runOperator } from "~/server/runtimes/operator-run.server";
+import {
+  runOperator,
+  type RunOperatorInput,
+} from "~/server/runtimes/operator-run.server";
 import {
   isBackendAvailable,
   type RealBackend,
@@ -140,7 +143,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       logger.warn("R19-15 task-view read-marking failed", {
         projectSlug: params.slug,
         taskKey: params.key,
-        error,
+        error: error instanceof Error ? error : new Error(String(error)),
       });
     }
   }
@@ -148,7 +151,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     new URL(request.url).searchParams.get("events"),
   );
   const slice = sliceTimeline(detail.timeline, limit);
-  const rawDefault = getPref<string>(db, user.id, "tlDefault");
+  const rawDefault = getPref(db, user.id, "tlDefault");
   const tlDefault: TimelineFilterId =
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
 
@@ -423,11 +426,13 @@ export async function action({ request, params }: Route.ActionArgs) {
         const runIdsBefore = new Set(
           listRunsForTask(db, projectSlug, taskKey).map((r) => r.serverRunId),
         );
-        const { option } = await resolvePacket(
-          db,
-          { projectSlug, taskKey, optionIndex, ...(note.trim() ? { note } : {}) },
-          actor,
-        );
+        const resolveInput: Parameters<typeof resolvePacket>[1] = {
+          projectSlug,
+          taskKey,
+          optionIndex,
+        };
+        if (note.trim()) resolveInput.note = note;
+        const { option } = await resolvePacket(db, resolveInput, actor);
         const retryStarted =
           option.kind === "retry_other_backend" &&
           listRunsForTask(db, projectSlug, taskKey).some(
@@ -449,22 +454,24 @@ export async function action({ request, params }: Route.ActionArgs) {
                   : option.kind === "edit_goal"
                     ? "Decision recorded — type the new goal; the packet clears when it lands"
                     : `Decision recorded: ${option.t}`;
-        return {
+        const resolved = {
           ok: true as const,
           intent,
           kind: option.kind,
           toast,
-          // F17-L3: a scoping (edit_goal) decision drops the human into the goal
-          // editor — prefill it with the CHOSEN option's deliverable so they
-          // don't have to retype the scope they just picked. The option title is
-          // the headline; its description carries the deliverable + acceptance.
-          ...(option.kind === "edit_goal"
-            ? {
-                goalDraft: option.d?.trim()
-                  ? `${option.t}\n\n${option.d.trim()}`
-                  : option.t,
-              }
-            : {}),
+        };
+        // F17-L3: a scoping (edit_goal) decision drops the human into the goal
+        // editor — prefill it with the CHOSEN option's deliverable so they
+        // don't have to retype the scope they just picked. The option title is
+        // the headline; its description carries the deliverable + acceptance.
+        // Every other kind ships NO `goalDraft` key at all, which is what tells
+        // the editor there is nothing to prefill.
+        if (option.kind !== "edit_goal") return resolved;
+        return {
+          ...resolved,
+          goalDraft: option.d?.trim()
+            ? `${option.t}\n\n${option.d.trim()}`
+            : option.t,
         };
       }
       case "request-maintainer-decision": {
@@ -473,9 +480,13 @@ export async function action({ request, params }: Route.ActionArgs) {
         // admins, records the ask on the timeline, and refuses (with a pointer)
         // if the caller could actually resolve it themselves.
         const note = String(formData.get("note") ?? "").slice(0, 2000);
+        const escalateInput: Parameters<
+          typeof requestPacketMaintainerDecision
+        >[1] = { projectSlug, taskKey };
+        if (note.trim()) escalateInput.note = note;
         const { notified } = await requestPacketMaintainerDecision(
           db,
-          { projectSlug, taskKey, ...(note.trim() ? { note } : {}) },
+          escalateInput,
           actor,
         );
         return {
@@ -799,16 +810,17 @@ export async function action({ request, params }: Route.ActionArgs) {
             : autonomyField === "supervised"
               ? "supervised"
               : undefined;
-        const started = await runOperator(db, {
+        const operatorInput: RunOperatorInput = {
           projectSlug,
           taskKey,
-          ...(backend ? { backend } : {}),
-          ...(autonomy ? { autonomy } : {}),
           // Attribute the run to the human who pressed the button (D8) — the
           // operator's own actions are still audited as the operator, but the
           // "started a run" audit row names the maintainer who launched it.
           actor: { userId: actor.userId, label: actor.label },
-        });
+        };
+        if (backend) operatorInput.backend = backend;
+        if (autonomy) operatorInput.autonomy = autonomy;
+        const started = await runOperator(db, operatorInput);
         const backendLabel =
           started.backend === "claude" ? "Claude Code" : "Codex";
         return {

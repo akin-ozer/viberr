@@ -75,25 +75,25 @@ export function resolveTaskAttachment(
 
 /** Extension → inline content type. Anything absent here is served as a
  *  download (`application/octet-stream`), never rendered on the app origin. */
-const INLINE_TYPES: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".pdf": "application/pdf",
-  ".txt": "text/plain; charset=utf-8",
-  ".log": "text/plain; charset=utf-8",
-  ".md": "text/plain; charset=utf-8",
-  ".json": "application/json",
-};
+const INLINE_TYPES = new Map<string, string>([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webp", "image/webp"],
+  [".gif", "image/gif"],
+  [".pdf", "application/pdf"],
+  [".txt", "text/plain; charset=utf-8"],
+  [".log", "text/plain; charset=utf-8"],
+  [".md", "text/plain; charset=utf-8"],
+  [".json", "application/json"],
+]);
 
 export function attachmentContentType(name: string): {
   type: string;
   inline: boolean;
 } {
   const ext = path.extname(name).toLowerCase();
-  const type = INLINE_TYPES[ext];
+  const type = INLINE_TYPES.get(ext);
   return type
     ? { type, inline: true }
     : { type: "application/octet-stream", inline: false };

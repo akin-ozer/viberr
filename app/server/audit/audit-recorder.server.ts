@@ -27,6 +27,26 @@ export const SYSTEM_ACTOR: AuditActor = { userId: null, label: "system" };
  * instead of drifting copies. */
 export const OPERATOR_AUDIT_ACTOR: AuditActor = { userId: null, label: "operator" };
 
+/**
+ * A `details` value as it survives the round trip through `details_json` — the
+ * JSON scalars, arrays and nested maps, and nothing else. Naming the value type
+ * is what stops a caller handing over something `JSON.stringify` flattens to
+ * `{}` (an Error, a class instance, a Map), which would record a field name
+ * with no fact under it. `undefined` is allowed and, as in any JSON encode,
+ * drops the key.
+ */
+export type AuditDetailValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | readonly AuditDetailValue[]
+  | { [key: string]: AuditDetailValue };
+
+/** The `details` bag itself: field names chosen by the call site. */
+export type AuditDetails = { [key: string]: AuditDetailValue };
+
 export interface AuditEventInput {
   /** lowercase dot-separated fact, e.g. "auth.login.success". */
   action: string;
@@ -35,7 +55,7 @@ export interface AuditEventInput {
   subjectId?: string;
   projectSlug?: string;
   taskKey?: string;
-  details?: Record<string, unknown>;
+  details?: AuditDetails;
 }
 
 export function recordAudit(

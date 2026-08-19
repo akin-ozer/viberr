@@ -83,9 +83,8 @@ export async function seedInitialAdmin(
     logger.info("seed admin created from environment", { email });
   }
 
-  return {
-    created: true,
-    email,
-    ...(generated ? { generatedPassword: password } : {}),
-  };
+  const result: SeedAdminResult = { created: true, email };
+  // The caller only ever hears a password we made up ourselves.
+  if (generated) result.generatedPassword = password;
+  return result;
 }

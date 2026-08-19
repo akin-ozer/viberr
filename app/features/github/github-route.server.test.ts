@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { RouterContextProvider } from "react-router";
+import type { Route } from "../../routes/+types/project.github";
 import {
   setupAppTest,
   type AppTestContext,
@@ -16,7 +18,15 @@ import { fakeGithubFetch } from "../../../test-support/fake-github";
  */
 
 let app: AppTestContext;
-let ids: { arda: string; murat: string; selin: string; deniz: string };
+
+/** The seeded users these cases act as. */
+interface SeededUserIds {
+  arda: string;
+  murat: string;
+  selin: string;
+  deniz: string;
+}
+let ids: SeededUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -32,19 +42,51 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-async function loaderArgs(
-  url: string,
-  params: Record<string, string>,
-  cookie?: string,
-) {
+/** The route pattern the framework matches these calls under. */
+const ROUTE_PATTERN = "/projects/:slug/github";
+
+/** The loader/action argument the framework builds, assembled by hand: the
+ *  route module is called directly here, so nothing else fills these in. */
+function routeArgs(request: Request, params: { slug: string }): Route.LoaderArgs {
   return {
-    request: app.request(url, cookie ? { cookie } : {}),
+    request,
+    url: new URL(request.url),
     params,
-    context: {},
+    pattern: ROUTE_PATTERN,
+    context: new RouterContextProvider(),
   };
 }
 
-async function postAction(userId: string, intent: string) {
+function loaderArgs(url: string, params: { slug: string }, cookie?: string) {
+  return routeArgs(app.request(url, cookie ? { cookie } : {}), params);
+}
+
+/** A refusal thrown out of a route module: react-router's `data(…, { status })`
+ *  envelope carries the status under `init`, an AppError carries it directly. */
+interface ThrownRefusal {
+  init?: ResponseInit | null;
+  status?: number;
+  data?: unknown;
+}
+
+/**
+ * What this route's action hands back, as these cases read it: the typed
+ * `GithubActionOutcome` (`ok`/`toast`/`result`), or the `data(…, { status })`
+ * envelope a refusal returns (`init`/`data`). Every field is optional because
+ * a case reads exactly one of the two halves.
+ */
+interface GithubActionReply {
+  ok?: boolean;
+  toast?: string;
+  result?: string;
+  init?: ResponseInit | null;
+  data?: unknown;
+}
+
+async function postAction(
+  userId: string,
+  intent: string,
+): Promise<GithubActionReply> {
   const { action } = await import("~/routes/project.github");
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
@@ -55,45 +97,42 @@ async function postAction(userId: string, intent: string) {
     body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
-  return action({
-    request,
-    params: { slug: "viberr-core" },
-    context: {},
-  } as never);
+  return action(routeArgs(request, { slug: "viberr-core" }));
 }
 
 describe("loader", () => {
   it("redirects signed-out users to /login", async () => {
     const { loader } = await import("~/routes/project.github");
-    const thrown = await loader(
-      (await loaderArgs("/projects/viberr-core/github", {
-        slug: "viberr-core",
-      })) as never,
+    const thrown: unknown = await loader(
+      loaderArgs("/projects/viberr-core/github", { slug: "viberr-core" }),
     ).catch((e) => e);
     expect(thrown).toBeInstanceOf(Response);
+    // SAFETY: the assertion on the line above fails the case unless `thrown` is
+    // a Response, so the status read below can only run on one.
     expect((thrown as Response).status).toBe(302);
   });
 
   it("404s for an unknown project", async () => {
     const { loader } = await import("~/routes/project.github");
     const { cookie } = await app.cookieFor(ids.arda);
-    const thrown = await loader(
-      (await loaderArgs("/projects/nope/github", { slug: "nope" }, cookie)) as never,
-    ).catch((e) => e as { init?: { status?: number }; status?: number });
-    expect(
-      (thrown as { init?: { status?: number } }).init?.status ??
-        (thrown as { status?: number }).status,
-    ).toBe(404);
+    const thrown: unknown = await loader(
+      loaderArgs("/projects/nope/github", { slug: "nope" }, cookie),
+    ).catch((e) => e);
+    // SAFETY: a refused loader throws one of two things — react-router's
+    // `data(msg, { status })` envelope, which carries the status under `init`,
+    // or an AppError, which carries it directly. Both are read optionally, so a
+    // throw of any other shape reads `undefined` and fails the expectation
+    // rather than being quietly accepted.
+    const refusal = thrown as ThrownRefusal;
+    expect(refusal.init?.status ?? refusal.status).toBe(404);
   });
 
   it("returns the seeded GithubViewData: repo panel, credential health, PR + branch rows", async () => {
     const { loader } = await import("~/routes/project.github");
     const { cookie } = await app.cookieFor(ids.arda);
-    const { view } = (await loader(
-      (await loaderArgs("/projects/viberr-core/github", {
-        slug: "viberr-core",
-      }, cookie)) as never,
-    )) as { view: import("./github-query.server").GithubViewData };
+    const { view } = await loader(
+      loaderArgs("/projects/viberr-core/github", { slug: "viberr-core" }, cookie),
+    );
 
     // Repo + connection: no PAT bound → honest degraded state, no network.
     expect(view.project).toEqual({
@@ -194,11 +233,9 @@ describe("loader", () => {
   it("discloses freshness: never reconciled → no timestamp, no label, stale", async () => {
     const { loader } = await import("~/routes/project.github");
     const { cookie } = await app.cookieFor(ids.arda);
-    const { view } = (await loader(
-      (await loaderArgs("/projects/viberr-core/github", {
-        slug: "viberr-core",
-      }, cookie)) as never,
-    )) as { view: import("./github-query.server").GithubViewData };
+    const { view } = await loader(
+      loaderArgs("/projects/viberr-core/github", { slug: "viberr-core" }, cookie),
+    );
 
     // No `github.reconcile` provenance yet → null `at` (the view renders
     // "Never reconciled"), no relative label, and honestly stale.
@@ -212,43 +249,33 @@ describe("action RBAC + degraded no-PAT results", () => {
     // may not"; R15-4 makes a project invisible to non-members, and every other
     // surface answers 404, so this one reply confirmed its existence. The role
     // tiers are still exercised honestly by the member cases below.
-    const thrown = (await postAction(ids.deniz, "reconcile").catch(
-      (e) => e,
-    )) as { init?: { status?: number }; data?: unknown };
-    expect(thrown?.init?.status).toBe(404);
-    expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
+    const thrown: unknown = await postAction(ids.deniz, "reconcile").catch((e) => e);
+    // SAFETY: the visibility gate refuses by THROWING react-router's
+    // `data("No project at …", { status: 404 })` envelope — both fields are read
+    // optionally, so any other throw fails the two expectations below.
+    const refusal = thrown as ThrownRefusal;
+    expect(refusal.init?.status).toBe(404);
+    expect(String(refusal.data)).toBe("No project at projects/viberr-core.");
   });
 
   it("rejects a reviewer from grant-scope (admin|maintainer only)", async () => {
-    const result = (await postAction(ids.selin, "grant-scope")) as {
-      init?: { status?: number };
-    };
+    const result = await postAction(ids.selin, "grant-scope");
     expect(result.init?.status).toBe(403);
   });
 
   it("rejects a contributor from reconcile (R8-4: maintainer+, aligned with rescan)", async () => {
-    const result = (await postAction(ids.selin, "reconcile")) as {
-      init?: { status?: number };
-    };
+    const result = await postAction(ids.selin, "reconcile");
     expect(result.init?.status).toBe(403);
   });
 
   it("allows a maintainer to reconcile", async () => {
-    const result = (await postAction(ids.murat, "reconcile")) as {
-      ok: boolean;
-      toast: string;
-      result: string;
-    };
+    const result = await postAction(ids.murat, "reconcile");
     expect(result.ok).toBe(true);
     expect(result.result).toBe("no_pat_configured");
   });
 
   it("reconcile with no PAT → typed result + honest toast, not a crash", async () => {
-    const result = (await postAction(ids.arda, "reconcile")) as {
-      ok: boolean;
-      toast: string;
-      result: string;
-    };
+    const result = await postAction(ids.arda, "reconcile");
     expect(result).toEqual({
       ok: true,
       toast:
@@ -258,11 +285,7 @@ describe("action RBAC + degraded no-PAT results", () => {
   });
 
   it("grant-scope with no PAT → typed no_pat_configured copy, not a crash", async () => {
-    const result = (await postAction(ids.arda, "grant-scope")) as {
-      ok: boolean;
-      toast: string;
-      result: string;
-    };
+    const result = await postAction(ids.arda, "grant-scope");
     expect(result).toEqual({
       ok: true,
       toast:
@@ -272,9 +295,7 @@ describe("action RBAC + degraded no-PAT results", () => {
   });
 
   it("rejects unknown intents", async () => {
-    const result = (await postAction(ids.arda, "frobnicate")) as {
-      init?: { status?: number };
-    };
+    const result = await postAction(ids.arda, "frobnicate");
     expect(result.init?.status).toBe(400);
   });
 });
@@ -416,23 +437,29 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
       { sha: "4ce0b18000000", commit: { message: "[VIB-142] branch reconciler + task projection" } },
       { sha: "12dd9af000000", commit: { message: "[VIB-142] tests for PR sync boundary" } },
     ];
-    const prFixtures: Record<
-      string,
-      { number: number; state: string; title: string; merged_at: string | null }
-    > = {
-      "vib-142-attach-workspace": {
+    /** The PR GitHub answers with for one task branch. */
+    interface PrFixture {
+      number: number;
+      state: string;
+      title: string;
+      merged_at: string | null;
+    }
+    // Keyed by branch, and looked up by the `head` the reconciler asks for — a
+    // real dictionary, so a Map rather than an object indexed by a computed key.
+    const prFixtures = new Map<string, PrFixture>([
+      ["vib-142-attach-workspace", {
         number: 318, state: "open", title: "Attach execution workspace", merged_at: null,
-      },
-      "vib-145-sse-revalidate": {
+      }],
+      ["vib-145-sse-revalidate", {
         number: 311, state: "open", title: "SSE board revalidation", merged_at: null,
-      },
-      "vib-139-policy-split": {
+      }],
+      ["vib-139-policy-split", {
         number: 298, state: "closed", title: "Policy split", merged_at: "2026-03-30T14:00:00Z",
-      },
-      "vib-141-typed-events": {
+      }],
+      ["vib-141-typed-events", {
         number: 287, state: "closed", title: "Typed events", merged_at: "2026-03-30T12:00:00Z",
-      },
-    };
+      }],
+    ]);
 
     const gh = fakeGithubFetch({
       [`GET /repos/${REPO}/compare/main...vib-139-policy-split`]: compareIdentical,
@@ -455,13 +482,13 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
       [`GET /repos/${REPO}/pulls`]: (call) => {
         const head = call.url.searchParams.get("head") ?? "";
         const branch = head.split(":")[1] ?? "";
-        const pr = prFixtures[branch];
+        const pr = prFixtures.get(branch);
         return { status: 200, body: pr ? [pr] : [] };
       },
-      [`GET /repos/${REPO}/pulls/318`]: { status: 200, body: prFixtures["vib-142-attach-workspace"] },
-      [`GET /repos/${REPO}/pulls/311`]: { status: 200, body: prFixtures["vib-145-sse-revalidate"] },
-      [`GET /repos/${REPO}/pulls/298`]: { status: 200, body: prFixtures["vib-139-policy-split"] },
-      [`GET /repos/${REPO}/pulls/287`]: { status: 200, body: prFixtures["vib-141-typed-events"] },
+      [`GET /repos/${REPO}/pulls/318`]: { status: 200, body: prFixtures.get("vib-142-attach-workspace") },
+      [`GET /repos/${REPO}/pulls/311`]: { status: 200, body: prFixtures.get("vib-145-sse-revalidate") },
+      [`GET /repos/${REPO}/pulls/298`]: { status: 200, body: prFixtures.get("vib-139-policy-split") },
+      [`GET /repos/${REPO}/pulls/287`]: { status: 200, body: prFixtures.get("vib-141-typed-events") },
     });
 
     const outcome = await runReconcile(
@@ -607,10 +634,11 @@ describe("R19-11: the loader withholds credential detail from readers without th
   beforeAll(async () => {
     // The route loader takes no fetchImpl by design, and a bound PAT makes
     // `checkRepoAccess` reach for the network. Offline keeps it hermetic.
-    realFetch = globalThis.fetch;
-    globalThis.fetch = (async () => {
+    const offline: typeof fetch = async () => {
       throw new TypeError("fetch failed");
-    }) as typeof fetch;
+    };
+    realFetch = globalThis.fetch;
+    globalThis.fetch = offline;
 
     const { createPat, setProjectCredential } = await import(
       "~/server/secrets/pat-store.server"
@@ -637,13 +665,9 @@ describe("R19-11: the loader withholds credential detail from readers without th
   const loadAs = async (userId: string) => {
     const { loader } = await import("~/routes/project.github");
     const { cookie } = await app.cookieFor(userId);
-    return (await loader(
-      (await loaderArgs(
-        "/projects/viberr-core/github",
-        { slug: "viberr-core" },
-        cookie,
-      )) as never,
-    )) as { view: import("./github-query.server").GithubViewData };
+    return await loader(
+      loaderArgs("/projects/viberr-core/github", { slug: "viberr-core" }, cookie),
+    );
   };
 
   it("hands a maintainer the real credential — the control case", async () => {

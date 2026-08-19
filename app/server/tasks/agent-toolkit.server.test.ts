@@ -16,6 +16,7 @@ import {
   openAgentQuestionPacket,
 } from "./agent-toolkit.server";
 import { takeStagedOutcome } from "./agent-outcome.server";
+import { z, type ZodType } from "zod";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 
 const ctx = createTestDbContext();
@@ -145,7 +146,7 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
       taskKey: "VIB-9",
       dataRoot: store.dataRoot,
     })!;
-    const packet = file.parsed.packet as { askedBy?: string; kind: string } | null;
+    const packet = file.parsed.packet;
     expect(packet?.kind).toBe("Agent question");
     expect(packet?.askedBy).toBe(AGENT_REF.profileId);
   });
@@ -158,10 +159,57 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
  * without the grant never even sees the field.
  */
 describe("report_outcome's evidence field (P13-D-26)", () => {
-  interface RegisteredTool {
-    handler: (args: unknown, extra?: unknown) => Promise<{ content: unknown[] }>;
-    inputSchema: { shape?: Record<string, unknown> } | Record<string, unknown>;
+  /** `report_outcome`'s own input, as these tests hand it to the handler
+   *  directly. `summary` and the evidence columns are optional because the
+   *  withheld-grant case sends the partial payload a model would. */
+  interface ReportOutcomeArgs {
+    verdict: string;
+    summary?: string;
+    evidence?: { label: string; add?: string; del?: string }[];
   }
+
+  /** The per-call MCP context the SDK passes second. Every toolkit handler
+   *  reads `args` alone, so these tests hand it an empty one. */
+  type ToolCallContext = Record<string, never>;
+
+  /** A tool's advertised input fields: one zod schema per field. Only the
+   *  field NAMES matter here. */
+  type AdvertisedFields = Record<string, ZodType>;
+
+  /**
+   * What these tests read off the MCP server's own registration record. The SDK
+   * types `handler` as a union over every registered tool's schema and `extra`
+   * as the full request context, neither of which can be produced without a
+   * live transport.
+   */
+  interface RegisteredTool {
+    handler: (
+      args: ReportOutcomeArgs,
+      extra: ToolCallContext,
+    ) => Promise<{ content: unknown[] }>;
+    /** zod publishes a ZodObject's field record under its own `shape` key —
+     *  a name this repo cannot rename, hence the literal. A tool registered
+     *  with the raw record instead carries the fields directly. */
+    inputSchema: { "shape"?: AdvertisedFields };
+  }
+
+  /** The registrations as the MOUNTED server carries them: `createSdkMcpServer`
+   *  hands back the live `McpServer` under `instance`, whose `_registeredTools`
+   *  is its own registry keyed by tool name — the only way to read what a tool
+   *  advertises, and to call it, without standing up a transport. That field is
+   *  `private` on the SDK's `McpServer`, so no narrowing reaches it; read it the
+   *  way this suite's sibling reads `_instructions`, by parsing the shape we
+   *  expect, so an SDK rename throws here instead of yielding `undefined`. */
+  const mountedTools = z
+    .object({
+      instance: z.object({
+        _registeredTools: z.record(
+          z.string(),
+          z.custom<RegisteredTool>((t) => t instanceof Object),
+        ),
+      }),
+    })
+    .transform((mounted) => mounted.instance._registeredTools);
 
   function toolkitTools(
     collab: { comment: boolean; ask: boolean; verdict: boolean; evidence: boolean },
@@ -182,10 +230,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       collab,
     })!;
     lastStore = store;
-    const server = built.mcpServers.viberr_agent as {
-      instance: { _registeredTools: Record<string, RegisteredTool> };
-    };
-    return server.instance._registeredTools;
+    return mountedTools.parse(built.mcpServers.viberr_agent);
   }
 
   let lastStore: ReturnType<typeof setupTestStore>;
@@ -196,9 +241,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     const granted = toolkitTools({ ...BASE, evidence: true }, "oc_a").report_outcome!;
     const withheld = toolkitTools({ ...BASE, evidence: false }, "oc_b").report_outcome!;
     const keys = (t: RegisteredTool) =>
-      Object.keys(
-        (t.inputSchema as { shape?: Record<string, unknown> }).shape ?? t.inputSchema,
-      );
+      Object.keys(t.inputSchema["shape"] ?? t.inputSchema);
     expect(keys(granted)).toContain("evidence");
     expect(keys(withheld)).not.toContain("evidence");
     // The rest of the envelope is unchanged either way.

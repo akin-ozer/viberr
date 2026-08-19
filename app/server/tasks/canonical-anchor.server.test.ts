@@ -10,7 +10,6 @@ import {
 import type {
   ParsedTaskFile,
   TaskFileEvent,
-  TaskFrontmatter,
   TaskPacket,
 } from "~/schemas/task-file.schema";
 import type {
@@ -99,7 +98,7 @@ function deployDev(): void {
           backends: ["claude"],
           model: "claude-sonnet",
         },
-      } as never,
+      },
     ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -265,7 +264,7 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
             verdictCapable: false,
           },
         ],
-      }) as TaskFrontmatter,
+      }),
       goal: "STALE: build the thing the old way.",
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });

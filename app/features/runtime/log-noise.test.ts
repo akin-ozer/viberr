@@ -12,11 +12,15 @@ import type { LogLine } from "./runtime-types";
  * calls a human opened it to read.
  */
 
-function line(patch: Partial<LogLine>): { display: LogLine; raw: string } {
-  return {
-    display: { t: "09:41:02", ev: "text", tag: "assistant", text: "hi", ...patch },
-    raw: '{"type":"assistant"}',
+function line(patch: Partial<LogLine>) {
+  const display: LogLine = {
+    t: "09:41:02",
+    ev: "text",
+    tag: "assistant",
+    text: "hi",
+    ...patch,
   };
+  return { display, raw: '{"type":"assistant"}' };
 }
 
 describe("isTelemetryLine", () => {

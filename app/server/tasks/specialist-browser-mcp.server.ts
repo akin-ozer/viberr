@@ -49,9 +49,16 @@ import type { UnresolvedMcpGrant } from "./specialist-mcp.server";
 /** Reserved server name (joins viberr/viberr_agent in RESERVED_MCP_NAMES). */
 export const BROWSER_MCP_NAME = "viberr_browser";
 
+/** The portable stdio config for the mounted browser — the exact shape both
+ *  backends receive (no `env`: it must survive codex `--config` argv). */
+export interface BrowserMcpServer {
+  command: string;
+  args: string[];
+}
+
 export interface BrowserMcpResolution {
   /** The portable stdio server config, or null when nothing mounts. */
-  server: Record<string, unknown> | null;
+  server: BrowserMcpServer | null;
   /**
    * Set when `use-browser` is granted but the mount was REFUSED — the run's
    * input disclosure and persona must say so (P14-LV-09 shape), because a

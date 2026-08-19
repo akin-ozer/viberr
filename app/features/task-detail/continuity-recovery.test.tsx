@@ -38,15 +38,25 @@ afterEach(cleanup);
 
 const DEAD_SESSION = "0f8b2b1e-9a44-4a1d-bb2f-7d9c2f1a55c1";
 
-/** The exact envelope `recordSessionMissing` persists for a vanished session. */
+/** The exact envelope `recordSessionMissing` persists for a vanished session —
+ *  `session_id` is ABSENT (not null) when the writer never learned one. */
+interface SessionMissingEnvelope {
+  type: string;
+  source: string;
+  reason: string;
+  session_id?: string;
+  message: string;
+}
+
 function missingRaw(sessionId: string | null = DEAD_SESSION): string {
-  return JSON.stringify({
+  const envelope: SessionMissingEnvelope = {
     type: "error",
     source: "viberr",
     reason: "session_missing",
-    ...(sessionId ? { session_id: sessionId } : {}),
     message: "The Claude Code session no longer exists on this machine.",
-  });
+  };
+  if (sessionId) envelope.session_id = sessionId;
+  return JSON.stringify(envelope);
 }
 
 /** The err line `recordSessionMissing` projects onto the dead run. */
@@ -422,8 +432,8 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     key: "VIB-160",
     title: "Rehydrate a specialist after a lost session",
     stage: "review",
-    readiness: "in_review",
-    displayReadiness: "in_review",
+    readiness: "ready",
+    displayReadiness: "ready",
     waiting: "human",
     urgent: false,
     validation: "healthy",
@@ -458,11 +468,16 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     updatedAt: null,
     boardRank: null,
     filePath: "projects/viberr-core/tasks/VIB-160/task.md",
+    archived: false,
+    continuity: null,
+    atAcceptanceBoundary: false,
+    lastActivityAt: null,
+    quiet: false,
     timeline: [continuityEvent],
     diagnostics: [],
     stages: STAGES,
     ...patch,
-  } as unknown as TaskDetail;
+  };
 }
 
 function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [brokenRun()]) {

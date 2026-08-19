@@ -46,8 +46,19 @@ export type ProjectionEvent =
 const EMITTER_KEY = Symbol.for("viberr.projectionEvents");
 const CHANNEL = "projection";
 
+/** The single `globalThis` slot this module owns — the emitter survives an HMR
+ *  module reload, which a module-level variable would not. */
+interface EmitterHost {
+  [EMITTER_KEY]?: EventEmitter;
+}
+
 function getEmitter(): EventEmitter {
-  const cache = globalThis as unknown as Record<symbol, EventEmitter | undefined>;
+  // SAFETY: `globalThis` carries no index signature, so the symbol slot has to
+  // be named to be read at all. `EMITTER_KEY` is module-private and the only
+  // write to it in the process is the assignment below, which stores the
+  // EventEmitter constructed one line earlier — the slot therefore holds ours
+  // or nothing.
+  const cache = globalThis as EmitterHost;
   let emitter = cache[EMITTER_KEY];
   if (!emitter) {
     emitter = new EventEmitter();
@@ -70,6 +81,13 @@ export function emitProjectionEvent(event: ProjectionEvent): void {
   getEmitter().emit(CHANNEL, event);
 }
 
+/** `fn`'s own result plus the events its call buffered, for the caller to
+ *  re-emit after the transaction commits. */
+export interface CollectedProjectionEvents<T> {
+  result: T;
+  events: ProjectionEvent[];
+}
+
 /**
  * Runs `fn` with projection-event emission DEFERRED: every
  * emitProjectionEvent call inside is buffered and returned instead of being
@@ -79,10 +97,9 @@ export function emitProjectionEvent(event: ProjectionEvent): void {
  * buffer into the innermost collector. If `fn` throws, buffered events are
  * DISCARDED (the transaction rolled back, so nothing actually changed).
  */
-export function collectProjectionEvents<T>(fn: () => T): {
-  result: T;
-  events: ProjectionEvent[];
-} {
+export function collectProjectionEvents<T>(
+  fn: () => T,
+): CollectedProjectionEvents<T> {
   const parent = collectBuffer;
   const events: ProjectionEvent[] = [];
   collectBuffer = events;

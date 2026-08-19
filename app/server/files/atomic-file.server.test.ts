@@ -1,21 +1,22 @@
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isAppError } from "~/server/errors/app-error.server";
+import { writeFileAtomic, type AtomicFileFsOps } from "./atomic-file.server";
 
-// Mock node:fs so we can inject the failure classes writeFileAtomic must
-// distinguish. Shared handles via vi.hoisted so the factory (hoisted above the
-// imports) and the tests reference the same mocks.
-const fs = vi.hoisted(() => ({
-  mkdirSync: vi.fn(),
-  writeFileSync: vi.fn(),
-  renameSync: vi.fn(),
-  rmSync: vi.fn(),
-}));
-vi.mock("node:fs", () => fs);
-
-import { writeFileAtomic } from "./atomic-file.server";
+// The failure classes writeFileAtomic must distinguish (ENOSPC/ESTALE/EIO)
+// cannot be produced by a real volume on demand — inject them through the
+// module's own `fsImpl` seam instead.
+const fs = {
+  mkdirSync: vi.fn<AtomicFileFsOps["mkdirSync"]>(),
+  writeFileSync: vi.fn<AtomicFileFsOps["writeFileSync"]>(),
+  renameSync: vi.fn<AtomicFileFsOps["renameSync"]>(),
+  rmSync: vi.fn<AtomicFileFsOps["rmSync"]>(),
+};
 
 function errno(code: string): NodeJS.ErrnoException {
-  const e = new Error(`${code}: injected`) as NodeJS.ErrnoException;
+  const e: NodeJS.ErrnoException = new Error(`${code}: injected`);
   e.code = code;
   return e;
 }
@@ -26,14 +27,27 @@ afterEach(() => {
 
 describe("writeFileAtomic", () => {
   it("writes to a *.tmp sibling then renames over the target", () => {
-    writeFileAtomic("/data/projects/p/project.md", "body");
+    writeFileAtomic("/data/projects/p/project.md", "body", { fsImpl: fs });
     expect(fs.mkdirSync).toHaveBeenCalledWith("/data/projects/p", {
       recursive: true,
     });
-    const tmp = fs.writeFileSync.mock.calls[0]?.[0] as string;
+    const tmp = fs.writeFileSync.mock.calls[0]![0];
     expect(tmp).toMatch(/\/data\/projects\/p\/project\.md\.[0-9a-f]+\.tmp$/);
     expect(fs.renameSync).toHaveBeenCalledWith(tmp, "/data/projects/p/project.md");
     expect(fs.rmSync).not.toHaveBeenCalled();
+  });
+
+  it("the default seam is the real node:fs — the write really lands, atomically", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-atomic-"));
+    try {
+      const target = path.join(dir, "nested", "note.md");
+      writeFileAtomic(target, "body");
+      expect(readFileSync(target, "utf8")).toBe("body");
+      // No *.tmp staging file left beside the target.
+      expect(readdirSync(path.dirname(target))).toEqual(["note.md"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("ENOSPC → a plain, actionable Error and the staging file is swept", () => {
@@ -42,11 +56,12 @@ describe("writeFileAtomic", () => {
     });
     let caught: unknown;
     try {
-      writeFileAtomic("/data/x.md", "body");
+      writeFileAtomic("/data/x.md", "body", { fsImpl: fs });
     } catch (e) {
       caught = e;
     }
     expect(caught).toBeInstanceOf(Error);
+    // SAFETY: the assertion above already failed the test if it is not one.
     expect((caught as Error).message).toMatch(/No space left on the data root/);
     // The tmp file is cleaned up before the error is raised (Gap 16).
     expect(fs.rmSync).toHaveBeenCalledTimes(1);
@@ -58,7 +73,7 @@ describe("writeFileAtomic", () => {
     });
     let caught: unknown;
     try {
-      writeFileAtomic("/data/projects/p/project.md", "body");
+      writeFileAtomic("/data/projects/p/project.md", "body", { fsImpl: fs });
     } catch (e) {
       caught = e;
     }
@@ -77,7 +92,7 @@ describe("writeFileAtomic", () => {
     });
     let caught: unknown;
     try {
-      writeFileAtomic("/data/x.md", "body");
+      writeFileAtomic("/data/x.md", "body", { fsImpl: fs });
     } catch (e) {
       caught = e;
     }
@@ -96,11 +111,13 @@ describe("writeFileAtomic", () => {
     });
     let caught: unknown;
     try {
-      writeFileAtomic("/data/x.md", "body");
+      writeFileAtomic("/data/x.md", "body", { fsImpl: fs });
     } catch (e) {
       caught = e;
     }
     expect(isAppError(caught)).toBe(false);
+    // SAFETY: the mock above threw the ErrnoException this helper built, and
+    // what is asserted here is that writeFileAtomic re-threw that same value.
     expect((caught as NodeJS.ErrnoException).code).toBe("EACCES");
   });
 });

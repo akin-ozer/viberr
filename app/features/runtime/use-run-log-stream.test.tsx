@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
+import { createContext, useContext, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import {
   useRunLogStream,
   type OlderLogState,
@@ -8,11 +10,52 @@ import {
 } from "./use-run-log-stream";
 import { runBoundaryLine, type LogLine, type RunLogWindow } from "./runtime-types";
 
-const revalidate = vi.fn(() => Promise.resolve());
-vi.mock("react-router", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("react-router")>()),
-  useRevalidator: () => ({ revalidate, state: "idle" as const }),
-}));
+/**
+ * The hook calls `useRevalidator` on `run.state-changed`, so it runs under a
+ * REAL data router here. The route carries no loader, which is what makes a
+ * revalidation a no-op: what these tests own is the log stream, not the task
+ * loader the pills come from. The subject renders through a context slot rather
+ * than as the route's own element, so `rerender` with new props reaches it.
+ */
+const SubjectContext = createContext<ReactNode>(null);
+
+function Subject() {
+  return <>{useContext(SubjectContext)}</>;
+}
+
+const router = createMemoryRouter([{ path: "*", Component: Subject }]);
+
+function DataRouter({ children }: { children: ReactNode }) {
+  return (
+    <SubjectContext.Provider value={children}>
+      <RouterProvider router={router} />
+    </SubjectContext.Provider>
+  );
+}
+
+/** The `run.log-appended` frame body, as the broker puts it on the wire. */
+interface RunLogAppended {
+  projectSlug: string;
+  taskKey: string;
+  runId: string;
+  threadId: string;
+  seq: number;
+}
+
+/** The tail window `/resources/run-log` answers with. */
+interface TailWindow {
+  data: {
+    threadId: string;
+    headSeq: number;
+    lines: { seq: number; display: LogLine; raw: string }[];
+  };
+}
+
+/** The two members the hook reads off a `fetch` response. */
+interface FakeResponse {
+  ok: boolean;
+  json: () => Promise<TailWindow>;
+}
 
 class FakeEventSource {
   static CONNECTING = 0;
@@ -35,9 +78,9 @@ class FakeEventSource {
   close() {
     this.closed = true;
   }
-  emit(name: string, data: unknown) {
+  emit(name: string, data: RunLogAppended) {
     for (const fn of this.listeners.get(name) ?? []) {
-      fn({ data: JSON.stringify({ data }) } as MessageEvent<string>);
+      fn(new MessageEvent(name, { data: JSON.stringify({ data }) }));
     }
   }
   static last() {
@@ -118,7 +161,7 @@ afterEach(() => {
  */
 describe("UI-35: run-log tail deduplication", () => {
   it("runs at most one tail fetch per run and drops already-held seqs", async () => {
-    let resolveFirst: (v: unknown) => void = () => {};
+    let resolveFirst: (response: FakeResponse) => void = () => {};
     const body = {
       data: {
         threadId: "primary",
@@ -131,12 +174,12 @@ describe("UI-35: run-log tail deduplication", () => {
     };
     fetchMock.mockImplementation(
       () =>
-        new Promise((resolve) => {
+        new Promise<FakeResponse>((resolve) => {
           resolveFirst = resolve;
         }),
     );
 
-    render(<Probe />);
+    render(<Probe />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
 
     // Two appended lines arrive back-to-back, as the sink really emits them.
@@ -206,13 +249,13 @@ describe("UI-35: run-log tail deduplication", () => {
 
 describe("UI-30 / UI-03: the tail says when it stopped", () => {
   it("does not open a stream at all when the viewer cannot read logs", () => {
-    render(<Probe enabled={false} />);
+    render(<Probe enabled={false} />, { wrapper: DataRouter });
     expect(FakeEventSource.instances).toHaveLength(0);
   });
 
   it("reports a 403 instead of swallowing it", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
-    render(<Probe />);
+    render(<Probe />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
     await act(async () => {
       es.emit("run.log-appended", {
@@ -228,7 +271,7 @@ describe("UI-30 / UI-03: the tail says when it stopped", () => {
   });
 
   it("reports a permanently closed EventSource", () => {
-    render(<Probe />);
+    render(<Probe />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
     act(() => {
       es.readyState = FakeEventSource.CLOSED;
@@ -285,6 +328,7 @@ describe("P13-D-11: the live tail seeds from logWindow.headSeq", () => {
           },
         ]}
       />,
+      { wrapper: DataRouter },
     );
     const es = FakeEventSource.last();
     await act(async () => {
@@ -340,7 +384,7 @@ function resumedThread(): Thread[] {
 
 describe("P13-D-11: paging backwards through the withheld history", () => {
   it("reports what the window withheld", () => {
-    render(<Probe threads={resumedThread()} />);
+    render(<Probe threads={resumedThread()} />, { wrapper: DataRouter });
     expect(state.olderByThread.primary).toEqual({
       hasMore: true,
       withheld: 7,
@@ -350,7 +394,7 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
   });
 
   it("pages within a run, then steps to the previous run and re-creates the boundary", async () => {
-    render(<Probe threads={resumedThread()} />);
+    render(<Probe threads={resumedThread()} />, { wrapper: DataRouter });
 
     // Page 1 — `before` the window's oldest line, still inside run_b.
     fetchMock.mockResolvedValue(
@@ -428,6 +472,7 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
           },
         ]}
       />,
+      { wrapper: DataRouter },
     );
     fetchMock
       .mockResolvedValueOnce(page([], false)) // run_b: already at its start
@@ -446,7 +491,7 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
   });
 
   it("surfaces a failed page instead of silently dropping the click", async () => {
-    render(<Probe threads={resumedThread()} />);
+    render(<Probe threads={resumedThread()} />, { wrapper: DataRouter });
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
     await act(async () => {
       state.loadOlder("primary");
@@ -462,7 +507,7 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
   });
 
   it("a loader revalidation does not throw away the pages the reader loaded", async () => {
-    const { rerender } = render(<Probe threads={resumedThread()} />);
+    const { rerender } = render(<Probe threads={resumedThread()} />, { wrapper: DataRouter });
     fetchMock.mockResolvedValue(
       page([{ seq: 0, text: "b0" }, { seq: 1, text: "b1" }, { seq: 2, text: "b2" }], false),
     );

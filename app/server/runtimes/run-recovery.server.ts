@@ -35,6 +35,16 @@ const OPERATOR_PLAN_EXECUTED_ACTION = "runtime.operator.plan_executed";
  */
 const STRANDED_PLAN_MAX_AGE_MS = 60 * 60 * 1000;
 
+/** What one boot's orphan sweep did. */
+export interface OrphanFinalization {
+  /** Non-terminal run rows moved to `error` (interrupted-by-restart). */
+  finalized: number;
+  /** Orphaned tasks for which the operator was re-invoked this boot. */
+  reinvoked: number;
+  /** Orphaned tasks whose re-invoke was skipped by the crash-loop cap. */
+  capped: number;
+}
+
 /**
  * Boot-time finalization of non-terminal runs.
  *
@@ -48,13 +58,10 @@ const STRANDED_PLAN_MAX_AGE_MS = 60 * 60 * 1000;
  *
  * Idempotent: a second boot finds nothing non-terminal.
  */
-export function finalizeOrphanedRuns(db: DatabaseSync): {
-  finalized: number;
-  /** Orphaned tasks for which the operator was re-invoked this boot. */
-  reinvoked: number;
-  /** Orphaned tasks whose re-invoke was skipped by the crash-loop cap. */
-  capped: number;
-} {
+export function finalizeOrphanedRuns(db: DatabaseSync): OrphanFinalization {
+  // SAFETY: every column named here is declared NOT NULL TEXT on `agent_runs`
+  // (db/migrations/0001_baseline.sql), so each row carries exactly these four
+  // string fields.
   const orphans = db
     .prepare(
       `SELECT id, project_slug, task_key, kind
@@ -94,6 +101,7 @@ export function finalizeOrphanedRuns(db: DatabaseSync): {
   const toReinvoke: { projectSlug: string; taskKey: string }[] = [];
   let capped = 0;
   for (const t of realTasks.values()) {
+    // SAFETY: `COUNT(*)` always returns exactly one row holding one integer.
     const priorReinvokes = (
       db
         .prepare(
@@ -195,6 +203,9 @@ export async function recoverUnreactedAgentRuns(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},
 ): Promise<{ recovered: number; capped: number }> {
+  // SAFETY: every selected column but `outcome_key` is NOT NULL on `agent_runs`,
+  // and `backend` carries `CHECK (backend IN ('claude', 'codex'))` — the two
+  // members of `RealBackend` (db/migrations/0001_baseline.sql).
   const rows = db
     .prepare(
       `SELECT r.id, r.project_slug, r.task_key, r.backend, r.role, r.kind,
@@ -216,7 +227,7 @@ export async function recoverUnreactedAgentRuns(
     id: string;
     project_slug: string;
     task_key: string;
-    backend: string;
+    backend: RealBackend;
     role: string;
     kind: string;
     agent_profile_id: string;
@@ -245,6 +256,7 @@ export async function recoverUnreactedAgentRuns(
       // the rolling window; once at the cap, skip re-firing costed operator
       // coordination. The count keys on runId (in details_json) so distinct runs
       // on the same task each get their own budget — never a shared task counter.
+      // SAFETY: `COUNT(*)` always returns exactly one row holding one integer.
       const priorReplays = (
         db
           .prepare(
@@ -288,29 +300,29 @@ export async function recoverUnreactedAgentRuns(
       // REACT (trigger `agent-reply`, fresh chain at depth 0) or stuck-packet/
       // waiting flip. A recovered reviewer run therefore records its verdict and
       // captures its branch/PR exactly like a live one.
-      await applyAgentCompletionEffects(
-        db,
-        ctx,
-        {
-          projectSlug: row.project_slug,
-          taskKey: row.task_key,
-          backend: row.backend as RealBackend,
-          profileId: row.agent_profile_id,
-          role: row.role,
-          delivers: row.kind === "primary",
-          // AO-1: re-supply the staging key so the staged report_outcome envelope
-          // (persisted in staged_outcomes) is consumed on recovery — a Claude
-          // verdict survives a restart instead of falling back to the prose regex.
-          ...(row.outcome_key ? { outcomeKey: row.outcome_key } : {}),
-          workdir: null,
-          // P14-RT-12: the ONE handle derivation every writer shares. The
-          // role's first word ("Senior Developer" → `@senior`) resolved to no
-          // agent at all, so a recovered run's stuck-packet observation named a
-          // handle nobody could reply to.
-          agentHandle: agentMentionHandle({ profileId: row.agent_profile_id }),
-        },
-        { id: row.id, state: "finished" },
-      );
+      const completion: Parameters<typeof applyAgentCompletionEffects>[2] = {
+        projectSlug: row.project_slug,
+        taskKey: row.task_key,
+        backend: row.backend,
+        profileId: row.agent_profile_id,
+        role: row.role,
+        delivers: row.kind === "primary",
+        workdir: null,
+        // P14-RT-12: the ONE handle derivation every writer shares. The
+        // role's first word ("Senior Developer" → `@senior`) resolved to no
+        // agent at all, so a recovered run's stuck-packet observation named a
+        // handle nobody could reply to.
+        agentHandle: agentMentionHandle({ profileId: row.agent_profile_id }),
+      };
+      // AO-1: re-supply the staging key so the staged report_outcome envelope
+      // (persisted in staged_outcomes) is consumed on recovery — a Claude
+      // verdict survives a restart instead of falling back to the prose regex.
+      // Left ABSENT, not undefined, when the run stored none.
+      if (row.outcome_key) completion.outcomeKey = row.outcome_key;
+      await applyAgentCompletionEffects(db, ctx, completion, {
+        id: row.id,
+        state: "finished",
+      });
       recovered += 1;
     } catch (error) {
       logger.warn("agent-reply recovery failed for a run", {
@@ -351,6 +363,8 @@ export async function recoverStrandedOperatorPlans(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},
 ): Promise<{ recovered: number; stale: number }> {
+  // SAFETY: the three id columns are NOT NULL TEXT on `agent_runs`;
+  // `finished_at` is the one nullable column of the four.
   const rows = db
     .prepare(
       `SELECT r.id, r.project_slug, r.task_key, r.finished_at

@@ -19,6 +19,7 @@ import {
 import { getRun, listRunLines } from "./run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { RunSpec, RuntimeAdapter } from "./adapter.server";
 import { setBackendAvailability, type AdapterSet } from "./runtime-registry.server";
 import {
@@ -26,6 +27,15 @@ import {
   queueFakeRun,
   type FakeRun,
 } from "../../../test-support/fake-runtime";
+
+// SAFETY: stands in for a live `createSdkMcpServer(...)` config. The tests
+// mounting it assert how the service ROUTES the dictionary — key-derived
+// auto-approval and verbatim carry onto the resumed spec — through capture
+// adapters that never connect, so the instance-bearing fields are never
+// dereferenced and the toEqual fixtures stay byte-identical.
+const sdkServerStub = { type: "sdk" } as McpSdkServerConfigWithInstance;
+/** A portable stdio mount, shaped as `resolveSpecialistMcpServers` builds it. */
+const stdioServerStub = { command: "npx", args: ["-y", "example-mcp"] };
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -225,7 +235,7 @@ describe("run-service lifecycle", () => {
       dataRoot: store.dataRoot,
     });
     await settle();
-    const tail = getRunLog(store.db, runId, 0)!;
+    const tail = getRunLog(store.db, runId, { since: 0 })!;
     expect(tail.lines.map((l) => l.display.text)).toEqual(["b", "c"]);
     expect(tail.headSeq).toBe(2);
   });
@@ -540,7 +550,7 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
       disallowedTools: ["Bash(gh pr merge:*)", "Edit"],
       skills: ["conventional-commits"],
       env: { GIT_CEILING_DIRECTORIES: "/data/projects/x/tasks/VIB-1" },
-      mcpServers: { viberr: { type: "sdk" } },
+      mcpServers: { viberr: sdkServerStub },
       systemPrompt: "You are the Developer.",
       dataRoot: store.dataRoot,
     });
@@ -583,7 +593,7 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
       kind: "primary", backend: "claude", model: "m", prompt: "go",
-      mcpServers: { viberr_agent: { type: "sdk" }, everything: { type: "stdio" } },
+      mcpServers: { viberr_agent: sdkServerStub, everything: stdioServerStub },
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -600,7 +610,7 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Operator", kind: "operator",
       backend: "claude", model: "m", prompt: "go",
-      mcpServers: { viberr: { type: "sdk" }, everything: { type: "stdio" } },
+      mcpServers: { viberr: sdkServerStub, everything: stdioServerStub },
       allowedTools: ["mcp__viberr__post_comment", "mcp__viberr__open_packet"],
       dataRoot: store.dataRoot,
     });
@@ -628,7 +638,7 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
       runId,
       prompt: "follow up",
       allowedTools: ["mcp__viberr__report_outcome"],
-      mcpServers: { viberr_agent: { type: "sdk" }, everything: { type: "stdio" } },
+      mcpServers: { viberr_agent: sdkServerStub, everything: stdioServerStub },
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -794,7 +804,7 @@ describe("resumeRun — continuity recovery", () => {
 
     const resumed = await resume({
       allowedTools: ["mcp__viberr__report_outcome"],
-      mcpServers: { viberr_agent: { type: "sdk" } },
+      mcpServers: { viberr_agent: sdkServerStub },
     });
     await settle();
 
@@ -881,7 +891,7 @@ describe("getRunLog paging", () => {
 
   it("keeps the forward `since` tail working unchanged", async () => {
     const runId = await runWithLines(4);
-    const tail = getRunLog(store.db, runId, 1)!;
+    const tail = getRunLog(store.db, runId, { since: 1 })!;
     expect(tail.lines.map((l) => l.display.text)).toEqual(["l2", "l3"]);
     expect(tail.headSeq).toBe(3);
     expect(tail.hasMore).toBe(true); // seq 0..1 exist below this page
@@ -954,7 +964,7 @@ describe("repoWriteWithheldFromDenylist (P13-RT-02)", () => {
 });
 
 describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
-  function captureSpecs(): { specs: RunSpec[] } {
+  function captureSpecs() {
     const specs: RunSpec[] = [];
     const capture: RuntimeAdapter = {
       backend: "claude",

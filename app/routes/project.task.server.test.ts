@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
+import { z } from "zod";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
@@ -35,15 +37,36 @@ interface TaskLoaderData {
   githubCheckedAt: string | null;
 }
 
+/**
+ * What the loader THROWS on the refused path — React Router's `data()`
+ * envelope. Both fields stay optional because a caught value is only ever
+ * whatever was thrown.
+ */
+interface ThrownRefusal {
+  data?: unknown;
+  init?: { status?: number };
+}
+
 async function loadTask(taskKey: string): Promise<TaskLoaderData> {
   const { loader } = await import("~/routes/project.task");
   const { cookie } = await app.cookieFor(ardaId);
-  return (await loader({
-    request: app.request(`/projects/viberr-core/tasks/${taskKey}`, { cookie }),
+  const request = app.request(`/projects/viberr-core/tasks/${taskKey}`, {
+    cookie,
+  });
+  return await loader({
+    request,
+    url: new URL(request.url),
     params: { slug: "viberr-core", key: taskKey },
-    context: {},
-  } as never)) as TaskLoaderData;
+    pattern: "/projects/:slug/tasks/:key",
+    context: new RouterContextProvider(),
+  });
 }
+
+/** The two columns these cases read back off a notification row. */
+const notificationReadRowSchema = z.object({
+  id: z.string(),
+  read_at: z.string().nullable(),
+});
 
 /** One completed per-task pass, re-dated in place (recordAudit stamps now). */
 async function recordPass(taskKey: string, iso: string, projectSlug = "viberr-core") {
@@ -129,7 +152,8 @@ describe("R19-15: GETting the task route auto-reads the viewer's notifications",
 
     const rows = app.db
       .prepare(`SELECT id, read_at FROM notifications WHERE id LIKE 'r19v%'`)
-      .all() as { id: string; read_at: string | null }[];
+      .all()
+      .map((row) => notificationReadRowSchema.parse(row));
     const readAt = (id: string) => rows.find((r) => r.id === id)?.read_at;
     expect(readAt("r19v_mine_m")).not.toBeNull();
     expect(readAt("r19v_mine_p")).not.toBeNull();
@@ -155,21 +179,39 @@ describe("R19-15: GETting the task route auto-reads the viewer's notifications",
 
     const { loader } = await import("~/routes/project.task");
     const { cookie } = await app.cookieFor(denizId);
-    const thrown = (await loader({
-      request: app.request("/projects/viberr-core/tasks/VIB-142", { cookie }),
-      params: { slug: "viberr-core", key: "VIB-142" },
-      context: {},
-    } as never).then(
-      () => null,
-      (e: unknown) => e,
-    )) as { data?: unknown; init?: { status?: number } } | null;
+    const request = app.request("/projects/viberr-core/tasks/VIB-142", {
+      cookie,
+    });
+    // Refusing IS the pass condition here, so the throw is captured rather than
+    // let out; a loader that RESOLVED leaves this null and fails the status
+    // assertion below.
+    let thrown: ThrownRefusal | null = null;
+    try {
+      await loader({
+        request,
+        url: new URL(request.url),
+        params: { slug: "viberr-core", key: "VIB-142" },
+        pattern: "/projects/:slug/tasks/:key",
+        context: new RouterContextProvider(),
+      });
+    } catch (error) {
+      // SAFETY: the only refusal this loader raises for a non-member is
+      // `requireVisibleProject`'s thrown `data(<body>, { status: 404 })`
+      // envelope, and `ThrownRefusal` leaves both of its fields optional
+      // precisely because a caught value is only ever whatever was thrown.
+      thrown = error as ThrownRefusal;
+    }
 
     expect(thrown?.init?.status).toBe(404);
     // The layout 404's byte-twin — the reply must not confirm the project exists.
     expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
-    const row = app.db
-      .prepare(`SELECT read_at FROM notifications WHERE id = 'r19v_probe'`)
-      .get() as { read_at: string | null };
+    const row = notificationReadRowSchema
+      .pick({ read_at: true })
+      .parse(
+        app.db
+          .prepare(`SELECT read_at FROM notifications WHERE id = 'r19v_probe'`)
+          .get(),
+      );
     expect(row.read_at).toBeNull();
   });
 });

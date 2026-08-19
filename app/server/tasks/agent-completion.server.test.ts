@@ -10,9 +10,11 @@ import {
 } from "../../../test-support/test-store";
 import type {
   Engagement,
+  PacketOption,
   TaskFileEvent,
   WorkRevision,
 } from "~/schemas/task-file.schema";
+import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   readTaskFile,
   resolveTaskFilePath,
@@ -59,9 +61,9 @@ function actor(user: { id: string; email: string }) {
  *  (F10-14: verdict authority is explicit-only now, no implicit default). Both
  *  `dev` (run as a reviewer on the UI-Run path) and the dedicated `reviewer`
  *  profile (the direct-effects path) carry it. */
-const VERDICT_GRANT = [
+const VERDICT_GRANT: CapabilityGrant[] = [
   { capabilityId: "report-validation-verdict", mode: "direct" },
-] as const;
+];
 
 function deployDevSpecialist(): void {
   const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -82,7 +84,7 @@ function deployDevSpecialist(): void {
           model: "sonnet",
           effort: "xhigh",
         },
-      } as never,
+      },
       {
         profileId: "reviewer",
         capabilities: VERDICT_GRANT,
@@ -95,7 +97,7 @@ function deployDevSpecialist(): void {
           model: "sonnet",
           effort: "xhigh",
         },
-      } as never,
+      },
     ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -254,6 +256,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       threadId: `th-${runSeq}`,
     });
     await waitFor(() => {
+      // SAFETY: the SELECT list is the single column `state`, which
+      // `agent_runs` declares TEXT NOT NULL in 0001_baseline; `undefined` is
+      // sqlite's own answer when the id matches no row.
       const row = store.db
         .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
         .get(started.runId) as { state: string } | undefined;
@@ -355,9 +360,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
       agents: file.parsed.frontmatter.agents.map((a) =>
-        (a as { profileId: string }).profileId === "reviewer"
-          ? ({ ...(a as object), capabilities: [] } as never)
-          : a,
+        a.profileId === "reviewer" ? { ...a, capabilities: [] } : a,
       ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -578,7 +581,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
             model: "sonnet",
             autonomy: "supervised",
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -642,6 +645,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.packet, "a recovery packet must open on a failed run").toBeTruthy();
     expect(parsed.packet!.type).toBe("blocked");
     // The task owner + supervisors get a quality notification about the failure.
+    // SAFETY: `COUNT(*) AS n` is an aggregate with no GROUP BY — sqlite answers
+    // it with exactly one row whose only column is the integer `n`.
     const notif = store.db
       .prepare(
         `SELECT COUNT(*) AS n FROM notifications WHERE task_key = 'VIB-1' AND kind = 'quality' AND text LIKE '%run failed%'`,
@@ -676,7 +681,7 @@ describe("unavailable backend through the specialist start path", () => {
             model: "sonnet",
             autonomy: "supervised",
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -696,6 +701,8 @@ describe("unavailable backend through the specialist start path", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
+    // SAFETY: same single-column SELECT, and `startAgentRun` returned the id of
+    // the row it had just written, so the lookup always finds it.
     const row = store.db
       .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
       .get(result.runId) as { state: string };
@@ -807,6 +814,9 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
       threadId: `th-${runSeq}`,
     });
     await waitFor(() => {
+      // SAFETY: the SELECT list is the single column `state`, which
+      // `agent_runs` declares TEXT NOT NULL in 0001_baseline; `undefined` is
+      // sqlite's own answer when the id matches no row.
       const row = store.db
         .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
         .get(started.runId) as { state: string } | undefined;
@@ -817,9 +827,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
 
   /** Write a `type: "blocked"` work-stalled packet straight into the task file
    *  (the schema shape operatorOpenPacket produces). */
-  async function openBlockedPacket(
-    options: Array<Record<string, unknown>>,
-  ): Promise<void> {
+  async function openBlockedPacket(options: PacketOption[]): Promise<void> {
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -831,24 +839,29 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
           body: "The run failed. Coordination is paused until a human chooses how to proceed.",
           observations: [],
           options,
-        } as never;
+        };
         parsed.frontmatter.readiness = "blocked";
       },
     );
   }
 
-  const redirect = { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: false };
+  const redirect: PacketOption = {
+    kind: "redirect",
+    t: "Redirect with sharper guidance",
+    d: "",
+    rec: false,
+  };
   // Deliberately UNSTAMPED — the operator's open_decision_packet option shape
   // has no profileId field, so a primary-subject retry never names one. Adding
   // a profileId here silently drops the unstamped case out of coverage.
-  const retryPrimary = {
+  const retryPrimary: PacketOption = {
     kind: "retry_other_backend",
     t: "Retry on Claude Code",
     d: "",
     rec: true,
     backend: "claude",
   };
-  const retryReviewer = { ...retryPrimary, profileId: "style" };
+  const retryReviewer: PacketOption = { ...retryPrimary, profileId: "style" };
 
   async function runEffects(
     runId: string,

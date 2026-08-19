@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
+import { z } from "zod";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
@@ -17,8 +19,14 @@ import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
  * `project.board.server.test.ts`.
  */
 
+/** The seeded people these cases POST as. */
+interface SeededUserIds {
+  arda: string;
+  deniz: string;
+}
+
 let app: AppTestContext;
-let ids: { arda: string; deniz: string };
+let ids: SeededUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -32,12 +40,42 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-type Refusal = { init?: { status: number }; data?: unknown };
+/**
+ * A guard refuses by THROWING React Router's `data(message, { status })`, so
+ * the rejection reaches the test untyped and is parsed where it lands.
+ */
+const thrownRefusalSchema = z.object({
+  data: z.unknown(),
+  init: z.object({ status: z.number() }).nullish(),
+});
 
+/** The `data(payload, { status })` envelope an action answers a bad intent on.
+ *  `init.status` is required: a bare success object is not a refusal at all,
+ *  and must fail the case rather than read as "some status other than 404". */
+const statusEnvelopeSchema = z.object({
+  init: z.object({ status: z.number() }),
+});
+
+/** The three routes, each with the pattern React Router matches it under. */
 const ROUTES = [
-  { name: "agents", mod: "~/routes/project.agents", path: "agents" },
-  { name: "settings", mod: "~/routes/project.settings", path: "settings" },
-  { name: "github", mod: "~/routes/project.github", path: "github" },
+  {
+    name: "agents",
+    path: "agents",
+    pattern: "/projects/:slug/agents",
+    load: () => import("~/routes/project.agents"),
+  },
+  {
+    name: "settings",
+    path: "settings",
+    pattern: "/projects/:slug/settings",
+    load: () => import("~/routes/project.settings"),
+  },
+  {
+    name: "github",
+    path: "github",
+    pattern: "/projects/:slug/github",
+    load: () => import("~/routes/project.github"),
+  },
 ] as const;
 
 async function post(
@@ -45,37 +83,41 @@ async function post(
   slug: string,
   userId: string,
   fields: Record<string, string>,
-): Promise<unknown> {
-  const { action } = (await import(route.mod)) as {
-    action: (args: never) => Promise<unknown>;
-  };
+) {
+  const { action } = await route.load();
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
+  const request = app.request(`/projects/${slug}/${route.path}`, {
+    method: "POST",
+    cookie,
+    body: new URLSearchParams({ _csrf: csrf, ...fields }),
+  });
   return action({
-    request: app.request(`/projects/${slug}/${route.path}`, {
-      method: "POST",
-      cookie,
-      body: new URLSearchParams({ _csrf: csrf, ...fields }),
-    }),
+    request,
+    url: new URL(request.url),
     params: { slug },
-    context: {},
-  } as never);
+    pattern: route.pattern,
+    context: new RouterContextProvider(),
+  });
 }
 
 describe("project actions — a non-member never learns the project exists (E2)", () => {
   for (const route of ROUTES) {
     it(`${route.name}: refused as an unknown slug, not forbidden`, async () => {
-      const thrown = (await post(route, "viberr-core", ids.deniz, {
+      const thrown: unknown = await post(route, "viberr-core", ids.deniz, {
         intent: "no-such-intent",
-      }).catch((e) => e)) as Refusal;
-      expect(thrown?.init?.status).toBe(404);
-      expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
+      }).catch((e) => e);
+      const refusal = thrownRefusalSchema.parse(thrown);
+      expect(refusal.init?.status).toBe(404);
+      expect(String(refusal.data)).toBe("No project at projects/viberr-core.");
     });
 
     it(`${route.name}: a member reaches the intent switch`, async () => {
-      const result = (await post(route, "viberr-core", ids.arda, {
-        intent: "no-such-intent",
-      })) as { init: { status: number } };
+      const result = statusEnvelopeSchema.parse(
+        await post(route, "viberr-core", ids.arda, {
+          intent: "no-such-intent",
+        }),
+      );
       // Past the gate: the route answers its own "unknown intent", not a 404.
       expect(result.init.status).not.toBe(404);
     });

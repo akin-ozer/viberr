@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { readdirSync } from "node:fs";
+import { z } from "zod";
 import { logger } from "~/server/logging/logger.server";
 
 /**
@@ -19,6 +20,16 @@ import { logger } from "~/server/logging/logger.server";
  */
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
+
+/** The on-disk bookkeeping this module maintains: shipped path → content hash. */
+const manifestSchema = z.record(z.string(), z.string());
+/** The asset a divergence warning names, and the drift it reports. */
+const warnedAssetSchema = z.object({ asset: z.string() });
+const divergenceFieldsSchema = z.object({
+  onDisk: z.string(),
+  shipped: z.string(),
+  path: z.string(),
+});
 const roots: string[] = [];
 afterAll(() => {
   for (const dir of roots) rmSync(dir, { recursive: true, force: true });
@@ -27,7 +38,7 @@ afterAll(() => {
 describe("shipped default assets", () => {
   it("exposes every persona/skill body with real content", async () => {
     const mod = await import("./default-assets.server");
-    expect(typeof mod.seedDefaultAgentAssets).toBe("function");
+    expect(mod.seedDefaultAgentAssets).toBeTypeOf("function");
     // The operator profile template is built from the assets; an empty asset
     // would silently ship an agent with no instructions.
     const assetDir = path.join(REPO_ROOT, "app/server/seed/assets");
@@ -138,7 +149,9 @@ describe("shipped-asset refresh (B-OP1)", () => {
     const manifestPath = path.join(dataRoot, "state", "shipped-assets.json");
     const oldDoctrine = "---\nid: operator\n---\n\nCall assign_specialist, then prompt_specialist.\n";
     writeFileSync(path.join(dataRoot, OPERATOR_REL), oldDoctrine, "utf8");
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, string>;
+    const manifest = manifestSchema.parse(
+      JSON.parse(readFileSync(manifestPath, "utf8")),
+    );
     const { assetHash } = await import("./default-assets.server");
     manifest[OPERATOR_REL] = assetHash(oldDoctrine);
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
@@ -146,7 +159,9 @@ describe("shipped-asset refresh (B-OP1)", () => {
     seedDefaultAgentAssets(dataRoot);
 
     expect(storeCopy(dataRoot)).toBe(shipped());
-    const after = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, string>;
+    const after = manifestSchema.parse(
+      JSON.parse(readFileSync(manifestPath, "utf8")),
+    );
     expect(after[OPERATOR_REL]).toBe(assetHash(shipped()));
   });
 
@@ -187,11 +202,12 @@ describe("shipped-asset refresh (B-OP1)", () => {
       // Still preserved — the warning REPLACES silence, not the fail-safe.
       expect(storeCopy(dataRoot)).toBe(diverged);
 
-      const call = warn.mock.calls.find(
-        ([, fields]) => (fields as { asset?: string } | undefined)?.asset === OPERATOR_REL,
-      );
+      const call = warn.mock.calls.find(([, fields]) => {
+        const warned = warnedAssetSchema.safeParse(fields);
+        return warned.success && warned.data.asset === OPERATOR_REL;
+      });
       expect(call, "no warning named the diverged asset").toBeDefined();
-      const fields = call![1] as { onDisk?: string; shipped?: string; path?: string };
+      const fields = divergenceFieldsSchema.parse(call![1]);
       expect(fields.onDisk).toBe(assetHash(diverged).slice(0, 12));
       expect(fields.shipped).toBe(assetHash(shipped()).slice(0, 12));
       expect(fields.path).toBe(path.join(dataRoot, OPERATOR_REL));
@@ -210,9 +226,11 @@ describe("shipped-asset refresh (B-OP1)", () => {
 
     seedDefaultAgentAssets(dataRoot);
 
-    const manifest = JSON.parse(
-      readFileSync(path.join(dataRoot, "state", "shipped-assets.json"), "utf8"),
-    ) as Record<string, string>;
+    const manifest = manifestSchema.parse(
+      JSON.parse(
+        readFileSync(path.join(dataRoot, "state", "shipped-assets.json"), "utf8"),
+      ),
+    );
     expect(manifest[OPERATOR_REL]).toBe(assetHash(shipped()));
   });
 

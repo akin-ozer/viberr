@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
+import { z } from "zod";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 
 /**
@@ -15,8 +17,14 @@ import { setupAppTest, type AppTestContext } from "../../../test-support/test-ap
  * checked per RUN (the run's own project), not per caller.
  */
 
+/** The seeded people these cases call the artifact routes as. */
+interface SeededUserIds {
+  arda: string;
+  deniz: string;
+}
+
 let app: AppTestContext;
-let ids: { arda: string; deniz: string };
+let ids: SeededUserIds;
 
 const RUN_ID = "run_authfixture";
 
@@ -51,32 +59,55 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
+/** The two routes under test, with the pattern the framework matches them under. */
+const ARTIFACT_ROUTES = {
+  "resources.run-log": "/resources/run-log",
+  "resources.session-export": "/resources/session-export",
+} as const;
+type ArtifactRoute = keyof typeof ARTIFACT_ROUTES;
+
+/**
+ * requireProjectMember throws react-router's `data(message, {status})`, which
+ * is a DataWithResponseInit — not a Response — so the rejection reaches the
+ * test untyped and is parsed where it lands. A thrown refusal is still a
+ * refusal: the route must not fall through to content either way.
+ */
+const thrownRefusalSchema = z.object({
+  data: z.unknown(),
+  init: z.object({ status: z.number() }),
+});
+
 /** Invoke a resource loader and normalize thrown Responses into a status. */
 async function callLoader(
-  mod: "resources.run-log" | "resources.session-export",
+  mod: ArtifactRoute,
   path: string,
   userId: string,
 ): Promise<{ status: number; body: string }> {
-  const { loader } = await import(`~/routes/${mod}`);
+  const { loader } =
+    mod === "resources.run-log"
+      ? await import("~/routes/resources.run-log")
+      : await import("~/routes/resources.session-export");
   const { cookie } = await app.cookieFor(userId);
+  const request = app.request(path, { cookie });
   try {
-    const res = (await loader({
-      request: app.request(path, { cookie }),
+    const res = await loader({
+      request,
+      url: new URL(request.url),
       params: {},
-      context: {},
-    } as never)) as Response;
+      pattern: ARTIFACT_ROUTES[mod],
+      context: new RouterContextProvider(),
+    });
     return { status: res.status, body: await res.text() };
   } catch (thrown) {
-    // requireProjectMember throws react-router's `data(message, {status})`,
-    // which is a DataWithResponseInit — not a Response. A thrown refusal is
-    // still a refusal: the route must not fall through to content either way.
-    const wrapped = thrown as { data?: unknown; init?: { status?: number } };
-    if (typeof wrapped?.init?.status === "number") {
-      return { status: wrapped.init.status, body: String(wrapped.data ?? "") };
+    const refusal = thrownRefusalSchema.safeParse(thrown);
+    if (refusal.success) {
+      return {
+        status: refusal.data.init.status,
+        body: String(refusal.data.data ?? ""),
+      };
     }
-    const res = thrown as Response;
-    if (typeof res?.status !== "number") throw thrown;
-    return { status: res.status, body: await res.text() };
+    if (!(thrown instanceof Response)) throw thrown;
+    return { status: thrown.status, body: await thrown.text() };
   }
 }
 

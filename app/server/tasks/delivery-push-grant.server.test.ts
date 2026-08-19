@@ -43,7 +43,7 @@ function deployDev(mode: "direct" | "human" | "off"): void {
           backends: ["claude"],
           model: "sonnet",
         },
-      } as never,
+      },
     ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });

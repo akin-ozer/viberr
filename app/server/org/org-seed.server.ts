@@ -380,6 +380,7 @@ export function seedOrgResources(
     skills: SKILL_SEEDS.length,
     mcps: 0,
     domains: 1,
+    // SAFETY: `count(*)` always returns exactly one row holding one integer.
     connections: (
       db.prepare(`SELECT count(*) AS c FROM github_connections`).get() as {
         c: number;

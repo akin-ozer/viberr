@@ -14,10 +14,10 @@
  *
  * So the channel is opened, scrubbed. Three layers, strongest first:
  *   1. the EXACT project credential, by value — both call sites hold the token
- *      at the failure site, so this layer needs no guessing and no shape;
+ *      at the failure site, so this layer needs no guessing and no pattern;
  *   2. URL userinfo (`https://user:secret@host`), the one shape a legacy
  *      token-bearing origin written by an older Viberr could reach stderr in;
- *   3. known token SHAPES, for a credential nobody here supplied.
+ *   3. known token PATTERNS, for a credential nobody here supplied.
  *
  * Then ANSI/control-character stripping (a timeline note and an agent prompt are
  * plain text, never a coloured TTY stream), and a hard clamp, because the text
@@ -25,10 +25,12 @@
  * `operatorSnapshot`, which caps one event at 1500 chars.
  */
 
+import { z } from "zod";
+
 export const REDACTED = "[redacted]";
 
 /**
- * Token shapes worth redacting on sight — anchored prefixes plus a length
+ * Token patterns worth redacting on sight — anchored prefixes plus a length
  * floor, so ordinary prose ("sk-1", "gh_") is never touched. Deliberately NOT
  * an entropy heuristic: mangling git's diagnosis is a worse failure than the
  * leak this backstops, and layers 1-2 above are the ones that actually carry
@@ -38,7 +40,7 @@ export const REDACTED = "[redacted]";
  * lines; the two must stay in step, and the run-log copy should import this one
  * so there is a single list.
  */
-export const TOKEN_SHAPE_SOURCE = [
+export const TOKEN_PATTERN_SOURCE = [
   "gh[pousr]_[A-Za-z0-9]{16,}", // ghp_/gho_/ghu_/ghs_/ghr_ GitHub tokens
   "github_pat_[A-Za-z0-9_]{20,}", // fine-grained PAT
   "sk-[A-Za-z0-9_-]{16,}", // sk-ant-…, sk-proj-…, OpenAI/Anthropic keys
@@ -92,8 +94,8 @@ export function redactGitOutput(
   // already reduced to `x-access-token:[redacted]@host`, still loses the
   // username half (it names the credential mechanism, not just the value).
   out = out.replace(URL_USERINFO_RE, `$1${REDACTED}@`);
-  // Layer 3 — shapes.
-  out = out.replace(new RegExp(TOKEN_SHAPE_SOURCE, "g"), REDACTED);
+  // Layer 3 — patterns.
+  out = out.replace(new RegExp(TOKEN_PATTERN_SOURCE, "g"), REDACTED);
 
   // Strip ANSI colour sequences before the split so a colourised `error:` line
   // is not spent on escape bytes.
@@ -121,7 +123,7 @@ export function redactGitOutput(
  *
  * Ruling 69's argument transfers verbatim from git to the model runtimes: the
  * credential never lives in argv (Codex gets it via `CodexOptions.apiKey`/env,
- * Claude via `claudeSpawnEnv`), so the same value+shape scrub plus
+ * Claude via `claudeSpawnEnv`), so the same value+pattern scrub plus
  * control-character stripping makes a provider's own complaint safe to surface.
  * `redactGitOutput` already IS that shared child-process scrubber, so this
  * layers on top of it: coerce the (possibly nested) error to text, scrub, keep
@@ -162,12 +164,18 @@ export function redactProviderText(
  * said anything, else the wrapper's own message (which quotes argv — already
  * credential-free by construction, and scrubbed anyway).
  */
+/** The two fields are decoded SEPARATELY, not as one object: a rejection that
+ *  carries a non-string `stderr` (a Buffer, when a caller drops the string
+ *  encoding) must still fall through to the message rather than lose both. */
+const gitStderrSchema = z.object({ stderr: z.string() });
+const gitMessageSchema = z.object({ message: z.string() });
+
 export function gitErrorText(error: unknown): string {
-  const value =
-    typeof error === "object" && error !== null
-      ? (error as { stderr?: unknown; message?: unknown })
-      : {};
-  const stderr = typeof value.stderr === "string" ? value.stderr.trim() : "";
-  if (stderr) return stderr;
-  return typeof value.message === "string" ? value.message : "";
+  const withStderr = gitStderrSchema.safeParse(error);
+  if (withStderr.success) {
+    const stderr = withStderr.data.stderr.trim();
+    if (stderr) return stderr;
+  }
+  const withMessage = gitMessageSchema.safeParse(error);
+  return withMessage.success ? withMessage.data.message : "";
 }

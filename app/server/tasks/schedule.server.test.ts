@@ -15,6 +15,7 @@ import {
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { getProject } from "~/server/projections/board-query.server";
 import type { RunHandle, RunSpec, RuntimeAdapter } from "~/server/runtimes/adapter.server";
 import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
@@ -207,6 +208,9 @@ describe("scheduleTaskAction", () => {
     expect(s.backend).toBe("codex");
     expect(schedules("VIB-1")).toHaveLength(1);
     // Projected to schedules_json so the runner can find it.
+    // SAFETY: the SELECT names one column, 0001_baseline declares
+    // `task_projections.schedules_json` NOT NULL, and the rebuild above
+    // projected VIB-1 — so the row exists and carries this shape.
     const row = store.db.prepare(`SELECT schedules_json FROM task_projections WHERE task_key=?`).get("VIB-1") as { schedules_json: string };
     expect(row.schedules_json).toContain('"status":"pending"');
     // Audited.
@@ -429,6 +433,8 @@ describe("fireDueSchedules", () => {
         schedules: [rawSchedule({ id: "sch_toctou" })],
       }),
     });
+    // SAFETY: the SELECT names one column, 0001_baseline declares
+    // `task_projections.stage` TEXT NOT NULL, and VIB-7 was projected above.
     expect(
       (
         store.db
@@ -542,12 +548,15 @@ describe("fireDueSchedules", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     // Deliberately NOT reprojected — that staleness IS the defect.
+    // `archived` is set only when asked: an absent key and `archived: false`
+    // are different task files, and the absent one is the default shape.
+    const patch: Partial<TaskFrontmatter> = {
+      stage: after.stage ?? "impl",
+      schedules: [rawSchedule({ id: "sch_race" })],
+    };
+    if (after.archived) patch.archived = true;
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter(key, {
-        stage: after.stage ?? "impl",
-        ...(after.archived ? { archived: true } : {}),
-        schedules: [rawSchedule({ id: "sch_race" })],
-      }),
+      frontmatter: baseTaskFrontmatter(key, patch),
     });
   }
 
@@ -624,6 +633,7 @@ describe("tasksWithUnresolvedSchedules (B-WF5)", () => {
     // Same data, formatted differently. The old scan matched the literal bytes
     // `"status":"pending"`, so one space after a colon silently dropped a due
     // schedule from every tick — it would never fire and never be reported.
+    // SAFETY: as above — one NOT NULL column, on a task the rebuild projected.
     const raw = store.db
       .prepare(`SELECT schedules_json FROM task_projections WHERE task_key = 'VIB-5'`)
       .get() as { schedules_json: string };

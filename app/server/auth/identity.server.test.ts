@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { createAuth, type ViberrAuth } from "~/lib/auth.server";
 import { hashPassword } from "./password.server";
@@ -20,6 +21,29 @@ import {
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
+
+/* `.get()` hands back untyped SQLite cells, so every row below is parsed on
+ * read — a column that stops being written, or comes back NULL, fails the case
+ * at the read rather than inside an assertion. */
+const userRowSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  emailVerified: z.number(),
+});
+const accountRowSchema = z.object({
+  providerId: z.string(),
+  password: z.string(),
+});
+const emailRowSchema = z.object({ email: z.string() });
+const identityCountsSchema = z.object({ users: z.number(), accts: z.number() });
+const countRowSchema = z.object({ c: z.number() });
+
+/** The credential fields the allow-list probes post: every blocked endpoint is
+ *  addressed by email, and only sign-in also carries a password. */
+interface AuthProbeBody {
+  email: string;
+  password?: string;
+}
 
 function auth(db: DatabaseSync): ViberrAuth {
   return createAuth({
@@ -42,14 +66,18 @@ describe("identity provisioning", () => {
     });
 
     // Identity id-preserving, email lowercased, emailVerified set.
-    const user = db
-      .prepare(`SELECT id, email, emailVerified FROM "user" WHERE id='u_arda'`)
-      .get() as { id: string; email: string; emailVerified: number };
+    const user = userRowSchema.parse(
+      db
+        .prepare(`SELECT id, email, emailVerified FROM "user" WHERE id='u_arda'`)
+        .get(),
+    );
     expect(user).toEqual({ id: "u_arda", email: "arda@viberr.dev", emailVerified: 1 });
 
-    const acct = db
-      .prepare(`SELECT providerId, password FROM account WHERE userId='u_arda'`)
-      .get() as { providerId: string; password: string };
+    const acct = accountRowSchema.parse(
+      db
+        .prepare(`SELECT providerId, password FROM account WHERE userId='u_arda'`)
+        .get(),
+    );
     expect(acct.providerId).toBe(CREDENTIAL_PROVIDER);
 
     // The raw-provisioned credential verifies through better-auth sign-in.
@@ -69,9 +97,9 @@ describe("identity provisioning", () => {
       passwordHash: await hashPassword("secret-secret"),
     });
     syncIdentityEmail(db, "u_e", "New@Viberr.Dev");
-    const row = db
-      .prepare(`SELECT email FROM "user" WHERE id='u_e'`)
-      .get() as { email: string };
+    const row = emailRowSchema.parse(
+      db.prepare(`SELECT email FROM "user" WHERE id='u_e'`).get(),
+    );
     expect(row.email).toBe("new@viberr.dev");
   });
 
@@ -85,13 +113,15 @@ describe("identity provisioning", () => {
     };
     provisionIdentity(db, input);
     provisionIdentity(db, input);
-    const counts = db
-      .prepare(
-        `SELECT
+    const counts = identityCountsSchema.parse(
+      db
+        .prepare(
+          `SELECT
            (SELECT count(*) FROM "user" WHERE id='u_x') AS users,
            (SELECT count(*) FROM account WHERE userId='u_x') AS accts`,
-      )
-      .get() as { users: number; accts: number };
+        )
+        .get(),
+    );
     expect(counts).toEqual({ users: 1, accts: 1 });
   });
 
@@ -110,13 +140,13 @@ describe("identity provisioning", () => {
       asResponse: true,
     });
     expect(signIn.status).toBe(200);
-    expect(
-      (db.prepare(`SELECT count(*) AS c FROM session WHERE userId='u_p'`).get() as { c: number }).c,
-    ).toBe(1);
+    const sessionCount = () =>
+      countRowSchema.parse(
+        db.prepare(`SELECT count(*) AS c FROM session WHERE userId='u_p'`).get(),
+      ).c;
+    expect(sessionCount()).toBe(1);
     expect(revokeUserSessions(db, "u_p")).toBe(1);
-    expect(
-      (db.prepare(`SELECT count(*) AS c FROM session WHERE userId='u_p'`).get() as { c: number }).c,
-    ).toBe(0);
+    expect(sessionCount()).toBe(0);
 
     // New password verifies, old one no longer does.
     setCredentialPassword(db, "u_p", await hashPassword("new-password-2"));
@@ -168,7 +198,7 @@ describe("identity provisioning", () => {
       name: "B",
       passwordHash: await hashPassword("some-password"),
     });
-    const post = (path: string, body: unknown) =>
+    const post = (path: string, body: AuthProbeBody) =>
       a.handler(
         new Request(`http://localhost:5173/api/auth${path}`, {
           method: "POST",

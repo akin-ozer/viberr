@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { logger } from "./logger.server";
 import {
   bindCorrelation,
@@ -17,11 +18,24 @@ import {
  * call site asking. These tests assert exactly that.
  */
 
-function captureLog(fn: () => void): Record<string, unknown>[] {
+/**
+ * One captured stdout line, parsed back into the record the logger wrote: the
+ * `{ level, time, msg }` envelope plus whatever correlation and call-site
+ * fields were merged on top — `looseObject` keeps those, since they are exactly
+ * what these cases assert on.
+ */
+const logRecordSchema = z.looseObject({
+  level: z.string(),
+  time: z.string(),
+  msg: z.string(),
+});
+type LogRecord = z.infer<typeof logRecordSchema>;
+
+function captureLog(fn: () => void): LogRecord[] {
   const lines: string[] = [];
   const spy = vi
     .spyOn(process.stdout, "write")
-    .mockImplementation((chunk: unknown) => {
+    .mockImplementation((chunk: string | Uint8Array) => {
       lines.push(String(chunk));
       return true;
     });
@@ -30,7 +44,7 @@ function captureLog(fn: () => void): Record<string, unknown>[] {
   } finally {
     spy.mockRestore();
   }
-  return lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+  return lines.map((l) => logRecordSchema.parse(JSON.parse(l)));
 }
 
 afterEach(() => {
@@ -104,11 +118,11 @@ describe("log correlation", () => {
   });
 
   it("survives async boundaries within the request", async () => {
-    const records: Record<string, unknown>[] = [];
+    const records: LogRecord[] = [];
     const lines: string[] = [];
     const spy = vi
       .spyOn(process.stdout, "write")
-      .mockImplementation((chunk: unknown) => {
+      .mockImplementation((chunk: string | Uint8Array) => {
         lines.push(String(chunk));
         return true;
       });
@@ -118,7 +132,7 @@ describe("log correlation", () => {
       logger.info("after await");
     });
     spy.mockRestore();
-    records.push(...lines.map((l) => JSON.parse(l) as Record<string, unknown>));
+    records.push(...lines.map((l) => logRecordSchema.parse(JSON.parse(l))));
     expect(records[0]).toMatchObject({ requestId: "req_async" });
   });
 });

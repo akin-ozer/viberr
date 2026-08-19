@@ -60,6 +60,9 @@ describe("runWithDataRootWriterLock", () => {
       "`npm run rescan`",
       () => {
         heldDuringBody = existsSync(lockPath(dataRoot));
+        // SAFETY: the body runs while the lock is held, so this reads back the
+        // holder record `acquireDataRootLock` serialized from a `LockHolder`
+        // moments earlier — the JSON round-trip is the only step in between.
         holderDuringBody = JSON.parse(
           readFileSync(lockPath(dataRoot), "utf8"),
         ) as LockHolder;

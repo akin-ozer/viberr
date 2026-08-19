@@ -12,7 +12,11 @@ import {
   RepositoryPanel,
   type ReconcileCheckView,
 } from "./github-view";
-import type { BranchRowView, PrRowView } from "./github-query.server";
+import type {
+  BranchRowView,
+  GithubViewData,
+  PrRowView,
+} from "./github-query.server";
 
 afterEach(cleanup);
 
@@ -61,6 +65,33 @@ const noneCredential: ProjectCredentialHealth = {
   masked: null,
   scopes: [],
 };
+
+/** A connected project with nothing on the board — the base every whole-page
+ *  fixture below patches. `connection` carries the full `checkRepoAccess`
+ *  result: the page reads only `status`/`reason`, but a partial one is a
+ *  fixture that has drifted from what the loader hands the page. */
+function viewData(patch: Partial<GithubViewData> = {}): GithubViewData {
+  return {
+    project: {
+      slug: "viberr-core",
+      name: "Viberr Core",
+      repo: "akin-ozer/viberr",
+      defaultBranch: "main",
+    },
+    githubHost: "https://github.com",
+    connection: {
+      status: "connected",
+      repo: "akin-ozer/viberr",
+      remoteDefaultBranch: "main",
+      private: false,
+    },
+    credential: noneCredential,
+    prs: [],
+    branches: [],
+    reconcile: { at: null, label: null, stale: true },
+    ...patch,
+  };
+}
 
 const prs: PrRowView[] = [
   {
@@ -739,20 +770,7 @@ describe("UI-05: a never-compared branch is not 'synced'", () => {
 });
 
 describe("UI-37: 'Update status' is gated like the action it calls", () => {
-  const data = {
-    project: {
-      slug: "viberr-core",
-      name: "Viberr Core",
-      repo: "akin-ozer/viberr",
-      defaultBranch: "main",
-    },
-    githubHost: "https://github.com",
-    connection: { status: "connected" as const },
-    credential: noneCredential,
-    prs: [],
-    branches: [],
-    reconcile: { at: null, label: null, stale: true },
-  } as unknown as Parameters<typeof GithubViewPage>[0]["data"];
+  const data = viewData();
 
   const renderPage = (myRole: string | null) => {
     const Stub = createRoutesStub([
@@ -806,23 +824,8 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
         Component: () => (
           <ToastProvider>
             <GithubViewPage
-              data={
-                {
-                  project: {
-                    slug: "viberr-core",
-                    name: "Viberr Core",
-                    repo: "akin-ozer/viberr",
-                    defaultBranch: "main",
-                  },
-                  githubHost: "https://github.com",
-                  connection: { status: "connected" as const },
-                  // A real bound PAT — the state that has something to disclose.
-                  credential: violationCredential,
-                  prs: [],
-                  branches: [],
-                  reconcile: { at: null, label: null, stale: true },
-                } as unknown as Parameters<typeof GithubViewPage>[0]["data"]
-              }
+              // A real bound PAT — the state that has something to disclose.
+              data={viewData({ credential: violationCredential })}
               reconcileCheck={NO_CHECK_ON_RECORD}
               myRole={myRole}
             />
@@ -904,26 +907,6 @@ const NO_CHECK_ON_RECORD: ReconcileCheckView = {
 };
 
 describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
-  const pageData = (reconcile: {
-    at: string | null;
-    label: string | null;
-    stale: boolean;
-  }) =>
-    ({
-      project: {
-        slug: "viberr-core",
-        name: "Viberr Core",
-        repo: "akin-ozer/viberr",
-        defaultBranch: "main",
-      },
-      githubHost: "https://github.com",
-      connection: { status: "connected" as const },
-      credential: noneCredential,
-      prs: [],
-      branches: [],
-      reconcile,
-    }) as unknown as Parameters<typeof GithubViewPage>[0]["data"];
-
   const renderChip = (reconcile: {
     at: string | null;
     label: string | null;
@@ -935,7 +918,7 @@ describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
         Component: () => (
           <ToastProvider>
             <GithubViewPage
-              data={pageData(reconcile)}
+              data={viewData({ reconcile })}
               reconcileCheck={NO_CHECK_ON_RECORD}
               myRole="maintainer"
             />
@@ -1011,22 +994,7 @@ describe("F19-22: the freshness chip names the last CHANGE, not the last check",
         Component: () => (
           <ToastProvider>
             <GithubViewPage
-              data={
-                {
-                  project: {
-                    slug: "viberr-core",
-                    name: "Viberr Core",
-                    repo: "akin-ozer/viberr",
-                    defaultBranch: "main",
-                  },
-                  githubHost: "https://github.com",
-                  connection: { status: "connected" as const },
-                  credential: noneCredential,
-                  prs: [],
-                  branches: [],
-                  reconcile,
-                } as unknown as Parameters<typeof GithubViewPage>[0]["data"]
-              }
+              data={viewData({ reconcile })}
               reconcileCheck={NO_CHECK_ON_RECORD}
               myRole="maintainer"
             />
@@ -1092,22 +1060,7 @@ describe("F19-22: the chip renders the last CHECK beside the last change", () =>
         Component: () => (
           <ToastProvider>
             <GithubViewPage
-              data={
-                {
-                  project: {
-                    slug: "viberr-core",
-                    name: "Viberr Core",
-                    repo: "akin-ozer/viberr",
-                    defaultBranch: "main",
-                  },
-                  githubHost: "https://github.com",
-                  connection: { status: "connected" as const },
-                  credential: noneCredential,
-                  prs: [],
-                  branches: [],
-                  reconcile,
-                } as unknown as Parameters<typeof GithubViewPage>[0]["data"]
-              }
+              data={viewData({ reconcile })}
               reconcileCheck={reconcileCheck}
               myRole="maintainer"
             />

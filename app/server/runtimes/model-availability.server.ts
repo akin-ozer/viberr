@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { logger } from "~/server/logging/logger.server";
 import type { RealBackend } from "./runtime-registry.server";
 
@@ -65,6 +66,15 @@ export function clearModelMark(
   ).run(backend, m);
 }
 
+/** One `model_availability` row, parsed at the DB boundary. Every selected
+ *  column is `TEXT NOT NULL` in the schema, so a row that fails to parse is a
+ *  hand-edited database, not a case this read model should invent a mark for. */
+const markRowSchema = z.object({
+  model: z.string(),
+  reason: z.string(),
+  marked_at: z.string(),
+});
+
 /** The unavailable models for a backend, keyed by model id. */
 export function unavailableModels(
   db: DatabaseSync,
@@ -74,14 +84,15 @@ export function unavailableModels(
     .prepare(
       `SELECT model, reason, marked_at FROM model_availability WHERE backend = ?`,
     )
-    .all(backend) as unknown as {
-    model: string;
-    reason: string;
-    marked_at: string;
-  }[];
+    .all(backend);
   const out = new Map<string, { reason: string; markedAt: string }>();
-  for (const r of rows) {
-    out.set(r.model, { reason: r.reason, markedAt: r.marked_at });
+  for (const row of rows) {
+    const parsed = markRowSchema.safeParse(row);
+    if (!parsed.success) continue;
+    out.set(parsed.data.model, {
+      reason: parsed.data.reason,
+      markedAt: parsed.data.marked_at,
+    });
   }
   return out;
 }

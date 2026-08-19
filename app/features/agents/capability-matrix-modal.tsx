@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { Icon, type IconName } from "~/ui/icon";
+import { Icon, storeIcon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 import type { MatrixProfile } from "./agent-types";
 import { CAP_MODAL_CATALOG } from "./capability-catalog";
@@ -31,12 +31,12 @@ function modeOf(profile: MatrixProfile, label: string): Mode {
   return "off";
 }
 
-const MODE_TITLE: Record<Mode, string> = {
+const MODE_TITLE = {
   off: "Not granted",
   human: "Reserved for humans",
   recommend: "Recommends",
   direct: "Acts directly",
-};
+} satisfies Record<Mode, string>;
 
 export function CapabilityMatrixModal({
   profiles,
@@ -138,7 +138,7 @@ export function CapabilityMatrixModal({
                           "agent-glyph" + (p.kind === "operator" ? " op" : "")
                         }
                       >
-                        <Icon name={p.icon as IconName} />
+                        <Icon name={storeIcon(p.icon)} />
                       </span>
                       {p.name}
                     </div>

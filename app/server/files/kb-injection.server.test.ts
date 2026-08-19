@@ -19,7 +19,7 @@ import {
   readKbBodyDetailed,
 } from "./kb-injection.server";
 
-function freshKb(dir = "notes"): { dataRoot: string; kbDir: string } {
+function freshKb(dir = "notes") {
   const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-kb-"));
   const kbDir = path.join(dataRoot, "kb", dir);
   mkdirSync(kbDir, { recursive: true });
@@ -267,6 +267,6 @@ describe("STORE_TEXT_EXTENSIONS is the ONLY store text-doc list", () => {
     // `store-files.server` no longer exports a list of its own to compare —
     // that IS the fix — so assert the module simply loads against the shared
     // set without redeclaring one (the scan above proves the negative).
-    expect(typeof editor.readStoreDoc).toBe("function");
+    expect(editor.readStoreDoc).toBeTypeOf("function");
   });
 });

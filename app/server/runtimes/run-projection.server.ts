@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   runBoundaryLine,
   type LogLine,
+  type RunBackend,
   type RunLogWindow,
   type RunState,
   type RunView,
@@ -25,15 +26,15 @@ import { transcriptExists } from "./session-export.server";
  * the mock's per-task order.
  */
 
-const SDK_LABEL: Record<string, string> = {
+const SDK_LABEL = {
   claude: "Claude Agent SDK",
   codex: "Codex SDK",
-};
+} satisfies Record<RunBackend, string>;
 
-const WHO_NAME: Record<string, string> = {
+const WHO_NAME = {
   claude: "Claude Code",
   codex: "Codex",
-};
+} satisfies Record<RunBackend, string>;
 
 // ------------------------------------------------- bounded log window (D-11)
 
@@ -178,8 +179,7 @@ function projectRow(
     !op &&
     (lines.some((l) => l.ev === "err" && l.tag === "run·unavailable") ||
       isBackendUnavailableError(raw));
-  const altBackend: "claude" | "codex" = backend === "codex" ? "claude" : "codex";
-  return {
+  const view: ProjectedRunView = {
     id: row.thread_id,
     serverRunId: row.id,
     op: op ? true : undefined,
@@ -203,7 +203,6 @@ function projectRow(
     state: renderStateOf(row.state, finished),
     lifecycle: row.state,
     interruptedBy,
-    ...(failedBackendUnavailable ? { failedBackendUnavailable: true, altBackend } : {}),
     phase: row.phase,
     step: row.step,
     startedAt: row.started_at,
@@ -218,6 +217,13 @@ function projectRow(
     lineCount: logWindow.totalLines,
     logWindow,
   };
+  // Both fields are the D4 retry offer, so they travel together — absent
+  // entirely on a run that failed for any other reason.
+  if (failedBackendUnavailable) {
+    view.failedBackendUnavailable = true;
+    view.altBackend = backend === "codex" ? "claude" : "codex";
+  }
+  return view;
 }
 
 /**
@@ -296,6 +302,14 @@ export function projectRunsForTask(
   });
 }
 
+/** One agent group's console slice: the projected lines, their raw envelopes
+ *  (index-aligned), and the window metadata the client pages with. */
+interface GroupConsoleSlice {
+  display: LogLine[];
+  raw: string[];
+  meta: RunLogWindow;
+}
+
 /**
  * The newest slice of one agent group's console, within the D-11 budgets.
  *
@@ -313,7 +327,7 @@ function windowForGroup(
   db: DatabaseSync,
   bucket: AgentRunRow[],
   representative: AgentRunRow,
-): { display: LogLine[]; raw: string[]; meta: RunLogWindow } {
+): GroupConsoleSlice {
   const stats = bucket.map((row) => runLineStats(db, row.id));
   const totalLines = stats.reduce((sum, s) => sum + s.count, 0);
 

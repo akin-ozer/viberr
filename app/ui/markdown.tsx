@@ -31,7 +31,16 @@ import { findMentionSpans } from "./mention-spans";
  * flows through react-markdown untouched.
  */
 
-// Minimal hast node shapes we touch (react-markdown's tree post mdast→hast).
+/**
+ * The hast node kinds this pass walks. Declared here rather than imported from
+ * `hast`: that module is types-only and reaches us solely through react-markdown's
+ * hoisted tree, which the C6 hermeticity guard rejects as an undeclared import.
+ * Modelling every kind as a discriminated member is what keeps the walk
+ * assertion-free — `child.type` narrows on its own.
+ */
+interface MentionChipProperties {
+  className: string[];
+}
 interface HastText {
   type: "text";
   value: string;
@@ -39,10 +48,20 @@ interface HastText {
 interface HastElement {
   type: "element";
   tagName: string;
-  properties?: Record<string, unknown>;
+  properties?: MentionChipProperties;
   children: HastNode[];
 }
-type HastNode = HastText | HastElement | { type: string; children?: HastNode[] };
+/** The kinds this pass never descends into or rewrites. (Union ordered with
+ *  `doctype` first so this declaration is not mistaken for a timeline-event
+ *  construction by the NEW-4 comment-writer scan in mention-notify.server.test.ts.) */
+interface HastLeaf {
+  type: "doctype" | "comment";
+}
+type HastNode = HastText | HastElement | HastLeaf;
+interface HastRoot {
+  type: "root";
+  children: HastNode[];
+}
 
 /**
  * Split a text value into text nodes + `.mention` span elements, using the
@@ -88,23 +107,19 @@ function chipMentions(value: string, names: string[]): HastNode[] | null {
 /** rehype plugin factory: re-chip @mentions in text nodes (skipping code/pre),
  *  matching known `names` as whole units. */
 function rehypeMentions(names: string[] = []) {
-  return function transform(tree: HastNode) {
-    walk(tree);
+  return function transform(tree: HastRoot) {
+    walk(tree.children);
   };
-  function walk(node: HastNode) {
-    const children = (node as HastElement).children;
-    if (!Array.isArray(children)) return;
+  function walk(children: HastNode[]) {
     for (let i = 0; i < children.length; i++) {
       const child = children[i]!;
       if (child.type === "element") {
-        const tag = (child as HastElement).tagName;
         // Leave code samples literal — a `@foo` in code is not a mention.
-        if (tag === "code" || tag === "pre") continue;
-        walk(child);
+        if (child.tagName === "code" || child.tagName === "pre") continue;
+        walk(child.children);
       } else if (child.type === "text") {
-        const value = (child as HastText).value;
-        if (value.indexOf("@") === -1) continue;
-        const parts = chipMentions(value, names);
+        if (child.value.indexOf("@") === -1) continue;
+        const parts = chipMentions(child.value, names);
         if (parts) {
           children.splice(i, 1, ...parts);
           i += parts.length - 1;

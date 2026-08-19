@@ -1,4 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   setupAppTest,
   type AppTestContext,
@@ -14,78 +17,17 @@ import type { DiskSpace } from "~/server/ops/disk-space.server";
  *
  * Also covers the two things the payload had to start carrying: free space
  * (gap 16) and build identity (gap 18).
+ *
+ * Every subsystem the loader reads is driven through its own real controls —
+ * the watchers are started and stopped, the writer lock is taken and released,
+ * the disk thresholds are the configurable ones measured against the real
+ * volume — so what these pin is the probe's reading of actual process state.
  */
 
-// Toggles for the subsystems the loader reads. Each mock spreads the real
-// module so only the one probe function is swapped.
-let watcherAlive = true;
-let kbWatcherAlive = true;
-let lockHeld = true;
-let disk: DiskSpace | null = null;
-let dbThrows = false;
-
-vi.mock("~/server/files/file-watch.service.server", async () => {
-  const actual = await vi.importActual<
-    typeof import("~/server/files/file-watch.service.server")
-  >("~/server/files/file-watch.service.server");
-  return { ...actual, isFileWatcherAlive: () => watcherAlive };
-});
-vi.mock("~/server/files/kb-watch.service.server", async () => {
-  const actual = await vi.importActual<
-    typeof import("~/server/files/kb-watch.service.server")
-  >("~/server/files/kb-watch.service.server");
-  return { ...actual, isKbWatcherAlive: () => kbWatcherAlive };
-});
-vi.mock("~/server/db/data-root-lock.server", async () => {
-  const actual = await vi.importActual<
-    typeof import("~/server/db/data-root-lock.server")
-  >("~/server/db/data-root-lock.server");
-  return {
-    ...actual,
-    heldDataRootLock: () =>
-      lockHeld
-        ? {
-            holder: {
-              pid: 4242,
-              hostname: "test-host",
-              startedAt: "2026-08-08T00:00:00.000Z",
-            },
-          }
-        : null,
-  };
-});
-vi.mock("~/server/ops/disk-space.server", async () => {
-  const actual = await vi.importActual<
-    typeof import("~/server/ops/disk-space.server")
-  >("~/server/ops/disk-space.server");
-  return { ...actual, cachedDataRootSpace: () => disk };
-});
-vi.mock("~/server/db/sqlite.server", async () => {
-  const actual =
-    await vi.importActual<typeof import("~/server/db/sqlite.server")>(
-      "~/server/db/sqlite.server",
-    );
-  return {
-    ...actual,
-    getDb: () => {
-      if (dbThrows) throw new Error("database is unreachable");
-      return actual.getDb();
-    },
-  };
-});
-
-const GB = 1024 * 1024 * 1024;
-
-function space(freeBytes: number, status: DiskSpace["status"]): DiskSpace {
-  return {
-    freeBytes,
-    totalBytes: 100 * GB,
-    usedPercent: 50,
-    status,
-    lowThresholdBytes: 2 * GB,
-    criticalThresholdBytes: 512 * 1024 * 1024,
-  };
-}
+/** A threshold no real volume can satisfy: 1 PiB, expressed in the MiB the
+ *  `VIBERR_DISK_*_FREE_MB` overrides take. */
+const UNREACHABLE_THRESHOLD_MB = 1024 * 1024 * 1024;
+const UNREACHABLE_THRESHOLD_BYTES = UNREACHABLE_THRESHOLD_MB * 1024 * 1024;
 
 interface HealthBody {
   ok: boolean;
@@ -102,27 +44,72 @@ interface HealthBody {
 
 let app: AppTestContext;
 
+/** Both watchers running and the single-writer lock held: what a serving
+ *  process looks like, and the baseline every test starts from. */
+async function bringSubsystemsUp(): Promise<void> {
+  const [
+    { startFileWatcher },
+    { startKbWatcher },
+    { acquireDataRootLock, heldDataRootLock },
+  ] = await Promise.all([
+    import("~/server/files/file-watch.service.server"),
+    import("~/server/files/kb-watch.service.server"),
+    import("~/server/db/data-root-lock.server"),
+  ]);
+  startFileWatcher({ dataRoot: app.dataRoot });
+  startKbWatcher({ dataRoot: app.dataRoot });
+  if (!heldDataRootLock()) acquireDataRootLock({ dataRoot: app.dataRoot });
+}
+
+async function takeSubsystemsDown(): Promise<void> {
+  const [{ stopFileWatcher }, { stopKbWatcher }, { releaseDataRootLock }] =
+    await Promise.all([
+      import("~/server/files/file-watch.service.server"),
+      import("~/server/files/kb-watch.service.server"),
+      import("~/server/db/data-root-lock.server"),
+    ]);
+  stopFileWatcher();
+  stopKbWatcher();
+  releaseDataRootLock();
+}
+
+/** Pin the configurable free-space thresholds low enough that a real volume
+ *  with any room at all classifies `ok` — the "low"/"critical" cases raise
+ *  them instead of fabricating a measurement. */
+async function setDiskThresholds(lowMb: number, criticalMb: number): Promise<void> {
+  process.env.VIBERR_DISK_LOW_FREE_MB = String(lowMb);
+  process.env.VIBERR_DISK_CRITICAL_FREE_MB = String(criticalMb);
+  const { resetDiskSpaceCacheForTests } = await import(
+    "~/server/ops/disk-space.server"
+  );
+  resetDiskSpaceCacheForTests();
+}
+
 beforeAll(async () => {
   app = await setupAppTest();
+  const { ensureDataRootDirs } = await import(
+    "~/server/files/file-store-root.server"
+  );
+  ensureDataRootDirs(app.dataRoot);
 });
-afterAll(() => app.cleanup());
 
-beforeEach(() => {
-  watcherAlive = true;
-  kbWatcherAlive = true;
-  lockHeld = true;
-  disk = space(50 * GB, "ok");
-  dbThrows = false;
+afterAll(async () => {
+  await takeSubsystemsDown();
+  delete process.env.VIBERR_DISK_LOW_FREE_MB;
+  delete process.env.VIBERR_DISK_CRITICAL_FREE_MB;
+  app.cleanup();
+});
+
+beforeEach(async () => {
+  await bringSubsystemsUp();
+  await setDiskThresholds(1, 1);
 });
 
 async function probe(
   url = "/resources/health",
 ): Promise<{ body: HealthBody; status: number }> {
   const { loader } = await import("~/routes/resources.health");
-  const response = (await loader({ request: app.request(url) })) as {
-    data: HealthBody;
-    init?: { status?: number };
-  };
+  const response = await loader({ request: app.request(url) });
   return { body: response.data, status: response.init?.status ?? 200 };
 }
 
@@ -136,7 +123,10 @@ describe("/resources/health — honest status (gap 17)", () => {
   });
 
   it("names a dead store watcher in the payload and downgrades the verdict", async () => {
-    watcherAlive = false;
+    const { stopFileWatcher } = await import(
+      "~/server/files/file-watch.service.server"
+    );
+    stopFileWatcher();
     const { body, status } = await probe();
     expect(body.status).toBe("degraded");
     expect(body.degraded).toContain("watcher");
@@ -148,7 +138,10 @@ describe("/resources/health — honest status (gap 17)", () => {
   });
 
   it("fails the READINESS probe so an orchestrator can act on it", async () => {
-    watcherAlive = false;
+    const { stopFileWatcher } = await import(
+      "~/server/files/file-watch.service.server"
+    );
+    stopFileWatcher();
     const { body, status } = await probe("/resources/health?probe=readiness");
     expect(status).toBe(503);
     expect(body.status).toBe("degraded");
@@ -162,8 +155,12 @@ describe("/resources/health — honest status (gap 17)", () => {
   });
 
   it("reports a dead KB watcher and a missing writer lock", async () => {
-    kbWatcherAlive = false;
-    lockHeld = false;
+    const [{ stopKbWatcher }, { releaseDataRootLock }] = await Promise.all([
+      import("~/server/files/kb-watch.service.server"),
+      import("~/server/db/data-root-lock.server"),
+    ]);
+    stopKbWatcher();
+    releaseDataRootLock();
     const { body } = await probe();
     expect(body.degraded).toEqual(
       expect.arrayContaining(["kbWatcher", "lock"]),
@@ -193,38 +190,49 @@ describe("/resources/health — honest status (gap 17)", () => {
       setBackendAvailability("codex", true);
     }
   });
-
-  it("still answers 503 / down when the database is unreadable", async () => {
-    dbThrows = true;
-    const { body, status } = await probe();
-    expect(status).toBe(503);
-    expect(body.ok).toBe(false);
-    expect(body.status).toBe("down");
-  });
 });
 
 describe("/resources/health — disk awareness (gap 16)", () => {
   it("carries free space and degrades on a low volume", async () => {
-    disk = space(1 * GB, "low");
+    // A low threshold above anything a real volume has free, with the critical
+    // one left at the floor: the classification is the real one.
+    await setDiskThresholds(UNREACHABLE_THRESHOLD_MB, 1);
     const { body } = await probe();
-    expect(body.disk).toMatchObject({ freeBytes: GB, status: "low" });
+    expect(body.disk).toMatchObject({
+      status: "low",
+      lowThresholdBytes: UNREACHABLE_THRESHOLD_BYTES,
+    });
+    expect(body.disk!.freeBytes).toBeGreaterThan(0);
     expect(body.degraded).toContain("disk");
     expect((await probe("/resources/health?probe=readiness")).status).toBe(503);
   });
 
   it("degrades on a critical volume", async () => {
-    disk = space(64 * 1024 * 1024, "critical");
+    await setDiskThresholds(UNREACHABLE_THRESHOLD_MB, UNREACHABLE_THRESHOLD_MB);
     const { body } = await probe();
+    expect(body.disk?.status).toBe("critical");
     expect(body.status).toBe("degraded");
     expect(body.degraded).toContain("disk");
   });
 
   it("an UNMEASURABLE volume is null and is not an alarm", async () => {
-    disk = null;
-    const { body } = await probe();
-    expect(body.disk).toBeNull();
-    expect(body.degraded).not.toContain("disk");
-    expect(body.status).toBe("ok");
+    // A data root that is not there: `statfs` fails, and the payload has to say
+    // "not measured" rather than fabricate a zero.
+    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
+    const gone = path.join(tmpdir(), "viberr-health-absent-root");
+    rmSync(gone, { recursive: true, force: true });
+    process.env.VIBERR_DATA_ROOT = gone;
+    resetEnvCacheForTests();
+    await setDiskThresholds(1, 1);
+    try {
+      const { body } = await probe();
+      expect(body.disk).toBeNull();
+      expect(body.degraded).not.toContain("disk");
+      expect(body.status).toBe("ok");
+    } finally {
+      process.env.VIBERR_DATA_ROOT = app.dataRoot;
+      resetEnvCacheForTests();
+    }
   });
 
   it("surfaces the maintenance schedule so the pruner is provable", async () => {
@@ -263,6 +271,33 @@ describe("/resources/health — build identity (gap 18)", () => {
       if (prevSha === undefined) delete process.env.VIBERR_BUILD_SHA;
       else process.env.VIBERR_BUILD_SHA = prevSha;
       resetBuildInfoCacheForTests();
+    }
+  });
+});
+
+describe("/resources/health — the database is the one fatal subsystem", () => {
+  it("still answers 503 / down when the database is unreadable", async () => {
+    // A data root whose `state` path is a FILE: the projection database under
+    // it cannot be opened at all, which is what "unreadable" means here. This
+    // runs last because it swaps the process's open handle.
+    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
+    const { closeDb, getDb } = await import("~/server/db/sqlite.server");
+    const broken = mkdtempSync(path.join(tmpdir(), "viberr-health-broken-"));
+    writeFileSync(path.join(broken, "state"), "not a directory");
+    process.env.VIBERR_DATA_ROOT = broken;
+    resetEnvCacheForTests();
+    closeDb();
+    try {
+      const { body, status } = await probe();
+      expect(status).toBe(503);
+      expect(body.ok).toBe(false);
+      expect(body.status).toBe("down");
+    } finally {
+      process.env.VIBERR_DATA_ROOT = app.dataRoot;
+      resetEnvCacheForTests();
+      closeDb();
+      getDb();
+      rmSync(broken, { recursive: true, force: true });
     }
   });
 });

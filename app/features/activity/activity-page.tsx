@@ -90,7 +90,7 @@ function ActivityText({ text }: { text: string }) {
  * map on TIMELINE_EVENT_TYPES makes the next added type a COMPILE error here
  * instead of a silent dot.
  */
-const ACT_ICON: Record<(typeof TIMELINE_EVENT_TYPES)[number], IconName> = {
+const ACT_ICON = {
   comment: "message",
   completion: "check",
   github: "github",
@@ -102,17 +102,35 @@ const ACT_ICON: Record<(typeof TIMELINE_EVENT_TYPES)[number], IconName> = {
   blocked: "alert",
   agent: "agents",
   assign: "user",
-};
+} as const satisfies Record<(typeof TIMELINE_EVENT_TYPES)[number], IconName>;
+
+/** Whether a projected stream type is one of the contract's own. */
+function isStreamEventType(
+  type: string,
+): type is (typeof TIMELINE_EVENT_TYPES)[number] {
+  return TIMELINE_EVENT_TYPES.some((known) => known === type);
+}
 
 /** The row icon for a stream type. The projection keeps unknown strings as-is
  *  (tolerant-parsing contract), so a type outside the vocabulary still falls
  *  back to the neutral dot rather than throwing. */
 export function actIcon(type: string): IconName {
-  return ACT_ICON[type as (typeof TIMELINE_EVENT_TYPES)[number]] ?? "dot";
+  return isStreamEventType(type) ? ACT_ICON[type] : "dot";
 }
 
-/** Audit kind → icon + pev-ico tint class (mock PEV_META; unknown → change). */
-const PEV_META: Record<string, { icon: IconName; cls: string }> = {
+/** One audit row's glyph + `pev-ico` tint class. */
+interface AuditKindMeta {
+  icon: IconName;
+  cls: string;
+}
+
+/** Audit kind → icon + pev-ico tint class (mock PEV_META; unknown → change).
+ *  Open by contract: an audit kind this map has never seen falls back below. */
+interface AuditKindTable {
+  [kind: string]: AuditKindMeta;
+}
+
+const PEV_META: AuditKindTable = {
   violation: { icon: "alert", cls: "violation" },
   blockedact: { icon: "lock", cls: "blockedact" },
   change: { icon: "shield", cls: "change" },

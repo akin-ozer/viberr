@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import type { TaskDetail } from "~/server/projections/task-query.server";
-import { AcceptConfirm } from "./accept-confirm";
+import { AcceptConfirm, type AcceptConfirmTask } from "./accept-confirm";
 
 afterEach(cleanup);
 
@@ -18,23 +17,21 @@ const STAGES = [
   { id: "done", name: "Done", color: "#00b473" },
 ];
 
-function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
+function detail(patch: Partial<AcceptConfirmTask> = {}): AcceptConfirmTask {
   return {
-    projectSlug: "viberr-core",
     key: "VIB-151",
     title: "Confirm the smoke suite still passes",
     stage: "review",
     validation: "healthy",
     branch: "vib-151",
-    repo: "akin-ozer/viberr",
     pr: null,
     stages: STAGES,
     ...patch,
-  } as unknown as TaskDetail;
+  };
 }
 
 function open(props: {
-  task?: Partial<TaskDetail>;
+  task?: Partial<AcceptConfirmTask>;
   noChanges?: boolean;
   workRevisionSha?: string | null;
 }): string {
@@ -96,7 +93,7 @@ describe("the no-change row states what is true of THIS task", () => {
  * either (the probe decides) — so it states exactly what the click will do.
  */
 describe("F20-6: the no-PR auto-detect arm", () => {
-  const openAutoDetect = (task: Partial<TaskDetail>) => {
+  const openAutoDetect = (task: Partial<AcceptConfirmTask>) => {
     const { container } = render(
       <AcceptConfirm
         task={detail(task)}
@@ -161,7 +158,7 @@ describe("the revision-drift row agrees with its own number", () => {
           state: "review",
           title: "[VIB-151] work",
           revisionDrift: { aheadBy, headSha: "a".repeat(40) },
-        } as TaskDetail["pr"],
+        },
       },
     });
 

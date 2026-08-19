@@ -11,7 +11,10 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { agentProfilesDir, taskDir } from "~/server/files/file-store-root.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import {
+  readProjectFile,
+  type ProjectFileRef,
+} from "~/server/files/project-writer.server";
 import { getPatToken, getProjectCredential } from "~/server/secrets/pat-store.server";
 import {
   CLONE_TIMEOUT_MS,
@@ -30,7 +33,11 @@ import { readSkillBodies } from "~/server/files/skill-body.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import {
+  readTaskFile,
+  updateTaskFile,
+  type TaskFileRef,
+} from "~/server/files/task-writer.server";
 import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
@@ -52,12 +59,18 @@ import {
   resolveOperatorAuthority,
   type OperatorActionResult,
   type OperatorAuthority,
+  type OperatorAuthorityOverrides,
+  type OperatorOpenPacketInput,
+  type OperatorPacketOptionInput,
   type OperatorAutonomy,
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
 import { PACKET_OPTION_KINDS, type PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
-import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
+import {
+  resolveSpecialistMcpServersDetailed,
+  type SpecialistMcpServerConfig,
+} from "~/server/tasks/specialist-mcp.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
@@ -69,7 +82,11 @@ import {
   type TaskMutationContext,
 } from "~/server/tasks/task-actions.server";
 import type { RealBackend } from "./runtime-registry.server";
-import { registerRunCompletion, startRun } from "./run-service.server";
+import {
+  registerRunCompletion,
+  startRun,
+  type StartRunInput,
+} from "./run-service.server";
 import { getRun, patchRun } from "./run-store.server";
 import {
   noteModelAvailabilityFromFailure,
@@ -220,6 +237,11 @@ function inFlightOperatorRun(
   projectSlug: string,
   taskKey: string,
 ): { id: string; backend: RealBackend; restartOrphan: boolean } | null {
+  // SAFETY: the SELECT names three `agent_runs` columns the baseline schema
+  // declares TEXT NOT NULL (id, backend, created_at), so a returned row carries
+  // exactly these three keys with string values. `backend` additionally carries
+  // `CHECK (backend IN ('claude','codex'))`, which is what the narrowing below
+  // relies on.
   const row = db
     .prepare(
       `SELECT id, backend, created_at FROM agent_runs
@@ -234,7 +256,7 @@ function inFlightOperatorRun(
   const createdMs = Date.parse(row.created_at);
   return {
     id: row.id,
-    backend: row.backend as RealBackend,
+    backend: row.backend === "codex" ? "codex" : "claude",
     // A row this process never created has no handle and no callback behind
     // it: nothing will ever fire the completion a queued trigger chains onto.
     restartOrphan: Number.isFinite(createdMs) && createdMs < PROCESS_START_MS,
@@ -242,6 +264,27 @@ function inFlightOperatorRun(
 }
 
 // ------------------------------------------------------ single-flight lease
+
+/** One live operator drive: the value the lease map holds, and the token every
+ *  release for that drive hands back (see releaseOperatorLease). */
+interface OperatorLeaseEntry {
+  runId: string | null;
+  backend: RealBackend;
+  autonomy: OperatorAutonomy;
+  /** Task ref carried for the waiting-flag settle on release. */
+  projectSlug: string;
+  taskKey: string;
+  dataRoot?: string;
+  /** This drive's transition-chain depth — the stranded-coordination
+   *  resume (settle-time) threads depth+1 so the backstop chain shares
+   *  OPERATOR_TRANSITION_CHAIN_CAP with the transition re-trigger. */
+  transitionDepth: number;
+  /** The task's stage when this drive started. A drive that MOVED the
+   *  stage is never "stranded" — the transition's own re-trigger owns the
+   *  follow-up (it is fire-and-forget async, so at settle time it may not
+   *  have reached the queue yet; resuming here would double-drive). */
+  stageAtStart: string | null;
+}
 
 /**
  * Process-level operator lease + trigger queue.
@@ -267,34 +310,23 @@ function inFlightOperatorRun(
  * three-message burst is one question, not three governed drives.
  */
 interface OperatorLeaseState {
-  held: Map<
-    string,
-    {
-      runId: string | null;
-      backend: RealBackend;
-      autonomy: OperatorAutonomy;
-      /** Task ref carried for the waiting-flag settle on release. */
-      projectSlug: string;
-      taskKey: string;
-      dataRoot?: string;
-      /** This drive's transition-chain depth — the stranded-coordination
-       *  resume (settle-time) threads depth+1 so the backstop chain shares
-       *  OPERATOR_TRANSITION_CHAIN_CAP with the transition re-trigger. */
-      transitionDepth: number;
-      /** The task's stage when this drive started. A drive that MOVED the
-       *  stage is never "stranded" — the transition's own re-trigger owns the
-       *  follow-up (it is fire-and-forget async, so at settle time it may not
-       *  have reached the queue yet; resuming here would double-drive). */
-      stageAtStart: string | null;
-    }
-  >;
+  held: Map<string, OperatorLeaseEntry>;
   pending: Map<string, PendingTriggers>;
 }
 
 const LEASE_KEY = Symbol.for("viberr.operatorLease");
 
+/** The process-global slot the lease lives in — a well-known symbol, so a
+ *  dev-server HMR reload of this module keeps the same single-flight state. */
+interface LeaseStateHost {
+  [LEASE_KEY]?: OperatorLeaseState;
+}
+
 function leaseState(): OperatorLeaseState {
-  const cache = globalThis as unknown as Record<symbol, OperatorLeaseState | undefined>;
+  // SAFETY: `LEASE_KEY` is a registry symbol under a viberr-namespaced key that
+  // only this module reads or writes, so the slot holds either the state this
+  // function put there or nothing at all.
+  const cache = globalThis as LeaseStateHost;
   let state = cache[LEASE_KEY];
   if (!state) {
     state = { held: new Map(), pending: new Map() };
@@ -394,7 +426,7 @@ function takePendingTrigger(key: string): RunOperatorInput | null {
 function releaseOperatorLease(
   db: DatabaseSync,
   key: string,
-  token?: object,
+  token?: OperatorLeaseEntry,
 ): void {
   const state = leaseState();
   const current = state.held.get(key);
@@ -452,7 +484,7 @@ function drainPendingAfterInFlight(db: DatabaseSync, key: string): void {
 
 /** Recover the task ref from a lease key (slugs are kebab-case — the first
  *  "/" is the separator). Fallback for releases with no held entry. */
-function leaseRefFromKey(key: string): { projectSlug: string; taskKey: string } {
+function leaseRefFromKey(key: string) {
   const i = key.indexOf("/");
   return { projectSlug: key.slice(0, i), taskKey: key.slice(i + 1) };
 }
@@ -519,6 +551,9 @@ async function maybeResumeStrandedOperator(
     );
     return false;
   }
+  // SAFETY: both arms SELECT one column, `agent_runs.state`, which the baseline
+  // schema declares TEXT NOT NULL — so a returned row is exactly
+  // `{ state: string }`, and no matching row at all is `undefined`.
   const stateRow = ref.runId
     ? (db.prepare(`SELECT state FROM agent_runs WHERE id = ?`).get(ref.runId) as
         | { state: string }
@@ -685,6 +720,14 @@ function inFlightAgentRun(
   return !!row;
 }
 
+/** The ref the task-file readers below take, carrying `dataRoot` only when one
+ *  is configured (a test store sets it; production leaves the key off). */
+function taskFileRef(ref: TaskFileRef): TaskFileRef {
+  const out: TaskFileRef = { projectSlug: ref.projectSlug, taskKey: ref.taskKey };
+  if (ref.dataRoot) out.dataRoot = ref.dataRoot;
+  return out;
+}
+
 /**
  * The stage a drive STARTS at — the fact that makes "this drive did not move
  * the task" decidable, and therefore the switch for the stranded-resume
@@ -697,16 +740,11 @@ function inFlightAgentRun(
  * it happens, not inferred later from a task sitting still.
  */
 function readStageAtStart(
-  ref: { projectSlug: string; taskKey: string; dataRoot?: string },
+  ref: TaskFileRef,
   origin: "drive" | "stranded-plan-recovery",
 ): string | null {
   try {
-    const stage =
-      readTaskFile({
-        projectSlug: ref.projectSlug,
-        taskKey: ref.taskKey,
-        ...(ref.dataRoot ? { dataRoot: ref.dataRoot } : {}),
-      })?.parsed.frontmatter.stage ?? null;
+    const stage = readTaskFile(taskFileRef(ref))?.parsed.frontmatter.stage ?? null;
     if (stage === null) {
       logger.warn(
         "operator drive could not read the task's starting stage — the stranded-resume backstop is OFF for it",
@@ -790,12 +828,11 @@ export type OperatorWorkspaceView =
  */
 export async function ensureOperatorRepoCheckout(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; dataRoot?: string },
+  input: TaskFileRef,
 ): Promise<OperatorWorkspaceView> {
-  const project = readProjectFile({
-    projectSlug: input.projectSlug,
-    ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
-  });
+  const projectRef: ProjectFileRef = { projectSlug: input.projectSlug };
+  if (input.dataRoot) projectRef.dataRoot = input.dataRoot;
+  const project = readProjectFile(projectRef);
   const repo = project?.parsed.frontmatter.repo ?? null;
   if (!repo) return { kind: "none" };
 
@@ -818,11 +855,13 @@ export async function ensureOperatorRepoCheckout(
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
     hadCredential = !!token;
-    const clone = createGitHubClonePlan({
+    const clonePlan: Parameters<typeof createGitHubClonePlan>[0] = {
       repo,
       destination: dir,
-      ...(token ? { token } : {}),
-    });
+    };
+    // No credential ⇒ the key stays off entirely and the clone runs anonymously.
+    if (token) clonePlan.token = token;
+    const clone = createGitHubClonePlan(clonePlan);
     try {
       await execFileAsync("git", clone.args, {
         timeout: CLONE_TIMEOUT_MS,
@@ -848,14 +887,18 @@ export async function ensureOperatorRepoCheckout(
     // F19-6: git's own complaint, redacted by value — "git exit 128" alone told
     // a human with a working credential nothing they could act on.
     const stderrExcerpt = redactGitOutput(gitErrorText(error), { token });
-    logger.warn("the operator runs WITHOUT a repository checkout — its clone failed", {
+    const failureFields = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       repo,
       hadCredential,
       ...details,
-      ...(stderrExcerpt ? { stderrExcerpt } : {}),
-    });
+    };
+    logger.warn(
+      "the operator runs WITHOUT a repository checkout — its clone failed",
+      // The excerpt is a field only when git actually printed something.
+      stderrExcerpt ? { ...failureFields, stderrExcerpt } : failureFields,
+    );
     return {
       kind: "unavailable",
       repo,
@@ -906,18 +949,18 @@ export async function runOperator(
   const ctx: TaskMutationContext = {
     dataRoot: input.dataRoot,
   };
-  const authority = resolveOperatorAuthority(ctx, input.projectSlug, {
-    ...(input.backend ? { backend: input.backend } : {}),
-    ...(input.autonomy ? { autonomy: input.autonomy } : {}),
-    // R19-A: this resolve LAUNCHES work, so a clamp that bites is recorded.
-    // Loader paths resolve authority too and deliberately pass no db — a read
-    // must not write audit rows. Live-verified: without this the clamp still
-    // held, but the reduction was invisible, which is the half of the ruling
-    // that matters to whoever wonders why their full-autonomy run behaved.
-    db,
-    taskKey: input.taskKey,
-    ...(input.actor ? { actor: input.actor } : {}),
-  });
+  // Only the overrides the caller actually supplied travel; the resolver fills
+  // the rest from the project's operator deployment.
+  // R19-A: this resolve LAUNCHES work, so a clamp that bites is recorded.
+  // Loader paths resolve authority too and deliberately pass no db — a read
+  // must not write audit rows. Live-verified: without this the clamp still
+  // held, but the reduction was invisible, which is the half of the ruling
+  // that matters to whoever wonders why their full-autonomy run behaved.
+  const overrides: OperatorAuthorityOverrides = { db, taskKey: input.taskKey };
+  if (input.backend) overrides.backend = input.backend;
+  if (input.autonomy) overrides.autonomy = input.autonomy;
+  if (input.actor) overrides.actor = input.actor;
+  const authority = resolveOperatorAuthority(ctx, input.projectSlug, overrides);
   const backend = authority.backend;
 
   // FR39 / F19-20 — a SCHEDULED re-run never fires on a terminal stage, checked
@@ -936,14 +979,7 @@ export async function runOperator(
   // question about finished work). This is the one capability that acts with no
   // human present, which is why FR39 singles it out.
   if (input.trigger === "scheduled") {
-    const stage = readStageAtStart(
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
-      },
-      "drive",
-    );
+    const stage = readStageAtStart(taskFileRef(input), "drive");
     const project = getProject(db, input.projectSlug);
     const terminalId = project
       ? (resolveStageRoles(project.stages, project.workflow ?? []).terminalId ??
@@ -962,11 +998,7 @@ export async function runOperator(
       // would strand `waiting: agent` on a closed task with no agent running.
       // It is a no-op unless the flag is `agent` and nothing else is live, and
       // it settles a terminal task to `none` rather than "waiting on a human".
-      settleWaitingAfterOperator(db, {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
-      });
+      settleWaitingAfterOperator(db, taskFileRef(input));
       return {
         runId: null,
         queued: false,
@@ -986,12 +1018,7 @@ export async function runOperator(
   // was already in flight. The packet already owns `waiting: "human"`, so there
   // is no settle to do here.
   if ((input.trigger ?? "manual") === "manual") {
-    const openPacket =
-      readTaskFile({
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
-      })?.parsed.packet ?? null;
+    const openPacket = readTaskFile(taskFileRef(input))?.parsed.packet ?? null;
     if (openPacket) {
       logger.info("manual operator run refused — a decision packet is open", {
         taskKey: input.taskKey,
@@ -1074,22 +1101,15 @@ export async function runOperator(
   // successor's lease (releaseOperatorLease is idempotent per token).
   // NOTE: no await may sit between the held-check above and this set — the
   // single-flight coalesce depends on check→set being one synchronous step.
-  const leaseToken = {
-    runId: null as string | null,
+  const leaseToken: OperatorLeaseEntry = {
+    runId: null,
     backend,
     autonomy: authority.autonomy,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     dataRoot: input.dataRoot,
     transitionDepth: input.transitionDepth ?? 0,
-    stageAtStart: readStageAtStart(
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
-      },
-      "drive",
-    ),
+    stageAtStart: readStageAtStart(taskFileRef(input), "drive"),
   };
   lease.held.set(leaseKey, leaseToken);
 
@@ -1122,11 +1142,7 @@ export async function runOperator(
     // `unavailable` arm rather than stranding the run, and the prompt then SAYS
     // the operator is blind instead of letting it read its empty task folder as
     // "the repo" (F19-4).
-    const workspace = await ensureOperatorRepoCheckout(db, {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
-    });
+    const workspace = await ensureOperatorRepoCheckout(db, taskFileRef(input));
     return backend === "codex"
       ? await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken, workspace)
       : await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken, workspace);
@@ -1181,7 +1197,7 @@ type OperatorPlanTool = (typeof OPERATOR_PLAN_TOOLS)[number];
  * Claude a denied capability's tool never exists, so the model cannot reach it;
  * the Codex plan schema advertised all nine regardless of policy.
  */
-const OPERATOR_PLAN_TOOL_CAPABILITIES: Record<OperatorPlanTool, readonly string[]> = {
+const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   post_comment: ["append-typed-events"],
   set_goal: ["append-typed-events"],
   open_packet: ["generate-packets"],
@@ -1199,7 +1215,7 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES: Record<OperatorPlanTool, readonly string[
   // updateBranchGate below, not the plain gate.
   update_branch_from_base: ["update-task-branch"],
   accept_completion: ["completion-for-acceptance"],
-};
+} satisfies Record<OperatorPlanTool, readonly string[]>;
 
 /**
  * The plan tools this operator is actually allowed to use (P13-RT-03). Codex
@@ -1376,15 +1392,7 @@ export function authoredPacketOptions(
         deleteBranch?: boolean | null;
       }[]
     | null,
-): {
-  kind: PacketOptionKind;
-  title: string;
-  detail?: string;
-  recommended?: boolean;
-  backend?: RealBackend;
-  profileId?: string;
-  deleteBranch?: boolean;
-}[] | null {
+): OperatorPacketOptionInput[] | null {
   if (!authored || authored.length === 0) return null;
   // Filter+cap FIRST, then locate the recommended within the KEPT set — an
   // earlier empty-title option (dropped here) would otherwise shift the raw
@@ -1392,22 +1400,24 @@ export function authoredPacketOptions(
   const kept = authored.filter((o) => o.title.trim() !== "").slice(0, 4);
   if (kept.length === 0) return null;
   const recIdx = kept.findIndex((o) => o.recommended);
-  return kept.map((o, i) => ({
-    kind: o.kind,
-    title: o.title.trim(),
+  return kept.map((o, i) => {
+    const detail = o.detail?.trim();
+    const profileId = o.profileId?.trim();
+    const option: OperatorPacketOptionInput = { kind: o.kind, title: o.title.trim() };
     // Carry the per-option detail line so a Codex-authored packet renders with
     // the same context a Claude-authored one does (AO-5 #12).
-    ...(o.detail && o.detail.trim() ? { detail: o.detail.trim() } : {}),
-    recommended: i === (recIdx >= 0 ? recIdx : 0),
+    if (detail) option.detail = detail;
+    option.recommended = i === (recIdx >= 0 ? recIdx : 0);
     // B1: retry_other_backend only. An omitted backend is NOT defaulted here —
     // `operatorOpenPacket` fills in the opposite of the backend that failed,
     // so the Claude tool path and this one land on the same rule.
-    ...(o.backend ? { backend: o.backend } : {}),
-    ...(o.profileId?.trim() ? { profileId: o.profileId.trim() } : {}),
+    if (o.backend) option.backend = o.backend;
+    if (profileId) option.profileId = profileId;
     // archive_task only — any other kind ignores it at resolution, so gating
     // here would just second-guess the resolver.
-    ...(o.deleteBranch ? { deleteBranch: true } : {}),
-  }));
+    if (o.deleteBranch) option.deleteBranch = true;
+    return option;
+  });
 }
 
 function defaultPacketOptions(
@@ -1464,7 +1474,7 @@ async function startCodexOperatorRun(
   input: RunOperatorInput,
   authority: OperatorAuthority,
   leaseKey: string,
-  leaseToken: object,
+  leaseToken: OperatorLeaseEntry,
   /** R19-1: what this run can really see of the repository. */
   workspace: OperatorWorkspaceView,
 ): Promise<RunOperatorResult> {
@@ -1496,7 +1506,7 @@ async function startCodexOperatorRun(
   );
   const orgMcpServers = mcp.servers;
 
-  const { runId } = await startRun(db, {
+  const spec: StartRunInput = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     threadId: "op-" + newId("t").replace("t_", "").slice(0, 8),
@@ -1504,12 +1514,10 @@ async function startCodexOperatorRun(
     kind: "operator",
     backend: "codex",
     model: authority.model,
-    ...(authority.effort ? { effort: authority.effort } : {}),
     agentName: authority.name,
     agentProfileId: "operator",
     prompt,
     systemPrompt,
-    ...(Object.keys(orgMcpServers).length ? { mcpServers: orgMcpServers } : {}),
     // R19-1: the same read-only policy the Claude operator carries. Codex has no
     // denylist channel — it enforces this with a read-only sandbox and no
     // network egress (codex-runtime) — but the spec must still STATE the run's
@@ -1520,7 +1528,13 @@ async function startCodexOperatorRun(
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     dataRoot: input.dataRoot,
-  });
+  };
+  // An absent effort leaves the SDK on its own default; an absent mcpServers
+  // key is what the adapters read as "this run mounts none".
+  if (authority.effort) spec.effort = authority.effort;
+  if (Object.keys(orgMcpServers).length) spec.mcpServers = orgMcpServers;
+
+  const { runId } = await startRun(db, spec);
 
   // When the run finishes, parse its decision plan and execute it through the
   // capability-gated operator-actions (so codex honors the exact same RBAC +
@@ -1602,13 +1616,16 @@ export async function executeStrandedCodexPlan(
     });
     return false;
   }
-  const leaseToken = {
-    runId: ref.runId,
-    backend: "codex" as RealBackend,
-    autonomy: authority.autonomy,
+  const recoveryRef = taskFileRef({
     projectSlug: ref.projectSlug,
     taskKey: ref.taskKey,
-    ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
+  });
+  const leaseToken: OperatorLeaseEntry = {
+    runId: ref.runId,
+    backend: "codex",
+    autonomy: authority.autonomy,
+    ...recoveryRef,
     // No prior chain depth survives a restart, so the resume chain starts at 0
     // — it is still bounded by OPERATOR_TRANSITION_CHAIN_CAP from there.
     transitionDepth: 0,
@@ -1618,26 +1635,14 @@ export async function executeStrandedCodexPlan(
     // from the restart stamped "waiting on a human" with nothing for a human
     // to do. The stage is what makes "this drive did not move the task"
     // decidable; reading it here costs one file read.
-    stageAtStart: readStageAtStart(
-      {
-        projectSlug: ref.projectSlug,
-        taskKey: ref.taskKey,
-        ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-      },
-      "stranded-plan-recovery",
-    ),
+    stageAtStart: readStageAtStart(recoveryRef, "stranded-plan-recovery"),
   };
   lease.held.set(leaseKey, leaseToken);
   try {
     await executeCodexPlan(
       db,
       ctx,
-      {
-        projectSlug: ref.projectSlug,
-        taskKey: ref.taskKey,
-        trigger: "manual",
-        ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-      },
+      { ...recoveryRef, trigger: "manual" },
       authority,
       ref.runId,
     );
@@ -1767,94 +1772,65 @@ async function executeCodexPlan(
           break;
         case "open_packet": {
           const packetType = a.packetType === "blocked" ? "blocked" : "input";
-          if (a.text)
-            record(
-              a.tool,
-              await operatorOpenPacket(
-                db,
-                ctx,
-                {
-                  ...base,
-                  packetType,
-                  title: a.text,
-                  ...(a.reason ? { body: a.reason } : {}),
-                  // P11-27: honor the operator's authored options when it supplied
-                  // a usable set (2–4); else fall back to the type's defaults.
-                  options: authoredPacketOptions(a.packetOptions) ?? defaultPacketOptions(packetType),
-                },
-                authority,
-              ),
-            );
+          if (a.text) {
+            const packet: OperatorOpenPacketInput = {
+              ...base,
+              packetType,
+              title: a.text,
+              // P11-27: honor the operator's authored options when it supplied
+              // a usable set (2–4); else fall back to the type's defaults.
+              options: authoredPacketOptions(a.packetOptions) ?? defaultPacketOptions(packetType),
+            };
+            if (a.reason) packet.body = a.reason;
+            record(a.tool, await operatorOpenPacket(db, ctx, packet, authority));
+          }
           break;
         }
         case "engage_agent":
-          if (a.profileId && a.delivers !== null)
-            record(
-              a.tool,
-              await operatorEngageAgent(
-                db,
-                ctx,
-                {
-                  ...base,
-                  profileId: a.profileId,
-                  delivers: a.delivers,
-                  ...(a.reason ? { reason: a.reason } : {}),
-                },
-                authority,
-              ),
-            );
+          if (a.profileId && a.delivers !== null) {
+            const engage: Parameters<typeof operatorEngageAgent>[2] = {
+              ...base,
+              profileId: a.profileId,
+              delivers: a.delivers,
+            };
+            if (a.reason) engage.reason = a.reason;
+            record(a.tool, await operatorEngageAgent(db, ctx, engage, authority));
+          }
           break;
-        case "run_agent":
-          record(
-            a.tool,
-            await operatorRunAgent(
-              db,
-              ctx,
-              {
-                ...base,
-                ...(a.profileId ? { profileId: a.profileId } : {}),
-                ...(a.delivers != null ? { delivers: a.delivers } : {}),
-              },
-              authority,
-            ),
-          );
+        case "run_agent": {
+          // An omitted profileId/delivers is NOT a default: `operatorRunAgent`
+          // derives the delivering intent from the task when the plan is silent.
+          const run: Parameters<typeof operatorRunAgent>[2] = { ...base };
+          if (a.profileId) run.profileId = a.profileId;
+          if (a.delivers != null) run.delivers = a.delivers;
+          record(a.tool, await operatorRunAgent(db, ctx, run, authority));
           break;
+        }
         case "prompt_agent":
-          if (a.profileId)
-            record(
-              a.tool,
-              await operatorPromptAgentGeneric(
-                db,
-                ctx,
-                {
-                  ...base,
-                  profileId: a.profileId,
-                  ...(a.text ? { directive: a.text } : {}),
-                  ...(a.delivers != null ? { delivers: a.delivers } : {}),
-                },
-                authority,
-              ),
-            );
+          if (a.profileId) {
+            const prompt: Parameters<typeof operatorPromptAgentGeneric>[2] = {
+              ...base,
+              profileId: a.profileId,
+            };
+            if (a.text) prompt.directive = a.text;
+            if (a.delivers != null) prompt.delivers = a.delivers;
+            record(a.tool, await operatorPromptAgentGeneric(db, ctx, prompt, authority));
+          }
           break;
         case "transition_stage":
-          if (a.toStageId)
-            record(
-              a.tool,
-              await operatorTransitionStage(
-                db,
-                ctx,
-                { ...base, toStageId: a.toStageId, ...(a.reason ? { reason: a.reason } : {}) },
-                authority,
-              ),
-            );
+          if (a.toStageId) {
+            const move: Parameters<typeof operatorTransitionStage>[2] = {
+              ...base,
+              toStageId: a.toStageId,
+            };
+            if (a.reason) move.reason = a.reason;
+            record(a.tool, await operatorTransitionStage(db, ctx, move, authority));
+          }
           break;
         case "deliver_for_review": {
-          const delivery = await operatorDeliverForReview(
-            db,
-            ctx,
-            { ...base, ...(a.reason ? { reason: a.reason } : {}) },
-            authority,
-          );
+          const deliver: Parameters<typeof operatorDeliverForReview>[2] = { ...base };
+          if (a.reason) deliver.reason = a.reason;
+          const delivery = await operatorDeliverForReview(db, ctx, deliver, authority);
           // A failed delivery is a GitHub-state outcome performDelivery already
           // surfaced on the timeline in full (push conflict, no commits, PR
           // number) — repeating it as a bare "did not apply" line would be a
@@ -1875,29 +1851,22 @@ async function executeCodexPlan(
         case "accept_completion":
           record(a.tool, await operatorAcceptCompletion(db, ctx, base, authority));
           break;
-        case "resolve_packet":
-          record(
-            a.tool,
-            await operatorResolvePacket(
-              db,
-              ctx,
-              { ...base, ...(a.reason ? { reason: a.reason } : a.text ? { reason: a.text } : {}) },
-              authority,
-            ),
-          );
+        case "resolve_packet": {
+          // The reason falls back to the step's prose; neither present leaves
+          // the key off, which is what `operatorResolvePacket` reads as "none".
+          const withdraw: Parameters<typeof operatorResolvePacket>[2] = { ...base };
+          const withdrawReason = a.reason || a.text;
+          if (withdrawReason) withdraw.reason = withdrawReason;
+          record(a.tool, await operatorResolvePacket(db, ctx, withdraw, authority));
           break;
+        }
         case "set_goal":
           // `text` carries the drafted goal.
-          if (a.text)
-            record(
-              a.tool,
-              await operatorSetGoal(
-                db,
-                ctx,
-                { ...base, goal: a.text, ...(a.reason ? { reason: a.reason } : {}) },
-                authority,
-              ),
-            );
+          if (a.text) {
+            const goal: Parameters<typeof operatorSetGoal>[2] = { ...base, goal: a.text };
+            if (a.reason) goal.reason = a.reason;
+            record(a.tool, await operatorSetGoal(db, ctx, goal, authority));
+          }
           break;
       }
     } catch (error) {
@@ -2059,7 +2028,7 @@ async function startRealOperatorRun(
   input: RunOperatorInput,
   authority: OperatorAuthority,
   leaseKey: string,
-  leaseToken: object,
+  leaseToken: OperatorLeaseEntry,
   /** R19-1: what this run can really see of the repository. */
   workspace: OperatorWorkspaceView,
 ): Promise<RunOperatorResult> {
@@ -2091,7 +2060,7 @@ async function startRealOperatorRun(
     input.resolvedOption,
   );
 
-  const { runId } = await startRun(db, {
+  const spec: StartRunInput = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     threadId: "op-" + newId("t").replace("t_", "").slice(0, 8),
@@ -2099,7 +2068,6 @@ async function startRealOperatorRun(
     kind: "operator",
     backend: "claude",
     model: authority.model,
-    ...(authority.effort ? { effort: authority.effort } : {}),
     agentName: authority.name,
     agentProfileId: "operator",
     prompt,
@@ -2113,7 +2081,11 @@ async function startRealOperatorRun(
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     dataRoot: input.dataRoot,
-  });
+  };
+  // An absent effort leaves the SDK on its own default.
+  if (authority.effort) spec.effort = authority.effort;
+
+  const { runId } = await startRun(db, spec);
 
   // The real operator coordinates DURING its run (in-proc MCP tools), so the
   // lease is held until the run reaches a terminal state. Chained (not
@@ -2192,34 +2164,27 @@ async function escalateFailedOperatorRun(
       runId,
       kind: reason?.kind ?? "unknown",
     });
-    const opened = await operatorOpenPacket(
-      db,
-      ctx,
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        packetType: "blocked",
-        title: "Operator run failed — pick a recovery path",
-        body:
-          `The operator run did not complete — ${detail}. No coordination was ` +
-          `performed. Retry on the other backend, fix the credential, or redirect ` +
-          `the task.` +
-          // R20-3 (F20-4): the operator's OWN escalation used to drop the
-          // provider's words entirely; append the redacted sentence so a Codex
-          // model/account mismatch reads its real cause, not the generic advice.
-          (providerText ? `\n\nWhat the provider reported: ${providerText}` : ""),
-        // Same "Provider said" observation the specialist stuck-loop packet gets.
-        ...(providerText
-          ? {
-              observations: [
-                { k: "Provider said", v: providerText, code: true },
-              ],
-            }
-          : {}),
-        options: defaultPacketOptions("blocked"),
-      },
-      authority,
-    );
+    const escalation: OperatorOpenPacketInput = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      packetType: "blocked",
+      title: "Operator run failed — pick a recovery path",
+      body:
+        `The operator run did not complete — ${detail}. No coordination was ` +
+        `performed. Retry on the other backend, fix the credential, or redirect ` +
+        `the task.` +
+        // R20-3 (F20-4): the operator's OWN escalation used to drop the
+        // provider's words entirely; append the redacted sentence so a Codex
+        // model/account mismatch reads its real cause, not the generic advice.
+        (providerText ? `\n\nWhat the provider reported: ${providerText}` : ""),
+      options: defaultPacketOptions("blocked"),
+    };
+    // Same "Provider said" observation the specialist stuck-loop packet gets —
+    // and no observations block at all when the provider said nothing.
+    if (providerText) {
+      escalation.observations = [{ k: "Provider said", v: providerText, code: true }];
+    }
+    const opened = await operatorOpenPacket(db, ctx, escalation, authority);
     // R20-3: mark the model unavailable when the provider REFUSED it (no probe).
     if (providerText) {
       noteModelAvailabilityFromFailure(db, {
@@ -2292,7 +2257,7 @@ function readOperatorDefinition(dataRoot?: string): string {
  */
 export interface OperatorMcpResolution {
   /** Portable `mcpServers` configs, keyed by server name. */
-  servers: Record<string, unknown>;
+  servers: Record<string, SpecialistMcpServerConfig>;
   mounted: string[];
   unresolved: string[];
   unhealthy: string[];

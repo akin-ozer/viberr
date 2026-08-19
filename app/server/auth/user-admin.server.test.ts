@@ -37,6 +37,8 @@ function seedSession(db: DatabaseSync, userId: string): void {
 }
 
 function sessionCount(db: DatabaseSync, userId: string): number {
+  // SAFETY: `count(*)` is an aggregate with no GROUP BY — sqlite answers it with
+  // exactly one row carrying the single integer column `c`.
   return (
     db.prepare(`SELECT count(*) AS c FROM session WHERE userId = ?`).get(userId) as {
       c: number;

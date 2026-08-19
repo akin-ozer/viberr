@@ -9,6 +9,8 @@ import {
 
 /** Project slugs the user is a member of (for scoping the `projects` firehose). */
 function memberProjectSlugs(userId: string): string[] {
+  // SAFETY: the SELECT names exactly one column, `project_members.project_slug`,
+  // which is NOT NULL TEXT (0001_baseline.sql).
   const rows = getDb()
     .prepare(`SELECT project_slug FROM project_members WHERE user_id = ?`)
     .all(userId) as { project_slug: string }[];

@@ -50,9 +50,30 @@ import {
 export function resolveSpecialistMcpServers(
   db: DatabaseSync,
   mcpNames: readonly string[],
-): Record<string, unknown> {
+): Record<string, SpecialistMcpServerConfig> {
   return resolveSpecialistMcpServersDetailed(db, mcpNames).servers;
 }
+
+/** A stdio mount: the registered command, its parsed argv, and — Claude only,
+ *  see BACKEND SCOPE above — the decrypted org credential. */
+export interface StdioMcpServerConfig {
+  command: string;
+  args: string[];
+  env?: { MCP_CREDENTIAL: string };
+}
+
+/** An HTTP mount, with the decrypted org credential as a bearer header. */
+export interface HttpMcpServerConfig {
+  type: "http";
+  url: string;
+  headers?: { Authorization: string };
+}
+
+/** The portable per-server config both adapters accept; the Codex adapter
+ *  translates it to `mcp_servers` and drops the credential. */
+export type SpecialistMcpServerConfig =
+  | StdioMcpServerConfig
+  | HttpMcpServerConfig;
 
 /** Viberr's own servers. They are built by the toolkit/browser builders, are
  *  refused as registry names at save (P13-KM-12), and must never be resolved
@@ -84,7 +105,7 @@ export interface UnresolvedMcpGrant {
 
 export interface SpecialistMcpResolution {
   /** Portable `mcpServers` configs, keyed by server name. */
-  servers: Record<string, unknown>;
+  servers: Record<string, SpecialistMcpServerConfig>;
   /**
    * Grants that produced NOTHING (P14-LV-09). A warn in the server log was the
    * only trace, so an orphaned grant — the standing consequence of an MCP
@@ -99,7 +120,7 @@ export function resolveSpecialistMcpServersDetailed(
   db: DatabaseSync,
   mcpNames: readonly string[],
 ): SpecialistMcpResolution {
-  const servers: Record<string, unknown> = {};
+  const servers: Record<string, SpecialistMcpServerConfig> = {};
   const unresolved: UnresolvedMcpGrant[] = [];
   if (mcpNames.length === 0) return { servers, unresolved };
   let registry: {
@@ -164,17 +185,13 @@ export function resolveSpecialistMcpServersDetailed(
         drop(name, "the registered stdio command is empty");
         continue;
       }
-      servers[name] = {
-        command,
-        args: parts.slice(1),
-        ...(token ? { env: { MCP_CREDENTIAL: token } } : {}),
-      };
+      const stdio: StdioMcpServerConfig = { command, args: parts.slice(1) };
+      if (token) stdio.env = { MCP_CREDENTIAL: token };
+      servers[name] = stdio;
     } else {
-      servers[name] = {
-        type: "http",
-        url: row.target,
-        ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
-      };
+      const http: HttpMcpServerConfig = { type: "http", url: row.target };
+      if (token) http.headers = { Authorization: `Bearer ${token}` };
+      servers[name] = http;
     }
     // P14-LV-09b: a REGISTERED but known-down server resolves to a config, so it
     // was mounted and announced as usable while exposing nothing. Live, a scout

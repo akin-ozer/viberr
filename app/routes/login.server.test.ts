@@ -1,3 +1,4 @@
+import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   setupAppTest,
@@ -25,30 +26,47 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
+/** The full framework-mode handler argument set. These routes take no dynamic
+ *  segments and read only `request`, but building the whole contract keeps the
+ *  call sites honest instead of asserting one into place. */
+function handlerArgs(request: Request, pattern: string) {
+  return {
+    request,
+    url: new URL(request.url),
+    params: {},
+    pattern,
+    context: new RouterContextProvider(),
+  };
+}
+
 async function loginLoader(url: string, cookie?: string) {
   const { loader } = await import("~/routes/login");
-  return loader({
-    request: app.request(url, cookie ? { cookie } : {}),
-    params: {},
-    context: {},
-  } as never);
+  return loader(
+    handlerArgs(app.request(url, cookie ? { cookie } : {}), "/login"),
+  );
 }
 
 async function loginAction(fields: Record<string, string>, cookie?: string) {
   const { action } = await import("~/routes/login");
-  return action({
-    request: app.request("/login", {
-      method: "POST",
-      body: new URLSearchParams(fields),
-      ...(cookie ? { cookie } : {}),
-    }),
-    params: {},
-    context: {},
-  } as never);
+  const init: RequestInit & { cookie?: string } = {
+    method: "POST",
+    body: new URLSearchParams(fields),
+  };
+  // Only carry the key when there is a session cookie to attach.
+  if (cookie) init.cookie = cookie;
+  return action(handlerArgs(app.request("/login", init), "/login"));
+}
+
+/** A refusal comes back as `data(payload, init)`; a success is a redirect. */
+function refused(result: Awaited<ReturnType<typeof loginAction>>) {
+  if (result instanceof Response) {
+    throw new Error("expected a refusal, got a redirect");
+  }
+  return result;
 }
 
 /** Route handlers signal redirects by THROWING a Response. */
-async function caught(run: () => Promise<unknown>): Promise<Response> {
+async function caught<T>(run: () => Promise<T>): Promise<Response> {
   try {
     const result = await run();
     if (result instanceof Response) return result;
@@ -61,11 +79,7 @@ async function caught(run: () => Promise<unknown>): Promise<Response> {
 
 describe("/login loader", () => {
   it("signed-out: login mode, with per-deployment provider availability", async () => {
-    const data = (await loginLoader("/login")) as {
-      mode: string;
-      returnTo: string | null;
-      providers: { github: boolean; google: boolean };
-    };
+    const data = await loginLoader("/login");
     expect(data.mode).toBe("login");
     expect(data.returnTo).toBeNull();
     // The harness configures no OAuth app, and the page must say so rather
@@ -74,13 +88,13 @@ describe("/login loader", () => {
   });
 
   it("keeps a safe returnTo and drops an off-site one", async () => {
-    const safe = (await loginLoader(
+    const safe = await loginLoader(
       "/login?returnTo=%2Fprojects%2Fviberr-core%2Fboard",
-    )) as { returnTo: string | null };
+    );
     expect(safe.returnTo).toBe("/projects/viberr-core/board");
-    const evil = (await loginLoader(
+    const evil = await loginLoader(
       "/login?returnTo=https%3A%2F%2Fevil.example%2Fx",
-    )) as { returnTo: string | null };
+    );
     expect(evil.returnTo).toBeNull();
   });
 
@@ -96,29 +110,30 @@ describe("/login loader", () => {
 
 describe("/login action — credentials", () => {
   it("an empty email is refused before any auth call", async () => {
-    const result = (await loginAction({ intent: "login", email: "" })) as {
-      data: { error: string };
-      init: { status: number };
-    };
-    expect(result.init.status).toBe(400);
+    const result = refused(await loginAction({ intent: "login", email: "" }));
+    expect(result.init?.status).toBe(400);
     expect(result.data.error).toBe("Enter your email.");
   });
 
   it("a wrong password says so; an unknown email never reveals existence", async () => {
-    const wrong = (await loginAction({
-      intent: "login",
-      email: "arda@viberr.dev",
-      password: "not-the-password",
-    })) as { data: { error: string }; init: { status: number } };
-    expect(wrong.init.status).toBe(400);
+    const wrong = refused(
+      await loginAction({
+        intent: "login",
+        email: "arda@viberr.dev",
+        password: "not-the-password",
+      }),
+    );
+    expect(wrong.init?.status).toBe(400);
     expect(wrong.data.error).toContain("Wrong password");
 
-    const unknown = (await loginAction({
-      intent: "login",
-      email: "nobody@viberr.dev",
-      password: "whatever",
-    })) as { data: { error: string }; init: { status: number } };
-    expect(unknown.init.status).toBe(400);
+    const unknown = refused(
+      await loginAction({
+        intent: "login",
+        email: "nobody@viberr.dev",
+        password: "whatever",
+      }),
+    );
+    expect(unknown.init?.status).toBe(400);
     // Same copy as "account exists but has no local password" — the page must
     // not become an account-enumeration oracle.
     expect(unknown.data.error).toContain("No local account for that email");
@@ -141,11 +156,8 @@ describe("/login action — credentials", () => {
   });
 
   it("an unknown intent is a 400, not a crash", async () => {
-    const result = (await loginAction({ intent: "teleport" })) as {
-      data: { error: string };
-      init: { status: number };
-    };
-    expect(result.init.status).toBe(400);
+    const result = refused(await loginAction({ intent: "teleport" }));
+    expect(result.init?.status).toBe(400);
     expect(result.data.error).toBe("Unknown action.");
   });
 });
@@ -154,7 +166,7 @@ describe("/logout", () => {
   it("GET redirects home — logout is a POST", async () => {
     const { loader } = await import("~/routes/logout");
     const res = await caught(async () =>
-      loader({ request: app.request("/logout"), params: {}, context: {} } as never),
+      loader(handlerArgs(app.request("/logout"), "/logout")),
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/");
@@ -163,11 +175,9 @@ describe("/logout", () => {
   it("signed out: POST redirects to /login instead of throwing", async () => {
     const { action } = await import("~/routes/logout");
     const res = await caught(async () =>
-      action({
-        request: app.request("/logout", { method: "POST" }),
-        params: {},
-        context: {},
-      } as never),
+      action(
+        handlerArgs(app.request("/logout", { method: "POST" }), "/logout"),
+      ),
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/login");
@@ -178,15 +188,16 @@ describe("/logout", () => {
     const csrf = await app.csrfFor(sessionId);
     const { action } = await import("~/routes/logout");
     const res = await caught(async () =>
-      action({
-        request: app.request("/logout", {
-          method: "POST",
-          cookie,
-          body: new URLSearchParams({ _csrf: csrf }),
-        }),
-        params: {},
-        context: {},
-      } as never),
+      action(
+        handlerArgs(
+          app.request("/logout", {
+            method: "POST",
+            cookie,
+            body: new URLSearchParams({ _csrf: csrf }),
+          }),
+          "/logout",
+        ),
+      ),
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/login");

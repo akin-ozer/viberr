@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { UNIFIED_CAP_CATALOG } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
@@ -29,11 +30,17 @@ import { newId } from "~/shared/ids/new-id.server";
  * agent without the grant).
  */
 
+/** One answer choice on an agent's question. */
+export interface AgentOutcomeChoice {
+  title: string;
+  detail?: string;
+}
+
 export interface AgentOutcomeQuestion {
   title: string;
   body?: string;
   /** 2-4 answer choices; the packet renders them as `custom` options. */
-  options?: { title: string; detail?: string }[];
+  options?: AgentOutcomeChoice[];
 }
 
 export interface AgentOutcome {
@@ -122,6 +129,63 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
   },
 } as const;
 
+/** Text a reader would treat as absent. The envelope's prose fields are kept
+ *  VERBATIM (the timeline renders them as written), so the blankness test is a
+ *  refinement rather than a `.trim()` transform. */
+const envelopeProse = z.string().refine((s) => s.trim().length > 0);
+
+/**
+ * The envelope AS IT ARRIVES from Codex, before it becomes an `AgentOutcome`.
+ *
+ * Every field carries its own `.catch`, and every list its own per-member one:
+ * the reply is model-written, so a garbled `question` must cost us the question
+ * and nothing else — never the `summary` that came with it. The schema decides
+ * only what is PRESENT and well-formed; the caller below decides what an
+ * envelope means.
+ */
+const codexEnvelopeSchema = z.object({
+  summary: envelopeProse.optional().catch(undefined),
+  verdict: z.enum(["approve", "request_changes"]).optional().catch(undefined),
+  question: z
+    .object({
+      title: envelopeProse,
+      body: envelopeProse.optional().catch(undefined),
+      options: z
+        .array(
+          z
+            .object({
+              title: z.string().min(1),
+              detail: z.string().optional().catch(undefined),
+            })
+            .nullable()
+            .catch(null),
+        )
+        .transform((opts) => opts.filter((opt) => opt !== null))
+        .optional()
+        .catch(undefined),
+    })
+    .optional()
+    .catch(undefined),
+  // The row fields stay `unknown` on purpose: `normalizeEvidenceRows` is the
+  // sanitizer, and it flattens whatever it is handed (a number count, a null
+  // column) rather than dropping the row. All the schema owes it is a list of
+  // row-shaped members.
+  evidence: z
+    .array(
+      z
+        .object({
+          label: z.unknown().optional(),
+          add: z.unknown().optional(),
+          del: z.unknown().optional(),
+        })
+        .nullable()
+        .catch(null),
+    )
+    .transform((rows) => rows.filter((row) => row !== null))
+    .optional()
+    .catch(undefined),
+});
+
 /**
  * Tolerant parse of a Codex envelope reply. The reply SHOULD be bare JSON
  * (outputSchema-constrained) but models occasionally fence it; strip one fence
@@ -139,52 +203,34 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
   } catch {
     return null;
   }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-  const o = raw as Record<string, unknown>;
+  const parsed = codexEnvelopeSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const envelope = parsed.data;
   const outcome: AgentOutcome = {};
-  if (typeof o.summary === "string" && o.summary.trim()) {
-    outcome.summary = o.summary;
-  }
-  if (o.verdict === "approve" || o.verdict === "request_changes") {
-    outcome.verdict = o.verdict;
-  }
-  if (typeof o.question === "object" && o.question !== null) {
-    const q = o.question as Record<string, unknown>;
-    if (typeof q.title === "string" && q.title.trim()) {
-      outcome.question = {
-        title: q.title.trim(),
-        ...(typeof q.body === "string" && q.body.trim()
-          ? { body: q.body }
-          : {}),
-        ...(Array.isArray(q.options)
-          ? {
-              options: q.options
-                .filter(
-                  (opt): opt is Record<string, unknown> =>
-                    typeof opt === "object" && opt !== null,
-                )
-                .filter((opt) => typeof opt.title === "string" && !!opt.title)
-                .slice(0, 4)
-                .map((opt) => ({
-                  title: String(opt.title),
-                  ...(typeof opt.detail === "string"
-                    ? { detail: opt.detail }
-                    : {}),
-                })),
-            }
-          : {}),
-      };
+  if (envelope.summary !== undefined) outcome.summary = envelope.summary;
+  if (envelope.verdict !== undefined) outcome.verdict = envelope.verdict;
+  if (envelope.question !== undefined) {
+    const question: AgentOutcomeQuestion = {
+      title: envelope.question.title.trim(),
+    };
+    if (envelope.question.body !== undefined) {
+      question.body = envelope.question.body;
     }
+    if (envelope.question.options !== undefined) {
+      question.options = envelope.question.options
+        .slice(0, 4)
+        .map((opt) => {
+          const choice: AgentOutcomeChoice = { title: opt.title };
+          if (opt.detail !== undefined) choice.detail = opt.detail;
+          return choice;
+        });
+    }
+    outcome.question = question;
   }
   // P13-D-26: the Codex half of the evidence channel. Sanitized through the
   // same funnel the toolkit uses, so a hostile envelope cannot forge rows.
-  if (Array.isArray(o.evidence)) {
-    const rows = normalizeEvidenceRows(
-      o.evidence.filter(
-        (row): row is Record<string, unknown> =>
-          typeof row === "object" && row !== null,
-      ),
-    );
+  if (envelope.evidence !== undefined) {
+    const rows = normalizeEvidenceRows(envelope.evidence);
     if (rows) outcome.evidence = rows;
   }
   // An envelope with NOTHING usable is not an envelope. Evidence alone does not
@@ -207,8 +253,35 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
  */
 const staged = new Map<string, AgentOutcome>();
 const STAGED_MAX = 500;
+
 /** Orphan prune horizon: a staged outcome whose run never completed. */
 const STAGED_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** The persisted staging row (`stageOutcome` writes it, one column). */
+const stagedRowSchema = z.object({ outcome_json: z.string() });
+
+/**
+ * `outcome_json` re-read as a domain outcome. This is our OWN writer's JSON, so
+ * the schema mirrors {@link AgentOutcome} exactly — it is here so a truncated
+ * or hand-edited row degrades to "nothing was staged" (the prose fallback) in
+ * place of a half-decoded envelope carrying a forged verdict.
+ */
+const stagedOutcomeSchema = z.object({
+  summary: z.string().optional(),
+  verdict: z.enum(["approve", "request_changes"]).optional(),
+  question: z
+    .object({
+      title: z.string(),
+      body: z.string().optional(),
+      options: z
+        .array(z.object({ title: z.string(), detail: z.string().optional() }))
+        .optional(),
+    })
+    .optional(),
+  evidence: z
+    .array(z.object({ label: z.string(), add: z.string(), del: z.string() }))
+    .optional(),
+});
 
 export function stageOutcome(
   db: DatabaseSync,
@@ -250,10 +323,14 @@ export function takeStagedOutcome(
   let persisted: AgentOutcome | null = null;
   try {
     if (!inMemory) {
-      const row = db
-        .prepare(`SELECT outcome_json FROM staged_outcomes WHERE outcome_key = ?`)
-        .get(outcomeKey) as { outcome_json: string } | undefined;
-      if (row) persisted = JSON.parse(row.outcome_json) as AgentOutcome;
+      const row = stagedRowSchema.safeParse(
+        db
+          .prepare(`SELECT outcome_json FROM staged_outcomes WHERE outcome_key = ?`)
+          .get(outcomeKey),
+      );
+      if (row.success) {
+        persisted = stagedOutcomeSchema.parse(JSON.parse(row.data.outcome_json));
+      }
     }
     db.prepare(`DELETE FROM staged_outcomes WHERE outcome_key = ?`).run(outcomeKey);
   } catch {
@@ -361,20 +438,21 @@ export function buildAgentQuestionPacket(
           rec: true,
         },
       ];
-  return {
+  const packet: TaskPacket = {
     id: newId("pkt"), // F10-09: stable identity for concurrent-resolution safety
     type: "input",
     kind: "Agent question",
     from: encodeActorRef(actorRef),
-    // R15-14: `from` is a DISPLAY string. The answer has to be routed back to a
-    // specific agent, and parsing a rendered label to decide who gets resumed is
-    // the kind of thing that works until someone renames a profile. Stamp the
-    // profile id the router actually needs. Optional by design: packets written
-    // before this exists simply fall back to the operator hand-off.
-    ...(actorRef.kind === "agent" ? { askedBy: actorRef.profileId } : {}),
     title: question.title.trim(),
     body: (question.body ?? "").trim(),
     observations: [],
     options,
   };
+  // R15-14: `from` is a DISPLAY string. The answer has to be routed back to a
+  // specific agent, and parsing a rendered label to decide who gets resumed is
+  // the kind of thing that works until someone renames a profile. Stamp the
+  // profile id the router actually needs. Absent by design on operator packets:
+  // anything without it simply falls back to the operator hand-off.
+  if (actorRef.kind === "agent") packet.askedBy = actorRef.profileId;
+  return packet;
 }

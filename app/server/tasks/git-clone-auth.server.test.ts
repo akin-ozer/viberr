@@ -37,7 +37,7 @@ function runAskpass(
     try {
       return execFileSync(askpassPath, [prompt], { encoding: "utf8", env }).trim();
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code ?? "";
+      const code = error instanceof Error && "code" in error ? String(error.code) : "";
       if (attempt >= 3 || !TRANSIENT.has(code)) throw error;
     }
   }

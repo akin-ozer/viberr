@@ -12,8 +12,10 @@ import {
  * bypassPermissions), so this is the seam that makes specialist grants bite.
  */
 
-const grant = (capabilityId: string, mode: CapabilityGrant["mode"]) =>
-  ({ capabilityId, mode }) as CapabilityGrant;
+const grant = (
+  capabilityId: string,
+  mode: CapabilityGrant["mode"],
+): CapabilityGrant => ({ capabilityId, mode });
 
 describe("resolveSpecialistDisallowedTools", () => {
   it("denies EVERY delivery tool when no grant says otherwise (P14-LV-01)", () => {

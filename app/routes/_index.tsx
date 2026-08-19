@@ -33,7 +33,7 @@ import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 
 // Home — multi-project landing (home spec). Route: `/`.
 
-export function meta(_: Route.MetaArgs) {
+export function meta() {
   return [
     { title: "Viberr" },
     { name: "description", content: "Collaborative AI software delivery." },
@@ -98,8 +98,9 @@ export async function action({ request }: Route.ActionArgs) {
       return { ok: true as const, intent: "pin" as const, pinned };
     }
     if (intent === "view") {
-      const view = formData.get("view") === "list" ? "list" : ("grid" as const);
-      patchHomePrefs(db, ctx.user.id, { view: view as "grid" | "list" });
+      patchHomePrefs(db, ctx.user.id, {
+        view: formData.get("view") === "list" ? "list" : "grid",
+      });
       return { ok: true as const, intent: "view" as const };
     }
     if (intent === "rescan") {

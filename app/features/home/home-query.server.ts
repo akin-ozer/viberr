@@ -115,15 +115,21 @@ export function listHomeProjectsForUser(
   // Single membership pass (pass-4 WI-9): one query for the slugs this viewer
   // belongs to, instead of re-running listProjectMembers once per project on
   // top of the pass listHomeProjects already made for the member avatars.
-  const memberSlugs = new Set(
-    (
-      db
-        .prepare(`SELECT project_slug FROM project_members WHERE user_id = ?`)
-        .all(viewer.id) as { project_slug: string }[]
-    ).map((r) => r.project_slug),
-  );
+  // SAFETY: the row type is the statement's own projection — one NOT NULL
+  // column (`project_members.project_slug`, 0001_baseline), named in the SELECT.
+  const memberRows = db
+    .prepare(`SELECT project_slug FROM project_members WHERE user_id = ?`)
+    .all(viewer.id) as { project_slug: string }[];
+  const memberSlugs = new Set(memberRows.map((r) => r.project_slug));
   return scoped.filter((p) => memberSlugs.has(p.slug));
 }
+
+/** Row of the per-project totals query in `listHomeProjects`. */
+type HomeAggRow = {
+  project_slug: string;
+  total: number;
+  updated_at: string | null;
+};
 
 /** Per-project task aggregates for the home cards. */
 interface HomeTaskAgg {
@@ -145,6 +151,10 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
   // terminal stage is excluded per project below (needs the stage list).
   const distBySlug = new Map<string, Record<string, number>>();
   const waitingByStage = new Map<string, Map<string, number>>();
+  // SAFETY: the row type is the SELECT list itself — `project_slug`/`stage` are
+  // NOT NULL columns, and both aggregates are integers on every group the
+  // GROUP BY emits (a group has at least one row, and the summed CASE is never
+  // NULL, so neither alias can come back null).
   const distRows = db
     .prepare(
       `SELECT project_slug, stage, COUNT(*) AS n,
@@ -175,6 +185,10 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
 
   // Per-project totals: task count and the latest updatedAt.
   const aggBySlug = new Map<string, HomeTaskAgg>();
+  // SAFETY: same SELECT-list correspondence. `updated_at` is the one nullable
+  // column of the three (0001_baseline declares it `TEXT`, not NOT NULL), so
+  // `MAX` over a project whose tasks all lack one is null — which is exactly
+  // the "no recency signal" the card renders.
   const aggRows = db
     .prepare(
       `SELECT project_slug,
@@ -184,11 +198,13 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
        WHERE archived = 0
        GROUP BY project_slug`,
     )
-    .all() as { project_slug: string; total: number; updated_at: string }[];
+    .all() as HomeAggRow[];
 
   // `running` = "agents running" — count projects' tasks with a run actually
   // in flight, not the task's waiting=agent governance state.
   const runningBySlug = new Map<string, number>();
+  // SAFETY: same SELECT-list correspondence — `agent_runs.project_slug` is NOT
+  // NULL and COUNT is an integer per group.
   const runningRows = db
     .prepare(
       `SELECT project_slug, COUNT(DISTINCT task_key) AS running

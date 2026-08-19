@@ -7,6 +7,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import type { AgentDeployment } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { getMentionables } from "./mention-suggestions.server";
 
@@ -39,7 +40,7 @@ function deploySpecialists(): void {
           backends: ["claude"],
           model: "claude-sonnet",
         },
-      } as never,
+      },
       {
         profileId: "qa",
         capabilities: [],
@@ -51,7 +52,7 @@ function deploySpecialists(): void {
           backends: ["codex"],
           model: "gpt-5-codex",
         },
-      } as never,
+      },
     ],
   });
 }
@@ -127,7 +128,10 @@ describe("getMentionables", () => {
   it("does NOT offer a backend handle that covers more than one deployed specialist", () => {
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
-    const claudeSpecialist = (profileId: string, name: string) => ({
+    const claudeSpecialist = (
+      profileId: string,
+      name: string,
+    ): AgentDeployment => ({
       profileId,
       capabilities: [],
       extras: [],
@@ -144,7 +148,7 @@ describe("getMentionables", () => {
       agents: [
         claudeSpecialist("docs-writer", "Docs Writer"),
         claudeSpecialist("security-reviewer", "Security Reviewer"),
-      ] as never,
+      ],
     });
     const { reserved, agents } = call();
     expect(reserved.map((r) => r.handle)).toEqual(["operator", "agent", "codex"]);

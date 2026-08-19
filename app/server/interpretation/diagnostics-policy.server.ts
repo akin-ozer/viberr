@@ -17,12 +17,12 @@ import type { Readiness } from "~/schemas/task-file.schema";
  */
 
 /** Severity order for "worst wins" comparisons. */
-export const READINESS_RANK: Record<Readiness, number> = {
+export const READINESS_RANK = {
   ready: 0,
   input_required: 1,
   inconsistency_risk_detected: 2,
   blocked: 3,
-};
+} satisfies Record<Readiness, number>;
 
 /** Readiness floor imposed by a single diagnostic. Null = no effect. */
 export function readinessEffectOf(diag: FileDiagnostic): Readiness | null {

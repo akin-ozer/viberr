@@ -17,6 +17,16 @@ afterEach(cleanup);
 
 let lastForm: Record<string, string> | null = null;
 
+/** The org-settings store reply this stub sends back, in the members the
+ *  browser reads: the outcome, its toast/error copy, and a document read. */
+interface StubActionReply {
+  ok: boolean;
+  toast?: string;
+  error?: string;
+  text?: string;
+  truncated?: boolean;
+}
+
 const TREE: StoreNode[] = [
   {
     type: "dir",
@@ -28,14 +38,27 @@ const TREE: StoreNode[] = [
   { type: "file", name: "overview.md", sizeBytes: 9100, mtime: new Date().toISOString() },
 ];
 
+/** A query answers a plain `HTMLElement`, but `.value` lives on the concrete
+ *  control — so the node is CHECKED against its element class rather than
+ *  asserted into it, and a wrong node fails here instead of further down. */
+function control<T extends HTMLElement>(
+  node: Element | null,
+  kind: new () => T,
+): T {
+  if (!(node instanceof kind)) {
+    throw new Error(`expected ${kind.name}, got ${node?.nodeName ?? "nothing"}`);
+  }
+  return node;
+}
+
 function renderBrowser(
   overrides: {
     tree?: StoreNode[];
     onClose?: () => void;
     /** Make the org-settings action fail, to exercise the failure toast. */
-    actionResult?: Record<string, unknown>;
+    actionResult?: StubActionReply;
     /** Per-intent canned responses (the editor reads AND writes). */
-    respond?: (intent: string) => Record<string, unknown> | undefined;
+    respond?: (intent: string) => StubActionReply | undefined;
   } = {},
 ) {
   lastForm = null;
@@ -58,7 +81,9 @@ function renderBrowser(
         const fd = await request.formData();
         lastForm = {};
         for (const [k, v] of fd.entries()) {
-          if (typeof v === "string") lastForm[k] = v;
+          // A form entry is either text or an uploaded file; only the text
+          // fields are what these assertions read back.
+          if (!(v instanceof File)) lastForm[k] = v;
         }
         return (
           overrides.respond?.(lastForm.intent ?? "") ??
@@ -99,7 +124,7 @@ describe("StoreBrowser", () => {
   it("new-folder input commits on Enter with mkdir -p semantics", async () => {
     const { getByText, getByLabelText } = renderBrowser();
     fireEvent.click(getByText("New folder"));
-    const input = getByLabelText("New folder name") as HTMLInputElement;
+    const input = getByLabelText("New folder name");
     fireEvent.change(input, { target: { value: "uploads/inbox" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
@@ -266,7 +291,7 @@ describe("StoreBrowser document editor", () => {
         path: JSON.stringify(["overview.md"]),
       }),
     );
-    const body = getByLabelText("Document contents") as HTMLTextAreaElement;
+    const body = control(getByLabelText("Document contents"), HTMLTextAreaElement);
     await waitFor(() => expect(body.value).toContain("LOADED"));
     // The name is the file's own — the editor edits it, it does not re-create it.
     expect(getByText("overview.md", { selector: ".fm-doc-path" })).toBeTruthy();
@@ -316,9 +341,9 @@ describe("StoreBrowser document editor", () => {
     await waitFor(() => expect(queryByRole("alertdialog")).toBeNull());
     expect(lastForm).toBeNull();
     // The draft survives the cancelled confirm.
-    expect((getByLabelText("Document contents") as HTMLTextAreaElement).value).toBe(
-      "CLOBBER",
-    );
+    expect(
+      control(getByLabelText("Document contents"), HTMLTextAreaElement).value,
+    ).toBe("CLOBBER");
 
     fireEvent.click(getByText("Save document"));
     fireEvent.click(getByText("Replace document"));
@@ -352,9 +377,9 @@ describe("StoreBrowser document editor", () => {
     await waitFor(() =>
       expect(getByText("facts.md already exists — open it to edit.")).toBeTruthy(),
     );
-    expect((getByLabelText("Document contents") as HTMLTextAreaElement).value).toBe(
-      "THE ONLY COPY",
-    );
+    expect(
+      control(getByLabelText("Document contents"), HTMLTextAreaElement).value,
+    ).toBe("THE ONLY COPY");
   });
 
   it("a doc too large to load cannot be saved back over the original", async () => {
@@ -368,9 +393,7 @@ describe("StoreBrowser document editor", () => {
     await waitFor(() =>
       expect(getByText(/larger than the editor can load/)).toBeTruthy(),
     );
-    expect(
-      (getByText("Save document").closest("button") as HTMLButtonElement).disabled,
-    ).toBe(true);
+    expect(getByText("Save document").closest("button")!.disabled).toBe(true);
   });
 });
 
@@ -384,7 +407,7 @@ describe("StoreBrowser failure toast kind (P13-D-10)", () => {
       actionResult: { ok: false, error: "Folder already exists." },
     });
     fireEvent.click(getByText("New folder"));
-    const input = getByLabelText("New folder name") as HTMLInputElement;
+    const input = getByLabelText("New folder name");
     fireEvent.change(input, { target: { value: "uploads" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
@@ -405,9 +428,9 @@ describe("StoreBrowser upload that uploads nothing (P13-UI-08)", () => {
 
   it("says the drop was all hidden files instead of doing nothing", async () => {
     const { container } = renderBrowser();
-    const input = container.querySelector(
+    const input = container.querySelector<HTMLInputElement>(
       'input[type="file"]:not([webkitdirectory])',
-    ) as HTMLInputElement;
+    )!;
     fireEvent.change(input, {
       target: { files: [hidden(".DS_Store"), hidden(".env")] },
     });

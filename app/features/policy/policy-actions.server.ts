@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, BOUNDARY_VALUES } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -75,12 +76,16 @@ function reprojectProject(
   });
 }
 
+/** The one column `userName` selects. A deleted account leaves no row at all,
+ *  which is the same answer to the caller as a row it cannot read. */
+const userNameRow = z.object({ name: z.string() });
+
 function userName(db: DatabaseSync, userId: string): string {
-  const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
-    | { name: string }
-    | undefined;
+  const row = userNameRow.safeParse(
+    db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId),
+  );
   // LV-04: never echo the raw `u_…` id as if it were a display name.
-  return row?.name ?? removedAccountLabel(userId);
+  return row.success ? row.data.name : removedAccountLabel(userId);
 }
 
 // ---------------------------------------------------------------- set role
@@ -104,10 +109,11 @@ export async function setMemberRole(
     actor,
     "manage members & roles",
   );
-  if (!(PROJECT_ROLES as readonly string[]).includes(input.role)) {
+  const parsedRole = z.enum(PROJECT_ROLES).safeParse(input.role);
+  if (!parsedRole.success) {
     throw AppError.validation("Unknown project role.");
   }
-  const role = input.role as ProjectRole;
+  const role = parsedRole.data;
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -145,7 +151,7 @@ export async function setMemberRole(
   const targetName = userName(db, input.targetUserId);
   if (!changed) {
     return {
-      toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role as ProjectRole]} · enforced on the next action`,
+      toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role]} · enforced on the next action`,
       changed: false,
     };
   }
@@ -161,7 +167,7 @@ export async function setMemberRole(
   });
 
   return {
-    toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role as ProjectRole]} · enforced on the next action`,
+    toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role]} · enforced on the next action`,
     changed: true,
   };
 }
@@ -184,10 +190,11 @@ export async function setTransitionBoundary(
   ctx: PolicyMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
   requirePolicyAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow & policy");
-  if (!(BOUNDARY_VALUES as readonly string[]).includes(input.boundary)) {
+  const parsedBoundary = z.enum(BOUNDARY_VALUES).safeParse(input.boundary);
+  if (!parsedBoundary.success) {
     throw AppError.validation("Unknown boundary.");
   }
-  const boundary = input.boundary as "auto" | "approval" | "human";
+  const boundary = parsedBoundary.data;
 
   const ref = {
     projectSlug: input.projectSlug,

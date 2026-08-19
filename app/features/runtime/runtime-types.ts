@@ -24,6 +24,22 @@ export type RunBackend = "claude" | "codex";
 export type RunKind = "operator" | "primary" | "reviewer";
 
 /**
+ * A value that survived JSON transport. The provider payloads this module
+ * carries verbatim to the raw view — a tool call's arguments above all — are
+ * free-form BY CONTRACT (each vendor tool declares its own schema, and both add
+ * tools between releases), so "whatever JSON.parse produced" is the honest
+ * value type. `wire-format.server.ts` parses them into this shape at the wire
+ * boundary; nothing downstream interprets them.
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+/**
  * Projected LogLine — one console row. Mirrors the mock's `cc.*`/`cx.*`
  * builder output (runs.md §3.2). `ev` selects the row color + raw-envelope
  * reconstruction; `tag` is the wire tag rendered verbatim.
@@ -45,7 +61,7 @@ export interface LogLine {
   /** Claude tool name (`Bash`, `Read`…) / codex `exec`; bold before text. */
   name?: string;
   /** Claude tool input for the raw view (null → synthesized from text). */
-  input?: Record<string, unknown> | null;
+  input?: Record<string, JsonValue> | null;
   /** Codex non-zero exit → the line is `err` + raw `status:"failed"`. */
   exit?: number;
   /** Claude result stats → raw result envelope fields. */

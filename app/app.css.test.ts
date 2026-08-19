@@ -787,7 +787,7 @@ describe("app.css search field vs palette trigger (P16-F6)", () => {
  * inventing a tenth value (a stray `1120px` "just for this panel") fails here
  * until someone names what it means.
  */
-const BREAKPOINTS: Record<string, string> = {
+const BREAKPOINTS = {
   "max-width: 1400px": "board columns tighten before any layout reflows",
   "max-width: 1300px": "the invite row's three fields stack",
   "max-width: 1100px": "THE TWO-COLUMN COLLAPSE — every 2-up layout goes 1-up",
@@ -797,7 +797,7 @@ const BREAKPOINTS: Record<string, string> = {
   "min-width: 900px": "the login page earns its brand aside (the one min-width)",
   "max-width: 760px": "topbar tier 2 — the middle crumb",
   "max-width: 720px": "MOBILE SHELL — the project rail becomes an overlay",
-};
+} satisfies Record<string, string>;
 
 describe("app.css breakpoints (P16-F8)", () => {
   /** Every `(max-width: Npx)` / `(min-width: Npx)` in the sheet, in order. */
@@ -918,8 +918,10 @@ function inBlockComment(src: string, index: number): boolean {
   return open !== -1 && src.lastIndexOf("*/", index) < open;
 }
 
+type Balanced = { body: string; end: number };
+
 /** The balanced `{…}` body starting at `open` (the index OF the brace). */
-function balanced(src: string, open: number): { body: string; end: number } {
+function balanced(src: string, open: number): Balanced {
   let depth = 0;
   let i = open;
   for (; i < src.length; i++) {
@@ -1371,6 +1373,9 @@ const RULES = cssRules(CODE);
 
 type Rgba = { rgb: [number, number, number]; alpha: number };
 
+/** One `color-mix()` stop: the colour, and the percentage it states (or none). */
+type MixStop = { colour: Rgba; weight: number | null };
+
 /** Split a function's argument list on TOP-LEVEL commas. */
 function splitArgs(text: string): string[] {
   const out: string[] = [];
@@ -1403,12 +1408,12 @@ function resolveColor(value: string, tokens: Map<string, string>, depth = 0): Rg
   if (!v) return null;
   if (v === "transparent") return { rgb: [0, 0, 0], alpha: 0 };
   if (/^#[0-9a-f]{3}$/i.test(v)) {
-    const [r, g, b] = [...v.slice(1)].map((c) => parseInt(c + c, 16));
+    const [r, g, b] = Array.from(v.slice(1), (c) => parseInt(c + c, 16));
     return { rgb: [r, g, b], alpha: 1 };
   }
   if (/^#[0-9a-f]{6}$/i.test(v)) {
-    const rgb = [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16)) as [number, number, number];
-    return { rgb, alpha: 1 };
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16));
+    return { rgb: [r, g, b], alpha: 1 };
   }
   const ref = /^var\(\s*(--[\w-]+)\s*(?:,([\s\S]*))?\)$/.exec(v);
   if (ref) {
@@ -1421,7 +1426,7 @@ function resolveColor(value: string, tokens: Map<string, string>, depth = 0): Rg
     const parts = rgbFn[1].split(/[,\s/]+/).filter(Boolean).map(Number);
     if (parts.length < 3 || parts.slice(0, 3).some(Number.isNaN)) return null;
     return {
-      rgb: parts.slice(0, 3) as [number, number, number],
+      rgb: [parts[0], parts[1], parts[2]],
       alpha: parts.length > 3 && !Number.isNaN(parts[3]) ? parts[3] : 1,
     };
   }
@@ -1429,31 +1434,29 @@ function resolveColor(value: string, tokens: Map<string, string>, depth = 0): Rg
   if (mix) {
     const args = splitArgs(mix[1]);
     if (args.length !== 2) return null;
-    const stops = args.map((arg) => {
+    const stops: MixStop[] = [];
+    for (const arg of args) {
       const pct = /^([\s\S]*?)\s+(\d+(?:\.\d+)?)%$/.exec(arg);
       const colour = resolveColor(pct ? pct[1] : arg, tokens, depth + 1);
-      return colour ? { colour, weight: pct ? Number(pct[2]) : null } : null;
-    });
-    if (stops.some((s) => s === null)) return null;
-    const [a, b] = stops as { colour: Rgba; weight: number | null }[];
-    let wa = a.weight;
-    let wb = b.weight;
-    if (wa === null && wb === null) [wa, wb] = [50, 50];
-    else if (wa === null) wa = 100 - (wb as number);
-    else if (wb === null) wb = 100 - wa;
-    const total = wa + (wb as number);
+      if (!colour) return null;
+      stops.push({ colour, weight: pct ? Number(pct[2]) : null });
+    }
+    const [a, b] = stops;
+    // A stop that states no percentage takes the remainder; with neither
+    // stated the two split the mix evenly.
+    const wa = a.weight ?? (b.weight === null ? 50 : 100 - b.weight);
+    const wb = b.weight ?? (a.weight === null ? 50 : 100 - a.weight);
+    const total = wa + wb;
     if (!total) return null;
     const pa = wa / total;
-    const pb = (wb as number) / total;
+    const pb = wb / total;
     const alpha = a.colour.alpha * pa + b.colour.alpha * pb;
     if (alpha === 0) return { rgb: [0, 0, 0], alpha: 0 };
     // Premultiplied, the way the browser mixes: a fully transparent stop must
     // not drag the result toward its (meaningless) channel values.
-    const rgb = [0, 1, 2].map(
-      (i) =>
-        (a.colour.rgb[i] * a.colour.alpha * pa + b.colour.rgb[i] * b.colour.alpha * pb) / alpha,
-    ) as [number, number, number];
-    return { rgb, alpha };
+    const channel = (i: number) =>
+      (a.colour.rgb[i] * a.colour.alpha * pa + b.colour.rgb[i] * b.colour.alpha * pb) / alpha;
+    return { rgb: [channel(0), channel(1), channel(2)], alpha };
   }
   return null;
 }
@@ -1467,11 +1470,8 @@ const asHex = (rgb: [number, number, number]) =>
 /** Composite a (possibly translucent) colour over an opaque backdrop. */
 function over(c: Rgba, backdrop: [number, number, number]): [number, number, number] {
   if (c.alpha >= 1) return c.rgb;
-  return [0, 1, 2].map((i) => c.rgb[i] * c.alpha + backdrop[i] * (1 - c.alpha)) as [
-    number,
-    number,
-    number,
-  ];
+  const channel = (i: number) => c.rgb[i] * c.alpha + backdrop[i] * (1 - c.alpha);
+  return [channel(0), channel(1), channel(2)];
 }
 
 /* -------------------------------------------------------- what sits on what */
@@ -1539,7 +1539,7 @@ function paintMap(dark: boolean): Map<string, string> {
  * pair is still measured, just against the right backdrop. An entry that stops
  * being consulted fails below.
  */
-const RENDERED_INSIDE: Record<string, { container: string; why: string }> = {
+const RENDERED_INSIDE = new Map(Object.entries({
   "log-line": {
     container: ".console",
     why: "runs-panels.tsx renders every log row inside `div.console`, which paints a fixed near-black fill in BOTH themes (that is why these rules use literal hex rather than tokens — see the .log-more comment). Measured against --bg/--surface they would read as failures in light and the console's real contrast would go unchecked.",
@@ -1564,22 +1564,22 @@ const RENDERED_INSIDE: Record<string, { container: string; why: string }> = {
     container: ".console",
     why: "the withheld-line count sits next to `.log-more` in the same console row.",
   },
-};
+}));
 
 /** Rules whose `color` paints a GLYPH, not text. WCAG 1.4.11 asks 3:1 of a
  *  meaningful non-text element, not 1.4.3's 4.5:1 — checked, at the right bar. */
-const GLYPH_NOT_TEXT: Record<string, string> = {
+const GLYPH_NOT_TEXT = new Map(Object.entries({
   ".stage-menu-pop .sm-check": "a 14×14 check mark marking the current stage in the stage menu; the row's selected state is also carried by `aria-checked` on the menuitemradio.",
-};
+}));
 
 /**
  * Pairs that are deliberately below AA and stay that way. Each says why in
  * WCAG's own terms; an entry nobody hits fails the rot guard below.
  */
-const BELOW_AA_BY_DESIGN: Record<string, string> = {
+const BELOW_AA_BY_DESIGN = {
   ".pj-star.on": "the pinned-project star. --pin-star is a decorative accent on a glyph whose IDENTITY and STATE are carried elsewhere: `StarIco` swaps outline for filled, and the button's accessible name flips between `Pin <project>` and `Unpin <project>`. 1.4.11 exempts a graphic that is not required to understand the content, which is exactly the case when shape and name already carry it.",
   ".log-more:disabled": "`load older lines` while a fetch is in flight. WCAG 1.4.3 exempts text in an INACTIVE user-interface component by name, and the button also swaps its label to `loading older lines…`, so the state is not carried by contrast.",
-};
+} satisfies Record<string, string>;
 
 /**
  * Pairs that fail today and are NOT by design — the sweep's first catch, with
@@ -1589,7 +1589,7 @@ const BELOW_AA_BY_DESIGN: Record<string, string> = {
  * suppression file every such list becomes. `app/app.css` belongs to another
  * workstream this pass, so these are recorded rather than edited.
  */
-const UNFIXED_BELOW_AA: Record<string, { themes: readonly string[]; why: string }> = {
+const UNFIXED_BELOW_AA = {
   ".goal-edit-btn": {
     themes: ["light"],
     why: "the board goal's `edit` control puts --blue on the page at .75rem — 3.84:1. --blue is the ACCENT token (borders, rings, washes); --blue-pressed (8.30:1) is the one that carries text, and 30 other rules already use it that way. Dark's lighter --blue clears the bar, so this is a light-theme-only fix.",
@@ -1630,7 +1630,7 @@ const UNFIXED_BELOW_AA: Record<string, { themes: readonly string[]; why: string 
     themes: ["light", "dark"],
     why: "` · N earlier lines not loaded` next to the load-older button, #5f6a85 on #0e1117 — 3.50:1. It is the console's only statement about what the reader is NOT seeing, so dimness costs more here than anywhere else in the ladder.",
   },
-};
+} satisfies Record<string, { themes: readonly string[]; why: string }>;
 
 /** `${theme} ${selector}` for every pair the baseline records. */
 const UNFIXED_KEYS = Object.entries(UNFIXED_BELOW_AA).flatMap(([selector, entry]) =>
@@ -1658,9 +1658,11 @@ type Pair = {
   where: string;
 };
 
+type Sweep = { pairs: Pair[]; unresolved: string[]; containerHits: Set<string> };
+
 /** The sweep. For every rule that sets a text colour, in both themes: resolve
  *  the colour, work out what is behind it, and measure. */
-function sweep(): { pairs: Pair[]; unresolved: string[]; containerHits: Set<string> } {
+function sweep(): Sweep {
   const pairs: Pair[] = [];
   const unresolved: string[] = [];
   const containerHits = new Set<string>();
@@ -1726,7 +1728,7 @@ function sweep(): { pairs: Pair[]; unresolved: string[]; containerHits: Set<stri
       }
       if (behind === ambient) {
         for (const atom of [...part.matchAll(/\.([-\w]+)/g)].map((m) => m[1])) {
-          const nest = RENDERED_INSIDE[atom];
+          const nest = RENDERED_INSIDE.get(atom);
           const paint = nest ? opaquePaint(nest.container) : null;
           if (nest && paint) {
             containerHits.add(atom);
@@ -1750,7 +1752,7 @@ function sweep(): { pairs: Pair[]; unresolved: string[]; containerHits: Set<stri
           ? [[own, bg.rgb]]
           : behind.map(([name, base]) => [`${own} over ${name}`, over(bg, base)] as const);
       }
-      const need = GLYPH_NOT_TEXT[part] || largeText(decls) ? 3 : 4.5;
+      const need = GLYPH_NOT_TEXT.has(part) || largeText(decls) ? 3 : 4.5;
       for (const [name, backdrop] of behind) {
         pairs.push({
           key: `${theme} ${part}`,
@@ -1826,7 +1828,7 @@ describe("app.css: every pair it paints clears WCAG AA, in both themes (R19-12)"
     // An entry that no longer changes an outcome is a stale claim about the
     // sheet. `ALLOW_SUBSTRINGS` taught this file that lesson once already.
     const dead: string[] = [];
-    for (const selector of Object.keys(GLYPH_NOT_TEXT)) {
+    for (const selector of GLYPH_NOT_TEXT.keys()) {
       const mine = pairs.filter((p) => p.selector === selector);
       if (!mine.length) dead.push(`GLYPH_NOT_TEXT ${selector}: matches no rule`);
       else if (mine.every((p) => p.ratio >= 4.5)) {
@@ -1840,7 +1842,7 @@ describe("app.css: every pair it paints clears WCAG AA, in both themes (R19-12)"
         dead.push(`BELOW_AA_BY_DESIGN ${selector}: passes now — delete it`);
       }
     }
-    for (const atom of Object.keys(RENDERED_INSIDE)) {
+    for (const atom of RENDERED_INSIDE.keys()) {
       if (!containerHits.has(atom)) dead.push(`RENDERED_INSIDE ${atom}: never consulted`);
     }
     expect(dead.sort()).toEqual([]);
@@ -1848,10 +1850,10 @@ describe("app.css: every pair it paints clears WCAG AA, in both themes (R19-12)"
 
   it("makes every exemption say why, in the sheet's own terms", () => {
     const entries = [
-      ...Object.entries(GLYPH_NOT_TEXT),
+      ...GLYPH_NOT_TEXT,
       ...Object.entries(BELOW_AA_BY_DESIGN),
       ...Object.entries(UNFIXED_BELOW_AA).map(([k, v]) => [k, v.why] as const),
-      ...Object.entries(RENDERED_INSIDE).map(([k, v]) => [k, v.why] as const),
+      ...[...RENDERED_INSIDE].map(([k, v]) => [k, v.why] as const),
     ];
     for (const [name, why] of entries) {
       expect(why.length, `${name} needs a real reason, not a label`).toBeGreaterThan(60);
@@ -2037,7 +2039,7 @@ const ELEMENTS = jsxElements();
  * in it turns interactive or reaches for a component outside this map — and an
  * entry no width-hidden scope consults fails the rot guard.
  */
-const RENDERS_NO_CONTROL: Record<string, { file: string; why: string }> = {
+const RENDERS_NO_CONTROL = {
   Icon: {
     file: "app/ui/icon.tsx",
     why: "renders exactly one `aria-hidden=\"true\"` <svg> whose body is a path string from ICON_PATHS — a glyph by construction, with no handler, no href and no children of its own.",
@@ -2046,7 +2048,7 @@ const RENDERS_NO_CONTROL: Record<string, { file: string; why: string }> = {
     file: "app/ui/pill.tsx",
     why: "renders one status <span class=\"pill …\"> (plus an optional dot <span>). The interactive pills elsewhere in the app (`button.pill` — the notification filter, the live-paused retry) are plain DOM buttons, not this component, so the sweep still sees them as controls.",
   },
-};
+} satisfies Record<string, { file: string; why: string }>;
 
 /** A component boundary is OPAQUE to a file-local scan: `<StageMenu>` inside
  *  board-page.tsx's `.card-move` renders its <button> over in stage-menu.tsx,
@@ -2122,12 +2124,12 @@ function removesTheElement(decls: Map<string, string>): string | null {
  * reachable another way at that width. Every entry says HOW — "it is only a
  * label" is a claim about the markup that the reader can check.
  */
-const HIDDEN_BY_DESIGN: Record<string, string> = {
+const HIDDEN_BY_DESIGN = {
   ".crumbs .crumb-root": "topbar tier 1 drops the project crumb at 1080px. The destination is the board, which the project rail links from every width — INTENT §4 keeps the rail's width at every breakpoint precisely so the crumbs can truncate. Navigation duplicated, not removed.",
   ".crumbs .crumb-mid": "topbar tier 2 drops the middle crumb at 760px. Same duplication: the view it links to is a rail item, and at 720px the rail becomes an overlay that still lists all of them.",
   ".home-top .top-search input": "P16-G3. At 900px Home's finder collapses to its `.kbd` BUTTON, which becomes the whole 36×36 box and opens the command palette — the same search over the same projects. The capability moves to a control a phone can actually use; it is not withdrawn. The three tests in `app.css palette reachability on touch` pin the replacement.",
   ".pj-row .pj-stats .pill": "the 1100px tier drops the least load-bearing stat from a Home project ROW. `.pill` is a shared chip class that is a <button> elsewhere (the notification filter, the topbar's live-paused retry), and the ancestors here live in a different component from the pills, so the sweep widens to every `.pill` and picks those buttons up. The pills this rule reaches are project-cards.tsx spans inside `.pj-stats`, and the same numbers stay on the project's own page.",
-};
+} satisfies Record<string, string>;
 
 /**
  * Width-scoped hiding that DOES cost the viewer a control. Recorded exactly,
@@ -2143,9 +2145,9 @@ const UNFIXED_HIDDEN: Record<string, string> = {};
 /** Files allowed to read the viewport, and what they do with it. A read that
  *  changes WHAT IS RENDERED is the thing the contract bans; these move things
  *  that are already there. */
-const VIEWPORT_READS: Record<string, string> = {
+const VIEWPORT_READS = {
   "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
-};
+} satisfies Record<string, string>;
 
 type Hidden = {
   selector: string;
@@ -2156,10 +2158,12 @@ type Hidden = {
   inside: Element[];
 };
 
+type HiddenSweep = { rules: Hidden[]; suppressed: Set<string> };
+
 /** Every width-scoped rule that removes an element, with the controls it takes
  *  with it — plus which RENDERS_NO_CONTROL entries a hidden scope actually
  *  consulted, so an entry that suppresses nothing can fail the rot guard. */
-function hiddenControls(): { rules: Hidden[]; suppressed: Set<string> } {
+function hiddenControls(): HiddenSweep {
   const out: Hidden[] = [];
   const suppressed = new Set<string>();
   for (const rule of RULES) {

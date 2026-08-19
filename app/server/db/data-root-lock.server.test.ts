@@ -62,6 +62,7 @@ describe("acquireDataRootLock", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(DataRootLockedError);
+    // SAFETY: the assertion above already failed the test if it is not one.
     const err = thrown as DataRootLockedError;
     expect(err.verdict).toBe("held");
     expect(err.holder).toEqual(HOST_A);
@@ -104,8 +105,12 @@ describe("acquireDataRootLock", () => {
     } catch (error) {
       thrown = error;
     }
-    expect((thrown as DataRootLockedError).verdict).toBe("unknown-holder");
-    expect((thrown as DataRootLockedError).message).toContain("holder is unknown");
+    // SAFETY: `acquire` refuses a lock it cannot take by throwing
+    // DataRootLockedError — its only throw that is not a re-raised fs error —
+    // and an unreadable holder file is exactly that refusal.
+    const refusal = thrown as DataRootLockedError;
+    expect(refusal.verdict).toBe("unknown-holder");
+    expect(refusal.message).toContain("holder is unknown");
 
     const forced = acquire(dataRoot, HOST_A_OTHER, { force: true });
     expect(forced.holder).toEqual(HOST_A_OTHER);
@@ -353,8 +358,12 @@ describe("verifyLockOwnership (injected probes)", () => {
 describe("startDataRootLockGuard (F18-5)", () => {
   afterEach(() => stopDataRootLockGuard());
 
+  // SAFETY: the guard reads a lock's `path` and hands the whole object to the
+  // injected `verify`/`onStolen` below — it never touches `fd`, `release()`,
+  // `abandon()` or `verifyOwnership()`, so a two-field stand-in drives every
+  // branch these three tests exercise.
   const fakeLock = (path = "/x/writer.lock") =>
-    ({ path, holder: HOST_A }) as unknown as DataRootLock;
+    ({ path, holder: HOST_A }) as DataRootLock;
 
   it("loudly shuts down and stops itself when a tick sees a stolen lock", () => {
     vi.useFakeTimers();

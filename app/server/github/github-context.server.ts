@@ -6,6 +6,7 @@ import {
 import {
   createGithubClient,
   type GithubClient,
+  type GithubClientOptions,
 } from "./github-client.server";
 
 /**
@@ -48,6 +49,10 @@ export function getProjectGithubContext(
   projectSlug: string,
   options: GithubContextOptions = {},
 ): GithubContextResult {
+  // SAFETY: the SELECT names two `projects` columns — `repo` is nullable TEXT
+  // and `default_branch` TEXT NOT NULL DEFAULT 'main' (0001_baseline.sql, so
+  // the nullable read below is a defensive widening); `get` returns exactly
+  // those two columns for the slug's row, or undefined when there is none.
   const projectRow = db
     .prepare(`SELECT repo, default_branch FROM projects WHERE slug = ?`)
     .get(projectSlug) as
@@ -64,12 +69,14 @@ export function getProjectGithubContext(
     return { status: "no_pat_configured", repo };
   }
 
+  const clientOptions: GithubClientOptions = { token };
+  // Optional key: set only when a caller supplied a transport (tests), so the
+  // client falls back to global fetch on every production path.
+  if (options.fetchImpl) clientOptions.fetchImpl = options.fetchImpl;
+
   return {
     status: "ok",
-    client: createGithubClient({
-      token,
-      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    }),
+    client: createGithubClient(clientOptions),
     repo,
     owner: repo.split("/")[0] ?? repo,
     defaultBranch: projectRow?.default_branch || "main",

@@ -19,6 +19,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import type { AgentDeployment } from "~/schemas/project-file.schema";
 import {
   deliveringEngagement,
   supportingEngagements,
@@ -93,7 +94,9 @@ async function waitForLines(
 /** Re-write the store's project.md with a deployed `dev` specialist (claude
  *  by default; pass ["codex"] to simulate editing the profile to the other
  *  backend after assignment). */
-function deployDevSpecialist(backends: string[] = ["claude"]): void {
+function deployDevSpecialist(
+  backends: ("codex" | "claude")[] = ["claude"],
+): void {
   const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
   const fm = file.parsed.frontmatter;
   writeProject(store.dataRoot, {
@@ -115,7 +118,7 @@ function deployDevSpecialist(backends: string[] = ["claude"]): void {
           model: "sonnet",
           effort: "xhigh",
         },
-      } as never,
+      },
     ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -305,7 +308,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
           capabilities: [],
           extras: [],
           definition: { kind: "specialist", name: id, role: id, backends: ["claude"], model: "sonnet" },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -435,7 +438,7 @@ describe("startSpecialistRun", () => {
       sdk: "Claude Agent SDK",
       state: "running",
       startedAt: "2026-07-16T00:00:00.000Z",
-    } as Parameters<typeof upsertRun>[1]);
+    });
     await expect(
       startAgentRun(
         store.db,
@@ -466,7 +469,7 @@ describe("startSpecialistRun", () => {
             effort: "xhigh",
             stages: ["review"], // eligible ONLY at review
           },
-        } as never,
+        },
       ],
     });
     // VIB-1 is at `impl` (from beforeEach) with `dev` assigned — an ineligible
@@ -684,24 +687,27 @@ describe("assignReviewer / removeReviewer", () => {
     function deployReviewPanel(): void {
       const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
         .parsed.frontmatter;
-      const specialist = (profileId: string, role: string, verdict: boolean) =>
-        ({
-          profileId,
-          capabilities: [
-            {
-              capabilityId: "report-validation-verdict",
-              mode: verdict ? "direct" : "off",
-            },
-          ],
-          extras: [],
-          definition: {
-            kind: "specialist",
-            name: profileId,
-            role,
-            backends: ["claude"],
-            model: "sonnet",
+      const specialist = (
+        profileId: string,
+        role: string,
+        verdict: boolean,
+      ): AgentDeployment => ({
+        profileId,
+        capabilities: [
+          {
+            capabilityId: "report-validation-verdict",
+            mode: verdict ? "direct" : "off",
           },
-        }) as never;
+        ],
+        extras: [],
+        definition: {
+          kind: "specialist",
+          name: profileId,
+          role,
+          backends: ["claude"],
+          model: "sonnet",
+        },
+      });
       writeProject(store.dataRoot, {
         ...fm,
         repo: null,
@@ -825,7 +831,7 @@ describe("assignReviewer / removeReviewer", () => {
             backends: ["claude"], model: "sonnet", effort: "xhigh",
             stages: ["review"],
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1019,7 +1025,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
             backends: ["claude"],
             model: "claude-sonnet-4-5",
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1109,7 +1115,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
             backends: ["codex"],
             model: "gpt-5-codex",
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1163,7 +1169,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
             backends: ["codex"],
             model: "gpt-5-codex",
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1209,7 +1215,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
             backends: ["claude"],
             model: "sonnet",
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1949,7 +1955,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
             backends: ["claude"], model: "sonnet",
             resources: { skills: [], mcps: [], kb: deliverKb },
           },
-        } as never,
+        },
         {
           profileId: "critic",
           capabilities: [],
@@ -1959,7 +1965,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
             backends: ["claude"], model: "sonnet",
             resources: { skills: [], mcps: [], kb: reviewKb },
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -2027,7 +2033,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
             backends: ["claude"], model: "sonnet",
             resources: { skills: ["deliverer-craft"], mcps: [], kb: ["shared-kb"] },
           },
-        } as never,
+        },
         {
           profileId: "critic", capabilities: [], extras: [],
           definition: {
@@ -2035,7 +2041,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
             backends: ["claude"], model: "sonnet",
             resources: { skills: [], mcps: [], kb: [] },
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -2114,7 +2120,10 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
   const exec = promisify(execFile);
 
   /** Deploy `dev` on `backends`, granting `skills`, on a project with a repo. */
-  function deployWithSkills(skills: string[], backends = ["claude"]): void {
+  function deployWithSkills(
+    skills: string[],
+    backends: ("codex" | "claude")[] = ["claude"],
+  ): void {
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     writeProject(store.dataRoot, {
@@ -2130,7 +2139,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
             backends, model: backends[0] === "codex" ? "gpt-5-codex" : "sonnet",
             resources: { skills, mcps: [], kb: [] },
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -2572,7 +2581,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
               backends: ["claude"], model: "sonnet",
               resources: { skills: ["deliverer-craft"], mcps: [], kb: ["house-kb"] },
             },
-          } as never,
+          },
           {
             profileId: "critic", capabilities: [], extras: [],
             definition: {
@@ -2580,7 +2589,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
               backends: ["claude"], model: "sonnet",
               resources: { skills: ["critic-craft"], mcps: [], kb: [] },
             },
-          } as never,
+          },
         ],
       });
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -2894,7 +2903,7 @@ describe("P19-G11 — the run records what it was given", () => {
             model: "sonnet",
             resources: { skills: [], mcps: [], kb: ["house-style"] },
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -2938,7 +2947,7 @@ describe("P19-G11 — the run records what it was given", () => {
             model: "sonnet",
             resources: { skills: [], mcps: [], kb: ["house-style"] },
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -3005,7 +3014,7 @@ describe("P19-G11 — the run records what it was given", () => {
             model: "sonnet",
             resources: { skills: ["conventional-commits"], mcps: [], kb: [] },
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });

@@ -6,7 +6,10 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import type { PolicyViewData } from "./policy-query.server";
+import type {
+  loader as policyLoader,
+  action as policyAction,
+} from "~/routes/project.policy";
 import { RBAC_ROWS, ROLE_IDS } from "./policy-data";
 
 /**
@@ -18,7 +21,39 @@ import { RBAC_ROWS, ROLE_IDS } from "./policy-data";
  */
 
 let app: AppTestContext;
-let ids: { arda: string; elif: string; murat: string; selin: string };
+let ids: SeededUserIds;
+
+/** The seeded humans every request in this file is issued as. */
+interface SeededUserIds {
+  arda: string;
+  elif: string;
+  murat: string;
+  selin: string;
+}
+
+type PolicyLoaderData = Awaited<ReturnType<typeof policyLoader>>;
+type PolicyActionData = Awaited<ReturnType<typeof policyAction>>;
+
+/**
+ * The accept arm: both intents answer a permitted change with this object
+ * directly, no `data()` envelope around it.
+ */
+interface PolicyAccepted {
+  ok: true;
+  toast: string;
+}
+
+/**
+ * The refusal arm. Every guard in routes/project.policy raises an AppError that
+ * the action's single catch hands to `appErrorResponse`, i.e.
+ * `data({ ok: false, error }, { status })` — so on this arm `init` always exists
+ * and carries a numeric status, where react-router types `data()`'s `init` as
+ * the general `ResponseInit | null`.
+ */
+interface PolicyRefusal {
+  data: { ok: false; error: string };
+  init: { status: number };
+}
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -34,17 +69,24 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-async function runLoader(userId: string): Promise<{ view: PolicyViewData }> {
+async function runLoader(userId: string): Promise<PolicyLoaderData> {
   const { loader } = await import("~/routes/project.policy");
   const { cookie } = await app.cookieFor(userId);
-  return (await loader({
+  // SAFETY: the loader destructures `request` and `params` and nothing else;
+  // React Router's generated `LoaderArgs` additionally carries the framework's
+  // `context` provider, which cannot be built outside a real router and which
+  // no path under test reads.
+  return loader({
     request: app.request("/projects/viberr-core/policy", { cookie }),
     params: { slug: "viberr-core" },
     context: {},
-  } as never)) as { view: PolicyViewData };
+  } as never);
 }
 
-async function postAction(userId: string, fields: Record<string, string>) {
+async function postAction(
+  userId: string,
+  fields: Record<string, string>,
+): Promise<PolicyActionData> {
   const { action } = await import("~/routes/project.policy");
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
@@ -55,6 +97,8 @@ async function postAction(userId: string, fields: Record<string, string>) {
     body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
+  // SAFETY: as in runLoader — the action reads `request` and `params` only, so
+  // this stub carries everything the call executes.
   return action({ request, params: { slug: "viberr-core" }, context: {} } as never);
 }
 
@@ -135,20 +179,24 @@ describe("loader", () => {
 
 describe("set-role", () => {
   it("rejects a maintainer (Manage members & roles is admin-only)", async () => {
+    // SAFETY: a maintainer fails the admin-only capability check, which raises
+    // an AppError the action answers through `appErrorResponse`.
     const result = (await postAction(ids.murat, {
       intent: "set-role",
       userId: ids.selin,
       role: "viewer",
-    })) as { init?: { status?: number } };
+    })) as PolicyRefusal;
     expect(result.init?.status).toBe(403);
   });
 
   it("round trip: project.md → projection → audit → toast, chip appears", async () => {
+    // SAFETY: arda is a project admin demoting someone else, so `setMemberRole`
+    // runs to completion and the action returns its accept arm.
     const result = (await postAction(ids.arda, {
       intent: "set-role",
       userId: ids.selin,
       role: "viewer",
-    })) as { ok: boolean; toast: string };
+    })) as PolicyAccepted;
     expect(result).toEqual({
       ok: true,
       toast: "Selin is now Viewer · enforced on the next action",
@@ -161,6 +209,9 @@ describe("set-role", () => {
     );
     expect(file).toMatch(new RegExp(`userId: ${ids.selin}\\s*\\n\\s*role: viewer`));
     // …projection follows…
+    // SAFETY: the SELECT list is the single column `role`, which
+    // `project_members` declares TEXT NOT NULL in 0001_baseline, and the row
+    // exists because the round trip above just wrote it.
     const row = app.db
       .prepare(
         `SELECT role FROM project_members WHERE project_slug = 'viberr-core' AND user_id = ?`,
@@ -196,52 +247,61 @@ describe("set-role", () => {
 
   it("last-admin guard: demoting the only admin is blocked server-side", async () => {
     // Two seeded admins — demote elif first (allowed, arda remains).
+    // SAFETY: a second admin remains, so the last-admin guard passes and the
+    // action returns its accept arm.
     const demoteElif = (await postAction(ids.arda, {
       intent: "set-role",
       userId: ids.elif,
       role: "maintainer",
-    })) as { ok: boolean };
+    })) as PolicyAccepted;
     expect(demoteElif.ok).toBe(true);
 
     // Now arda is the only admin — self-demotion must be refused.
+    // SAFETY: the last-admin guard raises an AppError here, which the action
+    // answers through `appErrorResponse`.
     const demoteArda = (await postAction(ids.arda, {
       intent: "set-role",
       userId: ids.arda,
       role: "viewer",
-    })) as { init?: { status?: number }; data?: { error?: string } };
+    })) as PolicyRefusal;
     expect(demoteArda.init?.status).toBe(409);
     expect(demoteArda.data?.error).toBe(
       "Viberr Core needs at least one admin — promote someone else first",
     );
 
     // Restore elif.
+    // SAFETY: a promotion by an admin, so the action returns its accept arm.
     const restore = (await postAction(ids.arda, {
       intent: "set-role",
       userId: ids.elif,
       role: "admin",
-    })) as { ok: boolean };
+    })) as PolicyAccepted;
     expect(restore.ok).toBe(true);
   });
 });
 
 describe("set-boundary", () => {
   it("rejects a reviewer (Edit workflow & policy is admin-only)", async () => {
+    // SAFETY: a contributor fails the admin-only capability check, which raises
+    // an AppError the action answers through `appErrorResponse`.
     const result = (await postAction(ids.selin, {
       intent: "set-boundary",
       from: "impl",
       to: "review",
       boundary: "auto",
-    })) as { init?: { status?: number } };
+    })) as PolicyRefusal;
     expect(result.init?.status).toBe(403);
   });
 
   it("persists a boundary change with the verbatim toast + audit", async () => {
+    // SAFETY: an admin editing an unlocked boundary, so `setTransitionBoundary`
+    // runs to completion and the action returns its accept arm.
     const result = (await postAction(ids.arda, {
       intent: "set-boundary",
       from: "impl",
       to: "review",
       boundary: "auto",
-    })) as { ok: boolean; toast: string };
+    })) as PolicyAccepted;
     expect(result).toEqual({
       ok: true,
       toast: "In Progress → Review: auto-advance · applies to future transitions",
@@ -277,12 +337,14 @@ describe("set-boundary", () => {
   });
 
   it("review→done stays LOCKED human — server hard-reject", async () => {
+    // SAFETY: the locked-boundary guard raises an AppError even for an admin,
+    // which the action answers through `appErrorResponse`.
     const result = (await postAction(ids.arda, {
       intent: "set-boundary",
       from: "review",
       to: "done",
       boundary: "auto",
-    })) as { init?: { status?: number }; data?: { error?: string } };
+    })) as PolicyRefusal;
     expect(result.init?.status).toBe(403);
     expect(result.data?.error).toBe(
       "Completion is human-authorized in V1 — this boundary can't be delegated",

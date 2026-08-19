@@ -10,7 +10,7 @@ import {
 } from "~/features/policy/policy-data";
 import type { BackendCredentialHealth } from "~/server/runtimes/runtime-registry.server";
 import { useCsrfToken } from "~/ui/csrf-input";
-import { Icon, type IconName } from "~/ui/icon";
+import { Icon, type IconName, storeIcon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
@@ -129,7 +129,7 @@ function ProfileGlyph({ a, lg }: { a: AgentProfileView; lg?: boolean }) {
       }
       title={profileRoleLabel(a.name, a.role, a.kind)}
     >
-      <Icon name={a.icon as IconName} />
+      <Icon name={storeIcon(a.icon)} />
     </span>
   );
 }
@@ -1087,6 +1087,14 @@ type ProfileActionResult =
     }
   | { ok: false; error: string };
 
+/** The form fields a profile create/edit posts to the route action. */
+type ProfileSubmitFields = {
+  intent: "create-profile" | "update-profile";
+  _csrf: string;
+  payload: string;
+  profileId?: string;
+};
+
 export function AgentsPage({
   profiles,
   library,
@@ -1110,7 +1118,7 @@ export function AgentsPage({
   workflow: WorkflowEdgeView[];
   projectSlug: string;
   projectName: string;
-  myRole: string | null;
+  myRole: ProjectRole | null;
   /** Live store resources for the profile-editor picker (F6/item-2). */
   resourceCatalog?: readonly ResCatalogGroup[];
   /** Per-backend credential availability — the create/edit modal disables a
@@ -1126,7 +1134,7 @@ export function AgentsPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<ProfileActionResult>();
 
-  const canManage = roleCan(myRole as ProjectRole | null, "manage-agents");
+  const canManage = roleCan(myRole, "manage-agents");
   // P13-UI-58 residual: `?profile=`/`?tab=` were READ once at mount and never
   // written back, so the selection was unlinkable, un-bookmarkable and lost on
   // reload — and a pasted `?tab=live` did nothing at all. The URL is the state:
@@ -1233,15 +1241,14 @@ export function AgentsPage({
 
   const submitProfile = (payload: ProfileFormPayload) => {
     setFormError(null);
-    fetcher.submit(
-      {
-        intent: editing ? "update-profile" : "create-profile",
-        _csrf: csrf,
-        ...(editing ? { profileId: editing.id } : {}),
-        payload: JSON.stringify(payload),
-      },
-      { method: "post" },
-    );
+    const fields: ProfileSubmitFields = {
+      intent: editing ? "update-profile" : "create-profile",
+      _csrf: csrf,
+      payload: JSON.stringify(payload),
+    };
+    // Only an edit names a profile; create posts no `profileId` field.
+    if (editing) fields.profileId = editing.id;
+    fetcher.submit(fields, { method: "post" });
   };
 
   const deployFromLibrary = (profileId: string) => {

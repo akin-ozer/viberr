@@ -208,5 +208,7 @@ export function guardrailValue(
   const g = project?.parsed.frontmatter.guardrails?.find(
     (x) => x.id === id && x.on === true,
   );
-  return typeof g?.value === "number" && g.value > 0 ? g.value : null;
+  // `value` is already a parsed number-or-absent (guardrailSchema) — the only
+  // thing left to decide is whether the project configured a usable one.
+  return g?.value != null && g.value > 0 ? g.value : null;
 }

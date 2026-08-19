@@ -17,6 +17,7 @@ import {
   deleteAgentProfile,
   deployAgentProfileFromLibrary,
   updateAgentProfile,
+  type ProfileSaveResult,
 } from "~/features/agents/agent-profile-actions.server";
 import {
   assembleAgentRoster,
@@ -102,6 +103,35 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   };
 }
 
+/** Any value `JSON.parse` can hand back. The profile form is validated against
+ *  the server's own schema INSIDE each mutation — after its RBAC gate — so this
+ *  route only decodes the transport, it does not judge the content. */
+type JsonPayload =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonPayload[]
+  | { [key: string]: JsonPayload };
+
+/** The success reply every profile mutation here answers with. Both notices are
+ *  OMITTED unless the save actually produced one — the agents page keys its
+ *  extra toasts on the key being there, not on its value. */
+interface ProfileMutationSuccess {
+  ok: true;
+  toast: string;
+  profileId: string;
+  /** B-AG1: a delivery-headline decision the save had to make is NOT a detail
+   *  for the audit log alone. A `withheld` notice means the profile was saved
+   *  exactly as asked and therefore cannot deliver — the admin sees that next to
+   *  the success toast instead of discovering it when a run silently refuses to
+   *  push. */
+  notice?: ProfileSaveResult["notice"];
+  /** F20-20: an operator autonomy elevation / direct-accept grant rides its own
+   *  governance notice so the toast names what the admin just enabled. */
+  governanceNotice?: ProfileSaveResult["governanceNotice"];
+}
+
 export async function action({ request, params }: Route.ActionArgs) {
   const { db, formData, actor, intent } = await requireFormAction(request);
 
@@ -111,7 +141,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   // every other surface answered 404. Same placement as project.board.tsx.
   requireVisibleProject(db, params.slug, actor, "act on this project");
 
-  const parsePayload = (): unknown => {
+  const parsePayload = (): JsonPayload => {
     try {
       return JSON.parse(String(formData.get("payload") ?? "{}"));
     } catch {
@@ -126,17 +156,13 @@ export async function action({ request, params }: Route.ActionArgs) {
         { projectSlug: params.slug, form: parsePayload() },
         actor,
       );
-      return {
-        ok: true as const,
+      const created: ProfileMutationSuccess = {
+        ok: true,
         toast: `Profile "${result.name}" created — available for future assignments`,
         profileId: result.profileId,
-        // B-AG1: a delivery-headline decision the save had to make is NOT a
-        // detail for the audit log alone. A `withheld` notice means the profile
-        // was saved exactly as asked and therefore cannot deliver — the admin
-        // sees that next to the success toast instead of discovering it when a
-        // run silently refuses to push.
-        ...(result.notice ? { notice: result.notice } : {}),
       };
+      if (result.notice) created.notice = result.notice;
+      return created;
     }
     if (intent === "deploy-profile") {
       const result = await deployAgentProfileFromLibrary(
@@ -147,12 +173,13 @@ export async function action({ request, params }: Route.ActionArgs) {
         },
         actor,
       );
-      return {
-        ok: true as const,
+      const deployed: ProfileMutationSuccess = {
+        ok: true,
         toast: `"${result.name}" added from the global library — the operator can assign it now`,
         profileId: result.profileId,
-        ...(result.notice ? { notice: result.notice } : {}),
       };
+      if (result.notice) deployed.notice = result.notice;
+      return deployed;
     }
     if (intent === "update-profile") {
       const result = await updateAgentProfile(
@@ -164,17 +191,15 @@ export async function action({ request, params }: Route.ActionArgs) {
         },
         actor,
       );
-      return {
-        ok: true as const,
+      const updated: ProfileMutationSuccess = {
+        ok: true,
         toast: `Profile "${result.name}" updated — changes apply to future assignments`,
         profileId: result.profileId,
-        ...(result.notice ? { notice: result.notice } : {}),
-        // F20-20: an operator autonomy elevation / direct-accept grant rides its
-        // own governance notice so the toast names what the admin just enabled.
-        ...(result.governanceNotice
-          ? { governanceNotice: result.governanceNotice }
-          : {}),
       };
+      if (result.notice) updated.notice = result.notice;
+      if (result.governanceNotice)
+        updated.governanceNotice = result.governanceNotice;
+      return updated;
     }
     if (intent === "delete-profile") {
       const result = await deleteAgentProfile(

@@ -16,6 +16,22 @@ import { storeRelativePath } from "../files/file-store-root.server";
  * stay small and secret-free — ids, counts, paths, never tokens or file bodies.
  */
 
+/**
+ * A `details` value as it survives the round trip through `details_json` — the
+ * JSON scalars, arrays and nested maps, and nothing else, so a caller cannot
+ * hand over a value `JSON.stringify` flattens to `{}` and leave a field name
+ * with no fact under it. (`audit-recorder.server.ts` states the same contract
+ * for its own blob column; the two tables share nothing else.)
+ */
+export type ProvenanceDetailValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | readonly ProvenanceDetailValue[]
+  | { [key: string]: ProvenanceDetailValue };
+
 export interface ProvenanceRecord {
   /** Store-relative path, e.g. `projects/viberr-core/tasks/VIB-142/task.md`. */
   sourcePath: string;
@@ -24,7 +40,7 @@ export interface ProvenanceRecord {
   contentHash?: string | null;
   /** `projected` | `removed` | `error` | `rescan` | `github.reconcile` | … */
   action: string;
-  details?: Record<string, unknown>;
+  details?: { [key: string]: ProvenanceDetailValue };
   /** Injectable observation time (tests / batch runs). Defaults to now. */
   observedAt?: string;
 }

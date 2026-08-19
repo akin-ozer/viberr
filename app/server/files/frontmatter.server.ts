@@ -1,4 +1,5 @@
 import YAML from "yaml";
+import { z } from "zod";
 import {
   diagError,
   type FileDiagnostic,
@@ -10,6 +11,12 @@ import {
  * Tolerant: a missing or unparseable frontmatter block yields diagnostics
  * and an empty mapping — never a throw.
  */
+
+/** A YAML mapping as this store reads and writes one: keys exactly as
+ * written, values still undecoded (the file schemas decode them field by
+ * field, and the keys they do not know are round-tripped verbatim). */
+export const yamlMappingSchema = z.record(z.string(), z.unknown());
+export type YamlMapping = z.infer<typeof yamlMappingSchema>;
 
 export interface FrontmatterSplit {
   /** Parsed YAML value (unknown — validate with the file schemas). */
@@ -55,9 +62,8 @@ export function splitFrontmatter(content: string): FrontmatterSplit {
   const afterFence = text.slice(closeIdx + 1 + FENCE.length);
   const body = afterFence.startsWith("\n") ? afterFence.slice(1) : afterFence;
 
-  let data: unknown = {};
   try {
-    data = YAML.parse(yamlText) ?? {};
+    return { data: YAML.parse(yamlText) ?? {}, body, diagnostics };
   } catch (error) {
     diagnostics.push(
       diagError(
@@ -67,17 +73,13 @@ export function splitFrontmatter(content: string): FrontmatterSplit {
         true,
       ),
     );
+    return { data: {}, body, diagnostics };
   }
-  return { data, body, diagnostics };
 }
 
 /** Stable YAML serialization: no line folding (round-trip friendly). */
-export function toYaml(value: unknown): string {
+export function toYaml(value: YamlMapping): string {
   return YAML.stringify(value, { lineWidth: 0 });
-}
-
-export function parseYaml(text: string): unknown {
-  return YAML.parse(text);
 }
 
 /**
@@ -85,11 +87,11 @@ export function parseYaml(text: string): unknown {
  * with preserved unknown fields, then the body.
  */
 export function serializeFrontmatterFile(
-  known: Record<string, unknown>,
-  unknown: Record<string, unknown>,
+  known: YamlMapping,
+  unknown: YamlMapping,
   body: string,
 ): string {
-  const merged: Record<string, unknown> = { ...known };
+  const merged: YamlMapping = { ...known };
   for (const [k, v] of Object.entries(unknown)) {
     if (!(k in merged)) merged[k] = v;
   }

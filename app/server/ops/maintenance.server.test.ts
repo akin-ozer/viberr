@@ -11,7 +11,7 @@ import {
 import { taskDir } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import type { DiskSpace } from "./disk-space.server";
+import { formatBytes, measureDataRootSpace } from "./disk-space.server";
 
 /**
  * Gaps 15 + 20 + 16 — retention existed but ran ONCE, at boot, which coupled
@@ -20,21 +20,6 @@ import type { DiskSpace } from "./disk-space.server";
  * one guard that makes a mid-flight workspace reclaim safe, and the free-space
  * watch that acts instead of only reporting.
  */
-
-/** Fake free space for the disk-pressure tests; undefined = measure for real. */
-let fakeDisk: DiskSpace | null | undefined;
-
-vi.mock("./disk-space.server", async () => {
-  const actual =
-    await vi.importActual<typeof import("./disk-space.server")>(
-      "./disk-space.server",
-    );
-  return {
-    ...actual,
-    measureDataRootSpace: (dataRoot?: string) =>
-      fakeDisk === undefined ? actual.measureDataRootSpace(dataRoot) : fakeDisk,
-  };
-});
 
 const {
   activeRunCount,
@@ -51,7 +36,8 @@ const ctx = createTestDbContext();
 
 afterEach(() => {
   resetMaintenanceStateForTests();
-  fakeDisk = undefined;
+  delete process.env.VIBERR_DISK_LOW_FREE_MB;
+  delete process.env.VIBERR_DISK_CRITICAL_FREE_MB;
   vi.useRealTimers();
   vi.restoreAllMocks();
   ctx.cleanup();
@@ -246,32 +232,37 @@ describe("startMaintenanceScheduler (gap 15)", () => {
 });
 
 describe("checkDiskPressure (gap 16)", () => {
-  const space = (freeBytes: number): DiskSpace => ({
-    freeBytes,
-    totalBytes: 100 * 1024 * 1024 * 1024,
-    usedPercent: 99,
-    status:
-      freeBytes < 512 * 1024 * 1024
-        ? "critical"
-        : freeBytes < 2 * 1024 * 1024 * 1024
-          ? "low"
-          : "ok",
-    lowThresholdBytes: 2 * 1024 * 1024 * 1024,
-    criticalThresholdBytes: 512 * 1024 * 1024,
-  });
+  /**
+   * The classification is driven through the thresholds the deployment already
+   * configures (`VIBERR_DISK_*_FREE_MB`), set relative to what the volume under
+   * the test's data root really has free — so `checkDiskPressure` runs against a
+   * real `statfs` and the status it acts on is the one the product computes.
+   * `× 2` rather than `+ 1` so a concurrent write cannot cross the line.
+   */
+  function pinThresholds(
+    dataRoot: string,
+    verdict: "low" | "critical" | "ok",
+  ): void {
+    const real = measureDataRootSpace(dataRoot);
+    if (!real) throw new Error("cannot measure the test data root");
+    const aboveFreeMb = Math.ceil((real.freeBytes * 2) / (1024 * 1024));
+    process.env.VIBERR_DISK_LOW_FREE_MB = verdict === "ok" ? "1" : String(aboveFreeMb);
+    process.env.VIBERR_DISK_CRITICAL_FREE_MB =
+      verdict === "critical" ? String(aboveFreeMb) : "1";
+  }
 
   it("warns on the transition into low space and reclaims immediately", () => {
     const store = storeWithTerminalTask();
     const workspace = seedWorkspace(store, "VIB-1");
     const warn = vi.spyOn(logger, "warn");
-    fakeDisk = space(1024 * 1024 * 1024); // 1 GiB free → low
+    pinThresholds(store.dataRoot, "low");
 
     const observed = checkDiskPressure(store.db, store.dataRoot);
 
     expect(observed?.status).toBe("low");
     expect(warn).toHaveBeenCalledWith(
       "data root is low on free space",
-      expect.objectContaining({ free: "1 GB" }),
+      expect.objectContaining({ free: formatBytes(observed!.freeBytes) }),
     );
     // Acting, not just reporting: the pass that frees the 11-16 MB clones runs
     // now rather than at the next 6-hour tick.
@@ -282,17 +273,18 @@ describe("checkDiskPressure (gap 16)", () => {
   it("escalates a critical volume to error level", () => {
     const store = storeWithTerminalTask();
     const error = vi.spyOn(logger, "error");
-    fakeDisk = space(64 * 1024 * 1024);
-    expect(checkDiskPressure(store.db, store.dataRoot)?.status).toBe("critical");
+    pinThresholds(store.dataRoot, "critical");
+    const observed = checkDiskPressure(store.db, store.dataRoot);
+    expect(observed?.status).toBe("critical");
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining("critically low on free space"),
-      expect.objectContaining({ free: "64 MB" }),
+      expect.objectContaining({ free: formatBytes(observed!.freeBytes) }),
     );
   });
 
   it("logs the TRANSITION only — not every sample", () => {
     const store = storeWithTerminalTask();
-    fakeDisk = space(1024 * 1024 * 1024);
+    pinThresholds(store.dataRoot, "low");
     checkDiskPressure(store.db, store.dataRoot);
     const warn = vi.spyOn(logger, "warn");
     checkDiskPressure(store.db, store.dataRoot);
@@ -304,7 +296,7 @@ describe("checkDiskPressure (gap 16)", () => {
     const store = storeWithTerminalTask();
     const workspace = seedWorkspace(store, "VIB-1");
     const warn = vi.spyOn(logger, "warn");
-    fakeDisk = space(50 * 1024 * 1024 * 1024);
+    pinThresholds(store.dataRoot, "ok");
     expect(checkDiskPressure(store.db, store.dataRoot)?.status).toBe("ok");
     expect(warn).not.toHaveBeenCalled();
     expect(maintenanceState().lastPassAt).toBeNull();
@@ -314,8 +306,10 @@ describe("checkDiskPressure (gap 16)", () => {
   it("reports nothing when the volume cannot be measured (never a false alarm)", () => {
     const store = storeWithTerminalTask();
     const error = vi.spyOn(logger, "error");
-    fakeDisk = null;
-    expect(checkDiskPressure(store.db, store.dataRoot)).toBeNull();
+    // A data root that is not there: `statfs` fails and the watch must stay
+    // quiet rather than read the failure as "no space".
+    const absent = path.join(store.dataRoot, "gone", "deeper");
+    expect(checkDiskPressure(store.db, absent)).toBeNull();
     expect(error).not.toHaveBeenCalled();
     expect(maintenanceState().lastPassAt).toBeNull();
   });

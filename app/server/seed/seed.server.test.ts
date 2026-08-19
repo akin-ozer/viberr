@@ -25,6 +25,8 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 function counts(db: ReturnType<typeof ctx.makeDb>) {
+  // SAFETY: every `sql` below is a `count(*) AS c` aggregate with no GROUP BY —
+  // sqlite answers each with exactly one row carrying the integer column `c`.
   const c = (sql: string) => (db.prepare(sql).get() as { c: number }).c;
   return {
     users: c(`SELECT count(*) AS c FROM users`),
@@ -187,6 +189,8 @@ describe("runSeed (clean-sheet product seed)", () => {
     expect(before.projects).toBeGreaterThan(0);
     // Board-derived leftovers that used to survive a reset (DM-3). The demo
     // fixture already carries an open scope violation; add a per-user pref too.
+    // SAFETY: the SELECT list is the single `users.id` column, and the demo seed
+    // above inserted its people — `before.projects > 0` already proved it ran.
     const anyUser = (db.prepare(`SELECT id FROM users LIMIT 1`).get() as { id: string }).id;
     db.prepare(
       `INSERT OR REPLACE INTO user_prefs (user_id, key, value_json, updated_at)

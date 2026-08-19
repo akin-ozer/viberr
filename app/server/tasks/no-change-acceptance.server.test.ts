@@ -15,7 +15,10 @@ import type {
   TaskFrontmatter,
   TaskPacket,
 } from "~/schemas/task-file.schema";
-import type { CapabilityMode } from "~/schemas/project-file.schema";
+import type {
+  AgentDeployment,
+  CapabilityMode,
+} from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -48,81 +51,76 @@ import {
  * Every test below fails against pre-R19-8 main.
  */
 
-vi.mock("~/server/github/github-context.server", () => ({
-  getProjectGithubContext: vi.fn(),
-}));
-vi.mock("~/server/github/github-reconciler.server", () => ({
-  mergeTaskPr: vi.fn(async () => ({ status: "no_pr" as const })),
-  deleteTaskRemoteBranch: vi.fn(async () => ({ status: "no_branch" as const })),
-}));
+// The GitHub surface rides `TaskActionContext`'s test seams instead of module
+// mocks: the probe and every accept-time gate run a REAL
+// `getProjectGithubContext` — a real credential on the project's repo — over
+// the canned transport `remote()` installs (`fetchImpl` on the call ctx), and
+// the acceptance merge is a typed double injected through the ctx `deps` bag.
+import type {
+  mergeTaskPr,
+  MergeTaskPrResult,
+} from "~/server/github/github-reconciler.server";
+import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 
-import { getProjectGithubContext } from "~/server/github/github-context.server";
-import { mergeTaskPr } from "~/server/github/github-reconciler.server";
-
-const ghCtxMock = vi.mocked(getProjectGithubContext);
-const mergeMock = vi.mocked(mergeTaskPr);
+const mergeMock = vi.fn<typeof mergeTaskPr>();
 
 let ctx: TestDbContext;
 let store: TestStore;
 
 const BASE_SHA = "b".repeat(40);
-const RATE_LIMIT = { limit: 5000, remaining: 4999, reset: null };
 
-function okResponse(data: unknown) {
-  return {
-    ok: true as const,
-    status: 200,
-    data,
-    etag: null,
-    rateLimit: RATE_LIMIT,
-    scopesHeader: null,
-    tokenExpiration: null,
-  };
+/** `GET /repos/{repo}/compare/{base}...{head}` as the probe consumes it —
+ *  mirrors `GhCompare` in app/server/github/branch-sync.server.ts (private
+ *  there, so the fixture restates it rather than guessing at it). */
+interface CompareBody {
+  ahead_by: number;
+  behind_by: number;
+  status: string;
+  commits: { sha: string; commit: { message: string } }[];
 }
 
-function httpError(status: number, message = "Not Found") {
-  return {
-    ok: false as const,
-    kind: "http" as const,
+/** `GET /repos/{repo}/git/ref/heads/{ref}` — the head sha of a ref. */
+interface RefBody {
+  object: { sha: string };
+}
+
+function jsonResponse(
+  body: CompareBody | RefBody | { message: string },
+  status = 200,
+): Response {
+  return new Response(JSON.stringify(body), {
     status,
-    message,
-    data: null,
-    rateLimit: RATE_LIMIT,
-  };
+    headers: { "content-type": "application/json" },
+  });
 }
 
-const requestSpy = vi.fn();
+let fetchImpl: typeof fetch;
 
 /** The remote as the probe will see it. `aheadBy: null` means the task branch
  *  does not exist at all (the VC-5 shape); a number means it does. */
 function remote(options: { aheadBy?: number | null; network?: boolean } = {}): void {
   const aheadBy = options.aheadBy ?? null;
-  requestSpy.mockImplementation(async (_method: string, path: string) => {
-    if (options.network) {
-      return { ok: false as const, kind: "network" as const, message: "fetch failed" };
-    }
+  fetchImpl = async (input) => {
+    if (options.network) throw new TypeError("fetch failed");
+    const path = new URL(
+      input instanceof Request ? input.url : String(input),
+    ).pathname;
     if (path.includes("/compare/")) {
-      return okResponse({
+      return jsonResponse({
         ahead_by: aheadBy ?? 0,
         behind_by: 0,
         status: aheadBy ? "ahead" : "identical",
         commits: [],
       });
     }
-    if (path.endsWith("/heads/main")) return okResponse({ object: { sha: BASE_SHA } });
+    if (path.endsWith("/heads/main")) {
+      return jsonResponse({ object: { sha: BASE_SHA } });
+    }
     // The task branch ref: 404 when the branch was never created.
     return aheadBy === null
-      ? httpError(404)
-      : okResponse({ object: { sha: "c".repeat(40) } });
-  });
-  ghCtxMock.mockReturnValue({
-    status: "ok",
-    client: { request: requestSpy } as never,
-    repo: "akin-ozer/viberr",
-    owner: "akin-ozer",
-    defaultBranch: "main",
-    patId: "pat_1",
-  });
+      ? jsonResponse({ message: "Not Found" }, 404)
+      : jsonResponse({ object: { sha: "c".repeat(40) } });
+  };
 }
 
 const OPERATOR_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
@@ -167,10 +165,10 @@ function deployAgents(withOperator = false): void {
                 // full-autonomy behaviour must configure full autonomy.
                 autonomy: "full",
               },
-            },
+            } satisfies AgentDeployment,
           ]
         : []),
-    ] as never,
+    ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
@@ -253,7 +251,11 @@ function arda() {
 }
 
 function dataCtx() {
-  return { dataRoot: store.dataRoot };
+  return {
+    dataRoot: store.dataRoot,
+    fetchImpl,
+    deps: { mergeTaskPr: mergeMock },
+  };
 }
 
 /** Drive the reviewer's approving verdict exactly as the run pipeline does. */
@@ -270,8 +272,21 @@ async function reviewerApproves(): Promise<void> {
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
+  // The probe runs against a real credential on the project's repo — seeded
+  // here so the LIVE `getProjectGithubContext` path is what every test runs.
+  const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
+  const pat = createPat(
+    store.db,
+    { userId: store.users.arda.id, label: "bot", token: "ghp_nochange0001" },
+    patActor,
+  );
+  setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
   vi.clearAllMocks();
-  mergeMock.mockResolvedValue({ status: "no_pr" } as never);
+  // SAFETY: every consumer of a merge result switches on `status` and reads
+  // only the fields of the arm it lands in (task-actions.server.ts) — the
+  // `no_pr` arm's `taskKey` is never read, so it is left off deliberately: the
+  // no-merge case below compares this whole recorded value.
+  mergeMock.mockResolvedValue({ status: "no_pr" } as MergeTaskPrResult);
   remote();
   resetSseBrokerForTests();
   installFakeRuntime();

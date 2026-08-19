@@ -1,8 +1,9 @@
-import { execFile } from "node:child_process";
+import { execFile, type ExecFileOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -128,50 +129,94 @@ function oneLine(excerpt: string): string {
     : flat;
 }
 
+/**
+ * The structured fields this module's git log lines carry. The optional members
+ * are OMITTED when they do not apply rather than written falsy: `timedOut:
+ * false` on a push that simply failed reads as a fact the server checked, not an
+ * absent one.
+ */
+type GitLogFields = {
+  taskKey: string;
+  branch?: string;
+  err?: string;
+  timedOut?: true;
+  detail?: string;
+};
+
+/**
+ * `push_failed` carrying git's own (already scrubbed) words. `redactGitOutput`
+ * answers "" when git printed nothing, and every reader of the excerpt guards on
+ * truthiness — so "git said nothing" stays the ABSENT key, not an empty one.
+ */
+function pushFailed(reason: string, detail: string): PushWorkspaceResult {
+  const failure: Extract<PushWorkspaceResult, { status: "push_failed" }> = {
+    status: "push_failed",
+    reason,
+  };
+  if (detail) {
+    failure.detail = detail;
+    failure.stderrExcerpt = detail;
+  }
+  return failure;
+}
+
+export interface ExecOutcome {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  /** The child was KILLED (timeout), not merely unsuccessful. */
+  timedOut?: boolean;
+}
+
 export interface Exec {
   (
     file: string,
     args: string[],
     opts: { cwd: string; timeoutMs: number; env?: NodeJS.ProcessEnv },
-  ): Promise<{
-    ok: boolean;
-    stdout: string;
-    stderr: string;
-    /** The child was KILLED (timeout), not merely unsuccessful. */
-    timedOut?: boolean;
-  }>;
+  ): Promise<ExecOutcome>;
 }
+
+/**
+ * What a rejected `execFile` promise carries. Node hangs these fields on the
+ * error object, so each is decoded on its own: a rejection whose `stderr` came
+ * back as a Buffer must still yield the kill signal, which is the only thing
+ * that separates a timeout from an ordinary non-zero exit.
+ */
+const execFileRejection = z
+  .object({
+    stdout: z.string().catch(""),
+    stderr: z.string().catch(""),
+    killed: z.boolean().catch(false),
+    signal: z.string().nullable().catch(null),
+  })
+  .catch(() => ({ stdout: "", stderr: "", killed: false, signal: null }));
 
 /** Exported ONLY so its timeout detection can be proven against a really-killed
  *  child. Injecting a fake `exec` in a test proves the classification above but
  *  says nothing about whether a kill is detected at all. */
 export const defaultExec: Exec = async (file, args, opts) => {
+  const options: ExecFileOptions = {
+    cwd: opts.cwd,
+    timeout: opts.timeoutMs,
+    maxBuffer: 4 * 1024 * 1024,
+  };
+  if (opts.env) options.env = opts.env;
   try {
-    const { stdout, stderr } = await execFileAsync(file, args, {
-      cwd: opts.cwd,
-      timeout: opts.timeoutMs,
-      maxBuffer: 4 * 1024 * 1024,
-      ...(opts.env ? { env: opts.env } : {}),
-    });
+    const { stdout, stderr } = await execFileAsync(file, args, options);
     return { ok: true, stdout: stdout.toString(), stderr: stderr.toString() };
   } catch (error) {
-    const err = error as {
-      stdout?: unknown;
-      stderr?: unknown;
-      killed?: unknown;
-      signal?: unknown;
+    const rejection = execFileRejection.parse(error);
+    const outcome: ExecOutcome = {
+      ok: false,
+      stdout: rejection.stdout,
+      stderr: rejection.stderr,
     };
     // A timeout is a KILL, not a non-zero exit, and saying "returned non-zero"
     // about a process that never returned sends the reader looking for a git
     // error that was never printed. Same failure the clone path had, one pipe
     // over: the true cause was "we did not wait long enough".
-    const timedOut = err.killed === true || typeof err.signal === "string";
-    return {
-      ok: false,
-      stdout: typeof err.stdout === "string" ? err.stdout : "",
-      stderr: typeof err.stderr === "string" ? err.stderr : "",
-      ...(timedOut ? { timedOut: true } : {}),
-    };
+    if (rejection.killed || rejection.signal !== null) outcome.timedOut = true;
+    return outcome;
   }
 };
 
@@ -660,24 +705,21 @@ export async function pushWorkspaceBranch(
         // WARN, not info, for the same reason the clone path is: a delivery that
         // did not happen changes what the review PR would have contained.
         const detail = redactGitOutput(pushRes.stderr, { token });
-        logger.warn("workspace branch push failed", {
-          taskKey,
-          branch,
-          ...(pushRes.timedOut ? { timedOut: true } : {}),
-          ...(detail ? { detail } : {}),
-        });
-        return {
-          status: "push_failed",
+        const fields: GitLogFields = { taskKey, branch };
+        if (pushRes.timedOut) fields.timedOut = true;
+        if (detail) fields.detail = detail;
+        logger.warn("workspace branch push failed", fields);
+        return pushFailed(
           // `performDelivery` interpolates this INSIDE a sentence, so the
           // human-facing form is one line; the untouched multi-line excerpt
           // rides the structured field and the log line.
-          reason: pushRes.timedOut
+          pushRes.timedOut
             ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
             : detail
               ? `git push failed — git said: ${oneLine(detail)}`
               : "git push returned non-zero, and git printed nothing to explain it",
-          ...(detail ? { detail, stderrExcerpt: detail } : {}),
-        };
+          detail,
+        );
       }
     } finally {
       askpass.dispose();
@@ -694,18 +736,18 @@ export async function pushWorkspaceBranch(
   } catch (error) {
     // F19-18: "unexpected error" named nothing either. Same redacted channel.
     const detail = redactGitOutput(gitErrorText(error), { token });
-    logger.info("workspace branch push errored — skipping", {
+    const fields: GitLogFields = {
       taskKey,
       err: error instanceof Error ? error.message : String(error),
-      ...(detail ? { detail } : {}),
-    });
-    return {
-      status: "push_failed",
-      reason: detail
+    };
+    if (detail) fields.detail = detail;
+    logger.info("workspace branch push errored — skipping", fields);
+    return pushFailed(
+      detail
         ? `the push could not run — ${oneLine(detail)}`
         : "the push could not run, and the failure carried no message",
-      ...(detail ? { detail, stderrExcerpt: detail } : {}),
-    };
+      detail,
+    );
   }
 }
 

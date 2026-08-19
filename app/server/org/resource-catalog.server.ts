@@ -45,6 +45,8 @@ export function buildResourceCatalog(
   for (const s of safe(() => listSkills(db))) skillIds.add(s.name);
 
   const kbIds = new Set<string>(dirNames(kbRootDir(dataRoot)));
+  // SAFETY: `dir` is TEXT NOT NULL UNIQUE on `org_knowledge_bases`
+  // (0001_baseline.sql), so every row of this one-column SELECT carries a string.
   for (const row of safe(() =>
     db.prepare(`SELECT dir FROM org_knowledge_bases`).all() as { dir: string }[],
   )) {

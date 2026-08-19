@@ -8,7 +8,11 @@ import {
   type RenderResult,
 } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
-import type { AgentDeploymentView, AgentProfileView } from "./agent-types";
+import type {
+  AgentDeploymentView,
+  AgentProfileView,
+  LibraryProfileView,
+} from "./agent-types";
 import type { ResCatalogGroup } from "./capability-catalog";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
@@ -25,6 +29,7 @@ import {
 } from "./agents-page";
 import { ToastProvider } from "~/ui/toast";
 import { capabilityById } from "~/shared/capabilities";
+import type { ProjectRole } from "~/shared/rbac";
 import { TRANSITION_TO_DONE_EXCEPTION } from "~/features/policy/policy-data";
 
 afterEach(cleanup);
@@ -685,6 +690,25 @@ describe("CapabilityMatrixModal", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  // Store icons are free-form frontmatter text. storeIcon must keep the exact
+  // fallback the Icon component always applied: unknown names draw "dot".
+  it("renders the dot fallback glyph for an unknown store icon", () => {
+    const { container } = render(
+      <CapabilityMatrixModal
+        profiles={[
+          mkProfile({ id: "a", name: "A", icon: "no-such-glyph" }),
+          mkProfile({ id: "b", name: "B", icon: "shield" }),
+        ]}
+        projectName="Viberr Core"
+        onClose={() => {}}
+      />,
+    );
+    const glyphs = [...container.querySelectorAll(".mx-col .agent-glyph svg")];
+    expect(glyphs).toHaveLength(2);
+    expect(glyphs[0]!.innerHTML).toContain('<circle cx="12" cy="12" r="4">');
+    expect(glyphs[1]!.innerHTML).toContain("M12 3l7 3");
+  });
+
   // P14-LV-03: live, the same MCP server answered `get-annotated-message` on
   // Claude and `get_annotated_message` on Codex, and Claude listed one tool
   // Codex never saw. The parity note covered only the SERVER segment, so it
@@ -762,13 +786,13 @@ describe("CreateProfileModal", () => {
     // The catalog fetch resolves the codex default model + effort.
     await waitFor(() =>
       expect(
-        (container.querySelector('select[aria-label="Model"]') as HTMLSelectElement)
+        container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')
           ?.value,
       ).toBe("gpt-5-codex"),
     );
     await waitFor(() =>
       expect(
-        (container.querySelector('select[aria-label="Effort"]') as HTMLSelectElement)
+        container.querySelector<HTMLSelectElement>('select[aria-label="Effort"]')
           ?.value,
       ).toBe("medium"),
     );
@@ -842,7 +866,7 @@ describe("CreateProfileModal", () => {
     const { container, getByText } = renderModal({ initial: null });
     // Before a backend is picked the model select is disabled.
     const modelSel = () =>
-      container.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
+      container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!;
     expect(modelSel().disabled).toBe(true);
 
     fireEvent.click(getByText("Claude Code"));
@@ -851,7 +875,7 @@ describe("CreateProfileModal", () => {
     const modelValues = Array.from(modelSel().options).map((o) => o.value);
     expect(modelValues).toEqual(["sonnet", "opus"]);
     const effortSel = () =>
-      container.querySelector('select[aria-label="Effort"]') as HTMLSelectElement;
+      container.querySelector<HTMLSelectElement>('select[aria-label="Effort"]')!;
     await waitFor(() => expect(effortSel().value).toBe("high"));
     expect(Array.from(effortSel().options).map((o) => o.value)).toEqual([
       "low",
@@ -915,12 +939,12 @@ describe("CreateProfileModal", () => {
     // Seeded picks survive the catalog load (opus is in the claude catalog).
     await waitFor(() =>
       expect(
-        (container.querySelector('select[aria-label="Model"]') as HTMLSelectElement)
+        container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!
           .value,
       ).toBe("opus"),
     );
     expect(
-      (container.querySelector('select[aria-label="Effort"]') as HTMLSelectElement)
+      container.querySelector<HTMLSelectElement>('select[aria-label="Effort"]')!
         .value,
     ).toBe("max");
   });
@@ -975,9 +999,10 @@ describe("CreateProfileModal", () => {
     });
 
     // The first resource group ("Skills") is expanded on mount.
-    const chips = [...container.querySelectorAll(".cap-mbody .pick-chip")];
-    const chipFor = (id: string) =>
-      chips.find((c) => c.textContent === id) as HTMLButtonElement;
+    const chips = [
+      ...container.querySelectorAll<HTMLButtonElement>(".cap-mbody .pick-chip"),
+    ];
+    const chipFor = (id: string) => chips.find((c) => c.textContent === id)!;
     // The granted skill reports pressed; the ungranted one reports the
     // attribute with "false" — present, not absent, so the toggle is readable.
     expect(chipFor("repo-write").getAttribute("aria-pressed")).toBe("true");
@@ -986,9 +1011,7 @@ describe("CreateProfileModal", () => {
 
     // A dangling grant IS a grant (clicking it removes one) — it reports pressed.
     fireEvent.click(getByText("Knowledge bases"));
-    const ghost = container.querySelector(
-      ".pick-chip.missing",
-    ) as HTMLButtonElement;
+    const ghost = container.querySelector<HTMLButtonElement>(".pick-chip.missing")!;
     expect(ghost.textContent).toBe("retired-kb");
     expect(ghost.getAttribute("aria-pressed")).toBe("true");
   });
@@ -1034,7 +1057,7 @@ describe("CreateProfileModal", () => {
     // A collapsed capability group flips to expanded on click.
     const collapsed = heads().find(
       (h) => h.getAttribute("aria-expanded") === "false",
-    ) as HTMLButtonElement;
+    )!;
     const label = collapsed.querySelector(".cap-mglabel")!.textContent!;
     fireEvent.click(collapsed);
     const reFind = () =>
@@ -1046,7 +1069,7 @@ describe("CreateProfileModal", () => {
 
     // The resource-group header is the same control and collapses the same way.
     const resHead = () =>
-      getByText("Skills").closest(".cap-mghead") as HTMLButtonElement;
+      getByText("Skills").closest<HTMLButtonElement>(".cap-mghead")!;
     expect(resHead().getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(resHead());
     expect(resHead().getAttribute("aria-expanded")).toBe("false");
@@ -1068,9 +1091,9 @@ describe("CreateProfileModal", () => {
     const { container, getByText } = renderModal({ initial: null });
     // The always-human group is the LAST accordion and starts collapsed.
     fireEvent.click(getByText("Reserved for humans"));
-    const seg = container.querySelector(
+    const seg = container.querySelector<HTMLElement>(
       '[aria-label^="Policy for Merge a pull request"]',
-    ) as HTMLElement;
+    )!;
     expect(seg).toBeTruthy();
     expect(seg.className).toContain("locked");
     const radios = [...seg.querySelectorAll("button")];
@@ -1105,9 +1128,9 @@ describe("CreateProfileModal", () => {
       }),
     });
     fireEvent.click(getByText("Collaboration"));
-    const seg = container.querySelector(
+    const seg = container.querySelector<HTMLElement>(
       '[aria-label="Policy for Report a validation verdict"]',
-    ) as HTMLElement;
+    )!;
     expect(seg).toBeTruthy();
     expect([...seg.querySelectorAll("button")].map((b) => b.textContent)).toEqual(
       ["Allowed", "Off"],
@@ -1117,9 +1140,9 @@ describe("CreateProfileModal", () => {
       "true",
     );
     // Its siblings keep all three specialist modes — this is a per-row rule.
-    const sibling = container.querySelector(
+    const sibling = container.querySelector<HTMLElement>(
       '[aria-label="Policy for Ask the human a question"]',
-    ) as HTMLElement;
+    )!;
     expect([...sibling.querySelectorAll("button")].map((b) => b.textContent)).toEqual(
       ["Allowed", "Human-only", "Off"],
     );
@@ -1134,9 +1157,7 @@ describe("CreateProfileModal", () => {
    */
   it("UX-19 — the capability radiogroup traverses with arrow keys on one tab stop", () => {
     const { container } = renderModal({ initial: null });
-    const seg = container.querySelector(
-      '.cap-seg[role="radiogroup"]',
-    ) as HTMLElement;
+    const seg = container.querySelector<HTMLElement>('.cap-seg[role="radiogroup"]')!;
     const radios = [...seg.querySelectorAll<HTMLElement>('[role="radio"]')];
     expect(radios).toHaveLength(3);
     // Roving tabindex: the checked option is the group's single tab stop.
@@ -1286,13 +1307,13 @@ describe("P13-UI-52 — the editor states the backend narrowing before the save"
 });
 
 describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
-  const TEMPLATES = [
+  const TEMPLATES: LibraryProfileView[] = [
     {
       id: "security-reviewer",
       name: "Security reviewer",
       role: "Security",
       desc: "Reviews IAM, secrets handling and supply-chain risk.",
-      backends: ["claude"] as ("codex" | "claude")[],
+      backends: ["claude"],
       stages: ["review"],
       spanAll: false,
       resources: { skills: [], mcps: [], kb: [] },
@@ -1383,7 +1404,11 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
  * is one.)
  */
 describe("AgentsPage failure toast kind (P13-D-10)", () => {
-  function renderPage(actionResult: Record<string, unknown>) {
+  /** The failure half of what the route's mutations answer with — the branch
+   *  whose toast kind is on trial here. */
+  type FailedActionResult = { ok: false; error: string };
+
+  function renderPage(actionResult: FailedActionResult) {
     const Stub = createRoutesStub([
       {
         path: "/projects/viberr-core/agents",
@@ -1554,7 +1579,7 @@ describe("F16: the roster tells the truth about backend credentials", () => {
  * not touch and no reason why.
  */
 describe("UXA-15: the Agents page explains its read-only state", () => {
-  const renderAs = (myRole: string) => {
+  const renderAs = (myRole: ProjectRole) => {
     const Stub = createRoutesStub([
       {
         path: "/projects/:slug/agents",
@@ -1567,7 +1592,7 @@ describe("UXA-15: the Agents page explains its read-only state", () => {
               workflow={WORKFLOW}
               projectSlug="viberr-core"
               projectName="Viberr Core"
-              myRole={myRole as never}
+              myRole={myRole}
             />
           </ToastProvider>
         ),
@@ -1904,8 +1929,8 @@ describe("CreateProfileModal — a provider-refused model is disabled + explaine
     // The Sol option loads disabled, with the refusal on its label.
     await waitFor(() => {
       const opt = [...container.querySelectorAll("option")].find(
-        (o) => (o as HTMLOptionElement).value === "gpt-5.6-sol",
-      ) as HTMLOptionElement | undefined;
+        (o) => o.value === "gpt-5.6-sol",
+      );
       expect(opt?.disabled).toBe(true);
       expect(opt?.textContent).toContain("unavailable for this account");
     });

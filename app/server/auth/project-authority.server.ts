@@ -61,6 +61,11 @@ export interface ProjectAuthority {
   isOrgAdminOverride: boolean;
 }
 
+/** What a passing {@link assertProjectAction} tells its caller. */
+export interface ProjectActionGrant extends ProjectAuthority {
+  projectName: string;
+}
+
 export type AuthorityDecision =
   | ({ allowed: true } & ProjectAuthority)
   | { allowed: false; memberRole: ProjectRole | null };
@@ -147,9 +152,8 @@ export function requireProjectMutable(
 export function isOrgAdmin(db: DatabaseSync, userId: string): boolean {
   const row = db
     .prepare(`SELECT role FROM users WHERE id = ? AND disabled = 0`)
-    .get(userId) as { role: string } | undefined;
-  if (!row) return false;
-  return row.role === "admin";
+    .get(userId);
+  return row?.role === "admin";
 }
 
 /**
@@ -337,7 +341,7 @@ export function assertProjectAction(
   actor: AuthorityActor,
   what: string,
   opts: { dataRoot?: string; allowArchived?: boolean } = {},
-): { projectName: string; role: ProjectRole; isOrgAdminOverride: boolean } {
+): ProjectActionGrant {
   const file = readProjectFile({
     projectSlug,
     dataRoot: opts.dataRoot,

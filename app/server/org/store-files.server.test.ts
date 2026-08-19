@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -38,6 +39,15 @@ import {
 
 const dbCtx = createTestDbContext();
 afterEach(dbCtx.cleanup);
+
+/** The freshness columns these tests read back off an adopted store row. */
+const skillFreshnessRow = z.object({ id: z.string(), updated_at: z.string() });
+const kbIndexedRow = z.object({ id: z.string(), last_indexed_at: z.string() });
+const kbStampsRow = z.object({
+  last_indexed_at: z.string(),
+  updated_at: z.string(),
+});
+const kbLastIndexedRow = z.object({ last_indexed_at: z.string() });
 
 const ACTOR = { userId: "u_t", label: "t@test" };
 
@@ -584,16 +594,17 @@ describe("disk-only resource freshness (E6)", () => {
       ACTOR,
     );
 
-    const row = db
+    const stored = db
       .prepare(`SELECT id, updated_at FROM org_skills WHERE name = ?`)
-      .get("shipped-expertise") as { id: string; updated_at: string } | undefined;
-    expect(row).toBeDefined();
-    expect(row!.id).toMatch(/^sk_/);
-    expect(row!.updated_at).toBeTruthy();
+      .get("shipped-expertise");
+    expect(stored).toBeDefined();
+    const row = skillFreshnessRow.parse(stored);
+    expect(row.id).toMatch(/^sk_/);
+    expect(row.updated_at).toBeTruthy();
     // Exactly ONE listing entry — the adopted row replaces the disk-only one.
     const listed = listSkills(db, ctx).filter((s) => s.name === "shipped-expertise");
     expect(listed).toHaveLength(1);
-    expect(listed[0]!.updatedAt).toBe(row!.updated_at);
+    expect(listed[0]!.updatedAt).toBe(row.updated_at);
   });
 
   it("mkdir + delete into a disk-only KB adopt it and bump last_indexed_at", () => {
@@ -606,11 +617,11 @@ describe("disk-only resource freshness (E6)", () => {
     const target = resolveStoreTarget(db, "kb", "disk:runbooks", ctx)!;
     createStoreFolder(db, target, [], "archive", ACTOR);
 
-    const row = db
+    const stored = db
       .prepare(`SELECT id, last_indexed_at FROM org_knowledge_bases WHERE dir = ?`)
-      .get("runbooks") as { id: string; last_indexed_at: string } | undefined;
-    expect(row).toBeDefined();
-    expect(row!.last_indexed_at).toBeTruthy();
+      .get("runbooks");
+    expect(stored).toBeDefined();
+    expect(kbIndexedRow.parse(stored).last_indexed_at).toBeTruthy();
 
     // A later mutation touches the SAME row (no duplicate adoption).
     deleteStoreNode(db, target, ["deploy.md"], ACTOR);
@@ -640,16 +651,20 @@ describe("the `manual` refresh pin (C5)", () => {
       ACTOR,
       ctx,
     );
-    const before = db
-      .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
-      .get(kb.id) as { last_indexed_at: string; updated_at: string };
+    const before = kbStampsRow.parse(
+      db
+        .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
+        .get(kb.id),
+    );
 
     const target = resolveStoreTarget(db, "kb", kb.id, ctx)!;
     writeStoreDoc(db, target, [], "note.md", "hello", ACTOR);
 
-    const after = db
-      .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
-      .get(kb.id) as { last_indexed_at: string; updated_at: string };
+    const after = kbStampsRow.parse(
+      db
+        .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
+        .get(kb.id),
+    );
     // The re-scan stamp is pinned…
     expect(after.last_indexed_at).toBe(before.last_indexed_at);
     // …but the row genuinely changed, so `updated_at` still moves.
@@ -672,9 +687,11 @@ describe("the `manual` refresh pin (C5)", () => {
     const target = resolveStoreTarget(db, "kb", kb.id, ctx)!;
     writeStoreDoc(db, target, [], "note.md", "hello", ACTOR);
 
-    const after = db
-      .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE id = ?`)
-      .get(kb.id) as { last_indexed_at: string };
+    const after = kbLastIndexedRow.parse(
+      db
+        .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE id = ?`)
+        .get(kb.id),
+    );
     expect(after.last_indexed_at).not.toBe("2020-01-01T00:00:00.000Z");
   });
 });

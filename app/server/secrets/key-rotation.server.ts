@@ -128,6 +128,11 @@ function scanStore(
   db: DatabaseSync,
   store: (typeof SEALED_STORES)[number],
 ): SealedStoreScan {
+  // SAFETY: every SEALED_STORES entry names columns 0001_baseline declares
+  // TEXT — its id column is the table's primary key and its name column is NOT
+  // NULL in all three stores (so `string | null` is the conservative reading),
+  // and `WHERE <box column> IS NOT NULL` is what makes `box` a string on the
+  // one store whose box column is nullable (`org_mcp_servers.cred_ref`).
   const rows = db
     .prepare(
       `SELECT ${store.idColumn} AS id, ${store.nameColumn} AS name, ${store.column} AS box
@@ -275,6 +280,8 @@ export function resealSecrets(
   const previous = previousSecretKeys();
 
   for (const store of SEALED_STORES) {
+    // SAFETY: the same store/column correspondence `scanStore` states above —
+    // this is byte-for-byte its query, run for the write pass.
     const rows = db
       .prepare(
         `SELECT ${store.idColumn} AS id, ${store.nameColumn} AS name, ${store.column} AS box

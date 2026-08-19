@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
@@ -11,6 +12,7 @@ import { encodeRefPath, type GithubClient } from "./github-client.server";
 import {
   getProjectGithubContext,
   type GithubContextFailure,
+  type GithubContextOptions,
 } from "./github-context.server";
 import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
 
@@ -50,12 +52,30 @@ export interface BranchCompare {
   commits: { sha: string; msg: string }[];
 }
 
-interface GhCompare {
-  ahead_by: number;
-  behind_by: number;
-  status: string;
-  commits: { sha: string; commit: { message: string } }[];
-}
+/**
+ * The compare payload's read slice, with the readers' own `??`-tolerance baked
+ * in — every field degrades to the caller's fallback on drift, so a mangled
+ * response yields the same "identical / 0 / 0" answer the raw reads produced.
+ */
+const ghCompareSchema = z
+  .object({
+    ahead_by: z.number().optional().catch(undefined),
+    behind_by: z.number().optional().catch(undefined),
+    status: z.string().optional().catch(undefined),
+    commits: z
+      .array(
+        z.object({
+          sha: z.string(),
+          commit: z
+            .object({ message: z.string().optional().catch(undefined) })
+            .optional()
+            .catch(undefined),
+        }),
+      )
+      .optional()
+      .catch(undefined),
+  })
+  .catch({});
 
 export type BranchCompareResult =
   | { status: "ok"; compare: BranchCompare }
@@ -75,9 +95,10 @@ export async function getBranchCompare(
   base: string,
   head: string,
 ): Promise<BranchCompareResult> {
-  const result = await client.request<GhCompare>(
+  const result = await client.request(
     "GET",
     `/repos/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
+    ghCompareSchema,
     { searchParams: { per_page: 250 } },
   );
   if (result.ok) {
@@ -167,9 +188,12 @@ export interface EnsureBranchContext {
   fetchImpl?: typeof fetch;
 }
 
-interface GhRef {
-  object: { sha: string };
-}
+/**
+ * `GET git/ref` — read only where the base head is resolved, and that sha
+ * feeds straight into the ref-create call, so it stays strict: an answer
+ * without `object.sha` must fail loudly, never create a branch from nothing.
+ */
+const ghRefSchema = z.object({ object: z.object({ sha: z.string() }) });
 
 /**
  * Creates (or confirms) the task-key branch from the project default
@@ -193,18 +217,21 @@ export async function ensureTaskBranch(
 
   // P13-D-5: passed `repoOverride: file.parsed.frontmatter.repo` until the
   // task-level repo override was deleted (owner ruling) — project repo only.
-  const gh = getProjectGithubContext(db, input.projectSlug, {
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  // `fetchImpl` is an OPTIONAL key: the context reads it with a truthiness
+  // check, so the hook is set only when a caller supplied one.
+  const ghOptions: GithubContextOptions = {};
+  if (ctx.fetchImpl) ghOptions.fetchImpl = ctx.fetchImpl;
+  const gh = getProjectGithubContext(db, input.projectSlug, ghOptions);
   if (gh.status !== "ok") return gh;
 
   const branch =
     file.parsed.frontmatter.branch ?? taskBranchName(input.taskKey);
 
   // 1. Does the ref already exist? (idempotency first)
-  const existing = await gh.client.request<GhRef>(
+  const existing = await gh.client.request(
     "GET",
     `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${branch}`)}`,
+    z.unknown(),
   );
   let created = false;
   if (!existing.ok) {
@@ -216,9 +243,10 @@ export async function ensureTaskBranch(
     }
     if (existing.kind === "http" && existing.status === 404) {
       // 2. Resolve the default branch head…
-      const baseRef = await gh.client.request<GhRef>(
+      const baseRef = await gh.client.request(
         "GET",
         `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${gh.defaultBranch}`)}`,
+        ghRefSchema,
       );
       if (!baseRef.ok) {
         if (baseRef.kind === "http" && baseRef.status === 404) {
@@ -236,9 +264,10 @@ export async function ensureTaskBranch(
         };
       }
       // 3. …and create the branch ref from it.
-      const createRef = await gh.client.request<GhRef>(
+      const createRef = await gh.client.request(
         "POST",
         `/repos/${gh.repo}/git/refs`,
+        z.unknown(),
         { body: { ref: `refs/heads/${branch}`, sha: baseRef.data.object.sha } },
       );
       if (createRef.ok) {

@@ -27,14 +27,20 @@ export interface RbacRow {
   grant: Record<ProjectRole, 0 | 1>;
 }
 
+/** Every role is named, so a new entry in `PROJECT_ROLES` fails to compile here
+ *  until the permission table accounts for its column. */
+function grantByRole(roles: readonly ProjectRole[]) {
+  return {
+    admin: roles.includes("admin") ? 1 : 0,
+    maintainer: roles.includes("maintainer") ? 1 : 0,
+    contributor: roles.includes("contributor") ? 1 : 0,
+    viewer: roles.includes("viewer") ? 1 : 0,
+  } satisfies Record<ProjectRole, 0 | 1>;
+}
+
 export const RBAC_ROWS: readonly RbacRow[] = RBAC_DEFINITIONS.map((cap) => ({
   action: cap.label,
-  grant: Object.fromEntries(
-    ROLE_IDS.map((r) => [
-      r,
-      (cap.roles as readonly ProjectRole[]).includes(r) ? 1 : 0,
-    ]),
-  ) as Record<ProjectRole, 0 | 1>,
+  grant: grantByRole(cap.roles),
 }));
 
 export type BoundaryId = "auto" | "approval" | "human";
@@ -48,11 +54,11 @@ export const BOUNDARIES: readonly { id: BoundaryId; label: string }[] = [
 /** Boundary → cap-seg CSS class (deliberate color-language reuse —
  * contracts §2.5: auto→teal `direct`, approval→blue `recommend`,
  * human→coral `human`. Do NOT "fix" to semantic names). */
-export const BCLS: Record<BoundaryId, string> = {
+export const BCLS = {
   auto: "direct",
   approval: "recommend",
   human: "human",
-};
+} satisfies Record<BoundaryId, string>;
 
 /**
  * F20-9 (co-owned with C-AGENTS): the single canonical statement of the one
@@ -108,7 +114,7 @@ export interface OperatorAutonomyState {
   operatorName: string | null;
 }
 
-type OperatorProfileShape = Pick<
+type RosterProfile = Pick<
   AgentProfileView,
   "kind" | "name" | "autonomy" | "capabilities"
 >;
@@ -122,7 +128,7 @@ type OperatorProfileShape = Pick<
  * live, so a board that has configured the grant reads as live.
  */
 export function operatorAutonomyState(
-  profiles: readonly OperatorProfileShape[],
+  profiles: readonly RosterProfile[],
 ): OperatorAutonomyState {
   const operators = profiles.filter((p) => p.kind === "operator");
   if (operators.length === 0) {

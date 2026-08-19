@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -29,23 +29,6 @@ import {
   BRANCH_CLEANUP_GUARDRAIL_DESC,
   BRANCH_CLEANUP_GUARDRAIL_ID,
 } from "./branch-cleanup.server";
-/** Post-merge cleanup reads the projection, appends an event and reprojects —
- *  all AFTER GitHub has merged. This lets one test make that housekeeping
- *  throw; pass-through otherwise, so every other test sees the real module. */
-const cleanupFault = vi.hoisted(() => ({ throws: false }));
-vi.mock("./branch-cleanup.server", async () => {
-  const actual =
-    await vi.importActual<typeof import("./branch-cleanup.server")>(
-      "./branch-cleanup.server",
-    );
-  return {
-    ...actual,
-    branchCleanupOnMerge: (...args: Parameters<typeof actual.branchCleanupOnMerge>) => {
-      if (cleanupFault.throws) throw new Error("projection read failed");
-      return actual.branchCleanupOnMerge(...args);
-    },
-  };
-});
 
 import {
   mergeTaskPr,
@@ -63,7 +46,24 @@ afterEach(ctx.cleanup);
 
 const REPO_PATH = "/repos/akin-ozer/viberr";
 
-function setup(): { store: TestStore; actor: { userId: string; label: string } } {
+/**
+ * A 200 whose body fails mid-read — a truncated response. Reading it throws
+ * PAST the GitHub client's network-error handling, which wraps the fetch call
+ * itself and not the body read, so this is how a test reaches the code paths
+ * that must survive a throw from inside the client.
+ */
+function truncatedResponse(): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(new TypeError("terminated"));
+      },
+    }),
+    { status: 200 },
+  );
+}
+
+function setup() {
   const store = setupTestStore(ctx);
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-301", {
@@ -90,7 +90,16 @@ function setup(): { store: TestStore; actor: { userId: string; label: string } }
   return { store, actor };
 }
 
-function happyRoutes(): Record<string, FakeResponder> {
+/**
+ * The fake transport's route table. Deliberately OPEN: the helpers below hand
+ * back a base table and each test overlays the one or two routes its scenario
+ * turns on, so the key set is not knowable at the point the base is built.
+ */
+interface FakeRoutes {
+  [routeKey: string]: FakeResponder;
+}
+
+function happyRoutes(): FakeRoutes {
   return {
     [`GET ${REPO_PATH}/compare/main...vib-301-workspace`]: {
       body: {
@@ -181,6 +190,8 @@ describe("reconcileTask", () => {
     expect(fm.github?.changed).toEqual({ files: 9, add: 412, del: 87 });
 
     // Reprojected into SQLite.
+    // SAFETY: the reconcile above wrote both caches into task.md and
+    // reprojected it, so this row exists and both columns carry their JSON.
     const row = store.db
       .prepare(
         `SELECT pr_json, github_json FROM task_projections
@@ -191,6 +202,8 @@ describe("reconcileTask", () => {
     expect(JSON.parse(row.github_json).commits).toHaveLength(2);
 
     // Provenance + audit recorded.
+    // SAFETY: the SELECT names the two columns, and the reconciler records a
+    // details payload on every `github.reconcile` row it writes.
     const prov = store.db
       .prepare(`SELECT action, details_json FROM provenance WHERE action = 'github.reconcile'`)
       .all() as { action: string; details_json: string }[];
@@ -333,6 +346,7 @@ describe("reconcileTask", () => {
 
     // …and the collision is REPORTED, not silently swallowed — with the same
     // remedy the non-fast-forward push gives, because it is one cause.
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events = store.db
       .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
       .all() as { text: string }[];
@@ -413,6 +427,7 @@ describe("reconcileTask", () => {
     // …and nothing about a merge is announced, because nothing of THIS task's
     // merged — the false "merged out of band" divergence is what then told the
     // operator to accept a completion that never happened.
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events = store.db
       .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
       .all() as { text: string }[];
@@ -445,6 +460,7 @@ describe("reconcileTask", () => {
     await run();
     await run();
 
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const notes = (
       store.db
         .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
@@ -511,6 +527,7 @@ describe("reconcileTask", () => {
     // Started together, never awaited in between — the real overlap.
     await Promise.all([pass(), pass()]);
 
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events = store.db
       .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
       .all() as { text: string }[];
@@ -646,6 +663,7 @@ describe("reconcileTask", () => {
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.stage).toBe("review");
     // A typed divergence event landed on the timeline (projected to task_events).
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events = store.db
       .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
       .all() as { text: string }[];
@@ -661,6 +679,7 @@ describe("reconcileTask", () => {
       actor,
       { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
     );
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events2 = store.db
       .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
       .all() as { text: string }[];
@@ -668,7 +687,7 @@ describe("reconcileTask", () => {
   });
 
   /** The merged-out-of-band routes, shared by the concurrency tests below. */
-  function mergedOutOfBandRoutes(): Record<string, FakeResponder> {
+  function mergedOutOfBandRoutes(): FakeRoutes {
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls/318`] = {
       body: {
@@ -698,6 +717,7 @@ describe("reconcileTask", () => {
         { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
     ]);
 
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events = store.db
       .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
       .all() as { text: string }[];
@@ -726,10 +746,9 @@ describe("reconcileTask", () => {
     // Canary: drop the rejection handler from `tail` (`run.then(() => undefined)`)
     // → passes 2 and 3 never run and the test times out.
     const { store, actor } = setup();
-    // Fault injection: a transport that hands back a malformed response, which
-    // throws PAST the client's network-error handling (that only wraps the
-    // fetch call itself).
-    const explodingFetch = (async () => ({ status: 200 })) as unknown as typeof fetch;
+    // Fault injection: a transport whose every answer fails mid-body, so the
+    // first GitHub read of the pass throws instead of degrading.
+    const explodingFetch: typeof fetch = async () => truncatedResponse();
     const gh = fakeGithubFetch(happyRoutes());
     const settled = await Promise.allSettled([
       reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
@@ -778,6 +797,7 @@ describe("reconcileTask", () => {
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
     // transition + accept_completion withdrawn (PR is gone); assign_specialist survives.
     expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-assign"]);
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events = store.db.prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`).all() as { text: string }[];
     expect(events.some((e) => /closed on GitHub without merging/.test(e.text) && /withdrawn/.test(e.text))).toBe(true);
   });
@@ -1005,6 +1025,8 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
       review: "changes_requested",
       checks: { total: 2, passing: 2, failing: 0, pending: 0 },
     });
+    // SAFETY: the reconcile above cached the PR and reprojected it, so this
+    // row exists and `pr_json` carries it.
     const row = store.db
       .prepare(
         `SELECT pr_json FROM task_projections
@@ -1013,6 +1035,8 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
       .get(store.slug) as { pr_json: string };
     expect(JSON.parse(row.pr_json)).toMatchObject({ review: "changes_requested" });
     // The observation row carries the two newly-consumed facts.
+    // SAFETY: the reconciler records a details payload on every
+    // `github.reconcile` row it writes.
     const prov = store.db
       .prepare(
         `SELECT details_json FROM provenance WHERE action = 'github.reconcile'`,
@@ -1144,6 +1168,9 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     const { store, actor } = setup();
     // The override used to win here. Nothing can write the field any more, so a
     // leftover line must not redirect reconcile at a repo the project never set.
+    // SAFETY: deliberately INVALID input — `repo:` is that retired override and
+    // the frontmatter type no longer declares it. The assertions below prove it
+    // survives as an unknown key and is never read back as frontmatter.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: {
         ...baseTaskFrontmatter("VIB-301", {
@@ -1551,6 +1578,8 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
       ),
     });
     // Owner notification (kind policy).
+    // SAFETY: `kind` is NOT NULL and the WHERE pins `task_key = 'VIB-301'`, so
+    // a matched row has both columns as strings.
     const notification = store.db
       .prepare(
         `SELECT kind, task_key FROM notifications WHERE user_id = ? AND task_key = 'VIB-301'`,
@@ -1629,7 +1658,7 @@ describe("R15-6 post-merge branch cleanup", () => {
     return { store, actor };
   }
 
-  const mergeRoutes = (extra: Record<string, FakeResponder> = {}) => ({
+  const mergeRoutes = (extra: FakeRoutes = {}) => ({
     [`PUT ${REPO_PATH}/pulls/410/merge`]: {
       body: { merged: true, sha: "mergesha410" },
     },
@@ -1725,21 +1754,24 @@ describe("R15-6 post-merge branch cleanup", () => {
   it("a THROWING cleanup never demotes the merge either", async () => {
     const { store, actor } = mergeableTask();
     const gh = fakeGithubFetch(mergeRoutes());
-    cleanupFault.throws = true;
-    try {
-      const result = await mergeTaskPr(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-410" },
-        actor,
-        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-      );
-      // Fails on wave-2b: the cleanup block was unguarded, so a post-merge
-      // housekeeping throw escaped mergeTaskPr and the caller surfaced a
-      // COMPLETED merge as a failed acceptance.
-      expect(result.status).toBe("merged");
-    } finally {
-      cleanupFault.throws = false;
-    }
+    // The merge succeeds; the branch delete that rides it comes back truncated,
+    // so the client throws INSIDE the cleanup block — after GitHub has merged.
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      return url.pathname === `${REPO_PATH}/git/refs/heads/vib-410`
+        ? truncatedResponse()
+        : gh.fetchImpl(input, init);
+    };
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-410" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl },
+    );
+    // Fails on wave-2b: the cleanup block was unguarded, so a post-merge
+    // housekeeping throw escaped mergeTaskPr and the caller surfaced a
+    // COMPLETED merge as a failed acceptance.
+    expect(result.status).toBe("merged");
     // The merge itself is still fully recorded.
     expect(
       listAuditEvents(store.db, { action: "github.pr.merged" }),
@@ -1777,7 +1809,7 @@ describe("reconcileProject fan-out control", () => {
   function concurrencyProbe() {
     let inFlight = 0;
     let peak = 0;
-    const fetchImpl = (async () => {
+    const fetchImpl: typeof fetch = async () => {
       inFlight += 1;
       peak = Math.max(peak, inFlight);
       await new Promise((resolve) => setTimeout(resolve, 1));
@@ -1786,7 +1818,7 @@ describe("reconcileProject fan-out control", () => {
         status: 404,
         headers: { "content-type": "application/json" },
       });
-    }) as unknown as typeof fetch;
+    };
     return { fetchImpl, peak: () => peak };
   }
 
@@ -1804,7 +1836,9 @@ describe("reconcileProject fan-out control", () => {
 
   /** Every branch compares clean and carries no PR — enough for a real
    *  `reconciled` result per task, so the budget slices are identifiable. */
-  function boardRoutes(store: TestStore): Record<string, FakeResponder> {
+  function boardRoutes(store: TestStore): FakeRoutes {
+    // SAFETY: the SELECT names one column, and its own `branch IS NOT NULL`
+    // predicate excludes the rows where that (nullable) column is null.
     const branches = (
       store.db
         .prepare(
@@ -1813,7 +1847,7 @@ describe("reconcileProject fan-out control", () => {
         )
         .all(store.slug) as { branch: string }[]
     ).map((r) => r.branch);
-    const routes: Record<string, FakeResponder> = {
+    const routes: FakeRoutes = {
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
     };
     for (const branch of branches) {

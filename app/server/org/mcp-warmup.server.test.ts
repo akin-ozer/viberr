@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   listMcpServers,
@@ -18,6 +19,18 @@ const dbCtx = createTestDbContext();
 const ACTOR = { userId: "u_admin", label: "admin@viberr.dev" };
 afterEach(() => resetWarmupsForTest());
 
+/** The JSON-RPC request lines the probe writes; this fake routes on `method`
+ *  alone and ignores anything else the handshake carries. */
+const probeRequest = z.object({ method: z.string() }).loose();
+
+/** What this fake ever answers with: the `initialize` capability advertisement
+ *  (the probe only needs a `result` to come back at all) and the tool listing. */
+interface McpProbeReply {
+  jsonrpc: string;
+  id: number;
+  result: { capabilities: { tools?: { listChanged?: boolean } } } | { tools: { name: string }[] };
+}
+
 /** Chatters like a package manager, then answers the handshake after `afterMs`. */
 function installerSpawn(afterMs: number, tools = 2): McpSpawn {
   return () => {
@@ -34,17 +47,18 @@ function installerSpawn(afterMs: number, tools = 2): McpSpawn {
           for (const line of data.split("\n")) {
             const t = line.trim();
             if (!t) continue;
-            const msg = JSON.parse(t) as { method?: string };
+            const msg = probeRequest.safeParse(JSON.parse(t));
+            if (!msg.success) continue;
             // Nothing answers until the "install" finishes — exactly why the
             // short probe could never see this server work.
-            const reply = (obj: unknown) =>
+            const reply = (obj: McpProbeReply) =>
               setTimeout(
                 () => out.emit("data", Buffer.from(`${JSON.stringify(obj)}\n`)),
                 ready ? 0 : afterMs,
               );
-            if (msg.method === "initialize") {
+            if (msg.data.method === "initialize") {
               reply({ jsonrpc: "2.0", id: 1, result: { capabilities: {} } });
-            } else if (msg.method === "tools/list") {
+            } else if (msg.data.method === "tools/list") {
               reply({
                 jsonrpc: "2.0",
                 id: 2,

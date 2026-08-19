@@ -11,7 +11,10 @@ import { getDataRoot } from "~/server/files/file-store-root.server";
  * `appendRunLine` (raw file + DB row) and read via the query helpers here.
  */
 
-export interface AgentRunRow {
+/** One `agent_runs` row, column-for-column. A row is a plain record, so this is
+ *  a type alias rather than an interface: the boundary reads below convert
+ *  `node:sqlite`'s own row type into it directly, with no `unknown` hop. */
+export type AgentRunRow = {
   id: string;
   task_key: string;
   project_slug: string;
@@ -40,7 +43,7 @@ export interface AgentRunRow {
   interrupted_by: string | null;
   created_at: string;
   updated_at: string;
-}
+};
 
 export interface InsertRunInput {
   id: string;
@@ -146,37 +149,44 @@ export interface RunPatch {
 
 /** Patch selected fields on a run row; always bumps updated_at. */
 export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void {
+  // Each patchable field paired with the column it writes. `satisfies` keeps the
+  // set exhaustive, so a field added to `RunPatch` cannot silently stop being
+  // persisted.
+  const assignable = {
+    sessionId: ["session_id", patch.sessionId],
+    state: ["state", patch.state],
+    phase: ["phase", patch.phase],
+    step: ["step", patch.step],
+    startedAt: ["started_at", patch.startedAt],
+    finishedAt: ["finished_at", patch.finishedAt],
+    turns: ["turns", patch.turns],
+    inputTokens: ["input_tokens", patch.inputTokens],
+    cachedInputTokens: ["cached_input_tokens", patch.cachedInputTokens],
+    outputTokens: ["output_tokens", patch.outputTokens],
+    totalCostUsd: ["total_cost_usd", patch.totalCostUsd],
+    interruptedBy: ["interrupted_by", patch.interruptedBy],
+    backend: ["backend", patch.backend],
+  } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
+
   const cols: string[] = [];
-  const params: Record<string, SQLInputValue> = {
-    id: runId,
-    updatedAt: new Date().toISOString(),
-  };
-  const map: Record<keyof RunPatch, string> = {
-    sessionId: "session_id",
-    state: "state",
-    phase: "phase",
-    step: "step",
-    startedAt: "started_at",
-    finishedAt: "finished_at",
-    turns: "turns",
-    inputTokens: "input_tokens",
-    cachedInputTokens: "cached_input_tokens",
-    outputTokens: "output_tokens",
-    totalCostUsd: "total_cost_usd",
-    interruptedBy: "interrupted_by",
-    backend: "backend",
-  };
-  for (const key of Object.keys(patch) as (keyof RunPatch)[]) {
-    const value = patch[key];
+  const values: SQLInputValue[] = [];
+  for (const [column, value] of Object.values(assignable)) {
     if (value === undefined) continue;
-    cols.push(`${map[key]} = @${key}`);
-    params[key] = value;
+    cols.push(`${column} = ?`);
+    values.push(value);
   }
   if (cols.length === 0) return;
-  db.prepare(`UPDATE agent_runs SET ${cols.join(", ")}, updated_at = @updatedAt WHERE id = @id`).run(params);
+  db.prepare(`UPDATE agent_runs SET ${cols.join(", ")}, updated_at = ? WHERE id = ?`).run(
+    ...values,
+    new Date().toISOString(),
+    runId,
+  );
 }
 
 export function getRun(db: DatabaseSync, runId: string): AgentRunRow | null {
+  // SAFETY: `agent_runs` declares every column of `AgentRunRow` — NOT NULL on
+  // the non-nullable ones, plus CHECK constraints pinning kind/backend/state to
+  // exactly the members of RunKind/RunBackend/RunState (0001_baseline.sql).
   return (db.prepare(`SELECT * FROM agent_runs WHERE id = ?`).get(runId) as AgentRunRow | undefined) ?? null;
 }
 
@@ -185,12 +195,13 @@ export function listRunsForTaskRows(
   projectSlug: string,
   taskKey: string,
 ): AgentRunRow[] {
+  // SAFETY: same `agent_runs` DDL guarantee as `getRun`.
   return db
     .prepare(
       `SELECT * FROM agent_runs WHERE project_slug = ? AND task_key = ?
        ORDER BY created_at ASC, rowid ASC`,
     )
-    .all(projectSlug, taskKey) as unknown as AgentRunRow[];
+    .all(projectSlug, taskKey) as AgentRunRow[];
 }
 
 /**
@@ -206,6 +217,8 @@ export function agentNamesByProfile(
   db: DatabaseSync,
   projectSlug: string,
 ): Map<string, string> {
+  // SAFETY: `agent_profile_id` is NOT NULL TEXT and the WHERE clause excludes
+  // every row whose `agent_name` is NULL or empty, so both aliases are strings.
   const rows = db
     .prepare(
       `SELECT agent_profile_id AS pid, agent_name AS name FROM agent_runs
@@ -220,6 +233,8 @@ export function agentNamesByProfile(
 
 /** Next append sequence for a run (max seq + 1, or 0). */
 export function nextSeq(db: DatabaseSync, runId: string): number {
+  // SAFETY: `MAX()` over the INTEGER `seq` column yields a number, or NULL when
+  // the run has no lines yet.
   const row = db.prepare(`SELECT MAX(seq) AS m FROM run_log_lines WHERE run_id = ?`).get(runId) as
     | { m: number | null }
     | undefined;
@@ -238,6 +253,8 @@ export function listRunLines(
   runId: string,
   sinceSeq = -1,
 ): RunLogLine[] {
+  // SAFETY: `run_log_lines` declares all four selected columns NOT NULL — `seq`
+  // INTEGER, the rest TEXT (0001_baseline.sql).
   const rows = db
     .prepare(
       `SELECT seq, occurred_at, raw_json, display_json FROM run_log_lines
@@ -249,6 +266,8 @@ export function listRunLines(
     raw_json: string;
     display_json: string;
   }[];
+  // SAFETY: `display_json` is written by `insertRunLine` and nowhere else, as
+  // `JSON.stringify` of the `LogLine` it was handed.
   return rows.map((r) => ({
     seq: r.seq,
     occurredAt: r.occurred_at,
@@ -280,6 +299,8 @@ export function listRunLinesTail(
 ): SizedRunLogLine[] {
   if (limit <= 0) return [];
   const before = beforeSeq ?? Number.MAX_SAFE_INTEGER;
+  // SAFETY: same NOT NULL guarantee as `listRunLines`; `length()` over two NOT
+  // NULL TEXT columns is an integer.
   const rows = db
     .prepare(
       `SELECT seq, occurred_at, raw_json, display_json,
@@ -295,6 +316,7 @@ export function listRunLinesTail(
     display_json: string;
     bytes: number;
   }[];
+  // SAFETY: `display_json` holds exactly what `insertRunLine` stringified.
   return rows.reverse().map((r) => ({
     seq: r.seq,
     occurredAt: r.occurred_at,
@@ -304,11 +326,18 @@ export function listRunLinesTail(
   }));
 }
 
+/** How much console a run holds: line count plus its seq bounds. `minSeq` and
+ *  `maxSeq` read -1 when the run has no lines. */
+export interface RunLineStats {
+  count: number;
+  minSeq: number;
+  maxSeq: number;
+}
+
 /** Line count + seq bounds for a run — one query, no row bodies (P13-D-11). */
-export function runLineStats(
-  db: DatabaseSync,
-  runId: string,
-): { count: number; minSeq: number; maxSeq: number } {
+export function runLineStats(db: DatabaseSync, runId: string): RunLineStats {
+  // SAFETY: `COUNT()` is always an integer; `MIN`/`MAX` over the INTEGER `seq`
+  // column are numbers, or NULL when the run has no lines.
   const row = db
     .prepare(
       `SELECT COUNT(*) AS c, MIN(seq) AS lo, MAX(seq) AS hi
@@ -339,6 +368,7 @@ export function runIdsWithMissingSession(
   projectSlug: string,
   taskKey: string,
 ): Set<string> {
+  // SAFETY: `run_log_lines.run_id` is NOT NULL TEXT (0001_baseline.sql).
   const rows = db
     .prepare(
       `SELECT DISTINCT l.run_id AS id FROM run_log_lines l

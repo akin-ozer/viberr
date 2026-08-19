@@ -49,7 +49,7 @@ function likePrefix(query: string): string {
   return escapeLike(query) + "%";
 }
 
-interface TaskRow {
+type TaskRow = {
   project_slug: string;
   task_key: string;
   title: string;
@@ -57,7 +57,7 @@ interface TaskRow {
   branch: string | null;
   /** 0/1 — see `archivedSub` below. */
   archived: number;
-}
+};
 
 /**
  * F19-8/R14-3: an archived task is a terminal disposition that "leaves every
@@ -121,9 +121,13 @@ export function searchWorkspace(
 
   // One scan for tasks AND branches — a branch only exists as a task's branch,
   // so a second query would read the same rows twice.
+
   const placeholders = projects.map(() => "?").join(", ");
   const term = likeTerm(q);
   const prefix = likePrefix(q);
+  // SAFETY: TaskRow names exactly the six columns this SELECT lists, in the
+  // types 0001_baseline declares for `task_projections` — `branch` is the one
+  // nullable column and `archived` its 0/1 INTEGER.
   const rows = db
     .prepare(
       `SELECT project_slug, task_key, title, stage, branch, archived
@@ -154,7 +158,7 @@ export function searchWorkspace(
       term,
       q,
       prefix,
-    ) as unknown as TaskRow[];
+    ) as TaskRow[];
 
   const taskHits: CommandHit[] = [];
   const branchHits: CommandHit[] = [];

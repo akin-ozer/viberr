@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
 import {
   setupAppTest,
   type AppTestContext,
@@ -63,22 +64,32 @@ async function callLoader(url: string, init: { cookie?: string; headers?: Header
   if (init.headers) requestInit.headers = init.headers;
   if (init.signal) requestInit.signal = init.signal;
   const request = app.request(url, requestInit);
-  return loader({ request, params: {}, context: {} } as never);
+  // A server loader is handed the request, the match pattern, the dynamic
+  // params and a middleware context. Building the whole envelope rather than a
+  // partial stand-in keeps this direct call type-checked against the real
+  // route signature — including its Response return.
+  return loader({
+    request,
+    url: new URL(request.url),
+    params: {},
+    pattern: "/resources/events",
+    context: new RouterContextProvider(),
+  });
 }
 
 describe("/resources/events", () => {
   it("401s when signed out (EventSource can't follow a login redirect)", async () => {
-    const res = (await callLoader("/resources/events?scope=user")) as Response;
+    const res = await callLoader("/resources/events?scope=user");
     expect(res.status).toBe(401);
   });
 
   it("400s on missing or malformed scopes", async () => {
     const { cookie } = await app.cookieFor(userId);
-    const missing = (await callLoader("/resources/events", { cookie })) as Response;
+    const missing = await callLoader("/resources/events", { cookie });
     expect(missing.status).toBe(400);
-    const malformed = (await callLoader("/resources/events?scope=banana:split", {
+    const malformed = await callLoader("/resources/events?scope=banana:split", {
       cookie,
-    })) as Response;
+    });
     expect(malformed.status).toBe(400);
   });
 
@@ -92,19 +103,19 @@ describe("/resources/events", () => {
     });
     const { cookie } = await app.cookieFor(outsider.id);
     // Non-member of viberr-core → denied.
-    const denied = (await callLoader(
+    const denied = await callLoader(
       "/resources/events?scope=project:viberr-core",
       { cookie },
-    )) as Response;
+    );
     expect(denied.status).toBe(403);
     // A task scope in the same project is likewise denied.
-    const deniedTask = (await callLoader(
+    const deniedTask = await callLoader(
       "/resources/events?scope=task:viberr-core/VIB-139",
       { cookie },
-    )) as Response;
+    );
     expect(deniedTask.status).toBe(403);
     // Their own `user` scope still works (that's their targeted events).
-    const own = (await callLoader("/resources/events?scope=user", { cookie })) as Response;
+    const own = await callLoader("/resources/events?scope=user", { cookie });
     expect(own.status).toBe(200);
     own.body?.cancel();
   });
@@ -118,10 +129,10 @@ describe("/resources/events", () => {
       role: "admin",
     });
     const { cookie } = await app.cookieFor(orgAdmin.id);
-    const res = (await callLoader(
+    const res = await callLoader(
       "/resources/events?scope=project:viberr-core",
       { cookie },
-    )) as Response;
+    );
     expect(res.status).toBe(200);
     res.body?.cancel();
   });
@@ -129,10 +140,10 @@ describe("/resources/events", () => {
   it("streams: SSE headers, hello first, then published events", async () => {
     const { cookie } = await app.cookieFor(userId);
     const abort = new AbortController();
-    const res = (await callLoader(
+    const res = await callLoader(
       "/resources/events?scope=project:viberr-core&scope=user",
       { cookie, signal: abort.signal },
-    )) as Response;
+    );
 
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("text/event-stream");
@@ -195,10 +206,10 @@ describe("/resources/events", () => {
     );
 
     const { cookie } = await app.cookieFor(userId);
-    const res = (await callLoader("/resources/events?scope=project:viberr-core", {
+    const res = await callLoader("/resources/events?scope=project:viberr-core", {
       cookie,
       headers: { "Last-Event-ID": String(head) },
-    })) as Response;
+    });
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let text = "";

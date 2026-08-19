@@ -40,6 +40,6 @@ export function headers({ actionHeaders }: Route.HeadersArgs) {
   return actionHeaders;
 }
 
-export function loader(_: Route.LoaderArgs) {
+export function loader() {
   throw redirect("/");
 }

@@ -79,14 +79,20 @@ function rememberWrite(absPath: string, content: string): void {
   lastWritten.set(absPath, { content, wroteAtMs: Date.now() });
 }
 
+/** The content a locked read-modify-write acts on, with the diagnostics of
+ *  whichever content won — the write guard below judges THAT content. */
+interface FreshTaskFile {
+  parsed: ParsedTaskFile;
+  diagnostics: FileDiagnostic[];
+}
+
 /** The freshest content for a locked read: disk, unless it is provably a
- *  stale cache of our own earlier write. Carries the diagnostics of whichever
- *  content won, because the write guard below judges THAT content. */
+ *  stale cache of our own earlier write. */
 function repairStaleRead(
   absPath: string,
   current: TaskFileReadResult,
   ref: TaskFileRef,
-): { parsed: ParsedTaskFile; diagnostics: FileDiagnostic[] } {
+): FreshTaskFile {
   const disk = { parsed: current.parsed, diagnostics: current.diagnostics };
   const remembered = lastWritten.get(absPath);
   if (!remembered || current.content === remembered.content) return disk;

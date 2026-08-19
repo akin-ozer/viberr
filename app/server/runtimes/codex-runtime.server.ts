@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type {
@@ -8,6 +9,7 @@ import type {
   Thread,
   ThreadErrorEvent,
   ThreadOptions,
+  TurnOptions,
 } from "@openai/codex-sdk";
 import type {
   RunCallbacks,
@@ -77,10 +79,58 @@ interface CodexAdapterDeps {
 }
 
 type CodexConfig = NonNullable<CodexOptions["config"]>;
+type CodexConfigValue = CodexConfig[string];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+/** The SDK's recursive `--config` value, as a parser. The SDK flattens this
+ * object into dotted `key=value` argv and serializes each leaf as a TOML
+ * literal, so the arms below are the complete set of things a CLI override can
+ * be. */
+const codexConfigValueSchema: z.ZodType<CodexConfigValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.array(codexConfigValueSchema),
+    z.record(z.string(), codexConfigValueSchema),
+  ]),
+);
+
+/** The TABLE arm of that value, for merging a deployment's base config into
+ * Viberr's own. A scalar or array override carries no sub-keys to merge, so it
+ * decodes to an empty table rather than being spread key-by-key. */
+const codexConfigTableSchema = z
+  .record(z.string(), codexConfigValueSchema)
+  .catch({});
+
+/** One portable MCP declaration, decoded from the opaque value `RunSpec` carries
+ * (the two SDKs disagree on the shape, so nothing upstream can type it). Arms
+ * are tried in order and mirror the CLI's own resolution: an in-process `sdk`
+ * server decodes to `null` (present, nothing to translate), an `http` server
+ * needs a real `url`, everything else is a stdio command. A value matching no
+ * arm is dropped — including a stdio declaration whose `args` array holds a
+ * non-string, because translating a half-declared server would silently change
+ * the command the profile wrote. */
+const codexMcpServerSchema = z.union([
+  z.object({ type: z.literal("sdk") }).transform(() => null),
+  z
+    .object({ type: z.literal("http"), url: z.string() })
+    .transform((server) => ({ transport: "http" as const, url: server.url })),
+  z
+    .object({
+      command: z.string(),
+      /** A non-array `args` is not a declaration at all and reads as absent;
+       *  only a partially malformed ARRAY rejects the whole server. */
+      args: z.preprocess(
+        (raw) => (Array.isArray(raw) ? raw : undefined),
+        z.array(z.string()).optional(),
+      ),
+    })
+    .transform((server) => ({
+      transport: "stdio" as const,
+      command: server.command,
+      args: server.args ?? [],
+    })),
+]);
 
 /** Translate only the portable external-server subset shared by both SDKs.
  * Claude's in-process `{ type: "sdk" }` server has no Codex equivalent and is
@@ -98,10 +148,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * NOTE also that this config does not REMOVE servers the run home declares —
  * the CLI merges `--config` per dotted leaf key. That is why runs get an
  * app-owned CODEX_HOME (`codex-config.server.ts`) instead of the host's. */
-function codexMcpServers(servers?: Record<string, unknown>): CodexConfig {
+function codexMcpServers(servers: RunSpec["mcpServers"]): CodexConfig {
   const translated: CodexConfig = {};
   for (const [name, value] of Object.entries(servers ?? {})) {
-    if (!name || !isRecord(value) || value.type === "sdk") continue;
+    if (!name) continue;
+    const declaration = codexMcpServerSchema.safeParse(value);
+    if (!declaration.success || declaration.data === null) continue;
 
     // F7-MCP1 credential scope: resolveSpecialistMcpServers injects the decrypted
     // token as `headers.Authorization` (HTTP) / `env.MCP_CREDENTIAL` (stdio).
@@ -112,29 +164,21 @@ function codexMcpServers(servers?: Record<string, unknown>): CodexConfig {
     // on Codex it connects unauthenticated. This is an honest, documented
     // limitation (same class as the S3 codex tool-confinement gap), not a silent
     // drop — the specialist-mcp docstring says so.
-    if (value.type === "http" && typeof value.url === "string") {
+    if (declaration.data.transport === "http") {
       translated[name] = {
-        url: value.url,
+        url: declaration.data.url,
         default_tools_approval_mode: "approve",
       };
       continue;
     }
 
-    if (typeof value.command === "string") {
-      const args = Array.isArray(value.args)
-        ? value.args.filter((arg): arg is string => typeof arg === "string")
-        : [];
-      // Reject partially malformed arg lists instead of silently changing the
-      // command the profile declared.
-      if (Array.isArray(value.args) && args.length !== value.args.length) {
-        continue;
-      }
-      translated[name] = {
-        command: value.command,
-        default_tools_approval_mode: "approve",
-        ...(args.length ? { args } : {}),
-      };
-    }
+    const stdio: CodexConfig = {
+      command: declaration.data.command,
+      default_tools_approval_mode: "approve",
+    };
+    // An empty `args` is not the same declaration as none at all.
+    if (declaration.data.args.length) stdio.args = declaration.data.args;
+    translated[name] = stdio;
   }
   return translated;
 }
@@ -177,8 +221,14 @@ const SHELL_EXPORTED_ENV_KEYS = [
   "GIT_COMMITTER_EMAIL",
 ] as const;
 
-function shellExportedEnv(spec: RunSpec): Record<string, string> {
-  const out: Record<string, string> = {};
+/** The `shell_environment_policy.set` table — closed over the keys above, so a
+ *  new promise to the agent's shell has to be declared there first. */
+type ShellExportedEnv = Partial<
+  Record<(typeof SHELL_EXPORTED_ENV_KEYS)[number], string>
+>;
+
+function shellExportedEnv(spec: RunSpec) {
+  const out: ShellExportedEnv = {};
   for (const key of SHELL_EXPORTED_ENV_KEYS) {
     const value = spec.env?.[key];
     if (value) out[key] = value;
@@ -217,11 +267,18 @@ function codexConfigForRun(
   spec: RunSpec,
   base?: CodexOptions["config"],
 ): CodexConfig {
-  const baseFeatures = isRecord(base?.features) ? base.features : {};
+  const baseFeatures = codexConfigTableSchema.parse(base?.features);
   const exported = shellExportedEnv(spec);
-  return {
-    ...(base ?? {}),
-    ...(spec.systemPrompt ? { developer_instructions: spec.systemPrompt } : {}),
+  const shellEnvironmentPolicy: CodexConfig = {
+    inherit: "core",
+    ignore_default_excludes: false,
+  };
+  // Only NAME a `set` table when there is something to promise — an empty one
+  // is not the same declaration as none at all.
+  if (Object.keys(exported).length) shellEnvironmentPolicy.set = exported;
+
+  const config: CodexConfig = {
+    ...base,
     // Enforce these after base config so a host/deployment override cannot
     // re-expose CODEX_ACCESS_TOKEN or other server credentials to tools.
     allow_login_shell: false,
@@ -271,12 +328,13 @@ function codexConfigForRun(
     // per-leaf-key into `$CODEX_HOME/config.toml`, so it removes nothing the
     // home declares — the app-owned run home is what makes this exhaustive.
     mcp_servers: codexMcpServers(spec.mcpServers),
-    shell_environment_policy: {
-      inherit: "core",
-      ignore_default_excludes: false,
-      ...(Object.keys(exported).length ? { set: exported } : {}),
-    },
+    shell_environment_policy: shellEnvironmentPolicy,
   };
+  // The persona/expertise prompt, when the run carries one. Set after the
+  // literal so it still overrides a base declaration of the same key without
+  // ever landing as an empty one.
+  if (spec.systemPrompt) config.developer_instructions = spec.systemPrompt;
+  return config;
 }
 
 /**
@@ -337,6 +395,14 @@ export type CodexFailureKind =
   | "session_missing"
   | "unknown";
 
+/** The classifier's whole output: the routing class, the canonical sentence a
+ *  human reads, and the provider's own words after redaction. */
+interface CodexFailure {
+  kind: CodexFailureKind;
+  message: string;
+  providerText: string;
+}
+
 /** Classify a provider failure IN MEMORY before its raw text is redacted, and
  * pair the class with a redaction-safe canonical message. The raw error can
  * echo stderr, command lines, or credentials, so ONLY the class and the
@@ -347,7 +413,7 @@ export type CodexFailureKind =
 function classifyCodexFailure(
   error: unknown,
   phase: "start" | "execution",
-): { kind: CodexFailureKind; message: string; providerText: string } {
+): CodexFailure {
   const parts: string[] = [];
   let current: unknown = error;
   for (let depth = 0; depth < 3 && current != null; depth += 1) {
@@ -525,22 +591,18 @@ export function createCodexAdapter(
         const baseEnv =
           deps.env ??
           (spec.env
-            ? (Object.fromEntries(
+            ? Object.fromEntries(
                 Object.entries(process.env).filter(
-                  ([, v]) => typeof v === "string",
+                  (entry): entry is [string, string] => entry[1] !== undefined,
                 ),
-              ) as Record<string, string>)
+              )
             : undefined);
         const mergedEnv =
-          baseEnv || spec.env
-            ? { ...(baseEnv ?? {}), ...(spec.env ?? {}) }
-            : undefined;
+          baseEnv || spec.env ? { ...baseEnv, ...spec.env } : undefined;
         const config = codexConfigForRun(spec, deps.config);
-        const codexOptions: CodexOptions = {
-          ...(deps.apiKey ? { apiKey: deps.apiKey } : {}),
-          ...(mergedEnv ? { env: mergedEnv } : {}),
-          config,
-        };
+        const codexOptions: CodexOptions = { config };
+        if (deps.apiKey) codexOptions.apiKey = deps.apiKey;
+        if (mergedEnv) codexOptions.env = mergedEnv;
         const codex = factory(codexOptions);
         // Fully autonomous: no approval gating. `danger-full-access` mirrors
         // Claude's bypassPermissions so a server-spawned run never blocks on
@@ -555,41 +617,42 @@ export function createCodexAdapter(
         const reasoningEffort = resolveCodexReasoningEffort(spec.effort);
         const threadOptions: ThreadOptions = {
           model: spec.model,
-          ...(reasoningEffort ? { modelReasoningEffort: reasoningEffort } : {}),
           sandboxMode,
           workingDirectory: spec.workdir,
           skipGitRepoCheck: true,
           // There is no interactive approval channel in a server run. "never"
           // returns denied operations to the model instead of hanging forever.
           approvalPolicy: "never",
-          ...(spec.kind === "operator"
-            ? {
-                networkAccessEnabled: false,
-                webSearchMode: "disabled",
-              }
-            : // P14-RT-06: a specialist whose `use-web-search-fetch` grant is
-              // withheld loses Codex's web search too. Claude removes WebFetch/
-              // WebSearch from the run; Codex has no denylist channel, so the
-              // grant used to bind on one backend only — while this exact option
-              // was already being set two lines up for the operator. Network
-              // access stays ON: declared MCP servers and the workspace's own
-              // tooling are not the egress this capability governs.
-              spec.webSearchWithheld
-              ? { webSearchMode: "disabled" as const }
-              : {}),
         };
+        // Absent when the profile's tier is not one this SDK accepts, so the
+        // CLI applies its own default rather than being handed an empty value.
+        if (reasoningEffort) {
+          threadOptions.modelReasoningEffort = reasoningEffort;
+        }
+        if (spec.kind === "operator") {
+          threadOptions.networkAccessEnabled = false;
+          threadOptions.webSearchMode = "disabled";
+        } else if (spec.webSearchWithheld) {
+          // P14-RT-06: a specialist whose `use-web-search-fetch` grant is
+          // withheld loses Codex's web search too. Claude removes WebFetch/
+          // WebSearch from the run; Codex has no denylist channel, so the grant
+          // used to bind on one backend only — while this exact option was
+          // already being set for the operator. Network access stays ON:
+          // declared MCP servers and the workspace's own tooling are not the
+          // egress this capability governs.
+          threadOptions.webSearchMode = "disabled";
+        }
         const thread = spec.resumeSessionId
           ? codex.resumeThread(spec.resumeSessionId, threadOptions)
           : codex.startThread(threadOptions);
 
         try {
           armIdle();
-          const { events } = await thread.runStreamed(spec.prompt, {
-            signal: abort.signal,
-            // Structured-output operator: constrain the final message to the
-            // decision-plan schema so the caller can parse + execute it.
-            ...(spec.outputSchema ? { outputSchema: spec.outputSchema } : {}),
-          });
+          const turnOptions: TurnOptions = { signal: abort.signal };
+          // Structured-output operator: constrain the final message to the
+          // decision-plan schema so the caller can parse + execute it.
+          if (spec.outputSchema) turnOptions.outputSchema = spec.outputSchema;
+          const { events } = await thread.runStreamed(spec.prompt, turnOptions);
           let turnCount = 0;
           for await (const event of events) {
             armIdle(); // reset the inactivity window on every event

@@ -2,6 +2,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { watch, type FSWatcher } from "chokidar";
+import { z } from "zod";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
@@ -31,6 +32,18 @@ import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-
 
 export const WATCH_DEBOUNCE_MS = 250;
 
+/** The single column the removal reconcile below selects from each table:
+ *  `task_projections.task_key` is TEXT NOT NULL, `projects.slug` is its
+ *  TEXT primary key. */
+const taskKeyRowSchema = z.object({ task_key: z.string() });
+const projectSlugRowSchema = z.object({ slug: z.string() });
+
+/** Node hangs its errno off `code`; a watcher error without one is not a
+ *  condition this module branches on. */
+const errnoSchema = z.object({
+  code: z.string().optional().catch(undefined),
+});
+
 const WATCHER_KEY = Symbol.for("viberr.fileWatcher");
 
 interface WatcherHandle {
@@ -56,13 +69,26 @@ interface WatcherLifecycle {
   generation: number;
   reArmTimer: ReturnType<typeof setTimeout> | null;
 }
-function watcherLifecycle(
-  cache: Record<symbol, unknown>,
-): WatcherLifecycle {
-  let lc = cache[WATCHER_LIFECYCLE_KEY] as WatcherLifecycle | undefined;
+
+/** The two `globalThis` slots this module owns — the watcher and its lifecycle
+ *  survive an HMR module reload, which module-level variables would not. */
+interface WatcherHost {
+  [WATCHER_KEY]?: WatcherHandle;
+  [WATCHER_LIFECYCLE_KEY]?: WatcherLifecycle;
+}
+
+function watcherHost(): WatcherHost {
+  // SAFETY: both keys are registry symbols under viberr-namespaced names that
+  // only the functions in this module read or write, so each slot holds either
+  // the value they put there or nothing at all.
+  return globalThis as WatcherHost;
+}
+
+function watcherLifecycle(host: WatcherHost): WatcherLifecycle {
+  let lc = host[WATCHER_LIFECYCLE_KEY];
   if (!lc) {
     lc = { generation: 0, reArmTimer: null };
-    cache[WATCHER_LIFECYCLE_KEY] = lc;
+    host[WATCHER_LIFECYCLE_KEY] = lc;
   }
   return lc;
 }
@@ -106,7 +132,7 @@ function cancelAll(timers: Map<string, ReturnType<typeof setTimeout>>): void {
 export function startFileWatcher(
   options: { dataRoot?: string; db?: DatabaseSync } = {},
 ): FSWatcher {
-  const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
+  const cache = watcherHost();
   const root = getDataRoot(options.dataRoot);
   const existing = cache[WATCHER_KEY];
   if (existing && existing.root === root) return existing.watcher;
@@ -168,9 +194,11 @@ export function startFileWatcher(
         rebuildPath(db, projectFilePath(slug, root), { dataRoot: root });
         // …and every projected task is checked against disk (a project-row
         // removal does NOT cascade to task rows — prune them explicitly).
-        const tasks = db
-          .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
-          .all(slug) as { task_key: string }[];
+        const tasks = z.array(taskKeyRowSchema).parse(
+          db
+            .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
+            .all(slug),
+        );
         for (const t of tasks) {
           rebuildTaskFile(db, slug, t.task_key, { dataRoot: root });
         }
@@ -182,9 +210,9 @@ export function startFileWatcher(
 
       if (segments.length === 0) {
         // The projects root itself vanished — reconcile everything projected.
-        const slugs = db.prepare(`SELECT slug FROM projects`).all() as {
-          slug: string;
-        }[];
+        const slugs = z
+          .array(projectSlugRowSchema)
+          .parse(db.prepare(`SELECT slug FROM projects`).all());
         for (const row of slugs) reconcileProject(row.slug);
         return;
       }
@@ -234,8 +262,9 @@ export function startFileWatcher(
       schedule(dirTimers, path.resolve(watchedDir, dir), rebuildDir),
     );
 
-  watcher.on("error", (error: unknown) => {
-    const code = (error as { code?: string } | null)?.code;
+  watcher.on("error", (error) => {
+    const errno = errnoSchema.safeParse(error);
+    const code = errno.success ? errno.data.code : undefined;
     // A vanished path is NOT a broken watcher: deleting a watched subtree can
     // race chokidar's own bookkeeping into a spurious ENOENT while the
     // deletion's unlinkDir reconcile is still queued in the debounce. Killing
@@ -299,8 +328,7 @@ export function startFileWatcher(
 
 /** True while a store watcher is running in this process. */
 export function isFileWatcherAlive(): boolean {
-  const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
-  return cache[WATCHER_KEY] !== undefined;
+  return watcherHost()[WATCHER_KEY] !== undefined;
 }
 
 /**
@@ -311,11 +339,11 @@ export function isFileWatcherAlive(): boolean {
  * guarantees no rebuild callback runs after this returns.
  */
 export function stopFileWatcher(): void {
-  const cache = globalThis as unknown as Record<symbol, unknown>;
+  const cache = watcherHost();
   const lc = watcherLifecycle(cache);
   cancelPendingReArm(lc);
   lc.generation += 1;
-  const existing = cache[WATCHER_KEY] as WatcherHandle | undefined;
+  const existing = cache[WATCHER_KEY];
   if (!existing) return;
   cancelAll(existing.fileTimers);
   cancelAll(existing.dirTimers);

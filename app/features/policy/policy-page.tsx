@@ -2,7 +2,7 @@ import { Fragment, useState } from "react";
 import { useFetcher, useNavigate } from "react-router";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
-import { Icon, type IconName } from "~/ui/icon";
+import { Icon, storeIcon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { rovingRadioKeyDown } from "~/ui/roving-radio";
@@ -67,12 +67,12 @@ export function HumanAccess({
   onSetRole: (member: MembershipView, role: ProjectRole) => void;
 }) {
   const push = useToast();
-  const counts: Record<ProjectRole, number> = {
+  const counts = {
     admin: 0,
     maintainer: 0,
     contributor: 0,
     viewer: 0,
-  };
+  } satisfies Record<ProjectRole, number>;
   // LV-04/UI-29: a membership whose org account was deleted is NOT a member for
   // any counting purpose — the role headers describe who can actually perform
   // an action, and the ghost can perform none of them.
@@ -303,7 +303,7 @@ export function AgentCapability({
             title={"Open " + p.name + " in Agents"}
           >
             <span className={"agent-glyph" + (p.kind === "operator" ? " op" : "")}>
-              <Icon name={p.icon as IconName} />
+              <Icon name={storeIcon(p.icon)} />
             </span>
             <span className="pcap-main">
               <span className="nm">{p.name}</span>
@@ -594,7 +594,7 @@ export function PolicyPage({
 }: {
   data: PolicyViewData;
   projectSlug: string;
-  myRole: string | null;
+  myRole: ProjectRole | null;
 }) {
   const navigate = useNavigate();
   const csrf = useCsrfToken();
@@ -610,8 +610,8 @@ export function PolicyPage({
   // `edit-policy` (policy-actions.server.ts:101,185). They resolve to the same
   // role set today, so the bug was latent, and that is exactly the drift the
   // single-source matrix exists to prevent: each control asks for ITS action.
-  const canSetRole = roleCan(myRole as ProjectRole | null, "manage-members");
-  const canEditPolicy = roleCan(myRole as ProjectRole | null, "edit-policy");
+  const canSetRole = roleCan(myRole, "manage-members");
+  const canEditPolicy = roleCan(myRole, "edit-policy");
   const busy =
     roleFetcher.state !== "idle" || boundaryFetcher.state !== "idle";
 

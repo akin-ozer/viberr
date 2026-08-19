@@ -20,8 +20,15 @@ import type { loader as taskLoader, action as taskAction } from "~/routes/projec
  * One seed per file; read-only assertions before the mutating interrupt.
  */
 
+/** The seeded users this file drives the route with. */
+interface SeedUserIds {
+  arda: string;
+  selin: string;
+  deniz: string;
+}
+
 let app: AppTestContext;
-let ids: { arda: string; selin: string; deniz: string };
+let ids: SeedUserIds;
 let finishedRunId: string;
 let runningRunId: string;
 
@@ -100,6 +107,9 @@ beforeAll(async () => {
   runningRunId = running.runId;
 
   // Both runs settle through async timers — wait for their target states.
+  // SAFETY: the SELECT names one column, and 0001_baseline declares
+  // `agent_runs.state` TEXT NOT NULL — so a matched row carries exactly this
+  // shape, and `get` returns undefined when the id matches nothing.
   const state = (id: string) =>
     (app.db.prepare(`SELECT state FROM agent_runs WHERE id = ?`).get(id) as
       | { state: string }
@@ -116,18 +126,27 @@ afterAll(() => app.cleanup());
 async function runLoader(key: string, userId: string): Promise<LoaderData> {
   const { loader } = await import("~/routes/project.task");
   const { cookie } = await app.cookieFor(userId);
-  return (await loader({
+  // SAFETY: the loader reads only `request` and `params.{slug,key}`; the rest of
+  // the generated `Route.LoaderArgs` (the router context provider, its matches)
+  // is untouched on every path this file exercises.
+  return await loader({
     request: app.request(`/projects/viberr-core/tasks/${key}`, { cookie }),
     params: { slug: "viberr-core", key },
     context: {},
-  } as never)) as LoaderData;
+  } as never);
 }
 
-async function postIntent(key: string, userId: string, fields: Record<string, string>) {
+async function postIntent(
+  key: string,
+  userId: string,
+  fields: Record<string, string>,
+): Promise<ActionData> {
   const { action } = await import("~/routes/project.task");
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
-  return (await action({
+  // SAFETY: as in `runLoader` — the action reads only `request` and
+  // `params.{slug,key}` out of the generated `Route.ActionArgs`.
+  return await action({
     request: app.request(`/projects/viberr-core/tasks/${key}`, {
       method: "POST",
       cookie,
@@ -135,7 +154,7 @@ async function postIntent(key: string, userId: string, fields: Record<string, st
     }),
     params: { slug: "viberr-core", key },
     context: {},
-  } as never)) as ActionData | { data: { ok: false; error: string }; init: { status: number } };
+  } as never);
 }
 
 describe("loader — runtime projection shape", () => {

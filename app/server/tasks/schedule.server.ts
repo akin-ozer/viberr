@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import {
   recordAudit,
   SYSTEM_ACTOR,
@@ -21,8 +22,13 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { CLONE_TIMEOUT_MS } from "~/server/tasks/git-clone-auth.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import type { TaskMutationContext } from "./task-actions.server";
-import type { TaskFileEvent, TaskSchedule } from "~/schemas/task-file.schema";
+import {
+  scheduleSchema,
+  type TaskFileEvent,
+  type TaskSchedule,
+} from "~/schemas/task-file.schema";
 
 /**
  * Governed SCHEDULED task actions (O-3). A maintainer schedules a future
@@ -220,14 +226,16 @@ export async function cancelScheduledAction(
 
 // ------------------------------------------------------------------ runner
 
-export interface DueRow {
-  project_slug: string;
-  task_key: string;
-  stage: string;
+/** Every column this query selects is NOT NULL in `task_projections`. */
+const dueRowSchema = z.object({
+  project_slug: z.string(),
+  task_key: z.string(),
+  stage: z.string(),
   /** R14-3 projection column; 1 = archived (P14-RV-03). */
-  archived: number;
-  schedules_json: string;
-}
+  archived: z.number(),
+  schedules_json: z.string(),
+});
+export type DueRow = z.infer<typeof dueRowSchema>;
 
 /**
  * Tasks holding an UNRESOLVED schedule occurrence (`pending` or `claimed`) —
@@ -241,18 +249,27 @@ export interface DueRow {
  * `status` is what selects the row.
  */
 export function tasksWithUnresolvedSchedules(db: DatabaseSync): DueRow[] {
-  return db
-    .prepare(
-      `SELECT project_slug, task_key, stage, archived, schedules_json
-         FROM task_projections
-        WHERE json_valid(schedules_json)
-          AND EXISTS (
-                SELECT 1 FROM json_each(task_projections.schedules_json)
-                 WHERE json_extract(value, '$.status') IN ('pending', 'claimed')
-              )`,
-    )
-    .all() as unknown as DueRow[];
+  return z.array(dueRowSchema).parse(
+    db
+      .prepare(
+        `SELECT project_slug, task_key, stage, archived, schedules_json
+           FROM task_projections
+          WHERE json_valid(schedules_json)
+            AND EXISTS (
+                  SELECT 1 FROM json_each(task_projections.schedules_json)
+                   WHERE json_extract(value, '$.status') IN ('pending', 'claimed')
+                )`,
+      )
+      .all(),
+  );
 }
+
+/** The projection's `schedules_json`, decoded. Tolerance is per ELEMENT on
+ *  purpose: one unreadable occurrence must not hide the readable due ones on
+ *  the same task from this tick. */
+const scheduleListSchema = z
+  .array(scheduleSchema.nullable().catch(null))
+  .transform((all) => all.filter((s) => s !== null));
 
 /**
  * F10-16: a claim older than this is treated as crashed and re-driven. Longer
@@ -321,7 +338,7 @@ export async function fireDueSchedules(
   for (const row of rows) {
     let scheds: TaskSchedule[];
     try {
-      scheds = JSON.parse(row.schedules_json) as TaskSchedule[];
+      scheds = scheduleListSchema.parse(JSON.parse(row.schedules_json));
     } catch {
       continue;
     }
@@ -459,7 +476,7 @@ export async function fireDueSchedules(
          *  the retirement has to say what actually happened. */
         let refusedTerminal = false;
         try {
-          const result = await runOperator(db, {
+          const runInput: RunOperatorInput = {
             projectSlug: t.projectSlug,
             taskKey: t.taskKey,
             backend: t.backend,
@@ -469,9 +486,12 @@ export async function fireDueSchedules(
             // human scheduled it never reached the turn — the operator re-read
             // the task with no idea what it was asked to re-check.
             trigger: "scheduled",
-            ...(t.note ? { scheduleNote: t.note } : {}),
             dataRoot: ctx.dataRoot,
-          });
+          };
+          // Only a real note rides along; an empty one would present itself to
+          // the turn instruction as a stated reason.
+          if (t.note) runInput.scheduleNote = t.note;
+          const result = await runOperator(db, runInput);
           refusedTerminal = result.refused === "terminal-stage";
           ok = true;
         } catch (error) {
@@ -589,5 +609,5 @@ export function startScheduleRunner(db: DatabaseSync): void {
       });
   }, SCHEDULE_TICK_MS);
   // Don't keep the process alive for the timer (tests, graceful shutdown).
-  if (typeof runnerHandle.unref === "function") runnerHandle.unref();
+  runnerHandle.unref?.();
 }

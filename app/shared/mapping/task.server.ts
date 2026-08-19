@@ -26,7 +26,10 @@ import { resolveStageRoles } from "~/shared/workflow/stage-roles";
  * board/detail render shapes consumed by Phase 4/5 loaders.
  */
 
-export interface TaskProjectionRow {
+/** A type alias, not an interface, so a `SELECT`-row assertion is checked
+ *  against SQLite's own output types instead of being laundered through
+ *  `unknown` first (only a type alias gets the implicit index signature). */
+export type TaskProjectionRow = {
   project_slug: string;
   task_key: string;
   title: string;
@@ -65,7 +68,7 @@ export interface TaskProjectionRow {
   source_path: string;
   content_hash: string;
   parsed_at: string;
-}
+};
 
 /** Agent chip render shape (mock AgentActor + the profile-id join key). */
 export interface AgentRender {
@@ -301,10 +304,11 @@ export function mapOperatorRef(
 export function mapPacket(packet: TaskPacket | null): PacketRender | null {
   if (!packet) return null;
   const { from, ...rest } = packet;
-  return {
-    ...rest,
-    from: packetFromDisplay(from),
-  } as PacketRender;
+  // Spread, not a field list: the packet's own extra keys (`id`, `askedBy`, and
+  // whatever the loose schema preserved) ride along untouched — only `from` is
+  // swapped for its display name.
+  const render: PacketRender = { ...rest, from: packetFromDisplay(from) };
+  return render;
 }
 
 /** Human-readable packet author from the stored actor-ref codec string. Most
@@ -328,6 +332,38 @@ function packetFromDisplay(from: string): string {
   }
 }
 
+/** The JSON columns a `task_projections` row carries, decoded. */
+interface TaskProjectionColumns {
+  specialist: AgentRef | null;
+  reviewers: AgentRef[];
+  operator: OperatorRef | null;
+  github: GithubCache | null;
+  pr: PrRef | null;
+  packet: TaskPacket | null;
+}
+
+/** Decoded in one place because the six columns share one provenance — the
+ *  projector's own `JSON.stringify` — and therefore one justification. */
+function decodeProjectionColumns(row: TaskProjectionRow): TaskProjectionColumns {
+  // SAFETY: every `*_json` column below has ONE writer — `rebuildTaskFile`
+  // (server/projections/rebuilder.server.ts) stores `JSON.stringify` of the
+  // frontmatter the task-file schema just parsed — so each column holds exactly
+  // the type named here. The nullable columns are checked before their parse;
+  // `reviewers_json` is NOT NULL and always a (possibly empty) array.
+  return {
+    specialist: row.specialist_json
+      ? (JSON.parse(row.specialist_json) as AgentRef)
+      : null,
+    reviewers: JSON.parse(row.reviewers_json) as AgentRef[],
+    operator: row.operator_json
+      ? (JSON.parse(row.operator_json) as OperatorRef)
+      : null,
+    github: row.github_json ? (JSON.parse(row.github_json) as GithubCache) : null,
+    pr: row.pr_json ? (JSON.parse(row.pr_json) as PrRef) : null,
+    packet: row.packet_json ? (JSON.parse(row.packet_json) as TaskPacket) : null,
+  };
+}
+
 export function mapTaskProjectionRow(
   row: TaskProjectionRow,
   context: {
@@ -342,19 +378,13 @@ export function mapTaskProjectionRow(
     accepted: boolean;
   },
 ): TaskSummary {
-  const specialist = row.specialist_json
-    ? mapAgentRef(JSON.parse(row.specialist_json) as AgentRef)
-    : null;
-  const reviewers = (JSON.parse(row.reviewers_json) as AgentRef[])
+  const columns = decodeProjectionColumns(row);
+  const specialist = mapAgentRef(columns.specialist);
+  const reviewers = columns.reviewers
     .map((c) => mapAgentRef(c))
     .filter((c): c is AgentRender => c !== null);
-  const operator = row.operator_json
-    ? mapOperatorRef(JSON.parse(row.operator_json) as OperatorRef, context.stages)
-    : null;
-  const github = row.github_json
-    ? (JSON.parse(row.github_json) as GithubCache)
-    : null;
-  const pr = row.pr_json ? (JSON.parse(row.pr_json) as PrRef) : null;
+  const operator = mapOperatorRef(columns.operator, context.stages);
+  const { github, pr } = columns;
 
   return {
     projectSlug: row.project_slug,
@@ -395,9 +425,7 @@ export function mapTaskProjectionRow(
     commits: github?.commits ?? [],
     changed: github?.changed ?? null,
     goal: row.goal,
-    packet: mapPacket(
-      row.packet_json ? (JSON.parse(row.packet_json) as TaskPacket) : null,
-    ),
+    packet: mapPacket(columns.packet),
     eventCount: row.event_count,
     commentCount: row.comment_count,
     diagnosticCount: row.diagnostic_count,

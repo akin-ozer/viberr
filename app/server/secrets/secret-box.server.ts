@@ -146,12 +146,7 @@ export function openSecret(box: string, key: Buffer = envKey()): string {
   if (parts.length !== 4) {
     throw invalidBox("malformed box (expected 4 $-separated segments)");
   }
-  const [version, ivB64, ciphertextB64, tagB64] = parts as [
-    string,
-    string,
-    string,
-    string,
-  ];
+  const [version, ivB64, ciphertextB64, tagB64] = parts;
   if (version !== VERSION) {
     throw invalidBox(`unsupported box version "${version}"`);
   }

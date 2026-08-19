@@ -277,10 +277,7 @@ const REGEX_AFTER_WORD = new Set([
  * swallowed region would leave its quotes behind. Without that proof "0
  * offenders" and "0 literals seen" are the same green.
  */
-function lexLiterals(
-  src: string,
-  label: string,
-): { literals: Literal[]; residue: string } {
+function lexLiterals(src: string, label: string) {
   const literals: Literal[] = [];
   const residue = src.split("");
   const blank = (from: number, to: number) => {

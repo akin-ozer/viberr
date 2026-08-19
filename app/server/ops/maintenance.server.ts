@@ -14,6 +14,7 @@ import {
 import {
   pruneRuntimeTranscripts,
   type TranscriptReclamation,
+  type TranscriptRetentionOptions,
 } from "./transcript-retention.server";
 
 /**
@@ -93,6 +94,22 @@ export interface MaintenancePassOptions {
   now?: Date;
 }
 
+/** The one line every pass logs — what it removed, and what it skipped.
+ *  Optional fields are OMITTED rather than nulled: see `runMaintenancePass`. */
+type MaintenancePassLog = {
+  reason: MaintenanceReason;
+  runLogLines: number;
+  auditEvents: number;
+  notifications: number;
+  transcripts: number;
+  sessionFiles: number;
+  workspaces: number;
+  freed: string;
+  workspacesSkipped?: MaintenancePassResult["workspacesSkipped"];
+  diskFree?: string;
+  diskStatus?: DiskStatus;
+};
+
 const EMPTY_RETENTION: RetentionResult = {
   runLogLines: 0,
   auditEvents: 0,
@@ -102,13 +119,14 @@ const EMPTY_RETENTION: RetentionResult = {
 /** Runs that could be holding a working tree open right now. */
 export function activeRunCount(db: DatabaseSync): number {
   try {
-    return (
-      db
-        .prepare(
-          `SELECT count(*) AS c FROM agent_runs WHERE state IN ('queued', 'running')`,
-        )
-        .get() as { c: number }
-    ).c;
+    // SAFETY: `SELECT count(*) AS c` is an aggregate with no GROUP BY — sqlite
+    // answers it with exactly one row carrying the single integer column `c`.
+    const row = db
+      .prepare(
+        `SELECT count(*) AS c FROM agent_runs WHERE state IN ('queued', 'running')`,
+      )
+      .get() as { c: number };
+    return row.c;
   } catch {
     // Unreadable table → assume busy. Skipping a reclaim costs disk; doing one
     // over a live working tree costs a run.
@@ -141,11 +159,13 @@ export function runMaintenancePass(
     sessions: 0,
     bytes: 0,
   };
+  // Both keys are left OFF when the caller named neither, so the pruner falls
+  // back to the configured data root and the real clock.
+  const transcriptOptions: TranscriptRetentionOptions = {};
+  if (options.dataRoot) transcriptOptions.dataRoot = options.dataRoot;
+  if (options.now) transcriptOptions.now = options.now;
   try {
-    transcripts = pruneRuntimeTranscripts({
-      ...(options.dataRoot ? { dataRoot: options.dataRoot } : {}),
-      ...(options.now ? { now: options.now } : {}),
-    });
+    transcripts = pruneRuntimeTranscripts(transcriptOptions);
   } catch (error) {
     logger.error("runtime transcript retention failed", {
       err: error instanceof Error ? error : new Error(String(error)),
@@ -174,7 +194,7 @@ export function runMaintenancePass(
   const disk = measureDataRootSpace(options.dataRoot);
   const freedBytes = transcripts.bytes + (workspaces?.bytes ?? 0);
 
-  const summary = {
+  const summary: MaintenancePassLog = {
     reason: options.reason,
     runLogLines: retention.runLogLines,
     auditEvents: retention.auditEvents,
@@ -182,12 +202,16 @@ export function runMaintenancePass(
     transcripts: transcripts.transcripts,
     sessionFiles: transcripts.sessions,
     workspaces: workspaces?.removed ?? 0,
-    ...(workspacesSkipped ? { workspacesSkipped } : {}),
     freed: formatBytes(freedBytes),
-    ...(disk
-      ? { diskFree: formatBytes(disk.freeBytes), diskStatus: disk.status }
-      : {}),
   };
+  // Both are stated only when they happened: a pass that reclaimed workspaces
+  // has no reason to skip, and an unmeasurable filesystem has no free space to
+  // report — a `null` in either would read as a measurement.
+  if (workspacesSkipped) summary.workspacesSkipped = workspacesSkipped;
+  if (disk) {
+    summary.diskFree = formatBytes(disk.freeBytes);
+    summary.diskStatus = disk.status;
+  }
   // Every pass logs what it removed — including a pass that removed nothing,
   // which is how an operator confirms the scheduler is alive at all.
   logger.info("store maintenance pass", summary);
@@ -255,29 +279,35 @@ export function maintenanceState(): MaintenanceState {
 const TIMER_KEY = Symbol.for("viberr.maintenanceTimers");
 const DISK_STATUS_KEY = Symbol.for("viberr.lastDiskStatus");
 
-type TimerSlot = Record<symbol, ReturnType<typeof setInterval>[] | undefined>;
+/** The process-global slots the scheduler parks its live state in — well-known
+ *  symbols, so a dev-server HMR reload of this module keeps the timers it
+ *  already armed instead of arming a second set. */
+interface MaintenanceGlobals {
+  [TIMER_KEY]?: ReturnType<typeof setInterval>[];
+  [DISK_STATUS_KEY]?: DiskStatus | null;
+}
+
+function schedulerGlobals(): MaintenanceGlobals {
+  // SAFETY: both keys are registry symbols under viberr-namespaced names that
+  // nothing outside this module reads or writes, so each slot holds either what
+  // the setters below put there or nothing at all.
+  return globalThis as MaintenanceGlobals;
+}
 
 function timers(): ReturnType<typeof setInterval>[] {
-  const slot = globalThis as unknown as TimerSlot;
-  return slot[TIMER_KEY] ?? [];
+  return schedulerGlobals()[TIMER_KEY] ?? [];
 }
 
 function setTimers(handles: ReturnType<typeof setInterval>[]): void {
-  const slot = globalThis as unknown as TimerSlot;
-  slot[TIMER_KEY] = handles;
+  schedulerGlobals()[TIMER_KEY] = handles;
 }
 
 function lastDiskStatus(): DiskStatus | null {
-  const slot = globalThis as unknown as Record<symbol, DiskStatus | undefined>;
-  return slot[DISK_STATUS_KEY] ?? null;
+  return schedulerGlobals()[DISK_STATUS_KEY] ?? null;
 }
 
 function setLastDiskStatus(status: DiskStatus | null): void {
-  const slot = globalThis as unknown as Record<
-    symbol,
-    DiskStatus | null | undefined
-  >;
-  slot[DISK_STATUS_KEY] = status;
+  schedulerGlobals()[DISK_STATUS_KEY] = status;
 }
 
 /**
@@ -320,10 +350,9 @@ export function checkDiskPressure(
     disk.status !== "ok" &&
     Date.now() - lastPassMs >= MIN_PRESSURE_PASS_GAP_MS
   ) {
-    runMaintenancePass(db, {
-      reason: "disk-pressure",
-      ...(dataRoot ? { dataRoot } : {}),
-    });
+    const passOptions: MaintenancePassOptions = { reason: "disk-pressure" };
+    if (dataRoot) passOptions.dataRoot = dataRoot;
+    runMaintenancePass(db, passOptions);
   }
   return disk;
 }
@@ -377,9 +406,7 @@ export function startMaintenanceScheduler(
     }
   }, diskMs);
 
-  for (const handle of [passTimer, diskTimer]) {
-    if (typeof handle.unref === "function") handle.unref();
-  }
+  for (const handle of [passTimer, diskTimer]) handle.unref?.();
   setTimers([passTimer, diskTimer]);
   logger.info("store maintenance scheduled", {
     everyMinutes: Math.round(intervalMs / 60_000),

@@ -2,7 +2,10 @@ import type { Route } from "./+types/resources.run-log";
 import { requireUser } from "~/server/auth/require-user.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { getRunLog } from "~/server/runtimes/run-service.server";
+import {
+  getRunLog,
+  type RunLogQuery,
+} from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 
 /**
@@ -68,16 +71,17 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Membership gate for the run's project (throws a 403 Response for non-members).
   await requireProjectMember(request, run.project_slug, "view raw run logs");
 
-  const log = getRunLog(
-    db,
-    runId,
-    before !== null || limit !== null
-      ? {
-          ...(before !== null ? { before } : {}),
-          ...(limit !== null ? { limit } : {}),
-        }
-      : { since },
-  );
+  // Backward mode is selected by the PRESENCE of `before`/`limit`, so an
+  // absent param must leave its key off entirely rather than carry undefined.
+  let query: RunLogQuery;
+  if (before !== null || limit !== null) {
+    query = {};
+    if (before !== null) query.before = before;
+    if (limit !== null) query.limit = limit;
+  } else {
+    query = { since };
+  }
+  const log = getRunLog(db, runId, query);
   if (!log) {
     return Response.json(
       { error: { code: "not_found", message: `Run ${runId} not found.` } },

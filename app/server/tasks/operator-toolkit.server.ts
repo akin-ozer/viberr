@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createSdkMcpServer,
   tool,
+  type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { TaskMutationContext } from "./task-actions.server";
@@ -23,6 +24,8 @@ import {
   operatorTransitionStage,
   type OperatorActionResult,
   type OperatorAuthority,
+  type OperatorOpenPacketInput,
+  type OperatorPacketOptionInput,
 } from "./operator-actions.server";
 import {
   operatorUpdateBranchFromBase,
@@ -30,7 +33,10 @@ import {
 } from "~/server/github/update-branch-operator.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import { normalizeEscapedNewlines } from "./model-prose.server";
-import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
+import {
+  resolveSpecialistMcpServers,
+  type SpecialistMcpServerConfig,
+} from "./specialist-mcp.server";
 
 /**
  * The operator's in-process governance TOOLS — a Claude Agent SDK MCP server
@@ -49,9 +55,16 @@ import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
  * is built here at all.
  */
 
+/** What the run mounts, keyed by server name: the in-process `viberr`
+ *  governance server, plus whichever org MCP grants resolved. */
+export type OperatorMcpServers = Record<
+  string,
+  McpSdkServerConfigWithInstance | SpecialistMcpServerConfig
+>;
+
 export interface OperatorToolkit {
   /** `{ viberr: <sdk mcp server> }` for the Claude query `mcpServers` option. */
-  mcpServers: Record<string, unknown>;
+  mcpServers: OperatorMcpServers;
   /** The `mcp__*` tool names this run AUTO-APPROVES (P14-KM-12: confinement is
    *  the deny list, not this). */
   allowedTools: string[];
@@ -65,9 +78,8 @@ interface ToolkitDeps {
   authority: OperatorAuthority;
 }
 
-function textResult(payload: unknown) {
-  const text =
-    typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+/** Every tool answers with one text block — the SDK's tool-result shape. */
+function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
@@ -79,6 +91,19 @@ const prose = normalizeEscapedNewlines;
 function resultText(r: OperatorActionResult) {
   return textResult(`[${r.outcome}] ${r.message}`);
 }
+
+// The action inputs, taken FROM the actions themselves: each handler below
+// fills one field at a time (an absent key and a key set to undefined are not
+// the same thing to these actions), so it needs the contract by name.
+type SetGoalInput = Parameters<typeof operatorSetGoal>[2];
+type OpenPacketObservation = NonNullable<
+  OperatorOpenPacketInput["observations"]
+>[number];
+type EngageAgentInput = Parameters<typeof operatorEngageAgent>[2];
+type RunAgentInput = Parameters<typeof operatorRunAgent>[2];
+type PromptAgentInput = Parameters<typeof operatorPromptAgentGeneric>[2];
+type DeliverInput = Parameters<typeof operatorDeliverForReview>[2];
+type TransitionInput = Parameters<typeof operatorTransitionStage>[2];
 
 /**
  * The MCP instructions block the model reads alongside these tools.
@@ -129,7 +154,13 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       "Read the current task snapshot: stage, readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can engage, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do), and your own capability policy + autonomy. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions) — never by guessing from names.",
       {},
       async () =>
-        textResult(operatorSnapshot(db, ctx, projectSlug, taskKey, authority)),
+        textResult(
+          JSON.stringify(
+            operatorSnapshot(db, ctx, projectSlug, taskKey, authority),
+            null,
+            2,
+          ),
+        ),
     ),
     "get_task",
   );
@@ -164,15 +195,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           goal: z.string().describe("The full drafted goal / scope + acceptance criteria."),
           reason: z.string().optional().describe("One line on why this scope — shown on the timeline."),
         },
-        async (args) =>
-          resultText(
-            await operatorSetGoal(
-              db,
-              ctx,
-              { ...base, goal: prose(args.goal), ...(args.reason ? { reason: prose(args.reason) } : {}) },
-              authority,
-            ),
-          ),
+        async (args) => {
+          const input: SetGoalInput = { ...base, goal: prose(args.goal) };
+          if (args.reason) input.reason = prose(args.reason);
+          return resultText(await operatorSetGoal(db, ctx, input, authority));
+        },
       ),
       "set_goal",
     );
@@ -241,7 +268,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .array(
               z.object({
                 kind: z
-                  .enum(PACKET_OPTION_KINDS as unknown as [string, ...string[]])
+                  .enum(PACKET_OPTION_KINDS)
                   .describe("Stable option kind the resolver dispatches on."),
                 title: z.string().describe("Button label, e.g. 'Reassign to a different developer'."),
                 detail: z.string().optional().describe("Short explanation under the option."),
@@ -268,40 +295,41 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             )
             .describe("The 2-4 resolvable options; exactly one recommended."),
         },
-        async (args) =>
-          resultText(
-            await operatorOpenPacket(
-              db,
-              ctx,
-              {
-                ...base,
-                packetType: args.packetType,
-                title: prose(args.title),
-                ...(args.body ? { body: prose(args.body) } : {}),
-                ...(args.observations
-                  ? {
-                      // Code-flagged observation values render as code — their
-                      // backslashes are content, so only prose values are repaired.
-                      observations: args.observations.map((o) => ({
-                        k: prose(o.k),
-                        v: o.code ? o.v : prose(o.v),
-                        ...(o.code !== undefined ? { code: o.code } : {}),
-                      })),
-                    }
-                  : {}),
-                options: args.options.map((o) => ({
-                  kind: o.kind as (typeof PACKET_OPTION_KINDS)[number],
-                  title: prose(o.title),
-                  ...(o.detail ? { detail: prose(o.detail) } : {}),
-                  ...(o.recommended !== undefined ? { recommended: o.recommended } : {}),
-                  ...(o.backend ? { backend: o.backend } : {}),
-                  ...(o.profileId ? { profileId: o.profileId } : {}),
-                  ...(o.deleteBranch ? { deleteBranch: true } : {}),
-                })),
-              },
-              authority,
-            ),
-          ),
+        async (args) => {
+          const input: OperatorOpenPacketInput = {
+            ...base,
+            packetType: args.packetType,
+            title: prose(args.title),
+            options: args.options.map((o) => {
+              const option: OperatorPacketOptionInput = {
+                kind: o.kind,
+                title: prose(o.title),
+              };
+              if (o.detail) option.detail = prose(o.detail);
+              if (o.recommended !== undefined) option.recommended = o.recommended;
+              if (o.backend) option.backend = o.backend;
+              if (o.profileId) option.profileId = o.profileId;
+              if (o.deleteBranch) option.deleteBranch = true;
+              return option;
+            }),
+          };
+          if (args.body) input.body = prose(args.body);
+          if (args.observations) {
+            // Code-flagged observation values render as code — their
+            // backslashes are content, so only prose values are repaired.
+            input.observations = args.observations.map((o) => {
+              const observed: OpenPacketObservation = {
+                k: prose(o.k),
+                v: o.code ? o.v : prose(o.v),
+              };
+              if (o.code !== undefined) observed.code = o.code;
+              return observed;
+            });
+          }
+          return resultText(
+            await operatorOpenPacket(db, ctx, input, authority),
+          );
+        },
       ),
       "open_decision_packet",
     );
@@ -344,20 +372,17 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .describe("true = the delivering agent (builds + owns the branch/PR); false = supporting (review/advice)."),
           reason: z.string().optional().describe("Why this profile fits — shown on the recommendation card."),
         },
-        async (args) =>
-          resultText(
-            await operatorEngageAgent(
-              db,
-              ctx,
-              {
-                ...base,
-                profileId: args.profileId,
-                delivers: args.delivers,
-                ...(args.reason ? { reason: prose(args.reason) } : {}),
-              },
-              authority,
-            ),
-          ),
+        async (args) => {
+          const input: EngageAgentInput = {
+            ...base,
+            profileId: args.profileId,
+            delivers: args.delivers,
+          };
+          if (args.reason) input.reason = prose(args.reason);
+          return resultText(
+            await operatorEngageAgent(db, ctx, input, authority),
+          );
+        },
       ),
       "engage_agent",
     );
@@ -371,15 +396,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .optional()
             .describe("The engaged agent to run; omit for the delivering agent."),
         },
-        async (args) =>
-          resultText(
-            await operatorRunAgent(
-              db,
-              ctx,
-              { ...base, ...(args.profileId ? { profileId: args.profileId } : {}) },
-              authority,
-            ),
-          ),
+        async (args) => {
+          const input: RunAgentInput = { ...base };
+          if (args.profileId) input.profileId = args.profileId;
+          return resultText(await operatorRunAgent(db, ctx, input, authority));
+        },
       ),
       "run_agent",
     );
@@ -397,20 +418,17 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .optional()
             .describe("true = delivering builder · false = supporting (review). Omit to follow how it is already engaged."),
         },
-        async (args) =>
-          resultText(
-            await operatorPromptAgentGeneric(
-              db,
-              ctx,
-              {
-                ...base,
-                profileId: args.profileId,
-                directive: prose(args.prompt),
-                ...(args.delivers !== undefined ? { delivers: args.delivers } : {}),
-              },
-              authority,
-            ),
-          ),
+        async (args) => {
+          const input: PromptAgentInput = {
+            ...base,
+            profileId: args.profileId,
+            directive: prose(args.prompt),
+          };
+          if (args.delivers !== undefined) input.delivers = args.delivers;
+          return resultText(
+            await operatorPromptAgentGeneric(db, ctx, input, authority),
+          );
+        },
       ),
       "prompt_agent",
     );
@@ -430,15 +448,13 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .optional()
             .describe("One line on why delivery is right now — shown on the recommendation card when your policy recommends instead of performs."),
         },
-        async (args) =>
-          resultText(
-            await operatorDeliverForReview(
-              db,
-              ctx,
-              { ...base, ...(args.reason ? { reason: prose(args.reason) } : {}) },
-              authority,
-            ),
-          ),
+        async (args) => {
+          const input: DeliverInput = { ...base };
+          if (args.reason) input.reason = prose(args.reason);
+          return resultText(
+            await operatorDeliverForReview(db, ctx, input, authority),
+          );
+        },
       ),
       "deliver_for_review",
     );
@@ -471,15 +487,13 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           toStageId: z.string().describe("The target stage id (must be a declared next stage)."),
           reason: z.string().optional().describe("Why advance now — shown on the recommendation card."),
         },
-        async (args) =>
-          resultText(
-            await operatorTransitionStage(
-              db,
-              ctx,
-              { ...base, toStageId: args.toStageId, ...(args.reason ? { reason: prose(args.reason) } : {}) },
-              authority,
-            ),
-          ),
+        async (args) => {
+          const input: TransitionInput = { ...base, toStageId: args.toStageId };
+          if (args.reason) input.reason = prose(args.reason);
+          return resultText(
+            await operatorTransitionStage(db, ctx, input, authority),
+          );
+        },
       ),
       "transition_stage",
     );

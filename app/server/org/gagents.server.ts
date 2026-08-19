@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import {
   recordAudit,
   type AuditActor,
@@ -78,37 +79,58 @@ function readTemplateFile(
 }
 
 /**
+ * The deployment list stored in `projects.agent_policy_json`, decoded down to
+ * the only field these projections read. A single malformed ENTRY must count
+ * as nothing rather than sink the whole row, so entries decode independently
+ * and junk drops out of the list.
+ */
+const deployedProfileIdsSchema = z
+  .array(z.object({ profileId: z.string() }).nullable().catch(null))
+  .catch([])
+  .transform((entries) =>
+    entries.flatMap((entry) => (entry === null ? [] : [entry.profileId])),
+  );
+
+/** Profile ids one projection row deploys; empty when the row is unreadable. */
+function deployedProfileIds(agentPolicyJson: string): string[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(agentPolicyJson);
+  } catch {
+    return [];
+  }
+  return deployedProfileIdsSchema.parse(raw);
+}
+
+/** Deployment count per profileId — how many projects carry the template. */
+export interface ProfileDeploymentCounts {
+  [profileId: string]: number;
+}
+
+/**
  * Distinct-project deployment counts per profileId (the `used` fact).
  *
  * P13-AP-10: archived projects were counted, so a template could be
  * undeletable ("detach it from its N projects first") because of a project
  * nobody can edit any more. Archived projects are excluded.
  */
-export function usedByProject(db: DatabaseSync): Record<string, number> {
+export function usedByProject(db: DatabaseSync): ProfileDeploymentCounts {
+  // SAFETY: the SELECT names exactly these two columns, and `projects.slug` /
+  // `projects.agent_policy_json` are both TEXT NOT NULL (0001_baseline), so
+  // every returned row really does carry both as a string.
   const rows = db
     .prepare(
       `SELECT slug, agent_policy_json FROM projects
        WHERE COALESCE(archived, 0) = 0`,
     )
     .all() as { slug: string; agent_policy_json: string }[];
-  const counts: Record<string, number> = {};
+  const counts: ProfileDeploymentCounts = {};
   for (const row of rows) {
-    try {
-      const deployments = JSON.parse(row.agent_policy_json) as unknown;
-      if (!Array.isArray(deployments)) continue;
-      const seen = new Set<string>();
-      for (const d of deployments) {
-        const profileId =
-          typeof d === "object" && d !== null
-            ? (d as { profileId?: unknown }).profileId
-            : null;
-        if (typeof profileId === "string" && !seen.has(profileId)) {
-          seen.add(profileId);
-          counts[profileId] = (counts[profileId] ?? 0) + 1;
-        }
-      }
-    } catch {
-      // tolerated — a malformed projection row counts nothing
+    // Distinct per project: a template deployed twice in one project is one use.
+    for (const profileId of new Set(
+      deployedProfileIds(row.agent_policy_json),
+    )) {
+      counts[profileId] = (counts[profileId] ?? 0) + 1;
     }
   }
   return counts;
@@ -157,26 +179,16 @@ export function listGlobalAgentProfiles(
 
 /** Projects whose deployment list already carries `profileId`. */
 function projectsUsingProfileId(db: DatabaseSync, profileId: string): string[] {
+  // SAFETY: as in `usedByProject` — the SELECT names exactly these two columns
+  // and both are TEXT NOT NULL in `projects` (0001_baseline).
   const rows = db
     .prepare(`SELECT slug, agent_policy_json FROM projects`)
     .all() as { slug: string; agent_policy_json: string }[];
   const out: string[] = [];
   for (const row of rows) {
-    try {
-      const deployments = JSON.parse(row.agent_policy_json) as unknown;
-      if (!Array.isArray(deployments)) continue;
-      if (
-        deployments.some(
-          (d) =>
-            typeof d === "object" &&
-            d !== null &&
-            (d as { profileId?: unknown }).profileId === profileId,
-        )
-      ) {
-        out.push(row.slug);
-      }
-    } catch {
-      // tolerated — a malformed projection row blocks nothing
+    // A malformed projection row decodes to no ids, so it blocks nothing.
+    if (deployedProfileIds(row.agent_policy_json).includes(profileId)) {
+      out.push(row.slug);
     }
   }
   return out;
@@ -196,12 +208,17 @@ export interface SaveGagentInput {
   kbs: string[];
 }
 
+export interface SaveGagentResult {
+  profile: GagentView;
+  toast: string;
+}
+
 export function saveGlobalAgentProfile(
   db: DatabaseSync,
   input: SaveGagentInput,
   actor: AuditActor,
   ctx: GagentContext = {},
-): { profile: GagentView; toast: string } {
+): SaveGagentResult {
   const name = input.name.trim();
   if (name.length < 2) throw AppError.validation("Give the profile a name.");
   if (input.stages.length === 0) {

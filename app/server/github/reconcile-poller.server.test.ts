@@ -43,13 +43,13 @@ function seedBranchedTask(store: TestStore, key: string): void {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
 }
 
-function happyRoutes(branch: string): Record<string, FakeResponder> {
+function happyRoutes(branch: string) {
   return {
     [`GET ${REPO_PATH}/compare/main...${branch}`]: {
       body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] },
     },
     [`GET ${REPO_PATH}/pulls`]: { body: [] },
-  };
+  } satisfies Record<string, FakeResponder>;
 }
 
 describe("pollGithubReconcile (P11-14)", () => {
@@ -112,6 +112,8 @@ describe("pollGithubReconcile (P11-14)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
+    // SAFETY: `SELECT COUNT(*) AS n` always returns exactly one row whose only
+    // column is that integer, so `get` cannot come back undefined here.
     const countNudges = () =>
       (
         store.db
@@ -155,13 +157,16 @@ describe("pollGithubReconcile (P11-14)", () => {
           number: 77,
           state: "review",
           title: "[VIB-1] work",
+          // `prRefSchema` is `.loose()`, so a hand-edited task.md can carry an
+          // extra nested key like this one — which is the whole fixture.
           previous: { state: "accepted" },
-        } as never,
+        },
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     // The fixture is real: the substring the old scan keyed on IS in the blob…
+    // SAFETY: as above — a COUNT(*) row always exists and carries `n`.
     const naive = (
       store.db
         .prepare(
@@ -171,6 +176,7 @@ describe("pollGithubReconcile (P11-14)", () => {
     ).n;
     expect(naive).toBe(1);
     // …while the PR's own state is not "accepted".
+    // SAFETY: as above — a COUNT(*) row always exists and carries `n`.
     const structural = (
       store.db
         .prepare(
@@ -183,6 +189,7 @@ describe("pollGithubReconcile (P11-14)", () => {
     expect(structural).toBe(0);
 
     await pollGithubReconcile(store.db, { dataRoot: store.dataRoot });
+    // SAFETY: as above — a COUNT(*) row always exists and carries `n`.
     const nudges = (
       store.db
         .prepare(

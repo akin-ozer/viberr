@@ -16,7 +16,13 @@ export interface EventMeta {
   label: string;
 }
 
-export const EVENT_META: Record<string, EventMeta> = {
+/** The lookup `eventMeta` reads: keyed by the contract event types, but open
+ *  by contract — an unrecognized type is a miss, never a parse failure. */
+interface EventMetaTable {
+  [type: string]: EventMeta;
+}
+
+export const EVENT_META: EventMetaTable = {
   comment: { node: "", icon: "message", label: "commented" },
   completion: { node: "completion", icon: "check", label: "Completion report" },
   github: { node: "github", icon: "github", label: "GitHub" },
@@ -53,7 +59,12 @@ export function eventMeta(type: string): EventMeta {
   return { node: "", icon: "message", label: type || "event" };
 }
 
-const TYPED_KIND: Record<string, PillKind> = {
+/** Same open keying as {@link EventMetaTable} — `typedKind` falls back. */
+interface TypedKindTable {
+  [type: string]: PillKind;
+}
+
+const TYPED_KIND: TypedKindTable = {
   completion: "done",
   github: "neutral",
   policy: "input",

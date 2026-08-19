@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type {
   AgentDeployment,
   ProjectFrontmatter,
@@ -101,7 +102,7 @@ function presetAgents(
             { capabilityId: "completion-for-acceptance", mode: "direct" as const },
           ],
           definition: {
-            ...(a.definition ?? {}),
+            ...a.definition,
             autonomy: "full" as const,
           },
         }
@@ -136,18 +137,38 @@ type RepoProbe =
  * only a PROVEN read-only repo (push === false) is called out. Mirrors the
  * (module-private) `repoWritable` in pat-validator.server.ts.
  */
-interface RepoPermissions {
-  admin?: boolean;
-  maintain?: boolean;
-  push?: boolean;
-}
+const repoPermissionsSchema = z.object({
+  admin: z.boolean().optional().catch(undefined),
+  maintain: z.boolean().optional().catch(undefined),
+  push: z.boolean().optional().catch(undefined),
+});
+type RepoPermissions = z.infer<typeof repoPermissionsSchema>;
+
+/** The `/repos/{owner}/{repo}` fields this probe reads. Every field is
+ *  individually tolerant and the object itself falls back to empty: GitHub
+ *  answering in an unexpected shape must read as "unknown" (the probe passes),
+ *  never as a failed creation. */
+const repoResponseSchema = z
+  .object({
+    default_branch: z.string().optional().catch(undefined),
+    permissions: repoPermissionsSchema.optional().catch(undefined),
+  })
+  .catch({ default_branch: undefined, permissions: undefined });
+
 function repoPushable(permissions: RepoPermissions | undefined): boolean | null {
-  if (!permissions || typeof permissions !== "object") return null;
+  if (!permissions) return null;
   if (permissions.admin === true || permissions.maintain === true || permissions.push === true) {
     return true;
   }
   if (permissions.push === false) return false;
   return null;
+}
+
+/** The optional overrides `proveAttachedCredential` accepts, named so the call
+ *  below can be built one key at a time. */
+interface ProveCredentialContext {
+  dataRoot?: string;
+  fetchImpl?: typeof fetch;
 }
 
 async function probeRemoteRepo(
@@ -166,10 +187,7 @@ async function probeRemoteRepo(
     if (res.status === 404) return { status: "not_found" };
     if (res.status === 401 || res.status === 403) return { status: "forbidden" };
     if (!res.ok) return { status: "unreachable" };
-    const data = (await res.json()) as {
-      default_branch?: string;
-      permissions?: RepoPermissions;
-    };
+    const data = repoResponseSchema.parse(await res.json());
     const defaultBranch = data.default_branch ?? null;
     // F20-14/F20-15: Repair refuses a repo the credential can only read; the same
     // check belongs at create time (live: creating against a read-only-visible
@@ -220,11 +238,20 @@ export interface CreateProjectResult {
   repoWarning: string | null;
 }
 
+/** Test overrides; production leaves every key off. `createProjectFileImpl`
+ *  stands in for the project.md write (F20-1 fault injection), defaulting to
+ *  the real `createProjectFile`. */
+interface CreateProjectContext {
+  dataRoot?: string;
+  fetchImpl?: typeof fetch;
+  createProjectFileImpl?: typeof createProjectFile;
+}
+
 export async function createProject(
   db: DatabaseSync,
   input: CreateProjectInput,
   actor: { userId: string; label: string },
-  ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
+  ctx: CreateProjectContext = {},
 ): Promise<CreateProjectResult> {
   // F20-1: guard the whole mutating action behind the data-root watchdog, so a
   // hung/unreachable mount fails THIS action with a typed error instead of
@@ -241,7 +268,7 @@ async function createProjectImpl(
   db: DatabaseSync,
   input: CreateProjectInput,
   actor: { userId: string; label: string },
-  ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
+  ctx: CreateProjectContext = {},
 ): Promise<CreateProjectResult> {
   const name = input.name.trim();
   if (name.length < 2) {
@@ -352,7 +379,7 @@ async function createProjectImpl(
     guardrails: DEFAULT_GUARDRAILS,
   };
 
-  await createProjectFile(
+  await (ctx.createProjectFileImpl ?? createProjectFile)(
     { projectSlug: slug, dataRoot: ctx.dataRoot },
     { frontmatter, description: desc },
   );
@@ -370,10 +397,12 @@ async function createProjectImpl(
   // credential card affirming scopes nothing had proven. Best-effort by
   // contract — the bind has already happened, and a degraded GitHub must not
   // fail the creation.
-  await proveAttachedCredential(db, slug, actor, {
-    ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  // Only the overrides this caller actually has: a key present with `undefined`
+  // is not the same as an absent one to the credential prover's own defaults.
+  const proveCtx: ProveCredentialContext = {};
+  if (ctx.dataRoot) proveCtx.dataRoot = ctx.dataRoot;
+  if (ctx.fetchImpl) proveCtx.fetchImpl = ctx.fetchImpl;
+  await proveAttachedCredential(db, slug, actor, proveCtx);
 
   recordAudit(db, {
     action: "project.created",

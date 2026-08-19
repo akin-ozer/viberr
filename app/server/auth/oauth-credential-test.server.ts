@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /**
  * R19-16 — prove an OAuth client id/secret pair against the PROVIDER, before
  * the deployment offers a sign-in button that depends on it.
@@ -20,6 +22,13 @@
  * sign-in, so the UI states the limit next to the result instead of implying a
  * green check means sign-in works.
  */
+
+/** The only part of Google's token error body this test reads. A body that is
+ *  not JSON, or carries something other than a string `error`, decodes to "no
+ *  error code" — the same NEGATIVE verdict an unrecognised code gets. */
+const googleTokenErrorSchema = z
+  .object({ error: z.string().optional() })
+  .catch({});
 
 export type OAuthProvider = "github" | "google";
 
@@ -103,10 +112,9 @@ async function testGoogle(
     body: body.toString(),
     signal: AbortSignal.timeout(OAUTH_TEST_TIMEOUT_MS),
   });
-  const data = (await res.json().catch(() => ({}))) as {
-    error?: string;
-    error_description?: string;
-  };
+  const data = googleTokenErrorSchema.parse(
+    await res.json().catch(() => null),
+  );
   if (data.error === "invalid_grant") {
     return {
       ok: true,

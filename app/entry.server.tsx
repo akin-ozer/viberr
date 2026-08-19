@@ -110,9 +110,13 @@ function renderDocument(
               callback();
             },
           });
-          const stream = Readable.toWeb(
-            body,
-          ) as unknown as ReadableStream<Uint8Array>;
+          // SAFETY: `Readable.toWeb` is declared to return the `node:stream/web`
+          // ReadableStream, which is a SEPARATE declaration of the very class
+          // the DOM lib names — one runtime constructor, two .d.ts files, so
+          // `Response` (which wants the DOM one) accepts this object as-is. The
+          // chunks are what `pipe(body)` writes into the PassThrough: Buffers,
+          // i.e. Uint8Arrays.
+          const stream = Readable.toWeb(body) as ReadableStream<Uint8Array>;
 
           responseHeaders.set("Content-Type", "text/html");
 
@@ -125,10 +129,10 @@ function renderDocument(
             }),
           );
         },
-        onShellError(error: unknown) {
+        onShellError(error) {
           reject(error);
         },
-        onError(error: unknown) {
+        onError(error) {
           responseStatusCode = 500;
           // Log streaming rendering errors from inside the shell.  Don't log
           // errors encountered during initial shell rendering since they'll

@@ -8,6 +8,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { CodexOptions, ThreadEvent } from "@openai/codex-sdk";
+import { z } from "zod";
 import {
   backendCredentialHealth,
   claudeCliAuthDiagnostics,
@@ -28,11 +30,25 @@ import {
 } from "./run-service.server";
 import type { RunSpec } from "./adapter.server";
 import type { CodexClient, CodexFactory } from "./codex-runtime.server";
-import type { ClaudeQuery } from "./claude-runtime.server";
+import type {
+  ClaudeQuery,
+  ClaudeQueryOptions,
+} from "./claude-runtime.server";
 import { resolveSpecialistDisallowedTools } from "../tasks/specialist-tool-policy";
 import { agentGitIdentity } from "../tasks/specialist-run.server";
 import { CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
+
+/**
+ * A Claude SDK query as the adapter consumes it: an async generator of SDK
+ * messages plus `interrupt`. Yields the given messages, then completes.
+ */
+function fakeClaudeQuery(...messages: unknown[]): ClaudeQuery {
+  const gen = (async function* (): AsyncGenerator<unknown, void> {
+    for (const message of messages) yield message;
+  })();
+  return Object.assign(gen, { interrupt: async () => {} });
+}
 
 describe("runtime-registry", () => {
   const tmpDirs: string[] = [];
@@ -443,7 +459,7 @@ describe("runtime-registry", () => {
     const adapters = createAdapters({
       claudeQueryFn: () => {
         queryCalled = true;
-        return (async function* () {})() as never;
+        return fakeClaudeQuery();
       },
     });
     expect(adapters.claude.backend).toBe("claude");
@@ -470,17 +486,8 @@ describe("runtime-registry", () => {
 describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () => {
   afterEach(() => resetRegistryForTests());
 
-  /** The Claude SDK options these tests read. */
-  interface ClaudeCapture {
-    cwd?: string;
-    env?: Record<string, string>;
-    disallowedTools?: string[];
-    allowedTools?: string[];
-    mcpServers?: Record<string, unknown>;
-    strictMcpConfig?: boolean;
-    permissionMode?: string;
-  }
-  /** The Codex thread options + CLI options these tests read. */
+  /** The Codex thread options + CLI options these tests read. `config` is the
+   *  SDK's own recursive `--config` value, so a leaf is decoded where read. */
   interface CodexCapture {
     thread: {
       model?: string;
@@ -490,7 +497,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
       webSearchMode?: string;
     };
     env?: Record<string, string>;
-    config?: Record<string, unknown>;
+    config?: CodexOptions["config"];
   }
 
   async function drain(): Promise<void> {
@@ -500,23 +507,29 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
   /** Start the SAME spec on both real adapters; return what each SDK was handed. */
   async function startOnBoth(
     spec: Omit<RunSpec, "backend">,
-  ): Promise<{ claude: ClaudeCapture; codex: CodexCapture }> {
-    let claude: ClaudeCapture = {};
+  ): Promise<{ claude: ClaudeQueryOptions; codex: CodexCapture }> {
+    let claude: ClaudeQueryOptions = {};
     const codex: CodexCapture = { thread: {} };
 
     const codexFactory: CodexFactory = (options) => {
       codex.env = options?.env;
-      codex.config = options?.config as Record<string, unknown> | undefined;
+      codex.config = options?.config;
       const thread: ReturnType<CodexClient["startThread"]> = {
         id: "thread-parity",
         async runStreamed() {
-          const events = (async function* () {
+          const events = (async function* (): AsyncGenerator<ThreadEvent> {
             yield {
               type: "turn.completed",
-              usage: { input_tokens: 1, output_tokens: 1 },
+              usage: {
+                input_tokens: 1,
+                cached_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                output_tokens: 1,
+                reasoning_output_tokens: 0,
+              },
             };
           })();
-          return { events: events as never };
+          return { events };
         },
       };
       const client: CodexClient = {
@@ -534,19 +547,14 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
 
     const adapters = createAdapters({
       claudeQueryFn: (params) => {
-        claude = (params.options ?? {}) as ClaudeCapture;
-        const gen = (async function* () {
-          yield {
-            type: "result",
-            subtype: "success",
-            is_error: false,
-            num_turns: 1,
-            usage: {},
-          };
-        })();
-        const q = gen as unknown as ClaudeQuery;
-        (q as { interrupt: () => Promise<void> }).interrupt = async () => {};
-        return q;
+        claude = params.options ?? {};
+        return fakeClaudeQuery({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          num_turns: 1,
+          usage: {},
+        });
       },
       codexFactory,
     });
@@ -605,16 +613,15 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
    */
   function specForGrants(grants: CapabilityGrant[]): Omit<RunSpec, "backend"> {
     const disallowedTools = resolveSpecialistDisallowedTools(grants);
-    return {
-      ...PARITY_TASK,
-      ...(disallowedTools.length ? { disallowedTools } : {}),
-      ...(repoWriteWithheldFromDenylist(disallowedTools)
-        ? { repoWriteWithheld: true }
-        : {}),
-      ...(webSearchWithheldFromDenylist(disallowedTools)
-        ? { webSearchWithheld: true }
-        : {}),
-    };
+    const spec: Omit<RunSpec, "backend"> = { ...PARITY_TASK };
+    if (disallowedTools.length) spec.disallowedTools = disallowedTools;
+    if (repoWriteWithheldFromDenylist(disallowedTools)) {
+      spec.repoWriteWithheld = true;
+    }
+    if (webSearchWithheldFromDenylist(disallowedTools)) {
+      spec.webSearchWithheld = true;
+    }
+    return spec;
   }
 
   it("the same withheld repo-write grant confines BOTH backends (headline capability)", async () => {
@@ -674,7 +681,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     }));
     const baseline = new Set(resolveSpecialistDisallowedTools(allGranted));
     const grantedRun = await startOnBoth(specForGrants(allGranted));
-    const codexShape = (c: CodexCapture) =>
+    const codexPosture = (c: CodexCapture) =>
       JSON.stringify([
         c.thread.sandboxMode,
         c.thread.webSearchMode ?? null,
@@ -690,7 +697,8 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
       if (!claudeBinds) continue; // not a tool-layer capability at all
       toolLayer.push(cap.id);
       const run = await startOnBoth(specForGrants(withMode(allGranted, cap.id, "off")));
-      const codexBinds = codexShape(run.codex) !== codexShape(grantedRun.codex);
+      const codexBinds =
+        codexPosture(run.codex) !== codexPosture(grantedRun.codex);
       expect(
         { id: cap.id, scope: capabilityEnforcement(cap.id) },
         `${cap.id}: codex ${codexBinds ? "binds" : "does not bind"} this grant`,
@@ -778,10 +786,13 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     // Codex only: the identity must be re-exported into the model's own shell,
     // or a `git commit` the agent runs is authored by whoever spawned the
     // process (P13-RT-10). Exactly these keys cross — nothing more, nothing less.
-    const policy = (both.codex.config?.shell_environment_policy ?? {}) as {
-      inherit?: string;
-      set?: Record<string, string>;
-    };
+    const policy = z
+      .object({
+        inherit: z.string().optional().catch(undefined),
+        set: z.record(z.string(), z.string()).optional().catch(undefined),
+      })
+      .catch({})
+      .parse(both.codex.config?.shell_environment_policy);
     expect(policy.inherit).toBe("core");
     expect(policy.set).toEqual(env);
   });

@@ -40,11 +40,13 @@ export function runMigrations(
     .filter((file) => file.endsWith(".sql"))
     .sort();
 
-  const alreadyAppliedRows = db
-    .prepare(`SELECT filename FROM schema_migrations`)
-    .all() as Array<{ filename: string }>;
+  // `all()` types every column as a SQL output value; `filename` is the TEXT
+  // primary key of the bookkeeping table this function itself writes.
   const alreadyAppliedSet = new Set(
-    alreadyAppliedRows.map((row) => row.filename),
+    db
+      .prepare(`SELECT filename FROM schema_migrations`)
+      .all()
+      .map((row) => String(row.filename)),
   );
 
   const recordStmt = db.prepare(

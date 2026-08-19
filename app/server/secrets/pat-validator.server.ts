@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type {
   PatTokenKind,
   PatValidation,
@@ -9,7 +10,10 @@ import {
   type AuditActor,
   SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
-import { createGithubClient } from "~/server/github/github-client.server";
+import {
+  createGithubClient,
+  type GithubClientOptions,
+} from "~/server/github/github-client.server";
 import { resolveScopeViolationWithEvent } from "~/server/github/scope-flag.server";
 import {
   listScopeViolations,
@@ -97,18 +101,27 @@ function writeProbeEnabled(explicit?: boolean): boolean {
 
 /** The legacy permission block GitHub computes for the AUTHENTICATED token on
  *  `GET /repos/{owner}/{repo}` — the read-only proof of repository write. */
-interface RepoPermissions {
-  admin?: boolean;
-  maintain?: boolean;
-  push?: boolean;
-  triage?: boolean;
-  pull?: boolean;
-}
+const repoPermissionsSchema = z.object({
+  admin: z.boolean().optional(),
+  maintain: z.boolean().optional(),
+  push: z.boolean().optional(),
+  triage: z.boolean().optional(),
+  pull: z.boolean().optional(),
+});
+
+type RepoPermissions = z.infer<typeof repoPermissionsSchema>;
+
+/** `GET /repos/{owner}/{repo}`, narrowed to the one block we read. A block in
+ *  an unexpected shape reads as ABSENT rather than voiding the response: the
+ *  repo itself was still reachable, we just learned nothing about write. */
+const repoResponseSchema = z.object({
+  permissions: repoPermissionsSchema.optional().catch(undefined),
+});
 
 /** True/false when GitHub answered, null when it sent no `permissions` block
  *  (an older GHES, or a response shape we should not guess about). */
 function repoWritable(permissions: RepoPermissions | undefined): boolean | null {
-  if (!permissions || typeof permissions !== "object") return null;
+  if (!permissions) return null;
   const { admin, maintain, push } = permissions;
   if (admin === true || maintain === true || push === true) return true;
   if (push === false) return false;
@@ -135,8 +148,22 @@ function classicScopeCheck(id: string, granted: Set<string>): ScopeCheck {
   return { id, ok: false, source: "header" };
 }
 
-interface GhUser {
-  login: string;
+/** `GET /user` — only the login is read, with a `?? null`, so it parses to
+ *  `undefined` on drift and the identity just stays unknown. */
+const ghUserSchema = z
+  .object({ login: z.string().optional().catch(undefined) })
+  .catch({});
+
+/** Everything a verdict carries besides `status` and `detail` — filled in as
+ *  the probes answer, and spread into whichever verdict the run reaches. */
+interface PatValidationBase {
+  checkedAt: string;
+  login: string | null;
+  tokenKind: PatTokenKind;
+  expiresAt: string | null;
+  repo: string | null;
+  scopes: ScopeCheck[];
+  missingScopes: string[];
 }
 
 /**
@@ -150,23 +177,22 @@ export async function validatePatToken(
   const requiredScopes = options.requiredScopes ?? [...DEFAULT_REQUIRED_SCOPES];
   const repo = options.repo ?? null;
   const checkedAt = new Date().toISOString();
-  const client = createGithubClient({
-    token,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  });
+  const clientOptions: GithubClientOptions = { token };
+  if (options.fetchImpl) clientOptions.fetchImpl = options.fetchImpl;
+  const client = createGithubClient(clientOptions);
 
-  const base = {
+  const base: PatValidationBase = {
     checkedAt,
-    login: null as string | null,
+    login: null,
     tokenKind: tokenKindOf(token, null),
     expiresAt: options.knownExpiresAt ?? null,
     repo,
-    scopes: [] as ScopeCheck[],
-    missingScopes: [] as string[],
+    scopes: [],
+    missingScopes: [],
   };
 
   // 1. Identity — /user.
-  const user = await client.request<GhUser>("GET", "/user");
+  const user = await client.request("GET", "/user", ghUserSchema);
   if (!user.ok) {
     if (user.kind === "network") {
       return {
@@ -227,13 +253,11 @@ export async function validatePatToken(
   let repoAccessible: boolean | null = null;
   let repoWriteOk: boolean | null = null;
   if (repo) {
-    const repoResult = await client.request<{
-      full_name: string;
-      permissions?: RepoPermissions;
-    }>("GET", `/repos/${repo}`);
+    const repoResult = await client.request("GET", `/repos/${repo}`, z.unknown());
     if (repoResult.ok) {
       repoAccessible = true;
-      repoWriteOk = repoWritable(repoResult.data.permissions);
+      const parsed = repoResponseSchema.safeParse(repoResult.data);
+      repoWriteOk = parsed.success ? repoWritable(parsed.data.permissions) : null;
     } else if (repoResult.kind === "network") {
       return {
         ...withIdentity,
@@ -311,7 +335,7 @@ export async function validatePatToken(
     // Fine-grained (or headerless) token: probe what can be probed.
     let orgReadOk: boolean | null = null;
     if (requiredScopes.includes("read:org")) {
-      const orgs = await client.request<unknown[]>("GET", "/user/orgs", {
+      const orgs = await client.request("GET", "/user/orgs", z.unknown(), {
         searchParams: { per_page: 1 },
       });
       // 4xx = the probe was refused; 5xx/network = unknown (assumed, not failed).
@@ -323,9 +347,10 @@ export async function validatePatToken(
     }
     let pullsReadOk: boolean | null = null;
     if (repo && requiredScopes.includes("pull_request:write")) {
-      const pulls = await client.request<unknown[]>(
+      const pulls = await client.request(
         "GET",
         `/repos/${repo}/pulls`,
+        z.unknown(),
         { searchParams: { per_page: 1, state: "all" } },
       );
       pullsReadOk = pulls.ok
@@ -354,7 +379,7 @@ export async function validatePatToken(
       path: string,
     ): Promise<boolean | null> => {
       if (!writeProbe) return null;
-      const dry = await client.request<unknown>(method, path, { body: {} });
+      const dry = await client.request(method, path, z.unknown(), { body: {} });
       if (dry.ok) return true; // cannot really happen for an empty payload
       if (dry.kind !== "http") return null;
       if (dry.status === 422) return true;
@@ -519,6 +544,22 @@ export const REVALIDATE_COOLDOWN_MS = 60_000;
 /** Scopes whose violations need PROVEN write evidence to clear (B-GH8). */
 const WRITE_EVIDENCE_SCOPES = new Set(["repo", "pull_request:write"]);
 
+/** What the attempt audit row records beside its `outcome`. */
+interface RevalidateAuditDetails {
+  validationStatus?: PatValidation["status"];
+  resolvedViolations?: number;
+  /** P13-D-33: the cooldown suppressed the network call. */
+  cached?: boolean;
+}
+
+/** Only the field a run reads out of `projects.credential_policy_json`. Junk
+ *  entries become null so the AUTHORED length still decides whether the policy
+ *  overrides the defaults — a list of nothing but junk means "check no scopes",
+ *  exactly as the hand-rolled filter left it. */
+const credentialPolicySchema = z.object({
+  requiredScopes: z.array(z.string().nullable().catch(null)).optional(),
+});
+
 export async function revalidateProjectCredential(
   db: DatabaseSync,
   projectSlug: string,
@@ -529,7 +570,7 @@ export async function revalidateProjectCredential(
   // audited with its outcome — not only the violation resolutions.
   const auditAttempt = (
     outcome: RevalidateProjectCredentialResult["status"],
-    extra: Record<string, unknown> = {},
+    extra: RevalidateAuditDetails = {},
   ) =>
     recordAudit(db, {
       action: "github.credential.revalidated",
@@ -546,6 +587,9 @@ export async function revalidateProjectCredential(
     return { status: "no_pat_configured" };
   }
 
+  // SAFETY: `projects` declares both selected columns nullable TEXT
+  // (0001_baseline.sql), and `slug` is the table's PRIMARY KEY, so the lookup
+  // returns at most one row.
   const projectRow = db
     .prepare(
       `SELECT repo, credential_policy_json FROM projects WHERE slug = ?`,
@@ -557,13 +601,12 @@ export async function revalidateProjectCredential(
   let requiredScopes: string[] | undefined;
   if (projectRow?.credential_policy_json) {
     try {
-      const parsed = JSON.parse(projectRow.credential_policy_json) as {
-        requiredScopes?: unknown;
-      };
-      if (Array.isArray(parsed.requiredScopes) && parsed.requiredScopes.length) {
-        requiredScopes = parsed.requiredScopes.filter(
-          (s): s is string => typeof s === "string",
-        );
+      const policy = credentialPolicySchema.safeParse(
+        JSON.parse(projectRow.credential_policy_json),
+      );
+      const authored = policy.success ? policy.data.requiredScopes : undefined;
+      if (authored && authored.length > 0) {
+        requiredScopes = authored.filter((id) => id !== null);
       }
     } catch {
       // tolerated — fall through to defaults
@@ -598,15 +641,16 @@ export async function revalidateProjectCredential(
       ? cached
       : null;
 
+  const validateOptions: ValidatePatTokenOptions = {
+    repo: targetRepo,
+    knownExpiresAt: credential.validation?.expiresAt ?? null,
+  };
+  if (requiredScopes) validateOptions.requiredScopes = requiredScopes;
+  if (ctx.fetchImpl) validateOptions.fetchImpl = ctx.fetchImpl;
+  if (ctx.writeProbe !== undefined) validateOptions.writeProbe = ctx.writeProbe;
+
   const validation =
-    reusable ??
-    (await validatePat(db, credential.id, {
-      repo: targetRepo,
-      ...(requiredScopes ? { requiredScopes } : {}),
-      knownExpiresAt: credential.validation?.expiresAt ?? null,
-      ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-      ...(ctx.writeProbe !== undefined ? { writeProbe: ctx.writeProbe } : {}),
-    }));
+    reusable ?? (await validatePat(db, credential.id, validateOptions));
   if (!validation) {
     auditAttempt("no_pat_configured");
     return { status: "no_pat_configured" };

@@ -23,7 +23,10 @@ export const NOTIFICATION_KINDS = [
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
-export interface NotificationRow {
+/** A type alias, not an interface, so a `SELECT`-row assertion is checked
+ *  against SQLite's own output types instead of being laundered through
+ *  `unknown` first (only a type alias gets the implicit index signature). */
+export type NotificationRow = {
   id: string;
   user_id: string;
   kind: NotificationKind;
@@ -46,7 +49,7 @@ export interface NotificationRow {
   /** 1 when the task has an open packet, else 0/null (SQL boolean). */
   task_has_packet?: number | null;
   task_recommendation_count?: number | null;
-}
+};
 
 export interface NotificationRecord {
   id: string;
@@ -79,11 +82,19 @@ export interface NotificationRecord {
  * the task is not in its terminal stage. A task that doesn't resolve locally
  * (deleted, or a foreign soft ref) has no live decision to wait on.
  */
+/** The one field the terminal-stage check reads out of a stored stage list. */
+interface StageIdOnly {
+  id: string;
+}
+
 function liveWaitingOnYou(row: NotificationRow): boolean {
   if (row.kind !== "packet" && row.kind !== "approval") return false;
   if (row.task_stage == null) return false; // no local task row → nothing pending
+  // SAFETY: `projects.stages_json` has ONE writer — the projection rebuilder
+  // stores the project file's parsed `stages` list — and `isTerminalStage` only
+  // reads each entry's `id`, so this names the one field it consumes.
   const stages = row.project_stages_json
-    ? (JSON.parse(row.project_stages_json) as { id: string }[])
+    ? (JSON.parse(row.project_stages_json) as StageIdOnly[])
     : [];
   if (isTerminalStage(row.task_stage, stages)) return false; // Done → resolved
   return row.kind === "packet"
@@ -92,6 +103,9 @@ function liveWaitingOnYou(row: NotificationRow): boolean {
 }
 
 export function mapNotificationRow(row: NotificationRow): NotificationRecord {
+  // SAFETY: `notifications.actor_json` has ONE writer — `createNotification`
+  // stores `JSON.stringify(input.from)`, and `CreateNotificationInput.from` is
+  // an `ActorRender` by construction.
   return {
     id: row.id,
     userId: row.user_id,

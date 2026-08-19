@@ -210,6 +210,13 @@ function NtfStream({
   );
 }
 
+/** The inbox's two toggles, in render order — mirrors the activity page's
+ *  `FILTERS`, which the mini-seg markup below is a copy of. */
+const FILTERS: [NotificationFilter, string][] = [
+  ["all", "All"],
+  ["unread", "Unread"],
+];
+
 export function NotificationsPage({
   items,
   unread,
@@ -268,12 +275,7 @@ export function NotificationsPage({
             role="group"
             aria-label="Filter notifications"
           >
-            {(
-              [
-                ["all", "All"],
-                ["unread", "Unread"],
-              ] as [NotificationFilter, string][]
-            ).map(([id, l]) => (
+            {FILTERS.map(([id, l]) => (
               <button
                 type="button"
                 key={id}

@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { z } from "zod";
 import {
   serializeFrontmatterFile,
   splitFrontmatter,
@@ -387,6 +388,7 @@ function mountOneSkill(
       filter: copyableEntry,
     });
     const { data, body } = splitFrontmatter(readFileSync(resolved.file, "utf8"));
+    const frontmatter = skillFrontmatterSchema.safeParse(data);
     // NORMALIZE the frontmatter — do not copy it through. Two reasons:
     //  · DISCOVERY: store SKILL.md files are plain markdown (the seeds and the
     //    org-settings editor never write frontmatter), and a SKILL.md without a
@@ -402,7 +404,14 @@ function mountOneSkill(
     writeFileSync(
       path.join(dest, "SKILL.md"),
       serializeFrontmatterFile(
-        { name, description: skillDescription(name, data, body) },
+        {
+          name,
+          description: skillDescription(
+            name,
+            frontmatter.success ? frontmatter.data.description : undefined,
+            body,
+          ),
+        },
         {},
         body,
       ),
@@ -438,19 +447,28 @@ function copyableEntry(src: string): boolean {
   }
 }
 
+/**
+ * The only frontmatter key a store file gets to keep (see the NORMALIZE note in
+ * `mountOneSkill`). `.catch(undefined)` so a non-string `description` falls back
+ * to the body's first line instead of failing the whole parse.
+ */
+const skillFrontmatterSchema = z.object({
+  description: z.string().optional().catch(undefined),
+});
+
 /** The one-line description the model reads when deciding to invoke a skill. */
-function skillDescription(name: string, data: unknown, body: string): string {
-  const declared =
-    data && typeof data === "object"
-      ? (data as { description?: unknown }).description
-      : undefined;
+function skillDescription(
+  name: string,
+  declared: string | undefined,
+  body: string,
+): string {
   const firstLine =
     body
       .split("\n")
       .map((line) => line.replace(/^#+\s*/, "").trim())
       .find((line) => line.length > 0) ?? "";
   const text = (
-    (typeof declared === "string" ? declared.trim() : "") ||
+    (declared?.trim() ?? "") ||
     firstLine ||
     `The ${name} skill attached to this agent's Viberr profile.`
   )

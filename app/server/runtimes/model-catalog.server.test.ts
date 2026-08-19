@@ -135,9 +135,9 @@ describe("curated catalog", () => {
 
 describe("getModelCatalog", () => {
   it("codex is curated-only (never calls the SDK)", async () => {
-    const queryFn = vi.fn();
+    const queryFn = vi.fn<ClaudeQueryFn>();
     const cat = await getModelCatalog("codex", {
-      claudeQueryFn: queryFn as unknown as ClaudeQueryFn,
+      claudeQueryFn: queryFn,
       isAvailable: () => true,
     });
     expect(cat.defaultModel).toBe("gpt-5.6-terra");
@@ -145,9 +145,9 @@ describe("getModelCatalog", () => {
   });
 
   it("claude falls back to curated when the backend is unavailable", async () => {
-    const queryFn = vi.fn();
+    const queryFn = vi.fn<ClaudeQueryFn>();
     const cat = await getModelCatalog("claude", {
-      claudeQueryFn: queryFn as unknown as ClaudeQueryFn,
+      claudeQueryFn: queryFn,
       isAvailable: () => false,
     });
     expect(cat.defaultModel).toBe("sonnet");
@@ -197,10 +197,10 @@ describe("getModelCatalog", () => {
       { value: "sonnet", displayName: "S", description: "", supportsEffort: true },
     ];
     let calls = 0;
-    const queryFn = ((_params: unknown) => {
+    const queryFn: ClaudeQueryFn = () => {
       calls += 1;
       return fakeQueryObject(live);
-    }) as unknown as ClaudeQueryFn;
+    };
 
     const first = await getModelCatalog("claude", {
       claudeQueryFn: queryFn,
@@ -216,15 +216,10 @@ describe("getModelCatalog", () => {
   });
 
   it("falls back to curated when the live fetch throws", async () => {
-    const queryFn = (() => {
-      const q = {
-        supportedModels: async () => {
-          throw new Error("network down");
-        },
-        interrupt: async () => {},
-      };
-      return q as unknown as ClaudeQuery;
-    }) as unknown as ClaudeQueryFn;
+    const queryFn: ClaudeQueryFn = () =>
+      fakeQuery(async () => {
+        throw new Error("network down");
+      });
     const cat = await getModelCatalog("claude", {
       claudeQueryFn: queryFn,
       isAvailable: () => true,
@@ -258,15 +253,12 @@ describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", (
     process.env.GITHUB_TOKEN = "ghp_should_not_leak";
     process.env.DATABASE_URL = "postgres://secret";
     let seen: ClaudeQueryOptions | undefined;
-    const queryFn = ((params: {
-      prompt: unknown;
-      options?: ClaudeQueryOptions;
-    }) => {
+    const queryFn: ClaudeQueryFn = (params) => {
       seen = params.options;
       return fakeQueryObject([
         { value: "sonnet", displayName: "S", description: "", supportsEffort: true },
       ]);
-    }) as unknown as ClaudeQueryFn;
+    };
     try {
       await getModelCatalog("claude", {
         claudeQueryFn: queryFn,
@@ -301,17 +293,24 @@ describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", (
 
 // -------------------------------------------------------------- test helpers
 
-/** A fake query object exposing supportedModels()/interrupt() (never iterated). */
-function fakeQueryObject(models: SdkModelInfo[]): ClaudeQuery {
-  const q = {
-    supportedModels: async () => models,
+/** A fake query exposing supportedModels()/interrupt(). `ClaudeQuery` is the
+ *  STREAMING contract, so the fake is built on a real async generator — the
+ *  probe never iterates it, and an unstarted generator runs no body. */
+function fakeQuery(supportedModels: () => Promise<SdkModelInfo[]>): ClaudeQuery {
+  async function* stream(): AsyncGenerator<unknown, void> {}
+  return Object.assign(stream(), {
+    supportedModels,
     interrupt: async () => {},
-  };
-  return q as unknown as ClaudeQuery;
+  });
+}
+
+/** A fake query object answering supportedModels() with `models`. */
+function fakeQueryObject(models: SdkModelInfo[]): ClaudeQuery {
+  return fakeQuery(async () => models);
 }
 
 function makeFakeQuery(models: SdkModelInfo[]): ClaudeQueryFn {
-  return (() => fakeQueryObject(models)) as unknown as ClaudeQueryFn;
+  return () => fakeQueryObject(models);
 }
 
 describe("isKnownModel agrees with what the picker offered (P13-RT-07)", () => {

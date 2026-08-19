@@ -90,7 +90,7 @@ describe("P13-D-10: the self-guard toasts are failures", () => {
 describe("F18-3: the Allow-access modal keys its method off configured providers", () => {
   const openModal = (container: HTMLElement, getByText: (t: string) => HTMLElement) => {
     fireEvent.click(getByText("Allow access"));
-    return [...container.querySelectorAll(".be-opt")] as HTMLButtonElement[];
+    return [...container.querySelectorAll<HTMLButtonElement>(".be-opt")];
   };
 
   it("with NO OAuth provider: defaults to Local; GitHub + Google are disabled and marked off", () => {
@@ -172,7 +172,7 @@ describe("LV-F1: a pending reset never hides the re-issue action", () => {
     // …and the recovery action is still reachable — this is the regression.
     const btn = getByText("Generate a new temp password");
     expect(btn).toBeTruthy();
-    expect((btn.closest("button") as HTMLButtonElement).disabled).toBe(false);
+    expect(btn.closest("button")!.disabled).toBe(false);
   });
 
   it("an established account (no pending reset) keeps the plain Reset password action", () => {

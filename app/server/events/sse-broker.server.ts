@@ -140,7 +140,7 @@ interface BrokerState {
 const BROKER_KEY = Symbol.for("viberr.sseBroker");
 
 function getState(): BrokerState {
-  const cache = globalThis as unknown as Record<symbol, BrokerState | undefined>;
+  const cache: Record<symbol, BrokerState | undefined> = globalThis;
   let state = cache[BROKER_KEY];
   if (!state) {
     state = {
@@ -174,16 +174,25 @@ export function formatSseMessage(id: number, name: string, json: string): string
 /** Heartbeat comment — clients ignore it, proxies see traffic. */
 export const HEARTBEAT_CHUNK = ": hb\n\n";
 
-function controlEvent(
-  type: "stream.open" | "stream.resync",
-  data: Record<string, unknown>,
-): SseEvent {
+/** The hello a connection opens with — its `headId` is where a client that
+ *  never receives a data event resumes from after a reconnect. */
+function streamOpenEvent(headId: number): SseEvent {
   return {
-    type,
+    type: "stream.open",
     entityId: "stream",
     occurredAt: new Date().toISOString(),
-    data,
-  } as SseEvent;
+    data: { headId },
+  };
+}
+
+/** Sent when replay cannot catch a reconnecting client up. */
+function streamResyncEvent(): SseEvent {
+  return {
+    type: "stream.resync",
+    entityId: "stream",
+    occurredAt: new Date().toISOString(),
+    data: {},
+  };
 }
 
 // ------------------------------------------------------------ connection
@@ -259,7 +268,7 @@ export function connectSseClient(input: ConnectSseInput): SseConnectionHandle {
       formatSseMessage(
         headId,
         "stream.open",
-        JSON.stringify(controlEvent("stream.open", { headId })),
+        JSON.stringify(streamOpenEvent(headId)),
       ),
   );
 
@@ -284,7 +293,7 @@ export function connectSseClient(input: ConnectSseInput): SseConnectionHandle {
         formatSseMessage(
           headId,
           "stream.resync",
-          JSON.stringify(controlEvent("stream.resync", {})),
+          JSON.stringify(streamResyncEvent()),
         ),
       );
     }
@@ -319,7 +328,9 @@ export function publishSseEvent(event: SseEvent, route: SseRoute): number {
     state.buffer.splice(0, state.buffer.length - RING_BUFFER_SIZE);
   }
   const chunk = formatSseMessage(id, event.type, json);
-  for (const conn of [...state.connections.values()]) {
+  // A failed write drops the connection it was writing to — deleting the entry
+  // the loop is standing on is well-defined for a Map iterator.
+  for (const conn of state.connections.values()) {
     if (!routeMatchesConnection(route, conn)) continue;
     safeWrite(state, conn, chunk);
   }
@@ -374,7 +385,7 @@ export function runProcessShutdown(): void {
 /** Graceful shutdown / test teardown: closes every connection. */
 export function closeAllSseConnections(): void {
   const state = getState();
-  for (const conn of [...state.connections.values()]) {
+  for (const conn of state.connections.values()) {
     dropConnection(state, conn);
   }
 }
@@ -382,17 +393,20 @@ export function closeAllSseConnections(): void {
 /** Test-only: fresh ids, empty buffer, no connections. */
 export function resetSseBrokerForTests(): void {
   closeAllSseConnections();
-  const cache = globalThis as unknown as Record<symbol, BrokerState | undefined>;
+  const cache: Record<symbol, BrokerState | undefined> = globalThis;
   cache[BROKER_KEY] = undefined;
+}
+
+/** What {@link getSseBrokerStats} reports. */
+export interface SseBrokerStats {
+  connections: number;
+  bufferedEvents: number;
+  headId: number;
 }
 
 /** test-only — leak invariants (buffer cap, connection registry) have no
  * behavioral surface, so the tests introspect. */
-export function getSseBrokerStats(): {
-  connections: number;
-  bufferedEvents: number;
-  headId: number;
-} {
+export function getSseBrokerStats(): SseBrokerStats {
   const state = getState();
   return {
     connections: state.connections.size,

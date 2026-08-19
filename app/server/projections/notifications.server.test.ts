@@ -192,9 +192,7 @@ describe("notifications", () => {
     createNotification(db, { id: "othertask", userId: "u_1", kind: "packet", text: "t", projectSlug: "viberr-core", taskKey: "VIB-160" });
 
     expect(markTaskPacketApprovalRead(db, "viberr-core", "VIB-142")).toBe(2);
-    const rows = db
-      .prepare(`SELECT id, read_at FROM notifications`)
-      .all() as { id: string; read_at: string | null }[];
+    const rows = db.prepare(`SELECT id, read_at FROM notifications`).all();
     expect(rows.find((r) => r.id === "p")?.read_at).not.toBeNull();
     expect(rows.find((r) => r.id === "ap")?.read_at).not.toBeNull();
     expect(rows.find((r) => r.id === "m")?.read_at).toBeNull();
@@ -225,11 +223,9 @@ describe("R19-15: markTaskNotificationsSeen — viewing a task auto-reads its ro
     const db = ctx.makeDb();
     seedViewRows(db);
     expect(markTaskNotificationsSeen(db, "u_1", "viberr-core", "VIB-142")).toBe(5);
-    const read = (
-      db
-        .prepare(`SELECT id FROM notifications WHERE read_at IS NOT NULL`)
-        .all() as { id: string }[]
-    )
+    const read = db
+      .prepare(`SELECT id FROM notifications WHERE read_at IS NOT NULL`)
+      .all()
       .map((r) => r.id)
       .sort();
     expect(read).toEqual(["s_a", "s_m", "s_p", "s_pol", "s_q"]);

@@ -99,6 +99,8 @@ export function getProject(
   db: DatabaseSync,
   slug: string,
 ): ProjectRecord | null {
+  // SAFETY: ProjectRow mirrors the 15 `projects` columns 0001_baseline
+  // declares, so `SELECT *` yields exactly it; a missing slug yields no row.
   const row = db.prepare(`SELECT * FROM projects WHERE slug = ?`).get(slug) as
     | ProjectRow
     | undefined;
@@ -106,9 +108,10 @@ export function getProject(
 }
 
 export function listProjects(db: DatabaseSync): ProjectRecord[] {
+  // SAFETY: same `SELECT *` / column-list correspondence as getProject.
   const rows = db
     .prepare(`SELECT * FROM projects ORDER BY name ASC`)
-    .all() as unknown as ProjectRow[];
+    .all() as ProjectRow[];
   return rows.map(mapProjectRow);
 }
 
@@ -116,9 +119,11 @@ export function listProjectMembers(
   db: DatabaseSync,
   slug: string,
 ): ProjectMemberRecord[] {
+  // SAFETY: ProjectMemberRow mirrors the three `project_members` columns, all
+  // NOT NULL, with `role` CHECK-constrained to the four values it lists.
   const rows = db
     .prepare(`SELECT * FROM project_members WHERE project_slug = ?`)
-    .all(slug) as unknown as ProjectMemberRow[];
+    .all(slug) as ProjectMemberRow[];
   return rows.map(mapProjectMemberRow);
 }
 
@@ -189,13 +194,16 @@ export function listProjectTasks(
   // (pass-4 WI-8, the hottest loader path). Output is identical — a shared
   // cache changes only the cost, not the resolved render.
   const resolveActor = createActorResolver(db, { projectMemberIds: memberIds });
+  // SAFETY: every member of TaskProjectionRow is a `task_projections` column
+  // 0001_baseline declares, so `SELECT *` covers all of them (it also returns
+  // `schedules_json`, which this read model has no member for and never reads).
   const rows = db
     .prepare(
       `SELECT * FROM task_projections WHERE project_slug = ?
          ${opts.includeArchived ? "" : "AND archived = 0"}
        ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
     )
-    .all(slug) as unknown as TaskProjectionRow[];
+    .all(slug) as TaskProjectionRow[];
   // Gap-10: two aggregate queries for the whole project, not one per row — the
   // same shape as the shared actor resolver above, and for the same reason
   // (this is the hottest loader path in the app).
@@ -221,17 +229,20 @@ export function listProjectTasks(
         : null,
       accepted,
     });
+    const quietAt: Parameters<typeof isQuiet>[0] = {
+      lastActivityAt: facts.lastActivityAt,
+      waiting: summary.waiting,
+      archived: summary.archived,
+      terminal: accepted,
+      runInFlight: facts.runInFlight,
+    };
+    // Injected only when a caller supplied it — `isQuiet` reads the CURRENT
+    // instant when the key is absent, and a `now: undefined` would not be.
+    if (opts.now) quietAt.now = opts.now;
     return {
       ...summary,
       lastActivityAt: facts.lastActivityAt,
-      quiet: isQuiet({
-        lastActivityAt: facts.lastActivityAt,
-        waiting: summary.waiting,
-        archived: summary.archived,
-        terminal: accepted,
-        runInFlight: facts.runInFlight,
-        ...(opts.now ? { now: opts.now } : {}),
-      }),
+      quiet: isQuiet(quietAt),
     };
   });
 }

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import {
   EVIDENCE_EMPTY_COLUMN,
   type PrRef,
@@ -19,10 +20,15 @@ import { taskBranchName } from "./branch-sync.server";
 import {
   getProjectGithubContext,
   type GithubContextFailure,
+  type GithubContextOptions,
 } from "./github-context.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 import { mapPrToCacheState } from "./pr-linker.server";
-import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
+import {
+  type FlagScopeViolationInput,
+  flagScopeViolation,
+  policyViolationText,
+} from "./scope-flag.server";
 
 /**
  * Compose the review PR body from the task contract (FR31/FR32). This is the
@@ -136,17 +142,28 @@ export type OpenTaskPrResult =
   | { status: "nothing_to_review"; message: string }
   | { status: "network_unavailable"; message: string };
 
-interface GhPull {
-  number: number;
-  html_url: string;
-  title: string;
-  state: string;
+/**
+ * The slice of a pulls payload this module reads — list item, detail and
+ * create response alike. The identity fields are on every PR payload GitHub
+ * sends; the merge facts (absent on list items) and the head sha carry the
+ * tolerance their optional-chained readers already had, parsing to `undefined`
+ * on drift rather than voiding the response.
+ */
+const ghPullSchema = z.object({
+  number: z.number(),
+  html_url: z.string(),
+  title: z.string(),
+  state: z.string(),
   /** Merge facts from GET /pulls/{n} (absent on list items). */
-  merged?: boolean;
-  merged_at?: string | null;
+  merged: z.boolean().optional().catch(undefined),
+  merged_at: z.string().nullable().optional().catch(undefined),
   /** Present on both the list item and the detail — the adoption rule's subject. */
-  head?: { sha?: string };
-}
+  head: z
+    .object({ sha: z.string().optional().catch(undefined) })
+    .optional()
+    .catch(undefined),
+});
+type GhPull = z.output<typeof ghPullSchema>;
 
 /**
  * Open (or reuse) the review pull request for a task's execution branch
@@ -176,9 +193,10 @@ export async function openTaskPr(
   const fm = file.parsed.frontmatter;
 
   // P13-D-5: task-level repo override deleted (owner ruling) — project repo only.
-  const gh = getProjectGithubContext(db, input.projectSlug, {
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  // Optional key: only a test hands over a transport.
+  const ghOptions: GithubContextOptions = {};
+  if (ctx.fetchImpl) ghOptions.fetchImpl = ctx.fetchImpl;
+  const gh = getProjectGithubContext(db, input.projectSlug, ghOptions);
   if (gh.status !== "ok") return gh;
 
   // 0. The task already carries a live PR — e.g. captured from agent-side
@@ -191,9 +209,10 @@ export async function openTaskPr(
   const cachedPrIsTerminal =
     fm.pr?.state === "closed" || fm.pr?.state === "merged";
   if (fm.pr && !cachedPrIsTerminal) {
-    const live = await gh.client.request<GhPull>(
+    const live = await gh.client.request(
       "GET",
       `/repos/${gh.repo}/pulls/${fm.pr.number}`,
+      ghPullSchema,
     );
     if (live.ok) {
       // Even a cached "review"/"accepted" PR may have been merged or closed
@@ -236,9 +255,10 @@ export async function openTaskPr(
   //    sha must be the delivered revision. A name-matched PR that fails the rule
   //    is a branch COLLISION: creating a second PR for the same head is
   //    impossible on GitHub anyway (422), so delivery stops here and says why.
-  const existing = await gh.client.request<GhPull[]>(
+  const existing = await gh.client.request(
     "GET",
     `/repos/${gh.repo}/pulls`,
+    z.array(ghPullSchema),
     { searchParams: { head: `${owner}:${branch}`, state: "open", per_page: 1 } },
   );
   if (existing.ok && existing.data.length > 0) {
@@ -303,14 +323,19 @@ export async function openTaskPr(
     // the evidence the PRD promises a GitHub reviewer.
     evidence: latestEvidenceLines(file.parsed.timeline),
   });
-  const created = await gh.client.request<GhPull>("POST", `/repos/${gh.repo}/pulls`, {
-    body: {
-      title: `[${input.taskKey}] ${fm.title}`,
-      head: branch,
-      base: gh.defaultBranch,
-      body,
+  const created = await gh.client.request(
+    "POST",
+    `/repos/${gh.repo}/pulls`,
+    ghPullSchema,
+    {
+      body: {
+        title: `[${input.taskKey}] ${fm.title}`,
+        head: branch,
+        base: gh.defaultBranch,
+        body,
+      },
     },
-  });
+  );
 
   if (created.ok) {
     await writePrToTask(db, ref, input, gh, created.data, actor, true, ctx, fm.pr);
@@ -328,20 +353,21 @@ export async function openTaskPr(
     return { status: "auth_failed", message: created.message };
   }
   if (created.kind === "http" && created.status === 403) {
-    const { violation } = await flagScopeViolation(
-      db,
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        scope: "pull_request:write",
-        detail: policyViolationText(
-          "pull_request:write",
-          "opening the review pull request",
-        ),
-        ...(actor ? { actor } : {}),
-      },
-      { dataRoot: ctx.dataRoot },
-    );
+    const flagInput: FlagScopeViolationInput = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      scope: "pull_request:write",
+      detail: policyViolationText(
+        "pull_request:write",
+        "opening the review pull request",
+      ),
+    };
+    // Optional key — with no actor the violation records the system as the one
+    // that found it.
+    if (actor) flagInput.actor = actor;
+    const { violation } = await flagScopeViolation(db, flagInput, {
+      dataRoot: ctx.dataRoot,
+    });
     return {
       status: "scope_violation",
       scope: "pull_request:write",
@@ -388,12 +414,8 @@ async function writePrToTask(
   // refreshing the SAME PR: this path never reads them, so rebuilding the ref
   // from scratch would blank both pills until the next 5-minute poll. A
   // DIFFERENT (freshly opened) PR correctly starts with neither.
-  const next: PrRef = {
-    ...(samePr ? existingPr : {}),
-    number: pr.number,
-    state,
-    title: pr.title,
-  };
+  const fresh = { number: pr.number, state, title: pr.title };
+  const next: PrRef = samePr ? { ...existingPr, ...fresh } : fresh;
   const changed = JSON.stringify(existingPr) !== JSON.stringify(next);
   if (changed) {
     await patchTaskFrontmatter(ref, { pr: next });
@@ -407,6 +429,9 @@ async function writePrToTask(
     // human; the agentless fallback keeps its historical "Implementation" render.
     const humanUserId =
       !actor.operatorAuthorized && actor.userId ? actor.userId : null;
+    // SAFETY: `users.name` is TEXT NOT NULL (0001_baseline.sql), so the single
+    // selected column is a string on any row that exists; `get` returns
+    // undefined when the id matches none.
     const nameHint = humanUserId
       ? ((db.prepare(`SELECT name FROM users WHERE id = ?`).get(humanUserId) as
           | { name: string }

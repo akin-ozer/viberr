@@ -90,10 +90,7 @@ describe("toast host live region", () => {
    *  moment of the call — the whole point is the ORDER of those two things. */
   function instrumentPopover() {
     const calls: string[] = [];
-    const proto = HTMLElement.prototype as unknown as {
-      showPopover?: () => void;
-      hidePopover?: () => void;
-    };
+    const proto = HTMLElement.prototype;
     const original = { show: proto.showPopover, hide: proto.hidePopover };
     proto.showPopover = function (this: HTMLElement) {
       calls.push("show:" + this.childElementCount);

@@ -69,10 +69,10 @@ const RESERVED_ROLES: MentionableReserved[] = [
   { handle: "agent", label: "Delivering agent" },
 ];
 
-const BACKEND_LABEL: Record<RealBackend, string> = {
+const BACKEND_LABEL = {
   claude: "Claude",
   codex: "Codex",
-};
+} satisfies Record<RealBackend, string>;
 
 /**
  * The backend handles this project can still be tagged by, with the profile

@@ -31,13 +31,16 @@ const reset = process.argv.includes("--reset");
 await runWithDataRootWriterLock(
   "`npm run seed`",
   async () => {
+    // An unset VIBERR_SEED_ADMIN_EMAIL must leave `email` ABSENT, not empty:
+    // runSeed falls back to the default bootstrap address on absence.
+    const adminEmail = env.VIBERR_SEED_ADMIN_EMAIL;
+    const adminPassword = env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD;
     const summary = await runSeed(getDb(), {
       dataRoot: env.VIBERR_DATA_ROOT,
       reset,
-      admin: {
-        ...(env.VIBERR_SEED_ADMIN_EMAIL ? { email: env.VIBERR_SEED_ADMIN_EMAIL } : {}),
-        password: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,
-      },
+      admin: adminEmail
+        ? { email: adminEmail, password: adminPassword }
+        : { password: adminPassword },
     });
 
     // Org resources: KBs with real files, skills, domain allowlist. No MCP

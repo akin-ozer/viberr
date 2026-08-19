@@ -1,5 +1,7 @@
+import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import type { RunLog } from "~/server/runtimes/run-service.server";
 
 /**
  * P13-D-11 — the wire contract for `/resources/run-log`.
@@ -54,30 +56,32 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
+/** The 200-branch wire body: the route wraps `getRunLog`'s own contract. */
 interface RunLogBody {
-  data: {
-    lines: { seq: number; display: { text: string } }[];
-    headSeq: number;
-    oldestSeq: number;
-    hasMore: boolean;
-  };
+  data: RunLog;
 }
 
-async function get(query: string): Promise<RunLogBody["data"]> {
+async function get(query: string): Promise<RunLog> {
   const { loader } = await import("~/routes/resources.run-log");
   const { cookie } = await app.cookieFor(ardaId);
-  const res = (await loader({
-    request: app.request(`/resources/run-log?runId=${RUN_ID}&${query}`, {
-      cookie,
-    }),
+  const request = app.request(`/resources/run-log?runId=${RUN_ID}&${query}`, {
+    cookie,
+  });
+  const res = await loader({
+    request,
+    url: new URL(request.url),
     params: {},
-    context: {},
-  } as never)) as Response;
+    pattern: "/resources/run-log",
+    context: new RouterContextProvider(),
+  });
+  // A 200 rules out the route's two error branches, so the body is the
+  // success payload the route builds from `getRunLog`.
   expect(res.status).toBe(200);
-  return ((await res.json()) as RunLogBody).data;
+  const body: RunLogBody = await res.json();
+  return body.data;
 }
 
-const texts = (data: RunLogBody["data"]) => data.lines.map((l) => l.display.text);
+const texts = (data: RunLog) => data.lines.map((l) => l.display.text);
 
 describe("GET /resources/run-log paging (P13-D-11)", () => {
   it("forward `since` keeps its existing meaning and reports what is older", async () => {

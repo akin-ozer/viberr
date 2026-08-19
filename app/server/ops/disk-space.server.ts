@@ -68,7 +68,13 @@ function envBytes(name: string, fallback: number): number {
   return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * MB) : fallback;
 }
 
-export function diskThresholds(): { low: number; critical: number } {
+/** The free-space thresholds in force, in bytes (`critical` <= `low`). */
+export interface DiskThresholds {
+  low: number;
+  critical: number;
+}
+
+export function diskThresholds(): DiskThresholds {
   const low = envBytes("VIBERR_DISK_LOW_FREE_MB", DEFAULT_DISK_LOW_FREE_BYTES);
   const critical = envBytes(
     "VIBERR_DISK_CRITICAL_FREE_MB",

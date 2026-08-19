@@ -1,12 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
+import { z } from "zod";
 import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import {
-  splitNotifications,
-  type NotificationPageItem,
-} from "./notifications-page-helpers";
+import { splitNotifications } from "./notifications-page-helpers";
 
 /**
  * Route-level tests for the /notifications page (Phase 9C): per-user rows
@@ -28,22 +27,42 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
+/**
+ * A server loader/action is handed the request, the match pattern, the dynamic
+ * params and a middleware context. Building the whole envelope rather than a
+ * partial stand-in is what keeps the direct calls below type-checked against
+ * the real route signatures. Neither route here takes path params.
+ */
+function routeArgs(request: Request, pattern: string) {
+  return {
+    request,
+    url: new URL(request.url),
+    params: {},
+    pattern,
+    context: new RouterContextProvider(),
+  };
+}
+
+/** The producing actor a stream line renders: either absent, or named. The
+ *  rows come off SQL joins, so the shape is parsed rather than trusted. */
+const producingActorSchema = z.object({ name: z.string() }).nullable();
+
 async function runLoader(cookie?: string) {
   const { loader } = await import("~/routes/notifications");
-  return loader({
-    request: app.request("/notifications", cookie ? { cookie } : {}),
-    params: {},
-    context: {},
-  } as never) as Promise<{
-    notifications: NotificationPageItem[];
-    unread: number;
-  }>;
+  return loader(
+    routeArgs(
+      app.request("/notifications", cookie ? { cookie } : {}),
+      "/notifications",
+    ),
+  );
 }
 
 describe("/notifications", () => {
   it("redirects signed-out users to /login", async () => {
     const thrown = await runLoader().catch((e) => e);
     expect(thrown).toBeInstanceOf(Response);
+    // SAFETY: the assertion above throws unless `thrown` is a Response, so
+    // this line only runs on the redirect the signed-out loader threw.
     expect((thrown as Response).status).toBe(302);
   });
 
@@ -58,7 +77,7 @@ describe("/notifications", () => {
     // Producing actors ship for the stream lines.
     expect(
       result.notifications.every(
-        (n) => n.from === null || typeof n.from.name === "string",
+        (n) => producingActorSchema.safeParse(n.from).success,
       ),
     ).toBe(true);
   });
@@ -138,17 +157,21 @@ describe("/notifications", () => {
     const { action } = await import("~/routes/notifications.read");
 
     const body = new URLSearchParams({ _csrf: csrf, intent: "read-all" });
-    const result = (await action({
-      request: app.request("/notifications/read", {
-        method: "POST",
-        cookie,
-        body,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      }),
-      params: {},
-      context: {},
-    } as never)) as { ok: boolean };
-    expect(result.ok).toBe(true);
+    const result = await action(
+      routeArgs(
+        app.request("/notifications/read", {
+          method: "POST",
+          cookie,
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+        "/notifications/read",
+      ),
+    );
+    // The read-all branch answers with a bare object; the CSRF-failure branch
+    // answers with a `data()` envelope carrying no `ok`, so the member is read
+    // through that narrowing rather than asserted into existence.
+    expect("ok" in result && result.ok).toBe(true);
 
     const after = await runLoader(cookie);
     expect(after.unread).toBe(0);

@@ -9,9 +9,13 @@
  * - Network failures and HTTP failures come back as TYPED RESULTS, never
  *   throws — services build their degraded modes on top. `toAppError`
  *   converts a failure at a route boundary when throwing is wanted.
+ * - Success bodies are decoded by a caller-supplied zod schema (see
+ *   `GithubClient.request`); failure bodies stay unparsed.
  * - `fetchImpl` injection is the mock-transport hook for tests; nothing in
  *   this layer ever logs or re-emits the token.
  */
+
+import { z } from "zod";
 
 export const GITHUB_API_BASE = "https://api.github.com";
 const API_VERSION = "2022-11-28";
@@ -73,9 +77,30 @@ export interface GithubRequestOptions {
   timeoutMs?: number;
 }
 
+export type GithubMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
 export interface GithubClient {
+  /**
+   * Issue a request and decode the SUCCESS body with `schema`. Call-site
+   * schemas model only the fields their reader consumes, carrying the
+   * tolerance that reader already has (`.catch(undefined)` where the read
+   * optional-chains, strict where a drifted value must not flow onward), so
+   * payload drift degrades exactly the way the raw reads always did. Failure
+   * results carry the body unparsed.
+   */
+  request<Schema extends z.ZodType>(
+    method: GithubMethod,
+    path: string,
+    schema: Schema,
+    options?: GithubRequestOptions,
+  ): Promise<GithubResponse<z.output<Schema>>>;
+  /**
+   * @deprecated Schema-less form: the success body is handed over unchecked as
+   * `T`. Kept only for the `task-actions.server.ts` call sites until they
+   * migrate to schemas (phase 2) — new callers pass a schema.
+   */
   request<T>(
-    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+    method: GithubMethod,
     path: string,
     options?: GithubRequestOptions,
   ): Promise<GithubResponse<T>>;
@@ -95,16 +120,39 @@ function rateLimitFrom(headers: Headers): RateLimitInfo {
   };
 }
 
-function messageFrom(data: unknown, statusText: string): string {
-  if (
-    typeof data === "object" &&
-    data !== null &&
-    "message" in data &&
-    typeof (data as { message: unknown }).message === "string"
-  ) {
-    return (data as { message: string }).message;
+/**
+ * GitHub's error envelope. `message` is the one field a failed response carries
+ * that is safe to surface — human-readable and secret-free — so it is parsed
+ * here rather than probed field by field at the failure site.
+ */
+const githubErrorSchema = z.object({ message: z.string() });
+
+/** A JSON value: everything `JSON.parse` can hand back, and nothing wider. */
+type JsonBody =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonBody[]
+  | { [key: string]: JsonBody };
+
+/**
+ * The response body — parsed JSON when GitHub sent JSON, the raw text when it
+ * sent something else (a proxy's HTML error page), null when it sent nothing.
+ */
+async function readBody(response: Response): Promise<JsonBody> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
-  return statusText || "GitHub request failed";
+}
+
+/** Outgoing request headers, lowercase-keyed the way this layer writes them. */
+interface RequestHeaders {
+  [name: string]: string;
 }
 
 /** Per-request budget for a GitHub API call (P13-UI-04). Generous enough for a
@@ -121,7 +169,7 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
     url: string,
     requestOptions: GithubRequestOptions,
   ): Promise<Response> {
-    const headers: Record<string, string> = {
+    const headers: RequestHeaders = {
       accept: "application/vnd.github+json",
       "user-agent": USER_AGENT,
       "x-github-api-version": API_VERSION,
@@ -148,74 +196,90 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
     return fetchImpl(url, init);
   }
 
-  return {
-    async request<T>(
-      method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
-      path: string,
-      requestOptions: GithubRequestOptions = {},
-    ): Promise<GithubResponse<T>> {
-      const url = new URL(
-        path.startsWith("http") ? path : `${baseUrl}${path}`,
-      );
-      for (const [key, value] of Object.entries(
-        requestOptions.searchParams ?? {},
-      )) {
-        url.searchParams.set(key, String(value));
-      }
+  function request<Schema extends z.ZodType>(
+    method: GithubMethod,
+    path: string,
+    schema: Schema,
+    options?: GithubRequestOptions,
+  ): Promise<GithubResponse<z.output<Schema>>>;
+  function request<T>(
+    method: GithubMethod,
+    path: string,
+    options?: GithubRequestOptions,
+  ): Promise<GithubResponse<T>>;
+  async function request(
+    method: GithubMethod,
+    path: string,
+    schemaOrOptions?: z.ZodType | GithubRequestOptions,
+    maybeOptions?: GithubRequestOptions,
+  ): Promise<GithubResponse<unknown>> {
+    let schema: z.ZodType | undefined;
+    let requestOptions: GithubRequestOptions;
+    if (schemaOrOptions instanceof z.ZodType) {
+      schema = schemaOrOptions;
+      requestOptions = maybeOptions ?? {};
+    } else {
+      schema = undefined;
+      requestOptions = schemaOrOptions ?? {};
+    }
+    const url = new URL(
+      path.startsWith("http") ? path : `${baseUrl}${path}`,
+    );
+    for (const [key, value] of Object.entries(
+      requestOptions.searchParams ?? {},
+    )) {
+      url.searchParams.set(key, String(value));
+    }
 
-      let response: Response;
-      try {
+    let response: Response;
+    try {
+      response = await doFetch(method, url.toString(), requestOptions);
+      // Exactly one retry, 5xx only (no retry storms).
+      if (response.status >= 500) {
         response = await doFetch(method, url.toString(), requestOptions);
-        // Exactly one retry, 5xx only (no retry storms).
-        if (response.status >= 500) {
-          response = await doFetch(method, url.toString(), requestOptions);
-        }
-      } catch (error) {
-        return {
-          ok: false,
-          kind: "network",
-          message: error instanceof Error ? error.message : String(error),
-        };
       }
-
-      const rateLimit = rateLimitFrom(response.headers);
-      const etag = response.headers.get("etag");
-
-      if (response.status === 304) {
-        return { ok: false, kind: "not_modified", status: 304, etag, rateLimit };
-      }
-
-      let data: unknown = null;
-      const text = await response.text();
-      if (text) {
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = text;
-        }
-      }
-
-      if (response.ok) {
-        return {
-          ok: true,
-          status: response.status,
-          data: data as T,
-          etag,
-          rateLimit,
-          scopesHeader: response.headers.get("x-oauth-scopes"),
-          tokenExpiration: tokenExpirationFrom(response.headers),
-        };
-      }
+    } catch (error) {
       return {
         ok: false,
-        kind: "http",
-        status: response.status,
-        message: messageFrom(data, response.statusText),
-        data,
-        rateLimit,
+        kind: "network",
+        message: error instanceof Error ? error.message : String(error),
       };
-    },
-  };
+    }
+
+    const rateLimit = rateLimitFrom(response.headers);
+    const etag = response.headers.get("etag");
+
+    if (response.status === 304) {
+      return { ok: false, kind: "not_modified", status: 304, etag, rateLimit };
+    }
+
+    const data = await readBody(response);
+
+    if (response.ok) {
+      return {
+        ok: true,
+        status: response.status,
+        data: schema === undefined ? data : schema.parse(data),
+        etag,
+        rateLimit,
+        scopesHeader: response.headers.get("x-oauth-scopes"),
+        tokenExpiration: tokenExpirationFrom(response.headers),
+      };
+    }
+    const failure = githubErrorSchema.safeParse(data);
+    return {
+      ok: false,
+      kind: "http",
+      status: response.status,
+      message: failure.success
+        ? failure.data.message
+        : response.statusText || "GitHub request failed",
+      data,
+      rateLimit,
+    };
+  }
+
+  return { request };
 }
 
 /**

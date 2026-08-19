@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PrRef } from "~/schemas/task-file.schema";
 import {
   isAtAcceptanceBoundary,
   mapOperatorRef,
@@ -134,8 +135,12 @@ describe("D4: continuity fact surfaces on the summary", () => {
 });
 
 describe("mapPrChecks / mapPrReview (P13-D-28)", () => {
-  const pr = (patch: Record<string, unknown> = {}) =>
-    ({ number: 7, state: "review", title: "PR", ...patch }) as never;
+  const pr = (patch: Partial<PrRef> = {}): PrRef => ({
+    number: 7,
+    state: "review",
+    title: "PR",
+    ...patch,
+  });
 
   it("rolls check-runs up to failing > pending > passing", () => {
     expect(

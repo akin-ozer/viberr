@@ -74,6 +74,10 @@ async function upsertUsers(
   db: DatabaseSync,
   options: DemoSeedOptions,
 ): Promise<SeedUserIds> {
+  // SAFETY: `SeedUserIds` is keyed by the handle union `SEED_PEOPLE` enumerates,
+  // and every iteration below assigns `ids[person.handle]` before it leaves the
+  // loop body (both the existing-user `continue` and the insert path do) — so the
+  // record is complete on the one line that returns it.
   const ids = {} as SeedUserIds;
   for (const person of SEED_PEOPLE) {
     const existing = findUserByEmail(db, person.email);

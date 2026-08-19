@@ -1,5 +1,13 @@
 import { ERROR_CODES, type ErrorCode } from "./error-codes";
 
+/**
+ * Structured, secret-free error context: ids, field names, counts — the values
+ * a log line or a test reads back. Scalars only, deliberately: `details` is
+ * diagnostic context, never a payload, so nothing here can carry a nested blob
+ * (or a secret's value) into a log.
+ */
+export type AppErrorDetails = Record<string, string | number | boolean | null>;
+
 export interface AppErrorOptions {
   code: ErrorCode;
   /** HTTP status this error maps to. Default 500. */
@@ -9,7 +17,7 @@ export interface AppErrorOptions {
   /** Safe, human-readable message that MAY be shown to users. */
   userMessage?: string;
   /** Structured, secret-free context (ids, field names — never values of secrets). */
-  details?: Record<string, unknown>;
+  details?: AppErrorDetails;
   cause?: unknown;
 }
 
@@ -19,7 +27,7 @@ export class AppError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
   readonly userMessage: string;
-  readonly details?: Record<string, unknown>;
+  readonly details?: AppErrorDetails;
 
   constructor(options: AppErrorOptions) {
     super(options.message ?? options.userMessage ?? options.code, {
@@ -34,7 +42,7 @@ export class AppError extends Error {
 
   static notFound(
     userMessage = "Not found.",
-    details?: Record<string, unknown>,
+    details?: AppErrorDetails,
   ): AppError {
     return new AppError({
       code: ERROR_CODES.NOT_FOUND,
@@ -46,7 +54,7 @@ export class AppError extends Error {
 
   static validation(
     userMessage: string,
-    details?: Record<string, unknown>,
+    details?: AppErrorDetails,
   ): AppError {
     return new AppError({
       code: ERROR_CODES.VALIDATION_FAILED,

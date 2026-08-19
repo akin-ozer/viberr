@@ -39,38 +39,27 @@ import {
  * honesty). Every test here FAILS against pre-pass-15 main.
  */
 
-vi.mock("~/server/github/push-workspace.server", () => ({
-  pushWorkspaceBranch: vi.fn(async () => ({
-    status: "no_commits",
-    reason: "no local commits ahead of the default branch",
-  })),
-}));
-vi.mock("~/server/github/pr-open.server", () => ({
-  openTaskPr: vi.fn(async () => ({
-    status: "no_pat_configured" as const,
-    repo: null,
-  })),
-}));
-vi.mock("~/server/github/github-reconciler.server", () => ({
-  mergeTaskPr: vi.fn(async () => ({ status: "no_pat_configured" as const })),
-  deleteTaskRemoteBranch: vi.fn(async () => ({ status: "no_branch" as const })),
-}));
-vi.mock("~/server/github/github-context.server", () => ({
-  getProjectGithubContext: vi.fn(() => ({
-    status: "no_pat_configured" as const,
-    repo: null,
-  })),
-}));
+// The delivery/acceptance collaborators ride `TaskActionContext`'s test seams
+// instead of module mocks: push-workspace, pr-open and the merge are injected
+// as typed doubles through the ctx `deps` bag, and the PR-head gate's GitHub
+// reads run a REAL `getProjectGithubContext` over the canned transport
+// (`fetchImpl`) — `githubReportsHead` seeds the credential and the routes. With
+// no credential seeded the context degrades to `no_pat_configured`, the same
+// shape the old default mock returned.
+import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { openTaskPr } from "~/server/github/pr-open.server";
+import type { mergeTaskPr } from "~/server/github/github-reconciler.server";
+import {
+  fakeGithubFetch,
+  type FakeGithub,
+} from "../../../test-support/fake-github";
+import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import type { TaskActionContext } from "./task-actions.server";
 
-import { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
-import { openTaskPr } from "~/server/github/pr-open.server";
-import { mergeTaskPr } from "~/server/github/github-reconciler.server";
-import { getProjectGithubContext } from "~/server/github/github-context.server";
-
-const pushMock = vi.mocked(pushWorkspaceBranch);
-const openPrMock = vi.mocked(openTaskPr);
-const mergeMock = vi.mocked(mergeTaskPr);
-const ghCtxMock = vi.mocked(getProjectGithubContext);
+const pushMock = vi.fn<typeof pushWorkspaceBranch>();
+const openPrMock = vi.fn<typeof openTaskPr>();
+const mergeMock = vi.fn<typeof mergeTaskPr>();
+let github: FakeGithub | null = null;
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -79,13 +68,13 @@ beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   vi.clearAllMocks();
+  github = null;
   pushMock.mockResolvedValue({
     status: "no_commits",
     reason: "no local commits ahead of the default branch",
   });
   openPrMock.mockResolvedValue({ status: "no_pat_configured", repo: null });
-  mergeMock.mockResolvedValue({ status: "no_pat_configured" } as never);
-  ghCtxMock.mockReturnValue({ status: "no_pat_configured", repo: null });
+  mergeMock.mockResolvedValue({ status: "no_pat_configured", repo: null });
 });
 
 afterEach(() => ctx.cleanup());
@@ -160,7 +149,20 @@ function authority(
   };
 }
 
-const dataCtx = () => ({ dataRoot: store.dataRoot });
+/** Every entry point gets the injected doubles; the canned transport rides
+ *  along once a test has installed one via `githubReportsHead`. */
+function dataCtx(): TaskActionContext {
+  const callCtx: TaskActionContext = {
+    dataRoot: store.dataRoot,
+    deps: {
+      pushWorkspaceBranch: pushMock,
+      openTaskPr: openPrMock,
+      mergeTaskPr: mergeMock,
+    },
+  };
+  if (github) callCtx.fetchImpl = github.fetchImpl;
+  return callCtx;
+}
 
 describe("R15-2: transitionStage no longer auto-delivers on review entry", () => {
   it("entering the review stage opens NO PR and instead writes the typed 'Review reached — no PR yet' event", async () => {
@@ -444,7 +446,7 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
 
   it("F17-1: the operator's delivery calls openTaskPr operator-authorized (so the PR-open event is the Operator, not a guest)", async () => {
     seed({ stage: "review", branch: "vib-1" });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1" } as never);
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1 });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 9,
@@ -462,7 +464,7 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
     // it operator-authorized so pr-open renders {kind:"operator"}, not a human.
     // Canary: drop `operatorAuthorized: true` in operatorDeliverForReview and
     // this reads false.
-    const actorArg = openPrMock.mock.calls.at(-1)![2] as { operatorAuthorized?: boolean };
+    const actorArg = openPrMock.mock.calls.at(-1)![2];
     expect(actorArg.operatorAuthorized).toBe(true);
   });
 });
@@ -666,23 +668,28 @@ describe("R15-1: the verdict gate on human acceptance (F15-19)", () => {
 });
 
 describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision", () => {
+  /** Point the head gate at a REAL GitHub context — a real credential on the
+   *  project's repo — served by the canned transport: the `/pulls/` head and
+   *  the `/compare/` verdict below, 404 (unknown, never a refusal) for
+   *  anything else. */
   function githubReportsHead(headSha: string, compareStatus = "diverged") {
-    ghCtxMock.mockReturnValue({
-      status: "ok",
-      repo: "akin-ozer/viberr",
-      defaultBranch: "main",
-      client: {
-        request: vi.fn(async (_method: string, path: string) => {
-          if (path.includes("/pulls/")) {
-            return { ok: true, data: { head: { sha: headSha } } };
-          }
-          if (path.includes("/compare/")) {
-            return { ok: true, data: { status: compareStatus } };
-          }
-          return { ok: false, kind: "network", message: "unexpected" };
-        }),
+    const patActor = actor(store.users.arda);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0001" },
+      patActor,
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      patActor,
+    );
+    github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: headSha } } },
+      [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${headSha}`]: {
+        body: { status: compareStatus },
       },
-    } as never);
+    });
   }
 
   const healthySeed = () =>
@@ -823,7 +830,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
         goal: current.goal,
         timeline: current.timeline,
       });
-      return { status: "merged", prNumber: 114 } as never;
+      return { status: "merged", prNumber: 114, sha: null };
     });
     await expect(
       transitionStage(
@@ -884,7 +891,7 @@ describe("B-WF1: the in-lock re-check after the merge await", () => {
         goal: current.goal,
         timeline: current.timeline,
       });
-      return { status: "merged", prNumber: 7 } as never;
+      return { status: "merged", prNumber: 7, sha: null };
     });
     await expect(
       transitionStage(
@@ -957,18 +964,27 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     // Fails on wave-1 (and on main): the packet path never called
     // acceptancePrHeadMismatch — the junk-head PR merged through the
     // operator's own acceptance packet.
-    ghCtxMock.mockReturnValue({
-      status: "ok",
-      repo: "akin-ozer/viberr",
-      client: {
-        request: vi.fn(async (_m: string, path: string) => {
-          if (path.includes("/pulls/")) {
-            return { ok: true, data: { head: { sha: "f".repeat(40) } } };
-          }
-          return { ok: true, data: { status: "diverged" } };
-        }),
+    // As in githubReportsHead: a real credential + canned transport, answering
+    // this packet's PR #7 with a junk head and the compare with "diverged".
+    const patActor = actor(store.users.arda);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0002" },
+      patActor,
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      patActor,
+    );
+    github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/pulls/7": {
+        body: { head: { sha: "f".repeat(40) } },
       },
-    } as never);
+      [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${"f".repeat(40)}`]: {
+        body: { status: "diverged" },
+      },
+    });
     seedWithPacket({
       stage: "review",
       branch: "vib-1",

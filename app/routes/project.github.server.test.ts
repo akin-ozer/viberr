@@ -1,4 +1,6 @@
+import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { AuditEventInput } from "~/server/audit/audit-recorder.server";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
@@ -26,24 +28,25 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-interface GithubLoaderData {
-  view: { reconcile: { at: string | null; label: string | null; stale: boolean } };
-  reconcileCheck: { at: string | null; label: string | null; stale: boolean };
-}
-
-async function loadGithubPage(): Promise<GithubLoaderData> {
+async function loadGithubPage() {
   const { loader } = await import("~/routes/project.github");
   const { cookie } = await app.cookieFor(ardaId);
-  return (await loader({
-    request: app.request("/projects/viberr-core/github", { cookie }),
+  const request = app.request("/projects/viberr-core/github", { cookie });
+  return await loader({
+    request,
+    url: new URL(request.url),
     params: { slug: "viberr-core" },
-    context: {},
-  } as never)) as GithubLoaderData;
+    pattern: "/projects/:slug/github",
+    context: new RouterContextProvider(),
+  });
 }
 
 /** Write one completed-pass audit row at a chosen age, the way a poller tick
  *  does (per-task, system actor, no project-summary row). */
-async function recordPass(minutesAgo: number, over: Record<string, unknown> = {}) {
+async function recordPass(
+  minutesAgo: number,
+  over: Partial<AuditEventInput> = {},
+) {
   const { recordAudit } = await import("~/server/audit/audit-recorder.server");
   const occurredAt = new Date(Date.now() - minutesAgo * 60_000).toISOString();
   // recordAudit stamps `new Date()`; the row is re-dated in place so the test

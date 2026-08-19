@@ -3,10 +3,10 @@ import {
   data,
   Outlet,
   useLocation,
-  useMatches,
   useRouteLoaderData,
 } from "react-router";
 import type { Route } from "./+types/project";
+import type { loader as taskLoader } from "./project.task";
 import type { loader as rootLoader } from "../root";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -187,11 +187,8 @@ export function ArchivedBanner({ canRestore }: { canRestore: boolean }) {
 export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   const { user, board } = loaderData;
   const rootData = useRouteLoaderData<typeof rootLoader>("root");
-  const matches = useMatches();
-  const taskMatch = matches.find((m) => m.id === "routes/project.task");
-  const openTask = taskMatch?.loaderData
-    ? (taskMatch.loaderData as { task: { key: string; title: string } }).task
-    : null;
+  const taskData = useRouteLoaderData<typeof taskLoader>("routes/project.task");
+  const openTask = taskData ? taskData.task : null;
 
   // Live updates (Phase 6): ONE stream per tab for the whole workspace
   // shell. `project:` covers board columns + rail counts + violations,

@@ -3,6 +3,7 @@ import {
   DataRootLockedError,
   acquireDataRootLock,
   forceDataRootTakeover,
+  type AcquireDataRootLockOptions,
   type DataRootLock,
 } from "./data-root-lock.server";
 
@@ -88,11 +89,14 @@ export function cliLockRefusalMessage(
 export function acquireCliWriterLock(
   options: Pick<CliLockOptions, "dataRoot" | "force"> = {},
 ): DataRootLock {
-  return acquireDataRootLock({
-    ...(options.dataRoot ? { dataRoot: options.dataRoot } : {}),
+  const request: AcquireDataRootLockOptions = {
     force: options.force ?? forceDataRootTakeover(),
     releaseOnExit: true,
-  });
+  };
+  // Naming a root at all is the caller's choice; left off, the lock resolves the
+  // configured one itself.
+  if (options.dataRoot) request.dataRoot = options.dataRoot;
+  return acquireDataRootLock(request);
 }
 
 /**
@@ -108,12 +112,14 @@ export async function runWithDataRootWriterLock<T>(
   options: CliLockOptions = {},
 ): Promise<T> {
   const io = options.io ?? PROCESS_REFUSAL_IO;
+  // Both are forwarded only when the caller set them: an absent `force` must
+  // reach the env-driven default, not overwrite it with `undefined`.
+  const request: Pick<CliLockOptions, "dataRoot" | "force"> = {};
+  if (options.dataRoot) request.dataRoot = options.dataRoot;
+  if (options.force !== undefined) request.force = options.force;
   let lock: DataRootLock;
   try {
-    lock = acquireCliWriterLock({
-      ...(options.dataRoot ? { dataRoot: options.dataRoot } : {}),
-      ...(options.force !== undefined ? { force: options.force } : {}),
-    });
+    lock = acquireCliWriterLock(request);
   } catch (error) {
     if (!(error instanceof DataRootLockedError)) throw error;
     io.write(cliLockRefusalMessage(command, error, options.alternative));

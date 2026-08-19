@@ -49,8 +49,7 @@ describe("demo fixture", () => {
       notifications: 10,
       agentProfiles: 3,
     });
-    const rows = (sql: string) =>
-      (db.prepare(sql).get() as { c: number }).c;
+    const rows = (sql: string) => Number(db.prepare(sql).get()!.c);
     expect(rows(`SELECT count(*) AS c FROM projects`)).toBe(3);
     expect(rows(`SELECT count(*) AS c FROM task_projections`)).toBe(12);
     expect(rows(`SELECT count(*) AS c FROM task_events`)).toBe(36);
@@ -68,7 +67,7 @@ describe("demo fixture", () => {
     const dataRoot = ctx.makeTempDir();
     await runDemoSeed(db, { dataRoot });
     await runDemoSeed(db, { dataRoot });
-    const count = (sql: string) => (db.prepare(sql).get() as { c: number }).c;
+    const count = (sql: string) => Number(db.prepare(sql).get()!.c);
     expect(count(`SELECT count(*) AS c FROM users`)).toBe(5);
     expect(count(`SELECT count(*) AS c FROM task_projections`)).toBe(12);
     expect(count(`SELECT count(*) AS c FROM notifications`)).toBe(10);
@@ -104,9 +103,11 @@ describe("demo fixture", () => {
     const { db, dataRoot } = await seed();
     const rows = db
       .prepare(`SELECT project_slug AS slug, task_key AS key FROM task_projections`)
-      .all() as { slug: string; key: string }[];
+      .all();
     expect(rows).toHaveLength(12);
-    for (const { slug, key } of rows) {
+    for (const row of rows) {
+      const slug = String(row.slug);
+      const key = String(row.key);
       const file = readTaskFile({ projectSlug: slug, taskKey: key, dataRoot })!;
       expect(file.diagnostics, `${key} diagnostics`).toEqual([]);
       expect(file.parsed.unknownFrontmatter, `${key} unknown frontmatter`).toEqual({});

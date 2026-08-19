@@ -95,6 +95,14 @@ function isTruthy(v: string | undefined): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
+/** What `prepareCodexHome` resolved for a run. */
+export interface PreparedCodexHome {
+  home: string;
+  authSource: string;
+  /** True when this call created or refreshed the mirrored auth.json. */
+  authMirrored: boolean;
+}
+
 /**
  * Materialize the run home: create it, and mirror the human's `auth.json` into
  * it when the two differ. Prefers a SYMLINK (the CLI refreshes the subscription
@@ -118,12 +126,9 @@ function isTruthy(v: string | undefined): boolean {
  * Never throws — an unpreparable home degrades to "codex unavailable" through
  * the normal credential probe rather than crashing adapter construction.
  */
-export function prepareCodexHome(env: NodeJS.ProcessEnv = process.env): {
-  home: string;
-  authSource: string;
-  /** True when this call created or refreshed the mirrored auth.json. */
-  authMirrored: boolean;
-} {
+export function prepareCodexHome(
+  env: NodeJS.ProcessEnv = process.env,
+): PreparedCodexHome {
   const home = resolveCodexHome(env);
   const authSource = path.resolve(resolveCodexAuthSource(env));
   let authMirrored = false;

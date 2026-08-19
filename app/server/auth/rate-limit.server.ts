@@ -118,10 +118,11 @@ function cachedLimiter(
   key: symbol,
   options: TokenBucketOptions,
 ): TokenBucketLimiter {
-  const cache = globalThis as unknown as Record<
-    symbol,
-    TokenBucketLimiter | undefined
-  >;
+  // SAFETY: `globalThis` carries no index signature, so the symbol slots have
+  // to be named to be read at all. The `Symbol.for("viberr.*RateLimiter")` keys
+  // are written nowhere but the assignment below, which only ever stores a
+  // TokenBucketLimiter — a slot therefore holds one of ours or nothing.
+  const cache = globalThis as Record<symbol, TokenBucketLimiter | undefined>;
   let limiter = cache[key];
   if (!limiter) {
     limiter = new TokenBucketLimiter(options);

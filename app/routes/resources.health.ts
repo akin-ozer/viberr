@@ -65,9 +65,12 @@ function requestedProbe(request?: Request): string | null {
 export async function loader(args?: { request?: Request }) {
   try {
     const db = getDb();
+    // SAFETY: `SELECT count(*) AS c` is an aggregate with no GROUP BY — sqlite
+    // answers it with exactly one row carrying the single integer column `c`.
     const projects = (
       db.prepare(`SELECT count(*) AS c FROM projects`).get() as { c: number }
     ).c;
+    // SAFETY: same aggregate guarantee as the `projects` count above.
     const tasks = (
       db.prepare(`SELECT count(*) AS c FROM task_projections`).get() as {
         c: number;

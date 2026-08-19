@@ -7,6 +7,7 @@ import {
   writeProject,
   writeTask,
 } from "../../../test-support/test-store";
+import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { rebuildAll } from "./rebuilder.server";
 import { getReviewQueue } from "./review-queue.server";
 
@@ -302,12 +303,22 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
   // this drives the shape a JS caller (or a future refactor that drops the
   // argument) would still produce, and asserts it fails CLOSED rather than
   // handing back an unfiltered acceptance list.
+  /** What `getReviewQueue` requires — named so the cast below states exactly
+   *  which required field the simulated caller omits. */
+  interface ReviewQueueOptions {
+    viewerUserId: string;
+    dataRoot: string;
+  }
+
   it("an absent viewer is fail-closed: nothing is acceptance-ready", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, null);
+    // SAFETY: deliberately UNSOUND — `viewerUserId` is missing. That is the
+    // input under test (see the note above): the JS-caller shape TypeScript
+    // alone cannot produce, fed in to prove the predicate fails closed.
     const q = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
-    } as unknown as { viewerUserId: string; dataRoot: string });
+    } as ReviewQueueOptions);
     expect(q.ready).toHaveLength(0);
     expect(q.working.map((t) => t.key)).toEqual(["VIB-201"]);
   });
@@ -446,7 +457,7 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
   function seedDelivered(
     store: ReturnType<typeof setupTestStore>,
     key: string,
-    patch: Record<string, unknown> = {},
+    patch: Partial<TaskFrontmatter> = {},
   ) {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter(key, {

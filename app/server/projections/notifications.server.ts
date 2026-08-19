@@ -187,6 +187,11 @@ export function listNotifications(
   userId: string,
   options: { limit?: number } = {},
 ): NotificationListItem[] {
+  // SAFETY: `n.*` is the `notifications` table, whose columns are
+  // NotificationRow's required fields one-for-one with the same nullability
+  // (`kind` pinned by its CHECK constraint to NOTIFICATION_KINDS, `ptype` to
+  // input|blocked). The five joined columns are exactly NotificationRow's
+  // OPTIONAL fields, which the LEFT JOINs leave null when unmatched.
   const rows = db
     .prepare(
       `SELECT n.*, p.name AS project_name, p.stages_json AS project_stages_json,
@@ -201,7 +206,7 @@ export function listNotifications(
        ORDER BY n.occurred_at DESC, n.id DESC
        LIMIT ?`,
     )
-    .all(userId, options.limit ?? 100) as unknown as NotificationRow[];
+    .all(userId, options.limit ?? 100) as NotificationRow[];
   // E1: `from` actors are baked at creation — overlay the current
   // users-table identity so renames reflect in the inbox immediately.
   const overlay = createActorRenderOverlay(db);
@@ -242,6 +247,8 @@ export function countUnreadNotifications(
   // F18-1: an unread row that points at a DELETED project is not actionable —
   // clicking it 404s — so it must not inflate the bell badge. Count unread rows
   // that are either org-wide (no project_slug) or whose project still exists.
+  // SAFETY: an un-grouped `count(*)` always returns exactly one row holding one
+  // INTEGER column, so `.get()` is never undefined and `c` is always a number.
   const row = db
     .prepare(
       `SELECT count(*) AS c
@@ -311,6 +318,8 @@ export function markTaskPacketApprovalRead(
   if (kinds.length === 0) return 0;
   const placeholders = kinds.map(() => "?").join(", ");
   // Affected users FIRST (the bulk UPDATE loses them) — one event each.
+  // SAFETY: the single selected column is `notifications.user_id`, TEXT NOT
+  // NULL (0001_baseline.sql).
   const affected = db
     .prepare(
       `SELECT DISTINCT user_id FROM notifications

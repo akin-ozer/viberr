@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -10,29 +11,41 @@ import {
   takeStagedOutcome,
 } from "./agent-outcome.server";
 
+/** The slice of a JSON Schema node the strictness walk below reads. The
+ *  envelope schema is a frozen `as const` literal, hence the readonly members. */
+interface JsonSchemaNode {
+  readonly type?: string | readonly string[];
+  readonly additionalProperties?: boolean;
+  readonly required?: readonly string[];
+  readonly properties?: Readonly<Record<string, JsonSchemaNode>>;
+  readonly items?: JsonSchemaNode;
+}
+
 /** OpenAI strict structured-output invariant (the `codex_output_schema` rule
  * that failed every Codex agent run): every object node sets
  * additionalProperties:false AND lists EVERY property key in `required`. Walks
  * recursively so a nested `question`/`options` violation is caught too. */
-function assertStrictSchema(node: unknown, path = "$"): string[] {
+function assertStrictSchema(node: JsonSchemaNode, path = "$"): string[] {
   const errs: string[] = [];
-  if (!node || typeof node !== "object") return errs;
-  const n = node as Record<string, unknown>;
-  const types = Array.isArray(n.type) ? n.type : [n.type];
+  const types = [node.type].flat();
   if (types.includes("object")) {
-    const props = (n.properties ?? {}) as Record<string, unknown>;
-    const required = new Set((n.required as string[]) ?? []);
-    if (n.additionalProperties !== false) errs.push(`${path}: additionalProperties must be false`);
+    const props = node.properties ?? {};
+    const required = new Set(node.required ?? []);
+    if (node.additionalProperties !== false)
+      errs.push(`${path}: additionalProperties must be false`);
     for (const key of Object.keys(props)) {
       if (!required.has(key)) errs.push(`${path}.${key}: not in required`);
       errs.push(...assertStrictSchema(props[key], `${path}.${key}`));
     }
   }
-  if (types.includes("array") && n.items) {
-    errs.push(...assertStrictSchema(n.items, `${path}[]`));
+  if (types.includes("array") && node.items) {
+    errs.push(...assertStrictSchema(node.items, `${path}[]`));
   }
   return errs;
 }
+
+/** `.get()` hands back untyped SQLite cells, so the count row is parsed on read. */
+const countRowSchema = z.object({ c: z.number() });
 
 const grant = (capabilityId: string, mode: CapabilityGrant["mode"]): CapabilityGrant => ({
   capabilityId,
@@ -192,12 +205,12 @@ describe("staged outcomes — restart persistence (P11-28)", () => {
     stageOutcome(db, "oc_1", { verdict: "approve", summary: "LGTM" });
     // Persisted alongside memory.
     expect(
-      (db.prepare(`SELECT count(*) c FROM staged_outcomes`).get() as { c: number }).c,
+      countRowSchema.parse(db.prepare(`SELECT count(*) c FROM staged_outcomes`).get()).c,
     ).toBe(1);
     expect(takeStagedOutcome(db, "oc_1")).toEqual({ verdict: "approve", summary: "LGTM" });
     // Consumed exactly once — the row is gone.
     expect(
-      (db.prepare(`SELECT count(*) c FROM staged_outcomes`).get() as { c: number }).c,
+      countRowSchema.parse(db.prepare(`SELECT count(*) c FROM staged_outcomes`).get()).c,
     ).toBe(0);
     expect(takeStagedOutcome(db, "oc_1")).toBeNull();
   });

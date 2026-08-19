@@ -1,6 +1,7 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
 import { AUTH_BASE_PATH } from "~/shared/auth/auth-paths";
 import { hashPassword, verifyPassword } from "~/server/auth/password.server";
@@ -72,6 +73,18 @@ export const ALLOWED_AUTH_PATHS = new Set<string>([
 export type ViberrAuth = ReturnType<typeof betterAuth>;
 
 /**
+ * The slice of a Better Auth endpoint context the provider resolution reads.
+ * Narrow on purpose: the database hooks hand over a full
+ * `GenericEndpointContext`, but the provider id is readable from the declared
+ * path and its route params alone, and a two-field contract is what lets the
+ * unit test drive it with a literal instead of a whole auth context.
+ */
+export interface AuthEndpointContext {
+  path?: string;
+  params?: Record<string, string | undefined>;
+}
+
+/**
  * P13-D-22: which provider's callback is running, read off the endpoint the
  * database hook fires under. The social callback endpoint is declared
  * `/callback/:id` (and `/oauth2/callback/:id`), so `params.id` IS the provider
@@ -85,17 +98,38 @@ export type ViberrAuth = ReturnType<typeof betterAuth>;
  * Returns null when the provider cannot be read; `isOAuthWhitelisted` fails
  * closed on null (no domain admission), which is the safe direction.
  */
-export function oauthProviderOf(context: unknown): OAuthProvider | null {
-  const ctx = context as
-    | { path?: string; params?: Record<string, string | undefined> }
-    | undefined;
-  const path = ctx?.path ?? "";
+export function oauthProviderOf(
+  context: AuthEndpointContext | null | undefined,
+): OAuthProvider | null {
+  const path = context?.path ?? "";
   if (!path.startsWith("/callback/") && !path.startsWith("/oauth2/callback/")) {
     return null;
   }
-  const id = ctx?.params?.id ?? path.split("/").pop();
+  const id = context?.params?.id ?? path.split("/").pop();
   return id === "github" || id === "google" ? id : null;
 }
+
+/**
+ * The one field each throttled endpoint's POST body contributes to its bucket
+ * key. Decoded rather than read off the raw body: `/api/auth/*` is a splat, so
+ * the body is whatever the caller posted, and a missing or non-string field has
+ * to collapse to the same empty key it always did (never a stringified object,
+ * which would hand a caller a private bucket per payload).
+ */
+const signInEmailBody = z.object({ email: z.string() });
+const signInSocialBody = z.object({ provider: z.string() });
+
+/**
+ * `githubHandle` off the record the user-create hooks receive. It is declared
+ * in `user.additionalFields` below and written only by the GitHub provider's
+ * `mapProfileToUser`, but Better Auth's `User` type does not model additional
+ * fields — the hook payload carries it as an undecoded slot. Absent (every
+ * non-GitHub sign-in) stays undefined and an explicit null stays null, which is
+ * what `isOAuthWhitelisted`/`applyOAuthUser` read as "no handle".
+ */
+const oauthUserFields = z
+  .object({ githubHandle: z.string().nullish() })
+  .catch({ githubHandle: undefined });
 
 export interface AuthDeps {
   /** The app database handle. */
@@ -129,7 +163,7 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
       // Carry the GitHub login into the user so the whitelist hook can mirror
       // it to legacy users.github_handle and claim placeholder rows.
       mapProfileToUser: (profile) => ({
-        githubHandle: (profile as { login?: string }).login ?? null,
+        githubHandle: profile.login ?? null,
       }),
     };
   }
@@ -228,8 +262,8 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
           throw new APIError("NOT_FOUND", { message: "Not found." });
         }
         if (ctx.path === "/sign-in/email") {
-          const email =
-            typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";
+          const body = signInEmailBody.safeParse(ctx.body);
+          const email = body.success ? body.data.email.trim().toLowerCase() : "";
           if (!getLoginRateLimiter().tryConsume(`${email}|${ip}`)) {
             throw new APIError("TOO_MANY_REQUESTS", {
               message: "Too many sign-in attempts. Try again later.",
@@ -243,8 +277,8 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
         // by real use while still displacing Better Auth's 3-per-10s default,
         // which is the actual denial-of-login lever on this path.
         if (ctx.path === "/sign-in/social") {
-          const provider =
-            typeof ctx.body?.provider === "string" ? ctx.body.provider : "";
+          const body = signInSocialBody.safeParse(ctx.body);
+          const provider = body.success ? body.data.provider : "";
           if (!getSocialStartRateLimiter().tryConsume(`${provider}|${ip}`)) {
             throw new APIError("TOO_MANY_REQUESTS", {
               message: "Too many sign-in attempts. Try again later.",
@@ -289,8 +323,7 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
                 id: String(user.id),
                 email: user.email,
                 name: user.name,
-                githubHandle: (user as { githubHandle?: string | null })
-                  .githubHandle,
+                githubHandle: oauthUserFields.parse(user).githubHandle,
                 provider: oauthProviderOf(context),
               })
                 ? undefined
@@ -301,8 +334,7 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
               id: String(user.id),
               email: user.email,
               name: user.name,
-              githubHandle: (user as { githubHandle?: string | null })
-                .githubHandle,
+              githubHandle: oauthUserFields.parse(user).githubHandle,
               provider: oauthProviderOf(context),
             });
             return Promise.resolve();
@@ -351,10 +383,11 @@ interface AuthCacheEntry {
  * enable or removal, so the next request rebuilds.
  */
 export function getAuth(): ReturnType<typeof betterAuth> {
-  const cache = globalThis as unknown as Record<
-    symbol,
-    AuthCacheEntry | undefined
-  >;
+  // SAFETY: `globalThis` carries no index signature, so the symbol slot has to
+  // be named to be read at all. `Symbol.for("viberr.betterAuth")` is written
+  // nowhere but the assignment below, which only ever stores an AuthCacheEntry
+  // — the slot therefore holds one of ours or nothing.
+  const cache = globalThis as Record<symbol, AuthCacheEntry | undefined>;
   const db = getDb();
   const providerFingerprint = oauthConfigFingerprint(db);
   const entry = cache[AUTH_CACHE_KEY];
@@ -368,16 +401,20 @@ export function getAuth(): ReturnType<typeof betterAuth> {
     // App configuration OVERRIDES the deployment env (owner ruling) — including
     // an app row that deliberately holds a provider off.
     const resolved = resolveOAuthProviders(db);
-    const auth = createAuth({
+    const deps: AuthDeps = {
       db,
       secret: env.BETTER_AUTH_SECRET ?? env.VIBERR_SESSION_SECRET,
       // Undefined lets better-auth infer the origin from the request — correct
       // for dev where the preview port varies. Set BETTER_AUTH_URL in prod.
       baseURL,
       trustedOrigins: baseURL ? [baseURL] : [],
-      ...(resolved.github ? { github: resolved.github } : {}),
-      ...(resolved.google ? { google: resolved.google } : {}),
-    });
+    };
+    // A provider the app holds off stays ABSENT from the deps rather than
+    // present as `undefined` — `AuthDeps.github`/`.google` are optional, and
+    // "not configured" is the absence of the key.
+    if (resolved.github) deps.github = resolved.github;
+    if (resolved.google) deps.google = resolved.google;
+    const auth = createAuth(deps);
     cache[AUTH_CACHE_KEY] = { db, providerFingerprint, auth };
     return auth;
   }

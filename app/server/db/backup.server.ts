@@ -12,6 +12,7 @@ import {
 import { hostname } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
@@ -127,7 +128,13 @@ function sha256File(file: string): string {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
 
-function walkFiles(dir: string): { files: number; bytes: number } {
+/** What a copied tree contributes to the manifest's store totals. */
+interface StoreFileTotals {
+  files: number;
+  bytes: number;
+}
+
+function walkFiles(dir: string): StoreFileTotals {
   let files = 0;
   let bytes = 0;
   const stack = [dir];
@@ -245,22 +252,26 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
   return { dir, manifest, text: renderBackup(dir, manifest) };
 }
 
-function countRows(dbPath: string): Record<string, number> {
+/** Row counts by table name, as the manifest records them. */
+interface TableRowCounts {
+  [table: string]: number;
+}
+
+function countRows(dbPath: string): TableRowCounts {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const present = new Set(
-      (
-        db
-          .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
-          .all() as { name: string }[]
-      ).map((r) => r.name),
+      db
+        .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+        .all()
+        .map((row) => String(row.name)),
     );
-    const rows: Record<string, number> = {};
+    const rows: TableRowCounts = {};
     for (const table of COUNTED_TABLES) {
       if (!present.has(table)) continue;
-      rows[table] = (
-        db.prepare(`SELECT count(*) AS c FROM ${table}`).get() as { c: number }
-      ).c;
+      // `count(*)` over a table that exists always yields exactly one integer row.
+      const counted = db.prepare(`SELECT count(*) AS c FROM ${table}`).get()!;
+      rows[table] = Number(counted.c);
     }
     return rows;
   } finally {
@@ -343,6 +354,45 @@ function renderBackup(dir: string, manifest: BackupManifest): string {
 
 // ----------------------------------------------------------------- restore
 
+/**
+ * The artefact's own claim about which format it is, read on its own so a
+ * foreign or future artefact can be refused BY NAME before the shape is judged.
+ */
+const manifestFormatSchema = z.object({ format: z.unknown() });
+
+/**
+ * The manifest as it comes back off disk. `.loose()` keeps whatever a newer
+ * build wrote alongside these fields; the fields themselves are strict, because
+ * `restoreBackup` drives a destructive replace off `store.dirs` and
+ * `projection.file` and a half-populated manifest must not reach it.
+ */
+const backupManifestSchema = z
+  .object({
+    format: z.literal(BACKUP_FORMAT),
+    createdAt: z.string(),
+    hostname: z.string(),
+    dataRoot: z.string(),
+    projection: z
+      .object({
+        file: z.string(),
+        bytes: z.number(),
+        sha256: z.string(),
+        rows: z.record(z.string(), z.number()),
+      })
+      .loose()
+      .nullable(),
+    store: z
+      .object({
+        dirs: z.array(z.string()),
+        files: z.number(),
+        bytes: z.number(),
+      })
+      .loose(),
+    contains: z.array(z.string()),
+    excludes: z.array(z.string()),
+  })
+  .loose();
+
 export function readManifest(artefact: string): BackupManifest {
   const file = path.join(artefact, MANIFEST_NAME);
   if (!existsSync(file)) {
@@ -350,13 +400,15 @@ export function readManifest(artefact: string): BackupManifest {
       `${artefact} is not a viberr backup (no ${MANIFEST_NAME}). Point --from at the artefact directory itself.`,
     );
   }
-  const manifest = JSON.parse(readFileSync(file, "utf8")) as BackupManifest;
-  if (manifest.format !== BACKUP_FORMAT) {
+  const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
+  const declared = manifestFormatSchema.safeParse(raw);
+  const format = declared.success ? declared.data.format : undefined;
+  if (format !== BACKUP_FORMAT) {
     throw new Error(
-      `unsupported backup format "${manifest.format}" (this build reads ${BACKUP_FORMAT})`,
+      `unsupported backup format "${String(format)}" (this build reads ${BACKUP_FORMAT})`,
     );
   }
-  return manifest;
+  return backupManifestSchema.parse(raw);
 }
 
 export interface RestoreResult {
@@ -586,7 +638,7 @@ function normalizeStoreRelPath(relPath: string): string {
     throw new Error(`refusing a path that escapes the store: ${relPath}`);
   }
   const root = rel.split(/[/\\]/)[0] ?? "";
-  if (!(FILE_RESTORE_ROOTS as readonly string[]).includes(root)) {
+  if (!FILE_RESTORE_ROOTS.some((allowed) => allowed === root)) {
     throw new Error(
       `single-file restore only writes into ${FILE_RESTORE_ROOTS.join("/, ")}/ — ` +
         `got "${relPath}". The database (state/) is a whole-root restore: drop --file.`,

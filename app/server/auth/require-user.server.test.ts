@@ -80,6 +80,8 @@ describe("authenticate (better-auth session)", () => {
     const { user, cookie } = await seedUser();
     app.db.prepare(`UPDATE users SET disabled = 1 WHERE id = ?`).run(user.id);
     expect(await authenticate(app.request("/x", { cookie }))).toBeNull();
+    // SAFETY: `count(*)` is an aggregate with no GROUP BY — sqlite answers it
+    // with exactly one row carrying the single integer column `c`.
     const count = app.db
       .prepare(`SELECT count(*) AS c FROM session WHERE userId = ?`)
       .get(user.id) as { c: number };

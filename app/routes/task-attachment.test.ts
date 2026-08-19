@@ -41,28 +41,33 @@ async function get(
   const { loader } = await import("~/routes/task-attachment");
   const { cookie } = await app.cookieFor(userId);
   try {
-    const res = (await loader({
+    // SAFETY: the loader reads only `request` and `params.{slug,key,file}`; the
+    // rest of the generated `Route.LoaderArgs` (the router context provider and
+    // its matches) is untouched on every path this file exercises.
+    const res = await loader({
       request: app.request(
         `/projects/viberr-core/tasks/VIB-142/attachments/${encodeURIComponent(file)}`,
         { cookie },
       ),
       params: { slug: "viberr-core", key: "VIB-142", file },
       context: {},
-    } as never)) as Response;
+    } as never);
     return { status: res.status, headers: res.headers, body: () => res.arrayBuffer() };
   } catch (thrown) {
-    // requireProjectMember throws react-router's `data(message, {status})` —
-    // a DataWithResponseInit, not a Response (see run-artifact-routes tests).
-    const wrapped = thrown as { init?: { status?: number } };
-    if (typeof wrapped?.init?.status === "number") {
-      return {
-        status: wrapped.init.status,
-        headers: new Headers(),
-        body: () => Promise.resolve(new ArrayBuffer(0)),
-      };
+    if (thrown instanceof Response) {
+      // requireUser's login redirect.
+      return { status: thrown.status, headers: thrown.headers, body: () => thrown.arrayBuffer() };
     }
-    const res = thrown as Response;
-    return { status: res.status, headers: res.headers, body: () => res.arrayBuffer() };
+    // SAFETY: the only other thrower on this loader is requireProjectMember,
+    // whose refusal is react-router's `data(message, { status })` — a
+    // DataWithResponseInit, not a Response (see run-artifact-routes tests) —
+    // and it carries the refusal status under `init`.
+    const refusal = thrown as { init: { status: number } };
+    return {
+      status: refusal.init.status,
+      headers: new Headers(),
+      body: () => Promise.resolve(new ArrayBuffer(0)),
+    };
   }
 }
 

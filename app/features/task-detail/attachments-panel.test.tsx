@@ -74,12 +74,12 @@ function evidenceEvent(label: string): TimelineEventRender {
     id: 7,
     type: "outcome",
     occurredAt: "2026-08-14T10:00:00.000Z",
-    actor: { kind: "agent", name: "Developer" },
+    actor: { kind: "agent", backend: "claude", name: "Developer", role: "developer" },
     title: null,
     text: "Reported completion",
     toAgent: false,
     evidence: [{ label, add: "+2", del: "−0" }],
-  } as unknown as TimelineEventRender;
+  };
 }
 
 describe("TimelineItem evidence linkify", () => {

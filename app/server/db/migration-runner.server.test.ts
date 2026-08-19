@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { isAppError } from "../errors/app-error.server";
 import { ERROR_CODES } from "../errors/error-codes";
 import { DEFAULT_MIGRATIONS_DIR, runMigrations } from "./migration-runner.server";
@@ -30,24 +31,30 @@ afterEach(() => {
   tempDirs = [];
 });
 
+/* `.get()`/`.all()` hand back untyped SQLite cells, so every row below is
+ * parsed on read — the SELECT names the column, the schema pins its type. */
+const nameRowsSchema = z.array(z.object({ name: z.string() }));
+const stepRowsSchema = z.array(z.object({ step: z.string() }));
+const countRowSchema = z.object({ c: z.number() });
+
 function tableNames(db: DatabaseSync): string[] {
-  return (
-    db
-      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
-      .all() as Array<{ name: string }>
-  ).map((row) => row.name);
+  return nameRowsSchema
+    .parse(db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all())
+    .map((row) => row.name);
 }
 
 describe("openDatabase", () => {
   it("creates parent directories and applies pragmas", () => {
     const db = makeDb();
     expect(
-      (db.prepare("PRAGMA journal_mode").get() as { journal_mode: string })
-        .journal_mode,
+      z
+        .object({ journal_mode: z.string() })
+        .parse(db.prepare("PRAGMA journal_mode").get()).journal_mode,
     ).toBe("wal");
     expect(
-      (db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number })
-        .foreign_keys,
+      z
+        .object({ foreign_keys: z.number() })
+        .parse(db.prepare("PRAGMA foreign_keys").get()).foreign_keys,
     ).toBe(1);
   });
 });
@@ -75,11 +82,9 @@ describe("runMigrations", () => {
     // would have said so. Canary: delete the CREATE TABLE from the baseline.
     expect(tables).toContain("verification");
 
-    const indexes = (
-      db
-        .prepare(`SELECT name FROM sqlite_master WHERE type = 'index'`)
-        .all() as Array<{ name: string }>
-    ).map((row) => row.name);
+    const indexes = nameRowsSchema
+      .parse(db.prepare(`SELECT name FROM sqlite_master WHERE type = 'index'`).all())
+      .map((row) => row.name);
     expect(indexes).toContain("idx_users__email");
   });
 
@@ -115,9 +120,9 @@ describe("runMigrations", () => {
        VALUES ('u1', 'home', '{}', ?)`,
     ).run(now);
     db.prepare(`DELETE FROM users WHERE id = 'u1'`).run();
-    const prefs = db.prepare(`SELECT count(*) AS c FROM user_prefs`).get() as {
-      c: number;
-    };
+    const prefs = countRowSchema.parse(
+      db.prepare(`SELECT count(*) AS c FROM user_prefs`).get(),
+    );
     expect(prefs.c).toBe(0); // ON DELETE CASCADE
   });
 
@@ -137,9 +142,9 @@ describe("runMigrations", () => {
     const result = runMigrations(db, dir);
     expect(result.applied).toEqual(["0001_first.sql", "0002_second.sql"]);
 
-    const steps = (
-      db.prepare(`SELECT step FROM ordering`).all() as Array<{ step: string }>
-    ).map((row) => row.step);
+    const steps = stepRowsSchema
+      .parse(db.prepare(`SELECT step FROM ordering`).all())
+      .map((row) => row.step);
     expect(steps).toEqual(["first", "second"]);
   });
 
@@ -167,9 +172,9 @@ describe("runMigrations", () => {
     // the CREATE TABLE inside the failed migration was rolled back
     expect(tableNames(db)).not.toContain("will_roll_back");
     // and nothing was recorded, so a fixed file would re-apply
-    const recorded = db
-      .prepare(`SELECT count(*) AS c FROM schema_migrations`)
-      .get() as { c: number };
+    const recorded = countRowSchema.parse(
+      db.prepare(`SELECT count(*) AS c FROM schema_migrations`).get(),
+    );
     expect(recorded.c).toBe(0);
   });
 });

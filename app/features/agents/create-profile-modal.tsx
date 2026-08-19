@@ -32,6 +32,13 @@ import {
  * server-side and never touched here.
  */
 
+/** The editor's working policy: capability id → the mode its toggle shows.
+ * Open by construction — the ids come from the catalog at runtime, and grants
+ * outside it are preserved server-side rather than represented here. */
+export interface CapSelection {
+  [capabilityId: string]: CapMode;
+}
+
 export interface ProfileFormPayload {
   name: string;
   role: string;
@@ -43,7 +50,7 @@ export interface ProfileFormPayload {
   /** Picked model id/alias + reasoning effort (from the model catalog). */
   model: string;
   effort: string;
-  caps: Record<string, CapMode>;
+  caps: CapSelection;
   /** Operator only: default autonomy the run uses. */
   autonomy?: "supervised" | "full";
   resources: ResourceSelection;
@@ -72,17 +79,17 @@ interface ModelCatalog {
   defaultEffort: string;
 }
 
-const EFFORT_LABEL: Record<string, string> = {
-  minimal: "Minimal",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "Extra high",
-  max: "Maximum",
-};
+const EFFORT_LABEL = new Map<string, string>([
+  ["minimal", "Minimal"],
+  ["low", "Low"],
+  ["medium", "Medium"],
+  ["high", "High"],
+  ["xhigh", "Extra high"],
+  ["max", "Maximum"],
+]);
 
 function effortLabel(id: string): string {
-  return EFFORT_LABEL[id] ?? id;
+  return EFFORT_LABEL.get(id) ?? id;
 }
 
 /**
@@ -121,10 +128,10 @@ const SUMMARY_MODES: readonly { id: CapMode; word: string }[] = [
 // toggle from its RUNTIME-effective mode below.
 function seedCaps(
   initial: AgentProfileView | null,
-  defaults: Readonly<Record<string, CapMode>>,
-): Record<string, CapMode> {
+  defaults: Readonly<CapSelection>,
+): CapSelection {
   if (!initial) return { ...defaults };
-  const caps: Record<string, CapMode> = {};
+  const caps: CapSelection = {};
   for (const id of Object.keys(defaults)) caps[id] = "off";
   // F10-07: seed EVERY toggle from the STORED grant only — never synthesize an
   // implicit default. Verdict authority is explicit-only (F10-14), so an absent
@@ -566,8 +573,8 @@ function CapabilityGrants({
   /** The mode buttons offered per row: 4 for the operator, 3 honest ones
    *  (Allowed/Human-only/Off) for a specialist (R7-5). */
   capModes: readonly { id: CapMode; label: string }[];
-  caps: Record<string, CapMode>;
-  setCaps: Dispatch<SetStateAction<Record<string, CapMode>>>;
+  caps: CapSelection;
+  setCaps: Dispatch<SetStateAction<CapSelection>>;
   openGroups: Record<string, boolean>;
   setOpenGroups: Dispatch<SetStateAction<Record<string, boolean>>>;
 }) {
@@ -939,7 +946,7 @@ export function CreateProfileModal({
   // is not in the catalog is still preserved and rendered.
   const [model, setModel] = useState(initial ? initial.model : "");
   const [effort, setEffort] = useState(initial ? initial.effort : "");
-  const [caps, setCaps] = useState<Record<string, CapMode>>(() =>
+  const [caps, setCaps] = useState<CapSelection>(() =>
     seedCaps(initial, capDefaults),
   );
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
@@ -1022,20 +1029,26 @@ export function CreateProfileModal({
       : (catalog?.efforts ?? []);
 
   const submit = () => {
-    if (!valid || busy) return;
-    onSubmit({
+    // `valid` already requires a picked backend; naming it in the guard is what
+    // rules out the picker's initial "" for the payload below.
+    if (!valid || busy || !backend) return;
+    const payload: ProfileFormPayload = {
       name: name.trim(),
       role: role.trim(),
-      backend: backend as "codex" | "claude",
+      backend,
       stages: [...stg],
       definition,
       persona,
       model: model.trim(),
       effort: showEffort ? effort.trim() : "",
       caps,
-      ...(isOperator ? { autonomy } : {}),
       resources: res,
-    });
+    };
+    // Autonomy is an OPERATOR field: a specialist payload must not carry the
+    // key at all (the action's schema leaves it optional and the writer only
+    // stores it for the operator).
+    if (isOperator) payload.autonomy = autonomy;
+    onSubmit(payload);
   };
 
   // AP-07: a template-sourced profile FORKS on save (the deployment stores a

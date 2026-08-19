@@ -28,14 +28,17 @@ import {
   stageEligible,
 } from "~/shared/workflow/stage-eligibility";
 import { stageName } from "~/shared/workflow/stage-roles";
-import { buildAgentToolkit } from "./agent-toolkit.server";
+import { buildAgentToolkit, type AgentToolkit } from "./agent-toolkit.server";
 import type {
   AgentDeployment,
   CapabilityGrant,
   ProjectRole,
 } from "~/schemas/project-file.schema";
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  recordAudit,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -58,6 +61,7 @@ import { readSkillBodies } from "~/server/files/skill-body.server";
 import {
   mountGrantedSkills,
   stripUngovernedRepoCatalog,
+  type SkillMount,
 } from "~/server/runtimes/skill-mount.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -80,7 +84,11 @@ import {
   resolveRunEffort,
 } from "~/server/runtimes/model-catalog.server";
 import { taskBranchName } from "~/server/github/branch-sync.server";
-import { startRun } from "~/server/runtimes/run-service.server";
+import type { RunMcpServers } from "~/server/runtimes/adapter.server";
+import {
+  startRun,
+  type StartRunInput,
+} from "~/server/runtimes/run-service.server";
 import { publishRunLogAppended } from "~/server/runtimes/run-events.server";
 import { createLineRedactor } from "~/server/runtimes/run-sink.server";
 import {
@@ -100,6 +108,7 @@ import {
 import {
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
+  type SpecialistMcpServerConfig,
 } from "./specialist-mcp.server";
 import {
   BROWSER_MCP_NAME,
@@ -115,6 +124,10 @@ import {
   type CloneFailureLogDetails,
 } from "./git-clone-auth.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
+
+/** The mount call's own input contract — named so `dataRoot` can be OMITTED
+ *  (not set to undefined) when the caller runs on the default store. */
+type SkillMountInput = Parameters<typeof mountGrantedSkills>[0];
 
 /**
  * Assign a deployed specialist agent to a task and start its provider run.
@@ -221,7 +234,17 @@ function deploymentGrants(
     "agent deployment carries NO capability grants — running it fully withheld",
     { projectSlug, profileId: deployment.profileId },
   );
-  return withheldAgentGrants() as CapabilityGrant[];
+  return withheldAgentGrants();
+}
+
+/** What a run's declared MCP grants resolved to. */
+interface RunMcpMounts {
+  /** The portable configs to mount — ABSENT when nothing resolved. */
+  mcpServers?: Record<string, SpecialistMcpServerConfig>;
+  /** Grants that reached NO server. */
+  unresolved: string[];
+  /** Grants that mounted but whose last health probe failed. */
+  unhealthy: string[];
 }
 
 /**
@@ -234,7 +257,7 @@ function deploymentGrants(
 async function mcpServersFor(
   db: DatabaseSync,
   names: string[],
-): Promise<{ mcpServers?: Record<string, unknown>; unresolved: string[]; unhealthy: string[] }> {
+): Promise<RunMcpMounts> {
   // F20-10: a declared stdio server that fails to START (a half-installed npx
   // tree crashing in <1s) used to be mounted anyway — the run was told it had
   // tools it would never get, and every Settings surface kept calling it
@@ -245,13 +268,16 @@ async function mcpServersFor(
     resolveSpecialistMcpServersDetailed(db, names),
   );
   const { servers, unresolved } = resolution;
-  return {
-    ...(Object.keys(servers).length ? { mcpServers: servers } : {}),
+  const mounts: RunMcpMounts = {
     // Only the grants that reached NO server; a mounted-but-unhealthy one is
     // reported separately so the prompt can say which is which (P14-LV-09b).
     unresolved: unresolved.filter((u) => !u.mounted).map((u) => u.name),
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
   };
+  // Absent rather than empty: callers read the key's PRESENCE as "this run has
+  // MCP mounts at all" before they build the prompt or the run spec.
+  if (Object.keys(servers).length) mounts.mcpServers = servers;
+  return mounts;
 }
 
 /**
@@ -564,6 +590,11 @@ export function recordRunInputs(
     inputs: input.inputs,
   };
   const displayJson = redact(JSON.stringify(display));
+  // SAFETY: `displayJson` is `JSON.stringify(display)` with credential VALUES
+  // swapped for the redaction marker, which carries no quote or backslash — the
+  // substitution rewrites string contents only, never the JSON structure — so
+  // the reparse yields the same LogLine with redacted text (same rule as
+  // run-sink.server's `redactDisplay`).
   const safe = JSON.parse(displayJson) as LogLine;
   const raw = redact(
     JSON.stringify({
@@ -726,12 +757,18 @@ export async function assignSpecialist(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      profileId: specialist.profileId,
-      backend: specialist.backend,
-      role: specialist.role,
-      ...(handoff ? { fromProfileId: handoff.profileId } : {}),
-    },
+    details: handoff
+      ? {
+          profileId: specialist.profileId,
+          backend: specialist.backend,
+          role: specialist.role,
+          fromProfileId: handoff.profileId,
+        }
+      : {
+          profileId: specialist.profileId,
+          backend: specialist.backend,
+          role: specialist.role,
+        },
   });
 
   return {
@@ -1180,14 +1217,16 @@ export async function startAgentRun(
   // F19-15: the mount is surgical (skill-mount.server's per-process MOUNT_MARK)
   // — it preserves the skill folders Viberr mounted for another profile's live
   // run in this shared per-task catalog instead of wiping them out from under it.
-  const skillMount =
-    backend === "claude" && realBackend
-      ? await mountGrantedSkills({
-          workspaceDir: clone?.dir ?? null,
-          skills,
-          ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-        })
-      : { mounted: [] as string[], skipped: [] };
+  let skillMount: SkillMount = { mounted: [], skipped: [] };
+  if (backend === "claude" && realBackend) {
+    const mountInput: SkillMountInput = {
+      workspaceDir: clone?.dir ?? null,
+      skills,
+    };
+    // Omitted on the default store — the mount resolves its own root then.
+    if (ctx.dataRoot) mountInput.dataRoot = ctx.dataRoot;
+    skillMount = await mountGrantedSkills(mountInput);
+  }
 
   // R19-19: the browser mount resolves from the SAME grants the collaboration
   // gates use — an unresolvable profile is withheld here for the same reason
@@ -1214,7 +1253,7 @@ export async function startAgentRun(
   // the persona reads the bodies (see `unresolvedOut`) so the run's input
   // disclosure can name them to a HUMAN, not only to the agent.
   const unresolvedResources: { name: string; reason: string }[] = [];
-  const persona = buildSpecialistPersona({
+  const personaInput: SpecialistPersonaInput = {
     profileId: engagement.profileId,
     skills,
     nativeSkills: skillMount.mounted,
@@ -1230,10 +1269,13 @@ export async function startAgentRun(
       : browser.refused
         ? { refusedReason: browser.refused.reason }
         : null,
-    ...(resolved?.definition ? { definition: resolved.definition } : {}),
     dataRoot: ctx.dataRoot,
     unresolvedOut: unresolvedResources,
-  });
+  };
+  // A profile with no body of its own leaves the key ABSENT — the builder falls
+  // back to the generic prompt, which an empty definition would not do.
+  if (resolved?.definition) personaInput.definition = resolved.definition;
+  const persona = buildSpecialistPersona(personaInput);
   // The refused pair joins the run-input disclosure (P19-G11) — a granted
   // browser that silently reached no run would be the silent-resource class.
   if (browser.refused) unresolvedResources.push(browser.refused);
@@ -1262,7 +1304,9 @@ export async function startAgentRun(
   // P19-G0: EVERY fresh run re-anchors on the canonical task artifact. This is
   // the one thing `buildAnalyzePrompt` never carried — see `freshRunAnchor`.
   const anchor = await freshRunAnchor(ctx, input.projectSlug, existing.parsed);
-  const basePrompt = buildAnalyzePrompt({
+  // Every optional field below is OMITTED rather than set to undefined: the
+  // prompt builder renders a section per key it was actually given.
+  const promptInput: AnalyzePromptInput = {
     role: engagement.role,
     taskKey: input.taskKey,
     title,
@@ -1270,27 +1314,27 @@ export async function startAgentRun(
     repo,
     branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey),
     cloned: !!clone?.dir,
-    ...(anchor ? { anchor } : {}),
-    ...(cloneFailure
-      ? {
-          cloneFailure: {
-            sentence: cloneFailure.sentence,
-            hadCredential: cloneFailure.hadCredential,
-            // F19-6: the agent is told to quote the reason verbatim, so this is
-            // the line that carries git's real complaint into its report — and
-            // from there into the operator's blocked packet.
-            ...(cloneFailure.stderrExcerpt
-              ? { stderrExcerpt: cloneFailure.stderrExcerpt }
-              : {}),
-          },
-        }
-      : {}),
     delivery,
     delivers,
-    ...(reviewSubject ? { reviewSubject } : {}),
-    ...(input.directive ? { directive: input.directive } : {}),
-    ...(input.directiveFrom ? { directiveFrom: input.directiveFrom } : {}),
-  });
+  };
+  if (anchor) promptInput.anchor = anchor;
+  if (cloneFailure) {
+    const promptFailure: PromptCloneFailure = {
+      sentence: cloneFailure.sentence,
+      hadCredential: cloneFailure.hadCredential,
+    };
+    // F19-6: the agent is told to quote the reason verbatim, so this is the line
+    // that carries git's real complaint into its report — and from there into
+    // the operator's blocked packet.
+    if (cloneFailure.stderrExcerpt) {
+      promptFailure.stderrExcerpt = cloneFailure.stderrExcerpt;
+    }
+    promptInput.cloneFailure = promptFailure;
+  }
+  if (reviewSubject) promptInput.reviewSubject = reviewSubject;
+  if (input.directive) promptInput.directive = input.directive;
+  if (input.directiveFrom) promptInput.directiveFrom = input.directiveFrom;
+  const basePrompt = buildAnalyzePrompt(promptInput);
   // The human needs the real reason too, and needs it BEFORE the agent's own
   // account of the run. Without this the only trace on the task page is the
   // agent saying it lacked credentials — which reads as a settings problem on a
@@ -1414,14 +1458,12 @@ export async function startAgentRun(
           collab,
         })
       : null;
-  const mergedMcpServers = {
-    ...(declaredMcps.mcpServers ?? {}),
-    // R19-19: the browser sits between the org grants and the toolkit — a
-    // registry row can never shadow it (the name is refused at save), and it
-    // can never shadow viberr's own governance tools.
-    ...(browser.server ? { [BROWSER_MCP_NAME]: browser.server } : {}),
-    ...(toolkit?.mcpServers ?? {}),
-  };
+  // R19-19: the browser sits between the org grants and the toolkit — a registry
+  // row can never shadow it (the name is refused at save), and it can never
+  // shadow viberr's own governance tools. That precedence is the order below.
+  const grantedMcpServers = { ...declaredMcps.mcpServers };
+  if (browser.server) grantedMcpServers[BROWSER_MCP_NAME] = browser.server;
+  const mergedMcpServers = { ...grantedMcpServers, ...toolkit?.mcpServers };
   // P13-D-26: `collab.evidence` joins the gate. Codex has no `report_outcome`
   // tool, so the envelope is its ONLY structured channel — without this an
   // evidence-granted Codex agent silently had no way to cite anything, making
@@ -1432,7 +1474,10 @@ export async function startAgentRun(
     realBackend &&
     (collab.verdict || collab.ask || collab.evidence);
 
-  const { runId } = await startRun(db, {
+  // Each optional field is set only when it has something to say: `startRun`
+  // derives its own defaults from an ABSENT key (an explicit undefined would
+  // override the adapter's, e.g. the fully-isolated skills posture).
+  const runInput: StartRunInput = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     threadId,
@@ -1442,28 +1487,30 @@ export async function startAgentRun(
     kind: delivers ? "primary" : "reviewer",
     backend,
     model,
-    ...(effort ? { effort } : {}),
-    ...(persona ? { systemPrompt: persona } : {}),
     // Persist the agent identity so the Agent-logs picker groups this run's
     // resumes into one entry labeled by the agent's name.
     agentName,
     agentProfileId: engagement.profileId,
     prompt,
     actor: auditActor,
-    ...(disallowedTools.length ? { disallowedTools } : {}),
-    // The SDK's native skills filter (Claude): exactly what mounted, nothing
-    // else. Empty ⇒ the adapter keeps the fully-isolated defaults and the
-    // `Skill` tool stays denied.
-    ...(skillMount.mounted.length ? { skills: skillMount.mounted } : {}),
-    // Profile MCPs (item-1/FR9) + the collaboration toolkit (Claude).
-    ...(Object.keys(mergedMcpServers).length
-      ? { mcpServers: mergedMcpServers }
-      : {}),
-    ...(useEnvelopeSchema ? { outputSchema: AGENT_OUTCOME_JSON_SCHEMA } : {}),
-    ...(runWorkdir ? { workdir: runWorkdir } : {}),
-    ...(realBackend ? { env: baseRunEnv } : {}),
     dataRoot: ctx.dataRoot,
-  });
+  };
+  if (effort) runInput.effort = effort;
+  if (persona) runInput.systemPrompt = persona;
+  if (disallowedTools.length) runInput.disallowedTools = disallowedTools;
+  // The SDK's native skills filter (Claude): exactly what mounted, nothing else.
+  // Empty ⇒ the adapter keeps the fully-isolated defaults and the `Skill` tool
+  // stays denied.
+  if (skillMount.mounted.length) runInput.skills = skillMount.mounted;
+  // Profile MCPs (item-1/FR9) + the collaboration toolkit (Claude).
+  if (Object.keys(mergedMcpServers).length) {
+    runInput.mcpServers = mergedMcpServers;
+  }
+  if (useEnvelopeSchema) runInput.outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
+  if (runWorkdir) runInput.workdir = runWorkdir;
+  if (realBackend) runInput.env = baseRunEnv;
+
+  const { runId } = await startRun(db, runInput);
 
   // P19-G8/G11: the run's INPUTS, on the run, before its first provider line.
   // Everything here was already resolved above and, until now, thrown away.
@@ -1550,6 +1597,13 @@ export async function startAgentRun(
   );
   reproject(db, ctx, input.projectSlug, input.taskKey);
 
+  const runStartedDetails = {
+    runId,
+    profileId: engagement.profileId,
+    backend,
+    delivers,
+    cloned: !!clone?.dir,
+  };
   recordAudit(db, {
     // ONE action id for every engaged agent (the former
     // task.specialist.run_started / task.reviewer.run_started split);
@@ -1560,14 +1614,9 @@ export async function startAgentRun(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      runId,
-      profileId: engagement.profileId,
-      backend,
-      delivers,
-      cloned: !!clone?.dir,
-      ...(directiveOverrode ? { directiveRequestedDelivery: true } : {}),
-    },
+    details: directiveOverrode
+      ? { ...runStartedDetails, directiveRequestedDelivery: true }
+      : runStartedDetails,
   });
 
   const { registerAgentCompletion, markWaitingAgent } = await import(
@@ -1583,7 +1632,7 @@ export async function startAgentRun(
   // operator prompt): reply → reconcile delivery (delivers only) → outcome/
   // verdict → re-invoke the operator to react. `ctx.operatorRun` (set when
   // this run is inside an operator react loop) continues the chain at depth+1.
-  await registerAgentCompletion(db, ctx, {
+  const completion: Parameters<typeof registerAgentCompletion>[2] = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     runId,
@@ -1594,16 +1643,19 @@ export async function startAgentRun(
     outcomeKey,
     workdir: runWorkdir,
     agentHandle: agentMentionHandle({ profileId: engagement.profileId, name: agentName }),
-    ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
-  });
+  };
+  // Only a run started INSIDE an operator react loop carries the loop state —
+  // its absence is what tells the completion handler not to continue a chain.
+  if (ctx.operatorRun) completion.operatorRun = ctx.operatorRun;
+  await registerAgentCompletion(db, ctx, completion);
 
   return { runId, backend, role: engagement.role };
 }
 
 // ----------------------------------------------------------------- persona
 
-/** Assemble the profile definition and attached skill/KB bodies into its persona. */
-export function buildSpecialistPersona(input: {
+/** Everything a run's persona is assembled from. */
+export interface SpecialistPersonaInput {
   profileId: string;
   skills: string[];
   /** The subset of `skills` that Viberr MOUNTED into the run's workspace for the
@@ -1637,7 +1689,10 @@ export function buildSpecialistPersona(input: {
    *  would mean reading every skill and KB file a second time on a path that
    *  already reads them once. Existing callers pass nothing and are unaffected. */
   unresolvedOut?: { name: string; reason: string }[];
-}): string {
+}
+
+/** Assemble the profile definition and attached skill/KB bodies into its persona. */
+export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   const parts: string[] = [];
   // F10-30: ONE persona source — the profile's own body (its `definition`).
   // The old `agents/definitions/<id>.md` override (a parallel authoring source
@@ -1844,7 +1899,17 @@ export function buildSpecialistPersona(input: {
 
 // ----------------------------------------------------------------- prompt/script
 
-export function buildAnalyzePrompt(input: {
+/** The checkout failure as the PROMPT carries it — the human-safe subset of
+ *  {@link CloneFailure}. */
+export interface PromptCloneFailure {
+  sentence: string;
+  hadCredential: boolean;
+  /** F19-6: git's own redacted output — the agent must quote it. */
+  stderrExcerpt?: string;
+}
+
+/** Everything the fresh-run prompt is composed from (`buildAnalyzePrompt`). */
+export interface AnalyzePromptInput {
   role: string;
   taskKey: string;
   title: string;
@@ -1856,12 +1921,7 @@ export function buildAnalyzePrompt(input: {
   /** Why there is no checkout, when `cloned` is false and the server tried.
    *  Without this the agent can only infer a cause from an empty directory,
    *  and it inferred the most expensive wrong one: a missing credential. */
-  cloneFailure?: {
-    sentence: string;
-    hadCredential: boolean;
-    /** F19-6: git's own redacted output — the agent must quote it. */
-    stderrExcerpt?: string;
-  } | null;
+  cloneFailure?: PromptCloneFailure | null;
   /** Which delivery steps the profile's capabilities permit (XS-4). */
   delivery: DeliveryPermissions;
   /** Whether this engagement DELIVERS. A supporting (non-delivering) run is
@@ -1886,7 +1946,9 @@ export function buildAnalyzePrompt(input: {
    *  goal and nothing that has happened since, which is why a re-run reviewer
    *  could not tell whether its own last request had been honoured. */
   anchor?: string;
-}): string {
+}
+
+export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
   let prompt =
     `You are the ${input.role} specialist on task ${input.taskKey}: ` +
     `"${input.title}". Goal: ${input.goal}.` +
@@ -2119,6 +2181,27 @@ function taskCloneDir(
   return path.join(taskWorkspaceRoot(projectSlug, taskKey, ctx.dataRoot), name);
 }
 
+/** The whole confinement a RESUMED run inherits — one contract so a resume can
+ *  never silently carry less policy than the fresh run did (the XS-1 class). */
+export interface ResumeConfinement {
+  disallowedTools: string[];
+  env: Record<string, string>;
+  mcpServers?: RunMcpServers;
+  systemPrompt?: string;
+  /** The granted skills re-mounted into the surviving workspace (Claude). */
+  skills?: string[];
+  /** Staging key for a Claude report_outcome on this resumed turn. */
+  outcomeKey?: string;
+  /** F7: the Codex outcome-envelope schema to re-arm on resume. */
+  outputSchema?: unknown;
+  /** P19-G8/G11: the resolved-resource half of this resumed run's input
+   *  disclosure — the SAME record the fresh path writes, built from the SAME
+   *  resolution this function performs. The caller owns the remaining three
+   *  fields (it composes the prompt) and passes the whole thing to
+   *  `recordRunInputs` once `resumeRun` has minted the run id. */
+  runInputs: ResolvedResourceInputs;
+}
+
 /**
  * Reapply the fresh-run confinement and resources when resuming a specialist.
  *
@@ -2144,24 +2227,7 @@ export async function resolveResumeConfinement(
     role?: string;
     delivers?: boolean;
   },
-): Promise<{
-  disallowedTools: string[];
-  env: Record<string, string>;
-  mcpServers?: Record<string, unknown>;
-  systemPrompt?: string;
-  /** The granted skills re-mounted into the surviving workspace (Claude). */
-  skills?: string[];
-  /** Staging key for a Claude report_outcome on this resumed turn. */
-  outcomeKey?: string;
-  /** F7: the Codex outcome-envelope schema to re-arm on resume. */
-  outputSchema?: unknown;
-  /** P19-G8/G11: the resolved-resource half of this resumed run's input
-   *  disclosure — the SAME record the fresh path writes, built from the SAME
-   *  resolution this function performs. The caller owns the remaining three
-   *  fields (it composes the prompt) and passes the whole thing to
-   *  `recordRunInputs` once `resumeRun` has minted the run id. */
-  runInputs: ResolvedResourceInputs;
-}> {
+): Promise<ResumeConfinement> {
   const env = {
     ...workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot),
     // F24: keep the unified delivery identity on resumed runs too.
@@ -2205,14 +2271,16 @@ export async function resolveResumeConfinement(
     // F19-15: same surgical mount as the fresh run — a RESUMED supporting agent
     // used to wipe the delivering run's mounted skills through this very call;
     // the MOUNT_MARK now preserves any live run's folders (skill-mount.server).
-    const skillMount =
-      input.backend === "claude"
-        ? await mountGrantedSkills({
-            workspaceDir: taskCloneDir(ctx, input.projectSlug, input.taskKey),
-            skills: resolved.skills,
-            ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-          })
-        : { mounted: [] as string[], skipped: [] };
+    let skillMount: SkillMount = { mounted: [], skipped: [] };
+    if (input.backend === "claude") {
+      const mountInput: SkillMountInput = {
+        workspaceDir: taskCloneDir(ctx, input.projectSlug, input.taskKey),
+        skills: resolved.skills,
+      };
+      // Omitted on the default store — the mount resolves its own root then.
+      if (ctx.dataRoot) mountInput.dataRoot = ctx.dataRoot;
+      skillMount = await mountGrantedSkills(mountInput);
+    }
     // R19-19: the browser re-mounts on resume from the same grants — a resumed
     // run must not silently lose (or gain) the browser the fresh run had.
     const resumeBrowser = input.backend
@@ -2227,7 +2295,7 @@ export async function resolveResumeConfinement(
         })
       : { server: null, refused: null };
     const resumeUnresolved: { name: string; reason: string }[] = [];
-    const persona = buildSpecialistPersona({
+    const personaInput: SpecialistPersonaInput = {
       profileId: input.profileId,
       skills: resolved.skills,
       nativeSkills: skillMount.mounted,
@@ -2248,21 +2316,24 @@ export async function resolveResumeConfinement(
         : resumeBrowser.refused
           ? { refusedReason: resumeBrowser.refused.reason }
           : null,
-      ...(resolved.definition ? { definition: resolved.definition } : {}),
       dataRoot: ctx.dataRoot,
       unresolvedOut: resumeUnresolved,
-    });
+    };
+    // Same rule as the fresh run: a profile with no body of its own leaves the
+    // key ABSENT so the builder falls back to the generic prompt.
+    if (resolved.definition) personaInput.definition = resolved.definition;
+    const persona = buildSpecialistPersona(personaInput);
     if (resumeBrowser.refused) resumeUnresolved.push(resumeBrowser.refused);
     // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
     // the in-process toolkit on Claude, the outcome-envelope outputSchema on
     // Codex. Both key off the SAME collaboration grants the fresh run resolves.
     const collab = resolveAgentCollab(resolved.capabilities);
     let outcomeKey: string | undefined;
-    let toolkitServers: Record<string, unknown> = {};
+    let toolkit: AgentToolkit | null = null;
     let outputSchema: unknown;
     if (input.backend === "claude") {
       outcomeKey = newId("oc");
-      const toolkit = buildAgentToolkit({
+      toolkit = buildAgentToolkit({
         db,
         ctx,
         projectSlug: input.projectSlug,
@@ -2276,7 +2347,6 @@ export async function resolveResumeConfinement(
         outcomeKey,
         collab,
       });
-      if (toolkit) toolkitServers = toolkit.mcpServers;
     } else if (
       input.backend === "codex" &&
       (collab.verdict || collab.ask || collab.evidence)
@@ -2287,16 +2357,16 @@ export async function resolveResumeConfinement(
       // resumed agent keeps the channel it started with.
       outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
     }
-    const merged = {
-      ...mcpServers,
-      ...(resumeBrowser.server
-        ? { [BROWSER_MCP_NAME]: resumeBrowser.server }
-        : {}),
-      ...toolkitServers,
-    };
+    // Same precedence as the fresh run: org grants, then the browser, then
+    // viberr's own governance tools.
+    const grantedServers = { ...mcpServers };
+    if (resumeBrowser.server) {
+      grantedServers[BROWSER_MCP_NAME] = resumeBrowser.server;
+    }
+    const merged = { ...grantedServers, ...toolkit?.mcpServers };
     const cloneDir = taskCloneDir(ctx, input.projectSlug, input.taskKey);
     const disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
-    return {
+    const confinement: ResumeConfinement = {
       disallowedTools,
       env,
       runInputs: resolvedResourceInputs({
@@ -2313,14 +2383,18 @@ export async function resolveResumeConfinement(
         unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
         unresolvedResources: resumeUnresolved,
         deniedTools: disallowedTools,
-        toolkit: Object.keys(toolkitServers).length ? collab : null,
+        toolkit: toolkit ? collab : null,
       }),
-      ...(Object.keys(merged).length ? { mcpServers: merged } : {}),
-      ...(persona ? { systemPrompt: persona } : {}),
-      ...(skillMount.mounted.length ? { skills: skillMount.mounted } : {}),
-      ...(outcomeKey ? { outcomeKey } : {}),
-      ...(outputSchema ? { outputSchema } : {}),
     };
+    // Each key is set only when this resume really has that policy: the caller
+    // spreads the result into the resume spec, where an ABSENT key means "keep
+    // the adapter's default" and a present-but-undefined one would not.
+    if (Object.keys(merged).length) confinement.mcpServers = merged;
+    if (persona) confinement.systemPrompt = persona;
+    if (skillMount.mounted.length) confinement.skills = skillMount.mounted;
+    if (outcomeKey) confinement.outcomeKey = outcomeKey;
+    if (outputSchema) confinement.outputSchema = outputSchema;
+    return confinement;
   } catch {
     // Profile not a current deployment (undeployed/deleted). We can't confirm
     // any grant, so confine CONSERVATIVELY — deny ALL delivery tools, not just
@@ -2369,7 +2443,7 @@ function workspaceRunEnv(
   projectSlug: string,
   taskKey: string,
   dataRoot?: string,
-): Record<string, string> {
+) {
   // The ceiling must be a STRICT ANCESTOR of the run cwd — `GIT_CEILING` only
   // blocks git from ascending INTO a listed dir, so a ceiling EQUAL to cwd is a
   // no-op (git's first step up lands in the ceiling's unblocked parent). The
@@ -2381,7 +2455,14 @@ function workspaceRunEnv(
   const ceiling = taskDir(projectSlug, taskKey, dataRoot);
   return {
     GIT_CEILING_DIRECTORIES: ceiling,
-  };
+  } satisfies Record<string, string>;
+}
+
+/** The git author/committer every commit on a task carries, whichever backend
+ *  and whichever profile made it. */
+export interface AgentGitIdentity {
+  name: string;
+  email: string;
 }
 
 /** F24 — one delivery identity across BOTH backends. Codex commits with the
@@ -2391,18 +2472,18 @@ function workspaceRunEnv(
  * override any `git config` the agent sets), matched by the repo config set at
  * clone (for viberr's server-side auto-commit) — so from Viberr's eye codex and
  * claude are indistinguishable in the git history. */
-export function agentGitIdentity(profileId: string): { name: string; email: string } {
+export function agentGitIdentity(profileId: string): AgentGitIdentity {
   return { name: profileId, email: `${profileId}@viberr.local` };
 }
 
-function agentGitIdentityEnv(profileId: string): Record<string, string> {
+function agentGitIdentityEnv(profileId: string) {
   const { name, email } = agentGitIdentity(profileId);
   return {
     GIT_AUTHOR_NAME: name,
     GIT_AUTHOR_EMAIL: email,
     GIT_COMMITTER_NAME: name,
     GIT_COMMITTER_EMAIL: email,
-  };
+  } satisfies Record<string, string>;
 }
 
 /** Why a workspace checkout is missing — carried to the prompt and the human. */
@@ -2490,11 +2571,14 @@ async function cloneRepo(
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
     hadCredential = !!token;
-    const clone = createGitHubClonePlan({
+    // No credential ⇒ no `token` key at all: the plan's askpass leg keys off the
+    // property's presence, so a public-repo clone must not carry an empty one.
+    const clonePlan: Parameters<typeof createGitHubClonePlan>[0] = {
       repo: input.repo,
       destination: dir,
-      ...(token ? { token } : {}),
-    });
+    };
+    if (token) clonePlan.token = token;
+    const clone = createGitHubClonePlan(clonePlan);
     try {
       await execFileAsync("git", clone.args, {
         timeout: CLONE_TIMEOUT_MS,
@@ -2533,26 +2617,29 @@ async function cloneRepo(
     // text `cloneFailureLogDetails` already produced on `details.detail` — one
     // redaction (via the unified `redactGitOutput`), both surfaces.
     const stderrExcerpt = details.detail;
-    logger.warn("specialist run clone failed — running WITHOUT a checkout", {
+    const warnFields = {
       taskKey: input.taskKey,
       repo: input.repo,
       hadCredential,
       timeoutMs: CLONE_TIMEOUT_MS,
       ...details,
-      ...(stderrExcerpt ? { stderrExcerpt } : {}),
-    });
-    return {
-      dir: null,
-      failure: {
-        ...details,
-        hadCredential,
-        sentence: cloneFailureSentence(details, {
-          hadCredential,
-          timeoutMs: CLONE_TIMEOUT_MS,
-        }),
-        ...(stderrExcerpt ? { stderrExcerpt } : {}),
-      },
     };
+    logger.warn(
+      "specialist run clone failed — running WITHOUT a checkout",
+      stderrExcerpt ? { ...warnFields, stderrExcerpt } : warnFields,
+    );
+    // Absent when git printed nothing usable — the prompt and the timeline both
+    // render the excerpt only when the key is there.
+    const failure: CloneFailure = {
+      ...details,
+      hadCredential,
+      sentence: cloneFailureSentence(details, {
+        hadCredential,
+        timeoutMs: CLONE_TIMEOUT_MS,
+      }),
+    };
+    if (stderrExcerpt) failure.stderrExcerpt = stderrExcerpt;
+    return { dir: null, failure };
   }
 }
 
@@ -2579,7 +2666,7 @@ function runtimeAuditActor(
   projectSlug: string,
   actor: TaskActor,
   what: string,
-): { userId: string | null; label: string } {
+): AuditActor {
   if (ctx.operatorAuthorized) return { userId: null, label: "operator" };
   requireRuntimeRole(db, ctx, projectSlug, actor, what);
   return { userId: actor.userId, label: actor.label };

@@ -171,10 +171,10 @@ export async function requireUser(
   return (await requireAuth(request, options)).user;
 }
 
-const ROLE_ORDER: Record<UserRole, number> = {
+const ROLE_ORDER = {
   member: 1,
   admin: 2,
-};
+} satisfies Record<UserRole, number>;
 
 /** Role hierarchy check: admin > member. */
 export function roleSatisfies(role: UserRole, required: UserRole): boolean {

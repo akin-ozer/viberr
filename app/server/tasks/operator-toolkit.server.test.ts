@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { saveMcpServer } from "~/server/org/resources.server";
 import {
@@ -15,6 +16,14 @@ const ctxDb = createTestDbContext();
 afterEach(() => ctxDb.cleanup());
 
 const ACTOR = { userId: "u_t", label: "t@test" };
+
+/** The instructions string as the MOUNTED server carries it: `createSdkMcpServer`
+ *  hands back the live `McpServer` under `instance`, and `instance.server` is its
+ *  `Server` handle, which keeps the instructions in `_instructions`. */
+const wiredInstructions = z
+  .object({ instance: z.object({ server: z.object({ _instructions: z.string() }) }) })
+  .transform((mounted) => mounted.instance.server._instructions)
+  .catch("");
 
 function authority(mcps: string[]): OperatorAuthority {
   return {
@@ -259,11 +268,13 @@ describe("OPERATOR_TOOLKIT_INSTRUCTIONS — reading is expected, writing is not 
       taskKey: "P-1",
       authority: authority([]),
     });
-    const wired = (
-      toolkit.mcpServers.viberr as unknown as {
-        instance: { server: { _instructions?: string } };
-      }
-    ).instance.server._instructions;
+    // `_instructions` is `private` on the MCP SDK's `Server`, so no narrowing
+    // reaches it — and reading THAT field is the point of this test: it proves
+    // the run's server carries the instructions, not merely that this module
+    // exports them. Read it the way any other opaque payload is read here, by
+    // parsing the shape we expect; a rename in the SDK falls through to `""`
+    // and fails the assertion below instead of passing on `undefined`.
+    const wired = wiredInstructions.parse(toolkit.mcpServers.viberr);
     expect(wired).toBe(OPERATOR_TOOLKIT_INSTRUCTIONS);
   });
 });

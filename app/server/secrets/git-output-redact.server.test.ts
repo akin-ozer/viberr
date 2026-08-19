@@ -3,7 +3,7 @@ import { gitErrorText, redactGitOutput } from "./git-output-redact.server";
 
 describe("redactGitOutput (F19-6 / F19-18)", () => {
   it("removes the project PAT by value, wherever git echoed it", () => {
-    // Deliberately BELOW the shape rule's 16-char floor: only the by-value
+    // Deliberately BELOW the pattern rule's 16-char floor: only the by-value
     // layer can catch this one, which is the layer the call sites exist to
     // supply (they hold the token at the failure site).
     // Canary: delete the `opts.token` split → the token survives.
@@ -21,7 +21,7 @@ describe("redactGitOutput (F19-6 / F19-18)", () => {
     // The live leak: a 5-char `MCP_CREDENTIAL` printed as `CRED=xy7Qk` into the
     // MCP row error, the toast, and the persisted `last_error`. The old
     // `>= MIN_TOKEN_LEN` (8) floor skipped the by-value pass for a value this
-    // short, and no token SHAPE matches an arbitrary 5-char secret.
+    // short, and no token PATTERN matches an arbitrary 5-char secret.
     // Canary: restore the `opts.token.length >= 8` gate → `xy7Qk` survives.
     const out = redactGitOutput(
       "exited before responding — CRED=xy7Qk\nfatal: giving up",
@@ -55,7 +55,7 @@ describe("redactGitOutput (F19-6 / F19-18)", () => {
     // The one shape a token can reach stderr in without anyone here supplying
     // it: a `remote.origin.url` written by an older Viberr.
     // Canary: remove the URL_USERINFO_RE replace → `x-access-token:` and the
-    // userinfo survive (the shape rule alone leaves the username half).
+    // userinfo survive (the pattern rule alone leaves the username half).
     const out = redactGitOutput(
       "fatal: unable to access 'https://x-access-token:github_pat_11ABCDE_zzzzzzzzzzzzzzzzzzzzzzzz@github.com/a/b.git/'",
     );
@@ -66,7 +66,7 @@ describe("redactGitOutput (F19-6 / F19-18)", () => {
 
   it("keeps git's diagnosis and never mangles ordinary output", () => {
     // The failure mode that makes surfacing worthless: a redactor that eats the
-    // words. Canary: widen TOKEN_SHAPE_SOURCE to an entropy heuristic and the
+    // words. Canary: widen TOKEN_PATTERN_SOURCE to an entropy heuristic and the
     // equality below fails.
     const input =
       "remote: error: GH006: Protected branch update failed for refs/heads/vib-7.\n" +

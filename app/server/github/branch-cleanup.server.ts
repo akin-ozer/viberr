@@ -33,6 +33,9 @@ export function branchCleanupOnMerge(
   db: DatabaseSync,
   projectSlug: string,
 ): boolean {
+  // SAFETY: the SELECT names one `projects` column, `guardrails_json`, declared
+  // TEXT NOT NULL DEFAULT '[]' (0001_baseline.sql) — the nullable read below is
+  // a defensive widening; `get` returns that one column or undefined.
   const row = db
     .prepare(`SELECT guardrails_json FROM projects WHERE slug = ?`)
     .get(projectSlug) as { guardrails_json: string | null } | undefined;

@@ -53,11 +53,14 @@ export async function updateResourceReferences(
   updated += rewriteTemplates(kind, from, to, dataRoot);
   updated += await rewriteProjects(kind, from, to, dataRoot);
   if (updated > 0) {
+    // A drop carries no `to` at all — the key stays absent rather than logging
+    // a null target nobody asked for.
+    const fields = to ? { kind, from, to, updated } : { kind, from, updated };
     logger.info(
       to
         ? "resource reference rewritten after rename"
         : "resource reference dropped after delete",
-      { kind, from, ...(to ? { to } : {}), updated },
+      fields,
     );
   }
   return { updated };
@@ -149,31 +152,21 @@ async function rewriteProjects(
       await updateProjectFile({ projectSlug: slug, dataRoot }, (parsed) => {
         const fm = parsed.frontmatter;
         const agents = fm.agents.map((deployment) => {
-          const definition = (deployment as Record<string, unknown>).definition;
-          if (!definition || typeof definition !== "object") return deployment;
-          const resources = (definition as Record<string, unknown>).resources;
-          if (!resources || typeof resources !== "object") return deployment;
-          const list = (resources as Record<string, unknown>)[kind];
-          const next = nextList(
-            Array.isArray(list) ? (list as string[]) : undefined,
-            from,
-            to,
-          );
+          const definition = deployment.definition;
+          const resources = definition?.resources;
+          if (!definition || !resources) return deployment;
+          const next = nextList(resources[kind], from, to);
           if (!next) return deployment;
           changed = true;
+          const nextResources = { ...resources };
+          nextResources[kind] = next;
           return {
             ...deployment,
-            definition: {
-              ...(definition as Record<string, unknown>),
-              resources: {
-                ...(resources as Record<string, unknown>),
-                [kind]: next,
-              },
-            },
+            definition: { ...definition, resources: nextResources },
           };
         });
         if (!changed) return parsed;
-        return { ...parsed, frontmatter: { ...fm, agents } as typeof fm };
+        return { ...parsed, frontmatter: { ...fm, agents } };
       });
       if (changed) updated += 1;
     } catch (error) {

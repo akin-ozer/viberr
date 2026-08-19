@@ -1,11 +1,13 @@
+import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   APP_TEST_PASSWORD,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import type { ProfileView } from "./profile-query.server";
 import { DEFAULT_NOTIF_PREFS } from "./notification-prefs";
+
+type ProfileAction = typeof import("~/routes/profile").action;
 
 /**
  * Route-level tests for /profile (Phase 9C): loader shape (session user is
@@ -29,48 +31,65 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
+/** What React Router hands a loader/action. Both routes here read only
+ *  `request`; the rest is the call the framework makes — and with no dynamic
+ *  segment in either path, the matched pattern IS the pathname. */
+const routeArgs = (request: Request) => {
+  const url = new URL(request.url);
+  return {
+    request,
+    url,
+    params: {},
+    pattern: url.pathname,
+    context: new RouterContextProvider(),
+  };
+};
+
+type ActionOutcome = {
+  status: number;
+  data: { ok: boolean; toast?: string; error?: string };
+};
+
+/** Route actions return plain objects on success, `data()` wrappers on error. */
+function unwrap(result: Awaited<ReturnType<ProfileAction>>): ActionOutcome {
+  return "init" in result
+    ? { status: result.init?.status ?? 200, data: result.data }
+    : { status: 200, data: result };
+}
+
 async function runLoader(cookie?: string) {
   const { loader } = await import("~/routes/profile");
-  return loader({
-    request: app.request("/profile", cookie ? { cookie } : {}),
-    params: {},
-    context: {},
-  } as never) as Promise<{ profile: ProfileView }>;
+  return loader(routeArgs(app.request("/profile", cookie ? { cookie } : {})));
 }
 
 async function postAction(
   userId: string,
   fields: Record<string, string>,
-): Promise<{ status: number; data: { ok: boolean; toast?: string; error?: string } }> {
+): Promise<ActionOutcome> {
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
   const { action } = await import("~/routes/profile");
   const body = new URLSearchParams({ _csrf: csrf, ...fields });
-  const result = await action({
-    request: app.request("/profile", {
-      method: "POST",
-      cookie,
-      body,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    }),
-    params: {},
-    context: {},
-  } as never);
-  // Route actions return plain objects on success, data() wrappers on error.
-  const wrapped = result as { data?: unknown; init?: { status?: number } };
-  if (wrapped && typeof wrapped === "object" && "data" in wrapped && wrapped.init) {
-    return {
-      status: wrapped.init?.status ?? 200,
-      data: wrapped.data as { ok: boolean; toast?: string; error?: string },
-    };
-  }
-  return { status: 200, data: result as { ok: boolean; toast?: string } };
+  return unwrap(
+    await action(
+      routeArgs(
+        app.request("/profile", {
+          method: "POST",
+          cookie,
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+      ),
+    ),
+  );
 }
 
 describe("/profile loader", () => {
   it("redirects signed-out users to /login", async () => {
-    const thrown = await runLoader().catch((e) => e);
+    const thrown: unknown = await runLoader().catch((e) => e);
     expect(thrown).toBeInstanceOf(Response);
+    // SAFETY: the assertion above fails the test unless `thrown` IS a Response,
+    // so this line only runs on one.
     expect((thrown as Response).status).toBe(302);
   });
 
@@ -159,13 +178,10 @@ describe("/profile action", () => {
     // Root loader (SSR <html data-motion>) reads the same pref.
     const { cookie } = await app.cookieFor(ardaId);
     const { loader: rootLoader } = await import("~/root");
-    const rootResult = (await rootLoader({
-      request: app.request("/", { cookie }),
-      params: {},
-      context: {},
-    } as never)) as { motion?: string } | { data: { motion?: string } };
-    const payload =
-      "data" in rootResult ? (rootResult.data as { motion?: string }) : rootResult;
+    const rootResult = await rootLoader(routeArgs(app.request("/", { cookie })));
+    // Root wraps its payload in `data()` only when better-auth renewed the
+    // session cookie on this request.
+    const payload = "data" in rootResult ? rootResult.data : rootResult;
     expect(payload.motion).toBe("reduce");
 
     await postAction(ardaId, { intent: "set-motion", motion: "full" });
@@ -223,16 +239,18 @@ describe("/profile action", () => {
       next: "murat-new-pw-9999",
       confirm: "murat-new-pw-9999",
     });
-    const result = (await action({
-      request: app.request("/profile", {
-        method: "POST",
-        cookie,
-        body,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      }),
-      params: {},
-      context: {},
-    } as never)) as { ok: boolean; toast?: string };
+    const { data: result } = unwrap(
+      await action(
+        routeArgs(
+          app.request("/profile", {
+            method: "POST",
+            cookie,
+            body,
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          }),
+        ),
+      ),
+    );
     expect(result.ok).toBe(true);
     expect(result.toast).toBe("Password updated — other sessions were signed out");
 
@@ -261,6 +279,9 @@ describe("/profile action", () => {
     ).toBe(false);
 
     // The acting session survives; the other one is gone.
+    // SAFETY: `session.id` is `text not null primary key` (0001_baseline.sql),
+    // so every row of this projection carries a string id — node:sqlite types
+    // every column as the open `SQLOutputValue` union regardless.
     const sessions = app.db
       .prepare(`SELECT id FROM session WHERE userId = ?`)
       .all(murId) as { id: string }[];
@@ -301,16 +322,20 @@ describe("/profile action", () => {
     const { cookie } = await app.cookieFor(ardaId);
     const { action } = await import("~/routes/profile");
     const body = new URLSearchParams({ _csrf: "forged", intent: "identity" });
-    const result = (await action({
-      request: app.request("/profile", {
-        method: "POST",
-        cookie,
-        body,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      }),
-      params: {},
-      context: {},
-    } as never)) as { init?: { status?: number }; data?: { ok: boolean; error: string } };
+    // SAFETY: every branch of this action returns either a plain `{ ok }`
+    // object or a `data()` wrapper, so reading `init`/`data` as OPTIONAL is
+    // true of both — a plain result leaves them undefined and fails the
+    // assertions below rather than passing on a shape that was never there.
+    const result = (await action(
+      routeArgs(
+        app.request("/profile", {
+          method: "POST",
+          cookie,
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+      ),
+    )) as { init?: { status?: number }; data?: { ok: boolean; error: string } };
     expect(result).not.toBeInstanceOf(Response);
     expect(result.init?.status).toBe(403);
     expect(result.data?.ok).toBe(false);

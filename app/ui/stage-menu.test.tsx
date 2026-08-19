@@ -41,7 +41,10 @@ function renderMenu(overrides: Partial<Parameters<typeof StageMenu>[0]> = {}) {
 }
 
 function trigger(view: ReturnType<typeof renderMenu>) {
-  return view.getByLabelText("Change stage (currently Ready)");
+  // SAFETY: the only element carrying this label is StageMenu's own
+  // `<button type="button" className="stage-menu-btn">` trigger (stage-menu.tsx);
+  // the bound query cannot be told that element type, so it is stated here.
+  return view.getByLabelText("Change stage (currently Ready)") as HTMLButtonElement;
 }
 
 function openMenu(view: ReturnType<typeof renderMenu>) {
@@ -57,7 +60,7 @@ function enabledNames(menu: HTMLElement): string[] {
 }
 
 function activeName(): string {
-  return (document.activeElement as HTMLElement).textContent!.trim();
+  return document.activeElement!.textContent!.trim();
 }
 
 describe("StageMenu keyboard contract (F10-25)", () => {
@@ -71,6 +74,8 @@ describe("StageMenu keyboard contract (F10-25)", () => {
 
     // The current stage is present but not selectable — you cannot "move" to
     // where you already are.
+    // SAFETY: every `menuitemradio` in this menu is a `<button>` — StageMenu
+    // renders one per stage and gives the current one `disabled` (stage-menu.tsx).
     const current = view.getByRole("menuitemradio", {
       name: /Ready/,
     }) as HTMLButtonElement;
@@ -152,7 +157,7 @@ describe("StageMenu keyboard contract (F10-25)", () => {
     fireEvent.click(trigger(view));
 
     expect(document.querySelector('[role="menu"]')).toBeNull();
-    expect((trigger(view) as HTMLButtonElement).disabled).toBe(true);
+    expect(trigger(view).disabled).toBe(true);
     expect(view.onSelect).not.toHaveBeenCalled();
   });
 

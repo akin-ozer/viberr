@@ -32,5 +32,5 @@ if (typeof window !== "undefined" && typeof window.ResizeObserver === "undefined
     unobserve(): void {}
     disconnect(): void {}
   }
-  window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+  window.ResizeObserver = ResizeObserverStub;
 }

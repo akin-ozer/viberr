@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 
 /**
  * Build identity for the RUNNING process (gap 18).
@@ -31,7 +32,9 @@ import path from "node:path";
  * so it must not do filesystem work per request.
  */
 
-export interface BuildInfo {
+/** A type alias, not an interface, so the boot integrity line can carry it as a
+ *  structured log field (only a type alias gets the implicit index signature). */
+export type BuildInfo = {
   /** Semver, from `VIBERR_BUILD_VERSION` or package.json; null when neither declares one. */
   version: string | null;
   /** Short (12-char) commit sha; null when the build baked none and there is no checkout. */
@@ -40,7 +43,7 @@ export interface BuildInfo {
   revisionSource: "env" | "git" | null;
   /** ISO timestamp baked at image build (`VIBERR_BUILD_TIME`); null when unset. */
   builtAt: string | null;
-}
+};
 
 const SHORT_SHA_LENGTH = 12;
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
@@ -53,15 +56,20 @@ function readTextFile(file: string): string | null {
   }
 }
 
+/** The ONE field this module reads out of a package.json. `.min(1)` after the
+ *  trim is the "a blank stamp is not a version" rule the rest of the module
+ *  applies to every source; `.catch` keeps a non-string `version` from being an
+ *  identity claim rather than making it an error. */
+const packageManifestSchema = z.object({
+  version: z.string().trim().min(1).optional().catch(undefined),
+});
+
 /** package.json `version`, or null when the file is missing/unparseable/versionless. */
 function packageVersion(root: string): string | null {
   const raw = readTextFile(path.join(root, "package.json"));
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { version?: unknown };
-    return typeof parsed.version === "string" && parsed.version.trim()
-      ? parsed.version.trim()
-      : null;
+    return packageManifestSchema.parse(JSON.parse(raw)).version ?? null;
   } catch {
     return null;
   }

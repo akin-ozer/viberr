@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { LogLine, RunKind, RunView } from "~/features/runtime/runtime-types";
 import {
   recordAudit,
@@ -10,7 +11,7 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
-import type { RunHandle, RunSpec, RuntimeAdapter } from "./adapter.server";
+import type { RunHandle, RunMcpServers, RunSpec, RuntimeAdapter } from "./adapter.server";
 import { resolveRunEffort } from "./model-catalog.server";
 import { publishRunStateChanged } from "./run-events.server";
 import {
@@ -34,6 +35,7 @@ import { probeSessionContinuity } from "./session-export.server";
 import {
   resolveTaskFilePath,
   updateTaskFile,
+  type TaskFileRef,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
@@ -90,7 +92,7 @@ export type RunCompletionCallback = (finished: AgentRunRow) => void;
 const SERVICE_KEY = Symbol.for("viberr.runService");
 
 function getState(): ServiceState {
-  const cache = globalThis as unknown as Record<symbol, ServiceState | undefined>;
+  const cache: Record<symbol, ServiceState | undefined> = globalThis;
   let state = cache[SERVICE_KEY];
   if (!state) {
     state = { handles: new Map(), adapters: createAdapters(), completions: new Map() };
@@ -178,16 +180,16 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
   resetRegistryForTests();
   setBackendAvailability("claude", true);
   setBackendAvailability("codex", true);
-  const cache = globalThis as unknown as Record<symbol, ServiceState | undefined>;
+  const cache: Record<symbol, ServiceState | undefined> = globalThis;
   cache[SERVICE_KEY] = { handles: new Map(), adapters, completions: new Map() };
 }
 
 // ---------------------------------------------- start / resume
 
-const SDK_LABEL: Record<string, string> = {
+const SDK_LABEL = {
   claude: "Claude Agent SDK",
   codex: "Codex SDK",
-};
+} satisfies Record<RealBackend, string>;
 
 export interface StartRunInput {
   projectSlug: string;
@@ -220,7 +222,7 @@ export interface StartRunInput {
   /** Custom instructions: Claude systemPrompt / Codex developer_instructions. */
   systemPrompt?: string;
   /** Portable HTTP/stdio MCPs, or Claude-only in-process SDK governance tools. */
-  mcpServers?: Record<string, unknown>;
+  mcpServers?: RunMcpServers;
   /** Tool allowlist confining the run (operator → its governance tools only). */
   allowedTools?: string[];
   /** Tool denylist confining a specialist run to its granted capabilities.
@@ -249,11 +251,11 @@ export interface StartRunInput {
 /** Runs started by the operator runtime itself (scheduling reactions). */
 const OPERATOR_ACTOR: AuditActor = { userId: null, label: "operator" };
 
-const DEFAULT_THREAD: Record<RunKind, string> = {
+const DEFAULT_THREAD = {
   operator: "op",
   primary: "primary",
   reviewer: "r0",
-};
+} satisfies Record<RunKind, string>;
 
 /**
  * The file-write built-ins `resolveSpecialistDisallowedTools` emits for a
@@ -318,14 +320,17 @@ export function webSearchWithheldFromDenylist(
  * alone: the operator deliberately lists its governance tools ONE BY ONE so the
  * approval list mirrors its capability policy, and a blanket `mcp__viberr`
  * would paper over that curation.
+ *
+ * Takes the mounted server NAMES, not the config bag: an approval entry is
+ * derived from a server's key alone, and nothing here may depend on how a
+ * declaration is shaped.
  */
 export function withMcpAutoApproval(
   allowedTools: readonly string[] | undefined,
-  mcpServers: Record<string, unknown> | undefined,
+  mcpServerNames: readonly string[],
 ): string[] | undefined {
   const named = allowedTools ?? [];
-  const servers = Object.keys(mcpServers ?? {});
-  const additions = servers.flatMap((name) =>
+  const additions = mcpServerNames.flatMap((name) =>
     named.some((t) => t === `mcp__${name}` || t.startsWith(`mcp__${name}__`))
       ? []
       : [`mcp__${name}`],
@@ -333,6 +338,26 @@ export function withMcpAutoApproval(
   const merged = [...named, ...additions];
   return merged.length ? merged : undefined;
 }
+
+/** The `runtime.run.started` audit payload. */
+type RunStartedAudit = {
+  threadId: string;
+  backend: RealBackend;
+  role: string;
+  kind: RunKind;
+  resumed: boolean;
+  /** R7-2 fail-fast marker: the run never spawned a backend process. */
+  failedUnavailable?: true;
+};
+
+/**
+ * What a `node:sqlite` write throws: an Error carrying the raw SQLite result
+ * code on an `errcode` property its declared type does not mention. Decoding it
+ * (rather than asserting a hand-written type onto the thrown value) keeps the
+ * unique-violation branch off anything the driver did not actually report —
+ * anything that fails this parse is rethrown untouched.
+ */
+const sqliteErrorSchema = z.object({ errcode: z.number() });
 
 /**
  * Starts a run: selects the requested provider adapter, inserts the queued
@@ -374,10 +399,11 @@ export async function startRun(
       state: "queued",
     });
   } catch (err) {
-    const errcode = (err as { errcode?: number } | null)?.errcode;
+    const sqliteError = sqliteErrorSchema.safeParse(err);
     if (
       input.kind === "primary" &&
-      errcode === 2067 // SQLITE_CONSTRAINT_UNIQUE
+      sqliteError.success &&
+      sqliteError.data.errcode === 2067 // SQLITE_CONSTRAINT_UNIQUE
     ) {
       throw new AppError({
         code: ERROR_CODES.CONFLICT,
@@ -389,6 +415,15 @@ export async function startRun(
     throw err;
   }
 
+  const details: RunStartedAudit = {
+    threadId,
+    backend: input.backend,
+    role: input.role,
+    kind: input.kind,
+    resumed: Boolean(input.resumeSessionId),
+  };
+  if (selection.kind === "unavailable") details.failedUnavailable = true;
+
   // Governed action: opening a runtime session is audited (BUILD-PLAN
   // Phase 10 / contracts — run start + interrupt both leave audit rows).
   recordAudit(db, {
@@ -398,20 +433,17 @@ export async function startRun(
     subjectId: runId,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      threadId,
-      backend: input.backend,
-      role: input.role,
-      kind: input.kind,
-      resumed: Boolean(input.resumeSessionId),
-      // R7-2 fail-fast marker: the run never spawned a backend process.
-      ...(selection.kind === "unavailable" ? { failedUnavailable: true } : {}),
-    },
+    details,
   });
 
   // D4: every mounted MCP server is auto-approved here, not per caller.
-  const allowedTools = withMcpAutoApproval(input.allowedTools, input.mcpServers);
+  const allowedTools = withMcpAutoApproval(
+    input.allowedTools,
+    Object.keys(input.mcpServers ?? {}),
+  );
 
+  // Each optional below is set ONLY when present — an absent key means "SDK
+  // default", which an explicit `undefined` would not.
   const spec: RunSpec = {
     runId,
     projectSlug: input.projectSlug,
@@ -421,41 +453,45 @@ export async function startRun(
     kind: input.kind,
     backend: input.backend,
     model: input.model,
-    // P13-RT-08: normalize the effort tier for the RUN's backend here, the one
-    // funnel every path goes through (specialist, operator, resume). It used to
-    // run only on the D4 cross-backend retry, so a profile whose stored effort
-    // came from the other backend's scale ("minimal" from Codex, "max" from
-    // Claude) shipped a tier the target SDK does not accept. An unset effort
-    // stays unset — the SDK default applies, as before.
-    ...(input.effort?.trim()
-      ? { effort: resolveRunEffort(input.backend, input.effort) }
-      : {}),
     prompt: input.prompt,
     workdir,
     resumeSessionId: input.resumeSessionId ?? null,
     autonomous: input.autonomous ?? true,
-    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
-    ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
-    ...(allowedTools ? { allowedTools } : {}),
-    ...(input.disallowedTools && input.disallowedTools.length
-      ? { disallowedTools: input.disallowedTools }
-      : {}),
-    ...(input.skills && input.skills.length ? { skills: input.skills } : {}),
-    // Codex has no denylist channel; the withheld repo-write grant becomes a
-    // read-only sandbox instead (P13-RT-02). Explicit caller value wins.
-    ...((input.repoWriteWithheld ??
-      repoWriteWithheldFromDenylist(input.disallowedTools))
-      ? { repoWriteWithheld: true }
-      : {}),
-    // Same shape for web egress: withheld ⇒ Codex runs with its web search
-    // disabled, the channel the operator already uses (P14-RT-06).
-    ...((input.webSearchWithheld ??
-      webSearchWithheldFromDenylist(input.disallowedTools))
-      ? { webSearchWithheld: true }
-      : {}),
-    ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
-    ...(input.env && Object.keys(input.env).length ? { env: input.env } : {}),
   };
+  // P13-RT-08: normalize the effort tier for the RUN's backend here, the one
+  // funnel every path goes through (specialist, operator, resume). It used to
+  // run only on the D4 cross-backend retry, so a profile whose stored effort
+  // came from the other backend's scale ("minimal" from Codex, "max" from
+  // Claude) shipped a tier the target SDK does not accept. An unset effort
+  // stays unset — the SDK default applies, as before.
+  if (input.effort?.trim()) {
+    spec.effort = resolveRunEffort(input.backend, input.effort);
+  }
+  if (input.systemPrompt) spec.systemPrompt = input.systemPrompt;
+  if (input.mcpServers) spec.mcpServers = input.mcpServers;
+  if (allowedTools) spec.allowedTools = allowedTools;
+  if (input.disallowedTools && input.disallowedTools.length) {
+    spec.disallowedTools = input.disallowedTools;
+  }
+  if (input.skills && input.skills.length) spec.skills = input.skills;
+  // Codex has no denylist channel; the withheld repo-write grant becomes a
+  // read-only sandbox instead (P13-RT-02). Explicit caller value wins.
+  if (
+    input.repoWriteWithheld ??
+    repoWriteWithheldFromDenylist(input.disallowedTools)
+  ) {
+    spec.repoWriteWithheld = true;
+  }
+  // Same for web egress: withheld ⇒ Codex runs with its web search disabled,
+  // the channel the operator already uses (P14-RT-06).
+  if (
+    input.webSearchWithheld ??
+    webSearchWithheldFromDenylist(input.disallowedTools)
+  ) {
+    spec.webSearchWithheld = true;
+  }
+  if (input.outputSchema) spec.outputSchema = input.outputSchema;
+  if (input.env && Object.keys(input.env).length) spec.env = input.env;
 
   if (selection.kind === "unavailable") {
     failRunUnavailable(db, spec);
@@ -478,7 +514,7 @@ function failRunUnavailable(db: DatabaseSync, spec: RunSpec): void {
   const sink = createRunSink(db, spec);
   sink.markRunning();
   const now = new Date().toISOString();
-  const text = backendUnavailableMessage(spec.backend as RealBackend);
+  const text = backendUnavailableMessage(spec.backend);
   sink.line({
     // An honest server-authored envelope — NOT a fabricated backend wire line.
     raw: JSON.stringify({ type: "error", source: "viberr", message: text }),
@@ -607,11 +643,11 @@ async function noteContinuityReset(
   run: AgentRunRow,
   dataRoot?: string,
 ): Promise<void> {
-  const ref = {
+  const ref: TaskFileRef = {
     projectSlug: run.project_slug,
     taskKey: run.task_key,
-    ...(dataRoot ? { dataRoot } : {}),
   };
+  if (dataRoot) ref.dataRoot = dataRoot;
   const label = run.backend === "claude" ? "Claude Code" : "Codex";
   try {
     await updateTaskFile(ref, (parsed) => {
@@ -633,6 +669,81 @@ async function noteContinuityReset(
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
+}
+
+/** The follow-up turn `resumeRun` starts on an existing run's session. */
+export interface ResumeRunInput {
+  runId: string;
+  prompt: string;
+  /** Reuse the original run's clone workdir (defaults to the task dir). */
+  workdir?: string;
+  /** Override the model for the resumed turns (defaults to the prior run's).
+   *  Lets a comment-resume pick up the agent profile's CURRENT model. */
+  model?: string;
+  /** Reasoning effort for the resumed turns (defaults to none). */
+  effort?: string;
+  /** Carry/override the agent identity onto the resumed run so it groups
+   *  with the prior run in the Agent-logs picker. Defaults to the prior
+   *  row's agent_name/agent_profile_id. */
+  agentName?: string | null;
+  agentProfileId?: string;
+  autonomous?: boolean;
+  dataRoot?: string;
+  actor?: AuditActor;
+  /** Re-apply the specialist's capability tool denylist on resume. Without
+   *  this a resumed (e.g. @mention) specialist runs UNCONFINED — the exact
+   *  confinement the fresh-run path establishes is silently dropped (XS-1). */
+  disallowedTools?: string[];
+  /** Re-apply the granted skills mounted into the workspace on resume. The
+   *  workspace (and its mount) survives between runs, but the SDK options do
+   *  not: without this a resumed @mention run would enable NO skill while its
+   *  persona — built by the same `resolveResumeConfinement` — already left the
+   *  bodies out for native delivery, so the agent would silently lose its
+   *  granted craft mid-thread (the XS-1 fresh-vs-resume parity class). */
+  skills?: string[];
+  /** Re-apply the run's tool APPROVAL list on resume. D4: the type used to
+   *  omit this while accepting every other half of the run's tool policy, so
+   *  a caller that curated an allowlist (the operator does) silently lost it
+   *  the moment its session was resumed. Mounted MCP servers are still
+   *  auto-approved by `startRun` either way. */
+  allowedTools?: string[];
+  /** Re-apply the per-run env overlay (GIT_CEILING_DIRECTORIES workspace
+   *  confinement) on resume. */
+  env?: Record<string, string>;
+  /** Re-apply the specialist's declared MCP servers on resume (Claude). */
+  mcpServers?: RunMcpServers;
+  /** Re-apply the persona/system prompt on resume (Claude). */
+  systemPrompt?: string;
+  /** Re-apply the outcome-envelope schema on resume so a resumed (e.g.
+   *  @mention) Codex agent still emits the structured outcome (verdict /
+   *  questions) instead of falling back to the fragile prose regex — and so
+   *  ask_human can fire. Without it a resumed Codex reviewer silently lost
+   *  its envelope, a fresh-vs-resume parity break (F7). */
+  outputSchema?: unknown;
+}
+
+/**
+ * Copy the caller's per-turn overrides onto a resumed run's input, key for key.
+ * An option the caller did NOT pass must stay ABSENT: `startRun` reads key
+ * PRESENCE (an absent effort keeps the SDK default, an absent `disallowedTools`
+ * derives the withheld-grant flags), so writing an explicit `undefined` here
+ * would change what the run gets. Both resume paths — the continuity-reset
+ * fresh run and the session resume — carry the identical set; that is the
+ * fresh-vs-resume parity XS-1 and F7 were about.
+ */
+function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void {
+  if (input.effort) target.effort = input.effort;
+  if (input.workdir) target.workdir = input.workdir;
+  if (input.autonomous !== undefined) target.autonomous = input.autonomous;
+  if (input.dataRoot) target.dataRoot = input.dataRoot;
+  if (input.actor) target.actor = input.actor;
+  if (input.disallowedTools) target.disallowedTools = input.disallowedTools;
+  if (input.skills) target.skills = input.skills;
+  if (input.allowedTools) target.allowedTools = input.allowedTools;
+  if (input.env) target.env = input.env;
+  if (input.mcpServers) target.mcpServers = input.mcpServers;
+  if (input.systemPrompt) target.systemPrompt = input.systemPrompt;
+  if (input.outputSchema) target.outputSchema = input.outputSchema;
 }
 
 /**
@@ -658,55 +769,7 @@ async function noteContinuityReset(
  */
 export async function resumeRun(
   db: DatabaseSync,
-  input: {
-    runId: string;
-    prompt: string;
-    /** Reuse the original run's clone workdir (defaults to the task dir). */
-    workdir?: string;
-    /** Override the model for the resumed turns (defaults to the prior run's).
-     *  Lets a comment-resume pick up the agent profile's CURRENT model. */
-    model?: string;
-    /** Reasoning effort for the resumed turns (defaults to none). */
-    effort?: string;
-    /** Carry/override the agent identity onto the resumed run so it groups
-     *  with the prior run in the Agent-logs picker. Defaults to the prior
-     *  row's agent_name/agent_profile_id. */
-    agentName?: string | null;
-    agentProfileId?: string;
-    autonomous?: boolean;
-    dataRoot?: string;
-    actor?: AuditActor;
-    /** Re-apply the specialist's capability tool denylist on resume. Without
-     *  this a resumed (e.g. @mention) specialist runs UNCONFINED — the exact
-     *  confinement the fresh-run path establishes is silently dropped (XS-1). */
-    disallowedTools?: string[];
-    /** Re-apply the granted skills mounted into the workspace on resume. The
-     *  workspace (and its mount) survives between runs, but the SDK options do
-     *  not: without this a resumed @mention run would enable NO skill while its
-     *  persona — built by the same `resolveResumeConfinement` — already left the
-     *  bodies out for native delivery, so the agent would silently lose its
-     *  granted craft mid-thread (the XS-1 fresh-vs-resume parity class). */
-    skills?: string[];
-    /** Re-apply the run's tool APPROVAL list on resume. D4: the type used to
-     *  omit this while accepting every other half of the run's tool policy, so
-     *  a caller that curated an allowlist (the operator does) silently lost it
-     *  the moment its session was resumed. Mounted MCP servers are still
-     *  auto-approved by `startRun` either way. */
-    allowedTools?: string[];
-    /** Re-apply the per-run env overlay (GIT_CEILING_DIRECTORIES workspace
-     *  confinement) on resume. */
-    env?: Record<string, string>;
-    /** Re-apply the specialist's declared MCP servers on resume (Claude). */
-    mcpServers?: Record<string, unknown>;
-    /** Re-apply the persona/system prompt on resume (Claude). */
-    systemPrompt?: string;
-    /** Re-apply the outcome-envelope schema on resume so a resumed (e.g.
-     *  @mention) Codex agent still emits the structured outcome (verdict /
-     *  questions) instead of falling back to the fragile prose regex — and so
-     *  ask_human can fire. Without it a resumed Codex reviewer silently lost
-     *  its envelope, a fresh-vs-resume parity break (F7). */
-    outputSchema?: unknown;
-  },
+  input: ResumeRunInput,
 ): Promise<{ runId: string; continuityReset?: true }> {
   const prev = getRun(db, input.runId);
   if (!prev) throw AppError.notFound(`Run ${input.runId} not found.`);
@@ -730,7 +793,7 @@ export async function resumeRun(
     });
     recordSessionMissing(db, prev);
     await noteContinuityReset(db, prev, input.dataRoot);
-    const fresh = await startRun(db, {
+    const freshTurn: StartRunInput = {
       projectSlug: prev.project_slug,
       taskKey: prev.task_key,
       threadId: resumeThreadId,
@@ -738,28 +801,18 @@ export async function resumeRun(
       kind: prev.kind,
       backend,
       model: input.model ?? prev.model,
-      ...(input.effort ? { effort: input.effort } : {}),
       agentName: input.agentName ?? prev.agent_name,
       agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
       prompt: `${continuityResetPreamble(backend)}\n\n${input.prompt}`,
       // The whole point: no resumeSessionId. A fresh provider session.
       resumeSessionId: null,
-      ...(input.workdir ? { workdir: input.workdir } : {}),
-      ...(input.autonomous !== undefined ? { autonomous: input.autonomous } : {}),
-      ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
-      ...(input.actor ? { actor: input.actor } : {}),
-      ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
-      ...(input.skills ? { skills: input.skills } : {}),
-      ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
-      ...(input.env ? { env: input.env } : {}),
-      ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
-      ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
-      ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
-    });
+    };
+    carryResumeOptions(freshTurn, input);
+    const fresh = await startRun(db, freshTurn);
     return { runId: fresh.runId, continuityReset: true };
   }
 
-  return startRun(db, {
+  const resumedTurn: StartRunInput = {
     projectSlug: prev.project_slug,
     taskKey: prev.task_key,
     threadId: resumeThreadId,
@@ -770,7 +823,6 @@ export async function resumeRun(
     // model on the prior run row — editing an agent to a new model must apply
     // when its session is resumed via a comment.
     model: input.model ?? prev.model,
-    ...(input.effort ? { effort: input.effort } : {}),
     // Carry the prior run's agent identity so the resume groups under the same
     // Agent-logs entry (one entry per agent, across every resume). A caller can
     // override (e.g. a comment-resume that knows the current profile name).
@@ -778,20 +830,9 @@ export async function resumeRun(
     agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
     prompt: input.prompt,
     resumeSessionId: prev.session_id,
-    ...(input.workdir ? { workdir: input.workdir } : {}),
-    ...(input.autonomous !== undefined ? { autonomous: input.autonomous } : {}),
-    ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
-    ...(input.actor ? { actor: input.actor } : {}),
-    // Re-establish the run confinement the fresh-run path applies (XS-1).
-    ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
-    ...(input.skills ? { skills: input.skills } : {}),
-    ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
-    ...(input.env ? { env: input.env } : {}),
-    ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
-    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
-    // F7: re-arm the outcome envelope on resume (Codex parity with fresh runs).
-    ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
-  });
+  };
+  carryResumeOptions(resumedTurn, input);
+  return startRun(db, resumedTurn);
 }
 
 /** Wires the sink + adapter callbacks and starts the adapter process/timer. */
@@ -1001,18 +1042,17 @@ export interface RunLogQuery {
 export function getRunLog(
   db: DatabaseSync,
   runId: string,
-  query: number | RunLogQuery = -1,
+  query: RunLogQuery = {},
 ): RunLog | null {
   const run = getRun(db, runId);
   if (!run) return null;
-  const q: RunLogQuery = typeof query === "number" ? { since: query } : query;
-  const backward = typeof q.before === "number" || typeof q.limit === "number";
+  const backward = query.before !== undefined || query.limit !== undefined;
   const lines: RunLog["lines"] = backward
-    ? listRunLinesTail(db, runId, q.limit ?? RUN_LOG_PAGE_LINES, q.before).map(
+    ? listRunLinesTail(db, runId, query.limit ?? RUN_LOG_PAGE_LINES, query.before).map(
         ({ seq, occurredAt, raw, display }) => ({ seq, occurredAt, raw, display }),
       )
-    : listRunLines(db, runId, q.since ?? -1);
-  const sinceSeq = q.since ?? -1;
+    : listRunLines(db, runId, query.since ?? -1);
+  const sinceSeq = query.since ?? -1;
   const head = lines.length ? lines[lines.length - 1]!.seq : sinceSeq;
   const oldestSeq = lines.length ? lines[0]!.seq : -1;
   const stats = runLineStats(db, runId);

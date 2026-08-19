@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import YAML from "yaml";
+import YAML, { YAMLParseError } from "yaml";
+import { z } from "zod";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import { parseProjectFileContent } from "./project-file.server";
 import { parseTaskFileContent } from "./task-file.server";
@@ -107,10 +108,12 @@ function frontmatterErrorLine(content: string): number | null {
     YAML.parse(yamlText);
     return null;
   } catch (error) {
-    const linePos = (error as { linePos?: { line: number }[] }).linePos;
-    const inner = linePos?.[0]?.line;
+    // Only the parser's own error carries a position; anything else that
+    // escaped leaves us with no line to point at, so blame the fence.
+    const inner =
+      error instanceof YAMLParseError ? error.linePos?.[0]?.line : undefined;
     // +1: the YAML body starts on the line after the opening `---` fence.
-    return typeof inner === "number" ? inner + 1 : 1;
+    return inner === undefined ? 1 : inner + 1;
   }
 }
 
@@ -295,6 +298,16 @@ export interface UntrustedProjectionReport {
   text: string;
 }
 
+/** The `diagnostics` columns this report reads: `source_path`, `code` and
+ *  `message` are TEXT NOT NULL, the two ids are nullable TEXT. */
+const untrustedRowSchema = z.object({
+  source_path: z.string(),
+  project_slug: z.string().nullable(),
+  task_key: z.string().nullable(),
+  code: z.string(),
+  message: z.string(),
+});
+
 /**
  * The same "which files are untrusted" answer, read from the projection's
  * `diagnostics` table instead of the disk. Used by `npm run rescan`, which has
@@ -303,20 +316,16 @@ export interface UntrustedProjectionReport {
 export function untrustedFileReport(
   db: DatabaseSync,
 ): UntrustedProjectionReport {
-  const rows = db
-    .prepare(
-      `SELECT source_path, project_slug, task_key, code, message
-         FROM diagnostics
-        WHERE hard_stop = 1
-        ORDER BY source_path, id`,
-    )
-    .all() as {
-    source_path: string;
-    project_slug: string | null;
-    task_key: string | null;
-    code: string;
-    message: string;
-  }[];
+  const rows = z.array(untrustedRowSchema).parse(
+    db
+      .prepare(
+        `SELECT source_path, project_slug, task_key, code, message
+           FROM diagnostics
+          WHERE hard_stop = 1
+          ORDER BY source_path, id`,
+      )
+      .all(),
+  );
 
   const byPath = new Map<string, UntrustedProjectionFile>();
   for (const row of rows) {

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import { listMcpServers, type McpSpawn } from "~/server/org/resources.server";
@@ -10,19 +11,29 @@ import {
   verifyStdioMcpMountsForRun,
 } from "./specialist-mcp.server";
 
+/** The two JSON-RPC replies the fake child speaks back over stdout. */
+interface HandshakeReply {
+  jsonrpc: string;
+  id: number;
+  result: { capabilities?: object; tools?: { name: string }[] };
+}
+
+/** Only the field the fake dispatches on; the rest of the request is ignored. */
+const rpcRequestSchema = z.object({ method: z.string().optional() });
+
 /** A stdio child that answers the JSON-RPC handshake with `tools` tools. */
 function handshakeSpawn(tools: number): McpSpawn {
   return () => {
     const out = new EventEmitter();
-    const emit = (o: unknown) =>
-      queueMicrotask(() => out.emit("data", Buffer.from(`${JSON.stringify(o)}\n`)));
+    const emit = (reply: HandshakeReply) =>
+      queueMicrotask(() => out.emit("data", Buffer.from(`${JSON.stringify(reply)}\n`)));
     return {
       stdin: {
         write(data: string) {
           for (const line of data.split("\n")) {
             const t = line.trim();
             if (!t) continue;
-            const msg = JSON.parse(t) as { method?: string };
+            const msg = rpcRequestSchema.parse(JSON.parse(t));
             if (msg.method === "initialize") {
               emit({ jsonrpc: "2.0", id: 1, result: { capabilities: {} } });
             } else if (msg.method === "tools/list") {
@@ -58,7 +69,7 @@ function crashSpawn(stderrText: string): McpSpawn {
       stdout: { on() {} },
       stderr: { on: (e, cb) => err.on(e, cb) },
       on: (e, cb) => {
-        if (e === "exit") exit.on("exit", cb as (a?: unknown, b?: unknown) => void);
+        if (e === "exit") exit.on("exit", cb);
       },
       kill() {},
     };

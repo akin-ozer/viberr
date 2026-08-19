@@ -5,16 +5,19 @@
  * write it directly; deliberately NOT HttpOnly for the same reason.
  */
 
+import { z } from "zod";
+
 export const THEME_COOKIE_NAME = "viberr_theme";
 
 export const THEME_PREFERENCES = ["light", "dark", "system"] as const;
 export type ThemePreference = (typeof THEME_PREFERENCES)[number];
 
-export function isThemePreference(value: unknown): value is ThemePreference {
-  return (
-    typeof value === "string" &&
-    (THEME_PREFERENCES as readonly string[]).includes(value)
-  );
+/** The cookie value and the `theme` form field are both untrusted text; this
+ *  is the one decoder both boundaries run before the value is a preference. */
+export const themePreferenceSchema = z.enum(THEME_PREFERENCES);
+
+export function isThemePreference(value: string): value is ThemePreference {
+  return themePreferenceSchema.safeParse(value).success;
 }
 
 /** Reads the theme preference from the request's Cookie header. Default: system. */
@@ -32,7 +35,8 @@ export function getThemePreference(request: Request): ThemePreference {
     } catch {
       // keep raw value; validated below anyway
     }
-    if (isThemePreference(value)) return value;
+    const parsed = themePreferenceSchema.safeParse(value);
+    if (parsed.success) return parsed.data;
   }
   return "system";
 }

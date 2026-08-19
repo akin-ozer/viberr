@@ -84,7 +84,7 @@ describe("StageMeter (per-project stages, ruling 15)", () => {
     const segments = meter.querySelectorAll("span");
     expect(segments.length).toBe(2); // "doing" has 0 tasks → no segment
     expect(meter.getAttribute("title")).toBe("2 to do · 0 in progress · 3 done");
-    expect((segments[1] as HTMLElement).style.opacity).toBe("0.45");
+    expect(segments[1]!.style.opacity).toBe("0.45");
   });
 
   it("renders a ghost pipeline preview for zero tasks — one faint segment per stage", () => {

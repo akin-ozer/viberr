@@ -65,10 +65,29 @@ function connect(
   scopes: SseScope[],
   options: { lastEventId?: number | null; failWrites?: boolean } = {},
 ): TestClient {
+  const writes: string[] = [];
+  // A failing hello write drops the connection INSIDE `connectSseClient`, so
+  // `onClose` can fire before the client object exists — it records into this
+  // holder, which the client then exposes.
+  const lifecycle = { closed: false };
+  const handle = connectSseClient({
+    userId,
+    scopes,
+    lastEventId: options.lastEventId ?? null,
+    write: (chunk) => {
+      if (options.failWrites) throw new Error("boom");
+      writes.push(chunk);
+    },
+    onClose: () => {
+      lifecycle.closed = true;
+    },
+  });
   const client: TestClient = {
-    writes: [],
-    closed: false,
-    handle: undefined as unknown as ReturnType<typeof connectSseClient>,
+    writes,
+    get closed() {
+      return lifecycle.closed;
+    },
+    handle,
     names() {
       return this.writes
         .flatMap((w) => w.split("\n"))
@@ -76,18 +95,6 @@ function connect(
         .map((line) => line.slice("event: ".length));
     },
   };
-  client.handle = connectSseClient({
-    userId,
-    scopes,
-    lastEventId: options.lastEventId ?? null,
-    write: (chunk) => {
-      if (options.failWrites) throw new Error("boom");
-      client.writes.push(chunk);
-    },
-    onClose: () => {
-      client.closed = true;
-    },
-  });
   return client;
 }
 
@@ -256,10 +263,7 @@ describe("wire format", () => {
     const message = conn.writes.at(-1)!;
     expect(message).toMatch(/^id: \d+\nevent: task\.updated\ndata: \{.*\}\n\n$/);
     expect(message.startsWith(`id: ${id}\n`)).toBe(true);
-    const payload = JSON.parse(message.match(/^data: (.*)$/m)![1]!) as Record<
-      string,
-      unknown
-    >;
+    const payload: unknown = JSON.parse(message.match(/^data: (.*)$/m)![1]!);
     expect(payload).toMatchObject({
       type: "task.updated",
       entityId: "p/K-1",

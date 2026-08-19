@@ -50,12 +50,25 @@ interface RegistryState {
 
 const REGISTRY_KEY = Symbol.for("viberr.runtimeRegistry");
 
+/** The single `globalThis` slot this module owns — the cache survives an HMR
+ *  module reload, which a module-level variable would not. */
+interface RegistryHost {
+  [REGISTRY_KEY]?: RegistryState;
+}
+
+/**
+ * SAFETY: `REGISTRY_KEY` is module-private, and `getState` /
+ * `resetRegistryForTests` below are the only code in the process that reads or
+ * writes the slot it names — so the slot holds a `RegistryState` this module
+ * put there, or nothing at all.
+ */
+const registryHost = globalThis as RegistryHost;
+
 function getState(): RegistryState {
-  const cache = globalThis as unknown as Record<symbol, RegistryState | undefined>;
-  let state = cache[REGISTRY_KEY];
+  let state = registryHost[REGISTRY_KEY];
   if (!state) {
     state = { detected: {}, overrides: {} };
-    cache[REGISTRY_KEY] = state;
+    registryHost[REGISTRY_KEY] = state;
   }
   return state;
 }
@@ -400,8 +413,7 @@ export function backendCredentialHealth(
 
 /** Test-only: clear detection state and overrides. */
 export function resetRegistryForTests(): void {
-  const cache = globalThis as unknown as Record<symbol, RegistryState | undefined>;
-  cache[REGISTRY_KEY] = undefined;
+  registryHost[REGISTRY_KEY] = undefined;
 }
 
 /**
@@ -447,7 +459,7 @@ function filteredSpawnEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>
-        typeof entry[1] === "string" &&
+        entry[1] !== undefined &&
         !CREDENTIAL_ENV_RE.test(entry[0]) &&
         !PRIVATE_RUNTIME_ENV_RE.test(entry[0]),
     ),
@@ -540,23 +552,25 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
     env.ANTHROPIC_API_KEY,
     env.CLAUDE_CODE_OAUTH_TOKEN,
   );
+  const claudeDeps: NonNullable<Parameters<typeof createClaudeAdapter>[0]> = {
+    env: claudeEnv,
+  };
+  if (deps.claudeQueryFn) claudeDeps.queryFn = deps.claudeQueryFn;
+  const codexDeps: NonNullable<Parameters<typeof createCodexAdapter>[0]> = {
+    // Point the SDK's spawned `codex` at the subscription login dir. Both
+    // SDKs REPLACE the child env with this object, so we hand it a FULL
+    // (secret-filtered) env — otherwise `codex` spawns with only CODEX_HOME
+    // and loses PATH/HOME (git/auth break). `codexSpawnEnv` starts from
+    // process.env, strips credentials, then forces CODEX_HOME.
+    env: codexEnv,
+  };
+  if (deps.codexFactory) codexDeps.codexFactory = deps.codexFactory;
+  // API key when present; otherwise NO key at all so the Codex SDK uses either
+  // CODEX_ACCESS_TOKEN or the ChatGPT login in $CODEX_HOME/auth.json.
+  if (codexApiKey) codexDeps.apiKey = codexApiKey;
   return {
-    claude: createClaudeAdapter({
-      ...(deps.claudeQueryFn ? { queryFn: deps.claudeQueryFn } : {}),
-      env: claudeEnv,
-    }),
-    codex: createCodexAdapter({
-      ...(deps.codexFactory ? { codexFactory: deps.codexFactory } : {}),
-      // API key when present; otherwise NO key so the Codex SDK uses either
-      // CODEX_ACCESS_TOKEN or the ChatGPT login in $CODEX_HOME/auth.json.
-      ...(codexApiKey ? { apiKey: codexApiKey } : {}),
-      // Point the SDK's spawned `codex` at the subscription login dir. Both
-      // SDKs REPLACE the child env with this object, so we hand it a FULL
-      // (secret-filtered) env — otherwise `codex` spawns with only CODEX_HOME
-      // and loses PATH/HOME (git/auth break). `codexSpawnEnv` starts from
-      // process.env, strips credentials, then forces CODEX_HOME.
-      env: codexEnv,
-    }),
+    claude: createClaudeAdapter(claudeDeps),
+    codex: createCodexAdapter(codexDeps),
   };
 }
 

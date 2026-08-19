@@ -89,9 +89,9 @@ function InviteModal({
         return;
       }
       if (d.toast) push(d.toast);
-      if (typeof d.tempPassword === "string") {
+      if (d.tempPassword !== undefined) {
         onSetupNotice({
-          email: typeof d.email === "string" ? d.email : "",
+          email: d.email ?? "",
           tempPassword: d.tempPassword,
         });
       }
@@ -361,7 +361,7 @@ function EditUserModal({
       if (d.toast) push(d.toast);
       // Modal stays open — the live user record re-renders the pending
       // state and the temp password shows ONCE (spec §7.7 + honesty).
-      if (typeof d.tempPassword === "string") setTempPassword(d.tempPassword);
+      if (d.tempPassword !== undefined) setTempPassword(d.tempPassword);
     },
   });
 

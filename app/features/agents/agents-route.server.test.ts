@@ -6,6 +6,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import type { DeliveryGrantNotice } from "~/shared/capabilities";
 import type {
   AgentProfileView,
   AgentDeploymentView,
@@ -24,7 +25,17 @@ import type {
  */
 
 let app: AppTestContext;
-let ids: { arda: string; selin: string; deniz: string };
+
+/** The three seeded accounts every case below acts as. */
+interface SeededActors {
+  /** project admin */
+  arda: string;
+  /** project reviewer */
+  selin: string;
+  /** a registered user who is NOT a member of viberr-core */
+  deniz: string;
+}
+let ids: SeededActors;
 
 type LoaderData = {
   profiles: AgentProfileView[];
@@ -63,7 +74,7 @@ beforeAll(async () => {
     sdk: "Claude Agent SDK",
     state: "running",
     startedAt,
-  } as Parameters<typeof upsertRun>[1]);
+  });
   upsertRun(app.db, {
     id: "run_test_vib151_reviewer",
     projectSlug: "viberr-core",
@@ -77,21 +88,24 @@ beforeAll(async () => {
     sdk: "Codex SDK",
     state: "running",
     startedAt,
-  } as Parameters<typeof upsertRun>[1]);
+  });
 });
 afterAll(() => app.cleanup());
 
 async function runLoader(userId?: string): Promise<LoaderData> {
   const { loader } = await import("~/routes/project.agents");
   const cookie = userId ? (await app.cookieFor(userId)).cookie : undefined;
-  return (await loader({
+  // SAFETY: the loader reads `request` and `params` and never touches the
+  // router `context`, so this stub carries everything the call executes; the
+  // generated `Route.LoaderArgs` cannot be built outside a real router.
+  return loader({
     request: app.request(
       "/projects/viberr-core/agents",
       cookie ? { cookie } : {},
     ),
     params: { slug: "viberr-core" },
     context: {},
-  } as never)) as LoaderData;
+  } as never);
 }
 
 async function postAction(userId: string, fields: Record<string, string>) {
@@ -105,7 +119,59 @@ async function postAction(userId: string, fields: Record<string, string>) {
     body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
+  // SAFETY: as above — the action reads `request` and `params` only.
   return action({ request, params: { slug: "viberr-core" }, context: {} } as never);
+}
+
+/** Both answers the agents action can give, off its one return type. */
+type AgentsActionReply = Awaited<
+  ReturnType<typeof import("~/routes/project.agents").action>
+>;
+
+/** The payload a successful profile mutation answers with. `project.agents.tsx`
+ *  keeps its own `ProfileMutationSuccess` private, so the fields these cases
+ *  read are written down here. Both notices are OMITTED unless the save
+ *  produced one — the page keys its extra toasts on the key being there. */
+interface ProfileMutationReply {
+  ok: true;
+  toast: string;
+  profileId: string;
+  notice?: DeliveryGrantNotice;
+  governanceNotice?: { message: string };
+}
+
+/** The success half of a reply. A refusal answers `{}`, so a case that expected
+ *  a save and got a refusal reads `undefined` — the same failure the shape it
+ *  replaces produced — rather than a type error. */
+function saved(reply: AgentsActionReply): Partial<ProfileMutationReply> {
+  return "ok" in reply ? reply : {};
+}
+
+/** …and the refusal half: `data({ ok: false, error }, { status })`. Both read
+ *  `undefined` on a success, which is what the assertions want. */
+function refusalStatus(reply: AgentsActionReply): number | undefined {
+  return "ok" in reply ? undefined : reply.init?.status;
+}
+function refusalError(reply: AgentsActionReply): string | undefined {
+  return "ok" in reply ? undefined : reply.data.error;
+}
+
+/** What a route THROWS to refuse a non-member: `data(message, { status })` —
+ *  React Router's `DataWithResponseInit`, carrying the status and the body. */
+interface ThrownRouteRefusal {
+  init?: { status?: number };
+  data?: unknown;
+}
+
+/** The refusal a guarded entry point threw. The rejection handler names the
+ *  contract (`requireProjectMember` / `requireVisibleProject` throw `data(…)`)
+ *  and the resolve branch answers an EMPTY refusal, so a call that unexpectedly
+ *  succeeds reads `undefined` and fails its case instead of passing it. */
+function refusalThrownBy<T>(call: Promise<T>): Promise<ThrownRouteRefusal> {
+  return call.then(
+    (): ThrownRouteRefusal => ({}),
+    (rejection: ThrownRouteRefusal) => rejection,
+  );
 }
 
 const FORM = {
@@ -120,9 +186,14 @@ const FORM = {
 
 describe("loader", () => {
   it("redirects signed-out users to /login", async () => {
-    const thrown = await runLoader().catch((e) => e);
+    // The signed-out guard refuses with a redirect Response, not a `data(…)`
+    // refusal — the `toBeInstanceOf` below is what pins that apart.
+    const thrown = await runLoader().then(
+      () => null,
+      (rejection: Response) => rejection,
+    );
     expect(thrown).toBeInstanceOf(Response);
-    expect((thrown as Response).status).toBe(302);
+    expect(thrown?.status).toBe(302);
   });
 
   it("answers a non-member as an unknown slug, never 403 (F19-28)", async () => {
@@ -132,13 +203,10 @@ describe("loader", () => {
     // projects members-only, so the two answers must be indistinguishable: the
     // loader runs ALONE under single fetch's `?_routes=` filter, so the
     // layout's 404 chokepoint is not a substitute for this gate.
-    const thrown = (await runLoader(ids.deniz).catch((e) => e)) as {
-      init?: { status?: number };
-      data?: unknown;
-    };
-    expect(thrown?.init?.status).toBe(404);
-    expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
-    expect(String(thrown?.data)).not.toMatch(/member/i);
+    const thrown = await refusalThrownBy(runLoader(ids.deniz));
+    expect(thrown.init?.status).toBe(404);
+    expect(String(thrown.data)).toBe("No project at projects/viberr-core.");
+    expect(String(thrown.data)).not.toMatch(/member/i);
   });
 
   it("assembles the seeded roster: operator first, template fields + id-based actions", async () => {
@@ -229,11 +297,11 @@ describe("loader", () => {
 
 describe("action RBAC (profile CRUD is admin-only)", () => {
   it("rejects a reviewer from creating a profile", async () => {
-    const result = (await postAction(ids.selin, {
+    const result = await postAction(ids.selin, {
       intent: "create-profile",
       payload: JSON.stringify(FORM),
-    })) as { init?: { status?: number } };
-    expect(result.init?.status).toBe(403);
+    });
+    expect(refusalStatus(result)).toBe(403);
   });
 
   it("answers a non-member as an unknown slug, never 403 (E2)", async () => {
@@ -241,37 +309,37 @@ describe("action RBAC (profile CRUD is admin-only)", () => {
     // invisible to a non-member (R15-4), so the action refuses before it ever
     // reaches the `manage-agents` tier check. The member-below-tier case above
     // still gets the honest 403.
-    const thrown = (await postAction(ids.deniz, {
-      intent: "delete-profile",
-      profileId: "reviewer",
-    }).catch((e) => e)) as { init?: { status?: number }; data?: unknown };
-    expect(thrown?.init?.status).toBe(404);
-    expect(String(thrown?.data)).toMatch(/^No project at projects\//);
+    const thrown = await refusalThrownBy(
+      postAction(ids.deniz, {
+        intent: "delete-profile",
+        profileId: "reviewer",
+      }),
+    );
+    expect(thrown.init?.status).toBe(404);
+    expect(String(thrown.data)).toMatch(/^No project at projects\//);
   });
 
   it("rejects deleting the operator even for an admin (server invariant)", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = await postAction(ids.arda, {
       intent: "delete-profile",
       profileId: "operator",
-    })) as { init?: { status?: number }; data?: { error?: string } };
-    expect(result.init?.status).toBe(403);
-    expect(result.data?.error).toContain("system profile");
+    });
+    expect(refusalStatus(result)).toBe(403);
+    expect(refusalError(result)).toContain("system profile");
   });
 
   it("rejects unknown intents", async () => {
-    const result = (await postAction(ids.arda, { intent: "frobnicate" })) as {
-      init?: { status?: number };
-    };
-    expect(result.init?.status).toBe(400);
+    const result = await postAction(ids.arda, { intent: "frobnicate" });
+    expect(refusalStatus(result)).toBe(400);
   });
 });
 
 describe("profile CRUD round trip (project.md writers + audit)", () => {
   it("create → deployment entry with inline definition; server-generated slug id", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify(FORM),
-    })) as { ok: boolean; toast: string; profileId: string };
+    }));
     expect(result.ok).toBe(true);
     expect(result.profileId).toBe("migrations");
     expect(result.toast).toContain('"Migrations" created');
@@ -317,7 +385,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
   });
 
   it("coerces always-human capabilities to human even when the form asks for direct", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
         name: "Overreach",
@@ -334,7 +402,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         },
         resources: { skills: [], mcps: [], kb: [] },
       }),
-    })) as { ok: boolean };
+    }));
     expect(result.ok).toBe(true);
 
     const created = (await runLoader(ids.arda)).profiles.find(
@@ -353,7 +421,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
   });
 
   it("persists an explicitly withheld (off) capability so runtime enforcement can see it", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
         name: "Locked Dev",
@@ -364,7 +432,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         caps: { "open-review-pr": "off" },
         resources: { skills: [], mcps: [], kb: [] },
       }),
-    })) as { ok: boolean };
+    }));
     expect(result.ok).toBe(true);
 
     const created = (await runLoader(ids.arda)).profiles.find(
@@ -389,7 +457,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
   // catalog defaults) is what this asserts now, with "not granted" written down
   // as an explicit `off` instead of an absence that silently means the opposite.
   it("persists the submitted governed caps and an explicit `off` for the rest — no permissive defaults merged, F14 headline repair still applies (#37 / AP-06)", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
         name: "Minimal Dev",
@@ -402,7 +470,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         caps: { "create-task-branch": "direct", "open-review-pr": "direct" },
         resources: { skills: [], mcps: [], kb: [] },
       }),
-    })) as { ok: boolean };
+    }));
     expect(result.ok).toBe(true);
 
     const created = (await runLoader(ids.arda)).profiles.find(
@@ -448,7 +516,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
    * repo writes got them back on the next save.
    */
   it("an EXPLICIT headline `off` survives the save, and the contradiction is recorded (B-AG1)", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
         name: "Withheld Dev",
@@ -463,7 +531,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         },
         resources: { skills: [], mcps: [], kb: [] },
       }),
-    })) as { ok: boolean };
+    }));
     expect(result.ok).toBe(true);
 
     const created = (await runLoader(ids.arda)).profiles.find(
@@ -479,12 +547,8 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     const audit = listAuditEvents(app.db, {
       action: "project.agent_profile.created",
     }).find((e) => e.subjectId === "withheld-dev")!;
-    const details = (audit.details ?? {}) as {
-      deliveryGrants?: string;
-      deliveryNote?: string;
-    };
-    expect(details.deliveryGrants).toBe("withheld");
-    expect(details.deliveryNote).toContain("cannot deliver");
+    expect(audit.details?.deliveryGrants).toBe("withheld");
+    expect(audit.details?.deliveryNote).toContain("cannot deliver");
 
     await postAction(ids.arda, {
       intent: "delete-profile",
@@ -512,41 +576,33 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       },
       resources: { skills: [], mcps: [], kb: [] },
     });
-    const created = (await postAction(ids.arda, {
+    const created = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify(contradictory("Silent Dev")),
-    })) as {
-      ok: boolean;
-      toast: string;
-      notice?: { kind: string; message: string };
-    };
+    }));
     expect(created.ok).toBe(true);
     expect(created.notice?.kind).toBe("withheld");
     expect(created.notice?.message).toContain("cannot deliver");
 
     // Editing it (the real path an admin walks into a legacy VIB-1 profile on)
     // reports the same thing rather than a bare "updated" tick.
-    const updated = (await postAction(ids.arda, {
+    const updated = saved(await postAction(ids.arda, {
       intent: "update-profile",
       profileId: "silent-dev",
       payload: JSON.stringify(contradictory("Silent Dev")),
-    })) as {
-      ok: boolean;
-      toast: string;
-      notice?: { kind: string; message: string };
-    };
+    }));
     expect(updated.ok).toBe(true);
     expect(updated.notice?.kind).toBe("withheld");
     expect(updated.notice?.message).toContain("Commit");
 
     // A profile with nothing to decide carries no notice at all.
-    const clean = (await postAction(ids.arda, {
+    const clean = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
         ...contradictory("Plain Dev"),
         caps: { "execute-code-or-write-repo": "direct" },
       }),
-    })) as { ok: boolean; notice?: unknown };
+    }));
     expect(clean.notice).toBeUndefined();
 
     for (const profileId of ["silent-dev", "plain-dev"]) {
@@ -561,7 +617,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     // up to `direct` (the old F7-CAP1 widening, which F20-21 removed because it
     // made a stored `recommend` render/count/enforce as `direct`); `human`/`off`
     // pass through unchanged.
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
         name: "Recommender",
@@ -577,7 +633,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         },
         resources: { skills: [], mcps: [], kb: [] },
       }),
-    })) as { ok: boolean };
+    }));
     expect(result.ok).toBe(true);
 
     const created = (await runLoader(ids.arda)).profiles.find(
@@ -613,7 +669,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         resources: { skills: [], mcps: [], kb: [] },
       }),
     });
-    const upd = (await postAction(ids.arda, {
+    const upd = saved(await postAction(ids.arda, {
       intent: "update-profile",
       profileId: "editable-dev",
       payload: JSON.stringify({
@@ -625,7 +681,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         caps: { "open-review-pr": "recommend", "commit-push-branch": "recommend" },
         resources: { skills: [], mcps: [], kb: [] },
       }),
-    })) as { ok: boolean };
+    }));
     expect(upd.ok).toBe(true);
 
     const edited = (await runLoader(ids.arda)).profiles.find(
@@ -660,7 +716,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     // Update the SAME profile with an EMPTY (whitespace) definition. The old
     // generated placeholder ("Prose Keeper — a implementation specialist.")
     // must never be persisted; the prior prose is left untouched.
-    const upd = (await postAction(ids.arda, {
+    const upd = saved(await postAction(ids.arda, {
       intent: "update-profile",
       profileId: "prose-keeper",
       payload: JSON.stringify({
@@ -672,7 +728,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         caps: {},
         resources: { skills: [], mcps: [], kb: [] },
       }),
-    })) as { ok: boolean };
+    }));
     expect(upd.ok).toBe(true);
 
     const updated = (await runLoader(ids.arda)).profiles.find(
@@ -691,7 +747,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
   });
 
   it("stores the picked model + effort on the deployment definition", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
         name: "Reasoner",
@@ -704,7 +760,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         caps: {},
         resources: { skills: [], mcps: [], kb: [] },
       }),
-    })) as { ok: boolean; profileId: string };
+    }));
     expect(result.ok).toBe(true);
     expect(result.profileId).toBe("reasoner");
 
@@ -726,16 +782,16 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
   });
 
   it("a second profile with the same name gets a uniquified id", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify(FORM),
-    })) as { ok: boolean; profileId: string };
+    }));
     expect(result.ok).toBe(true);
     expect(result.profileId).toBe("migrations-2");
   });
 
   it("edit stores the operator's backend/model/autonomy + governs its caps", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "update-profile",
       profileId: "operator",
       payload: JSON.stringify({
@@ -748,7 +804,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         caps: { "assign-primary-specialist": "recommend", "stage-transitions": "direct" },
         resources: { skills: ["viberr-app-expertise"], mcps: ["viberr"], kb: ["architecture-notes"] },
       }),
-    })) as { ok: boolean; toast: string };
+    }));
     expect(result.ok).toBe(true);
 
     const data = await runLoader(ids.arda);
@@ -770,10 +826,10 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
 
   it("delete removes the deployment; the org template file survives", async () => {
     for (const profileId of ["migrations", "migrations-2"]) {
-      const result = (await postAction(ids.arda, {
+      const result = saved(await postAction(ids.arda, {
         intent: "delete-profile",
         profileId,
-      })) as { ok: boolean };
+      }));
       expect(result.ok).toBe(true);
     }
     const data = await runLoader(ids.arda);
@@ -781,10 +837,10 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     expect(data.profiles).toHaveLength(3);
 
     // Deleting a TEMPLATE-deployed profile also only removes the deployment.
-    const del = (await postAction(ids.arda, {
+    const del = saved(await postAction(ids.arda, {
       intent: "delete-profile",
       profileId: "reviewer",
-    })) as { ok: boolean; toast: string };
+    }));
     expect(del.ok).toBe(true);
     expect(del.toast).toContain('"Reviewer" deleted');
     const after = await runLoader(ids.arda);
@@ -827,10 +883,10 @@ describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
   });
 
   it("deploy-profile copies the template into project.md with a full definition + EXPLICIT grants", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "deploy-profile",
       profileId: "reviewer",
-    })) as { ok: boolean; toast: string; profileId: string };
+    }));
     expect(result.ok).toBe(true);
     expect(result.profileId).toBe("reviewer");
     expect(result.toast).toContain("added from the global library");
@@ -917,10 +973,10 @@ describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
       "utf8",
     );
 
-    const result = (await postAction(ids.arda, {
+    const result = saved(await postAction(ids.arda, {
       intent: "deploy-profile",
       profileId: templateId,
-    })) as { ok: boolean; notice?: { kind: string; message: string } };
+    }));
     expect(result.ok).toBe(true);
     expect(result.notice?.kind).toBe("withheld");
     expect(result.notice?.message).toContain("cannot deliver");
@@ -928,9 +984,7 @@ describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
     const audit = listAuditEvents(app.db, {
       action: "project.agent_profile.deployed",
     }).find((e) => e.subjectId === templateId)!;
-    expect((audit.details ?? {}) as { deliveryGrants?: string }).toMatchObject({
-      deliveryGrants: "withheld",
-    });
+    expect(audit.details).toMatchObject({ deliveryGrants: "withheld" });
 
     await postAction(ids.arda, {
       intent: "delete-profile",
@@ -940,33 +994,33 @@ describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
   });
 
   it("refuses a duplicate deploy, an unknown id, and a non-admin", async () => {
-    const dup = (await postAction(ids.arda, {
+    const dup = await postAction(ids.arda, {
       intent: "deploy-profile",
       profileId: "reviewer",
-    })) as { init?: { status?: number }; data?: { error?: string } };
-    expect(dup.init?.status).toBe(409);
-    expect(dup.data?.error).toContain("already deployed");
+    });
+    expect(refusalStatus(dup)).toBe(409);
+    expect(refusalError(dup)).toContain("already deployed");
 
-    const unknown = (await postAction(ids.arda, {
+    const unknown = await postAction(ids.arda, {
       intent: "deploy-profile",
       profileId: "no-such-template",
-    })) as { init?: { status?: number } };
-    expect(unknown.init?.status).toBe(404);
+    });
+    expect(refusalStatus(unknown)).toBe(404);
 
     // The operator template is a system profile — never library material,
     // rejected on its kind before any duplicate check.
-    const operator = (await postAction(ids.arda, {
+    const operator = await postAction(ids.arda, {
       intent: "deploy-profile",
       profileId: "operator",
-    })) as { init?: { status?: number }; data?: { error?: string } };
-    expect(operator.init?.status).toBe(400);
-    expect(operator.data?.error).toContain("not a specialist template");
+    });
+    expect(refusalStatus(operator)).toBe(400);
+    expect(refusalError(operator)).toContain("not a specialist template");
 
-    const denied = (await postAction(ids.selin, {
+    const denied = await postAction(ids.selin, {
       intent: "deploy-profile",
       profileId: "reviewer",
-    })) as { init?: { status?: number } };
-    expect(denied.init?.status).toBe(403);
+    });
+    expect(refusalStatus(denied)).toBe(403);
   });
 
   it("AP-11 sibling: a traversing profileId is rejected, not path.join'd into the store", async () => {
@@ -974,12 +1028,12 @@ describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
     // containment guard skills/KB got in F10-18 was never added to it), and
     // this id arrives from a form field — so the segment is validated here.
     for (const evil of ["../../project", "..", "a/b", "with\\sep"]) {
-      const result = (await postAction(ids.arda, {
+      const result = await postAction(ids.arda, {
         intent: "deploy-profile",
         profileId: evil,
-      })) as { init?: { status?: number }; data?: { error?: string } };
-      expect(result.init?.status, evil).toBe(400);
-      expect(result.data?.error, evil).toContain("not a valid profile id");
+      });
+      expect(refusalStatus(result), evil).toBe(400);
+      expect(refusalError(result), evil).toContain("not a valid profile id");
     }
   });
 });
@@ -1033,10 +1087,12 @@ describe("AP-07 — a project-level edit FORKS the profile (the modal now says s
 
     // Deploy it, then confirm it still tracks the template.
     expect(
-      ((await postAction(ids.arda, {
-        intent: "deploy-profile",
-        profileId: templateId,
-      })) as { ok: boolean }).ok,
+      saved(
+        await postAction(ids.arda, {
+          intent: "deploy-profile",
+          profileId: templateId,
+        }),
+      ).ok,
     ).toBe(true);
 
     // Edit the project's copy — this is the fork point.
@@ -1103,10 +1159,10 @@ describe("F15-05/06 — a brand-new profile claims no verdict authority", () => 
       { userId: ids.arda, label: "Arda" },
       { dataRoot: app.dataRoot },
     );
-    const deployed = (await postAction(ids.arda, {
+    const deployed = saved(await postAction(ids.arda, {
       intent: "deploy-profile",
       profileId: orgProfileId,
-    })) as { ok: boolean };
+    }));
     expect(deployed.ok).toBe(true);
 
     const view = (await runLoader(ids.arda)).profiles.find(
@@ -1174,20 +1230,20 @@ describe("F20-20 — an operator autonomy elevation is audited + surfaced, not g
 
     // Baseline the operator to supervised (self-contained regardless of the
     // order earlier tests left it in) — this is NOT an elevation, so no notice.
-    const baseline = (await postAction(ids.arda, {
+    const baseline = saved(await postAction(ids.arda, {
       intent: "update-profile",
       profileId: "operator",
       payload: operatorForm("supervised", "recommend"),
-    })) as { ok: boolean; governanceNotice?: unknown };
+    }));
     expect(baseline.ok).toBe(true);
     expect(baseline.governanceNotice).toBeUndefined();
 
     // Now elevate to full + direct accept-completion: the exception goes live.
-    const elevated = (await postAction(ids.arda, {
+    const elevated = saved(await postAction(ids.arda, {
       intent: "update-profile",
       profileId: "operator",
       payload: operatorForm("full", "direct"),
-    })) as { ok: boolean; governanceNotice?: { message: string } };
+    }));
     expect(elevated.ok).toBe(true);
     expect(elevated.governanceNotice?.message).toContain("full autonomy");
     expect(elevated.governanceNotice?.message).toContain("without a human");
@@ -1199,14 +1255,12 @@ describe("F20-20 — an operator autonomy elevation is audited + surfaced, not g
       action: "project.operator.autonomy_changed",
     }).filter((e) => e.subjectId === "operator");
     expect(
-      govRows.some((e) => {
-        const d = (e.details ?? {}) as {
-          from?: string;
-          to?: string;
-          directDoneLive?: boolean;
-        };
-        return d.from === "supervised" && d.to === "full" && d.directDoneLive === true;
-      }),
+      govRows.some(
+        (e) =>
+          e.details?.from === "supervised" &&
+          e.details.to === "full" &&
+          e.details.directDoneLive === true,
+      ),
       "an autonomy_changed event records supervised→full with the exception live",
     ).toBe(true);
 
@@ -1216,7 +1270,7 @@ describe("F20-20 — an operator autonomy elevation is audited + surfaced, not g
     }).filter((e) => e.subjectId === "operator");
     expect(
       updated.some(
-        (e) => (e.details as { operatorAutonomy?: string })?.operatorAutonomy === "full",
+        (e) => e.details?.operatorAutonomy === "full",
       ),
     ).toBe(true);
 

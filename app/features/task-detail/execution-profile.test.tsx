@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -29,22 +30,48 @@ const deployedFixture: DeployedSpecialistView[] = [
   { id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large" },
 ];
 
-/** An UNOWNED task — `owner: null` is the branch this finding lives in. */
+/** An UNOWNED task — `owner: null` is the branch this finding lives in. The
+ *  rest is a neutral projection row: nothing here is accepted/merged/archived,
+ *  so the section renders its live controls. */
 function unownedTask(): TaskSummary {
   return {
     key: "VIB-151",
     title: "Compress long-running task timelines",
     projectSlug: "viberr-core",
+    stage: "impl",
+    readiness: "ready",
+    displayReadiness: "ready",
     waiting: "agent",
+    urgent: false,
+    archived: false,
+    validation: "healthy",
+    continuity: null,
+    blockReason: null,
+    atAcceptanceBoundary: false,
     packet: null,
     owner: null,
     specialist: null,
     reviewers: [],
     operator: null,
-  } as unknown as TaskSummary;
+    branch: null,
+    repo: null,
+    pr: null,
+    prChecks: null,
+    prReview: null,
+    commits: [],
+    changed: null,
+    goal: "Keep the console readable on long runs.",
+    eventCount: 0,
+    commentCount: 0,
+    diagnosticCount: 0,
+    createdAt: null,
+    updatedAt: null,
+    boardRank: null,
+    filePath: "projects/viberr-core/tasks/VIB-151/task.md",
+  };
 }
 
-function renderExec(props: Partial<Record<string, unknown>> = {}) {
+function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}) {
   return render(
     <MemoryRouter>
       <ExecutionProfile

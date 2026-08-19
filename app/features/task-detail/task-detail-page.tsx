@@ -27,7 +27,7 @@ import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
-import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import {
   useActionFeedback,
   useLogSelection,
@@ -239,13 +239,17 @@ export function TaskDetailPage({
   // recommendation) are admin|maintainer (contracts §3.2); server re-checks
   // RBAC. The execution mutations live in ExecutionSection; applying a
   // recommendation is page-owned (F19-3 — an Apply can be an acceptance).
-  const canRunAgents = roleCan(myRole as ProjectRole | null, "run-agents");
-  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  // `myRole` arrives from the loader as a plain string; narrow it ONCE to the
+  // project-role domain. A value outside the four roles holds no action — the
+  // same answer `roleCan` already gives a non-member.
+  const role: ProjectRole | null = PROJECT_ROLES.find((r) => r === myRole) ?? null;
+  const canRunAgents = roleCan(role, "run-agents");
+  const canOwn = roleCan(role, "own-task");
   // E3: ask for the action the SERVER enforces, not a neighbouring one.
   // `updateTaskGoal` requires `update-goal`; this read `run-agents`, which
   // agrees today only because the matrix happens to line up — a role change to
   // either row silently desyncs the button from the endpoint behind it.
-  const canEditGoal = roleCan(myRole as ProjectRole | null, "update-goal");
+  const canEditGoal = roleCan(role, "update-goal");
   // The viewer may resolve THIS packet when they're admin|maintainer OR the
   // task owner (M2 / owner ruling Q2, WIDENED by R14-2). The owner bypass
   // requires `own-task` (contributor+): the server's owner check does too, so a
@@ -265,10 +269,7 @@ export function TaskDetailPage({
   // set. A contributor-owner may resolve the packet but not this option, so the
   // card blocks it with the reason instead of 403ing on click (same treatment
   // as edit_goal / accept_completion).
-  const canArchiveViaPacket = roleCan(
-    myRole as ProjectRole | null,
-    "approve-transition",
-  );
+  const canArchiveViaPacket = roleCan(role, "approve-transition");
 
   // F7-UI1: "operator active" reflects a LIVE operator run (queued/running),
   // never mere attachment. The runtime projection already carries kind+state.

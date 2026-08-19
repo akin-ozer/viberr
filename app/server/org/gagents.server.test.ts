@@ -4,6 +4,7 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   parseAgentProfileContent,
   serializeAgentProfile,
+  type AgentProfileFrontmatter,
 } from "~/server/files/agent-profile-file.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import {
@@ -33,7 +34,7 @@ function writeTemplate(
   dataRoot: string,
   id: string,
   kind: "operator" | "specialist",
-  extraFm: Record<string, unknown> = {},
+  extraFm: Partial<AgentProfileFrontmatter> = {},
 ) {
   writeFileAtomic(
     agentProfileFilePath(id, dataRoot),

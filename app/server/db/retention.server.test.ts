@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   applyRetention,
@@ -8,6 +9,12 @@ import {
 } from "./retention.server";
 
 const ctx = createTestDbContext();
+
+/* `.get()`/`.all()` hand back untyped SQLite cells, so every row below is
+ * parsed on read — the SELECT names the column, the schema pins its type. */
+const countRowSchema = z.object({ c: z.number() });
+const seqRowSchema = z.object({ seq: z.number() });
+const idRowsSchema = z.array(z.object({ id: z.string() }));
 
 function iso(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 86_400_000).toISOString();
@@ -51,13 +58,17 @@ describe("applyRetention (F10-29)", () => {
     expect(res.auditEvents).toBe(1);
 
     expect(
-      db.prepare(`SELECT COUNT(*) c FROM run_log_lines`).get() as { c: number },
+      countRowSchema.parse(
+        db.prepare(`SELECT COUNT(*) c FROM run_log_lines`).get(),
+      ),
     ).toEqual({ c: 1 });
     expect(
-      (db.prepare(`SELECT seq FROM run_log_lines`).get() as { seq: number }).seq,
+      seqRowSchema.parse(db.prepare(`SELECT seq FROM run_log_lines`).get()).seq,
     ).toBe(2);
     expect(
-      db.prepare(`SELECT COUNT(*) c FROM audit_events`).get() as { c: number },
+      countRowSchema.parse(
+        db.prepare(`SELECT COUNT(*) c FROM audit_events`).get(),
+      ),
     ).toEqual({ c: 1 });
   });
 
@@ -83,14 +94,14 @@ describe("applyRetention (F10-29)", () => {
     const res = applyRetention(db);
     expect(res.notifications).toBe(20);
     expect(
-      (db.prepare(`SELECT COUNT(*) c FROM notifications WHERE user_id='u1'`).get() as {
-        c: number;
-      }).c,
+      countRowSchema.parse(
+        db.prepare(`SELECT COUNT(*) c FROM notifications WHERE user_id='u1'`).get(),
+      ).c,
     ).toBe(NOTIFICATION_MAX_PER_USER);
     expect(
-      (db.prepare(`SELECT COUNT(*) c FROM notifications WHERE user_id!='u1'`).get() as {
-        c: number;
-      }).c,
+      countRowSchema.parse(
+        db.prepare(`SELECT COUNT(*) c FROM notifications WHERE user_id!='u1'`).get(),
+      ).c,
     ).toBe(1);
   });
 });
@@ -118,9 +129,9 @@ describe("idempotency-keyed audit rows survive retention (B-FD10)", () => {
 
     expect(applyRetention(db).auditEvents).toBe(2);
     expect(
-      (db.prepare(`SELECT id FROM audit_events ORDER BY id`).all() as { id: string }[]).map(
-        (r) => r.id,
-      ),
+      idRowsSchema
+        .parse(db.prepare(`SELECT id FROM audit_events ORDER BY id`).all())
+        .map((r) => r.id),
     ).toEqual(["keep_plan", "keep_reply"]);
   });
 });

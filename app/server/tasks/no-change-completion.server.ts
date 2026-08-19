@@ -1,7 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { AppError } from "~/server/errors/app-error.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import {
+  type TaskFileRef,
+  readTaskFile,
+} from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
+import type { GithubContextOptions } from "~/server/github/github-context.server";
 import type {
   FileActorRef,
   TaskFileEvent,
@@ -30,6 +35,18 @@ import type {
  * Everything lives in one module so a fifth writer to Done cannot ship without
  * the gate (the same reason `closedPrBlockedReason` is one shared helper).
  */
+
+/** The task-file read ref for a call context: `dataRoot` is carried only when
+ *  the caller actually has one, so the reader keeps its own default otherwise. */
+function taskFileRef(
+  ctx: { dataRoot?: string },
+  projectSlug: string,
+  taskKey: string,
+): TaskFileRef {
+  const ref: TaskFileRef = { projectSlug, taskKey };
+  if (ctx.dataRoot) ref.dataRoot = ctx.dataRoot;
+  return ref;
+}
 
 /** What a passing verification established — the facts the event may state. */
 export interface NoChangeVerification {
@@ -63,8 +80,16 @@ export function noChangeCandidate(fm: Pick<TaskFrontmatter, "pr">): boolean {
   return !fm.pr;
 }
 
-interface GhRef {
-  object?: { sha?: string };
+/** `GET /git/ref/...` — the one field this module reads. Parsed, not asserted:
+ *  the client hands back the decoded body untyped, so a sha is only a sha once
+ *  something has checked it (an empty one is no sha at all). */
+const refShaSchema = z.object({ object: z.object({ sha: z.string().min(1) }) });
+
+/** What the live probe needs from its caller: where the files are, and the
+ *  mock-transport hook the GitHub context already takes (tests only). */
+export interface NoChangeProbeContext {
+  dataRoot?: string;
+  fetchImpl?: typeof fetch;
 }
 
 /**
@@ -81,23 +106,23 @@ interface GhRef {
  */
 export async function probeNothingToDeliver(
   db: DatabaseSync,
-  ctx: { dataRoot?: string },
+  ctx: NoChangeProbeContext,
   projectSlug: string,
   taskKey: string,
 ): Promise<NoChangeProbe> {
   try {
     const { taskBranchName } = await import("~/server/github/branch-sync.server");
-    const file = readTaskFile({
-      projectSlug,
-      taskKey,
-      ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-    });
+    const file = readTaskFile(taskFileRef(ctx, projectSlug, taskKey));
     const branch = file?.parsed.frontmatter.branch ?? taskBranchName(taskKey);
 
     const { getProjectGithubContext } = await import(
       "~/server/github/github-context.server"
     );
-    const gh = getProjectGithubContext(db, projectSlug);
+    // `fetchImpl` is an OPTIONAL key: the context reads it with a truthiness
+    // check, so the hook is set only when a caller supplied one.
+    const githubOptions: GithubContextOptions = {};
+    if (ctx.fetchImpl) githubOptions.fetchImpl = ctx.fetchImpl;
+    const gh = getProjectGithubContext(db, projectSlug, githubOptions);
     if (gh.status === "no_repo_configured") {
       // Nothing was configured to deliver INTO. This is the one basis with no
       // sha to name, and it keeps repo-less (planning) projects acceptable.
@@ -122,19 +147,20 @@ export async function probeNothingToDeliver(
     }
 
     const { encodeRefPath } = await import("~/server/github/github-client.server");
-    const head = await gh.client.request<GhRef>(
+    const head = await gh.client.request(
       "GET",
       `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${branch}`)}`,
     );
 
     /** The default-branch head — the sha the outcome is pinned to. */
     const readBaseSha = async (): Promise<string | null> => {
-      const baseRef = await gh.client.request<GhRef>(
+      const baseRef = await gh.client.request(
         "GET",
         `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${gh.defaultBranch}`)}`,
       );
-      const sha = baseRef.ok ? baseRef.data?.object?.sha : null;
-      return typeof sha === "string" && sha !== "" ? sha : null;
+      if (!baseRef.ok) return null;
+      const parsed = refShaSchema.safeParse(baseRef.data);
+      return parsed.success ? parsed.data.object.sha : null;
     };
 
     if (!head.ok) {
@@ -253,15 +279,11 @@ export interface AcceptanceNoChangeCheck {
  */
 export async function acceptanceNoChangeCheck(
   db: DatabaseSync,
-  ctx: { dataRoot?: string },
+  ctx: NoChangeProbeContext,
   projectSlug: string,
   taskKey: string,
 ): Promise<AcceptanceNoChangeCheck> {
-  const file = readTaskFile({
-    projectSlug,
-    taskKey,
-    ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-  });
+  const file = readTaskFile(taskFileRef(ctx, projectSlug, taskKey));
   const fm = file?.parsed.frontmatter;
   if (!fm) {
     return { applies: false, refusal: null, verification: null, branch: null, autoDetected: false };

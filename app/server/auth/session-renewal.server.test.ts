@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 
 /**
@@ -45,11 +46,14 @@ function ageSession(sessionId: string, daysAgo: number): void {
 
 async function rootLoader(cookie: string) {
   const { loader } = await import("~/root");
+  const request = app.request("/", { cookie });
   return loader({
-    request: app.request("/", { cookie }),
+    request,
+    url: new URL(request.url),
     params: {},
-    context: {},
-  } as never);
+    pattern: "/",
+    context: new RouterContextProvider(),
+  });
 }
 
 describe("F10-17: rolling-session renewal reaches the browser", () => {
@@ -88,21 +92,20 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
     const { cookie, sessionId } = await app.cookieFor(ardaId);
     ageSession(sessionId, 3);
 
-    const result = (await rootLoader(cookie)) as {
-      init?: { headers?: Headers };
-      data?: { theme?: string };
-    };
+    const result = await rootLoader(cookie);
+    // The loader answers in one of two shapes; `init` is what tells them apart.
+    const wrapped = "init" in result ? result : null;
 
     // A renewal is due, so the loader must return data() WITH headers rather
     // than a bare payload — otherwise the slide never reaches the browser.
-    const headers = result.init?.headers;
+    const headers = wrapped?.init?.headers;
     expect(headers).toBeDefined();
     const forwarded = new Headers(headers).getSetCookie();
     expect(forwarded.length).toBeGreaterThan(0);
     expect(forwarded.join("\n")).toContain("session_token");
     // The payload itself is still present (P11-46 removed the unread `user`
     // field; theme remains).
-    expect(result.data?.theme).toBeDefined();
+    expect(wrapped?.data.theme).toBeDefined();
   });
 
   it("a fresh session adds no headers (the common path stays a bare payload)", async () => {
@@ -110,20 +113,24 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
     // Well inside the updateAge window — no roll is due.
     ageSession(sessionId, 0);
 
-    const result = (await rootLoader(cookie)) as {
-      init?: unknown;
-      theme?: string;
-    };
+    const result = await rootLoader(cookie);
 
     // Bare payload: no data() wrapper, so no stray Set-Cookie is written.
-    expect(result.init).toBeUndefined();
-    expect(result.theme).toBeDefined();
+    expect("init" in result ? result.init : undefined).toBeUndefined();
+    expect("theme" in result ? result.theme : undefined).toBeDefined();
   });
 
   it("the headers export surfaces loader headers for routes without their own", async () => {
     const { headers } = await import("~/root");
     const loaderHeaders = new Headers();
     loaderHeaders.append("Set-Cookie", "session_token=abc; Path=/");
-    expect(headers({ loaderHeaders } as never)).toBe(loaderHeaders);
+    expect(
+      headers({
+        loaderHeaders,
+        parentHeaders: new Headers(),
+        actionHeaders: new Headers(),
+        errorHeaders: undefined,
+      }),
+    ).toBe(loaderHeaders);
   });
 });

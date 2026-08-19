@@ -18,7 +18,13 @@ export interface FakeRun {
   outcome?: "finished" | "error";
 }
 
-const queued: Record<RealBackend, FakeRun[]> = { claude: [], codex: [] };
+/** The runs a test queued, per backend, consumed oldest-first by the adapters. */
+interface QueuedRuns {
+  claude: FakeRun[];
+  codex: FakeRun[];
+}
+
+const queued: QueuedRuns = { claude: [], codex: [] };
 
 /**
  * Every `RunSpec` the fake adapters were started with, in order. Lets a test
@@ -126,18 +132,20 @@ function lineFacts(spec: RunSpec, line: LogLine, sessionId: string): EmittedLine
           output_tokens: line.stats.out ?? 0,
         }
       : undefined);
-  return {
-    sessionId,
-    model: spec.model,
-    ...(usage ? { usage } : {}),
-    ...(line.stats?.cost !== undefined ? { costUsd: line.stats.cost } : {}),
-    ...(line.stats?.turns !== undefined ? { turns: line.stats.turns } : {}),
-    ...(line.ev === "result" ? { isResult: true } : {}),
-    ...(line.ev === "err" ||
+  // Absence is the signal the fold reads (a fact the envelope did not carry is
+  // left alone), so each key is set only when this line actually reports it.
+  const facts: EmittedLine["facts"] = { sessionId, model: spec.model };
+  if (usage) facts.usage = usage;
+  if (line.stats?.cost !== undefined) facts.costUsd = line.stats.cost;
+  if (line.stats?.turns !== undefined) facts.turns = line.stats.turns;
+  if (line.ev === "result") facts.isResult = true;
+  if (
+    line.ev === "err" ||
     (line.ev === "result" && line.stats?.subtype && line.stats.subtype !== "success")
-      ? { isError: true }
-      : {}),
-  };
+  ) {
+    facts.isError = true;
+  }
+  return facts;
 }
 
 function inferOutcome(lines: LogLine[]): "finished" | "error" {

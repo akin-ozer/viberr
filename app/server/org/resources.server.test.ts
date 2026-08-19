@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { unreachableFetch } from "../../../test-support/fake-github";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { kbDirPath, skillDirPath } from "~/server/files/file-store-root.server";
@@ -38,15 +39,33 @@ import {
 import { resetWarmupsForTest } from "./mcp-warmup.server";
 
 /**
+ * The JSON-RPC request envelope the fakes read back off the wire. Only
+ * `method` steers a reply, and a message without one has to fall through every
+ * branch — so the schema stays tolerant instead of rejecting the whole line.
+ */
+const jsonRpcRequest = z.object({ method: z.string().optional() }).catch({});
+
+/**
+ * The JSON-RPC replies the fakes write back: the `initialize` result, then the
+ * `tools/list` result — the only two messages the probe handshake reads.
+ */
+type FakeMcpReply = { jsonrpc: "2.0"; id: number } & {
+  result:
+    | { capabilities: Record<string, never> }
+    | { protocolVersion: string }
+    | { tools: { name: string }[] };
+};
+
+/**
  * A fake stdio MCP server: answers the JSON-RPC `initialize` and `tools/list`
  * handshake with `tools` tools — no real process spawned.
  */
 function fakeMcpSpawn(tools: number): McpSpawn {
   return () => {
     const stdout = new EventEmitter();
-    const emit = (obj: unknown) =>
+    const emit = (reply: FakeMcpReply) =>
       queueMicrotask(() =>
-        stdout.emit("data", Buffer.from(`${JSON.stringify(obj)}\n`)),
+        stdout.emit("data", Buffer.from(`${JSON.stringify(reply)}\n`)),
       );
     return {
       stdin: {
@@ -54,7 +73,7 @@ function fakeMcpSpawn(tools: number): McpSpawn {
           for (const line of data.split("\n")) {
             const t = line.trim();
             if (!t) continue;
-            const msg = JSON.parse(t) as { method?: string };
+            const msg = jsonRpcRequest.parse(JSON.parse(t));
             if (msg.method === "initialize") {
               emit({ jsonrpc: "2.0", id: 1, result: { capabilities: {} } });
             } else if (msg.method === "tools/list") {
@@ -147,7 +166,7 @@ const epipeSpawn: McpSpawn = () => {
         queueMicrotask(() => stdinErr.emit("error", new Error("write EPIPE")));
       },
       end() {},
-      on: (event: "error", cb: (err: unknown) => void) => stdinErr.on(event, cb),
+      on: (event, cb) => stdinErr.on(event, cb),
     },
     stdout: { on() {} },
     stderr: { on() {} },
@@ -166,7 +185,7 @@ function exitingSpawn(code: number | null, signal?: string): McpSpawn {
       stdout: { on() {} },
       stderr: { on() {} },
       on: (event, cb) => {
-        if (event === "exit") exit.on("exit", cb as (a?: unknown, b?: unknown) => void);
+        if (event === "exit") exit.on("exit", cb);
       },
       kill() {},
     };
@@ -194,7 +213,8 @@ function setup() {
 }
 
 /** An "up" probe transport: any HTTP response counts as reachable. */
-const respondingFetch = (async () => new Response("nope", { status: 404 })) as typeof fetch;
+const respondingFetch: typeof fetch = async () =>
+  new Response("nope", { status: 404 });
 
 /**
  * A fake Streamable-HTTP MCP endpoint that answers the REAL handshake
@@ -205,13 +225,16 @@ function mcpHttpFetch(
   toolCount: number,
   opts: { sseFramed?: boolean; requireAuth?: string } = {},
 ): typeof fetch {
-  return (async (_url: string, init?: RequestInit) => {
-    const headers = (init?.headers ?? {}) as Record<string, string>;
-    if (opts.requireAuth && headers.authorization !== `Bearer ${opts.requireAuth}`) {
+  return async (_url, init) => {
+    const headers = new Headers(init?.headers);
+    if (
+      opts.requireAuth &&
+      headers.get("authorization") !== `Bearer ${opts.requireAuth}`
+    ) {
       return new Response("no", { status: 401 });
     }
-    const body = JSON.parse(String(init?.body ?? "{}")) as { id?: number; method?: string };
-    const reply = (payload: unknown) => {
+    const body = jsonRpcRequest.parse(JSON.parse(String(init?.body ?? "{}")));
+    const reply = (payload: FakeMcpReply) => {
       const text = opts.sseFramed
         ? `event: message\ndata: ${JSON.stringify(payload)}\n\n`
         : JSON.stringify(payload);
@@ -234,7 +257,7 @@ function mcpHttpFetch(
       });
     }
     return new Response("", { status: 202 });
-  }) as unknown as typeof fetch;
+  };
 }
 
 describe("knowledge bases", () => {
@@ -852,13 +875,13 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     const groups: number[] = [];
     let directKills = 0;
     const realKill = process.kill.bind(process);
-    process.kill = ((pid: number, sig?: string | number) => {
+    process.kill = (pid, sig) => {
       if (pid < 0) {
         groups.push(pid);
         return true;
       }
-      return realKill(pid, sig as never);
-    }) as typeof process.kill;
+      return realKill(pid, sig);
+    };
     try {
       const withPid: McpSpawn = () => ({
         stdin: { write() {}, end() {} },
@@ -928,7 +951,7 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
       timeoutMs: 20,
     });
     expect(node).toMatchObject({ kind: "down", reason: "timed out after 0s" });
-    expect((node as { firstRunInstaller?: boolean }).firstRunInstaller).toBeUndefined();
+    if (node.kind === "down") expect(node.firstRunInstaller).toBeUndefined();
   });
 
   it("R20-4 (N20-2): an always-timing-out npx arms ONE heuristic warm-up, then settles unreachable", async () => {
@@ -1206,9 +1229,12 @@ describe("resource reference integrity", () => {
       kb: { id: kb.id, dir: "race-facts-v2" },
     });
 
-    const rows = db
-      .prepare(`SELECT id, dir FROM org_knowledge_bases ORDER BY dir`)
-      .all() as unknown as { id: string; dir: string }[];
+    const rows = z
+      .object({ id: z.string(), dir: z.string() })
+      .array()
+      .parse(
+        db.prepare(`SELECT id, dir FROM org_knowledge_bases ORDER BY dir`).all(),
+      );
     expect(rows).toEqual([{ id: kb.id, dir: "race-facts-v2" }]);
     // The rename still completed on both legs.
     expect(existsSync(kbDirPath("race-facts-v2", dataRoot))).toBe(true);

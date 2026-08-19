@@ -7,7 +7,14 @@ import {
   type DeployedSpecialistView,
 } from "./execution-profile";
 import type { TaskDetail } from "~/server/projections/task-query.server";
-import type { TaskSchedule } from "~/schemas/task-file.schema";
+import type {
+  PacketOption,
+  PacketOptionKind,
+  PrRef,
+  PrState,
+  TaskSchedule,
+} from "~/schemas/task-file.schema";
+import type { PacketRender } from "~/shared/mapping/task.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { ToastProvider } from "~/ui/toast";
 import { AcceptConfirm } from "./accept-confirm";
@@ -44,12 +51,18 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     key: "VIB-151",
     title: "Compress long-running task timelines",
     stage: "review",
-    readiness: "in_review",
-    displayReadiness: "in_review",
+    readiness: "ready",
+    displayReadiness: "ready",
     waiting: "human",
     urgent: false,
+    archived: false,
     validation: "healthy",
+    continuity: null,
     blockReason: null,
+    // The BOARD's own boundary predicate — nothing the task page renders reads
+    // it, so it stays neutral and the `acceptance` prop remains the single
+    // answer these tests vary.
+    atAcceptanceBoundary: false,
     owner: { kind: "human", userId: "u-selin", name: "Selin Aksoy", initials: "SA", tone: "" },
     specialist: null,
     reviewers: [],
@@ -73,8 +86,10 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     timeline: [],
     diagnostics: [],
     stages: STAGES,
+    lastActivityAt: null,
+    quiet: false,
     ...patch,
-  } as unknown as TaskDetail;
+  };
 }
 
 const ACCEPTANCE: AcceptanceAffordance = {
@@ -127,7 +142,7 @@ function renderPage(props: {
             recommendations={props.recommendations ?? []}
             schedules={props.schedules ?? []}
             archived={props.archived ?? false}
-            acceptance={{ ...ACCEPTANCE, ...(props.acceptance ?? {}) }}
+            acceptance={{ ...ACCEPTANCE, ...props.acceptance }}
             githubHost="https://github.com"
             workRevisionSha={props.workRevisionSha ?? null}
             canDeliver={props.canDeliver ?? false}
@@ -137,7 +152,7 @@ function renderPage(props: {
       action: async ({ request }) => {
         const fd = await request.formData();
         const row: Record<string, string> = {};
-        for (const [k, v] of fd.entries()) if (typeof v === "string") row[k] = v;
+        for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
         submitted.push(row);
         return { ok: true, intent: row.intent, toast: "done" };
       },
@@ -150,7 +165,7 @@ function renderPage(props: {
 const findButton = (container: HTMLElement, text: string) =>
   Array.from(container.querySelectorAll("button")).find((b) =>
     b.textContent?.includes(text),
-  ) as HTMLButtonElement | undefined;
+  );
 
 describe("P14-LV-06: the acceptance affordance", () => {
   it("renders an Accept control naming the terminal stage; it CONFIRMS first, then submits accept-completion (F15-10)", async () => {
@@ -171,7 +186,7 @@ describe("P14-LV-06: the acceptance affordance", () => {
   it("the confirm names the PR, revision, verdict state and target branch (R15-1)", () => {
     const { container, getByText } = renderPage({
       task: {
-        pr: { number: 117, state: "review", title: "[VIB-151] x" } as TaskDetail["pr"],
+        pr: { number: 117, state: "review", title: "[VIB-151] x" },
       },
       workRevisionSha: "abcdef1234567890",
     });
@@ -302,7 +317,7 @@ describe("P14-LV-06: the acceptance affordance", () => {
       myRole: "admin",
       task: {
         blockReason: "PR #124 closed without merging",
-        pr: { number: 124, state: "closed", title: "[VIB-151] x" } as TaskDetail["pr"],
+        pr: { number: 124, state: "closed", title: "[VIB-151] x" },
         packet: {
           type: "input",
           kind: "Decision required",
@@ -311,10 +326,10 @@ describe("P14-LV-06: the acceptance affordance", () => {
           body: "Rework and reopen, or archive the task.",
           observations: [],
           options: [
-            { kind: "custom", title: "Rework and reopen the PR", detail: "", rec: true },
-            { kind: "archive_task", title: "Archive the task", detail: "" },
+            { kind: "custom", t: "Rework and reopen the PR", d: "", rec: true },
+            { kind: "archive_task", t: "Archive the task", d: "", rec: false },
           ],
-        } as unknown as TaskDetail["packet"],
+        },
       },
       acceptance: {
         canAccept: false,
@@ -386,7 +401,7 @@ describe("P14-LV-06: the acceptance affordance", () => {
   it("F15-11: an ARCHIVED task renders no Accept control, no schedule form, and disabled run controls", () => {
     const { container, queryByText } = renderPage({
       archived: true,
-      task: { archived: true } as Partial<TaskDetail>,
+      task: { archived: true },
       acceptance: { atBoundary: true, canAccept: true },
     });
     // Fails on main: the Accept button and the schedule form stayed live.
@@ -404,13 +419,12 @@ describe("P14-LV-06: the acceptance affordance", () => {
  * has drifted ahead of the reviewed revision. Three of the five never asked.
  */
 describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", () => {
-  const acceptedPr = (patch: Record<string, unknown> = {}) =>
-    ({
-      number: 147,
-      state: "accepted",
-      title: "[VIB-151] Compress timelines",
-      ...patch,
-    }) as unknown as TaskDetail["pr"];
+  const acceptedPr = (patch: Partial<PrRef> = {}): PrRef => ({
+    number: 147,
+    state: "accepted",
+    title: "[VIB-151] Compress timelines",
+    ...patch,
+  });
 
   it("F19-24: 'Complete merge' asks first, disclosing PR, target branch and the commits added since review", async () => {
     // The mandatory human half of EVERY full-autonomy operator acceptance
@@ -537,19 +551,18 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(queryByText("Apply this recommendation?")).toBeNull();
   });
 
-  const packetWith = (kind: string) =>
-    ({
-      type: "input",
-      kind: "Completion report",
-      from: "Operator",
-      title: "VIB-151 is ready for a decision",
-      body: "The reviewer approved the delivered revision.",
-      observations: [],
-      options: [
-        { kind, t: "Accept the completion and close it", d: "", rec: true },
-        { kind: "request_edit", t: "Send it back for edits", d: "", rec: false },
-      ],
-    }) as unknown as TaskDetail["packet"];
+  const packetWith = (kind: PacketOptionKind): PacketRender => ({
+    type: "input",
+    kind: "Completion report",
+    from: "Operator",
+    title: "VIB-151 is ready for a decision",
+    body: "The reviewer approved the delivered revision.",
+    observations: [],
+    options: [
+      { kind, t: "Accept the completion and close it", d: "", rec: true },
+      { kind: "request_edit", t: "Send it back for edits", d: "", rec: false },
+    ],
+  });
 
   it("F19-7: a packet's accept_completion option asks first — 'Confirm decision' is a selection, not a merge confirmation", async () => {
     // The button said "Confirm decision" and the card showed only the freeform
@@ -668,14 +681,14 @@ describe("F19-10: merge-pending is finishable by the owner the server authorizes
     },
     task: {
       stage: "done",
-      displayReadiness: "accepted" as const,
+      displayReadiness: "accepted",
       pr: {
         number: 147,
         state: "accepted",
         title: "[VIB-151] Compress timelines",
-      } as unknown as TaskDetail["pr"],
+      },
     },
-  };
+  } satisfies { acceptance: Partial<AcceptanceAffordance>; task: Partial<TaskDetail> };
 
   it("a CONTRIBUTOR who owns the task is offered the merge — and it still asks first", async () => {
     // Canary: put `roleCan(myRole, "accept-completion")` back in
@@ -752,7 +765,7 @@ describe("R19-5: the force-accept confirm enumerates what the jump skips", () =>
       task: {
         stage: "triage",
         stages: FOUR_STAGES,
-        pr: { number: 147, state: "review", title: "x" } as TaskDetail["pr"],
+        pr: { number: 147, state: "review", title: "x" },
       },
       acceptance: {
         atBoundary: false,
@@ -809,7 +822,7 @@ describe("R19-5: the force-accept confirm enumerates what the jump skips", () =>
     // "goes straight to Done", on the dialog authorizing the real merge.
     const { container } = renderPage({
       myRole: "admin",
-      task: { pr: { number: 147, state: "accepted", title: "x" } as TaskDetail["pr"] },
+      task: { pr: { number: 147, state: "accepted", title: "x" } },
       acceptance: { atBoundary: false, canAccept: false, blockedReason: "not yet" },
     });
     fireEvent.click(findButton(container, "Complete merge")!);
@@ -835,7 +848,7 @@ describe("R19-5: the force-accept confirm enumerates what the jump skips", () =>
       task: {
         stage: "triage",
         stages: FOUR_STAGES,
-        pr: { number: 147, state: "review", title: "x" } as TaskDetail["pr"],
+        pr: { number: 147, state: "review", title: "x" },
       },
       acceptance: {
         atBoundary: false,
@@ -891,7 +904,7 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
   it("hides once a live PR stands, and entirely without delivery authority", () => {
     const withPr = renderPage({
       canDeliver: true,
-      task: { pr: { number: 9, state: "review", title: "x" } as TaskDetail["pr"] },
+      task: { pr: { number: 9, state: "review", title: "x" } },
     });
     expect(findButton(withPr.container, "Deliver branch & open PR")).toBeUndefined();
     cleanup();
@@ -911,7 +924,7 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
  * Execution profile.
  */
 describe("F20-5 / N20-17: the operator run control's honest off-states", () => {
-  const openPacket = {
+  const openPacket: PacketRender = {
     type: "input",
     kind: "Decision required",
     from: "Operator",
@@ -919,7 +932,7 @@ describe("F20-5 / N20-17: the operator run control's honest off-states", () => {
     body: "Choose a path.",
     observations: [],
     options: [{ kind: "custom", t: "Rework and re-run", d: "", rec: true }],
-  } as unknown as TaskDetail["packet"];
+  };
 
   it("F20-5: an open packet disables Run operator with the resolve-first reason", () => {
     const { container } = renderPage({ myRole: "admin", task: { packet: openPacket } });
@@ -936,7 +949,7 @@ describe("F20-5 / N20-17: the operator run control's honest off-states", () => {
   it("N20-17: a closed task's disabled button notes that @operator still runs it", () => {
     const { container } = renderPage({
       myRole: "admin",
-      task: { displayReadiness: "accepted", stage: "done" } as Partial<TaskDetail>,
+      task: { displayReadiness: "accepted", stage: "done" },
     });
     const runOperator = findButton(container, "Run operator")!;
     expect(runOperator.disabled).toBe(true);
@@ -946,15 +959,21 @@ describe("F20-5 / N20-17: the operator run control's honest off-states", () => {
 });
 
 describe("C8: Scheduled re-runs collapses below the Execution profile", () => {
-  const schedule = (id: string): TaskSchedule =>
-    ({
-      id,
-      dueAt: new Date(Date.now() + 3_600_000).toISOString(),
-      backend: "claude",
-      autonomy: "supervised",
-      note: null,
-      createdByLabel: "Arda",
-    }) as unknown as TaskSchedule;
+  const schedule = (id: string): TaskSchedule => ({
+    id,
+    action: "run-operator",
+    dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+    backend: "claude",
+    autonomy: "supervised",
+    note: "",
+    createdBy: "u-arda",
+    createdByLabel: "Arda",
+    createdAt: "2026-07-01T09:00:00.000Z",
+    status: "pending",
+    firedAt: null,
+    claimedAt: null,
+    retries: 0,
+  });
 
   it("shows a one-line disclosure (not the form) when nothing is scheduled", () => {
     const { container, getByText, queryByText } = renderPage({ myRole: "admin" });
@@ -1025,7 +1044,7 @@ describe("R14-3: the task archive", () => {
     const { container } = renderPage({
       myRole: "maintainer",
       task: {
-        pr: { number: 147, state: "accepted", title: "x" } as TaskDetail["pr"],
+        pr: { number: 147, state: "accepted", title: "x" },
       },
     });
     fireEvent.click(findButton(container, "Archive task")!);
@@ -1127,11 +1146,11 @@ const acceptDialog = (container: HTMLElement) =>
  *  statement runs — the assertion would read green while the PR merged. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 
-const PR_147 = {
+const PR_147: PrRef = {
   number: 147,
   state: "review",
   title: "[VIB-151] Compress long-running task timelines",
-} as TaskDetail["pr"];
+};
 
 /**
  * F19-7 — resolving a packet option whose kind is `accept_completion` merges
@@ -1141,18 +1160,15 @@ const PR_147 = {
  * and no "Not yet".
  */
 describe("F19-7: a packet accept_completion option discloses the merge", () => {
-  const acceptPacket = (
-    options: Array<{ kind: string; t: string; d: string; rec?: boolean }>,
-  ) =>
-    ({
-      type: "input",
-      kind: "input required",
-      from: "Operator",
-      title: "VIB-151 is ready to accept",
-      body: "The delivered revision carries an approving verdict.",
-      observations: [],
-      options,
-    }) as unknown as TaskDetail["packet"];
+  const acceptPacket = (options: PacketOption[]): PacketRender => ({
+    type: "input",
+    kind: "input required",
+    from: "Operator",
+    title: "VIB-151 is ready to accept",
+    body: "The delivered revision carries an approving verdict.",
+    observations: [],
+    options,
+  });
 
   it("Confirm decision opens the acceptance dialog, then resolves the packet", async () => {
     const { container, submitted } = renderPage({
@@ -1245,11 +1261,11 @@ describe("F19-7: a packet accept_completion option discloses the merge", () => {
  * whose button merges it.
  */
 describe("F19-14: the accept dialog speaks the product's PR vocabulary", () => {
-  const renderConfirm = (state: string) =>
+  const renderConfirm = (state: PrState) =>
     render(
       <AcceptConfirm
         task={detail({
-          pr: { number: 147, state, title: "[VIB-151] x" } as TaskDetail["pr"],
+          pr: { number: 147, state, title: "[VIB-151] x" },
         })}
         workRevisionSha="abcdef1234567890"
         noChanges={false}
@@ -1284,7 +1300,7 @@ describe("F19-14: the accept dialog speaks the product's PR vocabulary", () => {
     const { container } = renderPage({
       myRole: "maintainer",
       task: {
-        pr: { number: 124, state: "closed", title: "[VIB-151] x" } as TaskDetail["pr"],
+        pr: { number: 124, state: "closed", title: "[VIB-151] x" },
       },
     });
     fireEvent.click(findButton(container, "Archive task")!);
@@ -1320,26 +1336,26 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     pendingRecommendations: 2,
   };
 
-  const archivePacket = (deleteBranch: boolean) =>
-    ({
+  const archivePacket = (deleteBranch: boolean): PacketRender => {
+    const option: PacketOption = {
+      kind: "archive_task",
+      t: deleteBranch ? "Archive and delete the branch" : "Archive the task",
+      d: "Discards the rejected work entirely.",
+      rec: true,
+    };
+    // The plain-archive variant must carry NO `deleteBranch` key at all — the
+    // absence is what the "claims no branch deletion" case reads.
+    if (deleteBranch) option.deleteBranch = true;
+    return {
       type: "blocked",
       kind: "blocked decision",
       from: "Operator",
       title: "PR #147 was closed without merging — pick a recovery path",
       body: "The pull request was closed on GitHub without merging.",
       observations: [],
-      options: [
-        {
-          kind: "archive_task",
-          t: deleteBranch
-            ? "Archive and delete the branch"
-            : "Archive the task",
-          d: "Discards the rejected work entirely.",
-          rec: true,
-          ...(deleteBranch ? { deleteBranch: true } : {}),
-        },
-      ],
-    }) as unknown as TaskDetail["packet"];
+      options: [option],
+    };
+  };
 
   const archiveDialog = (container: HTMLElement) =>
     container.ownerDocument.querySelector(
@@ -1360,7 +1376,7 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
         Component: () => (
           <ToastProvider>
             <DecisionPacket
-              packet={archivePacket(deleteBranch)!}
+              packet={archivePacket(deleteBranch)}
               busy={false}
               canResolve
               canResolveCompletion
@@ -1448,7 +1464,7 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     const { container, submitted } = renderPage({
       task: {
         packet: {
-          ...archivePacket(true)!,
+          ...archivePacket(true),
           options: [
             {
               kind: "custom",
@@ -1457,7 +1473,7 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
               rec: true,
             },
           ],
-        } as unknown as TaskDetail["packet"],
+        },
       },
     });
     fireEvent.click(findButton(container, "Confirm decision")!);
@@ -1551,14 +1567,13 @@ const engagement = (
   profileId: string,
   role: string,
   backend: "claude" | "codex" = "claude",
-) =>
-  ({
-    kind: "agent",
-    profileId,
-    backend,
-    role,
-    name: backend === "claude" ? "Claude Code" : "Codex",
-  }) as unknown as NonNullable<TaskDetail["specialist"]>;
+): NonNullable<TaskDetail["specialist"]> => ({
+  kind: "agent",
+  profileId,
+  backend,
+  role,
+  name: backend === "claude" ? "Claude Code" : "Codex",
+});
 
 /** A deployed profile as the loader ships it. */
 const deployedAgent = (
@@ -1575,17 +1590,27 @@ const deployedAgent = (
   capabilities: { delivery: true, verdict, askHuman: true, browser: false },
 });
 
+/** Every callback `renderExec` records, so a test can assert what the cell invoked. */
+interface RecordedExecCalls {
+  owner: string[];
+  assignSpecialist: string[];
+  runSpecialist: string[];
+  assignReviewer: string[];
+  runReviewer: string[];
+  removeReviewer: string[];
+}
+
 function renderExec(opts: {
   task?: Partial<TaskDetail>;
   deployedSpecialists?: DeployedSpecialistView[];
 } = {}) {
-  const calls = {
-    owner: [] as string[],
-    assignSpecialist: [] as string[],
-    runSpecialist: [] as string[],
-    assignReviewer: [] as string[],
-    runReviewer: [] as string[],
-    removeReviewer: [] as string[],
+  const calls: RecordedExecCalls = {
+    owner: [],
+    assignSpecialist: [],
+    runSpecialist: [],
+    assignReviewer: [],
+    runReviewer: [],
+    removeReviewer: [],
   };
   const utils = render(
     <MemoryRouter>
@@ -1627,9 +1652,9 @@ const popoverTrigger = (container: HTMLElement, label: string) =>
   );
 
 const engagementsCell = (container: HTMLElement) =>
-  Array.from(container.querySelectorAll(".profile-cell")).find((cell) =>
+  Array.from(container.querySelectorAll<HTMLElement>(".profile-cell")).find((cell) =>
     cell.querySelector(".val.revs"),
-  ) as HTMLElement;
+  )!;
 
 /**
  * UXA-6 residual (pass-19 UX coherence audit, finding 2) — UXA-6 renamed the
@@ -1745,7 +1770,7 @@ describe("UX19-4: the engagements cell speaks ONE vocabulary", () => {
       task: {
         reviewers: [engagement("docs", "Documentation")],
         displayReadiness: "merged",
-      } as Partial<TaskDetail>,
+      },
       deployedSpecialists: [docs, perf],
     });
     expect(engagementsCell(supporting.container).textContent).toContain(
@@ -1756,7 +1781,7 @@ describe("UX19-4: the engagements cell speaks ONE vocabulary", () => {
       task: {
         reviewers: [engagement("senior", "Code review")],
         displayReadiness: "merged",
-      } as Partial<TaskDetail>,
+      },
       deployedSpecialists: [senior],
     });
     expect(engagementsCell(reviewing.container).textContent).toContain(
@@ -1782,9 +1807,9 @@ describe("UX19-12: an engagement whose profile is gone says so, and cannot be ru
       task: { specialist: engagement("dev-2f1c", "Implementation", "codex") },
       deployedSpecialists: [deployedAgent("other", "Other agent", "Docs", false)],
     });
-    const cell = Array.from(container.querySelectorAll(".profile-cell")).find(
-      (c) => c.querySelector(".lbl")?.textContent === "Delivering agent",
-    ) as HTMLElement;
+    const cell = Array.from(
+      container.querySelectorAll<HTMLElement>(".profile-cell"),
+    ).find((c) => c.querySelector(".lbl")?.textContent === "Delivering agent")!;
     // Canary: restore the `?? fallback` role substitution in `agentNameOf` and
     // the name line reads "Implementation" — the role, printed twice.
     expect(cell.querySelector(".nm")!.textContent).toBe("profile no longer here");
@@ -1821,9 +1846,9 @@ describe("UX19-12: an engagement whose profile is gone says so, and cannot be ru
         deployedAgent("developer", "Developer", "Implementation", false),
       ],
     });
-    const cell = Array.from(container.querySelectorAll(".profile-cell")).find(
-      (c) => c.querySelector(".lbl")?.textContent === "Delivering agent",
-    ) as HTMLElement;
+    const cell = Array.from(
+      container.querySelectorAll<HTMLElement>(".profile-cell"),
+    ).find((c) => c.querySelector(".lbl")?.textContent === "Delivering agent")!;
     expect(cell.querySelector(".nm")!.textContent).toBe("Developer");
     expect(cell.textContent).not.toMatch(GONE_NOTE);
     const run = cell.querySelector<HTMLButtonElement>(".btn.primary")!;
@@ -1923,33 +1948,32 @@ describe("UX19-18: the three popovers keep the keyboard promises they make", () 
  * (Remove-stage and remove-member are covered in settings-page.test.tsx.)
  */
 describe("D6: consequential actions confirm before they act", () => {
-  const runningRun = (): RunView =>
-    ({
-      id: "primary",
-      serverRunId: "run_1",
-      role: "Primary specialist",
-      kind: "primary",
-      who: { kind: "agent", backend: "claude", name: "Claude Code", role: "Developer" },
-      backend: "claude",
-      sdk: "Claude Agent SDK",
-      model: "claude-sonnet-4-5",
-      profileId: "developer",
-      exportable: false,
-      sid: "51d8f0e2",
-      state: "running",
-      lifecycle: "running",
-      interruptedBy: null,
-      phase: "Running validation sweep",
-      step: "Bash · npm test",
-      startedAt: new Date(Date.now() - 60_000).toISOString(),
-      finished: null,
-      turns: 1,
-      tokens: 0,
-      lines: [],
-      raw: [],
-      lineCount: 0,
-      logWindow: { totalLines: 0, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 0 },
-    }) as unknown as RunView;
+  const runningRun = (): RunView => ({
+    id: "primary",
+    serverRunId: "run_1",
+    role: "Primary specialist",
+    kind: "primary",
+    who: { kind: "agent", backend: "claude", name: "Claude Code", role: "Developer" },
+    backend: "claude",
+    sdk: "Claude Agent SDK",
+    model: "claude-sonnet-4-5",
+    profileId: "developer",
+    exportable: false,
+    sid: "51d8f0e2",
+    state: "running",
+    lifecycle: "running",
+    interruptedBy: null,
+    phase: "Running validation sweep",
+    step: "Bash · npm test",
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+    finished: null,
+    turns: 1,
+    tokens: 0,
+    lines: [],
+    raw: [],
+    lineCount: 0,
+    logWindow: { totalLines: 0, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 0 },
+  });
 
   it("cancelling a scheduled re-run confirms, then posts cancel-schedule", async () => {
     const submitted: Record<string, string>[] = [];
@@ -1962,12 +1986,19 @@ describe("D6: consequential actions confirm before they act", () => {
               schedules={[
                 {
                   id: "s-1",
+                  action: "run-operator",
                   dueAt: new Date(Date.now() + 3_600_000).toISOString(),
                   backend: "claude",
                   autonomy: "supervised",
-                  note: null,
+                  note: "",
+                  createdBy: "u-selin",
                   createdByLabel: "Selin",
-                } as unknown as TaskSchedule,
+                  createdAt: "2026-07-01T09:00:00.000Z",
+                  status: "pending",
+                  firedAt: null,
+                  claimedAt: null,
+                  retries: 0,
+                },
               ]}
               canRunAgents
               taskClosed={false}
@@ -1979,7 +2010,7 @@ describe("D6: consequential actions confirm before they act", () => {
         action: async ({ request }: { request: Request }) => {
           const fd = await request.formData();
           const row: Record<string, string> = {};
-          for (const [k, v] of fd.entries()) if (typeof v === "string") row[k] = v;
+          for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
           submitted.push(row);
           return { ok: true };
         },

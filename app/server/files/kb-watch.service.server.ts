@@ -2,6 +2,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { watch, type FSWatcher } from "chokidar";
+import { z } from "zod";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { reindexKnowledgeBaseByDir } from "~/server/org/resources.server";
@@ -30,12 +31,31 @@ import { getDataRoot, kbRootDir } from "./file-store-root.server";
 
 export const KB_WATCH_DEBOUNCE_MS = 250;
 
+/** Node hangs its errno off `code`; a watcher error without one is not a
+ *  condition this module branches on. */
+const errnoSchema = z.object({
+  code: z.string().optional().catch(undefined),
+});
+
 const KB_WATCHER_KEY = Symbol.for("viberr.kbWatcher");
 
 interface KbWatcherHandle {
   watcher: FSWatcher;
   timers: Map<string, ReturnType<typeof setTimeout>>;
   root: string;
+}
+
+/** The single `globalThis` slot this module owns — the handle survives an HMR
+ *  module reload, which a module-level variable would not. */
+interface KbWatcherHost {
+  [KB_WATCHER_KEY]?: KbWatcherHandle;
+}
+
+function kbWatcherHost(): KbWatcherHost {
+  // SAFETY: `KB_WATCHER_KEY` is a registry symbol under a viberr-namespaced
+  // name that only the functions in this module read or write, so the slot
+  // holds either the handle they put there or nothing at all.
+  return globalThis as KbWatcherHost;
 }
 
 /** The top-level KB dir a changed path belongs to, or null when out of tree. */
@@ -52,7 +72,7 @@ export function kbDirOfChange(kbRoot: string, changedRel: string): string | null
 export function startKbWatcher(
   options: { dataRoot?: string; db?: DatabaseSync } = {},
 ): FSWatcher | null {
-  const cache = globalThis as unknown as Record<symbol, KbWatcherHandle | undefined>;
+  const cache = kbWatcherHost();
   const root = getDataRoot(options.dataRoot);
   const kbRoot = kbRootDir(options.dataRoot);
   const existing = cache[KB_WATCHER_KEY];
@@ -120,8 +140,9 @@ export function startKbWatcher(
     return null;
   }
 
-  watcher.on("error", (err: unknown) => {
-    const code = (err as { code?: string } | null)?.code;
+  watcher.on("error", (err) => {
+    const errno = errnoSchema.safeParse(err);
+    const code = errno.success ? errno.data.code : undefined;
     // A vanished path is NOT a broken watcher (mirrors the store watcher):
     // deleting a watched KB subtree can race into a spurious ENOENT while its
     // debounced re-index is still queued. Keep watching.
@@ -169,14 +190,13 @@ export function startKbWatcher(
  *  A watcher error clears the handle, so `false` is REAL (dead/never-started),
  *  not a zombie. */
 export function isKbWatcherAlive(): boolean {
-  const cache = globalThis as unknown as Record<symbol, KbWatcherHandle | undefined>;
-  return cache[KB_WATCHER_KEY] !== undefined;
+  return kbWatcherHost()[KB_WATCHER_KEY] !== undefined;
 }
 
 /** Stops the kb watcher (process shutdown + test teardown). The native close
  *  is fire-and-forget: clearing timers/handle is what stops domain work. */
 export function stopKbWatcher(): void {
-  const cache = globalThis as unknown as Record<symbol, KbWatcherHandle | undefined>;
+  const cache = kbWatcherHost();
   const existing = cache[KB_WATCHER_KEY];
   if (!existing) return;
   for (const t of existing.timers.values()) clearTimeout(t);

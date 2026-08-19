@@ -1,6 +1,7 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import {
   gitErrorText,
   redactGitOutput,
@@ -229,11 +230,22 @@ export function cloneFailureSentence(
     default:
       return (
         `The workspace checkout failed` +
-        (typeof details.exitCode === "number" ? ` (git exit ${details.exitCode})` : "") +
+        (details.exitCode === undefined ? "" : ` (git exit ${details.exitCode})`) +
         `. ${cred}`
       );
   }
 }
+
+/** Each reading of a rejected `execFile` is decoded on its own, the way
+ *  `gitErrorText` decodes its two fields: `code` is the spawn errno (a string,
+ *  `ENOENT` when git is not installed) OR git's exit status (a number), never
+ *  both, and neither reading should have to defend against the other's shape.
+ *  `signal` carries `.min(1)` because an empty signal name is "no signal" to
+ *  every reader downstream. */
+const spawnErrnoSchema = z.object({ code: z.string() });
+const exitStatusSchema = z.object({ code: z.number() });
+const terminationSchema = z.object({ signal: z.string().min(1) });
+const killedSchema = z.object({ killed: z.literal(true) });
 
 /**
  * Classify a failed clone — and carry git's own words along, SCRUBBED.
@@ -252,24 +264,22 @@ export function cloneFailureLogDetails(
   error: unknown,
   opts: { token?: string | null } = {},
 ): CloneFailureLogDetails {
-  const value =
-    typeof error === "object" && error !== null
-      ? (error as { code?: unknown; signal?: unknown; killed?: unknown })
-      : {};
-  const code = value.code;
-  const signal = typeof value.signal === "string" ? value.signal : undefined;
-  const reason =
-    code === "ENOENT"
-      ? "git_unavailable"
-      : value.killed === true || signal
-        ? "clone_terminated"
-        : "clone_failed";
-  const detail = redactGitOutput(gitErrorText(error), opts);
+  const errno = spawnErrnoSchema.safeParse(error);
+  const exitStatus = exitStatusSchema.safeParse(error);
+  const termination = terminationSchema.safeParse(error);
+  const killed = killedSchema.safeParse(error).success;
 
-  return {
-    reason,
-    ...(typeof code === "number" ? { exitCode: code } : {}),
-    ...(signal ? { signal } : {}),
-    ...(detail ? { detail } : {}),
+  const details: CloneFailureLogDetails = {
+    reason:
+      errno.success && errno.data.code === "ENOENT"
+        ? "git_unavailable"
+        : killed || termination.success
+          ? "clone_terminated"
+          : "clone_failed",
   };
+  if (exitStatus.success) details.exitCode = exitStatus.data.code;
+  if (termination.success) details.signal = termination.data.signal;
+  const detail = redactGitOutput(gitErrorText(error), opts);
+  if (detail) details.detail = detail;
+  return details;
 }

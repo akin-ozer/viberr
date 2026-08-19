@@ -30,7 +30,13 @@ const SNAPSHOT: OperatorTaskSnapshot = {
   deployedSpecialists: [],
   openPacket: false,
   packet: null,
-} as unknown as OperatorTaskSnapshot;
+  recentTimeline: [],
+  pr: null,
+  branch: null,
+  liveRuns: [],
+  autonomy: "supervised",
+  policy: {},
+};
 
 describe("operator turn instruction — @tag the human (NEW-4)", () => {
   const comment = "can you summarize what you did in this whole session?";
@@ -78,7 +84,7 @@ describe("operator triage gate — disclose a substituted delegated ask (R20-9)"
     ...SNAPSHOT,
     stage: "triage",
     stageName: "Triage",
-  } as OperatorTaskSnapshot;
+  };
 
   it("Claude triage prompt tells the operator to disclose gathering on the agent's behalf", () => {
     const prompt = buildOperatorTurnPrompt(TRIAGE, "create");

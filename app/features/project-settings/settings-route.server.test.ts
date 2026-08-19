@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { RouterContextProvider } from "react-router";
+import { z } from "zod";
 import {
   setupAppTest,
   type AppTestContext,
@@ -17,14 +19,17 @@ import type { SettingsViewData } from "./settings-query.server";
  * project).
  */
 
-let app: AppTestContext;
-let ids: {
+/** The seeded people this file drives the settings surface as. */
+interface SeedUserIds {
   arda: string;
   elif: string;
   murat: string;
   selin: string;
   deniz: string;
-};
+}
+
+let app: AppTestContext;
+let ids: SeedUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -41,17 +46,29 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
+/** Un-interpolated match pattern, the way React Router reports it. */
+const SETTINGS_PATTERN = "/projects/:slug/settings";
+
+/**
+ * A server loader/action is handed the request, the match pattern, the dynamic
+ * params and a middleware context. Building the whole envelope rather than a
+ * partial stand-in is what keeps the direct calls below type-checked against
+ * the real route signatures.
+ */
 async function runLoader(
   userId: string,
   slug = "viberr-core",
 ): Promise<{ view: SettingsViewData }> {
   const { loader } = await import("~/routes/project.settings");
   const { cookie } = await app.cookieFor(userId);
-  return (await loader({
-    request: app.request(`/projects/${slug}/settings`, { cookie }),
+  const request = app.request(`/projects/${slug}/settings`, { cookie });
+  return loader({
+    request,
+    url: new URL(request.url),
     params: { slug },
-    context: {},
-  } as never)) as { view: SettingsViewData };
+    pattern: SETTINGS_PATTERN,
+    context: new RouterContextProvider(),
+  });
 }
 
 async function postAction(
@@ -69,7 +86,48 @@ async function postAction(
     body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
-  return action({ request, params: { slug }, context: {} } as never);
+  return action({
+    request,
+    url: new URL(request.url),
+    params: { slug },
+    pattern: SETTINGS_PATTERN,
+    context: new RouterContextProvider(),
+  });
+}
+
+/**
+ * `.get()` hands back untyped SQLite cells, and a guard refuses an action by
+ * THROWING React Router's `data(message, { status })` — both arrive as values
+ * TypeScript knows nothing about, so both are parsed where they enter.
+ */
+const stagesJsonRowSchema = z.object({ stages_json: z.string() });
+const archivedRowSchema = z.object({ archived: z.number() });
+const thrownRefusalSchema = z.object({
+  init: z.object({ status: z.number() }).nullish(),
+  data: z.unknown(),
+});
+
+type SettingsActionResult = Awaited<
+  ReturnType<typeof import("~/routes/project.settings").action>
+>;
+
+/**
+ * The action answers on one of three envelopes: a bare success object, a
+ * `data(payload, { status })` refusal, or the delete branch's redirect. A test
+ * that reads a single member has to say which envelope it expects, so read it
+ * through this projection — a member the actual branch does not carry comes
+ * back `undefined` and fails its assertion, rather than being asserted into
+ * existence.
+ */
+function actionOutcome(result: SettingsActionResult) {
+  return {
+    ok: "ok" in result ? result.ok : undefined,
+    toast: "toast" in result ? result.toast : undefined,
+    stageId: "stageId" in result ? result.stageId : undefined,
+    status: "init" in result ? result.init?.status : undefined,
+    error: "data" in result ? result.data.error : undefined,
+    redirected: result instanceof Response ? result : undefined,
+  };
 }
 
 function projectMd(): string {
@@ -112,12 +170,12 @@ describe("loader", () => {
 
 describe("identity", () => {
   it("saves name/prefix/description to project.md + audits", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = await postAction(ids.arda, {
       intent: "save-project",
       name: "Viberr Core",
       prefix: "VIB",
       description: "Updated description for the settings test.",
-    })) as { ok: boolean; toast: string };
+    });
     expect(result).toEqual({ ok: true, toast: "Project settings saved" });
     const { view } = await runLoader(ids.arda);
     expect(view.project.description).toBe(
@@ -129,23 +187,27 @@ describe("identity", () => {
   });
 
   it("rejects a non-letter prefix", async () => {
-    const result = (await postAction(ids.arda, {
-      intent: "save-project",
-      name: "Viberr Core",
-      prefix: "V1B",
-      description: "x",
-    })) as { init?: { status?: number } };
-    expect(result.init?.status).toBe(400);
+    const result = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "save-project",
+        name: "Viberr Core",
+        prefix: "V1B",
+        description: "x",
+      }),
+    );
+    expect(result.status).toBe(400);
   });
 
   it("rejects non-admins (maintainer)", async () => {
-    const result = (await postAction(ids.murat, {
-      intent: "save-project",
-      name: "X",
-      prefix: "VIB",
-      description: "x",
-    })) as { init?: { status?: number } };
-    expect(result.init?.status).toBe(403);
+    const result = actionOutcome(
+      await postAction(ids.murat, {
+        intent: "save-project",
+        name: "X",
+        prefix: "VIB",
+        description: "x",
+      }),
+    );
+    expect(result.status).toBe(403);
   });
 });
 
@@ -155,26 +217,23 @@ describe("stage editor", () => {
   it("add-stage inserts before done, returns the id for inline rename", async () => {
     // Name-first (2026-07-28 ruling): the intent carries the name; the old
     // no-name POST minted a stage called "New stage" and is now refused.
-    const refused = (await postAction(ids.arda, { intent: "add-stage" })) as {
-      init?: { status?: number };
-      data?: { error?: string };
-    };
-    expect(refused.init?.status).toBe(400);
-    expect(refused.data?.error).toMatch(/name is required/i);
+    const refused = actionOutcome(
+      await postAction(ids.arda, { intent: "add-stage" }),
+    );
+    expect(refused.status).toBe(400);
+    expect(refused.error).toMatch(/name is required/i);
 
-    const result = (await postAction(ids.arda, {
-      intent: "add-stage",
-      name: "Hardening pass",
-    })) as {
-      ok: boolean;
-      toast: string;
-      stageId: string;
-    };
+    const result = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "add-stage",
+        name: "Hardening pass",
+      }),
+    );
     expect(result.ok).toBe(true);
     expect(result.toast).toBe(
       '"Hardening pass" added — it appears on the board immediately',
     );
-    newStageId = result.stageId;
+    newStageId = result.stageId ?? "";
 
     const { view } = await runLoader(ids.arda);
     expect(view.stages).toHaveLength(6);
@@ -184,20 +243,24 @@ describe("stage editor", () => {
     });
     expect(view.stages[5]!.id).toBe("done");
     // Board columns read the same projection (stages_json).
-    const row = app.db
-      .prepare(`SELECT stages_json FROM projects WHERE slug = 'viberr-core'`)
-      .get() as { stages_json: string };
+    const row = stagesJsonRowSchema.parse(
+      app.db
+        .prepare(`SELECT stages_json FROM projects WHERE slug = 'viberr-core'`)
+        .get(),
+    );
     expect(JSON.parse(row.stages_json).map((s: { id: string }) => s.id)).toEqual(
       ["triage", "ready", "impl", "review", newStageId, "done"],
     );
   });
 
   it("rename-stage commits with the verbatim toast", async () => {
-    const result = (await postAction(ids.arda, {
-      intent: "rename-stage",
-      stageId: newStageId,
-      name: "Hardening",
-    })) as { ok: boolean; toast: string };
+    const result = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "rename-stage",
+        stageId: newStageId,
+        name: "Hardening",
+      }),
+    );
     expect(result.toast).toBe(
       'Stage renamed to "Hardening" — board and policy follow',
     );
@@ -216,10 +279,12 @@ describe("stage editor", () => {
       "ready",
       "triage",
     ].filter((id) => view.stages.some((s) => s.id === id));
-    const result = (await postAction(ids.arda, {
-      intent: "reorder-stages",
-      orderedIds: shuffled.join(","),
-    })) as { ok: boolean; toast: string };
+    const result = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "reorder-stages",
+        orderedIds: shuffled.join(","),
+      }),
+    );
     expect(result.toast).toBe("Stage order updated — board columns follow");
     const after = await runLoader(ids.arda);
     const orderedIds = after.view.stages.map((s) => s.id);
@@ -234,46 +299,48 @@ describe("stage editor", () => {
   });
 
   it("remove-stage: locked + non-empty guards re-checked server-side", async () => {
-    const locked = (await postAction(ids.arda, {
-      intent: "remove-stage",
-      stageId: "triage",
-    })) as { init?: { status?: number }; data?: { error?: string } };
-    expect(locked.init?.status).toBe(409);
-    expect(locked.data?.error).toBe(
-      "Triage can't be removed — it's the entry point",
+    const locked = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "remove-stage",
+        stageId: "triage",
+      }),
     );
+    expect(locked.status).toBe(409);
+    expect(locked.error).toBe("Triage can't be removed — it's the entry point");
 
-    const nonEmpty = (await postAction(ids.arda, {
-      intent: "remove-stage",
-      stageId: "review",
-    })) as { init?: { status?: number }; data?: { error?: string } };
-    expect(nonEmpty.init?.status).toBe(409);
-    expect(nonEmpty.data?.error).toBe("Move 2 tasks out of Review first");
+    const nonEmpty = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "remove-stage",
+        stageId: "review",
+      }),
+    );
+    expect(nonEmpty.status).toBe(409);
+    expect(nonEmpty.error).toBe("Move 2 tasks out of Review first");
 
-    const ok = (await postAction(ids.arda, {
+    const ok = await postAction(ids.arda, {
       intent: "remove-stage",
       stageId: newStageId,
-    })) as { ok: boolean; toast: string };
+    });
     expect(ok).toEqual({ ok: true, toast: 'Stage "Hardening" removed' });
     const { view } = await runLoader(ids.arda);
     expect(view.stages).toHaveLength(5);
   });
 
   it("rejects stage mutations from non-admins", async () => {
-    const result = (await postAction(ids.selin, { intent: "add-stage" })) as {
-      init?: { status?: number };
-    };
-    expect(result.init?.status).toBe(403);
+    const result = actionOutcome(
+      await postAction(ids.selin, { intent: "add-stage" }),
+    );
+    expect(result.status).toBe(403);
   });
 });
 
 describe("members", () => {
   it("invites a registered user as Viewer — an invite IS the membership (X15: no decorative status)", async () => {
-    const result = (await postAction(ids.arda, {
+    const result = await postAction(ids.arda, {
       intent: "invite",
       name: "Deniz Şahin",
       email: "deniz@viberr.dev",
-    })) as { ok: boolean; toast: string };
+    });
     // N20-6: no mailer exists — the toast names what happened, not a sent email.
     expect(result).toEqual({
       ok: true,
@@ -287,21 +354,25 @@ describe("members", () => {
   });
 
   it("rejects a duplicate invite", async () => {
-    const result = (await postAction(ids.arda, {
-      intent: "invite",
-      name: "Deniz Şahin",
-      email: "deniz@viberr.dev",
-    })) as { init?: { status?: number }; data?: { error?: string } };
-    expect(result.init?.status).toBe(409);
-    expect(result.data?.error).toBe("deniz@viberr.dev is already a member");
+    const result = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "invite",
+        name: "Deniz Şahin",
+        email: "deniz@viberr.dev",
+      }),
+    );
+    expect(result.status).toBe(409);
+    expect(result.error).toBe("deniz@viberr.dev is already a member");
   });
 
   it("invites an unregistered email by creating a passwordless whitelist user", async () => {
-    const result = (await postAction(ids.arda, {
-      intent: "invite",
-      name: "Yeni Kişi",
-      email: "yeni@viberr.dev",
-    })) as { ok: boolean; toast: string };
+    const result = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "invite",
+        name: "Yeni Kişi",
+        email: "yeni@viberr.dev",
+      }),
+    );
     expect(result.ok).toBe(true);
     const { findUserByEmail } = await import(
       "~/server/auth/user-store.server"
@@ -320,28 +391,32 @@ describe("members", () => {
   });
 
   it("removing an invited member uses the standard removed toast (X15)", async () => {
-    const result = (await postAction(ids.arda, {
-      intent: "remove-member",
-      userId: ids.deniz,
-    })) as { ok: boolean; toast: string };
+    const result = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "remove-member",
+        userId: ids.deniz,
+      }),
+    );
     expect(result.ok).toBe(true);
     expect(result.toast).toContain("removed from");
   });
 
   it("self-removal is refused server-side", async () => {
-    const result = (await postAction(ids.arda, {
-      intent: "remove-member",
-      userId: ids.arda,
-    })) as { init?: { status?: number }; data?: { error?: string } };
-    expect(result.init?.status).toBe(409);
-    expect(result.data?.error).toBe("You can't remove yourself from Viberr Core");
+    const result = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "remove-member",
+        userId: ids.arda,
+      }),
+    );
+    expect(result.status).toBe(409);
+    expect(result.error).toBe("You can't remove yourself from Viberr Core");
   });
 
   it("removing an active member works with the removal toast + audit", async () => {
-    const remove = (await postAction(ids.arda, {
+    const remove = await postAction(ids.arda, {
       intent: "remove-member",
       userId: ids.selin,
-    })) as { ok: boolean; toast: string };
+    });
     expect(remove).toEqual({
       ok: true,
       toast: "Selin Aksoy removed from Viberr Core",
@@ -359,12 +434,14 @@ describe("members", () => {
   });
 
   it("membership CRUD is admin-only", async () => {
-    const result = (await postAction(ids.murat, {
-      intent: "invite",
-      name: "X Y",
-      email: "x@viberr.dev",
-    })) as { init?: { status?: number } };
-    expect(result.init?.status).toBe(403);
+    const result = actionOutcome(
+      await postAction(ids.murat, {
+        intent: "invite",
+        name: "X Y",
+        email: "x@viberr.dev",
+      }),
+    );
+    expect(result.status).toBe(403);
   });
 });
 
@@ -375,17 +452,13 @@ describe("grant-scope", () => {
   // nothing in either direction. One project, one repository.
 
   it("grant-scope: reviewer refused; admin with no PAT gets the typed copy", async () => {
-    const denied = (await postAction(ids.selin, {
-      intent: "grant-scope",
-    })) as { init?: { status?: number } };
+    const denied = actionOutcome(
+      await postAction(ids.selin, { intent: "grant-scope" }),
+    );
     // Selin was re-invited as viewer above → still not admin|maintainer.
-    expect(denied.init?.status).toBe(403);
+    expect(denied.status).toBe(403);
 
-    const result = (await postAction(ids.arda, { intent: "grant-scope" })) as {
-      ok: boolean;
-      toast: string;
-      result: string;
-    };
+    const result = await postAction(ids.arda, { intent: "grant-scope" });
     expect(result).toEqual({
       ok: true,
       toast:
@@ -397,23 +470,26 @@ describe("grant-scope", () => {
 
 describe("danger zone", () => {
   it("delete requires the typed project name", async () => {
-    const result = (await postAction(
-      ids.arda,
-      { intent: "delete-project", confirmName: "nope" },
-      "billing-service",
-    )) as { init?: { status?: number } };
-    expect(result.init?.status).toBe(400);
+    const result = actionOutcome(
+      await postAction(
+        ids.arda,
+        { intent: "delete-project", confirmName: "nope" },
+        "billing-service",
+      ),
+    );
+    expect(result.status).toBe(400);
   });
 
   it("deletes a project for real: files gone, projections pruned, audited", async () => {
-    const result = (await postAction(
+    const result = await postAction(
       ids.arda,
       { intent: "delete-project", confirmName: "Billing Service" },
       "billing-service",
-    )) as Response;
+    );
     expect(result).toBeInstanceOf(Response);
-    expect(result.status).toBe(302);
-    expect(result.headers.get("Location")).toBe("/");
+    const { redirected } = actionOutcome(result);
+    expect(redirected?.status).toBe(302);
+    expect(redirected?.headers.get("Location")).toBe("/");
 
     expect(
       existsSync(path.join(app.dataRoot, "projects/billing-service")),
@@ -433,38 +509,42 @@ describe("danger zone", () => {
     // invisible to him (R15-4) — this used to answer 403, which confirmed the
     // project exists. Admin-only-ness for actual members is covered by the
     // archive-project case below, where Murat IS a member and is told plainly.
-    const thrown = (await postAction(
-      ids.murat,
-      { intent: "delete-project", confirmName: "Deploy Pipeline" },
-      "deploy-pipeline",
-    ).catch((e) => e)) as { init?: { status?: number }; data?: unknown };
-    expect(thrown?.init?.status).toBe(404);
-    expect(String(thrown?.data)).toBe("No project at projects/deploy-pipeline.");
+    const thrown = thrownRefusalSchema.parse(
+      await postAction(
+        ids.murat,
+        { intent: "delete-project", confirmName: "Deploy Pipeline" },
+        "deploy-pipeline",
+      ).catch((e) => e),
+    );
+    expect(thrown.init?.status).toBe(404);
+    expect(String(thrown.data)).toBe("No project at projects/deploy-pipeline.");
   });
 });
 
 describe("archive-project", () => {
   it("maintainer is rejected (admin-only)", async () => {
-    const result = (await postAction(ids.murat, {
-      intent: "archive-project",
-      archived: "true",
-    })) as { init?: { status?: number } };
-    expect(result.init?.status).toBe(403);
+    const result = actionOutcome(
+      await postAction(ids.murat, {
+        intent: "archive-project",
+        archived: "true",
+      }),
+    );
+    expect(result.status).toBe(403);
   });
 
   it("admin archives then restores — file + projection + audit follow", async () => {
     // Archive: project.md flag set, projection column follows, loader reflects.
-    const archived = (await postAction(ids.arda, {
+    const archived = await postAction(ids.arda, {
       intent: "archive-project",
       archived: "true",
-    })) as { ok: boolean; archived: boolean };
+    });
     expect(archived).toMatchObject({ ok: true, archived: true });
     expect(projectMd()).toMatch(/archived: true/);
     expect(
-      (
+      archivedRowSchema.parse(
         app.db
           .prepare(`SELECT archived FROM projects WHERE slug = 'viberr-core'`)
-          .get() as { archived: number }
+          .get(),
       ).archived,
     ).toBe(1);
     expect((await runLoader(ids.arda)).view.project.archived).toBe(true);
@@ -474,16 +554,16 @@ describe("archive-project", () => {
     ).toMatchObject({ subjectId: "viberr-core" });
 
     // Restore: flag cleared, projection back to 0, so later tests see it active.
-    const restored = (await postAction(ids.arda, {
+    const restored = await postAction(ids.arda, {
       intent: "archive-project",
       archived: "false",
-    })) as { ok: boolean; archived: boolean };
+    });
     expect(restored).toMatchObject({ ok: true, archived: false });
     expect(
-      (
+      archivedRowSchema.parse(
         app.db
           .prepare(`SELECT archived FROM projects WHERE slug = 'viberr-core'`)
-          .get() as { archived: number }
+          .get(),
       ).archived,
     ).toBe(0);
     expect(

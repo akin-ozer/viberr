@@ -24,16 +24,25 @@ function group(options: { checked?: boolean; disabled?: boolean }[]) {
   return { el, radios: [...el.querySelectorAll("button")] };
 }
 
-/** The two fields `rovingRadioKeyDown` actually reads off the React event. */
+/** The three members `rovingRadioKeyDown` actually reads off the React event. */
+type KeyPress = Pick<
+  KeyboardEvent<HTMLElement>,
+  "key" | "currentTarget" | "preventDefault"
+>;
+
 const press = (el: HTMLElement, key: string) => {
   let prevented = false;
-  rovingRadioKeyDown({
+  const event: KeyPress = {
     key,
     currentTarget: el,
     preventDefault: () => {
       prevented = true;
     },
-  } as unknown as KeyboardEvent<HTMLElement>);
+  };
+  // SAFETY: `rovingRadioKeyDown` touches exactly `key`, `currentTarget` and
+  // `preventDefault()` (roving-radio.ts) — the three `KeyPress` supplies — so
+  // the rest of the synthetic event is never reached.
+  rovingRadioKeyDown(event as KeyboardEvent<HTMLElement>);
   return prevented;
 };
 
@@ -67,7 +76,7 @@ describe("rovingRadioKeyDown", () => {
 
   it("starts from the CHECKED option when focus is outside the group", () => {
     const { el, radios } = group([{}, { checked: true }, {}]);
-    (document.activeElement as HTMLElement | null)?.blur();
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     press(el, "ArrowRight");
     expect(document.activeElement).toBe(radios[2]);
   });

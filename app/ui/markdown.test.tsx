@@ -104,6 +104,9 @@ describe("Markdown", () => {
     for (const label of labels) {
       expect(label.nextElementSibling!.className).toBe("mention");
     }
+    // SAFETY: `cloneNode` is declared on `Node` and typed as returning one, but a
+    // deep clone is always an instance of the interface it was taken from — and
+    // `container` is the HTMLElement testing-library rendered into.
     const clone = container.cloneNode(true) as HTMLElement;
     for (const vh of clone.querySelectorAll(".mention-vh")) vh.remove();
     expect(clone.textContent).toBe("thanks @dev and @operator");

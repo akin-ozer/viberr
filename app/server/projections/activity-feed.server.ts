@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import {
   createActorRenderOverlay,
   type ActorRender,
@@ -45,6 +46,8 @@ export function countActivityStream(
   db: DatabaseSync,
   slug: string,
 ): number {
+  // SAFETY: a bare `count(*)` aggregate always yields exactly one row — zero on
+  // an empty match, never no row — and `c` is the integer SQLite counted.
   return (
     db
       .prepare(`SELECT count(*) AS c FROM task_events WHERE project_slug = ?`)
@@ -57,6 +60,9 @@ export function listActivityStream(
   slug: string,
   options: { limit?: number } = {},
 ): ActivityStreamRow[] {
+  // SAFETY: the SELECT names exactly the seven `task_events` columns the Pick
+  // lists, and 0001_baseline declares all of them NOT NULL except `title` —
+  // which is why TaskEventRow types that one, and only that one, nullable.
   const rows = db
     .prepare(
       `SELECT id, task_key, type, actor_json, occurred_at, title, text
@@ -74,6 +80,9 @@ export function listActivityStream(
     id: row.id,
     taskKey: row.task_key,
     type: row.type,
+    // SAFETY: `actor_json` has ONE writer — the rebuilder stores
+    // `JSON.stringify(resolveActor(event.actor))`, and `resolveActor` returns an
+    // ActorRender by construction.
     actor: row.actor_json
       ? overlay(JSON.parse(row.actor_json) as ActorRender)
       : null,
@@ -110,7 +119,7 @@ export const AUDIT_LOG_LIMIT = 60;
  * events) renders in the Stream panel instead. Every listed action has a
  * readable template in `auditText`; the default template covers additions
  * that land here before a bespoke sentence does. */
-const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
+const AUDIT_ACTION_KINDS = {
   "project.policy.boundary_changed": "change",
   "project.member.role_changed": "change",
   "project.member.invited": "change",
@@ -137,7 +146,7 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "github.credential.revalidated": "change",
   "github.pr.merge_refused": "blockedact",
   "task.ownership.admin_released": "audit",
-    "task.operator.autonomy_clamped": "audit",
+  "task.operator.autonomy_clamped": "audit",
   "runtime.run.started": "audit",
   "runtime.run.interrupted": "audit",
   // P13-D-7: the two governance overrides that were RECORDED but surfaced
@@ -147,15 +156,19 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
-};
+} satisfies Record<string, AuditLogKind>;
 
-const BOUNDARY_LABEL: Record<string, string> = {
-  auto: "auto-advance",
-  approval: "human approval",
-  human: "human only",
-};
+/** The whitelist above as the lookup `listAuditLog` reads: `action` arrives as
+ * a plain `audit_events` column, so only a keyed get can answer it. */
+const AUDIT_KIND_BY_ACTION = new Map(Object.entries(AUDIT_ACTION_KINDS));
 
-interface AuditRow {
+const BOUNDARY_LABEL = new Map([
+  ["auto", "auto-advance"],
+  ["approval", "human approval"],
+  ["human", "human only"],
+]);
+
+type AuditRow = {
   id: string;
   occurred_at: string;
   actor_user_id: string | null;
@@ -165,45 +178,86 @@ interface AuditRow {
   task_key: string | null;
   details_json: string | null;
   actor_name: string | null;
-}
+};
+
+/** A `details_json` string the sentences below interpolate. Empty is the same
+ * as absent: every template already carries the fallback a reader sees when the
+ * writer recorded nothing, and a bold `****` in the audit column reads as a bug
+ * rather than as a value. */
+const detailText = z.string().min(1).nullable().catch(null);
+
+/**
+ * The `details_json` fields this panel renders, decoded at the read boundary.
+ *
+ * `details` is free-form JSON — each guard writes the keys its own sentence
+ * needs — so every field is INDEPENDENTLY tolerant: one junk value degrades to
+ * that one sentence's fallback instead of failing the whole audit row (or, with
+ * a canonical schema, the whole panel). Unknown keys are dropped; nothing here
+ * reads them.
+ */
+const auditDetailsSchema = z.object({
+  from: detailText,
+  to: detailText,
+  boundary: detailText,
+  targetUserId: detailText,
+  email: detailText,
+  role: detailText,
+  name: detailText,
+  // F20-13: the composite boundary change a stage removal caused (display
+  // NAMES), written only when re-joining the neighbours TIGHTENED a hop.
+  tightened: z
+    .object({ from: detailText, to: detailText, boundary: detailText })
+    .nullable()
+    .catch(null),
+  outcome: detailText,
+  resolvedViolations: z.number().catch(0),
+  scope: detailText,
+  bypassed: detailText,
+  what: detailText,
+  memberRole: detailText,
+});
+
+/** A blob that is not an object at all — never written by `recordAudit`, but
+ * the column is free text — reads as "nothing recorded", like an absent one. */
+const auditDetails = auditDetailsSchema.catch(() =>
+  auditDetailsSchema.parse({}),
+);
 
 function auditText(
   row: AuditRow,
   resolveUserName: (userId: string | null | undefined) => string | null,
 ): string {
   const actor = row.actor_name ?? row.actor_label;
-  const d = (
-    row.details_json ? JSON.parse(row.details_json) : {}
-  ) as Record<string, unknown>;
-  const str = (v: unknown): string | null =>
-    typeof v === "string" && v.length > 0 ? v : null;
+  const d = auditDetails.parse(
+    row.details_json ? JSON.parse(row.details_json) : {},
+  );
 
   switch (row.action) {
     case "project.policy.boundary_changed": {
-      const from = str(d.from) ?? "?";
-      const to = str(d.to) ?? "?";
-      const boundary = BOUNDARY_LABEL[str(d.boundary) ?? ""] ?? str(d.boundary) ?? "?";
+      const from = d.from ?? "?";
+      const to = d.to ?? "?";
+      const boundary =
+        BOUNDARY_LABEL.get(d.boundary ?? "") ?? d.boundary ?? "?";
       return `${actor} set **${from} → ${to}** to ${boundary}.`;
     }
     case "project.member.role_changed": {
-      const target =
-        resolveUserName(str(d.targetUserId)) ?? "a member";
-      return `${actor} set ${target} to **${str(d.to) ?? "?"}**.`;
+      const target = resolveUserName(d.targetUserId) ?? "a member";
+      return `${actor} set ${target} to **${d.to ?? "?"}**.`;
     }
     case "project.member.invited":
-      return `${actor} invited ${str(d.email) ?? "a member"} as ${str(d.role) ?? "viewer"}.`;
+      return `${actor} invited ${d.email ?? "a member"} as ${d.role ?? "viewer"}.`;
     case "project.member.removed": {
       const target = resolveUserName(row.subject_id) ?? "a member";
       return `${actor} removed ${target} from the project.`;
     }
     case "project.stage.added": {
-      const name = str(d.name);
+      const name = d.name;
       return name
         ? `${actor} added workflow stage **${name}**.`
         : `${actor} added a workflow stage.`;
     }
     case "project.stage.renamed": {
-      const name = str(d.name);
+      const name = d.name;
       return name
         ? `${actor} renamed a workflow stage to **${name}**.`
         : `${actor} renamed a workflow stage.`;
@@ -212,7 +266,7 @@ function auditText(
       // F20-27: the writer records `details: { id, name }`; read the name (it was
       // stored all along and ignored, so every removal printed the bare
       // "removed a workflow stage").
-      const name = str(d.name);
+      const name = d.name;
       const base = name
         ? `${actor} removed workflow stage **${name}**`
         : `${actor} removed a workflow stage`;
@@ -220,15 +274,15 @@ function auditText(
       // keeps the STRICTER of the two boundaries it replaced
       // (transitions.ts → rejoinChainAroundStage). When that tightened a
       // surviving hop, the writer records the composite change under
-      // `tightened: { from, to, boundary }` (display NAMES) so the audit row
-      // discloses the side effect the toast alone hid — the same vocabulary a
-      // manual boundary flip audits under.
+      // `tightened` so the audit row discloses the side effect the toast alone
+      // hid — the same vocabulary a manual boundary flip audits under. A
+      // recorded hop with no readable boundary says nothing, so it is dropped.
       const tightened = d.tightened;
-      if (tightened && typeof tightened === "object") {
-        const t = tightened as Record<string, unknown>;
-        const tf = str(t.from) ?? "?";
-        const tt = str(t.to) ?? "?";
-        const tb = BOUNDARY_LABEL[str(t.boundary) ?? ""] ?? str(t.boundary);
+      if (tightened) {
+        const tf = tightened.from ?? "?";
+        const tt = tightened.to ?? "?";
+        const tb =
+          BOUNDARY_LABEL.get(tightened.boundary ?? "") ?? tightened.boundary;
         if (tb) return `${base} — **${tf} → ${tt}** is now ${tb}.`;
       }
       return `${base}.`;
@@ -238,13 +292,13 @@ function auditText(
     case "project.settings.updated":
       return `${actor} updated project settings.`;
     case "project.agent_profile.created":
-      return `${actor} created agent profile **${str(d.name) ?? "?"}**.`;
+      return `${actor} created agent profile **${d.name ?? "?"}**.`;
     case "project.agent_profile.updated":
-      return `${actor} updated agent profile **${str(d.name) ?? "?"}**.`;
+      return `${actor} updated agent profile **${d.name ?? "?"}**.`;
     case "project.agent_profile.deleted":
-      return `${actor} deleted agent profile **${str(d.name) ?? "?"}**.`;
+      return `${actor} deleted agent profile **${d.name ?? "?"}**.`;
     case "project.agent_profile.deployed":
-      return `${actor} deployed agent profile **${str(d.name) ?? "?"}** to the project.`;
+      return `${actor} deployed agent profile **${d.name ?? "?"}** to the project.`;
     case "project.created":
       return `${actor} created the project.`;
     case "project.archived":
@@ -261,25 +315,24 @@ function auditText(
       return `${actor} cleared the project GitHub credential.`;
     case "github.credential.revalidated": {
       // The grant-scope / re-check attempt with its typed outcome (Phase 10).
-      const outcome = str(d.outcome);
+      const outcome = d.outcome;
       if (outcome === "no_pat_configured") {
         return `${actor} requested a scope grant — no GitHub credential configured.`;
       }
       if (outcome === "network_unavailable") {
         return `${actor} re-checked the project credential — GitHub was unreachable.`;
       }
-      const resolved =
-        typeof d.resolvedViolations === "number" ? d.resolvedViolations : 0;
+      const resolved = d.resolvedViolations;
       return resolved > 0
         ? `${actor} re-validated the project credential — ${resolved} policy flag${resolved === 1 ? "" : "s"} resolved.`
         : `${actor} re-checked the project credential scopes.`;
     }
     case "github.pr.merge_refused":
-      return `Blocked: review PR merge refused — the project credential is missing \`${str(d.scope) ?? "a scope"}\` — on`;
+      return `Blocked: review PR merge refused — the project credential is missing \`${d.scope ?? "a scope"}\` — on`;
     case "task.ownership.admin_released":
       return `${actor} released the task owner — recorded per audit policy on`;
     case "runtime.run.started": {
-      const role = str(d.role) ?? "agent";
+      const role = d.role ?? "agent";
       return `${actor} opened the ${role} runtime session — recorded per audit policy on`;
     }
     case "runtime.run.interrupted":
@@ -296,7 +349,7 @@ function auditText(
     // record of an override that already happened, so "or an admin can
     // force-accept" is advice for a decision nobody still has to make.
     case "task.acceptance.forced": {
-      const bypassed = str(d.bypassed);
+      const bypassed = d.bypassed;
       if (!bypassed || bypassed.startsWith("no gate")) {
         return `${actor} force-accepted the completion — on`;
       }
@@ -306,15 +359,15 @@ function auditText(
     // P13-D-7: the D2 emergency override — an org admin acting above (or
     // without) their project membership. `what` is the guard's own copy.
     case "project.org_admin.override": {
-      const what = str(d.what) ?? "act on this project";
-      const memberRole = str(d.memberRole);
+      const what = d.what ?? "act on this project";
+      const memberRole = d.memberRole;
       return `${actor} used the org-admin override to ${what} (project role: ${memberRole ?? "not a member"}).`;
     }
     // P13-D-8: a refused attempt. Reads as a blocked action, like the merge
     // refusal above.
     case "project.authority.denied": {
-      const what = str(d.what) ?? "act on this project";
-      const memberRole = str(d.memberRole);
+      const what = d.what ?? "act on this project";
+      const memberRole = d.memberRole;
       return `Blocked: ${actor} tried to ${what} — ${
         memberRole
           ? `their project role (${memberRole}) is not permitted`
@@ -336,6 +389,8 @@ function finishText(text: string, taskKey: string | null): string {
 
 /** Total audit-panel rows for the project (drives "show older"). */
 export function countAuditLog(db: DatabaseSync, slug: string): number {
+  // SAFETY: a `count(*)` aggregate yields exactly one row whose `c` is the
+  // integer SQLite counted — 0 when nothing matched, never no row.
   const violations = (
     db
       .prepare(
@@ -345,6 +400,7 @@ export function countAuditLog(db: DatabaseSync, slug: string): number {
   ).c;
   const actions = Object.keys(AUDIT_ACTION_KINDS);
   const placeholders = actions.map(() => "?").join(", ");
+  // SAFETY: same aggregate guarantee as above — one row, numeric `c`.
   const audits = (
     db
       .prepare(
@@ -368,6 +424,8 @@ export function listAuditLog(
   const resolveUserName = (userId: string | null | undefined): string | null => {
     if (!userId) return null;
     if (!nameCache.has(userId)) {
+      // SAFETY: the statement selects the single `name` column, which
+      // 0001_baseline declares NOT NULL on `users`; a missing id gives no row.
       const hit = nameStmt.get(userId) as { name: string } | undefined;
       nameCache.set(userId, hit?.name ?? null);
     }
@@ -394,6 +452,10 @@ export function listAuditLog(
 
   const actions = Object.keys(AUDIT_ACTION_KINDS);
   const placeholders = actions.map(() => "?").join(", ");
+  // SAFETY: the SELECT names exactly AuditRow's nine members. 0001_baseline
+  // declares `id`, `occurred_at`, `actor_label` and `action` NOT NULL on
+  // `audit_events`; the rest are nullable there, and `actor_name` is null
+  // whenever the LEFT JOIN finds no user — which is how AuditRow types them.
   const rows = db
     .prepare(
       `SELECT a.id, a.occurred_at, a.actor_user_id, a.actor_label, a.action,
@@ -402,11 +464,11 @@ export function listAuditLog(
        WHERE a.project_slug = ? AND a.action IN (${placeholders})
        ORDER BY a.occurred_at DESC, a.id DESC LIMIT ?`,
     )
-    .all(slug, ...actions, limit) as unknown as AuditRow[];
+    .all(slug, ...actions, limit) as AuditRow[];
 
   const auditEntries: AuditLogEntry[] = rows.map((row) => ({
     id: row.id,
-    kind: AUDIT_ACTION_KINDS[row.action] ?? "change",
+    kind: AUDIT_KIND_BY_ACTION.get(row.action) ?? "change",
     text: finishText(auditText(row, resolveUserName), row.task_key),
     taskKey: row.task_key,
     occurredAt: row.occurred_at,

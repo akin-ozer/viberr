@@ -44,6 +44,10 @@ async function nudgeMergePendingTasks(
   // a JSON blob, which a PR TITLE containing that text satisfies just as well.
   // `json_extract` asks the question the code actually means; the re-parse below
   // stays because the projection column is still a blob and the number matters.
+  // SAFETY: `project_slug` and `task_key` are NOT NULL TEXT on
+  // `task_projections` (0001_baseline.sql), and the WHERE clause admits only
+  // rows whose `pr_json` is non-null valid JSON — so every selected row carries
+  // the three strings named here.
   const rows = db
     .prepare(
       `SELECT t.project_slug AS slug, t.task_key AS key, t.pr_json AS pr
@@ -94,6 +98,8 @@ async function nudgeMergePendingTasks(
 
 /** Active projects that have at least one branched task worth reconciling. */
 function projectsToPoll(db: DatabaseSync): string[] {
+  // SAFETY: `task_projections.project_slug` is NOT NULL TEXT
+  // (0001_baseline.sql), so each row of this single-column SELECT holds a slug.
   return (
     db
       .prepare(
@@ -166,11 +172,16 @@ export async function pollGithubReconcile(
 // no-op — no duplicate interval and no re-fired boot poll.
 const POLLER_KEY = Symbol.for("viberr.githubReconcilePoller");
 
-function pollerCache(): Record<symbol, ReturnType<typeof setInterval> | undefined> {
-  return globalThis as unknown as Record<
-    symbol,
-    ReturnType<typeof setInterval> | undefined
-  >;
+/** The process-global slot the interval handle lives in. */
+interface PollerHost {
+  [POLLER_KEY]?: ReturnType<typeof setInterval>;
+}
+
+function pollerCache(): PollerHost {
+  // SAFETY: `POLLER_KEY` is a registry symbol under a viberr-namespaced key
+  // that only the two functions below read or write, so the slot holds either
+  // the interval handle they put there or nothing at all.
+  return globalThis as PollerHost;
 }
 
 /**
@@ -202,7 +213,7 @@ export function startGithubReconcilePoller(db: DatabaseSync): void {
         running = false;
       });
   }, RECONCILE_POLL_MS);
-  if (typeof handle.unref === "function") handle.unref();
+  handle.unref?.();
   cache[POLLER_KEY] = handle;
 }
 

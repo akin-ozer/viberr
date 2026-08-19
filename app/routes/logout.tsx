@@ -33,6 +33,6 @@ export async function action({ request }: Route.ActionArgs) {
   throw redirect("/login", { headers });
 }
 
-export function loader(_: Route.LoaderArgs) {
+export function loader(_args: Route.LoaderArgs) {
   throw redirect("/");
 }

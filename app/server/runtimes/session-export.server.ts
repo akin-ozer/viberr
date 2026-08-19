@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import { resolveClaudeConfigDir } from "./claude-config.server";
 import { codexSessionRoots } from "./codex-config.server";
 import type { RealBackend } from "./runtime-registry.server";
@@ -41,19 +42,37 @@ function codexSessionDirs(): string[] {
     .filter((dir) => existsSync(dir));
 }
 
+/**
+ * The only field this module reads out of a transcript line: Claude writes the
+ * working directory at the top level, Codex nests it under `payload`. Both are
+ * `.catch(undefined)` per field — one line carrying a junk `cwd` must fall
+ * through to the same line's `payload.cwd` (and then to the next line), exactly
+ * as the hand-decoded version did.
+ */
+const transcriptCwdLineSchema = z.object({
+  cwd: z.string().optional().catch(undefined),
+  payload: z
+    .object({ cwd: z.string().optional().catch(undefined) })
+    .optional()
+    .catch(undefined),
+});
+
 /** Read the cwd baked into a Claude/Codex transcript's first line that carries one. */
 function transcriptCwd(filePath: string): string | null {
   try {
     const text = readFileSync(filePath, "utf8");
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
+      let parsed: unknown;
       try {
-        const obj = JSON.parse(line) as { cwd?: string; payload?: { cwd?: string } };
-        if (typeof obj.cwd === "string") return obj.cwd;
-        if (obj.payload && typeof obj.payload.cwd === "string") return obj.payload.cwd;
+        parsed = JSON.parse(line);
       } catch {
-        // skip non-JSON lines
+        continue; // skip non-JSON lines
       }
+      const decoded = transcriptCwdLineSchema.safeParse(parsed);
+      if (!decoded.success) continue;
+      const cwd = decoded.data.cwd ?? decoded.data.payload?.cwd;
+      if (cwd !== undefined) return cwd;
     }
   } catch {
     // unreadable → no cwd
@@ -61,7 +80,13 @@ function transcriptCwd(filePath: string): string | null {
   return null;
 }
 
-function fileStats(filePath: string): { lineCount: number; bytes: number } {
+/** Rough size signals for one transcript file (see {@link LocatedTranscript}). */
+interface TranscriptSize {
+  lineCount: number;
+  bytes: number;
+}
+
+function fileStats(filePath: string): TranscriptSize {
   try {
     const text = readFileSync(filePath, "utf8");
     const lineCount = text.split("\n").filter((l) => l.trim()).length;

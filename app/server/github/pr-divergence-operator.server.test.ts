@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -17,7 +18,11 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import { deleteTaskRemoteBranch, reconcileTask } from "./github-reconciler.server";
+import {
+  deleteTaskRemoteBranch,
+  reconcileTask,
+  type OperatorWake,
+} from "./github-reconciler.server";
 
 /**
  * The pr-diverged coordination seam: an out-of-band PR transition detected by
@@ -28,30 +33,42 @@ import { deleteTaskRemoteBranch, reconcileTask } from "./github-reconciler.serve
  * archive_task + deleteBranch packet option.
  */
 
-// Observe the exact trigger without spawning any real operator runtime. The
-// spread keeps every other task-actions export (notifyTaskWatchers etc.) real.
-vi.mock("~/server/tasks/task-actions.server", async (importOriginal) => {
-  const mod = await importOriginal<
-    typeof import("~/server/tasks/task-actions.server")
-  >();
-  return { ...mod, autoInvokeOperator: vi.fn(async () => {}) };
-});
-import { autoInvokeOperator } from "~/server/tasks/task-actions.server";
-const invoked = vi.mocked(autoInvokeOperator);
+/** One recorded wake: the arguments the reconciler passed the operator. */
+interface OperatorWakeCall {
+  projectSlug: string;
+  taskKey: string;
+  trigger: "pr-diverged";
+}
+
+/**
+ * The reconciler's own `wakeOperator` hook, so the exact trigger is observed
+ * without spawning a real operator runtime — and without displacing any other
+ * task-actions behaviour these tests rely on.
+ */
+const invoked: OperatorWakeCall[] = [];
+const wakeOperator: OperatorWake = async (
+  _db,
+  _ctx,
+  projectSlug,
+  taskKey,
+  trigger,
+) => {
+  invoked.push({ projectSlug, taskKey, trigger });
+};
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
-beforeEach(() => invoked.mockClear());
+beforeEach(() => {
+  invoked.length = 0;
+});
 
 const REPO_PATH = "/repos/akin-ozer/viberr";
 const BRANCH = "vib-301-workspace";
 
-function setup(
-  fmPatch: Parameters<typeof baseTaskFrontmatter>[1] = {},
-): { store: TestStore; actor: { userId: string; label: string } } {
+function setup(fmPatch: Parameters<typeof baseTaskFrontmatter>[1] = {}) {
   const store = setupTestStore(ctx);
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-301", {
@@ -77,7 +94,7 @@ function routesWithPr(pr: {
   number: number;
   state: "open" | "closed";
   merged: boolean;
-}): Record<string, FakeResponder> {
+}) {
   return {
     [`GET ${REPO_PATH}/compare/main...${BRANCH}`]: {
       body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] },
@@ -107,7 +124,7 @@ function routesWithPr(pr: {
         changed_files: 1,
       },
     },
-  };
+  } satisfies Record<string, FakeResponder>;
 }
 
 async function reconcile(
@@ -119,8 +136,27 @@ async function reconcile(
     store.db,
     { projectSlug: store.slug, taskKey: "VIB-301" },
     actor,
-    { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch(routes).fetchImpl,
+      wakeOperator,
+    },
   );
+}
+
+/** `.all()` hands back untyped SQLite cells, so the event rows are parsed on read. */
+const eventTextRows = z.array(z.object({ text: z.string() }));
+
+/**
+ * A branch deletion answers on one of several members and only the refusals
+ * carry a sentence, so the message is read through that narrowing — a member
+ * that carries none answers `undefined` and fails its assertion, rather than
+ * being asserted into existence.
+ */
+function refusalMessage(
+  result: Awaited<ReturnType<typeof deleteTaskRemoteBranch>>,
+): string | undefined {
+  return "message" in result ? result.message : undefined;
 }
 
 describe("pr-diverged wakes the operator", () => {
@@ -130,14 +166,14 @@ describe("pr-diverged wakes the operator", () => {
     });
     const routes = routesWithPr({ number: 318, state: "closed", merged: false });
     await reconcile(store, actor, routes);
-    expect(invoked).toHaveBeenCalledTimes(1);
-    expect(invoked.mock.calls[0]![2]).toBe(store.slug);
-    expect(invoked.mock.calls[0]![3]).toBe("VIB-301");
-    expect(invoked.mock.calls[0]![4]).toBe("pr-diverged");
+    expect(invoked).toHaveLength(1);
+    expect(invoked[0]!.projectSlug).toBe(store.slug);
+    expect(invoked[0]!.taskKey).toBe("VIB-301");
+    expect(invoked[0]!.trigger).toBe("pr-diverged");
 
     // A persistent divergence is not a new event — no second wake-up.
     await reconcile(store, actor, routes);
-    expect(invoked).toHaveBeenCalledTimes(1);
+    expect(invoked).toHaveLength(1);
   });
 
   it("merged-but-not-done fires the trigger too", async () => {
@@ -145,8 +181,8 @@ describe("pr-diverged wakes the operator", () => {
       pr: { number: 318, state: "review", title: "Attach execution workspace" },
     });
     await reconcile(store, actor, routesWithPr({ number: 318, state: "closed", merged: true }));
-    expect(invoked).toHaveBeenCalledTimes(1);
-    expect(invoked.mock.calls[0]![4]).toBe("pr-diverged");
+    expect(invoked).toHaveLength(1);
+    expect(invoked[0]!.trigger).toBe("pr-diverged");
   });
 
   it("accepted-then-closed (task already Done) fires the trigger", async () => {
@@ -155,8 +191,8 @@ describe("pr-diverged wakes the operator", () => {
       pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
     });
     await reconcile(store, actor, routesWithPr({ number: 318, state: "closed", merged: false }));
-    expect(invoked).toHaveBeenCalledTimes(1);
-    expect(invoked.mock.calls[0]![4]).toBe("pr-diverged");
+    expect(invoked).toHaveLength(1);
+    expect(invoked[0]!.trigger).toBe("pr-diverged");
   });
 
   it("an unchanged happy-path reconcile never wakes the operator", async () => {
@@ -164,7 +200,7 @@ describe("pr-diverged wakes the operator", () => {
     const routes = routesWithPr({ number: 318, state: "open", merged: false });
     await reconcile(store, actor, routes); // review PR appears (a normal linking)
     await reconcile(store, actor, routes); // steady state
-    expect(invoked).not.toHaveBeenCalled();
+    expect(invoked).toHaveLength(0);
   });
 });
 
@@ -182,9 +218,11 @@ describe("the healing transition — a closed PR goes live again", () => {
     })!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({ number: 318, state: "review" });
 
-    const events = store.db
-      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
-      .all() as { text: string }[];
+    const events = eventTextRows.parse(
+      store.db
+        .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+        .all(),
+    );
     expect(
       events.some((e) => /PR #318 was reopened on GitHub/.test(e.text)),
     ).toBe(true);
@@ -192,8 +230,8 @@ describe("the healing transition — a closed PR goes live again", () => {
     const notifs = listNotifications(store.db, store.users.arda.id);
     expect(notifs.some((n) => n.kind === "policy" && /live again/.test(n.title ?? ""))).toBe(true);
 
-    expect(invoked).toHaveBeenCalledTimes(1);
-    expect(invoked.mock.calls[0]![4]).toBe("pr-diverged");
+    expect(invoked).toHaveLength(1);
+    expect(invoked[0]!.trigger).toBe("pr-diverged");
   });
 
   it("a FRESH PR replacing the closed one is announced as a replacement", async () => {
@@ -212,15 +250,17 @@ describe("the healing transition — a closed PR goes live again", () => {
       },
     });
     await reconcile(store, actor, routesWithPr({ number: 999, state: "open", merged: false }));
-    const events = store.db
-      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
-      .all() as { text: string }[];
+    const events = eventTextRows.parse(
+      store.db
+        .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+        .all(),
+    );
     expect(
       events.some((e) =>
         /PR #999 now tracks VIB-301's branch on GitHub, replacing closed PR #318/.test(e.text),
       ),
     ).toBe(true);
-    expect(invoked).toHaveBeenCalledTimes(1);
+    expect(invoked).toHaveLength(1);
   });
 
   it("R16-1: a DIFFERENT open PR whose head is not the delivered revision does not heal anything", async () => {
@@ -248,15 +288,17 @@ describe("the healing transition — a closed PR goes live again", () => {
     })!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({ number: 318, state: "closed" });
 
-    const events = store.db
-      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
-      .all() as { text: string }[];
+    const events = eventTextRows.parse(
+      store.db
+        .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+        .all(),
+    );
     expect(events.some((e) => /replacing closed PR #318/.test(e.text))).toBe(false);
     const collision = events.find((e) => /Branch name collision/.test(e.text));
     expect(collision, "the stranger is reported as a collision").toBeTruthy();
     expect(collision!.text).toContain("#999");
     expect(collision!.text).toContain("the-del"); // the delivered sha, abbreviated
-    expect(invoked).not.toHaveBeenCalled();
+    expect(invoked).toHaveLength(0);
   });
 });
 
@@ -277,9 +319,11 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
     expect(result).toEqual({ status: "deleted", branch: BRANCH });
     expect(fake.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`)).toHaveLength(1);
 
-    const events = store.db
-      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
-      .all() as { text: string }[];
+    const events = eventTextRows.parse(
+      store.db
+        .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+        .all(),
+    );
     expect(events.some((e) => e.text === `Deleted branch \`${BRANCH}\` from GitHub.`)).toBe(true);
     expect(
       listAuditEvents(store.db, { action: "github.branch.deleted" }),
@@ -298,7 +342,7 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
       { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
     );
     expect(result).toMatchObject({ status: "refused" });
-    expect((result as { message: string }).message).toMatch(/PR #318 is still open/);
+    expect(refusalMessage(result)).toMatch(/PR #318 is still open/);
     expect(fake.calls).toHaveLength(0); // refused BEFORE any GitHub write
   });
 
@@ -312,7 +356,7 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
       { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
     );
     expect(result).toMatchObject({ status: "refused" });
-    expect((result as { message: string }).message).toMatch(/default branch/);
+    expect(refusalMessage(result)).toMatch(/default branch/);
     expect(fake.calls).toHaveLength(0);
   });
 
@@ -346,7 +390,7 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
       { dataRoot: store.dataRoot, fetchImpl: unreachableFetch() },
     );
     expect(result).toMatchObject({ status: "refused" });
-    expect((result as { message: string }).message).toMatch(/unreachable/);
+    expect(refusalMessage(result)).toMatch(/unreachable/);
   });
 
   it("B11: URL-encodes the branch — an exotic name addresses its OWN ref, not a different one", async () => {

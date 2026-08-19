@@ -6,7 +6,10 @@ import type { ActorRender } from "./actor.server";
  * taken at projection time (events survive member removal).
  */
 
-export interface TaskEventRow {
+/** A type alias, not an interface, so a `SELECT`-row assertion is checked
+ *  against SQLite's own output types instead of being laundered through
+ *  `unknown` first (only a type alias gets the implicit index signature). */
+export type TaskEventRow = {
   id: number;
   project_slug: string;
   task_key: string;
@@ -20,6 +23,13 @@ export interface TaskEventRow {
   text: string;
   to_agent: 0 | 1;
   evidence_json: string | null;
+};
+
+/** The evidence rows a completion/verdict event carries, as stored. */
+export interface EvidenceRowRender {
+  label: string;
+  add: string;
+  del: string;
 }
 
 export interface TimelineEventRender {
@@ -37,10 +47,16 @@ export interface TimelineEventRender {
   toAgent: boolean;
   /** Outcome events (completion / verdict / an agent's report — P13-D-26);
    *  add/del are short signed display strings ("+14", "−4") and may be empty. */
-  evidence: { label: string; add: string; del: string }[] | null;
+  evidence: EvidenceRowRender[] | null;
 }
 
 export function mapTaskEventRow(row: TaskEventRow): TimelineEventRender {
+  // SAFETY: both JSON columns have ONE writer — `rebuilder.server.ts` inserts
+  // `JSON.stringify(resolveActor(event.actor))` and
+  // `JSON.stringify(event.evidence)`, whose sources are an `ActorRender` and a
+  // parsed evidence-row list by construction. The projection is rebuilt from
+  // the task files, never hand-edited, so no other shape can reach these two
+  // columns. (Same invariant `activity-feed.server.ts` reads `actor_json` on.)
   return {
     id: row.id,
     type: row.type,
@@ -50,11 +66,7 @@ export function mapTaskEventRow(row: TaskEventRow): TimelineEventRender {
     text: row.text,
     toAgent: row.to_agent === 1,
     evidence: row.evidence_json
-      ? (JSON.parse(row.evidence_json) as {
-          label: string;
-          add: string;
-          del: string;
-        }[])
+      ? (JSON.parse(row.evidence_json) as EvidenceRowRender[])
       : null,
   };
 }

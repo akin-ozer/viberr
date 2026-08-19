@@ -127,8 +127,8 @@ describe("HumanAccess", () => {
         onSetRole={() => {}}
       />,
     );
-    const buttons = container.querySelectorAll(".mini-seg button");
-    expect(Array.from(buttons).every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
+    const buttons = container.querySelectorAll<HTMLButtonElement>(".mini-seg button");
+    expect(Array.from(buttons).every((b) => b.disabled)).toBe(true);
   });
 });
 
@@ -210,9 +210,7 @@ describe("WorkflowRules", () => {
     const locked = container.querySelector(".cap-seg.locked")!;
     expect(locked).not.toBeNull();
     expect(
-      Array.from(locked.querySelectorAll("button")).every(
-        (b) => (b as HTMLButtonElement).disabled,
-      ),
+      Array.from(locked.querySelectorAll("button")).every((b) => b.disabled),
     ).toBe(true);
     expect(getByText("locked · V1")).toBeTruthy();
 
@@ -327,9 +325,9 @@ describe("WorkflowRules — the not-permitted case says why", () => {
   it("a non-manager gets every radio disabled AND a visible reason", () => {
     const { container } = render1(false);
     expect(
-      Array.from(container.querySelectorAll(".cap-seg button")).every(
-        (b) => (b as HTMLButtonElement).disabled,
-      ),
+      Array.from(
+        container.querySelectorAll<HTMLButtonElement>(".cap-seg button"),
+      ).every((b) => b.disabled),
     ).toBe(true);
     const note = container.querySelector(".deny-note");
     expect(note).not.toBeNull();

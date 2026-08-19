@@ -16,6 +16,7 @@ import {
   defaultExec,
   discardLocalTaskBranch,
   pushWorkspaceBranch,
+  type ExecOutcome,
 } from "./push-workspace.server";
 
 let ctx: TestDbContext;
@@ -118,12 +119,15 @@ function fakeGit(opts: {
       return { ok: true, stdout: String(ahead), stderr: "" };
     }
     if (args.includes("push")) {
-      return {
+      // `timedOut` is OMITTED unless the child was killed, exactly as
+      // `defaultExec` writes it — a falsy key would not be the same outcome.
+      const pushed: ExecOutcome = {
         ok: opts.pushOk !== false,
-        ...(opts.pushTimedOut ? { timedOut: true } : {}),
         stdout: "",
         stderr: opts.pushOk === false ? (opts.pushStderr ?? "") : "",
       };
+      if (opts.pushTimedOut) pushed.timedOut = true;
+      return pushed;
     }
     return { ok: true, stdout: "", stderr: "" };
   });
@@ -172,10 +176,11 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       dataRoot: store.dataRoot, exec: git.exec,
     });
     expect(res.status).toBe("no_commits");
+    if (res.status !== "no_commits") throw new Error("expected no_commits");
     expect(res).toMatchObject({ defaultBranchEvidence: { verified: false } });
-    expect(
-      (res as { defaultBranchEvidence?: { why?: string } }).defaultBranchEvidence?.why,
-    ).toContain("uncommitted");
+    const evidence = res.defaultBranchEvidence;
+    if (evidence?.verified !== false) throw new Error("expected unverified evidence");
+    expect(evidence.why).toContain("uncommitted");
   });
 
   it("A3: a FAILED rev-list is UNKNOWN, not `no_commits` — it still pushes", async () => {

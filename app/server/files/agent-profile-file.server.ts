@@ -7,6 +7,7 @@ import { CAPABILITY_MODES } from "~/schemas/project-file.schema";
 import {
   serializeFrontmatterFile,
   splitFrontmatter,
+  yamlMappingSchema,
 } from "./frontmatter.server";
 
 /**
@@ -96,19 +97,29 @@ export interface ParsedAgentProfile {
   description: string;
 }
 
+export interface AgentProfileParseResult {
+  parsed: ParsedAgentProfile | null;
+  diagnostics: FileDiagnostic[];
+}
+
 export function parseAgentProfileContent(
   content: string,
   context: { fallbackId?: string } = {},
-): { parsed: ParsedAgentProfile | null; diagnostics: FileDiagnostic[] } {
+): AgentProfileParseResult {
   const diagnostics: FileDiagnostic[] = [];
   const { data, body, diagnostics: fmDiags } = splitFrontmatter(content);
   diagnostics.push(...fmDiags);
 
-  const result = agentProfileFrontmatterSchema.safeParse(
-    typeof data === "object" && data !== null
-      ? { id: context.fallbackId, ...(data as Record<string, unknown>) }
-      : { id: context.fallbackId },
-  );
+  // Frontmatter that is not a mapping (a scalar, a sequence, an empty block)
+  // contributes no fields at all; the schema below then reports the required
+  // ones as missing, exactly as it did for a frontmatter-less file.
+  const mapping = yamlMappingSchema.safeParse(data);
+  const fields = mapping.success ? mapping.data : {};
+
+  const result = agentProfileFrontmatterSchema.safeParse({
+    id: context.fallbackId,
+    ...fields,
+  });
   if (!result.success) {
     diagnostics.push(
       diagWarning(
@@ -123,18 +134,16 @@ export function parseAgentProfileContent(
   // preserved but otherwise SILENT — the exact drift the task/project files guard
   // against. Surface it as a warning so a stale profile is diagnosable (and a
   // fixture guard can assert zero unknowns on the shipped profiles).
-  if (typeof data === "object" && data !== null) {
-    const unknown = Object.keys(data).filter(
-      (k) => !AGENT_PROFILE_KNOWN_KEYS.has(k),
+  const unknown = Object.keys(fields).filter(
+    (k) => !AGENT_PROFILE_KNOWN_KEYS.has(k),
+  );
+  if (unknown.length > 0) {
+    diagnostics.push(
+      diagWarning(
+        "agent_profile.unknown_field",
+        `Agent profile has unrecognized frontmatter field(s): ${unknown.join(", ")}. This usually means the file drifted from the current schema.`,
+      ),
     );
-    if (unknown.length > 0) {
-      diagnostics.push(
-        diagWarning(
-          "agent_profile.unknown_field",
-          `Agent profile has unrecognized frontmatter field(s): ${unknown.join(", ")}. This usually means the file drifted from the current schema.`,
-        ),
-      );
-    }
   }
   return {
     parsed: { frontmatter: result.data, description: body.trim() },
@@ -143,9 +152,5 @@ export function parseAgentProfileContent(
 }
 
 export function serializeAgentProfile(parsed: ParsedAgentProfile): string {
-  return serializeFrontmatterFile(
-    parsed.frontmatter as unknown as Record<string, unknown>,
-    {},
-    parsed.description,
-  );
+  return serializeFrontmatterFile(parsed.frontmatter, {}, parsed.description);
 }

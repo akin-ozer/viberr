@@ -77,12 +77,15 @@ export function readProjectActivity(
   slug: string,
 ): Map<string, TaskActivityFacts> {
   const facts = new Map<string, TaskActivityFacts>();
+  // SAFETY: the two selected columns are exactly the two asserted here —
+  // `task_key` is TEXT NOT NULL, and `MAX(occurred_at)` over a TEXT column is
+  // TEXT or NULL for an empty group (0001_baseline.sql `task_events`).
   const events = db
     .prepare(
       `SELECT task_key AS k, MAX(occurred_at) AS last_at
          FROM task_events WHERE project_slug = ? GROUP BY task_key`,
     )
-    .all(slug) as unknown as { k: string; last_at: string | null }[];
+    .all(slug) as { k: string; last_at: string | null }[];
   for (const row of events) {
     facts.set(row.k, { lastActivityAt: row.last_at, runInFlight: false });
   }
@@ -90,12 +93,13 @@ export function readProjectActivity(
   // actually in flight is not quiet whatever its timeline says — a run can work
   // for an hour and report once at the end, and the runtime's idle guard (not
   // this module) owns the "the run itself hung" case.
+  // SAFETY: one selected column, `agent_runs.task_key` (TEXT NOT NULL).
   const live = db
     .prepare(
       `SELECT DISTINCT task_key AS k FROM agent_runs
         WHERE project_slug = ? AND state IN ('queued', 'running')`,
     )
-    .all(slug) as unknown as { k: string }[];
+    .all(slug) as { k: string }[];
   for (const row of live) {
     const existing = facts.get(row.k);
     if (existing) existing.runInFlight = true;
@@ -110,6 +114,8 @@ export function readTaskActivity(
   slug: string,
   taskKey: string,
 ): TaskActivityFacts {
+  // SAFETY: an un-grouped `MAX()` returns at most one row, and its single
+  // column is `task_events.occurred_at` (TEXT) — NULL when nothing matched.
   const event = db
     .prepare(
       `SELECT MAX(occurred_at) AS last_at FROM task_events
@@ -136,6 +142,18 @@ export function activityFactsFor(
   return facts.get(taskKey) ?? NO_ACTIVITY;
 }
 
+/** What {@link isQuiet} needs to answer the question. */
+export interface QuietCheck {
+  lastActivityAt: string | null;
+  waiting: Waiting;
+  archived: boolean;
+  /** Terminal stage — accepted / merged, i.e. `isAcceptedDisplayState`. */
+  terminal: boolean;
+  runInFlight: boolean;
+  /** Omitted outside tests — the real clock answers the question. */
+  now?: Date;
+}
+
 /**
  * Has this task gone quiet? Pure, so both read models and the tests agree.
  *
@@ -150,15 +168,7 @@ export function activityFactsFor(
  *    after a planning session has taught everyone to ignore it.
  *  · the threshold follows who is on the hook (see the two constants).
  */
-export function isQuiet(input: {
-  lastActivityAt: string | null;
-  waiting: Waiting;
-  archived: boolean;
-  /** Terminal stage — accepted / merged, i.e. `isAcceptedDisplayState`. */
-  terminal: boolean;
-  runInFlight: boolean;
-  now?: Date;
-}): boolean {
+export function isQuiet(input: QuietCheck): boolean {
   if (input.archived || input.terminal || input.runInFlight) return false;
   if (!input.lastActivityAt) return false;
   const at = Date.parse(input.lastActivityAt);

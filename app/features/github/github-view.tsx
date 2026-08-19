@@ -433,6 +433,12 @@ export function GithubViewPage({
   // push "Updating branch and PR status from GitHub…" BEFORE submitting, so a
   // viewer clicked, watched fake progress, and then got a 403 — while the
   // sibling grant-scope control in this same file was correctly gated.
+  //
+  // SAFETY: `myRole` is the project layout loader's own value (routes/project.tsx
+  // — `project_members.role`, which 0001_baseline CHECK-constrains to exactly the
+  // four project roles, or "admin" for the org-admin override, or null); this
+  // page's prop is what widens it to `string`. `roleCan` denies any value outside
+  // the four regardless, so the widening can only ever under-grant.
   const canReconcile = roleCan(
     myRole as ProjectRole | null,
     "reconcile-github",
@@ -461,6 +467,8 @@ export function GithubViewPage({
   // attach/rotate/remove row renders — so a role can never be shown a control
   // it may not use, nor hidden from one it may. The loader redacts the payload
   // on the same rule; a client-only gate would leave the token tail in the HTML.
+  //
+  // SAFETY: same loader-sourced `myRole` as `canReconcile` above.
   const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
   // Grant scope RE-CHECKS an existing PAT's scopes — meaningless when no
   // credential is configured (F6). Only offer it once a PAT is bound; the

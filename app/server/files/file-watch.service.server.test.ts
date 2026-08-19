@@ -68,11 +68,11 @@ async function startWatcherReady(store: ReturnType<typeof setupTestStore>) {
 }
 
 function taskCount(store: ReturnType<typeof setupTestStore>): number {
-  return (
+  return Number(
     store.db
       .prepare(`SELECT count(*) AS c FROM task_projections WHERE project_slug = ?`)
-      .get(store.slug) as { c: number }
-  ).c;
+      .get(store.slug)!.c,
+  );
 }
 
 describe("unlinkDir handling (E13)", () => {
@@ -96,7 +96,7 @@ describe("unlinkDir handling (E13)", () => {
     );
     const left = store.db
       .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
-      .all(store.slug) as { task_key: string }[];
+      .all(store.slug);
     expect(left.map((r) => r.task_key)).toEqual(["VIB-2"]);
   }, 15000);
 
@@ -139,9 +139,9 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1") });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const projectedTitle = () =>
-      (store.db
+      store.db
         .prepare(`SELECT title FROM task_projections WHERE project_slug = ? AND task_key = ?`)
-        .get(store.slug, "VIB-1") as { title: string }).title;
+        .get(store.slug, "VIB-1")!.title;
     const originalTitle = projectedTitle();
 
     await startWatcherReady(store);

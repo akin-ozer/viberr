@@ -3,7 +3,10 @@ import { AppError } from "~/server/errors/app-error.server";
 import { resolveTaskFilePath, readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { createNotification } from "~/server/projections/notifications.server";
+import {
+  type CreateNotificationInput,
+  createNotification,
+} from "~/server/projections/notifications.server";
 import { logger } from "~/server/logging/logger.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
@@ -172,7 +175,7 @@ export function notifyTaskWatchers(
   for (const userId of recipients) {
     // createNotification consults this recipient's routing prefs and returns
     // null when they've silenced this category — only count real deliveries.
-    const id = createNotification(db, {
+    const notification: CreateNotificationInput = {
       userId,
       kind: notice.kind,
       ptype: notice.ptype ?? null,
@@ -181,8 +184,10 @@ export function notifyTaskWatchers(
       from: notice.from ?? OPERATOR_NOTIFY_FROM,
       projectSlug: notice.projectSlug,
       taskKey: notice.taskKey,
-      ...(notice.occurredAt ? { occurredAt: notice.occurredAt } : {}),
-    });
+    };
+    // No caller timestamp ⇒ leave the key off and let the writer stamp `now`.
+    if (notice.occurredAt) notification.occurredAt = notice.occurredAt;
+    const id = createNotification(db, notification);
     if (id) notified.push(userId);
   }
   return notified;

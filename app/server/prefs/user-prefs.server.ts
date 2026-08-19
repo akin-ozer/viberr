@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 
 /**
  * Per-user UI preference store (`user_prefs`, migration 0004): JSON values
@@ -11,33 +12,73 @@ import type { DatabaseSync } from "node:sqlite";
 
 export const HOME_PREFS_KEY = "home";
 
-export interface HomePrefs {
+export type HomePrefs = {
   view: "grid" | "list";
   /** projectSlug → pinned. */
   stars: Record<string, boolean>;
-}
+};
 
-export function getPref<T>(
+/** Any JSON document a pref row can carry — `value_json` holds nothing else,
+ *  so this is both what `setPref` accepts and what an undecoded read returns
+ *  (the client-safe twin is `StoredPrefJson` in notification-prefs.ts). */
+export type PrefJson =
+  | PrefJson[]
+  | boolean
+  | number
+  | string
+  | { [key: string]: PrefJson }
+  | null;
+
+/** `value_json` is TEXT NOT NULL — a row that does not decode as one is no
+ *  readable pref, the same as a missing row. */
+const prefRowSchema = z.object({ value_json: z.string() });
+
+/**
+ * Read one pref. With a schema, the stored JSON is decoded through it and a
+ * value that does not conform reads as null — exactly like a missing row —
+ * so a hand-edited junk blob degrades to the caller's default. Without one,
+ * the raw JSON document is returned for callers that decode at their own
+ * boundary (e.g. `mergeNotifPrefs`).
+ */
+export function getPref(
   db: DatabaseSync,
   userId: string,
   key: string,
-): T | null {
-  const row = db
-    .prepare(`SELECT value_json FROM user_prefs WHERE user_id = ? AND key = ?`)
-    .get(userId, key) as { value_json: string } | undefined;
-  if (!row) return null;
+): PrefJson | null;
+export function getPref<S extends z.ZodType>(
+  db: DatabaseSync,
+  userId: string,
+  key: string,
+  schema: S,
+): z.infer<S> | null;
+export function getPref(
+  db: DatabaseSync,
+  userId: string,
+  key: string,
+  schema?: z.ZodType,
+) {
+  const row = prefRowSchema.safeParse(
+    db
+      .prepare(`SELECT value_json FROM user_prefs WHERE user_id = ? AND key = ?`)
+      .get(userId, key),
+  );
+  if (!row.success) return null;
+  let value: PrefJson;
   try {
-    return JSON.parse(row.value_json) as T;
+    value = JSON.parse(row.data.value_json);
   } catch {
     return null; // tolerant: malformed pref falls back to defaults
   }
+  if (!schema) return value;
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 export function setPref(
   db: DatabaseSync,
   userId: string,
   key: string,
-  value: unknown,
+  value: PrefJson,
 ): void {
   db.prepare(
     `INSERT INTO user_prefs (user_id, key, value_json, updated_at)
@@ -47,14 +88,25 @@ export function setPref(
   ).run(userId, key, JSON.stringify(value), new Date().toISOString());
 }
 
+/**
+ * The stored `home` blob, decoded tolerantly: the file is hand-editable and
+ * the row is whatever an older build wrote, so every field falls back to its
+ * default rather than failing the page.
+ */
+const homePrefsSchema = z.object({
+  view: z.enum(["grid", "list"]).catch("grid"),
+  /** projectSlug → pinned; an entry that is not a boolean reads as unpinned. */
+  stars: z.record(z.string(), z.boolean().catch(false)).catch({}),
+});
+
 /** Home prefs with tolerant fallback to defaults for missing/partial rows. */
 export function getHomePrefs(db: DatabaseSync, userId: string): HomePrefs {
-  const raw = getPref<Partial<HomePrefs>>(db, userId, HOME_PREFS_KEY);
-  return {
-    view: raw?.view === "list" ? "list" : "grid",
-    stars:
-      raw?.stars && typeof raw.stars === "object" ? { ...raw.stars } : {},
-  };
+  return (
+    getPref(db, userId, HOME_PREFS_KEY, homePrefsSchema) ?? {
+      view: "grid",
+      stars: {},
+    }
+  );
 }
 
 export function patchHomePrefs(

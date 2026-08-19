@@ -6,6 +6,7 @@ import {
   useNavigate,
   useRouteLoaderData,
 } from "react-router";
+import { z } from "zod";
 import type { Route } from "./+types/profile";
 import type { loader as rootLoader } from "../root";
 import { requireAuth, requireUser } from "~/server/auth/require-user.server";
@@ -43,9 +44,17 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * route's action.
  */
 
-export function meta(_: Route.MetaArgs) {
+export function meta() {
   return [{ title: "Profile & preferences · Viberr" }];
 }
+
+/** Overlay routes are opened from the shell with the path to return to in
+ *  history state (top-bell, user-menu). Browser history state survives reloads
+ *  and back/forward and is not the app's to trust, so it is parsed here rather
+ *  than asserted. */
+const overlayReturnState = z
+  .object({ returnTo: z.string().optional().catch(undefined) })
+  .catch({});
 
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireUser(request);
@@ -156,7 +165,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const githubFetcher = useFetcher<ProfileActionData>();
 
   const close = () => {
-    const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+    const { returnTo } = overlayReturnState.parse(location.state);
     navigate(returnTo ?? "/");
   };
 

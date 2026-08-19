@@ -11,6 +11,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import { getEnv, type Env } from "../config/env.server";
 import { getDataRoot } from "../files/file-store-root.server";
 import { logger, writeFatalSync } from "../logging/logger.server";
@@ -51,7 +52,10 @@ export const DATA_ROOT_LOCK_FILENAME = "writer.lock";
 /** The env var that forces a takeover of a live-looking lock. */
 export const FORCE_LOCK_ENV = "VIBERR_FORCE_DATA_ROOT_LOCK";
 
-export interface LockHolder {
+/** A type alias, not an interface, so the takeover/steal log lines can carry the
+ *  holder as a structured field (only a type alias gets the implicit index
+ *  signature). */
+export type LockHolder = {
   pid: number;
   hostname: string;
   /** ISO timestamp of when the holder acquired the lock. */
@@ -82,7 +86,7 @@ export interface LockHolder {
    * through to the liveness probe, unchanged.
    */
   procStartedAt?: number;
-}
+};
 
 /** Why an existing lock could not simply be taken. */
 export type LockVerdict = "stale" | "held" | "unknown-holder";
@@ -166,8 +170,16 @@ export class DataRootLockedError extends Error {
  *  the shutdown handler, which lives in another module — sees the same one. */
 const HELD_LOCK_KEY = Symbol.for("viberr.dataRootLock");
 
-function heldLockSlot(): Record<symbol, DataRootLock | null | undefined> {
-  return globalThis as unknown as Record<symbol, DataRootLock | null | undefined>;
+interface HeldLockSlot {
+  [HELD_LOCK_KEY]?: DataRootLock | null;
+}
+
+function heldLockSlot(): HeldLockSlot {
+  // SAFETY: `globalThis` carries no static type for a symbol-keyed slot. The key
+  // is module-private, and the only writes to it anywhere in the process are the
+  // two in `acquireDataRootLock`/`release` below — both storing a DataRootLock or
+  // null — so nothing else can put another shape there.
+  return globalThis as HeldLockSlot;
 }
 
 /** The lock this process holds, or null. */
@@ -179,8 +191,14 @@ export function heldDataRootLock(): DataRootLock | null {
  *  id per OS process, preserved across an HMR module reload. */
 const BOOT_ID_KEY = Symbol.for("viberr.processBootId");
 
+interface BootIdSlot {
+  [BOOT_ID_KEY]?: string;
+}
+
 export function processBootId(): string {
-  const slot = globalThis as unknown as Record<symbol, string | undefined>;
+  // SAFETY: as above — the key is module-private and this function is the only
+  // writer of it, storing the `randomUUID()` string on the line below.
+  const slot = globalThis as BootIdSlot;
   const existing = slot[BOOT_ID_KEY];
   if (existing) return existing;
   const created = randomUUID();
@@ -218,7 +236,7 @@ function isProcessAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
+    return error instanceof Error && "code" in error && error.code === "EPERM";
   }
 }
 
@@ -244,23 +262,43 @@ function readProcessStartTicks(pid: number): number | null {
   }
 }
 
+/**
+ * The lock file as it is found on disk — an unknown process's JSON, possibly
+ * hand-edited, possibly written by an older build.
+ *
+ * A verdict cannot be reached without a real pid and a hostname, so those two
+ * reject the file outright (`unknown-holder` → refuse, which is the safe answer).
+ * Everything else is tolerated FIELD BY FIELD, because a lock that only lost its
+ * timestamp still names its holder: `startedAt` falls back to "" (the refusal
+ * message reads it as "unknown since"), and the two evidence fields stay ABSENT
+ * rather than becoming `undefined` values — `classifyLock` and
+ * `verifyLockOwnership` both read them as "was this recorded at all?".
+ * `z.number()` rejects NaN/Infinity, which is the old `Number.isFinite` guard.
+ */
+const lockFileSchema = z
+  .object({
+    pid: z.number().int().positive(),
+    hostname: z.string().min(1),
+    startedAt: z.string().catch(""),
+    bootId: z.string().min(1).optional().catch(undefined),
+    procStartedAt: z.number().optional().catch(undefined),
+  })
+  .transform((file) => {
+    const holder: LockHolder = {
+      pid: file.pid,
+      hostname: file.hostname,
+      startedAt: file.startedAt,
+    };
+    if (file.bootId !== undefined) holder.bootId = file.bootId;
+    if (file.procStartedAt !== undefined) holder.procStartedAt = file.procStartedAt;
+    return holder;
+  });
+
 function readHolder(lockPath: string): LockHolder | null {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
-    if (!parsed || typeof parsed !== "object") return null;
-    const { pid, hostname: host, startedAt } = parsed as Record<string, unknown>;
-    if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
-    if (typeof host !== "string" || host.length === 0) return null;
-    const { bootId, procStartedAt } = parsed as Record<string, unknown>;
-    return {
-      pid,
-      hostname: host,
-      startedAt: typeof startedAt === "string" ? startedAt : "",
-      ...(typeof bootId === "string" && bootId ? { bootId } : {}),
-      ...(typeof procStartedAt === "number" && Number.isFinite(procStartedAt)
-        ? { procStartedAt }
-        : {}),
-    };
+    const raw: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
+    const parsed = lockFileSchema.safeParse(raw);
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
@@ -298,7 +336,7 @@ export function classifyLock(
   // crashed predecessor from inside one pid namespace, so this errs toward
   // reclaiming rather than bricking — and that residual window is caught within one
   // tick by the F18-5 ownership guard, which fails the loser closed.
-  if (holder.pid === self.pid && typeof holder.procStartedAt === "number") {
+  if (holder.pid === self.pid && holder.procStartedAt !== undefined) {
     const current = readProcStartTicks(self.pid);
     if (current !== null) {
       return current === holder.procStartedAt ? "held" : "stale";
@@ -388,6 +426,21 @@ function refusalMessage(
   ].join(" ");
 }
 
+/** This process's own identity for the lock file. */
+function bootingHolder(ownStartTicks: number | null): LockHolder {
+  const self: LockHolder = {
+    pid: process.pid,
+    hostname: hostname(),
+    startedAt: new Date().toISOString(),
+    bootId: processBootId(),
+  };
+  // F20-8(b): so a restart can tell our crashed predecessor's recycled pid from
+  // a genuinely live holder. Omitted off-Linux (null), where pid 1 self-lockout
+  // does not arise.
+  if (ownStartTicks !== null) self.procStartedAt = ownStartTicks;
+  return self;
+}
+
 function writeLockFile(lockPath: string, self: LockHolder): number {
   // "wx" = O_CREAT|O_EXCL: the create itself is the mutual exclusion.
   const fd = openSync(lockPath, "wx");
@@ -411,16 +464,7 @@ export function acquireDataRootLock(
   const lockPath = path.join(stateDir, DATA_ROOT_LOCK_FILENAME);
 
   const ownStartTicks = readProcessStartTicks(process.pid);
-  const self: LockHolder = options.self ?? {
-    pid: process.pid,
-    hostname: hostname(),
-    startedAt: new Date().toISOString(),
-    bootId: processBootId(),
-    // F20-8(b): so a restart can tell our crashed predecessor's recycled pid from
-    // a genuinely live holder. Omitted off-Linux (null), where pid 1 self-lockout
-    // does not arise.
-    ...(ownStartTicks !== null ? { procStartedAt: ownStartTicks } : {}),
-  };
+  const self: LockHolder = options.self ?? bootingHolder(ownStartTicks);
   const isAlive = options.isAlive ?? isProcessAlive;
   const force = options.force ?? false;
 
@@ -431,7 +475,9 @@ export function acquireDataRootLock(
     try {
       fd = writeLockFile(lockPath, self);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const collision =
+        error instanceof Error && "code" in error && error.code === "EEXIST";
+      if (!collision) throw error;
       const holder = readHolder(lockPath);
       const verdict = classifyLock(holder, self, isAlive);
       if (!force && verdict !== "stale") {
@@ -512,11 +558,15 @@ export const DATA_ROOT_LOCK_GUARD_INTERVAL_MS = 20_000;
  *  poller / file watcher, so a dev reload never stacks a second interval. */
 const GUARD_KEY = Symbol.for("viberr.dataRootLockGuard");
 
-function guardSlot(): Record<symbol, ReturnType<typeof setInterval> | undefined> {
-  return globalThis as unknown as Record<
-    symbol,
-    ReturnType<typeof setInterval> | undefined
-  >;
+interface LockGuardSlot {
+  [GUARD_KEY]?: ReturnType<typeof setInterval>;
+}
+
+function guardSlot(): LockGuardSlot {
+  // SAFETY: as with the held-lock slot — the key is module-private, and the only
+  // writes to it are `startDataRootLockGuard`/`stopDataRootLockGuard` below,
+  // storing the interval handle they created or clearing it.
+  return globalThis as LockGuardSlot;
 }
 
 export interface DataRootLockGuardOptions {
@@ -586,7 +636,7 @@ export function startDataRootLockGuard(options: DataRootLockGuardOptions = {}): 
     }
     // "held" → fine; "unverifiable" → torn read, retry next tick.
   }, intervalMs);
-  if (typeof handle.unref === "function") handle.unref();
+  handle.unref?.();
   slot[GUARD_KEY] = handle;
 }
 

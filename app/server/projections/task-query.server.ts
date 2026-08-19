@@ -19,7 +19,7 @@ import {
   listProjectMembers,
   resolveTaskOwner,
 } from "./board-query.server";
-import { isQuiet, readTaskActivity } from "./task-activity.server";
+import { isQuiet, readTaskActivity, type QuietCheck } from "./task-activity.server";
 
 /**
  * Task-detail read models. Phase 5 loaders call these directly.
@@ -58,7 +58,10 @@ export interface TaskDetail extends TaskSummary {
   quiet: boolean;
 }
 
-interface DiagnosticRow {
+/** The `diagnostics` columns the query below selects. A type alias, not an
+ *  interface, so the row assertion is checked against SQLite's output types
+ *  instead of having to launder the rows through `unknown` first. */
+type DiagnosticRow = {
   id: number;
   severity: DiagnosticSeverity;
   code: string;
@@ -66,13 +69,17 @@ interface DiagnosticRow {
   message: string;
   hard_stop: 0 | 1;
   observed_at: string;
-}
+};
 
 export function getTaskSummary(
   db: DatabaseSync,
   slug: string,
   key: string,
 ): TaskSummary | null {
+  // SAFETY: every TaskProjectionRow field is a `task_projections` column with
+  // the same nullability, and each of its string-union fields (readiness,
+  // waiting, validation, acceptance, continuity) is pinned by that table's own
+  // CHECK constraint (0001_baseline.sql) — SQLite rejects any other value.
   const row = db
     .prepare(
       `SELECT * FROM task_projections WHERE project_slug = ? AND task_key = ?`,
@@ -101,12 +108,15 @@ export function listTaskEvents(
   slug: string,
   key: string,
 ): TimelineEventRender[] {
+  // SAFETY: every TaskEventRow field is a `task_events` column with the same
+  // nullability, `actor_kind` is pinned by that table's CHECK constraint, and
+  // `to_agent` is written as 0/1 by the only writer (rebuilder.server.ts).
   const rows = db
     .prepare(
       `SELECT * FROM task_events WHERE project_slug = ? AND task_key = ?
        ORDER BY position ASC`,
     )
-    .all(slug, key) as unknown as TaskEventRow[];
+    .all(slug, key) as TaskEventRow[];
   // E1: baked actor snapshots go stale on user rename — overlay the CURRENT
   // users-table identity at read time (deleted users keep the snapshot).
   const overlay = createActorRenderOverlay(db);
@@ -121,13 +131,16 @@ export function listTaskDiagnostics(
   slug: string,
   key: string,
 ): DiagnosticRecord[] {
+  // SAFETY: the selected columns are DiagnosticRow one-for-one, `severity` is
+  // pinned by the `diagnostics` CHECK constraint (0001_baseline.sql), and
+  // `hard_stop` is written as 0/1 by the only writer (rebuilder.server.ts).
   const rows = db
     .prepare(
       `SELECT id, severity, code, path, message, hard_stop, observed_at
        FROM diagnostics WHERE project_slug = ? AND task_key = ?
        ORDER BY id ASC`,
     )
-    .all(slug, key) as unknown as DiagnosticRow[];
+    .all(slug, key) as DiagnosticRow[];
   return rows.map((row) => ({
     id: row.id,
     severity: row.severity,
@@ -157,19 +170,22 @@ export function getTaskDetail(
   const project = getProject(db, slug);
   const stageIds = project ? project.stages.map((s) => s.id) : [];
   const facts = readTaskActivity(db, slug, key);
+  const quietCheck: QuietCheck = {
+    lastActivityAt: facts.lastActivityAt,
+    waiting: summary.waiting,
+    archived: summary.archived,
+    terminal: isAcceptedDisplayState({ stage: summary.stage, stageIds }),
+    runInFlight: facts.runInFlight,
+  };
+  // Test-only clock override: left ABSENT when unset, so `isQuiet` reads the
+  // real clock rather than being handed an explicit `undefined`.
+  if (opts.now) quietCheck.now = opts.now;
   return {
     ...summary,
     timeline: listTaskEvents(db, slug, key),
     diagnostics: listTaskDiagnostics(db, slug, key),
     stages: project ? project.stages.map((s) => ({ id: s.id, name: s.name, color: s.color })) : [],
     lastActivityAt: facts.lastActivityAt,
-    quiet: isQuiet({
-      lastActivityAt: facts.lastActivityAt,
-      waiting: summary.waiting,
-      archived: summary.archived,
-      terminal: isAcceptedDisplayState({ stage: summary.stage, stageIds }),
-      runInFlight: facts.runInFlight,
-      ...(opts.now ? { now: opts.now } : {}),
-    }),
+    quiet: isQuiet(quietCheck),
   };
 }

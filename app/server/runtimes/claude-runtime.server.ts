@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type {
@@ -49,8 +50,11 @@ export interface ClaudeQueryOptions {
   systemPrompt?:
     | string
     | { type: "preset"; preset: "claude_code"; append?: string };
-  /** In-process SDK MCP servers (operator governance tools). */
-  mcpServers?: Record<string, unknown>;
+  /** In-process SDK MCP servers (operator governance tools) plus the profile's
+   *  declared external ones — forwarded exactly as `RunSpec` carries them. The
+   *  SDK owns their shape (an `sdk` entry is a live server INSTANCE, not data);
+   *  this adapter never inspects a declaration. */
+  mcpServers?: RunSpec["mcpServers"];
   /** Auto-approve allowlist. NOTE: this does NOT remove other tools from the
    *  model's context — it only skips the permission prompt. `disallowedTools`
    *  below is the ONLY restriction channel this adapter has (D5/pass-16: this
@@ -308,9 +312,9 @@ export function nativeSkillNames(skills?: readonly string[]): string[] {
  * confirms otherwise; the deterministic guarantees of this change are the
  * stripped-and-rewritten `.claude` catalog and the `skills` filter, not this.
  */
-const MANAGED_SETTINGS: { claudeMdExcludes: string[] } = {
+const MANAGED_SETTINGS = {
   claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
-};
+} satisfies NonNullable<ClaudeQueryOptions["managedSettings"]>;
 
 /** One streaming-input user message (enables Query.interrupt()). */
 async function* singlePrompt(prompt: string): AsyncGenerator<unknown> {
@@ -325,33 +329,80 @@ async function* singlePrompt(prompt: string): AsyncGenerator<unknown> {
 let cachedQuery: ClaudeQueryFn | null = null;
 async function realQuery(): Promise<ClaudeQueryFn> {
   if (cachedQuery) return cachedQuery;
-  const mod = (await import("@anthropic-ai/claude-agent-sdk")) as {
-    query: (params: { prompt: string | AsyncIterable<unknown>; options?: ClaudeQueryOptions }) => ClaudeQuery;
-  };
-  cachedQuery = mod.query as unknown as ClaudeQueryFn;
+  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+  // SAFETY: same function, seen through the deliberately narrower seam above —
+  // `unknown` stands in for the SDK message/option unions this adapter does not
+  // depend on. TS refuses the plain assignment on exactly one point, the
+  // contravariant prompt parameter (`AsyncIterable<unknown>` is not an
+  // `AsyncIterable<SDKUserMessage>`), and the only prompt this adapter ever
+  // passes is `singlePrompt`, which yields that exact SDKUserMessage shape.
+  cachedQuery = query as ClaudeQueryFn;
   return cachedQuery;
 }
 
 /**
- * Per-step usage from a Claude `assistant` message (`message.message.usage`), or
- * null when the message is not an assistant message or carries no usage. Used to
- * grow the live token counter during a run (the final `result` envelope supplies
- * the authoritative totals).
+ * The fields the ADAPTER itself reads off a streamed SDK envelope, decoded once
+ * per message at the stream boundary (the console line is projected separately
+ * by `projectEnvelope`, which decodes the same envelope for its own purposes).
+ *
+ * Every field is independently tolerant — a junk one reads as absent and never
+ * ends a run — because both vendors add envelope shapes between minor versions
+ * (runtime-adapters.md gotcha 9). A non-object message decodes to all-absent.
  */
-function assistantUsage(
-  message: unknown,
-): { input_tokens: number; output_tokens: number; cached_input_tokens: number } | null {
-  if (!message || typeof message !== "object") return null;
-  const m = message as { type?: unknown; message?: { usage?: Record<string, unknown> } };
-  if (m.type !== "assistant") return null;
-  const u = m.message?.usage;
-  if (!u || typeof u !== "object") return null;
-  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-  const inTok = n(u.input_tokens);
-  const outTok = n(u.output_tokens);
-  const cached = n(u.cache_read_input_tokens);
-  if (inTok === 0 && outTok === 0 && cached === 0) return null;
-  return { input_tokens: inTok, output_tokens: outTok, cached_input_tokens: cached };
+const claudeEnvelopeSchema = z
+  .object({
+    type: z.string().nullable().catch(null),
+    /** `result` envelopes: the SDK's own terminal sub-classification. */
+    subtype: z.string().nullable().catch(null),
+    /** `result` envelopes: the failure prose. Blank prose is no prose — the
+     *  classifier falls back to the subtype rather than to an empty string. */
+    result: z
+      .string()
+      .refine((text) => text.trim() !== "")
+      .nullable()
+      .catch(null),
+    /** `assistant` envelopes: this step's usage counters. Anything that is not
+     *  a finite number counts as 0, exactly as the run row folds it. */
+    message: z
+      .object({
+        usage: z.object({
+          input_tokens: z.number().catch(0),
+          output_tokens: z.number().catch(0),
+          cache_read_input_tokens: z.number().catch(0),
+        }),
+      })
+      .nullable()
+      .catch(null),
+  })
+  .catch({ type: null, subtype: null, result: null, message: null });
+type ClaudeEnvelope = z.infer<typeof claudeEnvelopeSchema>;
+
+/** The live token counters one streamed step contributes. */
+interface StepUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cached_input_tokens: number;
+}
+
+/**
+ * Per-step usage from a Claude `assistant` envelope, or null when the envelope
+ * is not an assistant message or carries no usage at all. Used to grow the live
+ * token counter during a run (the final `result` envelope supplies the
+ * authoritative totals).
+ */
+function assistantUsage(envelope: ClaudeEnvelope): StepUsage | null {
+  if (envelope.type !== "assistant") return null;
+  const usage = envelope.message?.usage;
+  if (!usage) return null;
+  const { input_tokens, output_tokens, cache_read_input_tokens } = usage;
+  if (input_tokens === 0 && output_tokens === 0 && cache_read_input_tokens === 0) {
+    return null;
+  }
+  return {
+    input_tokens,
+    output_tokens,
+    cached_input_tokens: cache_read_input_tokens,
+  };
 }
 
 /**
@@ -391,12 +442,24 @@ function resolveMaxTurns(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CLAUDE_MAX_TURNS;
 }
 
-function classifyClaudeError(error: unknown): {
+/** The classifier's whole output: the routing class, the canonical sentence a
+ *  human reads, and the provider's own words after redaction. */
+interface ClaudeFailure {
   kind: ClaudeFailureKind;
   message: string;
   providerText: string;
-} {
-  const code = (error as { code?: unknown } | null)?.code;
+}
+
+/** The `code` a Node spawn failure carries (`EBADF`/`ENOENT`/…). Anything that
+ *  is not an object with a string `code` decodes to "" and matches no arm — the
+ *  same thing the previous property read did. */
+const spawnErrorCodeSchema = z
+  .object({ code: z.string() })
+  .transform((thrown) => thrown.code)
+  .catch("");
+
+function classifyClaudeError(error: unknown): ClaudeFailure {
+  const code = spawnErrorCodeSchema.parse(error);
   if (code === "EBADF" || code === "EMFILE" || code === "ENFILE") {
     // R20-3: these three name the real cause already (host resource exhaustion,
     // not a provider verdict), so there is no separate provider sentence to add.
@@ -575,17 +638,6 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         const nativeSkills = nativeSkillNames(spec.skills);
         const options: ClaudeQueryOptions = {
           cwd: spec.workdir,
-          // Only set model when we have a real id/alias; otherwise let the SDK
-          // (and the subscription) pick its default.
-          ...(resolvedModel ? { model: resolvedModel } : {}),
-          // Pass the profile's chosen reasoning effort when it is one the SDK
-          // accepts; otherwise the SDK uses its default (high). Narrowed rather
-          // than forwarded raw so a Codex-only tier ("minimal") never reaches
-          // the Claude union (P13-RT-08).
-          ...((): { effort?: string } => {
-            const effort = resolveClaudeEffort(spec.effort);
-            return effort ? { effort } : {};
-          })(),
           // Fully autonomous: bypass ALL permission prompts so a
           // server-spawned run never blocks waiting for approval (there is no
           // human at the CLI). acceptEdits still gated non-edit tools like
@@ -626,7 +678,6 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           //    See MANAGED_SETTINGS for the CLAUDE.md ingress this opens.
           settingSources: nativeSkills.length ? ["project"] : [],
           skills: nativeSkills,
-          ...(nativeSkills.length ? { managedSettings: MANAGED_SETTINGS } : {}),
           plugins: [],
           // R18-3 (governance parity with settingSources): only Viberr-granted
           // MCP servers reach a run — ignore a repo `.mcp.json`, user MCP config,
@@ -634,11 +685,23 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // in-process toolkit via `mcpServers`; nothing ambient should widen it.
           strictMcpConfig: true,
         };
+        // Only NAME a model when we have a real id/alias; otherwise let the SDK
+        // (and the subscription) pick its default.
+        if (resolvedModel) options.model = resolvedModel;
+        // Pass the profile's chosen reasoning effort when it is one the SDK
+        // accepts; otherwise the SDK uses its default (high). Narrowed rather
+        // than forwarded raw so a Codex-only tier ("minimal") never reaches the
+        // Claude union (P13-RT-08).
+        const effort = resolveClaudeEffort(spec.effort);
+        if (effort) options.effort = effort;
+        // Only for the run that opened `settingSources: ['project']` — see the
+        // MANAGED_SETTINGS docstring for the ingress this closes.
+        if (nativeSkills.length) options.managedSettings = MANAGED_SETTINGS;
         if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
         // Base adapter env, overlaid with any per-run env (e.g. the specialist's
         // GIT_CEILING_DIRECTORIES workspace confinement).
         if (deps.env || spec.env) {
-          options.env = { ...(deps.env ?? {}), ...(spec.env ?? {}) };
+          options.env = { ...deps.env, ...spec.env };
         }
         // System prompt strategy differs by run kind:
         //  · OPERATOR — its persona REPLACES the default. The operator never
@@ -650,14 +713,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         //    Replacing it (the old behavior) stripped the scaffolding and made a
         //    coding agent run on persona prose alone.
         if (spec.systemPrompt) {
-          if (typeof spec.systemPrompt === "string" && spec.kind !== "operator") {
+          if (spec.kind === "operator") {
+            options.systemPrompt = spec.systemPrompt;
+          } else {
             options.systemPrompt = {
               type: "preset",
               preset: "claude_code",
               append: spec.systemPrompt,
             };
-          } else {
-            options.systemPrompt = spec.systemPrompt;
           }
         }
         if (spec.mcpServers) options.mcpServers = spec.mcpServers;
@@ -710,17 +773,15 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             armIdle(); // reset the inactivity window on every message
             const occurredAt = new Date().toISOString();
             const { display, facts } = projectEnvelope("claude", message, occurredAt);
+            const envelope = claudeEnvelopeSchema.parse(message);
             if (facts.sessionId) sessionId = facts.sessionId;
             if (facts.isResult) {
               sawResult = true;
               resultIsError = !!facts.isError;
-              resultSubtype =
-                (message as { subtype?: string }).subtype ?? null;
-              const detail = (message as { result?: unknown }).result;
-              resultErrorText =
-                typeof detail === "string" && detail.trim() ? detail : null;
+              resultSubtype = envelope.subtype;
+              resultErrorText = envelope.result;
             } else {
-              const u = assistantUsage(message);
+              const u = assistantUsage(envelope);
               if (u) {
                 liveTurns += 1;
                 liveOut += u.output_tokens;

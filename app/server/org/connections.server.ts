@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { withTransaction } from "~/server/db/transaction.server";
 import {
   parsePatValidation,
@@ -10,7 +11,10 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { getPatValidationRateLimiter } from "~/server/auth/rate-limit.server";
-import { createGithubClient } from "~/server/github/github-client.server";
+import {
+  createGithubClient,
+  type GithubClientOptions,
+} from "~/server/github/github-client.server";
 import {
   createPat,
   deletePat,
@@ -19,7 +23,10 @@ import {
   recordPatValidation,
   replacePatToken,
 } from "~/server/secrets/pat-store.server";
-import { validatePatToken } from "~/server/secrets/pat-validator.server";
+import {
+  validatePatToken,
+  type ValidatePatTokenOptions,
+} from "~/server/secrets/pat-validator.server";
 import { slugify } from "~/shared/ids/slugify";
 import { formatCalendarDate } from "~/shared/dates/format";
 
@@ -55,6 +62,17 @@ export const CONNECTION_REQUIRED_SCOPES = DEFAULT_REQUIRED_SCOPES;
 
 export type ConnectionValidationState = "valid" | "failed" | "unvalidated";
 
+/**
+ * One scope's verdict as every connection surface renders it. `note` is only
+ * present when the validator had something to add.
+ */
+export interface ConnectionScopeEvidence {
+  id: string;
+  ok: boolean;
+  source: string;
+  note?: string;
+}
+
 export interface ConnectionRecord {
   id: string;
   owner: string;
@@ -78,12 +96,12 @@ export interface ConnectionRecord {
    * token is refused". The first honest signal was a failed agent delivery.
    * `source` was already persisted and ignored; it now reaches the UI.
    */
-  scopes: { id: string; ok: boolean; source: string; note?: string }[];
+  scopes: ConnectionScopeEvidence[];
   lastValidatedAt: string | null;
   createdAt: string;
 }
 
-interface ConnectionRow {
+type ConnectionRow = {
   id: string;
   owner: string;
   pat_id: string;
@@ -94,7 +112,7 @@ interface ConnectionRow {
   token_suffix: string | null;
   last_validated_at: string | null;
   validation_json: string | null;
-}
+};
 
 function validationState(
   validation: PatValidation | null,
@@ -121,12 +139,15 @@ function mapRow(row: ConnectionRow, now = new Date()): ConnectionRecord {
     expiresAt,
     daysLeft,
     validationState: validationState(parsePatValidation(row.validation_json)),
-    scopes: (parsePatValidation(row.validation_json)?.scopes ?? []).map((sc) => ({
-      id: sc.id,
-      ok: sc.ok,
-      source: sc.source,
-      ...(sc.note ? { note: sc.note } : {}),
-    })),
+    scopes: (parsePatValidation(row.validation_json)?.scopes ?? []).map((sc) => {
+      const scope: ConnectionScopeEvidence = {
+        id: sc.id,
+        ok: sc.ok,
+        source: sc.source,
+      };
+      if (sc.note) scope.note = sc.note;
+      return scope;
+    }),
     lastValidatedAt: row.last_validated_at,
     createdAt: row.created_at,
   };
@@ -138,10 +159,19 @@ const LIST_SQL = `
   FROM github_connections c
   LEFT JOIN github_pats p ON p.id = c.pat_id`;
 
+/**
+ * Why every reader below may name its rows `ConnectionRow`: LIST_SQL selects
+ * exactly the columns that type declares. In 0001_baseline
+ * `github_connections.id / owner / pat_id / created_at` are TEXT NOT NULL and
+ * `is_default` is INTEGER NOT NULL, while `repos_count` and `expires_at` are
+ * nullable; the LEFT JOIN can additionally leave every `github_pats` column
+ * null, which is why those three are typed nullable.
+ */
 export function listConnections(db: DatabaseSync): ConnectionRecord[] {
+  // SAFETY: LIST_SQL's column list is ConnectionRow's (see above).
   const rows = db
     .prepare(`${LIST_SQL} ORDER BY c.created_at ASC, c.id ASC`)
-    .all() as unknown as ConnectionRow[];
+    .all() as ConnectionRow[];
   return rows.map((r) => mapRow(r));
 }
 
@@ -149,6 +179,8 @@ export function getConnection(
   db: DatabaseSync,
   id: string,
 ): ConnectionRecord | null {
+  // SAFETY: LIST_SQL's column list is ConnectionRow's; `id` is the primary key,
+  // so at most one row comes back.
   const row = db.prepare(`${LIST_SQL} WHERE c.id = ?`).get(id) as
     | ConnectionRow
     | undefined;
@@ -159,6 +191,8 @@ export function getConnection(
 export function getDefaultConnection(
   db: DatabaseSync,
 ): ConnectionRecord | null {
+  // SAFETY: LIST_SQL's column list is ConnectionRow's; `setDefaultConnection`
+  // keeps `is_default = 1` on at most one row.
   const row = db.prepare(`${LIST_SQL} WHERE c.is_default = 1`).get() as
     | ConnectionRow
     | undefined;
@@ -222,12 +256,14 @@ export async function ensureConnectionFresh(
 
   const token = getPatToken(db, connection.patId);
   if (!token) return connection;
-  const validation = await validatePatToken(token, {
+  const probe: ValidatePatTokenOptions = {
     requiredScopes: [...CONNECTION_REQUIRED_SCOPES],
     repo: null,
     knownExpiresAt: connection.expiresAt,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  });
+  };
+  // Only a test hands one over; production must reach the real `fetch`.
+  if (options.fetchImpl) probe.fetchImpl = options.fetchImpl;
+  const validation = await validatePatToken(token, probe);
   if (validation.status === "network_error") return connection;
 
   recordPatValidation(db, connection.patId, validation);
@@ -299,6 +335,20 @@ interface ValidatedToken {
 }
 
 /**
+ * `GET /users/:owner` answers unvalidated JSON — the generic on
+ * `client.request` is a claim, not a check — so the accessible-repo count is
+ * kept only when the body really carries a number. Anything else leaves it
+ * unknown (null), never 0.
+ */
+const publicRepoCountSchema = z.number().nullable().catch(null);
+
+/** `GET /users/{owner}` — only the public repo count is read, and
+ *  `publicRepoCountSchema` above already supplies its tolerance. */
+const ghOwnerSchema = z
+  .object({ public_repos: z.number().optional().catch(undefined) })
+  .catch({});
+
+/**
  * P13-D-33: `architecture.md` asks for a targeted limit on PAT validation and
  * there was none. Both save paths below call GitHub with a token the CALLER
  * typed in, so the connection form is an unmetered outbound-probe surface (and
@@ -325,25 +375,23 @@ async function validateConnectionToken(
   | { ok: true; result: ValidatedToken }
   | { ok: false; message: string }
 > {
-  const validation = await validatePatToken(token, {
+  const probe: ValidatePatTokenOptions = {
     requiredScopes: [...CONNECTION_REQUIRED_SCOPES],
     repo: null,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  });
+  };
+  // Only a test hands one over; production must reach the real `fetch`.
+  if (options.fetchImpl) probe.fetchImpl = options.fetchImpl;
+  const validation = await validatePatToken(token, probe);
   if (validation.status !== "valid") {
     return { ok: false, message: failureMessage(validation) };
   }
 
   // Owner existence + repo count (honest replacement for the mock's fake
   // `repos: 5`). A miss here refuses the save — the owner must be real.
-  const client = createGithubClient({
-    token,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  });
-  const user = await client.request<{ public_repos?: number }>(
-    "GET",
-    `/users/${owner}`,
-  );
+  const clientOptions: GithubClientOptions = { token };
+  if (options.fetchImpl) clientOptions.fetchImpl = options.fetchImpl;
+  const client = createGithubClient(clientOptions);
+  const user = await client.request("GET", `/users/${owner}`, ghOwnerSchema);
   if (!user.ok) {
     if (user.kind === "http" && user.status === 404) {
       return {
@@ -365,10 +413,7 @@ async function validateConnectionToken(
     ok: true,
     result: {
       validation,
-      repos:
-        typeof user.data.public_repos === "number"
-          ? user.data.public_repos
-          : null,
+      repos: publicRepoCountSchema.parse(user.data.public_repos),
     },
   };
 }
@@ -404,6 +449,8 @@ export async function createConnection(
   recordPatValidation(db, pat.id, validation);
 
   const now = new Date().toISOString();
+  // SAFETY: `SELECT count(*) AS c` is an aggregate with no GROUP BY — sqlite
+  // answers it with exactly one row carrying the single integer column `c`.
   const isFirst =
     (db.prepare(`SELECT count(*) AS c FROM github_connections`).get() as {
       c: number;

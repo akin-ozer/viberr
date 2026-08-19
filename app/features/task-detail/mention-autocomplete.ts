@@ -49,15 +49,19 @@ export function flattenMentionables(m: Mentionables): MentionSuggestion[] {
     });
   }
   for (const r of m.reserved) {
-    out.push({
+    const row: MentionSuggestion = {
       kind: "reserved",
       handle: r.handle,
       name: r.handle,
       sub: r.label,
       operator: r.handle === "operator" || r.handle === "agent",
-      ...(r.handle === "claude" ? { backend: "claude" } : {}),
-      ...(r.handle === "codex" ? { backend: "codex" } : {}),
-    });
+    };
+    // Only the two backend handles carry a backend glyph; every other reserved
+    // row (operator/agent) renders the shield instead, so `backend` stays
+    // ABSENT rather than undefined.
+    if (r.handle === "claude") row.backend = "claude";
+    if (r.handle === "codex") row.backend = "codex";
+    out.push(row);
   }
   for (const u of m.users) {
     out.push({

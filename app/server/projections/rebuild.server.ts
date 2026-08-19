@@ -36,22 +36,21 @@ export function rebuildProjections(
   db: DatabaseSync,
   options: { dataRoot?: string; actor?: AuditActor } = {},
 ): RescanSummary {
-  let summary: RescanSummary | null = null;
-  const run = () => withTransaction(db, () => {
-    db.prepare(`DELETE FROM task_events`).run();
-    db.prepare(`DELETE FROM diagnostics`).run();
-    db.prepare(`DELETE FROM task_projections`).run();
-    db.prepare(`DELETE FROM projects`).run(); // project_members cascade
-    summary = rebuildAll(db, {
-      force: true,
-      dataRoot: options.dataRoot,
+  const run = (): RescanSummary =>
+    withTransaction(db, () => {
+      db.prepare(`DELETE FROM task_events`).run();
+      db.prepare(`DELETE FROM diagnostics`).run();
+      db.prepare(`DELETE FROM task_projections`).run();
+      db.prepare(`DELETE FROM projects`).run(); // project_members cascade
+      return rebuildAll(db, {
+        force: true,
+        dataRoot: options.dataRoot,
+      });
     });
-  });
   // Buffer every projection event raised inside the transaction; deliver
   // after commit (a throwing transaction rolls back AND drops its events).
-  const { events } = collectProjectionEvents(() => run());
+  const { result, events } = collectProjectionEvents(run);
   for (const event of events) emitProjectionEvent(event);
-  const result = summary! as RescanSummary;
   recordAudit(db, {
     action: "projection.rebuild",
     actor: options.actor ?? SYSTEM_ACTOR,

@@ -1,39 +1,32 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createPat, getProjectCredential } from "~/server/secrets/pat-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { isAppError } from "~/server/errors/app-error.server";
+import { AppError, isAppError } from "~/server/errors/app-error.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 import { createProject } from "./project-create.server";
 
-// F20-1: fault-inject a stale-mount write. The shared flag defaults OFF so every
-// other test in this file writes for real; a test flips it ON only after setup,
-// so the store seeding above it is untouched. The ESTALE→typed-error translation
-// itself is unit-proven in atomic-file.server.test.ts; here we assert the ACTION
-// surfaces a typed error and never hangs.
-const mockAtomic = vi.hoisted(() => ({ failWrites: false }));
-vi.mock("~/server/files/atomic-file.server", async (importActual) => {
-  const actual =
-    await importActual<typeof import("~/server/files/atomic-file.server")>();
-  const { AppError } = await import("~/server/errors/app-error.server");
-  const { ERROR_CODES } = await import("~/server/errors/error-codes");
-  return {
-    ...actual,
-    writeFileAtomic: (absPath: string, content: string) => {
-      if (mockAtomic.failWrites && absPath.endsWith("project.md")) {
-        throw new AppError({
-          code: ERROR_CODES.INTERNAL,
-          status: 503,
-          message: `ESTALE writing ${absPath} — data root unreachable`,
-          userMessage: `The data root is unreachable (ESTALE) — ${absPath} was not written.`,
-        });
-      }
-      return actual.writeFileAtomic(absPath, content);
-    },
-  };
-});
+// F20-1: fault-inject a stale-mount write through `createProjectFileImpl` —
+// the ctx seam standing in for the project.md write. Every other test in this
+// file leaves the seam off and writes for real. The ESTALE→typed-error
+// translation itself is unit-proven in atomic-file.server.test.ts; here we
+// assert the ACTION surfaces a typed error and never hangs.
+const staleMountWrite = async (): Promise<never> => {
+  throw new AppError({
+    code: ERROR_CODES.INTERNAL,
+    status: 503,
+    message: "ESTALE writing project.md — data root unreachable",
+    userMessage: "The data root is unreachable (ESTALE) — project.md was not written.",
+  });
+};
+
+/** The single columns these tests read back off a just-written row. */
+const defaultBranchRow = z.object({ default_branch: z.string() });
+const idRow = z.object({ id: z.string() });
 
 // Hermetic env for the secret box.
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -87,9 +80,11 @@ describe("createProject — GitHub connection wiring", () => {
     expect(bound?.id).toBe(patId);
 
     // Default branch reflects the real repo, not a hardcoded "main".
-    const row = store.db
-      .prepare(`SELECT default_branch FROM projects WHERE slug = ?`)
-      .get(result.slug) as { default_branch: string };
+    const row = defaultBranchRow.parse(
+      store.db
+        .prepare(`SELECT default_branch FROM projects WHERE slug = ?`)
+        .get(result.slug),
+    );
     expect(row.default_branch).toBe("master");
   });
 
@@ -123,9 +118,11 @@ describe("createProject — GitHub connection wiring", () => {
     expect(result.repoWarning).toBeTruthy();
     expect(result.repoWarning).toMatch(/push|write access/i);
     // The visible default branch is still adopted.
-    const row = store.db
-      .prepare(`SELECT default_branch FROM projects WHERE slug = ?`)
-      .get(result.slug) as { default_branch: string };
+    const row = defaultBranchRow.parse(
+      store.db
+        .prepare(`SELECT default_branch FROM projects WHERE slug = ?`)
+        .get(result.slug),
+    );
     expect(row.default_branch).toBe("master");
   });
 
@@ -144,10 +141,10 @@ describe("createProject — GitHub connection wiring", () => {
       },
       ACTOR,
     );
-    const patId = (
+    const patId = idRow.parse(
       store.db
         .prepare(`SELECT id FROM github_pats ORDER BY created_at DESC LIMIT 1`)
-        .get() as { id: string }
+        .get(),
     ).id;
     const now = new Date().toISOString();
     store.db
@@ -395,8 +392,7 @@ describe("createProject — F20-1 data-root write resilience", () => {
       ),
     );
 
-    // Flip the fault ON only now — after the store seeding wrote for real.
-    mockAtomic.failWrites = true;
+    // The fault reaches ONLY this call — the store seeding above wrote for real.
     const start = Date.now();
     let caught: unknown;
     try {
@@ -404,12 +400,10 @@ describe("createProject — F20-1 data-root write resilience", () => {
         store.db,
         { name: "Ghost Mount", key: "GHM", owner: "akin-ozer", repoName: "ghost", policy: "balanced" },
         ACTOR,
-        { dataRoot: store.dataRoot },
+        { dataRoot: store.dataRoot, createProjectFileImpl: staleMountWrite },
       );
     } catch (e) {
       caught = e;
-    } finally {
-      mockAtomic.failWrites = false;
     }
 
     // Rejects with a typed AppError (not a raw errno, not a hang). The action

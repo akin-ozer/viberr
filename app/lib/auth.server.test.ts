@@ -42,7 +42,13 @@ function get(auth: ViberrAuth, path: string) {
   );
 }
 
-function post(auth: ViberrAuth, path: string, body: Record<string, unknown>) {
+/** The Better Auth JSON payloads these allow-list probes post. */
+interface AuthEndpointBody {
+  name?: string;
+  email?: string;
+}
+
+function post(auth: ViberrAuth, path: string, body: AuthEndpointBody) {
   return auth.handler(
     new Request(`http://localhost:5173${AUTH_BASE_PATH}${path}`, {
       method: "POST",

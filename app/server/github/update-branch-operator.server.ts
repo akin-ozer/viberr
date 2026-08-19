@@ -19,6 +19,7 @@ import {
 } from "~/server/tasks/task-actions.server";
 import {
   updateWorkspaceBranchFromBase,
+  type UpdateBranchInput,
   type UpdateBranchResult,
 } from "./update-branch.server";
 import type { Exec } from "./push-workspace.server";
@@ -41,6 +42,15 @@ import type { Exec } from "./push-workspace.server";
  * decision packet and the branch is left exactly as it was, rather than being
  * retried, forced, or narrated away.
  */
+
+/** What the operator's branch-update audit row records about the outcome. */
+type BranchUpdateAuditDetails = {
+  status: UpdateBranchResult["status"];
+  /** Base commits the branch was missing — `updated` only. */
+  commits?: number;
+  /** Conflicting paths — `conflict` only. */
+  files?: string[];
+};
 
 /** The capability id that gates the operator's branch-update tool. */
 export const UPDATE_BRANCH_CAPABILITY = "update-task-branch";
@@ -181,13 +191,21 @@ export async function operatorUpdateBranchFromBase(
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
 
-  const result = await updateWorkspaceBranchFromBase({
+  const updateInput: UpdateBranchInput = {
     db,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-    ...(input.exec ? { exec: input.exec } : {}),
-  });
+  };
+  // Optional keys: absent `dataRoot` means the process default root, and absent
+  // `exec` means the real git runner.
+  if (ctx.dataRoot) updateInput.dataRoot = ctx.dataRoot;
+  if (input.exec) updateInput.exec = input.exec;
+  const result = await updateWorkspaceBranchFromBase(updateInput);
+  // The audit carries whatever the outcome carries — commits only on an actual
+  // update, conflicting paths only on a conflict.
+  const details: BranchUpdateAuditDetails = { status: result.status };
+  if (result.status === "updated") details.commits = result.commits;
+  if (result.status === "conflict") details.files = result.files;
   recordAudit(db, {
     action: "github.branch_update.operator",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -195,11 +213,7 @@ export async function operatorUpdateBranchFromBase(
     subjectId: "branch" in result ? result.branch : input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      status: result.status,
-      ...(result.status === "updated" ? { commits: result.commits } : {}),
-      ...(result.status === "conflict" ? { files: result.files } : {}),
-    },
+    details,
   });
 
   if (result.status === "updated") {
@@ -220,8 +234,7 @@ export async function operatorUpdateBranchFromBase(
   }
 
   if (result.status === "conflict" || result.status === "push_conflict") {
-    const conflictFiles =
-      result.status === "conflict" ? result.files : ([] as string[]);
+    const conflictFiles = result.status === "conflict" ? result.files : [];
     const packet = await operatorOpenPacket(
       db,
       { ...ctx, operatorAuthorized: true },

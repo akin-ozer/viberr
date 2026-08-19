@@ -24,6 +24,7 @@ import {
 } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import type { AgentDeployment } from "~/schemas/project-file.schema";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   interruptRun,
@@ -99,7 +100,7 @@ function deployDevSpecialist(): void {
           backends: ["claude"],
           model: "claude-sonnet",
         },
-      } as never,
+      },
     ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -203,7 +204,10 @@ describe("resolveMentionedAgent", () => {
    */
   it("refuses an AMBIGUOUS backend handle instead of engaging the first-listed profile", () => {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    const specialist = (profileId: string, name: string) => ({
+    const specialist = (
+      profileId: string,
+      name: string,
+    ): AgentDeployment => ({
       profileId,
       capabilities: [],
       extras: [],
@@ -220,7 +224,7 @@ describe("resolveMentionedAgent", () => {
       agents: [
         specialist("docs-writer", "Docs Writer"),
         specialist("security-reviewer", "Security Reviewer"),
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -297,7 +301,7 @@ describe("resolveMentionedAgent", () => {
             backends: ["claude"],
             model: "claude-sonnet",
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -328,7 +332,7 @@ describe("resolveMentionedAgent", () => {
           definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet" },
         },
         ...file.parsed.frontmatter.agents,
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -373,12 +377,12 @@ describe("resolveMentionedAgent", () => {
         {
           ...fm.agents[0]!,
           definition: {
-            ...(fm.agents[0]! as { definition: Record<string, unknown> }).definition,
+            ...fm.agents[0]!.definition,
             backends: ["codex"],
             model: "gpt-5.6-sol",
           },
         },
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -539,7 +543,7 @@ describe("agentMentionHandle (P14-RT-12)", () => {
             backends: ["claude"],
             model: "claude-sonnet",
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1032,7 +1036,7 @@ describe("commentToAgent", () => {
           { kind: "custom", t: "Target production", d: "", rec: false },
         ],
       },
-    } as never);
+    });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const { resolvePacket } = await import("./task-actions.server");
@@ -1138,7 +1142,10 @@ describe("commentToAgent", () => {
    */
   it("an AMBIGUOUS backend handle posts the policy note naming the candidates and starts NO run (B-AG2)", async () => {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    const specialist = (profileId: string, name: string) => ({
+    const specialist = (
+      profileId: string,
+      name: string,
+    ): AgentDeployment => ({
       profileId,
       capabilities: [],
       extras: [],
@@ -1156,7 +1163,7 @@ describe("commentToAgent", () => {
       agents: [
         specialist("docs-writer", "Docs Writer"),
         specialist("security-reviewer", "Security Reviewer"),
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -1235,8 +1242,8 @@ describe("mention routing keeps each agent on its OWN session (regression)", () 
       ...file.parsed.frontmatter,
       repo: null,
       agents: [
-        { profileId: "dev", capabilities: [], extras: [], definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "claude-sonnet" } } as never,
-        { profileId: "analyst", capabilities: [], extras: [], definition: { kind: "specialist", name: "analyst", role: "reviewer", backends: ["claude"], model: "claude-sonnet" } } as never,
+        { profileId: "dev", capabilities: [], extras: [], definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "claude-sonnet" } },
+        { profileId: "analyst", capabilities: [], extras: [], definition: { kind: "specialist", name: "analyst", role: "reviewer", backends: ["claude"], model: "claude-sonnet" } },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1324,7 +1331,7 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
             backends: ["claude"], model: "claude-sonnet",
             resources: { skills: ["conventional-commits"], mcps: [], kb: [] },
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1414,7 +1421,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
             model: "claude-sonnet",
           },
         },
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
@@ -1427,6 +1434,9 @@ describe("comment routing: agent handles engage agents, teammate handles never d
   }
 
   const runs = () => listRunsForTaskRows(store.db, store.slug, "VIB-1");
+  // SAFETY: the row type is the SELECT list itself — `user_id`, `kind` and
+  // `text` are all TEXT NOT NULL in 0001_baseline, so every row carries the
+  // three strings and nothing else.
   const notifications = () =>
     store.db
       .prepare(`SELECT user_id, kind, text FROM notifications`)
@@ -1468,7 +1478,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
             model: "gpt-5.6-sol",
           },
         },
-      ] as never,
+      ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -1581,7 +1591,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
           { kind: "custom", t: "Target production", d: "", rec: false },
         ],
       },
-    } as never);
+    });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const { resolvePacket } = await import("./task-actions.server");

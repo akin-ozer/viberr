@@ -37,13 +37,14 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     key: "VIB-151",
     title: "Compress long-running task timelines",
     stage: "review",
-    readiness: "in_review",
-    displayReadiness: "in_review",
+    readiness: "ready",
+    displayReadiness: "ready",
     waiting: "agent",
     urgent: false,
     archived: false,
     validation: "healthy",
     blockReason: null,
+    continuity: null,
     owner: null,
     specialist: null,
     reviewers: [],
@@ -70,9 +71,10 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     diagnostics: [],
     stages: STAGES,
     lastActivityAt: null,
+    atAcceptanceBoundary: false,
     quiet: false,
     ...patch,
-  } as unknown as TaskDetail;
+  };
 }
 
 function renderPanel(patch: Partial<TaskDetail> = {}) {

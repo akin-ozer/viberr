@@ -16,7 +16,7 @@ import {
 import { rebuildAll } from "./rebuilder.server";
 import { decisionsRequiring } from "./decisions.server";
 import { getReviewQueue } from "./review-queue.server";
-import type { TaskPacket } from "~/schemas/task-file.schema";
+import type { TaskFrontmatter, TaskPacket } from "~/schemas/task-file.schema";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -35,7 +35,7 @@ const PACKET: TaskPacket = {
 function seedOpenDecision(
   store: ReturnType<typeof setupTestStore>,
   key: string,
-  patch: Record<string, unknown> = {},
+  patch: Partial<TaskFrontmatter> = {},
 ) {
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter(key, { stage: "review", ...patch }),
@@ -232,7 +232,7 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
   function seedAcceptanceReady(
     store: ReturnType<typeof setupTestStore>,
     key: string,
-    patch: Record<string, unknown> = {},
+    patch: Partial<TaskFrontmatter> = {},
   ) {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter(key, {

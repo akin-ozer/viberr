@@ -9,7 +9,7 @@ import {
 import { rescanProject } from "~/server/projections/rescan.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { createTask, reorderTask } from "~/server/tasks/task-actions.server";
-import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { roleCan } from "~/shared/rbac";
 import { BoardPage } from "~/features/board/board-page";
 
 /**
@@ -102,18 +102,15 @@ export default function Board() {
   // UI-58 again (E3): this was the one control left gated on a role LITERAL
   // (`!== "viewer"`) rather than the action id the server enforces — the exact
   // drift hazard the comment below names, three lines from the comment.
-  const canCreate = roleCan(layout.myRole as ProjectRole | null, "create-task");
+  const canCreate = roleCan(layout.myRole, "create-task");
   // UI-58: drag/move visibility must consult the SAME action id the server
   // enforces (`reorder-board`), not the `admin|maintainer` literal it happened
   // to equal — this file already uses `roleCan` for `rescan-project` for exactly
   // that reason, and the literal was a standing drift hazard.
-  const canTransition = roleCan(
-    layout.myRole as ProjectRole | null,
-    "reorder-board",
-  );
+  const canTransition = roleCan(layout.myRole, "reorder-board");
   // Re-scan visibility must track the server's `rescan-project` gate — not the
   // approve-transition gate — so display and enforcement can't drift (P11-45).
-  const canRescan = roleCan(layout.myRole as ProjectRole | null, "rescan-project");
+  const canRescan = roleCan(layout.myRole, "rescan-project");
   return (
     <BoardPage
       columns={layout.board.columns}

@@ -9,6 +9,7 @@ import {
   createUser,
   resetPassword,
   updateUser,
+  type UpdateUserPatch,
 } from "~/server/auth/user-admin.server";
 import {
   deleteIdentity,
@@ -122,11 +123,17 @@ export function githubPlaceholderEmail(handle: string): string {
   return `github.com/${handle.toLowerCase()}`;
 }
 
+/** What a whitelist call hands back: the new row plus the toast copy. */
+export interface WhitelistedUser {
+  user: OrgUserView;
+  toast: string;
+}
+
 export function whitelistGithubUser(
   db: DatabaseSync,
   input: { handle: string; role: UserRole },
   actor: AuditActor,
-): { user: OrgUserView; toast: string } {
+): WhitelistedUser {
   const handle = input.handle.trim().replace(/^@/, "");
   if (!/^[\w.-]{2,}$/.test(handle)) {
     throw AppError.validation("Enter a GitHub username.");
@@ -162,7 +169,7 @@ export async function whitelistGoogleAccount(
   db: DatabaseSync,
   input: { email: string; role: UserRole },
   actor: AuditActor,
-): Promise<{ user: OrgUserView; toast: string }> {
+): Promise<WhitelistedUser> {
   const email = normalizeEmail(input.email);
   const name = email.split("@")[0] || email;
   // Phase-2 API: the row IS the whitelist; passwordless = OAuth-only.
@@ -261,15 +268,12 @@ export function updateOrgUser(
     }
   }
 
-  const updated = updateUser(
-    db,
-    existing.id,
-    {
-      ...(isLocal ? { name: input.name } : {}),
-      ...(input.role !== existing.role ? { role: input.role } : {}),
-    },
-    actor,
-  );
+  // Only what actually changed reaches the phase-2 API: an idp account's name
+  // belongs to the provider, and an unchanged role must not read as a role edit.
+  const patch: UpdateUserPatch = {};
+  if (isLocal) patch.name = input.name;
+  if (input.role !== existing.role) patch.role = input.role;
+  const updated = updateUser(db, existing.id, patch, actor);
   return toOrgUserView(updated);
 }
 
@@ -420,29 +424,32 @@ export interface DomainRecord {
   createdAt: string;
 }
 
-interface DomainRow {
+type DomainRow = {
   id: string;
   domain: string;
   role: string;
   created_at: string;
-}
+};
 
 function mapDomain(row: DomainRow): DomainRecord {
   return {
     id: row.id,
     domain: row.domain,
-    role: (row.role === "admin" ? "admin" : "member") as UserRole,
+    role: row.role === "admin" ? "admin" : "member",
     createdAt: row.created_at,
   };
 }
 
 export function listDomains(db: DatabaseSync): DomainRecord[] {
+  // SAFETY: the SELECT names exactly DomainRow's four columns, and in
+  // 0001_baseline every one of them is TEXT NOT NULL on
+  // `google_domain_allowlist`.
   const rows = db
     .prepare(
       `SELECT id, domain, role, created_at FROM google_domain_allowlist
        ORDER BY created_at ASC, id ASC`,
     )
-    .all() as unknown as DomainRow[];
+    .all() as DomainRow[];
   return rows.map(mapDomain);
 }
 
@@ -506,11 +513,19 @@ export function addDomain(
   };
 }
 
+/** What a removal hands back: the row that is gone plus the toast copy. */
+export interface RemovedDomain {
+  domain: DomainRecord;
+  toast: string;
+}
+
 export function removeDomain(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
-): { domain: DomainRecord; toast: string } {
+): RemovedDomain {
+  // SAFETY: the same four TEXT NOT NULL columns `listDomains` reads, and `id`
+  // is the primary key, so at most one row comes back.
   const row = db
     .prepare(
       `SELECT id, domain, role, created_at FROM google_domain_allowlist
@@ -548,6 +563,7 @@ export function findDomainAllowlistRole(
   const domain = `@${email.slice(at + 1).toLowerCase()}`;
   const row = db
     .prepare(`SELECT role FROM google_domain_allowlist WHERE domain = ?`)
-    .get(domain) as { role: string } | undefined;
-  return row ? ((row.role === "admin" ? "admin" : "member") as UserRole) : null;
+    .get(domain);
+  // `role` carries the CHECK-constrained pair; anything else joins as a member.
+  return row ? (row.role === "admin" ? "admin" : "member") : null;
 }

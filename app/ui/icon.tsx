@@ -53,6 +53,13 @@ const ICON_PATHS = {
 
 export type IconName = keyof typeof ICON_PATHS;
 
+/** Free-form icon text (e.g. profile frontmatter) → a renderable name. */
+export function storeIcon(name: string): IconName {
+  // SAFETY: the `in` check is the invariant — when it passes, `name` is a key
+  // of ICON_PATHS; any other value maps to the "dot" fallback glyph.
+  return name in ICON_PATHS ? (name as IconName) : "dot";
+}
+
 export function Icon({
   name,
   className,

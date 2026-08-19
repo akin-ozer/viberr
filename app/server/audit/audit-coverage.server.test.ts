@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   createTestDbContext,
   type TestDbContext,
@@ -85,8 +86,13 @@ afterEach(() => {
 interface CoverageRow {
   name: string;
   action: string;
-  /** Runs the governed entry point; audit rows are asserted afterwards. */
-  run: () => Promise<unknown> | unknown;
+  /**
+   * Runs the governed entry point for its EFFECT — this table asserts on the
+   * audit rows it writes, never on what it hands back, which is why the
+   * contract returns nothing. The loop below still awaits the call: several of
+   * these entry points are async.
+   */
+  run: () => void;
   /** Expected taskKey (task-scoped rows). */
   taskKey?: string;
   /** Instance-wide maintenance events have no project subject. */
@@ -361,23 +367,19 @@ describe("governed actions record audit rows (table-driven)", () => {
   });
 
   it("rebuildProjections drops + re-projects to identical counts", () => {
-    const countsBefore = {
-      projects: (
-        store.db.prepare(`SELECT count(*) c FROM projects`).get() as {
-          c: number;
-        }
+    const countSchema = z.object({ c: z.number() });
+    const rowCounts = () => ({
+      projects: countSchema.parse(
+        store.db.prepare(`SELECT count(*) c FROM projects`).get(),
       ).c,
-      tasks: (
-        store.db.prepare(`SELECT count(*) c FROM task_projections`).get() as {
-          c: number;
-        }
+      tasks: countSchema.parse(
+        store.db.prepare(`SELECT count(*) c FROM task_projections`).get(),
       ).c,
-      events: (
-        store.db.prepare(`SELECT count(*) c FROM task_events`).get() as {
-          c: number;
-        }
+      events: countSchema.parse(
+        store.db.prepare(`SELECT count(*) c FROM task_events`).get(),
       ).c,
-    };
+    });
+    const countsBefore = rowCounts();
     expect(countsBefore.projects).toBeGreaterThan(0);
     expect(countsBefore.tasks).toBeGreaterThan(0);
 
@@ -389,23 +391,7 @@ describe("governed actions record audit rows (table-driven)", () => {
     expect(summary.tasks).toBe(countsBefore.tasks);
     expect(summary.errors).toBe(0);
 
-    const countsAfter = {
-      projects: (
-        store.db.prepare(`SELECT count(*) c FROM projects`).get() as {
-          c: number;
-        }
-      ).c,
-      tasks: (
-        store.db.prepare(`SELECT count(*) c FROM task_projections`).get() as {
-          c: number;
-        }
-      ).c,
-      events: (
-        store.db.prepare(`SELECT count(*) c FROM task_events`).get() as {
-          c: number;
-        }
-      ).c,
-    };
+    const countsAfter = rowCounts();
     expect(countsAfter).toEqual(countsBefore);
   });
 });

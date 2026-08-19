@@ -129,6 +129,36 @@ function isMergeConflictOutput(text: string): boolean {
 }
 
 /**
+ * The structured fields this module's git log lines carry. The optional members
+ * are OMITTED when they do not apply rather than written falsy: `timedOut:
+ * false` on a line about a push that simply failed reads as a fact the server
+ * checked, not an absent one.
+ */
+type GitLogFields = {
+  taskKey: string;
+  branch: string;
+  base?: string;
+  files?: string[];
+  timedOut?: true;
+  abortFailed?: true;
+  detail?: string;
+};
+
+/**
+ * `update_failed` carrying git's own (already scrubbed) words. `redactGitOutput`
+ * answers "" when git printed nothing, and every reader of `detail` guards on
+ * truthiness — so "git said nothing" stays the ABSENT key, not an empty one.
+ */
+function updateFailed(reason: string, detail: string): UpdateBranchResult {
+  const failure: Extract<UpdateBranchResult, { status: "update_failed" }> = {
+    status: "update_failed",
+    reason,
+  };
+  if (detail) failure.detail = detail;
+  return failure;
+}
+
+/**
  * Merge the project's default branch into the task's workspace branch and push
  * the result. Returns a typed result; never throws.
  */
@@ -229,20 +259,16 @@ export async function updateWorkspaceBranchFromBase(
       );
       if (!fetchRes.ok) {
         const detail = redactGitOutput(fetchRes.stderr, { token });
-        logger.warn("branch update could not fetch the base branch", {
-          taskKey,
-          branch,
-          base,
-          ...(fetchRes.timedOut ? { timedOut: true } : {}),
-          ...(detail ? { detail } : {}),
-        });
-        return {
-          status: "update_failed",
-          reason: fetchRes.timedOut
+        const fields: GitLogFields = { taskKey, branch, base };
+        if (fetchRes.timedOut) fields.timedOut = true;
+        if (detail) fields.detail = detail;
+        logger.warn("branch update could not fetch the base branch", fields);
+        return updateFailed(
+          fetchRes.timedOut
             ? `fetching \`${base}\` was cancelled after ${FETCH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
             : `could not fetch \`${base}\` from origin`,
-          ...(detail ? { detail } : {}),
-        };
+          detail,
+        );
       }
 
       // 2. How far behind? Zero is a real answer, and it is a no-op that says
@@ -256,12 +282,10 @@ export async function updateWorkspaceBranchFromBase(
         ? Number.parseInt(behindRes.stdout.trim(), 10)
         : Number.NaN;
       if (!Number.isFinite(behind)) {
-        const detail = redactGitOutput(behindRes.stderr, { token });
-        return {
-          status: "update_failed",
-          reason: `could not compare \`${branch}\` against \`${base}\``,
-          ...(detail ? { detail } : {}),
-        };
+        return updateFailed(
+          `could not compare \`${branch}\` against \`${base}\``,
+          redactGitOutput(behindRes.stderr, { token }),
+        );
       }
       if (behind === 0) {
         return { status: "already_current", branch, base };
@@ -328,36 +352,29 @@ export async function updateWorkspaceBranchFromBase(
             abortRes.ok ? output : `${output}\n${abortRes.stderr}`,
             { token },
           );
-          logger.info("branch update conflicted — merge aborted", {
-            taskKey,
-            branch,
-            base,
-            files,
-            ...(abortRes.ok ? {} : { abortFailed: true }),
-          });
-          return {
+          const fields: GitLogFields = { taskKey, branch, base, files };
+          if (!abortRes.ok) fields.abortFailed = true;
+          logger.info("branch update conflicted — merge aborted", fields);
+          const conflict: Extract<UpdateBranchResult, { status: "conflict" }> = {
             status: "conflict",
             branch,
             base,
             files,
-            ...(detail ? { detail } : {}),
           };
+          if (detail) conflict.detail = detail;
+          return conflict;
         }
         const detail = redactGitOutput(output, { token });
-        logger.warn("branch update merge failed", {
-          taskKey,
-          branch,
-          base,
-          ...(mergeRes.timedOut ? { timedOut: true } : {}),
-          ...(detail ? { detail } : {}),
-        });
-        return {
-          status: "update_failed",
-          reason: mergeRes.timedOut
+        const fields: GitLogFields = { taskKey, branch, base };
+        if (mergeRes.timedOut) fields.timedOut = true;
+        if (detail) fields.detail = detail;
+        logger.warn("branch update merge failed", fields);
+        return updateFailed(
+          mergeRes.timedOut
             ? `merging \`${base}\` was cancelled after ${MERGE_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
             : `merging \`${base}\` into \`${branch}\` failed`,
-          ...(detail ? { detail } : {}),
-        };
+          detail,
+        );
       }
 
       // 4. Publish. A fast-forward on the remote by construction (the merge sits
@@ -388,19 +405,16 @@ export async function updateWorkspaceBranchFromBase(
           };
         }
         const detail = redactGitOutput(pushRes.stderr, { token });
-        logger.warn("branch update push failed", {
-          taskKey,
-          branch,
-          ...(pushRes.timedOut ? { timedOut: true } : {}),
-          ...(detail ? { detail } : {}),
-        });
-        return {
-          status: "update_failed",
-          reason: pushRes.timedOut
+        const fields: GitLogFields = { taskKey, branch };
+        if (pushRes.timedOut) fields.timedOut = true;
+        if (detail) fields.detail = detail;
+        logger.warn("branch update push failed", fields);
+        return updateFailed(
+          pushRes.timedOut
             ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
             : "pushing the updated branch returned non-zero — the update was rolled back",
-          ...(detail ? { detail } : {}),
-        };
+          detail,
+        );
       }
 
       logger.info("brought the task branch up to date with its base", {

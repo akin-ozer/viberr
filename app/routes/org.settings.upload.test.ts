@@ -1,3 +1,4 @@
+import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   setupAppTest,
@@ -28,7 +29,13 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-async function upload(files: { name: string; relPath: string }[]) {
+/** The half of an org-settings reply these tests read. `ok()` carries the
+ *  toast; a `fail()` body has none, so the field reads optional across both. */
+type UploadReply = { ok: boolean; toast?: string };
+
+async function upload(
+  files: { name: string; relPath: string }[],
+): Promise<UploadReply> {
   const { action } = await import("~/routes/org.settings");
   const { cookie, sessionId } = await app.cookieFor(ardaId);
   const csrf = await app.csrfFor(sessionId);
@@ -43,16 +50,21 @@ async function upload(files: { name: string; relPath: string }[]) {
     fd.append("filePaths", f.relPath);
   }
   fd.set("_csrf", csrf);
+  const request = app.request("/org/settings", {
+    method: "POST",
+    body: fd,
+    cookie,
+  });
   const result = await action({
-    request: app.request("/org/settings", { method: "POST", body: fd, cookie }),
+    request,
+    url: new URL(request.url),
+    pattern: "/org/settings",
     params: {},
-    context: {},
-  } as never);
-  return (
-    result && typeof result === "object" && "data" in result
-      ? (result as { data: Record<string, unknown> }).data
-      : (result as Record<string, unknown>)
-  );
+    context: new RouterContextProvider(),
+  });
+  // `fail()` answers through `data()`, which parks the body under `.data`;
+  // `ok()` hands the body back directly.
+  return "data" in result ? result.data : result;
 }
 
 describe("store-upload reports what it did NOT store", () => {

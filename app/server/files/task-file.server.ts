@@ -1,11 +1,13 @@
+import YAML from "yaml";
 import {
+  diagError,
   diagInfo,
   diagWarning,
   type FileDiagnostic,
 } from "~/schemas/file-diagnostics";
 import {
   parseTaskFrontmatter,
-  parseTaskPacket,
+  taskPacketSchema,
   TIMELINE_EVENT_TYPES,
   type ParsedTaskFile,
   type TaskFileEvent,
@@ -13,10 +15,10 @@ import {
 } from "~/schemas/task-file.schema";
 import { decodeActorRef, encodeActorRef } from "./actor-ref.server";
 import {
-  parseYaml,
   serializeFrontmatterFile,
   splitFrontmatter,
   toYaml,
+  yamlMappingSchema,
 } from "./frontmatter.server";
 
 /**
@@ -56,6 +58,9 @@ import {
 const SECTION_RE = /^## (.+)$/;
 const EVENT_HEADING_PREFIX = "### ";
 const SEP = " · ";
+
+/** Membership test for a heading's type token, which is free text off disk. */
+const KNOWN_EVENT_TYPES = new Set<string>(TIMELINE_EVENT_TYPES);
 
 /** Line patterns the parser treats as structure inside an event block
  * (mirrors SECTION_RE / EVENT_HEADING_PREFIX / metadata / evidence rules). */
@@ -133,7 +138,7 @@ function parseEventBlock(
     return null;
   }
 
-  if (!(TIMELINE_EVENT_TYPES as readonly string[]).includes(type)) {
+  if (!KNOWN_EVENT_TYPES.has(type)) {
     diagnostics.push(
       diagInfo(
         "timeline.unknown_type",
@@ -264,6 +269,8 @@ function serializeEvent(event: TaskFileEvent): string {
 
 // --------------------------------------------------------------- packet
 
+/** Tolerant packet parse (the fenced yaml block under `## Packet`). Returns
+ * null + diagnostics when the block cannot be salvaged. */
 function parsePacketSection(
   lines: string[],
   diagnostics: FileDiagnostic[],
@@ -284,7 +291,7 @@ function parsePacketSection(
   }
   let raw: unknown;
   try {
-    raw = parseYaml(fence[1]!);
+    raw = YAML.parse(fence[1]!);
   } catch (error) {
     diagnostics.push(
       diagWarning(
@@ -295,9 +302,30 @@ function parsePacketSection(
     );
     return null;
   }
-  const { packet, diagnostics: packetDiags } = parseTaskPacket(raw);
-  diagnostics.push(...packetDiags);
-  return packet;
+  if (raw === undefined || raw === null) return null;
+  const result = taskPacketSchema.safeParse(raw);
+  if (result.success) {
+    const recCount = result.data.options.filter((o) => o.rec).length;
+    if (result.data.options.length > 0 && recCount !== 1) {
+      diagnostics.push(
+        diagInfo(
+          "packet.rec_count",
+          `Packet has ${recCount} recommended options (expected exactly 1).`,
+          "packet.options",
+        ),
+      );
+    }
+    return result.data;
+  }
+  const issue = result.error.issues[0];
+  diagnostics.push(
+    diagError(
+      "packet.invalid",
+      `Packet block is invalid at \`${issue?.path.join(".") || "packet"}\` (${issue?.message ?? "unparseable"}) — packet ignored.`,
+      "packet",
+    ),
+  );
+  return null;
 }
 
 // ----------------------------------------------------------- public API
@@ -315,7 +343,24 @@ export function parseTaskFileContent(
   const { data, body, diagnostics: fmDiags } = splitFrontmatter(content);
   diagnostics.push(...fmDiags);
 
-  const fm = parseTaskFrontmatter(data, context);
+  // Frontmatter that is not a mapping (a scalar, a sequence) contributes no
+  // fields at all; the schema below then falls every field back to its default.
+  const mapping = yamlMappingSchema.safeParse(data);
+  if (!mapping.success) {
+    diagnostics.push(
+      diagError(
+        "frontmatter.not_a_map",
+        "Frontmatter is not a YAML mapping — all fields fall back to defaults.",
+        undefined,
+        true,
+      ),
+    );
+  }
+
+  const fm = parseTaskFrontmatter(
+    mapping.success ? mapping.data : {},
+    context,
+  );
   diagnostics.push(...fm.diagnostics);
 
   const sections = splitSections(body);
@@ -445,7 +490,7 @@ export function serializeTaskFile(parsed: ParsedTaskFile): string {
 
   const { frontmatter, unknownFrontmatter } = parsed;
   return serializeFrontmatterFile(
-    frontmatter as unknown as Record<string, unknown>,
+    frontmatter,
     unknownFrontmatter,
     bodyParts.join("\n\n"),
   );

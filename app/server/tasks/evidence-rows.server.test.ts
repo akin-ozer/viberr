@@ -304,7 +304,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
             backends: ["claude"],
             model: "sonnet",
           },
-        } as never,
+        },
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -372,7 +372,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
     for (let i = 0; i < 200; i++) {
       const row = store.db
         .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
-        .get(started.runId) as { state: string } | undefined;
+        .get(started.runId);
       if (row?.state === "finished") break;
       await new Promise((r) => setTimeout(r, 25));
     }

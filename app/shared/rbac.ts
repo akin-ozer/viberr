@@ -28,19 +28,19 @@ import { PROJECT_ROLES, type ProjectRole } from "~/schemas/project-file.schema";
 
 export { PROJECT_ROLES, type ProjectRole };
 
-export const ROLE_RANK: Record<ProjectRole, number> = {
+export const ROLE_RANK = {
   viewer: 0,
   contributor: 1,
   maintainer: 2,
   admin: 3,
-};
+} satisfies Record<ProjectRole, number>;
 
-export const ROLE_LABEL: Record<ProjectRole, string> = {
+export const ROLE_LABEL = {
   admin: "Admin",
   maintainer: "Maintainer",
   contributor: "Contributor",
   viewer: "Viewer",
-};
+} satisfies Record<ProjectRole, string>;
 
 const A = "admin" as const;
 const M = "maintainer" as const;
@@ -89,17 +89,23 @@ export const RBAC_DEFINITIONS = [
 
 export type RbacAction = (typeof RBAC_DEFINITIONS)[number]["id"];
 
-export const ACTION_ROLES = Object.fromEntries(
-  RBAC_DEFINITIONS.map(({ id, roles }) => [id, roles]),
-) as unknown as Record<RbacAction, readonly ProjectRole[]>;
+export const ACTION_ROLES = new Map<RbacAction, readonly ProjectRole[]>(
+  RBAC_DEFINITIONS.map(
+    ({ id, roles }): [RbacAction, readonly ProjectRole[]] => [id, roles],
+  ),
+);
 
 /** Does this project role hold this action? A null role (non-member) never does. */
 export function roleCan(role: ProjectRole | null | undefined, action: RbacAction): boolean {
   if (!role) return false;
-  return ACTION_ROLES[action].includes(role);
+  return rolesForAction(action).includes(role);
 }
 
 /** The roles that hold an action (for rendering + for building guard allow-lists). */
 export function rolesForAction(action: RbacAction): readonly ProjectRole[] {
-  return ACTION_ROLES[action];
+  const roles = ACTION_ROLES.get(action);
+  // Every `RbacAction` is an id of RBAC_DEFINITIONS, which is what the map is
+  // built from — a miss means an action string reached here past the type.
+  if (!roles) throw new Error(`unknown RBAC action: ${action}`);
+  return roles;
 }

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   PrChecks,
   PrMergeable,
@@ -77,34 +78,60 @@ export type PrLinkResult =
   | { status: "auth_failed"; message: string }
   | { status: "network_unavailable"; message: string };
 
-interface GhPullListItem {
-  number: number;
-  title: string;
-  state: string;
-  draft?: boolean;
-  merged_at: string | null;
-  head?: { sha?: string };
-}
+/** A pulls LIST item's read slice. The identity fields are on every PR payload;
+ *  the rest carry their readers' optional-chain tolerance (`undefined` on
+ *  drift, never a voided response). */
+const ghPullListItemSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  draft: z.boolean().optional().catch(undefined),
+  merged_at: z.string().nullable().optional().catch(undefined),
+  head: z
+    .object({ sha: z.string().optional().catch(undefined) })
+    .optional()
+    .catch(undefined),
+});
 
-interface GhPullDetail extends GhPullListItem {
-  merged?: boolean;
-  additions?: number;
-  deletions?: number;
-  changed_files?: number;
+const ghPullDetailSchema = ghPullListItemSchema.extend({
+  /** The list item (which always carries the title) is the primary read; a
+   *  detail payload without one must not void the whole link, so it degrades
+   *  to an empty title instead. */
+  title: z.string().catch(""),
+  merged: z.boolean().optional().catch(undefined),
+  additions: z.number().optional().catch(undefined),
+  deletions: z.number().optional().catch(undefined),
+  changed_files: z.number().optional().catch(undefined),
   /** P14-LV-07: `null` while GitHub computes it (first read after a push), then
    *  true/false. `mergeable_state` carries the WHY ("dirty" = conflicts). */
-  mergeable?: boolean | null;
-  mergeable_state?: string;
+  mergeable: z.boolean().nullable().optional().catch(undefined),
+  mergeable_state: z.string().optional().catch(undefined),
   /** P13-D-28: who has been ASKED to review (free — the detail fetch already
-   *  happens). Distinguishes "review required" from "nobody is expected". */
-  requested_reviewers?: { login?: string }[];
-  requested_teams?: { slug?: string }[];
-}
+   *  happens). Distinguishes "review required" from "nobody is expected". Only
+   *  the lengths are read, so the entries stay unmodeled. */
+  requested_reviewers: z.array(z.unknown()).optional().catch(undefined),
+  requested_teams: z.array(z.unknown()).optional().catch(undefined),
+});
+type GhPullDetail = z.output<typeof ghPullDetailSchema>;
 
-interface GhCheckRuns {
-  total_count: number;
-  check_runs: { status: string; conclusion: string | null }[];
-}
+/** The check-runs summary's read slice — only each run's `conclusion` is
+ *  consumed, and `null` (still running) is distinct from absent/mangled
+ *  (counts toward nothing, exactly like the raw read). */
+const ghCheckRunsSchema = z
+  .object({
+    total_count: z.number().optional().catch(undefined),
+    check_runs: z
+      .array(
+        z
+          .object({
+            conclusion: z.string().nullable().optional().catch(undefined),
+          })
+          .catch({}),
+      )
+      .optional()
+      .catch(undefined),
+  })
+  .catch({});
 
 /** One entry of `GET /pulls/{n}/reviews` — an EVENT log, not a per-reviewer
  *  state: the same person appears once per submitted review. */
@@ -119,6 +146,27 @@ export interface GhReview {
   submitted_at?: string | null;
 }
 
+/** {@link GhReview}, as parsed at the boundary. Every field already tolerates
+ *  absence in the derivations, so each parses to `undefined` on drift; a
+ *  non-object entry becomes `{}` and a non-array payload `[]` — the same
+ *  nothing the raw reads made of them. */
+const ghReviewsSchema = z
+  .array(
+    z
+      .object({
+        state: z.string().optional().catch(undefined),
+        user: z
+          .object({ login: z.string().optional().catch(undefined) })
+          .nullable()
+          .optional()
+          .catch(undefined),
+        commit_id: z.string().nullable().optional().catch(undefined),
+        submitted_at: z.string().nullable().optional().catch(undefined),
+      })
+      .catch({}),
+  )
+  .catch([]);
+
 /** R19-B — a reviewer whose LATEST review is an approval, and the commit it
  *  was submitted on. */
 export interface PrApproval {
@@ -130,6 +178,17 @@ export interface PrApproval {
   /** ISO timestamp of the approval, or null. */
   at: string | null;
 }
+
+/**
+ * The change stats on a PR detail payload. GitHub sends all three or the read
+ * is not a detail read — parsed here rather than probed field by field, so the
+ * "did we get numbers?" question is answered once, at the boundary.
+ */
+const prChangeStatsSchema = z.object({
+  additions: z.number(),
+  deletions: z.number(),
+  changed_files: z.number(),
+});
 
 const PASSING = new Set(["success", "neutral", "skipped"]);
 const FAILING = new Set(["failure", "timed_out", "cancelled", "action_required"]);
@@ -238,9 +297,10 @@ export async function findPrForBranch(
   branch: string,
 ): Promise<PrLinkResult> {
   const owner = repo.split("/")[0] ?? repo;
-  const list = await client.request<GhPullListItem[]>(
+  const list = await client.request(
     "GET",
     `/repos/${repo}/pulls`,
+    z.array(ghPullListItemSchema),
     {
       searchParams: {
         head: `${owner}:${branch}`,
@@ -272,9 +332,10 @@ export async function findPrForBranch(
   if (!head) return { status: "none" };
 
   // Detail fetch for merged flag + change stats (list items omit them).
-  const detail = await client.request<GhPullDetail>(
+  const detail = await client.request(
     "GET",
     `/repos/${repo}/pulls/${head.number}`,
+    ghPullDetailSchema,
   );
   const pr: GhPullDetail = detail.ok ? detail.data : head;
   const state = mapPrToCacheState(pr);
@@ -289,9 +350,17 @@ export async function findPrForBranch(
   // opens a fresh PR. Fail-safe: if the branch head can't be read (e.g. the head
   // branch was auto-deleted on merge), fall through and link the PR as before.
   if (pr.state === "closed" && headSha) {
-    const branchRes = await client.request<{ commit?: { sha?: string } }>(
+    const branchRes = await client.request(
       "GET",
       `/repos/${repo}/branches/${encodeURIComponent(branch)}`,
+      z
+        .object({
+          commit: z
+            .object({ sha: z.string().optional().catch(undefined) })
+            .optional()
+            .catch(undefined),
+        })
+        .catch({}),
     );
     if (branchRes.ok) {
       const branchHead = branchRes.data.commit?.sha ?? null;
@@ -303,18 +372,21 @@ export async function findPrForBranch(
 
   let checks: PrChecksSummary | null = null;
   if (headSha) {
-    const checkRuns = await client.request<GhCheckRuns>(
+    const checkRuns = await client.request(
       "GET",
       `/repos/${repo}/commits/${headSha}/check-runs`,
+      ghCheckRunsSchema,
       { searchParams: { per_page: 100 } },
     );
     if (checkRuns.ok) {
       const runs = checkRuns.data.check_runs ?? [];
+      // `== null` spans `null` (still running — pending below) and absent/
+      // drifted (counts toward nothing, exactly like the raw read).
       const passing = runs.filter(
-        (r) => r.conclusion !== null && PASSING.has(r.conclusion),
+        (r) => r.conclusion != null && PASSING.has(r.conclusion),
       ).length;
       const failing = runs.filter(
-        (r) => r.conclusion !== null && FAILING.has(r.conclusion),
+        (r) => r.conclusion != null && FAILING.has(r.conclusion),
       ).length;
       checks = {
         total: checkRuns.data.total_count ?? runs.length,
@@ -334,13 +406,14 @@ export async function findPrForBranch(
   let review: PrReviewState | null | undefined;
   let approvals: PrApproval[] | undefined;
   if (state === "review") {
-    const reviews = await client.request<GhReview[]>(
+    const reviews = await client.request(
       "GET",
       `/repos/${repo}/pulls/${head.number}/reviews`,
+      ghReviewsSchema,
       { searchParams: { per_page: 100 } },
     );
     if (reviews.ok) {
-      const entries = Array.isArray(reviews.data) ? reviews.data : [];
+      const entries = reviews.data;
       review = deriveReviewState(
         entries,
         (pr.requested_reviewers?.length ?? 0) + (pr.requested_teams?.length ?? 0),
@@ -351,32 +424,38 @@ export async function findPrForBranch(
     }
   }
 
-  return {
-    status: "found",
-    pr: {
-      number: pr.number,
-      title: pr.title,
-      state,
-      draft: pr.draft ?? false,
-      headSha,
-      ...(review !== undefined ? { review } : {}),
-      ...(approvals !== undefined ? { approvals } : {}),
-      // P14-LV-07: only an OPEN PR has a meaningful mergeability, and only the
-      // detail fetch carries it. A failed detail read — or GitHub still
-      // COMPUTING the answer (the first read after a push) — leaves the key
-      // absent, so the caller keeps the last-known value instead of flapping
-      // the pill through "unknown" on every push.
-      ...(detail.ok && state === "review" && deriveMergeable(pr) !== "unknown"
-        ? { mergeable: deriveMergeable(pr) }
-        : {}),
-      changed:
-        detail.ok &&
-        typeof pr.changed_files === "number" &&
-        typeof pr.additions === "number" &&
-        typeof pr.deletions === "number"
-          ? { files: pr.changed_files, add: pr.additions, del: pr.deletions }
-          : null,
-      checks,
-    },
+  // The change stats are read as ONE fact off the detail payload: the list item
+  // carries none of the three, and a partial answer ("+12 lines over an unknown
+  // number of files") is not a change summary. A payload that does not parse
+  // leaves `changed` null — the caller's "not read" value.
+  const stats = detail.ok ? prChangeStatsSchema.safeParse(pr) : null;
+  const facts: PrFacts = {
+    number: pr.number,
+    title: pr.title,
+    state,
+    draft: pr.draft ?? false,
+    headSha,
+    changed: stats?.success
+      ? {
+          files: stats.data.changed_files,
+          add: stats.data.additions,
+          del: stats.data.deletions,
+        }
+      : null,
+    checks,
   };
+  // `review` and `approvals` are set only when the reviews call actually ran —
+  // an ABSENT key means "not read this pass", which is what makes the caller
+  // keep its cached value instead of erasing it.
+  if (review !== undefined) facts.review = review;
+  if (approvals !== undefined) facts.approvals = approvals;
+  // P14-LV-07: only an OPEN PR has a meaningful mergeability, and only the
+  // detail fetch carries it. A failed detail read — or GitHub still
+  // COMPUTING the answer (the first read after a push) — leaves the key
+  // absent, so the caller keeps the last-known value instead of flapping
+  // the pill through "unknown" on every push.
+  const mergeable =
+    detail.ok && state === "review" ? deriveMergeable(pr) : "unknown";
+  if (mergeable !== "unknown") facts.mergeable = mergeable;
+  return { status: "found", pr: facts };
 }

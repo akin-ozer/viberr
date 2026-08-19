@@ -27,6 +27,9 @@ describe("R19-16 oauth provider store", () => {
       { provider: "github", clientId: "Iv1.abc", clientSecret: "s3cr3t-value" },
       ACTOR,
     );
+    // SAFETY: the SELECT names one column, declared `client_secret TEXT NOT
+    // NULL`, and the save above inserted the row this WHERE matches — so the
+    // read is one row of exactly this shape.
     const raw = db
       .prepare(`SELECT client_secret FROM oauth_providers WHERE provider = 'github'`)
       .get() as { client_secret: string };
@@ -150,10 +153,11 @@ describe("R19-16 oauth provider store", () => {
     recordOAuthVerification(db, "github", { ok: true, detail: "ok" }, ACTOR);
     setOAuthProviderEnabled(db, "github", true, ACTOR);
     deleteOAuthProvider(db, "github", ACTOR);
+    // SAFETY: the SELECT names one column, declared `action TEXT NOT NULL`.
     const actions = (
       db
         .prepare(`SELECT action FROM audit_events ORDER BY rowid`)
-        .all() as unknown as { action: string }[]
+        .all() as { action: string }[]
     ).map((r) => r.action);
     expect(actions).toEqual([
       "org.oauth_provider.created",
@@ -162,9 +166,11 @@ describe("R19-16 oauth provider store", () => {
       "org.oauth_provider.removed",
     ]);
     // The secret never reaches the audit details.
+    // SAFETY: the SELECT names one column, and every mutation above records a
+    // `details` payload — so `details_json` is written on all four rows.
     const details = db
       .prepare(`SELECT details_json FROM audit_events`)
-      .all() as unknown as { details_json: string }[];
+      .all() as { details_json: string }[];
     for (const d of details) expect(d.details_json).not.toContain("shhh-secret");
   });
 });
@@ -172,42 +178,40 @@ describe("R19-16 oauth provider store", () => {
 describe("R19-16 credential test", () => {
   it("reads GitHub's 401 as a bad pair and its 404 as a good one", async () => {
     const bad = await testOAuthCredentials("github", "id", "secret", {
-      fetchImpl: (async () =>
-        new Response("{}", { status: 401 })) as unknown as typeof fetch,
+      fetchImpl: async () => new Response("{}", { status: 401 }),
     });
     expect(bad.ok).toBe(false);
 
     const good = await testOAuthCredentials("github", "id", "secret", {
-      fetchImpl: (async () =>
-        new Response("{}", { status: 404 })) as unknown as typeof fetch,
+      fetchImpl: async () => new Response("{}", { status: 404 }),
     });
     expect(good.ok).toBe(true);
   });
 
   it("reads Google's invalid_client as bad and invalid_grant as good", async () => {
     const bad = await testOAuthCredentials("google", "id", "secret", {
-      fetchImpl: (async () =>
+      fetchImpl: async () =>
         new Response(JSON.stringify({ error: "invalid_client" }), {
           status: 401,
-        })) as unknown as typeof fetch,
+        }),
     });
     expect(bad.ok).toBe(false);
 
     // The pair authenticated; only the deliberately-invalid code was refused.
     const good = await testOAuthCredentials("google", "id", "secret", {
-      fetchImpl: (async () =>
+      fetchImpl: async () =>
         new Response(JSON.stringify({ error: "invalid_grant" }), {
           status: 400,
-        })) as unknown as typeof fetch,
+        }),
     });
     expect(good.ok).toBe(true);
   });
 
   it("an unreachable provider is a NEGATIVE result, never a throw", async () => {
     const result = await testOAuthCredentials("github", "id", "secret", {
-      fetchImpl: (async () => {
+      fetchImpl: async () => {
         throw new Error("network down: Basic aWQ6c2VjcmV0");
-      }) as unknown as typeof fetch,
+      },
     });
     expect(result.ok).toBe(false);
     // The thrown error can carry the request — and the request carries the

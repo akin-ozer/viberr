@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { RouterContextProvider } from "react-router";
+import { z } from "zod";
 import {
   setupAppTest,
   type AppTestContext,
@@ -12,8 +14,15 @@ import {
  * RBAC, notification reads, theme persistence).
  */
 
+/** The seeded people this file drives the shell routes as. */
+interface SeedUserIds {
+  arda: string;
+  deniz: string;
+  selin: string;
+}
+
 let app: AppTestContext;
-let seedIds: { arda: string; deniz: string; selin: string };
+let seedIds: SeedUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -27,35 +36,98 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-async function loaderArgs(url: string, params: Record<string, string>, cookie?: string) {
+/** Un-interpolated match patterns, the way React Router reports them. */
+const HOME_PATTERN = "/";
+const PROJECT_PATTERN = "/projects/:slug";
+
+/**
+ * A server loader/action is handed the request, the match pattern, the dynamic
+ * params and a middleware context. Building the whole envelope rather than a
+ * partial stand-in is what keeps the direct calls below type-checked against
+ * the real route signatures.
+ */
+function loaderArgs<Params extends Record<string, string>>(
+  url: string,
+  pattern: string,
+  params: Params,
+  cookie?: string,
+) {
+  const request = app.request(url, cookie ? { cookie } : {});
   return {
-    request: app.request(url, cookie ? { cookie } : {}),
+    request,
+    url: new URL(request.url),
     params,
-    context: {},
+    pattern,
+    context: new RouterContextProvider(),
   };
 }
+
+type RouteActionResult = Awaited<
+  ReturnType<
+    | typeof import("~/routes/_index").action
+    | typeof import("~/routes/notifications.read").action
+    | typeof import("~/routes/prefs.theme").action
+    | typeof import("~/routes/project.board").action
+  >
+>;
+
+/**
+ * An action answers on one of two envelopes: a bare success object, or
+ * `data(payload, init)`. A test that reads a single member has to say which
+ * envelope it expects, so read it through this projection — a member the
+ * actual branch does not carry comes back `undefined` and fails its
+ * assertion, rather than being asserted into existence.
+ */
+function actionOutcome(result: RouteActionResult) {
+  return {
+    ok: "ok" in result ? result.ok : undefined,
+    key: "key" in result ? result.key : undefined,
+    slug: "slug" in result ? result.slug : undefined,
+    stageName: "stageName" in result ? result.stageName : undefined,
+    changed: "changed" in result ? result.changed : undefined,
+    payload: "data" in result ? result.data : undefined,
+    error:
+      "data" in result && "error" in result.data ? result.data.error : undefined,
+    status: "init" in result ? result.init?.status : undefined,
+    headers: "init" in result ? new Headers(result.init?.headers) : undefined,
+  };
+}
+
+/**
+ * A guard refuses by THROWING React Router's `data(message, { status })`, so
+ * the rejection reaches the test untyped and is parsed where it lands.
+ */
+const thrownRefusalSchema = z.object({
+  data: z.unknown(),
+  init: z.object({ status: z.number() }).nullish(),
+});
+
+/** `.get()` hands back untyped SQLite cells, so the row is parsed on read. */
+const memberRoleRowSchema = z.object({ role: z.string() }).optional();
 
 describe("auth gating", () => {
   it("home loader redirects signed-out users to /login", async () => {
     const { loader } = await import("~/routes/_index");
-    const thrown = await loader(
-      (await loaderArgs("/", {})) as never,
+    const thrown: unknown = await loader(
+      loaderArgs("/", HOME_PATTERN, {}),
     ).catch((e) => e);
     expect(thrown).toBeInstanceOf(Response);
-    expect((thrown as Response).status).toBe(302);
-    expect((thrown as Response).headers.get("Location")).toBe("/login");
+    const redirected = thrown instanceof Response ? thrown : null;
+    expect(redirected?.status).toBe(302);
+    expect(redirected?.headers.get("Location")).toBe("/login");
   });
 
   it("workspace layout loader redirects with returnTo", async () => {
     const { loader } = await import("~/routes/project");
-    const thrown = await loader(
-      (await loaderArgs("/projects/viberr-core/board", {
+    const thrown: unknown = await loader(
+      loaderArgs("/projects/viberr-core/board", PROJECT_PATTERN, {
         slug: "viberr-core",
-      })) as never,
+      }),
     ).catch((e) => e);
     expect(thrown).toBeInstanceOf(Response);
-    expect((thrown as Response).status).toBe(302);
-    expect((thrown as Response).headers.get("Location")).toBe(
+    const redirected = thrown instanceof Response ? thrown : null;
+    expect(redirected?.status).toBe(302);
+    expect(redirected?.headers.get("Location")).toBe(
       "/login?returnTo=" + encodeURIComponent("/projects/viberr-core/board"),
     );
   });
@@ -66,7 +138,7 @@ describe("workspace layout loader (seeded)", () => {
     const { loader } = await import("~/routes/project");
     const { cookie } = await app.cookieFor(seedIds.arda);
     const thrown = await loader(
-      (await loaderArgs("/projects/nope", { slug: "nope" }, cookie)) as never,
+      loaderArgs("/projects/nope", PROJECT_PATTERN, { slug: "nope" }, cookie),
     ).catch((e) => e);
     expect(thrown?.init?.status ?? thrown?.status).toBe(404);
   });
@@ -78,13 +150,14 @@ describe("workspace layout loader (seeded)", () => {
     it("a project MEMBER sees the board", async () => {
       const { loader } = await import("~/routes/project");
       const { cookie } = await app.cookieFor(seedIds.selin); // contributor
-      const result = (await loader(
-        (await loaderArgs(
+      const result = await loader(
+        loaderArgs(
           "/projects/viberr-core/board",
+          PROJECT_PATTERN,
           { slug: "viberr-core" },
           cookie,
-        )) as never,
-      )) as { myRole: string; orgAdminOverride: boolean };
+        ),
+      );
       expect(result.myRole).toBe("contributor");
       expect(result.orgAdminOverride).toBe(false);
     });
@@ -94,17 +167,18 @@ describe("workspace layout loader (seeded)", () => {
       // deniz is an org MEMBER with no membership on any seeded project.
       const { cookie } = await app.cookieFor(seedIds.deniz);
       const thrown = await loader(
-        (await loaderArgs(
+        loaderArgs(
           "/projects/viberr-core/board",
+          PROJECT_PATTERN,
           { slug: "viberr-core" },
           cookie,
-        )) as never,
+        ),
       ).catch((e) => e);
       expect(thrown?.init?.status ?? thrown?.status).toBe(404);
       // Byte-identical to the unknown-slug refusal — the response must not
       // confirm that `viberr-core` exists (WI-13).
       const unknown = await loader(
-        (await loaderArgs("/projects/nope", { slug: "nope" }, cookie)) as never,
+        loaderArgs("/projects/nope", PROJECT_PATTERN, { slug: "nope" }, cookie),
       ).catch((e) => e);
       expect(String(thrown?.data ?? thrown)).toBe(
         String(unknown?.data ?? unknown).replace("nope", "viberr-core"),
@@ -115,11 +189,12 @@ describe("workspace layout loader (seeded)", () => {
       const { loader } = await import("~/routes/project");
       const { cookie } = await app.cookieFor(seedIds.deniz);
       const thrown = await loader(
-        (await loaderArgs(
+        loaderArgs(
           "/projects/viberr-core/tasks/VIB-142",
+          PROJECT_PATTERN,
           { slug: "viberr-core" },
           cookie,
-        )) as never,
+        ),
       ).catch((e) => e);
       expect(thrown?.init?.status ?? thrown?.status).toBe(404);
     });
@@ -144,28 +219,55 @@ describe("workspace layout loader (seeded)", () => {
       { mod: "~/routes/project.settings", path: "settings" },
     ] as const;
 
+    /**
+     * The six specifiers above are the only modules `childLoader` imports, so
+     * their union is the honest type for the dynamic import — and the six
+     * loaders share one args envelope.
+     */
+    type ChildRouteModule =
+      | typeof import("~/routes/project.activity")
+      | typeof import("~/routes/project.agents")
+      | typeof import("~/routes/project.github")
+      | typeof import("~/routes/project.policy")
+      | typeof import("~/routes/project.review")
+      | typeof import("~/routes/project.settings");
+
+    /**
+     * A child loader refuses by throwing React Router's
+     * `data(message, { status })`; a plain Response carries the status itself.
+     * Anything else (or a loader that resolved) reads as no refusal at all.
+     */
+    const childRefusalSchema = z.object({
+      data: z.unknown(),
+      init: z.object({ status: z.number() }).nullish(),
+      status: z.number().optional(),
+    });
+
     /** Run ONE child loader the way single fetch's `?_routes=` filter does. */
     async function childLoader(
       surface: (typeof CHILD_SURFACES)[number],
       slug: string,
       cookie: string,
     ): Promise<{ status: number; body: string }> {
-      const { loader } = await import(/* @vite-ignore */ surface.mod);
+      // `surface.mod` is one of the six literals above, so the module is typed
+      // as their union rather than left untyped by the dynamic specifier.
+      const routeModule: ChildRouteModule = await import(
+        /* @vite-ignore */ surface.mod
+      );
       const url =
         `/projects/${slug}/${surface.path}.data` +
         `?_routes=routes/project.${surface.path}`;
-      const thrown = await (
-        loader as (a: unknown) => Promise<unknown>
-      )(await loaderArgs(url, { slug }, cookie)).then(
-        () => null,
-        (e: unknown) => e,
-      );
-      const wrapped = thrown as
-        | { data?: unknown; init?: { status?: number }; status?: number }
-        | null;
+      const pattern = `${PROJECT_PATTERN}/${surface.path}`;
+      const settled: unknown = await routeModule
+        .loader(loaderArgs(url, pattern, { slug }, cookie))
+        .then(
+          () => null,
+          (e) => e,
+        );
+      const refusal = childRefusalSchema.nullable().catch(null).parse(settled);
       return {
-        status: wrapped?.init?.status ?? wrapped?.status ?? 200,
-        body: String(wrapped?.data ?? ""),
+        status: refusal?.init?.status ?? refusal?.status ?? 200,
+        body: String(refusal?.data ?? ""),
       };
     }
 
@@ -201,13 +303,14 @@ describe("workspace layout loader (seeded)", () => {
       updateUserFields(app.db, seedIds.deniz, { role: "admin" });
       try {
         const { cookie } = await app.cookieFor(seedIds.deniz);
-        const result = (await loader(
-          (await loaderArgs(
+        const result = await loader(
+          loaderArgs(
             "/projects/viberr-core/board",
+            PROJECT_PATTERN,
             { slug: "viberr-core" },
             cookie,
-          )) as never,
-        )) as { myRole: string; orgAdminOverride: boolean };
+          ),
+        );
         expect(result.myRole).toBe("admin");
         expect(result.orgAdminOverride).toBe(true);
       } finally {
@@ -219,34 +322,14 @@ describe("workspace layout loader (seeded)", () => {
   it("returns the seeded board: 5 columns, VIB-142 in Review with its chips", async () => {
     const { loader } = await import("~/routes/project");
     const { cookie } = await app.cookieFor(seedIds.arda);
-    const result = (await loader(
-      (await loaderArgs("/projects/viberr-core", {
-        slug: "viberr-core",
-      }, cookie)) as never,
-    )) as {
-      board: {
-        columns: {
-          stage: { id: string; name: string };
-          tasks: {
-            key: string;
-            urgent: boolean;
-            displayReadiness: string;
-            waiting: string;
-            branch: string | null;
-            pr: { number: number } | null;
-            packet: unknown;
-            owner: { kind: string; name?: string } | null;
-            validation: string;
-          }[];
-        }[];
-      };
-      taskCount: number;
-      reviewCount: number;
-      violations: number;
-      myRole: string | null;
-      unread: number;
-      notifications: unknown[];
-    };
+    const result = await loader(
+      loaderArgs(
+        "/projects/viberr-core",
+        PROJECT_PATTERN,
+        { slug: "viberr-core" },
+        cookie,
+      ),
+    );
 
     expect(result.board.columns.map((c) => c.stage.id)).toEqual([
       "triage",
@@ -272,7 +355,7 @@ describe("workspace layout loader (seeded)", () => {
     expect(vib142.packet).not.toBeNull();
     expect(vib142.validation).toBe("changed");
     expect(vib142.owner?.kind).toBe("human");
-    expect((vib142.owner as { name: string }).name).toBe("Arda Kaya");
+    expect(vib142.owner?.name).toBe("Arda Kaya");
   });
 
   /**
@@ -326,15 +409,14 @@ describe("workspace layout loader (seeded)", () => {
     ).toEqual([]);
 
     const { cookie } = await app.cookieFor(seedIds.arda);
-    const result = (await loader(
-      (await loaderArgs(
+    const result = await loader(
+      loaderArgs(
         "/projects/viberr-core",
+        PROJECT_PATTERN,
         { slug: "viberr-core" },
         cookie,
-      )) as never,
-    )) as {
-      board: { columns: { tasks: { key: string; waitingOnMe?: boolean }[] }[] };
-    };
+      ),
+    );
     const flagged = new Set(
       result.board.columns
         .flatMap((c) => c.tasks)
@@ -359,22 +441,7 @@ describe("home loader (seeded)", () => {
   it("lists the 3 seeded projects with real aggregates + Arda's pins", async () => {
     const { loader } = await import("~/routes/_index");
     const { cookie } = await app.cookieFor(seedIds.arda);
-    const result = (await loader(
-      (await loaderArgs("/", {}, cookie)) as never,
-    )) as {
-      projects: {
-        slug: string;
-        total: number;
-        running: number;
-        waiting: number;
-        dist: Record<string, number>;
-        stages: { id: string }[];
-        members: unknown[];
-      }[];
-      prefs: { view: string; stars: Record<string, boolean> };
-      unread: number;
-      org: { users: { total: number; admins: number } };
-    };
+    const result = await loader(loaderArgs("/", HOME_PATTERN, {}, cookie));
 
     expect(result.projects.map((p) => p.slug).sort()).toEqual([
       "billing-service",
@@ -420,16 +487,17 @@ describe("board create-task action", () => {
     });
     return action({
       request,
+      url: new URL(request.url),
       params: { slug: "viberr-core" },
-      context: {},
-    } as never);
+      pattern: `${PROJECT_PATTERN}/board`,
+      context: new RouterContextProvider(),
+    });
   }
 
   it("member creates a task → file on disk + board card", async () => {
-    const result = (await postCreate(
-      seedIds.arda,
-      "Route-level create task",
-    )) as { ok: boolean; key: string; stageName: string };
+    const result = actionOutcome(
+      await postCreate(seedIds.arda, "Route-level create task"),
+    );
     expect(result.ok).toBe(true);
     expect(result.key).toMatch(/^VIB-\d+$/);
     expect(result.stageName).toBe("Triage");
@@ -439,7 +507,7 @@ describe("board create-task action", () => {
       "projects",
       "viberr-core",
       "tasks",
-      result.key,
+      result.key ?? "",
       "task.md",
     );
     expect(existsSync(taskFile)).toBe(true);
@@ -463,9 +531,9 @@ describe("board create-task action", () => {
   // a non-member gets the same unknown-slug 404 as every other route and intent.
   // Per-intent coverage lives in app/routes/project.board.server.test.ts.
   it("non-member is refused as an unknown slug (R15-4 secrecy)", async () => {
-    const thrown = (await postCreate(seedIds.deniz, "Should not exist").catch(
-      (e) => e,
-    )) as { data: unknown; init: { status: number } };
+    const thrown = thrownRefusalSchema.parse(
+      await postCreate(seedIds.deniz, "Should not exist").catch((e) => e),
+    );
     expect(thrown.init?.status).toBe(404);
     expect(String(thrown.data)).toBe("No project at projects/viberr-core.");
   });
@@ -482,31 +550,32 @@ describe("notification read actions", () => {
     const before = countUnreadNotifications(app.db, seedIds.arda);
     expect(before).toBeGreaterThan(0);
 
-    const post = (body: Record<string, string>) =>
-      action({
-        request: app.request("/notifications/read", {
-          method: "POST",
-          cookie,
-          body: new URLSearchParams({ _csrf: csrf, ...body }),
-        }),
+    const post = (body: Record<string, string>) => {
+      const request = app.request("/notifications/read", {
+        method: "POST",
+        cookie,
+        body: new URLSearchParams({ _csrf: csrf, ...body }),
+      });
+      return action({
+        request,
+        url: new URL(request.url),
         params: {},
-        context: {},
-      } as never);
-
-    const one = (await post({ intent: "read", id: "n-142-packet" })) as {
-      ok: boolean;
-      changed: number;
+        pattern: "/notifications/read",
+        context: new RouterContextProvider(),
+      });
     };
+
+    const one = await post({ intent: "read", id: "n-142-packet" });
     expect(one).toEqual({ ok: true, changed: 1 });
     expect(countUnreadNotifications(app.db, seedIds.arda)).toBe(before - 1);
 
     // Idempotent re-mark.
-    const again = (await post({ intent: "read", id: "n-142-packet" })) as {
-      changed: number;
-    };
+    const again = actionOutcome(
+      await post({ intent: "read", id: "n-142-packet" }),
+    );
     expect(again.changed).toBe(0);
 
-    const all = (await post({ intent: "read-all" })) as { changed: number };
+    const all = actionOutcome(await post({ intent: "read-all" }));
     expect(all.changed).toBe(before - 1);
     expect(countUnreadNotifications(app.db, seedIds.arda)).toBe(0);
   });
@@ -518,20 +587,22 @@ describe("theme action", () => {
     const { findUserById } = await import("~/server/auth/user-store.server");
     const { cookie, sessionId } = await app.cookieFor(seedIds.selin);
     const csrf = await app.csrfFor(sessionId);
-    const result = (await action({
-      request: app.request("/prefs/theme", {
-        method: "POST",
-        cookie,
-        body: new URLSearchParams({ _csrf: csrf, theme: "dark" }),
+    const request = app.request("/prefs/theme", {
+      method: "POST",
+      cookie,
+      body: new URLSearchParams({ _csrf: csrf, theme: "dark" }),
+    });
+    const result = actionOutcome(
+      await action({
+        request,
+        url: new URL(request.url),
+        params: {},
+        pattern: "/prefs/theme",
+        context: new RouterContextProvider(),
       }),
-      params: {},
-      context: {},
-    } as never)) as {
-      data: { ok: boolean; theme: string };
-      init: { headers: Record<string, string> };
-    };
-    expect(result.data).toEqual({ ok: true, theme: "dark" });
-    expect(result.init.headers["Set-Cookie"]).toContain("viberr_theme=dark");
+    );
+    expect(result.payload).toEqual({ ok: true, theme: "dark" });
+    expect(result.headers?.get("Set-Cookie")).toContain("viberr_theme=dark");
     expect(findUserById(app.db, seedIds.selin)?.theme).toBe("dark");
   });
 });
@@ -575,35 +646,33 @@ describe("create-project action (home)", () => {
     const { action } = await import("~/routes/_index");
     const { cookie, sessionId } = await app.cookieFor(seedIds.arda);
     const csrf = await app.csrfFor(sessionId);
-    return action({
-      request: app.request("/", {
-        method: "POST",
-        cookie,
-        body: new URLSearchParams({
-          _csrf: csrf,
-          intent: "create-project",
-          name,
-          key: "PAY",
-          owner: "akin-ozer",
-          repoName: "payments-gateway",
-          // P13-AP-04: no `template` field any more — the "Lightweight ·
-          // 3 stages" preset was deleted (owner ruling 2), so creation always
-          // produces the Standard 5-stage board.
-          policy: "strict",
-        }),
+    const request = app.request("/", {
+      method: "POST",
+      cookie,
+      body: new URLSearchParams({
+        _csrf: csrf,
+        intent: "create-project",
+        name,
+        key: "PAY",
+        owner: "akin-ozer",
+        repoName: "payments-gateway",
+        // P13-AP-04: no `template` field any more — the "Lightweight ·
+        // 3 stages" preset was deleted (owner ruling 2), so creation always
+        // produces the Standard 5-stage board.
+        policy: "strict",
       }),
+    });
+    return action({
+      request,
+      url: new URL(request.url),
       params: {},
-      context: {},
-    } as never);
+      pattern: HOME_PATTERN,
+      context: new RouterContextProvider(),
+    });
   }
 
   it("writes project.md from the template and projects it", async () => {
-    const result = (await postCreateProject("Payments Gateway")) as {
-      ok: boolean;
-      slug: string;
-      key: string;
-      storePath: string;
-    };
+    const result = actionOutcome(await postCreateProject("Payments Gateway"));
     expect(result.ok).toBe(true);
     expect(result.slug).toBe("payments-gateway");
     expect(result.key).toBe("PAY");
@@ -636,12 +705,9 @@ describe("create-project action (home)", () => {
   });
 
   it("rejects a duplicate slug with a conflict", async () => {
-    const result = (await postCreateProject("Payments Gateway")) as {
-      data: { ok: boolean; error: string };
-      init: { status: number };
-    };
-    expect(result.init?.status).toBe(409);
-    expect(result.data.error).toContain("already exists");
+    const result = actionOutcome(await postCreateProject("Payments Gateway"));
+    expect(result.status).toBe(409);
+    expect(result.error).toContain("already exists");
   });
 
   it("RBAC decision (pinned): any org MEMBER may create a project and is seeded its admin", async () => {
@@ -650,33 +716,40 @@ describe("create-project action (home)", () => {
     const { action } = await import("~/routes/_index");
     const { cookie, sessionId } = await app.cookieFor(seedIds.deniz);
     const csrf = await app.csrfFor(sessionId);
-    const result = (await action({
-      request: app.request("/", {
-        method: "POST",
-        cookie,
-        body: new URLSearchParams({
-          _csrf: csrf,
-          intent: "create-project",
-          name: "Member Made",
-          key: "MEM",
-          owner: "akin-ozer",
-          repoName: "member-made",
-          template: "light",
-          policy: "balanced",
-        }),
+    const request = app.request("/", {
+      method: "POST",
+      cookie,
+      body: new URLSearchParams({
+        _csrf: csrf,
+        intent: "create-project",
+        name: "Member Made",
+        key: "MEM",
+        owner: "akin-ozer",
+        repoName: "member-made",
+        template: "light",
+        policy: "balanced",
       }),
-      params: {},
-      context: {},
-    } as never)) as { ok: boolean; slug: string };
+    });
+    const result = actionOutcome(
+      await action({
+        request,
+        url: new URL(request.url),
+        params: {},
+        pattern: HOME_PATTERN,
+        context: new RouterContextProvider(),
+      }),
+    );
     expect(result.ok).toBe(true);
     expect(result.slug).toBe("member-made");
 
     // The creating member is seeded as the new project's admin.
-    const row = app.db
-      .prepare(
-        `SELECT role FROM project_members WHERE project_slug = 'member-made' AND user_id = ?`,
-      )
-      .get(seedIds.deniz) as { role: string } | undefined;
+    const row = memberRoleRowSchema.parse(
+      app.db
+        .prepare(
+          `SELECT role FROM project_members WHERE project_slug = 'member-made' AND user_id = ?`,
+        )
+        .get(seedIds.deniz),
+    );
     expect(row?.role).toBe("admin");
   });
 });

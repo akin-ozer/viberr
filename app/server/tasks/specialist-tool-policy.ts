@@ -125,7 +125,9 @@ const GRANT_REQUIRED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
  * mode this layer never reinterprets is an explicit withholding.
  */
 function grantModes(grants: readonly CapabilityGrant[]): Map<string, string> {
-  const modes = new Map(grants.map((g) => [g.capabilityId, g.mode as string]));
+  const modes = new Map<string, string>(
+    grants.map((g) => [g.capabilityId, g.mode]),
+  );
   if (modes.has("execute-code-or-write-repo")) return modes;
   const actionable = (m: string | undefined) => m === "direct" || m === "recommend";
   if (SCOPED_DELIVERY_CAPABILITY_IDS.some((id) => actionable(modes.get(id)))) {

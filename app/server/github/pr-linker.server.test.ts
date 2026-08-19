@@ -7,7 +7,12 @@ import {
   deriveReviewState,
   findPrForBranch,
   mapPrToCacheState,
+  type GhReview,
 } from "./pr-linker.server";
+
+/** The mergeability half of a PR detail payload — the only part these cases
+ *  vary, and `deriveMergeable`'s own contract for it. */
+type MergeabilityDetail = Parameters<typeof deriveMergeable>[0];
 
 const REPO = "akin-ozer/viberr";
 const REPO_PATH = `/repos/${REPO}`;
@@ -408,7 +413,7 @@ describe("deriveMergeable (P14-LV-07)", () => {
 
 describe("findPrForBranch mergeability (P14-LV-07)", () => {
   const routesFor = (
-    detail: Record<string, unknown>,
+    detail: MergeabilityDetail,
   ): Parameters<typeof fakeGithubFetch>[0] => ({
     [`GET ${REPO_PATH}/pulls`]: {
       body: [
@@ -491,12 +496,15 @@ describe("findPrForBranch mergeability (P14-LV-07)", () => {
  * delivered revision — GitHub keeps an approval standing after new pushes.
  */
 describe("deriveApprovals (R19-B)", () => {
-  const review = (login: string, state: string, commit?: string, at?: string) => ({
-    user: { login },
-    state,
-    ...(commit !== undefined ? { commit_id: commit } : {}),
-    ...(at !== undefined ? { submitted_at: at } : {}),
-  });
+  // Key PRESENCE is the fixture's point: an omitted `commit_id`/`submitted_at`
+  // is what an older review entry looks like on the wire, and the reducer must
+  // tell that apart from an explicit null.
+  const review = (login: string, state: string, commit?: string, at?: string) => {
+    const entry: GhReview = { user: { login }, state };
+    if (commit !== undefined) entry.commit_id = commit;
+    if (at !== undefined) entry.submitted_at = at;
+    return entry;
+  };
 
   it("returns each standing approver with the commit they approved", () => {
     expect(

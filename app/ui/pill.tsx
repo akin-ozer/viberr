@@ -53,17 +53,26 @@ export type ReadinessValue =
  * really merged — F7-UI3: "accepted" must not read stale next to GitHub). */
 export type ReadinessDisplayValue = ReadinessValue | "accepted" | "merged";
 
-const READINESS_DISPLAY: Record<
-  ReadinessDisplayValue,
-  { kind: PillKind; label: string }
-> = {
+/** What a pill renders for one value: its CSS kind and its label. */
+interface PillDisplay {
+  kind: PillKind;
+  label: string;
+}
+
+const READINESS_DISPLAY = {
   ready: { kind: "ready", label: "ready" },
   input_required: { kind: "input", label: "input required" },
   inconsistency_risk_detected: { kind: "risk", label: "inconsistency risk" },
   blocked: { kind: "blocked", label: "blocked" },
   accepted: { kind: "done", label: "accepted" },
   merged: { kind: "done", label: "merged" },
-};
+} satisfies Record<ReadinessDisplayValue, PillDisplay>;
+
+/** The same table, keyed for lookup by a value that has NOT been narrowed to
+ *  the canonical enum yet (see `ReadinessPill`). */
+const READINESS_BY_VALUE = new Map<string, PillDisplay>(
+  Object.entries(READINESS_DISPLAY),
+);
 
 /** C12: an UNRECOGNISED readiness value must never greenwash. The lookup used to
  *  fall back to the `ready` entry, so a malformed or future value rendered as a
@@ -71,7 +80,7 @@ const READINESS_DISPLAY: Record<
  *  (decisions.md "Behavior rules": malformed input is "a readiness downgrade …
  *  never a silent drop"). It falls back to a NEUTRAL "unknown" pill instead; the
  *  diagnostics panel carries the reason. */
-const READINESS_UNKNOWN: { kind: PillKind; label: string } = {
+const READINESS_UNKNOWN: PillDisplay = {
   kind: "neutral",
   label: "unknown",
 };
@@ -93,7 +102,7 @@ export function ReadinessPill({
   value: ReadinessDisplayValue | (string & {});
   sm?: boolean;
 }) {
-  const r = READINESS_DISPLAY[value as ReadinessDisplayValue] ?? READINESS_UNKNOWN;
+  const r = READINESS_BY_VALUE.get(value) ?? READINESS_UNKNOWN;
   return (
     <Pill kind={r.kind} sm={sm}>
       <Icon name="activity" />
@@ -109,10 +118,7 @@ export type ValidationValue =
   | "none"
   | "bypassed";
 
-const VALIDATION_DISPLAY: Record<
-  ValidationValue,
-  { kind: PillKind; label: string }
-> = {
+const VALIDATION_DISPLAY = {
   healthy: { kind: "ready", label: "validation healthy" },
   // `changed` = the delivered revision has no reviewer verdict covering it
   // (never reviewed, or re-delivered since the last verdict). The old label
@@ -127,7 +133,12 @@ const VALIDATION_DISPLAY: Record<
   // gate. It replaces the stale "awaiting verdict" a force-accepted, Done task
   // used to re-derive on any surface that still renders its validation pill.
   bypassed: { kind: "risk", label: "accepted · gate bypassed" },
-};
+} satisfies Record<ValidationValue, PillDisplay>;
+
+/** Lookup half of the table, for a value not yet narrowed to the enum. */
+const VALIDATION_BY_VALUE = new Map<string, PillDisplay>(
+  Object.entries(VALIDATION_DISPLAY),
+);
 
 /** Never dotted (mock contract). Unknown values fall back to `none`. */
 export function ValidationPill({
@@ -137,8 +148,7 @@ export function ValidationPill({
   value: ValidationValue | (string & {});
   sm?: boolean;
 }) {
-  const v =
-    VALIDATION_DISPLAY[value as ValidationValue] ?? VALIDATION_DISPLAY.none;
+  const v = VALIDATION_BY_VALUE.get(value) ?? VALIDATION_DISPLAY.none;
   return (
     <Pill kind={v.kind} sm={sm}>
       {v.label}

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type {
   AgentDeployment,
   AgentDeploymentDefinition,
@@ -47,52 +48,93 @@ import type { AgentProfileView, LibraryProfileView } from "./agent-types";
  * here for the roster/CRUD callers that assemble it. */
 export type { AgentDeploymentDefinition };
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
+/** One YAML list of names: non-string members drop out (never the whole list),
+ * and a value that is not a list at all reads as ABSENT so the org template's
+ * value still wins downstream. */
+const looseNameList = z
+  .array(z.string().nullable().catch(null))
+  .transform((items) => items.filter((item) => item !== null))
+  .optional()
+  .catch(undefined);
 
-function stringArray(v: unknown): string[] | undefined {
-  if (!Array.isArray(v)) return undefined;
-  const out = v.filter((x): x is string => typeof x === "string");
-  return out;
-}
+/**
+ * The tolerant decode of the loose `definition` override. Every field catches
+ * independently: a hand-edited project.md with one junk value must lose only
+ * that field, never the whole override (the profile's name and persona live
+ * here too). `name`/`role`/`icon`/`effort` treat an empty string as ABSENT —
+ * the readers below fall back with `??`, so a stored `name: ""` would otherwise
+ * beat the template and render a nameless profile. `resources` fills all three
+ * lists, so a partial override cannot silently inherit the template's grants
+ * for the lists it omitted.
+ *
+ * Field order matches `agentDeploymentDefinitionSchema` (project-file.schema),
+ * the single source of truth for which fields exist at all.
+ */
+const deploymentDefinitionOverrideSchema = z.object({
+  kind: z.enum(["operator", "specialist"]).optional().catch(undefined),
+  name: z.string().min(1).optional().catch(undefined),
+  role: z.string().min(1).optional().catch(undefined),
+  icon: z.string().min(1).optional().catch(undefined),
+  backends: z
+    .array(z.string().nullable().catch(null))
+    .transform((items) =>
+      items.filter((item): item is RealBackend => item === "codex" || item === "claude"),
+    )
+    .optional()
+    .catch(undefined),
+  model: z.string().optional().catch(undefined),
+  effort: z.string().min(1).optional().catch(undefined),
+  scope: z.string().optional().catch(undefined),
+  desc: z.string().optional().catch(undefined),
+  persona: z.string().optional().catch(undefined),
+  stages: looseNameList,
+  spanAll: z.boolean().optional().catch(undefined),
+  autonomy: z.enum(["supervised", "full"]).optional().catch(undefined),
+  resources: z
+    .object({ skills: looseNameList, mcps: looseNameList, kb: looseNameList })
+    .transform((r) => ({
+      skills: r.skills ?? [],
+      mcps: r.mcps ?? [],
+      kb: r.kb ?? [],
+    }))
+    .optional()
+    .catch(undefined),
+});
 
-/** Tolerant read of the loose `definition` field — junk fields ignored. */
+/** Tolerant read of the loose `definition` field — junk fields ignored.
+ *
+ * The roster reads deployments out of the `agent_policy_json` projection
+ * column, which `mapProjectRow` re-hydrates with an unchecked
+ * `JSON.parse(...) as AgentDeployment[]` — so this is the one place on the read
+ * path that actually validates the override against a schema. */
 export function parseDeploymentDefinition(
-  raw: unknown,
+  raw: AgentDeploymentDefinition | undefined,
 ): AgentDeploymentDefinition | null {
-  if (!isRecord(raw)) return null;
-  const def: AgentDeploymentDefinition = {};
-  if (raw.kind === "operator" || raw.kind === "specialist") def.kind = raw.kind;
-  if (typeof raw.name === "string" && raw.name) def.name = raw.name;
-  if (typeof raw.role === "string" && raw.role) def.role = raw.role;
-  if (typeof raw.icon === "string" && raw.icon) def.icon = raw.icon;
-  const backends = stringArray(raw.backends)?.filter(
-    (b): b is "codex" | "claude" => b === "codex" || b === "claude",
-  );
-  if (backends) def.backends = backends;
-  if (typeof raw.model === "string") def.model = raw.model;
-  if (typeof raw.effort === "string" && raw.effort) def.effort = raw.effort;
-  if (typeof raw.scope === "string") def.scope = raw.scope;
-  if (typeof raw.desc === "string") def.desc = raw.desc;
-  if (typeof raw.persona === "string") def.persona = raw.persona;
-  const stages = stringArray(raw.stages);
-  if (stages) def.stages = stages;
-  if (typeof raw.spanAll === "boolean") def.spanAll = raw.spanAll;
-  if (raw.autonomy === "supervised" || raw.autonomy === "full") def.autonomy = raw.autonomy;
-  if (isRecord(raw.resources)) {
-    def.resources = {
-      skills: stringArray(raw.resources.skills) ?? [],
-      mcps: stringArray(raw.resources.mcps) ?? [],
-      kb: stringArray(raw.resources.kb) ?? [],
-    };
-  }
-  return def;
+  const parsed = deploymentDefinitionOverrideSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 /** The one capability whose "acts directly" is ceilinged by operator autonomy —
  * `completion-for-acceptance` (label "Accept completion into Done"). */
 const ACCEPT_COMPLETION_CAP_ID = "completion-for-acceptance";
+
+/** One id-based capability grant as the DISPLAY layer reads it: the catalog id
+ * plus the mode this surface renders. Deliberately narrower than the stored
+ * `CapabilityGrant` — nothing here may depend on a field the runtime owns. */
+export interface CapabilityGrantView {
+  capabilityId: string;
+  mode: CapabilityMode;
+}
+
+/** The display-label buckets every capability surface renders (profile detail,
+ * capability matrix, policy counts). `forbidden` = reserved for a human;
+ * `off` = withheld from this agent (NEW-3 — semantically different). */
+export interface CapabilityActionLabels {
+  direct: string[];
+  recommend: string[];
+  forbidden: string[];
+  off: string[];
+}
 
 /**
  * F20-9 / R20-7: the AUTONOMY CEILING, the display twin of the runtime gate at
@@ -108,14 +150,14 @@ const ACCEPT_COMPLETION_CAP_ID = "completion-for-acceptance";
  * A specialist never holds this capability (operator-only), and `autonomy` is
  * `undefined` for a specialist, so the ceiling is a no-op there.
  */
-function applyAutonomyCeiling<G extends { capabilityId: string; mode: string }>(
-  grants: readonly G[],
+function applyAutonomyCeiling(
+  grants: readonly CapabilityGrantView[],
   autonomy: "supervised" | "full" | undefined,
-): G[] {
+): CapabilityGrantView[] {
   if (autonomy === "full") return grants.map((g) => ({ ...g }));
   return grants.map((g) =>
     g.capabilityId === ACCEPT_COMPLETION_CAP_ID && g.mode === "direct"
-      ? ({ ...g, mode: "recommend" } as G)
+      ? { ...g, mode: "recommend" }
       : { ...g },
   );
 }
@@ -134,15 +176,15 @@ function applyAutonomyCeiling<G extends { capabilityId: string; mode: string }>(
  * "Accept completion into Done" renders under RECOMMENDS ONLY — mirroring the
  * runtime gate — instead of ACTS DIRECTLY, authority the server refuses. */
 export function capabilitiesToActionLabels(
-  capabilities: { capabilityId: string; mode: CapabilityMode }[],
+  capabilities: CapabilityGrantView[],
   extras: { label: string; mode: CapabilityMode }[],
   autonomy?: "supervised" | "full",
-): { direct: string[]; recommend: string[]; forbidden: string[]; off: string[] } {
-  const buckets = {
-    direct: [] as string[],
-    recommend: [] as string[],
-    forbidden: [] as string[],
-    off: [] as string[],
+): CapabilityActionLabels {
+  const buckets: CapabilityActionLabels = {
+    direct: [],
+    recommend: [],
+    forbidden: [],
+    off: [],
   };
   // `human` = RESERVED for a human (a structural always-human lock) → `forbidden`.
   // `off` = simply WITHHELD from this agent (not granted) → its own `off` bucket.
@@ -160,7 +202,7 @@ export function capabilitiesToActionLabels(
     autonomy,
   )) {
     const def = capabilityById(grant.capabilityId);
-    bucketOf(grant.mode as CapabilityMode).push(def ? def.label : grant.capabilityId);
+    bucketOf(grant.mode).push(def ? def.label : grant.capabilityId);
   }
   for (const extra of extras) {
     bucketOf(extra.mode).push(extra.label);
@@ -304,9 +346,7 @@ export function effectiveProfileView(
   modelMarks?: ModelMarks,
 ): AgentProfileView {
   const template = readTemplate(deployment.profileId, dataRoot);
-  const def = parseDeploymentDefinition(
-    (deployment as Record<string, unknown>).definition,
-  );
+  const def = parseDeploymentDefinition(deployment.definition);
   const kind = def?.kind ?? template?.kind ?? "specialist";
   // R7-5: on a specialist profile, a stored `recommend` grant is runtime-
   // identical to `direct` and the picker no longer offers it — coerce it to
@@ -365,7 +405,7 @@ export function effectiveProfileView(
   // Done" (F20-9), the same value the runtime gate reads.
   const operatorAutonomy =
     kind === "operator" ? (def?.autonomy ?? "supervised") : undefined;
-  return {
+  const view: AgentProfileView = {
     id: deployment.profileId,
     kind,
     name: def?.name ?? template?.name ?? deployment.profileId,
@@ -375,7 +415,6 @@ export function effectiveProfileView(
     model,
     modelLabel,
     modelKnown,
-    ...(modelUnavailable ? { modelUnavailable } : {}),
     effort: def?.effort ?? "",
     scope: def?.scope ?? template?.scope ?? "",
     // Short scannable copy (operator selection + cards): deployment override,
@@ -404,6 +443,11 @@ export function effectiveProfileView(
     },
     source: template ? "template" : "project",
   };
+  // The key is set ONLY when a real run earned the mark: an absent
+  // `modelUnavailable` claims nothing about availability (ruling 19), so it must
+  // stay off the view rather than ride along as an explicit `undefined`.
+  if (modelUnavailable) view.modelUnavailable = modelUnavailable;
+  return view;
 }
 
 /**
@@ -425,10 +469,10 @@ export function assembleAgentRoster(
   // R20-3 / F20-4: read the account's model-availability marks once per backend
   // so a profile pinned to (or falling back to) a model a real run proved
   // unusable renders the badge instead of a value that would 400 at the SDK.
-  const modelMarks: ModelMarks = {
+  const modelMarks = {
     codex: unavailableModels(db, "codex"),
     claude: unavailableModels(db, "claude"),
-  };
+  } satisfies ModelMarks;
   const views = project.agentPolicy.map((dep) =>
     effectiveProfileView(dep, ctx.dataRoot, deliverDefault, modelMarks),
   );

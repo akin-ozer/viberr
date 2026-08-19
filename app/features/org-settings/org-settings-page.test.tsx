@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { createRoutesStub } from "react-router";
+import { z } from "zod";
 import type { ConnectionRecord } from "~/server/org/connections.server";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
@@ -24,6 +25,10 @@ afterEach(cleanup);
 
 let lastForm: Record<string, string> | null = null;
 
+/** A posted form field the panels set — file entries are not part of any
+ *  intent these tests capture, so they are skipped rather than stringified. */
+const textField = z.string();
+
 function renderPanel(ui: ReactNode) {
   lastForm = null;
   const Stub = createRoutesStub([
@@ -34,7 +39,8 @@ function renderPanel(ui: ReactNode) {
         const fd = await request.formData();
         lastForm = {};
         for (const [k, v] of fd.entries()) {
-          if (typeof v === "string") lastForm[k] = v;
+          const field = textField.safeParse(v);
+          if (field.success) lastForm[k] = field.data;
         }
         return { ok: true, toast: "stub done" };
       },
@@ -129,11 +135,15 @@ describe("ConnectionsPanel", () => {
       <ConnectionsPanel connections={CONNECTIONS} />,
     );
     fireEvent.click(getByText("Add connection"));
+    // SAFETY: the placeholder belongs to the token `<input>` in the add-connection
+    // form (connections-panel.tsx); the bound query cannot be told that element
+    // type, so it is stated here.
     const token = getByPlaceholderText("ghp_…") as HTMLInputElement;
     expect(token.type).toBe("password");
     expect(token.getAttribute("autocomplete")).toBe("off");
     expect(token.getAttribute("spellcheck")).toBe("false");
     // The owner field beside it is NOT a secret and stays readable.
+    // SAFETY: same form, the owner `<input>` beside the token field.
     expect((getByPlaceholderText("owner") as HTMLInputElement).type).toBe("text");
   });
 
@@ -654,7 +664,7 @@ describe("ResourcesPanel", () => {
     // The name is slugified before saving (`_`→`-`), which silently rewrote what
     // the admin typed — and the reserved-name refusal then quoted a name they
     // never entered. The field now discloses the slug the moment it differs.
-    const nameInput = container.querySelector("#mcp-name") as HTMLInputElement;
+    const nameInput = container.querySelector<HTMLInputElement>("#mcp-name")!;
     fireEvent.change(nameInput, { target: { value: "viberr_browser" } });
     expect(getByText(/will be saved as/)).toBeTruthy();
     expect(getByText("viberr-browser")).toBeTruthy();

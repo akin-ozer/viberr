@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type {
   GithubCache,
   PrMergeable,
@@ -16,7 +17,10 @@ import {
   resolveTaskFilePath,
 } from "~/server/files/task-writer.server";
 import { storeRelativePath } from "~/server/files/file-store-root.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import {
+  readProjectFile,
+  type ProjectFileRef,
+} from "~/server/files/project-writer.server";
 import {
   findOpenScopeViolation,
 } from "~/server/projections/policy-violations.server";
@@ -32,6 +36,7 @@ import { encodeRefPath, GITHUB_API_BASE } from "./github-client.server";
 import {
   getProjectGithubContext,
   type GithubContextFailure,
+  type GithubContextOptions,
 } from "./github-context.server";
 import { branchCleanupOnMerge } from "./branch-cleanup.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
@@ -71,10 +76,26 @@ import {
  * / no_repo_configured / network_unavailable are values, not throws.
  */
 
+/**
+ * The operator wake a divergence fires: `autoInvokeOperator` narrowed to the one
+ * trigger this module ever passes. Typed here rather than imported so the
+ * task-actions dependency stays the runtime-only dynamic import it already is.
+ */
+export type OperatorWake = (
+  db: DatabaseSync,
+  ctx: { dataRoot?: string },
+  projectSlug: string,
+  taskKey: string,
+  trigger: "pr-diverged",
+) => Promise<void>;
+
 export interface GithubActionContext {
   dataRoot?: string;
   /** Mock-transport hook for tests. */
   fetchImpl?: typeof fetch;
+  /** The pr-diverged operator wake below; injection hook for tests, same shape
+   *  as `fetchImpl`. Defaults to the real `autoInvokeOperator`. */
+  wakeOperator?: OperatorWake;
   /** P11-14: the background poller reconciles every active project every 5 min;
    *  it suppresses the per-project summary audit (a human clicking "Update
    *  status" still audits) so poller ticks don't spam the audit log. The
@@ -103,14 +124,47 @@ function taskRefOf(
   };
 }
 
+/** `fetchImpl` is an OPTIONAL key: the context reads it with a truthiness check,
+ *  so the hook is set only when a caller supplied one. */
+function githubOptionsOf(ctx: GithubActionContext): GithubContextOptions {
+  const options: GithubContextOptions = {};
+  if (ctx.fetchImpl) options.fetchImpl = ctx.fetchImpl;
+  return options;
+}
+
+/**
+ * What ONE GitHub observation row records. `details_json` is this object
+ * JSON-serialized, so the interface is the whole contract a later reader gets:
+ * each action fills the facts it actually observed and omits the rest.
+ */
+interface GithubProvenanceDetails {
+  repo: string;
+  branch?: string;
+  changed?: boolean;
+  sync?: BranchSyncState;
+  aheadBy?: number | null;
+  behindBy?: number | null;
+  prNumber?: number | null;
+  prState?: PrFacts["state"] | null;
+  prReview?: PrRef["review"];
+  prChecks?: PrRef["checks"];
+  commits?: number | null;
+  sha?: string | null;
+  /** A pass over a project with no branched task at all (F15-02). */
+  heartbeat?: boolean;
+  tasks?: number;
+}
+
+interface GithubProvenanceRow {
+  absPath: string;
+  dataRoot?: string;
+  action: string;
+  details: GithubProvenanceDetails;
+}
+
 function recordGithubProvenance(
   db: DatabaseSync,
-  input: {
-    absPath: string;
-    dataRoot?: string;
-    action: string;
-    details: Record<string, unknown>;
-  },
+  input: GithubProvenanceRow,
 ): void {
   db.prepare(
     `INSERT INTO provenance (source_path, content_hash, observed_at, action, details_json)
@@ -123,11 +177,15 @@ function recordGithubProvenance(
   );
 }
 
+/** `users.name` is NOT NULL, so a row that fails this parse is a missing user —
+ *  the id is then the honest display fallback. */
+const userNameRow = z.object({ name: z.string() });
+
 function userName(db: DatabaseSync, userId: string): string {
-  const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
-    | { name: string }
-    | undefined;
-  return row?.name ?? userId;
+  const row = userNameRow.safeParse(
+    db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId),
+  );
+  return row.success ? row.data.name : userId;
 }
 
 // ------------------------------------------------------------- reconcile
@@ -249,9 +307,7 @@ async function reconcileTaskUnlocked(
 
   // P13-D-5: this passed `repoOverride: fm.repo` — the task-level repo override,
   // deleted by owner ruling this pass. One project, one repo.
-  const gh = getProjectGithubContext(db, input.projectSlug, {
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  const gh = getProjectGithubContext(db, input.projectSlug, githubOptionsOf(ctx));
   if (gh.status !== "ok") return gh;
 
   // 1. Compare vs the default branch (sync pill + commit association).
@@ -428,19 +484,23 @@ async function reconcileTaskUnlocked(
           })
         : readPrHumanApproval(cachedPr);
   }
-  const newPr: PrRef | null =
-    pr && ownsAPr
-      ? {
-          number: pr.number,
-          state: prState ?? pr.state,
-          title: pr.title,
-          ...(checks ? { checks } : {}),
-          ...(review ? { review } : {}),
-          ...(mergeable ? { mergeable } : {}),
-          ...(revisionDrift ? { revisionDrift } : {}),
-          ...(humanApproval ? { [PR_HUMAN_APPROVAL_KEY]: humanApproval } : {}),
-        }
-      : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
+  let newPr: PrRef | null = fm.pr ?? null; // keep last-known PR when lookup was refused/none
+  if (pr && ownsAPr) {
+    // Each fact below is an OPTIONAL KEY, never a null one: absent means "not
+    // read this pass" (so the writer omits it and the reader keeps the cached
+    // value), which is a different claim from "read, and there is nothing".
+    const owned: PrRef = {
+      number: pr.number,
+      state: prState ?? pr.state,
+      title: pr.title,
+    };
+    if (checks) owned.checks = checks;
+    if (review) owned.review = review;
+    if (mergeable) owned.mergeable = mergeable;
+    if (revisionDrift) owned.revisionDrift = revisionDrift;
+    if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
+    newPr = owned;
+  }
 
   const existingGithub: GithubCache | null = fm.github;
   // Commit association: `[KEY]`-prefixed commits on the branch. Agents don't
@@ -659,10 +719,10 @@ async function reconcileTaskUnlocked(
       acceptedClosedExternally ||
       prJustReopened
     ) {
-      const { autoInvokeOperator } = await import(
-        "~/server/tasks/task-actions.server"
-      );
-      void autoInvokeOperator(
+      const wake =
+        ctx.wakeOperator ??
+        (await import("~/server/tasks/task-actions.server")).autoInvokeOperator;
+      void wake(
         db,
         { dataRoot: ctx.dataRoot },
         input.projectSlug,
@@ -790,6 +850,12 @@ export function resetReconcileCursorsForTests(): void {
   taskReconcileChain.clear();
 }
 
+/** One branched task the pass may visit. `terminal` is sqlite's 0/1 answer to
+ *  the archived-or-merged test the SELECT computes. */
+const reconcileQueueRows = z
+  .object({ task_key: z.string(), terminal: z.number() })
+  .array();
+
 /**
  * Reconciles every task of the project that has a branch (the GitHub
  * view's Reconcile button). Configuration gaps short-circuit before any
@@ -801,9 +867,7 @@ export async function reconcileProject(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<ProjectReconcileSummary> {
-  const gh = getProjectGithubContext(db, projectSlug, {
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  const gh = getProjectGithubContext(db, projectSlug, githubOptionsOf(ctx));
   if (gh.status !== "ok") {
     return {
       status: gh.status,
@@ -815,17 +879,19 @@ export async function reconcileProject(
     };
   }
 
-  const rows = db
-    .prepare(
-      `SELECT task_key,
+  const rows = reconcileQueueRows.parse(
+    db
+      .prepare(
+        `SELECT task_key,
               (archived = 1
                OR COALESCE(json_extract(pr_json, '$.state'), '') = 'merged')
               AS terminal
        FROM task_projections
        WHERE project_slug = ? AND branch IS NOT NULL
        ORDER BY task_key ASC`,
-    )
-    .all(projectSlug) as { task_key: string; terminal: number }[];
+      )
+      .all(projectSlug),
+  );
 
   const budget = ctx.taskBudget ?? 0;
   // R15-6 + B-GH5: cleanup deletes the remote ref but `branch:` stays in the
@@ -863,8 +929,10 @@ export async function reconcileProject(
   }
   const skipped = allKeys.length - selected.length;
 
-  // Bounded worker pool, not Promise.all — see RECONCILE_TASK_CONCURRENCY.
-  const results: TaskReconcileResult[] = new Array(selected.length);
+  // Bounded worker pool, not Promise.all — see RECONCILE_TASK_CONCURRENCY. Each
+  // worker writes its own index, so the finished array is in `selected` order
+  // however the passes interleaved.
+  const results: TaskReconcileResult[] = [];
   let cursorIndex = 0;
   const worker = async (): Promise<void> => {
     for (;;) {
@@ -922,15 +990,15 @@ export async function reconcileProject(
     const { resolveProjectFilePath } = await import(
       "~/server/files/project-writer.server"
     );
-    recordGithubProvenance(db, {
-      absPath: resolveProjectFilePath({
-        projectSlug,
-        ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-      }),
-      ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+    const projectRef: ProjectFileRef = { projectSlug };
+    if (ctx.dataRoot) projectRef.dataRoot = ctx.dataRoot;
+    const heartbeat: GithubProvenanceRow = {
+      absPath: resolveProjectFilePath(projectRef),
       action: "github.reconcile",
       details: { repo: gh.repo, heartbeat: true, tasks: 0 },
-    });
+    };
+    if (ctx.dataRoot) heartbeat.dataRoot = ctx.dataRoot;
+    recordGithubProvenance(db, heartbeat);
   }
   return { status: "ok", results, reconciled, changed, failed, skipped };
 }
@@ -962,11 +1030,23 @@ export type MergeTaskPrResult =
   | { status: "auth_failed"; message: string }
   | { status: "network_unavailable"; message: string };
 
-interface GhMergeResponse {
-  merged: boolean;
-  sha: string | null;
-  message?: string;
-}
+/** `PUT /pulls/{n}/merge` — only the merge sha is read, and with `??`
+ *  tolerance, so it parses to `undefined` on drift (recorded as null). */
+const ghMergeResponseSchema = z
+  .object({ sha: z.string().nullable().optional().catch(undefined) })
+  .catch({});
+
+/** The PR-detail slice the merge path reads (draft/un-draft + mergeability).
+ *  Every read is optional-chained or `=== true`-guarded, so every field
+ *  degrades to `undefined` on drift instead of voiding the response. */
+const ghPrViewSchema = z
+  .object({
+    draft: z.boolean().optional().catch(undefined),
+    node_id: z.string().optional().catch(undefined),
+    mergeable: z.boolean().nullable().optional().catch(undefined),
+    mergeable_state: z.string().optional().catch(undefined),
+  })
+  .catch({});
 
 /**
  * THE real merge behind accept_completion (ruling 7). Merges the task's
@@ -1000,9 +1080,7 @@ export async function mergeTaskPr(
   const prNumber = fm.pr.number;
 
   // P13-D-5: task-level repo override deleted (owner ruling) — project repo only.
-  const gh = getProjectGithubContext(db, input.projectSlug, {
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  const gh = getProjectGithubContext(db, input.projectSlug, githubOptionsOf(ctx));
   if (gh.status !== "ok") return gh;
 
   // F7-GH5: an agent that opened the PR via `gh pr create --draft` (or the
@@ -1012,12 +1090,11 @@ export async function mergeTaskPr(
   // REST can't unset `draft`), so mark it ready with the project PAT before the
   // merge. Best-effort: if the un-draft fails, the merge attempt below still
   // returns GitHub's own actionable message.
-  const prView = await gh.client.request<{
-    draft?: boolean;
-    node_id?: string;
-    mergeable?: boolean | null;
-    mergeable_state?: string;
-  }>("GET", `/repos/${gh.repo}/pulls/${prNumber}`);
+  const prView = await gh.client.request(
+    "GET",
+    `/repos/${gh.repo}/pulls/${prNumber}`,
+    ghPrViewSchema,
+  );
 
   // P14-LV-07: the SAME detail call already carries GitHub's mergeability, and
   // a conflicting PR cannot be merged by anyone. Refuse before the merge attempt
@@ -1051,7 +1128,7 @@ export async function mergeTaskPr(
       // V1 is github.com-only (no non-default baseUrl is ever wired), so this
       // resolves to api.github.com/graphql; a GHE base would need the different
       // `/api/graphql` path, which V1 does not claim to support.
-      .request<unknown>("POST", `${GITHUB_API_BASE}/graphql`, {
+      .request("POST", `${GITHUB_API_BASE}/graphql`, z.unknown(), {
         body: {
           query:
             "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){clientMutationId}}",
@@ -1061,9 +1138,10 @@ export async function mergeTaskPr(
       .catch(() => undefined);
   }
 
-  const merge = await gh.client.request<GhMergeResponse>(
+  const merge = await gh.client.request(
     "PUT",
     `/repos/${gh.repo}/pulls/${prNumber}/merge`,
+    ghMergeResponseSchema,
     { body: {} },
   );
 
@@ -1260,9 +1338,7 @@ export async function deleteTaskRemoteBranch(
     return { status: "refused", branch, message: "No acting user." };
   }
 
-  const gh = getProjectGithubContext(db, input.projectSlug, {
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  const gh = getProjectGithubContext(db, input.projectSlug, githubOptionsOf(ctx));
   if (gh.status !== "ok") return gh;
 
   if (branch === gh.defaultBranch) {
@@ -1287,9 +1363,10 @@ export async function deleteTaskRemoteBranch(
   // separator. For today's task-key branches this is byte-identical to what it
   // already sent, so the working path cannot regress.
   const refPath = encodeRefPath(`heads/${branch}`);
-  const del = await gh.client.request<unknown>(
+  const del = await gh.client.request(
     "DELETE",
     `/repos/${gh.repo}/git/refs/${refPath}`,
+    z.unknown(),
   );
 
   if (del.ok) {

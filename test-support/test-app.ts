@@ -112,6 +112,9 @@ export async function setupAppTest(): Promise<AppTestContext> {
         .getSetCookie()
         .find((c) => c.includes("viberr.session_token"));
       if (!setCookie) throw new Error("cookieFor: no session cookie issued");
+      // SAFETY: the SELECT list is the single NOT NULL `session.id` column, and
+      // the `!setCookie` guard above already failed if better-auth did not just
+      // write the row this statement reads back.
       const session = db
         .prepare(
           `SELECT id FROM session WHERE userId = ? ORDER BY createdAt DESC LIMIT 1`,

@@ -98,7 +98,7 @@ describe("createLineRedactor", () => {
     expect(redact(`bearer ${CODEX_TOKEN} done`)).toBe("bearer [redacted] done");
   });
 
-  it("redacts token SHAPES the app never held (a PAT the agent minted itself)", () => {
+  it("redacts token PATTERNS the app never held (a PAT the agent minted itself)", () => {
     const redact = createLineRedactor({});
     expect(redact("remote: ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")).toBe(
       "remote: [redacted]",
@@ -186,7 +186,7 @@ describe("the sink redacts before it persists", () => {
       ),
     );
     const [line] = listRunLines(store.db, "run_nested");
-    const command = (line!.display.input as { command: string }).command;
+    const command = line!.display.input!.command;
     expect(command).not.toContain(CLAUDE_KEY);
     expect(command).toContain("Bearer [redacted]");
   });
@@ -207,7 +207,7 @@ describe("finalize state precedence", () => {
   function runRow(runId: string) {
     return store.db
       .prepare(`SELECT state, finished_at FROM agent_runs WHERE id = ?`)
-      .get(runId) as { state: string; finished_at: string | null };
+      .get(runId)!;
   }
 
   it("does not overwrite a run already recorded as interrupted", () => {
@@ -226,9 +226,9 @@ describe("finalize state precedence", () => {
     expect(row.finished_at).toBe("2026-07-28T10:00:00.000Z");
     // Facts the exit carried still land.
     expect(
-      (store.db.prepare(`SELECT session_id FROM agent_runs WHERE id = ?`).get("run_interrupted") as {
-        session_id: string | null;
-      }).session_id,
+      store.db
+        .prepare(`SELECT session_id FROM agent_runs WHERE id = ?`)
+        .get("run_interrupted")!.session_id,
     ).toBe("sess_1");
   });
 

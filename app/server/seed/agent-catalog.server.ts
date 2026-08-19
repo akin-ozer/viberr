@@ -18,12 +18,16 @@ interface ProfileActionSpec {
   forbidden: string[];
 }
 
-/** Maps mock action-label lists onto CAP_CATALOG ids; labels with no exact
- * catalog match stay as display-only extras (contracts §7 #7). */
-export function mapActions(actions: ProfileActionSpec): {
+/** An action list split by what the catalog recognizes: real capability grants,
+ *  and the labels that stay display-only. */
+export interface MappedActions {
   capabilities: { capabilityId: string; mode: CapabilityMode }[];
   extras: { label: string; mode: CapabilityMode }[];
-} {
+}
+
+/** Maps mock action-label lists onto CAP_CATALOG ids; labels with no exact
+ * catalog match stay as display-only extras (contracts §7 #7). */
+export function mapActions(actions: ProfileActionSpec): MappedActions {
   const capabilities: { capabilityId: string; mode: CapabilityMode }[] = [];
   const extras: { label: string; mode: CapabilityMode }[] = [];
   const add = (labels: string[], mode: CapabilityMode) => {

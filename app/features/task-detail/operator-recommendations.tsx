@@ -35,7 +35,7 @@ export interface RecommendationView {
   detail: string;
 }
 
-const KIND_ICON: Record<RecommendationView["kind"], IconName> = {
+const KIND_ICON = {
   assign_specialist: "branch",
   assign_reviewer: "check",
   run_specialist: "bolt",
@@ -43,9 +43,9 @@ const KIND_ICON: Record<RecommendationView["kind"], IconName> = {
   transition: "board",
   accept_completion: "check",
   delivery: "github",
-};
+} as const satisfies Record<RecommendationView["kind"], IconName>;
 
-const KIND_LABEL: Record<RecommendationView["kind"], string> = {
+const KIND_LABEL = {
   // UXA-6: this slot is "Delivering agent" everywhere else on THIS page — the
   // execution profile's section header, the "Assign delivering agent" menu and
   // its aria-label, and the GitHub panel's deliver button — so the same actor
@@ -60,7 +60,7 @@ const KIND_LABEL: Record<RecommendationView["kind"], string> = {
   transition: "Stage",
   accept_completion: "Completion",
   delivery: "Delivery",
-};
+} as const satisfies Record<RecommendationView["kind"], string>;
 
 export function OperatorRecommendations({
   recommendations,

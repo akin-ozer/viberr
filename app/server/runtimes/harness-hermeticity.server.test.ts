@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
 import { beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   isBackendAvailable,
   resetRegistryForTests,
@@ -107,6 +108,13 @@ describe("test-harness hermeticity", () => {
  * it is the same category — an invariant about the REPOSITORY, not a feature.
  */
 describe("dependency hygiene: every imported package is declared (C6)", () => {
+  /** Only the two declaration maps this scan reads; the rest of package.json is
+   *  none of its business. */
+  const packageManifest = z.object({
+    dependencies: z.record(z.string(), z.string()).optional(),
+    devDependencies: z.record(z.string(), z.string()).optional(),
+  });
+
   /** Statement-position module specifiers only — never a quoted string that
    *  happens to sit in prose or a comment. */
   const IMPORT_RE =
@@ -148,10 +156,9 @@ describe("dependency hygiene: every imported package is declared (C6)", () => {
   }
 
   it("no app import resolves only through npm hoisting", () => {
-    const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-    };
+    const manifest = packageManifest.parse(
+      JSON.parse(readFileSync("package.json", "utf8")),
+    );
     const declared = new Set([
       ...Object.keys(manifest.dependencies ?? {}),
       ...Object.keys(manifest.devDependencies ?? {}),

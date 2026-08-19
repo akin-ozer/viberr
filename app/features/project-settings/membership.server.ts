@@ -56,6 +56,10 @@ export function listMembershipViews(
     `SELECT id, name, email, avatar_tone, disabled FROM users WHERE id = ?`,
   );
   return file.parsed.frontmatter.members.map((member) => {
+    // SAFETY: UserRow names exactly the five columns the statement above
+    // selects, in the types 0001_baseline declares for them (`avatar_tone`
+    // nullable, `disabled` the 0/1 INTEGER). A member id with no account row
+    // yields undefined — the LV-04 branch below.
     const user = stmt.get(member.userId) as UserRow | undefined;
     // LV-04: never fall back to the raw id — a deleted account renders as an
     // explicit "Removed account", which is what it is.
@@ -71,6 +75,11 @@ export function listMembershipViews(
       disabled: user?.disabled === 1,
     };
   });
+}
+
+/** The one column {@link countLiveAdmins} reads per member. */
+interface DisabledFlagRow {
+  disabled: number;
 }
 
 /**
@@ -90,7 +99,9 @@ export function countLiveAdmins(
   let live = 0;
   for (const member of members) {
     if (member.role !== "admin") continue;
-    const row = stmt.get(member.userId) as { disabled: number } | undefined;
+    // SAFETY: the statement selects the single `disabled` column, an INTEGER
+    // 0/1 in 0001_baseline; an org-deleted account yields no row at all.
+    const row = stmt.get(member.userId) as DisabledFlagRow | undefined;
     if (row && row.disabled !== 1) live += 1;
   }
   return live;

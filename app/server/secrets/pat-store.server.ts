@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import {
   parsePatValidation,
   type PatValidation,
@@ -53,15 +54,20 @@ export interface PatMetadata {
   validation: PatValidation | null;
 }
 
-interface PatRow {
-  id: string;
-  user_id: string;
-  label: string;
-  token_suffix: string;
-  created_at: string;
-  last_validated_at: string | null;
-  validation_json: string | null;
-}
+/** The metadata columns every PAT read selects, decoded at the sqlite boundary.
+ *  0001_baseline declares each of them TEXT, the first five NOT NULL — a row
+ *  that fails this parse is a row the readers below have no id or label for,
+ *  which is the same answer as no row at all. */
+const patRowSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  label: z.string(),
+  token_suffix: z.string(),
+  created_at: z.string(),
+  last_validated_at: z.string().nullable(),
+  validation_json: z.string().nullable(),
+});
+type PatRow = z.infer<typeof patRowSchema>;
 
 const PAT_META_COLUMNS = `id, user_id, label, token_suffix, created_at,
        last_validated_at, validation_json`;
@@ -130,10 +136,12 @@ export function getPatMetadata(
   db: DatabaseSync,
   patId: string,
 ): PatMetadata | null {
-  const row = db
-    .prepare(`SELECT ${PAT_META_COLUMNS} FROM github_pats WHERE id = ?`)
-    .get(patId) as PatRow | undefined;
-  return row ? mapRow(row) : null;
+  const row = patRowSchema.safeParse(
+    db
+      .prepare(`SELECT ${PAT_META_COLUMNS} FROM github_pats WHERE id = ?`)
+      .get(patId),
+  );
+  return row.success ? mapRow(row.data) : null;
 }
 
 /**
@@ -189,6 +197,10 @@ export function deletePat(
   return true;
 }
 
+/** `encrypted_token` is a single NOT NULL column on `github_pats`; a row that
+ *  does not decode is a credential this reader cannot open, same as no row. */
+const sealedTokenRow = z.object({ encrypted_token: z.string() });
+
 /**
  * Decrypts the stored token. SERVER-INTERNAL: feed it straight into the
  * GitHub client; never into loader data, logs, timelines or errors.
@@ -197,15 +209,17 @@ export function getPatToken(
   db: DatabaseSync,
   patId: string,
 ): string | null {
-  const row = db
-    .prepare(`SELECT encrypted_token FROM github_pats WHERE id = ?`)
-    .get(patId) as { encrypted_token: string } | undefined;
-  if (!row) return null;
+  const row = sealedTokenRow.safeParse(
+    db
+      .prepare(`SELECT encrypted_token FROM github_pats WHERE id = ?`)
+      .get(patId),
+  );
+  if (!row.success) return null;
   // A9: accept a box sealed under a RETIRED key during a rotation window, then
   // re-seal it in place under the current key. Without this, rotating
   // VIBERR_SECRET_ENCRYPTION_KEY bricked every stored PAT — the only signal
   // being a 500 at the next GitHub call.
-  const opened = openSecretRotating(row.encrypted_token);
+  const opened = openSecretRotating(row.data.encrypted_token);
   if (opened.staleKey) {
     try {
       db.prepare(`UPDATE github_pats SET encrypted_token = ? WHERE id = ?`).run(
@@ -298,8 +312,9 @@ export function getProjectCredential(
        JOIN github_pats p ON p.id = b.pat_id
        WHERE b.project_slug = ?`,
     )
-    .get(projectSlug) as PatRow | undefined;
-  return row ? mapRow(row) : null;
+    .get(projectSlug);
+  const parsed = patRowSchema.safeParse(row);
+  return parsed.success ? mapRow(parsed.data) : null;
 }
 
 // --------------------------------------------------------- credential health
@@ -347,25 +362,39 @@ interface CredentialPolicyDisplay {
   requiredScopes: string[];
 }
 
+/** `credential_policy_json` is the projection's own nullable TEXT column. */
+const credentialPolicyRow = z.object({
+  credential_policy_json: z.string().nullable(),
+});
+
+/** The non-secret display policy as project.md's projection stored it. Every
+ *  field is INDEPENDENTLY tolerant, exactly as the hand decode this replaced
+ *  was: a junk value degrades to that one field's fallback (a junk SCOPE drops
+ *  itself, keeping the rest of the list) instead of voiding the whole policy. */
+const credentialPolicyDisplaySchema = z
+  .object({
+    credentialLabel: z.string().catch(""),
+    masked: z.string().catch(""),
+    requiredScopes: z
+      .array(z.string().nullable().catch(null))
+      .catch([])
+      .transform((scopes) => scopes.filter((scope) => scope !== null)),
+  })
+  .catch({ credentialLabel: "", masked: "", requiredScopes: [] });
+
 function readCredentialPolicy(
   db: DatabaseSync,
   projectSlug: string,
 ): CredentialPolicyDisplay | null {
-  const row = db
-    .prepare(`SELECT credential_policy_json FROM projects WHERE slug = ?`)
-    .get(projectSlug) as { credential_policy_json: string | null } | undefined;
-  if (!row?.credential_policy_json) return null;
+  const row = credentialPolicyRow.safeParse(
+    db
+      .prepare(`SELECT credential_policy_json FROM projects WHERE slug = ?`)
+      .get(projectSlug),
+  );
+  const json = row.success ? row.data.credential_policy_json : null;
+  if (!json) return null;
   try {
-    const parsed = JSON.parse(row.credential_policy_json) as Partial<
-      CredentialPolicyDisplay
-    >;
-    return {
-      credentialLabel: parsed.credentialLabel ?? "",
-      masked: parsed.masked ?? "",
-      requiredScopes: Array.isArray(parsed.requiredScopes)
-        ? parsed.requiredScopes.filter((s): s is string => typeof s === "string")
-        : [],
-    };
+    return credentialPolicyDisplaySchema.parse(JSON.parse(json));
   } catch {
     return null;
   }
@@ -407,12 +436,9 @@ export function getProjectCredentialHealth(
   const scopes: ScopeChip[] = requiredScopes.map((id) => {
     const violation = violationByScope.get(id);
     if (violation) {
-      return {
-        id,
-        ok: false,
-        source: "violation",
-        ...(violation.taskKey ? { flaggedTaskKey: violation.taskKey } : {}),
-      };
+      const chip: ScopeChip = { id, ok: false, source: "violation" };
+      if (violation.taskKey) chip.flaggedTaskKey = violation.taskKey;
+      return chip;
     }
     const check = validated.get(id);
     if (check) return { id, ok: check.ok, source: check.source };

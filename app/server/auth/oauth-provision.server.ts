@@ -160,9 +160,7 @@ export function linkOAuth(
   providerId: string,
 ): void {
   if (providerId !== "github" && providerId !== "google") return;
-  const existing = db
-    .prepare(`SELECT idp FROM users WHERE id = ?`)
-    .get(userId) as { idp: string } | undefined;
+  const existing = db.prepare(`SELECT idp FROM users WHERE id = ?`).get(userId);
   if (existing && existing.idp !== providerId) {
     updateUserFields(db, userId, { idp: providerId });
   }

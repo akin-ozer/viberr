@@ -216,7 +216,10 @@ describe("buildOperatorSystemPrompt — unresolved skill/KB grants (C1)", () => 
     const kbDir = path.join(dataRoot, "kb", "architecture-notes");
     mkdirSync(kbDir, { recursive: true });
     writeFileSync(path.join(kbDir, "overview.md"), "All good.", "utf8");
-    const auth = { ...authorityWith(["architecture-notes"]), skills: [] as string[] };
+    const auth: OperatorAuthority = {
+      ...authorityWith(["architecture-notes"]),
+      skills: [],
+    };
     const prompt = buildOperatorSystemPrompt(auth, dataRoot);
     // (`skills: []` falls back to the shipped expertise skill, which this bare
     // store does not ship — so assert on the KB half only.)
@@ -284,7 +287,7 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
  */
 describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
   const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-a6-"));
-  const withKb = (): { root: string; auth: OperatorAuthority } => {
+  const withKb = () => {
     const root = mkdtempSync(path.join(tmpdir(), "viberr-op-res-"));
     const kbDir = path.join(root, "kb", "architecture-notes");
     mkdirSync(kbDir, { recursive: true });
@@ -319,7 +322,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
     // exists), so this paragraph is the only thing between an org MCP with
     // write powers and `transition-to-done: human`.
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot, {
-      servers: { "ops-readonly": {} },
+      servers: { "ops-readonly": { command: "npx", args: ["-y", "ops-readonly"] } },
       mounted: ["ops-readonly"],
       unresolved: [],
       unhealthy: [],
@@ -358,7 +361,7 @@ describe("buildOperatorSystemPrompt — RESOLVED MCP servers (B8)", () => {
 
   it("flags a mounted-but-unreachable server separately from one that never mounted", () => {
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot, {
-      servers: { "flaky-mcp": {} },
+      servers: { "flaky-mcp": { command: "npx", args: ["-y", "flaky-mcp"] } },
       mounted: ["flaky-mcp"],
       unresolved: [],
       unhealthy: ["flaky-mcp"],

@@ -23,10 +23,41 @@ import type { loader as taskLoader, action as taskAction } from "~/routes/projec
  */
 
 let app: AppTestContext;
-let ids: { arda: string; elif: string; murat: string; selin: string; deniz: string };
+let ids: SeededUserIds;
 
 type LoaderData = Awaited<ReturnType<typeof taskLoader>>;
 type ActionData = Awaited<ReturnType<typeof taskAction>>;
+
+/** The seeded humans every request in this file is issued as. */
+interface SeededUserIds {
+  arda: string;
+  elif: string;
+  murat: string;
+  selin: string;
+  deniz: string;
+}
+
+/**
+ * The action's refusal envelope. Every guard in routes/project.task raises an
+ * AppError that the action's single catch hands to `appErrorResponse`, i.e.
+ * `data({ ok: false, error }, { status })` — so on this arm `init` always
+ * exists and carries a numeric status, where react-router types `data()`'s
+ * `init` as `ResponseInit | null` for the general case.
+ */
+interface ActionRefusal {
+  data: { ok: false; error: string };
+  init: { status: number };
+}
+
+/**
+ * What `.catch((e) => e)` yields for a refusal the route THROWS rather than
+ * returns — R15-4's unknown-slug 404 Response. Both fields stay optional
+ * because a catch binding is only ever "whatever was thrown".
+ */
+interface ThrownRefusal {
+  init?: { status: number };
+  data?: unknown;
+}
 
 beforeAll(async () => {
   // File-wide, BEFORE the first test. This used to live in the comment-routing
@@ -51,25 +82,35 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-async function runLoader(key: string, userId: string, search = "") {
+async function runLoader(
+  key: string,
+  userId: string,
+  search = "",
+): Promise<LoaderData> {
   const { loader } = await import("~/routes/project.task");
   const { cookie } = await app.cookieFor(userId);
-  return (await loader({
+  // SAFETY: the loader destructures `request` and `params` and nothing else;
+  // React Router's generated `LoaderArgs` additionally carries the framework's
+  // `context` provider, which no path under test reads. `as never` supplies the
+  // two fields it does read without standing a router up around them.
+  return await loader({
     request: app.request(`/projects/viberr-core/tasks/${key}${search}`, { cookie }),
     params: { slug: "viberr-core", key },
     context: {},
-  } as never)) as LoaderData;
+  } as never);
 }
 
 async function postIntent(
   key: string,
   userId: string,
   fields: Record<string, string>,
-) {
+): Promise<ActionData | ActionRefusal> {
   const { action } = await import("~/routes/project.task");
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
-  return (await action({
+  // SAFETY: as in runLoader — the action reads `request` and `params` only, so
+  // `as never` stands in for the generated `ActionArgs` context provider.
+  return await action({
     request: app.request(`/projects/viberr-core/tasks/${key}`, {
       method: "POST",
       cookie,
@@ -77,9 +118,7 @@ async function postIntent(
     }),
     params: { slug: "viberr-core", key },
     context: {},
-  } as never)) as
-    | ActionData
-    | { data: { ok: false; error: string }; init: { status: number } };
+  } as never);
 }
 
 /* --------------------------------------------------- loader (read-only) */
@@ -236,6 +275,9 @@ describe("comment action — @agent routing detection", () => {
   // measures machine load rather than behavior is a false signal — the
   // assertions below are unchanged.
   it("@operator on a task WITH a specialist triggers the agent + names it in the toast", { timeout: 20_000 }, async () => {
+    // SAFETY: arda is a project admin, so the comment runs to completion and the
+    // action returns its `comment` arm — the only success arm that carries
+    // `toAgent`/`agent`/`triggered` next to the toast.
     const result = (await postIntent("VIB-153", ids.arda, {
       intent: "comment",
       text: "@operator please tighten the packet budget",
@@ -257,6 +299,8 @@ describe("comment action — @agent routing detection", () => {
   });
 
   it("@codex also routes + triggers; plain member mentions do not", { timeout: 20_000 }, async () => {
+    // SAFETY: the same `comment` arm — an @mention that resolves to a deployed
+    // specialist reports through `toAgent`/`triggered`.
     const codex = (await postIntent("VIB-153", ids.arda, {
       intent: "comment", text: "@codex check the linter",
     })) as { toAgent: boolean; triggered: string | null };
@@ -264,6 +308,8 @@ describe("comment action — @agent routing detection", () => {
     expect(codex.triggered).toBeTruthy();
     await stopTaskRuns("VIB-153", ids.arda);
 
+    // SAFETY: still the `comment` arm; a plain member mention is the not-routed
+    // branch of that same return, so the fields are unchanged.
     const plain = (await postIntent("VIB-153", ids.arda, {
       intent: "comment", text: "cc @murat for a second look",
     })) as { ok: true; toAgent: boolean; triggered: string | null; toast: string };
@@ -277,9 +323,12 @@ describe("comment action — @agent routing detection", () => {
     // without its parent's loader — so this POST used to land a comment (and
     // could @mention an agent) inside a project the actor must not know exists.
     const before = (await runLoader("VIB-153", ids.arda)).task.timeline.length;
+    // SAFETY: deniz is not a member, so `requireVisibleProject` throws the
+    // unknown-slug 404 OUTSIDE the action's try — the catch above receives what
+    // was thrown, never a returned envelope.
     const thrown = (await postIntent("VIB-153", ids.deniz, {
       intent: "comment", text: "Following from the platform side.",
-    }).catch((e) => e)) as { init?: { status: number }; data?: unknown };
+    }).catch((e) => e)) as ThrownRefusal;
     expect(thrown?.init?.status).toBe(404);
     // Byte-identical to the unknown-slug refusal — no existence confirmation.
     expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
@@ -293,6 +342,8 @@ describe("comment action — @agent routing detection", () => {
     const { updateUserFields } = await import("~/server/auth/user-store.server");
     updateUserFields(app.db, ids.deniz, { role: "admin" });
     try {
+      // SAFETY: as an org admin deniz clears the D2 override, so the comment lands
+      // on the action's `comment` success arm.
       const result = (await postIntent("VIB-153", ids.deniz, {
         intent: "comment", text: "Checking in from the org-admin override.",
       })) as { ok: true };
@@ -309,9 +360,11 @@ describe("comment action — @agent routing detection", () => {
   });
 
   it("rejects empty comments", async () => {
+    // SAFETY: a whitespace-only comment fails validation inside the try, and the
+    // action's single catch answers every AppError through `appErrorResponse`.
     const result = (await postIntent("VIB-153", ids.arda, {
       intent: "comment", text: "   ",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(400);
   });
 });
@@ -340,17 +393,20 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
   it("rejects a non-owner contributor accepting a completion packet (R6-2)", async () => {
     // Accepting a completion is admin|maintainer OR the task's owner (R6-2).
     // selin is a contributor and NOT VIB-142's owner, so the accept path denies.
+    // SAFETY: that denial leaves the action through its `appErrorResponse` catch.
     const result = (await postIntent("VIB-142", ids.selin, {
       intent: "resolve-packet", option: "0",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(403);
     expect(result.data.error).toContain("accept completion into Done");
   });
 
   it("rejects non-members entirely (R15-4: as an unknown slug, not a 403)", async () => {
+    // SAFETY: as in the non-member comment above — the visibility refusal is
+    // thrown ahead of the action body.
     const thrown = (await postIntent("VIB-142", ids.deniz, {
       intent: "resolve-packet", option: "1",
-    }).catch((e) => e)) as { init?: { status: number }; data?: unknown };
+    }).catch((e) => e)) as ThrownRefusal;
     expect(thrown?.init?.status).toBe(404);
     expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
   });
@@ -364,6 +420,8 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
       lines: [{ t: "", ev: "text", tag: "assistant", text: "re-checking" }],
       keepRunning: true,
     });
+    // SAFETY: arda holds `resolve-packet`, so the confirmed option returns the
+    // resolve arm: `kind`, its toast, and the optional navigation target.
     const result = (await postIntent("VIB-142", ids.arda, {
       intent: "resolve-packet", option: "2",
     })) as { ok: true; kind: string; toast: string; navigateTo?: string };
@@ -389,6 +447,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
       lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
       keepRunning: true,
     });
+    // SAFETY: the same resolve arm as the block_on_policy case above.
     const result = (await postIntent("VIB-142", ids.arda, {
       intent: "resolve-packet", option: "1",
     })) as { ok: true; kind: string; toast: string; navigateTo?: string };
@@ -417,19 +476,25 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
       lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
       keepRunning: true,
     });
+    // SAFETY: the first resolve succeeds, so this is the resolve arm; only
+    // `kind` is read, to pin which option ran.
     const first = (await postIntent("VIB-142", ids.arda, {
       intent: "resolve-packet", option: "1",
     })) as { ok: true; kind: string };
     expect(first.kind).toBe("request_edit");
 
+    // SAFETY: the packet is already cleared, so resolvePacket raises the conflict
+    // and the action answers through `appErrorResponse`.
     const result = (await postIntent("VIB-142", ids.arda, {
       intent: "resolve-packet", option: "1",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(409);
     expect(result.data.error).toBe("This packet was already resolved.");
   });
 
   it("hold_runtime_debug on VIB-160 (R20-1): stays blocked but RESOLVES the packet", async () => {
+    // SAFETY: murat holds `resolve-packet` on VIB-160, so this is the resolve arm
+    // again — a hold still resolves the packet.
     const result = (await postIntent("VIB-160", ids.murat, {
       intent: "resolve-packet", option: "2",
     })) as { ok: true; kind: string; toast: string };
@@ -452,6 +517,8 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
 
 describe("ownership actions", () => {
   it("take on VIB-148 records ownership only — no operator scheduling side effects (F19)", async () => {
+    // SAFETY: `count(*) AS c` with no GROUP BY is an aggregate, so sqlite always
+    // answers with exactly one row holding that one integer.
     const opRuns = () =>
       (
         app.db
@@ -462,6 +529,7 @@ describe("ownership actions", () => {
       ).c;
     const before = opRuns();
 
+    // SAFETY: arda may own tasks, so `owner-take` returns the ownership arm.
     const result = (await postIntent("VIB-148", ids.arda, {
       intent: "owner-take",
     })) as { ok: true; toast: string };
@@ -490,6 +558,8 @@ describe("ownership actions", () => {
   });
 
   it("self release writes the exact assign copy (no re-scheduling on re-take)", async () => {
+    // SAFETY: releasing one's own seat is permitted, so this is the ownership arm
+    // — `forced` exists only there, to separate a self-release from an admin one.
     const result = (await postIntent("VIB-148", ids.arda, {
       intent: "owner-release",
     })) as { ok: true; forced: boolean; toast: string };
@@ -503,6 +573,8 @@ describe("ownership actions", () => {
     );
     // Re-taking is a clean ownership mutation: just the assign event on top,
     // no operator scheduling reaction to re-fire (F19).
+    // SAFETY: selin is a contributor, which `own-task` admits, so the re-take
+    // lands on the ownership arm.
     const again = (await postIntent("VIB-148", ids.selin, {
       intent: "owner-take",
     })) as { ok: true };
@@ -516,15 +588,18 @@ describe("ownership actions", () => {
 
   it("non-owner non-admin cannot hand off or release someone else's seat", async () => {
     // VIB-151 is owned by Selin; Murat is a maintainer (not owner, not admin).
+    // SAFETY: the hand-off guard therefore denies through `appErrorResponse`.
     const handoff = (await postIntent("VIB-151", ids.murat, {
       intent: "owner-assign", userId: ids.elif,
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(handoff.init.status).toBe(403);
     expect(handoff.data.error).toContain("Only the current owner or a project admin");
 
+    // SAFETY: `release-any-ownership` is admin-only, so selin releasing another
+    // member's seat is denied the same way.
     const release = (await postIntent("VIB-160", ids.selin, {
       intent: "owner-release",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(release.init.status).toBe(403);
     // Canonical guard (release-any-ownership = admin only): the message names the
     // actor's role rather than a hard-coded "admins" string.
@@ -532,6 +607,7 @@ describe("ownership actions", () => {
   });
 
   it("hand-off by admin + admin release with the forced copy + audit trail", async () => {
+    // SAFETY: arda is a project admin, so the hand-off returns the ownership arm.
     const handoff = (await postIntent("VIB-151", ids.arda, {
       intent: "owner-assign", userId: ids.murat,
     })) as { ok: true; toast: string };
@@ -542,6 +618,7 @@ describe("ownership actions", () => {
       "Handed task ownership to **Murat Yıldız** — they hold review & acceptance for this task now.",
     );
 
+    // SAFETY: the admin release returns the ownership arm too, with `forced` set.
     const release = (await postIntent("VIB-151", ids.arda, {
       intent: "owner-release",
     })) as { ok: true; forced: boolean; toast: string };
@@ -556,6 +633,8 @@ describe("ownership actions", () => {
     );
 
     // Admin release promise: recorded in the audit trail (spec §4.5).
+    // SAFETY: `COUNT(*) AS n` is an aggregate with no GROUP BY — exactly one row,
+    // holding exactly the one integer the SELECT names.
     const audit = app.db
       .prepare(
         `SELECT COUNT(*) AS n FROM audit_events
@@ -567,6 +646,7 @@ describe("ownership actions", () => {
 
   it("take-over writes the take-over copy", async () => {
     // Selin owns VIB-148 (from the earlier test); Murat takes over.
+    // SAFETY: murat is a maintainer, so the take-over returns the ownership arm.
     const result = (await postIntent("VIB-148", ids.murat, {
       intent: "owner-take",
     })) as { ok: true };
@@ -580,15 +660,19 @@ describe("ownership actions", () => {
   it("non-members are denied ownership; hand-off to a non-member is denied", async () => {
     // R15-4: a non-member never gets past the route's visibility gate, so the
     // refusal is the unknown-slug 404 rather than the mutation's own 403.
+    // SAFETY: that gate runs outside the action's try, so the 404 arrives here
+    // as a throw rather than a returned envelope.
     const take = (await postIntent("VIB-148", ids.deniz, {
       intent: "owner-take",
-    }).catch((e) => e)) as { init?: { status: number }; data?: unknown };
+    }).catch((e) => e)) as ThrownRefusal;
     expect(take?.init?.status).toBe(404);
     expect(String(take?.data)).toBe("No project at projects/viberr-core.");
 
+    // SAFETY: a hand-off target must be a project member and deniz is not, so the
+    // mutation's own guard denies through `appErrorResponse`.
     const toGuest = (await postIntent("VIB-148", ids.murat, {
       intent: "owner-assign", userId: ids.deniz,
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(toGuest.init.status).toBe(403);
     expect(toGuest.data.error).toContain("only be handed to a project member");
   });
@@ -600,17 +684,21 @@ describe("transition action (manual stage move — admin|maintainer)", () => {
   it("moving to Done routes through acceptance: a contributor is rejected", async () => {
     // A manual move INTO the final stage IS accepting completion — the RBAC
     // message reflects the acceptance authority, still admin|maintainer.
+    // SAFETY: selin does not hold it, so the guard denies through
+    // `appErrorResponse`.
     const result = (await postIntent("VIB-145", ids.selin, {
       intent: "transition", to: "done",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(403);
     expect(result.data.error).toContain("accept completion into Done");
   });
 
   it("a non-final manual move is admin|maintainer only: a contributor is rejected", async () => {
+    // SAFETY: non-final manual moves are admin|maintainer, so the contributor is
+    // denied the same way.
     const result = (await postIntent("VIB-145", ids.selin, {
       intent: "transition", to: "triage",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(403);
     expect(result.data.error).toContain("change the task stage");
   });
@@ -619,6 +707,8 @@ describe("transition action (manual stage move — admin|maintainer)", () => {
     // triage is not a declared boundary FROM VIB-145's stage — allowed only
     // because the dropdown move is `manual`. (The transition comment it writes
     // is covered by task-governance.server.test.ts against an isolated store.)
+    // SAFETY: arda is a project admin, so the move returns the transition arm —
+    // the only success arm carrying `stage`.
     const result = (await postIntent("VIB-145", ids.arda, {
       intent: "transition", to: "triage",
     })) as { ok: true; intent: string; stage: string; toast: string };
@@ -628,9 +718,11 @@ describe("transition action (manual stage move — admin|maintainer)", () => {
   });
 
   it("rejects a move to a stage that isn't in the project", async () => {
+    // SAFETY: "nope" is not one of the project's stages, so validation rejects it
+    // inside the try and the catch answers through `appErrorResponse`.
     const result = (await postIntent("VIB-145", ids.arda, {
       intent: "transition", to: "nope",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(400);
   });
 });
@@ -660,6 +752,8 @@ describe("assign-specialist + run-specialist intents", () => {
     // stages are ready/impl (F1 now enforces this), so move it to Ready first —
     // assigning a developer at Triage is correctly rejected.
     await postIntent("VIB-166", ids.arda, { intent: "transition", to: "ready" });
+    // SAFETY: arda is a project admin and VIB-166 now sits at an eligible stage,
+    // so `assign-specialist` returns its success arm.
     const result = (await postIntent("VIB-166", ids.arda, {
       intent: "assign-specialist", profileId: "developer",
     })) as { ok: true; toast: string };
@@ -685,34 +779,41 @@ describe("assign-specialist + run-specialist intents", () => {
   });
 
   it("reviewer + viewer are denied assign (admin|maintainer only)", async () => {
+    // SAFETY: assigning a specialist is admin|maintainer, so selin's attempt is
+    // denied through `appErrorResponse`.
     const reviewer = (await postIntent("VIB-145", ids.selin, {
       intent: "assign-specialist", profileId: "developer",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(reviewer.init.status).toBe(403);
   });
 
   it("rejects assigning a specialist to a stage outside its eligibility (F1)", async () => {
     // VIB-168 is at Triage; the Developer profile is scoped to ready/impl.
+    // SAFETY: the F1 eligibility check therefore rejects inside the try, and the
+    // catch answers through `appErrorResponse`.
     const result = (await postIntent("VIB-168", ids.arda, {
       intent: "assign-specialist", profileId: "developer",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(400);
     expect(result.data.error).toContain("not eligible");
   });
 
   it("assigning an unknown profile id is a validation error", async () => {
+    // SAFETY: no profile carries that id, so the lookup rejects inside the try.
     const result = (await postIntent("VIB-145", ids.arda, {
       intent: "assign-specialist", profileId: "does-not-exist",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(400);
   });
 
   it("run-specialist requires an assigned specialist", async () => {
     // VIB-168 has no specialist assigned (VIB-148 gains one when the ownership
     // test's real operator reaction assigns the Developer).
+    // SAFETY: `run-specialist` therefore rejects inside the try, and the catch
+    // answers through `appErrorResponse`.
     const result = (await postIntent("VIB-168", ids.arda, {
       intent: "run-specialist",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(400);
     expect(result.data.error).toContain("Engage a delivering agent");
   });
@@ -740,6 +841,8 @@ describe("assign-specialist + run-specialist intents", () => {
         { userId: ids.arda, label: "arda@viberr.dev" },
       );
     }
+    // SAFETY: with the developer assigned and no primary run in flight, the human
+    // Run action returns the run arm and its streaming toast.
     const result = (await postIntent("VIB-166", ids.arda, {
       intent: "run-specialist",
     })) as { ok: true; toast: string };
@@ -764,9 +867,11 @@ describe("assign-specialist + run-specialist intents", () => {
   });
 
   it("reviewer is denied run-specialist (admin|maintainer only)", async () => {
+    // SAFETY: running agents is admin|maintainer, so selin is denied through
+    // `appErrorResponse`.
     const result = (await postIntent("VIB-166", ids.selin, {
       intent: "run-specialist",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(403);
   });
 });
@@ -802,22 +907,27 @@ describe("acceptance affordance (P14-LV-06)", () => {
   });
 
   it("accept-completion refuses when the task is not at the boundary", async () => {
+    // SAFETY: VIB-166 is not at the review boundary, so acceptance is refused
+    // inside the try instead of granted.
     const result = (await postIntent("VIB-166", ids.arda, {
       intent: "accept-completion",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBeGreaterThanOrEqual(400);
   });
 });
 
 describe("task archive (R14-3)", () => {
   it("a contributor cannot archive", async () => {
+    // SAFETY: archiving is admin|maintainer, so the contributor is denied through
+    // `appErrorResponse`.
     const result = (await postIntent("VIB-153", ids.selin, {
       intent: "archive-task",
-    })) as { data: { ok: false; error: string }; init: { status: number } };
+    })) as ActionRefusal;
     expect(result.init.status).toBe(403);
   });
 
   it("a maintainer archives and restores; the loader reports the disposition", async () => {
+    // SAFETY: murat is a maintainer, so the archive returns its success arm.
     const archived = (await postIntent("VIB-153", ids.murat, {
       intent: "archive-task",
     })) as { ok: true; toast: string };
@@ -828,6 +938,8 @@ describe("task archive (R14-3)", () => {
     // An archived task is out of the flow — acceptance is refused with a reason.
     expect(after.acceptance.canAccept).toBe(false);
 
+    // SAFETY: the same maintainer restoring what he just archived — the restore
+    // success arm.
     const restored = (await postIntent("VIB-153", ids.murat, {
       intent: "restore-task",
     })) as { ok: true; toast: string };
@@ -850,6 +962,8 @@ describe("F20-11: task-view read-marking fires only on a genuine navigation", ()
   ) {
     const { loader } = await import("~/routes/project.task");
     const { cookie } = await app.cookieFor(userId);
+    // SAFETY: as in runLoader — this loader reads `request` and `params` only, so
+    // `as never` stands in for the generated args' context provider.
     return loader({
       request: app.request(url, { cookie, headers }),
       params: { slug: "viberr-core", key },
@@ -857,6 +971,8 @@ describe("F20-11: task-view read-marking fires only on a genuine navigation", ()
     } as never);
   }
 
+  // SAFETY: the statement selects the single `read_at` column, so a hit is a
+  // one-property row and a miss is undefined, which the `?.` below handles.
   const readAt = (id: string) =>
     (
       app.db

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
 import { createGithubClient, githubWebHost } from "./github-client.server";
 
@@ -15,7 +16,7 @@ describe("github-client", () => {
     const { gh, client: c } = client({
       "GET /user": { body: { login: "octocat" } },
     });
-    const result = await c.request<{ login: string }>("GET", "/user");
+    const result = await c.request("GET", "/user", z.object({ login: z.string() }));
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.login).toBe("octocat");
     const call = gh.calls[0]!;
@@ -36,7 +37,7 @@ describe("github-client", () => {
         },
       },
     });
-    const result = await c.request("GET", "/rate");
+    const result = await c.request("GET", "/rate", z.unknown());
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.etag).toBe('W/"abc123"');
@@ -55,7 +56,9 @@ describe("github-client", () => {
           ? { status: 304, headers: { "x-ratelimit-remaining": "10" } }
           : { body: { fresh: true } },
     });
-    const result = await c.request("GET", "/cached", { etag: 'W/"abc"' });
+    const result = await c.request("GET", "/cached", z.unknown(), {
+      etag: 'W/"abc"',
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.kind).toBe("not_modified");
@@ -74,7 +77,7 @@ describe("github-client", () => {
           ? { status: 502, body: { message: "Bad gateway" } }
           : { body: { ok: true } },
     });
-    const success = await recovered.request("GET", "/flaky");
+    const success = await recovered.request("GET", "/flaky", z.unknown());
     expect(success.ok).toBe(true);
     expect(gh.callsTo("GET /flaky")).toHaveLength(2);
 
@@ -82,7 +85,7 @@ describe("github-client", () => {
     const { gh: gh2, client: broken } = client({
       "GET /down": { status: 500, body: { message: "boom" } },
     });
-    const failure = await broken.request("GET", "/down");
+    const failure = await broken.request("GET", "/down", z.unknown());
     expect(failure.ok).toBe(false);
     if (!failure.ok && failure.kind === "http") {
       expect(failure.status).toBe(500);
@@ -95,7 +98,7 @@ describe("github-client", () => {
     const { gh, client: c } = client({
       "GET /missing": { status: 404, body: { message: "Not Found" } },
     });
-    const result = await c.request("GET", "/missing");
+    const result = await c.request("GET", "/missing", z.unknown());
     expect(result.ok).toBe(false);
     if (!result.ok && result.kind === "http") {
       expect(result.status).toBe(404);
@@ -109,7 +112,7 @@ describe("github-client", () => {
       token: "ghp_x",
       fetchImpl: unreachableFetch("ENOTFOUND"),
     });
-    const result = await c.request("GET", "/user");
+    const result = await c.request("GET", "/user", z.unknown());
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.kind).toBe("network");
@@ -122,16 +125,48 @@ describe("github-client", () => {
       "POST /repos/o/r/git/refs": { status: 201, body: {} },
       "GET /repos/o/r/pulls": { body: [] },
     });
-    await c.request("POST", "/repos/o/r/git/refs", {
+    await c.request("POST", "/repos/o/r/git/refs", z.unknown(), {
       body: { ref: "refs/heads/x", sha: "abc" },
     });
-    await c.request("GET", "/repos/o/r/pulls", {
+    await c.request("GET", "/repos/o/r/pulls", z.unknown(), {
       searchParams: { state: "all", per_page: 5 },
     });
     expect(gh.calls[0]!.body).toEqual({ ref: "refs/heads/x", sha: "abc" });
     expect(gh.calls[0]!.headers["content-type"]).toBe("application/json");
     expect(gh.calls[1]!.url.searchParams.get("state")).toBe("all");
     expect(gh.calls[1]!.url.searchParams.get("per_page")).toBe("5");
+  });
+
+  it("parses the success body with the given schema (call-site tolerance applies)", async () => {
+    const { client: c } = client({
+      "GET /pr": { body: { number: 7, head: "not-an-object", junk: true } },
+    });
+    const result = await c.request(
+      "GET",
+      "/pr",
+      z.object({
+        number: z.number(),
+        head: z
+          .object({ sha: z.string().optional().catch(undefined) })
+          .optional()
+          .catch(undefined),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Modeled field survives, drifted field degrades to its catch, unmodeled
+      // junk is stripped.
+      expect(result.data).toEqual({ number: 7 });
+    }
+  });
+
+  it("hands the body over unparsed on the schema-less (deprecated) form", async () => {
+    const { client: c } = client({
+      "GET /raw": { body: { anything: ["goes", 1] } },
+    });
+    const result = await c.request<{ anything: unknown }>("GET", "/raw");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toEqual({ anything: ["goes", 1] });
   });
 
   it("exposes scope + token-expiration headers on success", async () => {
@@ -144,7 +179,7 @@ describe("github-client", () => {
         },
       },
     });
-    const result = await c.request("GET", "/user");
+    const result = await c.request("GET", "/user", z.unknown());
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.scopesHeader).toBe("repo, workflow");

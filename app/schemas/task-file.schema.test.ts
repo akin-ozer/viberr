@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import YAML from "yaml";
+import type { YamlMapping } from "~/server/files/frontmatter.server";
+import { parseTaskFileContent } from "~/server/files/task-file.server";
 import {
   acceptanceBlockedReason,
   deriveValidation,
   nextWorkRevision,
   parseTaskFrontmatter,
-  parseTaskPacket,
   requiredReviewers,
   type Engagement,
   type ReviewVerdict,
@@ -294,26 +296,33 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
   });
 });
 
+/** A frontmatter mapping that parses without diagnostics (the first test
+ *  below asserts that) — also the clean scaffold for the packet tests. */
+const valid = {
+  key: "VIB-142",
+  title: "Attach execution workspace to task runtime",
+  stage: "review",
+  readiness: "input_required",
+  waiting: "human",
+  ownerUserId: "u_abc",
+  engagements: [
+    { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+  ],
+  operator: { assignedAtStageId: "triage" },
+  urgent: true,
+  validation: "changed",
+  branch: "vib-142-attach-workspace",
+  pr: { number: 318, state: "review", title: "Attach execution workspace" },
+  github: null,
+  createdAt: "2026-07-03T06:00:00.000Z",
+  updatedAt: "2026-07-04T06:58:00.000Z",
+};
+
 describe("parseTaskFrontmatter (tolerant)", () => {
-  const valid = {
-    key: "VIB-142",
-    title: "Attach execution workspace to task runtime",
-    stage: "review",
-    readiness: "input_required",
-    waiting: "human",
-    ownerUserId: "u_abc",
-    engagements: [
-      { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
-    ],
-    operator: { assignedAtStageId: "triage" },
-    urgent: true,
-    validation: "changed",
-    branch: "vib-142-attach-workspace",
-    pr: { number: 318, state: "review", title: "Attach execution workspace" },
-    github: null,
-    createdAt: "2026-07-03T06:00:00.000Z",
-    updatedAt: "2026-07-04T06:58:00.000Z",
-  };
+  /** `valid` without the modern `engagements` key — what a task.md written
+   *  before the G1 rename carries, so the legacy slots below are the only
+   *  source of engagements. */
+  const { engagements: _engagements, ...preG1 } = valid;
 
   it("parses a fully valid frontmatter without diagnostics", () => {
     const result = parseTaskFrontmatter(valid, { fallbackKey: "VIB-142" });
@@ -443,12 +452,11 @@ describe("parseTaskFrontmatter (tolerant)", () => {
   });
 
   it("absorbs legacy `specialist`/`reviewers` keys into engagements (G1 back-compat)", () => {
-    const legacy: Record<string, unknown> = {
-      ...valid,
+    const legacy = {
+      ...preG1,
       specialist: { profileId: "developer", backend: "codex", role: "Developer" },
       reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
     };
-    delete legacy.engagements;
     const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
     expect(result.diagnostics).toEqual([]);
     expect(result.frontmatter.engagements).toEqual([
@@ -461,11 +469,10 @@ describe("parseTaskFrontmatter (tolerant)", () => {
   });
 
   it("reads the pre-rename `consultants` key as supporting engagements (back-compat)", () => {
-    const legacy: Record<string, unknown> = {
-      ...valid,
+    const legacy = {
+      ...preG1,
       consultants: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
     };
-    delete legacy.engagements;
     const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
     expect(result.diagnostics).toEqual([]);
     expect(result.frontmatter.engagements).toEqual([
@@ -477,12 +484,11 @@ describe("parseTaskFrontmatter (tolerant)", () => {
   });
 
   it("prefers `reviewers` over a stale `consultants` when both are present", () => {
-    const both: Record<string, unknown> = {
-      ...valid,
+    const both = {
+      ...preG1,
       reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
       consultants: [{ profileId: "old", backend: "codex", role: "Stale" }],
     };
-    delete both.engagements;
     const result = parseTaskFrontmatter(both, { fallbackKey: "VIB-142" });
     expect(result.frontmatter.engagements).toEqual([
       { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
@@ -608,15 +614,15 @@ describe("parseTaskFrontmatter (tolerant)", () => {
   });
 
   it("non-mapping frontmatter → hard stop + all defaults", () => {
-    const result = parseTaskFrontmatter("just a string", {
+    const result = parseTaskFileContent("---\njust a string\n---\n", {
       fallbackKey: "VIB-7",
     });
-    expect(result.frontmatter.key).toBe("VIB-7");
+    expect(result.parsed.frontmatter.key).toBe("VIB-7");
     expect(result.diagnostics.some((d) => d.hardStop)).toBe(true);
   });
 
   it("absent urgent stays false with NO diagnostic (optional by contract)", () => {
-    const { urgent, ...withoutUrgent } = valid;
+    const { urgent: _urgent, ...withoutUrgent } = valid;
     const result = parseTaskFrontmatter(withoutUrgent, {
       fallbackKey: "VIB-142",
     });
@@ -625,9 +631,38 @@ describe("parseTaskFrontmatter (tolerant)", () => {
   });
 });
 
-describe("parseTaskPacket (tolerant)", () => {
+describe("packet block parse (tolerant)", () => {
+  /** Routes a packet value through a full task.md parse — the packet decode
+   *  lives at the file boundary in `parsePacketSection` (task-file.server.ts),
+   *  under a scaffold (`valid` frontmatter, goal, timeline) that contributes
+   *  no diagnostics of its own. */
+  const parsePacket = (packet: YamlMapping | null) => {
+    const content = [
+      "---",
+      YAML.stringify(valid).trimEnd(),
+      "---",
+      "",
+      "## Goal",
+      "",
+      "g",
+      "",
+      "## Packet",
+      "",
+      "```yaml",
+      YAML.stringify(packet).trimEnd(),
+      "```",
+      "",
+      "## Timeline",
+      "",
+    ].join("\n");
+    const { parsed, diagnostics } = parseTaskFileContent(content, {
+      fallbackKey: "VIB-142",
+    });
+    return { packet: parsed.packet, diagnostics };
+  };
+
   it("valid packet parses with option kinds intact", () => {
-    const { packet, diagnostics } = parseTaskPacket({
+    const { packet, diagnostics } = parsePacket({
       type: "input",
       kind: "Completion report",
       from: "operator",
@@ -645,7 +680,7 @@ describe("parseTaskPacket (tolerant)", () => {
   });
 
   it("F20-6: a discard_branch option parses with its kind intact", () => {
-    const { packet, diagnostics } = parseTaskPacket({
+    const { packet, diagnostics } = parsePacket({
       type: "input",
       kind: "Completion report",
       title: "Discard the empty branch, or refine the goal?",
@@ -659,7 +694,7 @@ describe("parseTaskPacket (tolerant)", () => {
   });
 
   it("F20-6: an unknown option kind still rejects the packet", () => {
-    const { packet, diagnostics } = parseTaskPacket({
+    const { packet, diagnostics } = parsePacket({
       type: "input",
       kind: "Completion report",
       title: "t",
@@ -670,13 +705,13 @@ describe("parseTaskPacket (tolerant)", () => {
   });
 
   it("invalid packet → null + error diagnostic (never a throw)", () => {
-    const { packet, diagnostics } = parseTaskPacket({ type: "nope" });
+    const { packet, diagnostics } = parsePacket({ type: "nope" });
     expect(packet).toBeNull();
     expect(diagnostics[0]?.code).toBe("packet.invalid");
   });
 
   it("zero or multiple recommended options → info diagnostic", () => {
-    const { diagnostics } = parseTaskPacket({
+    const { diagnostics } = parsePacket({
       type: "blocked",
       kind: "Blocked decision",
       title: "t",
@@ -689,6 +724,6 @@ describe("parseTaskPacket (tolerant)", () => {
   });
 
   it("null/undefined → no packet, no diagnostics", () => {
-    expect(parseTaskPacket(null)).toEqual({ packet: null, diagnostics: [] });
+    expect(parsePacket(null)).toEqual({ packet: null, diagnostics: [] });
   });
 });

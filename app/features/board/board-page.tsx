@@ -127,10 +127,9 @@ export interface BoardColumnData {
 
 /** Data carried by every card sortable so the drag handlers can refine the
  *  insertion slot without global lookups. */
-interface CardDragData {
+type CardDragData = {
   nextKey: string | null;
-  [key: string]: unknown;
-}
+};
 
 /* Drag-and-drop configuration (dnd-kit).
  *
@@ -1583,6 +1582,11 @@ export function BoardPage({
     if (!element) return;
     const rect = element.getBoundingClientRect();
     const key = String(target.id);
+    // SAFETY: dnd-kit types every droppable's `data` as its own open bag, but
+    // the only card droppables on this board are the `useSortable<CardDragData>`
+    // above — which passes `{ nextKey }` and nothing else. Stage droppables,
+    // the one other kind, returned two lines up. `Partial` + `?.` still cover a
+    // sortable that has not been given its data yet.
     const nextKey =
       (target.data as Partial<CardDragData> | undefined)?.nextKey ?? null;
     const before = y < rect.top + rect.height / 2 ? key : nextKey;

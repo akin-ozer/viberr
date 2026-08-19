@@ -181,9 +181,8 @@ export function AgentModal({
       onSave={() => {
         if (!canSave) return;
         setErr(null);
-        action.submit({
+        const fields = {
           intent: "agent-save",
-          ...(initial ? { profileId: initial.id } : {}),
           name: name.trim(),
           backend,
           summary: summary.trim(),
@@ -192,7 +191,12 @@ export function AgentModal({
           skills: JSON.stringify([...selSkills, ...legacySkills]),
           mcps: JSON.stringify([...selMcps, ...legacyMcps]),
           kbs: JSON.stringify([...selKbs, ...legacyKbs]),
-        });
+        };
+        // No `profileId` at all means "create"; an empty one would mean "edit
+        // the profile with the empty id", so the field stays absent.
+        action.submit(
+          initial ? { ...fields, profileId: initial.id } : fields,
+        );
       }}
     >
       <div className="field">

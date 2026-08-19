@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -24,6 +25,15 @@ afterEach(ctx.cleanup);
 const REPO_PATH = "/repos/akin-ozer/viberr";
 const ACTOR = { userId: "u_test", label: "arda@viberr.test" };
 const BRANCH = "vib-201-attach-execution-workspace-to";
+
+/** What the service PUTs on the wire when it creates a PR — the fake records
+ *  the request body as `unknown`, so it is parsed here rather than asserted at. */
+const createPrRequest = z.object({
+  title: z.string(),
+  head: z.string(),
+  base: z.string(),
+  body: z.string(),
+});
 
 /** The delivered revision an adoptable PR's head has to be (R16-1). */
 const DELIVERED_SHA = "d3l1ver3dsha0000000000000000000000000000";
@@ -142,7 +152,7 @@ describe("openTaskPr", () => {
 
     // The PR request body carries the composed description with the task link.
     const post = gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!;
-    const sent = post.body as { title: string; head: string; base: string; body: string };
+    const sent = createPrRequest.parse(post.body);
     expect(sent.title).toBe("[VIB-201] Attach execution workspace to task runtime");
     expect(sent.head).toBe(BRANCH);
     expect(sent.body).toContain("https://viberr.example/projects/");
@@ -272,7 +282,7 @@ describe("openTaskPr", () => {
       { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
     expect(res.status).toBe("ok");
-    const sent = gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body as { body: string };
+    const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
     expect(sent.body).toContain("## Evidence");
     expect(sent.body).toContain("- unit/policy_gate_test · +14 · 0");
     // The empty-column placeholder is a serialization detail, not PR prose.

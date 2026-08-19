@@ -1,7 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
 
@@ -33,8 +35,15 @@ import { listAuditEvents } from "../../../test-support/audit-log";
  *     request to the bytes on disk.
  */
 
+/** The three actors this file drives, by user id. */
+interface ProbeActors {
+  arda: string;
+  deniz: string;
+  orgAdmin: string;
+}
+
 let app: AppTestContext;
-let ids: { arda: string; deniz: string; orgAdmin: string };
+let ids: ProbeActors;
 
 const SLUG = "viberr-core";
 const TASK = "VIB-142";
@@ -114,34 +123,90 @@ const ACTION_ROUTES: GatedRoute[] = [
   },
 ];
 
+/** The argument set React Router hands a project-scoped action. */
+interface ProjectActionArgs {
+  request: Request;
+  url: URL;
+  params: Record<string, string>;
+  pattern: string;
+  context: Readonly<RouterContextProvider>;
+}
+
+/** Whatever the six actions answer with, straight from their own signatures —
+ *  type-only imports, so the modules are still LOADED lazily inside `post`
+ *  (after setupAppTest has pointed the env at the temp data root). */
+type ProjectActionAnswer = Awaited<
+  | ReturnType<typeof import("~/routes/project.board").action>
+  | ReturnType<typeof import("~/routes/project.task").action>
+  | ReturnType<typeof import("~/routes/project.policy").action>
+  | ReturnType<typeof import("~/routes/project.agents").action>
+  | ReturnType<typeof import("~/routes/project.github").action>
+  | ReturnType<typeof import("~/routes/project.settings").action>
+>;
+
+interface ProjectActionModule {
+  action: (args: ProjectActionArgs) => Promise<ProjectActionAnswer>;
+}
+
 async function post(
   route: GatedRoute,
   userId: string,
   fields: Record<string, string>,
-): Promise<unknown> {
+) {
+  // SAFETY: the module id is a `GatedRoute.mod`, and the completeness scan at
+  // the bottom of this file fails unless ACTION_ROUTES is EXACTLY the set of
+  // project route modules exporting an `action` — so every id resolves to a
+  // module with one. Each of those actions reads `request` and `params.slug` /
+  // `params.key`, which every GatedRoute supplies.
   const { action } = (await import(
     /* @vite-ignore */ `~/routes/${route.mod}`
-  )) as { action: (args: unknown) => Promise<unknown> };
+  )) as ProjectActionModule;
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
+  const request = app.request(route.path, {
+    method: "POST",
+    cookie,
+    body: new URLSearchParams({ _csrf: csrf, ...fields }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
   return action({
-    request: app.request(route.path, {
-      method: "POST",
-      cookie,
-      body: new URLSearchParams({ _csrf: csrf, ...fields }),
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    }),
+    request,
+    url: new URL(request.url),
     params: route.params,
-    context: {},
+    pattern: route.path,
+    context: new RouterContextProvider(),
   });
 }
 
-/** What a route answered: a thrown Response-ish refusal or a returned result. */
-function outcome(value: unknown): { status: number; body: unknown } {
-  const v = value as
-    | { init?: { status?: number }; status?: number; data?: unknown }
-    | undefined;
-  return { status: v?.init?.status ?? v?.status ?? 200, body: v?.data ?? v };
+/** What a route answered: a thrown Response-ish refusal or a returned result.
+ *  `data(payload, init)` carries its own status — returned for an in-band
+ *  refusal, THROWN for the unknown-slug 404 — and anything else (a plain result
+ *  object, a bare Error) reads as a 200 that is its own body. */
+const answer = z.unknown().transform((value) => {
+  const envelope = z
+    .object({
+      init: z.object({ status: z.number() }).partial().nullish(),
+      status: z.number().optional(),
+      data: z.unknown(),
+    })
+    .safeParse(value).data;
+  return {
+    status: envelope?.init?.status ?? envelope?.status ?? 200,
+    body: envelope?.data ?? value,
+  };
+});
+
+/** POST and report the answer whether the route RETURNED or THREW it. */
+async function outcome(
+  route: GatedRoute,
+  userId: string,
+  fields: Record<string, string>,
+) {
+  try {
+    return answer.parse(await post(route, userId, fields));
+  } catch (error) {
+    return answer.parse(error);
+  }
 }
 
 async function timelineTexts(taskKey: string): Promise<string[]> {
@@ -167,10 +232,12 @@ describe("F19-30: an org-admin non-member's COMMENT is granted AND audited", () 
       ),
     );
 
-    const result = (await post(ACTION_ROUTES[1]!, ids.orgAdmin, {
-      intent: "comment",
-      text,
-    })) as { ok: boolean; toast: string };
+    const result = z.object({ ok: z.boolean(), toast: z.string() }).parse(
+      await post(ACTION_ROUTES[1]!, ids.orgAdmin, {
+        intent: "comment",
+        text,
+      }),
+    );
 
     // The comment really happened — this is the mutation the gate is the ONLY
     // authority for, so "granted" has to mean bytes on disk.
@@ -200,10 +267,9 @@ describe("F19-30: an org-admin non-member's COMMENT is granted AND audited", () 
 describe("R15-4 on the ACTION side of every project-scoped route", () => {
   for (const route of ACTION_ROUTES) {
     it(`${route.name}: a non-member is refused as an unknown slug`, async () => {
-      const thrown = await post(route, ids.deniz, {
+      const { status, body } = await outcome(route, ids.deniz, {
         intent: "no-such-intent",
-      }).catch((e: unknown) => e);
-      const { status, body } = outcome(thrown);
+      });
       expect(status, `${route.name} must refuse a non-member with 404`).toBe(404);
       // Byte-identical to the layout loader's unknown-slug refusal (and to the
       // six child loaders'): the response can never confirm that `viberr-core`
@@ -213,9 +279,12 @@ describe("R15-4 on the ACTION side of every project-scoped route", () => {
     });
 
     it(`${route.name}: a member reaches the intent switch`, async () => {
-      const result = (await post(route, ids.arda, {
-        intent: "no-such-intent",
-      })) as { init: { status: number }; data: { error: string } };
+      const result = z
+        .object({
+          init: z.object({ status: z.number() }),
+          data: z.object({ error: z.string() }),
+        })
+        .parse(await post(route, ids.arda, { intent: "no-such-intent" }));
       expect(result.init.status).toBe(400);
       expect(result.data.error).toBe("Unknown action.");
     });
@@ -224,11 +293,11 @@ describe("R15-4 on the ACTION side of every project-scoped route", () => {
   it("a non-member's comment never reaches the timeline", async () => {
     const text = "Non-member comment — must never be written.";
     const before = await timelineTexts(TASK);
-    const thrown = await post(ACTION_ROUTES[1]!, ids.deniz, {
+    const refused = await outcome(ACTION_ROUTES[1]!, ids.deniz, {
       intent: "comment",
       text,
-    }).catch((e: unknown) => e);
-    expect(outcome(thrown).status).toBe(404);
+    });
+    expect(refused.status).toBe(404);
     // Commenting carries no RbacAction of its own — `requireVisibleProject` IS
     // its access control, so a refusal has to mean the write never happened.
     const after = await timelineTexts(TASK);

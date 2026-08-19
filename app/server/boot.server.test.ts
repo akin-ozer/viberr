@@ -4,6 +4,19 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { createTestDbContext } from "../../test-support/test-db";
 import { logger } from "./logging/logger.server";
+import type {
+  MaintenancePassOptions,
+  MaintenancePassResult,
+} from "./ops/maintenance.server";
+import type { BuildInfo } from "./ops/build-info.server";
+import type { DiskStatus } from "./ops/disk-space.server";
+import {
+  installCrashVisibilityHandlers,
+  logBootIntegrity,
+  reconcileRestartedWork,
+  startStoreMaintenance,
+  takeDataRootWriterLock,
+} from "./boot.server";
 
 /**
  * P14-RT-09: the boot reconcile chain is ORDERED.
@@ -26,52 +39,49 @@ const recoverStrandedOperatorPlans = vi.fn(async () => {
   calls.push("plan-recovery:start");
   await new Promise((r) => setTimeout(r, 5));
   calls.push("plan-recovery:end");
-  return { recovered: 0 };
+  return { recovered: 0, stale: 0 };
 });
 const reclaimTerminalTaskWorkspaces = vi.fn(() => {
   calls.push("reclaim");
   return { removed: 0, bytes: 0 };
 });
-
-vi.mock("./runtimes/run-recovery.server", async () => {
-  const actual = await vi.importActual<
-    typeof import("./runtimes/run-recovery.server")
-  >("./runtimes/run-recovery.server");
-  return { ...actual, recoverUnreactedAgentRuns, recoverStrandedOperatorPlans };
-});
-vi.mock("./tasks/workspace-retention.server", async () => {
-  const actual = await vi.importActual<
-    typeof import("./tasks/workspace-retention.server")
-  >("./tasks/workspace-retention.server");
-  return { ...actual, reclaimTerminalTaskWorkspaces };
-});
+/** Injected through `reconcileRestartedWork`'s deps seam, so the chain's ORDER
+ *  is observable without touching a live store. */
+const reconcileDeps = {
+  recoverUnreactedAgentRuns,
+  recoverStrandedOperatorPlans,
+  reclaimTerminalTaskWorkspaces,
+};
 
 /**
  * Gap 15: boot's retention step used to be the ONLY one in the process
  * lifetime. These two stand in for the periodic scheduler so the boot WIRING
  * (which cannot be exercised without booting a real server) is testable.
  */
+/** Boot discards the pass result, so the stand-in answers the empty one —
+ *  spelled out rather than faked, so it still satisfies the real signature. */
+const EMPTY_PASS: MaintenancePassResult = {
+  reason: "boot",
+  retention: { runLogLines: 0, auditEvents: 0, notifications: 0 },
+  transcripts: { transcripts: 0, sessions: 0, bytes: 0 },
+  workspaces: null,
+  workspacesSkipped: "not-requested",
+  disk: null,
+  freedBytes: 0,
+};
 const runMaintenancePass = vi.fn(
-  (_db: unknown, _options: { reason: string; reclaimWorkspaces?: boolean }) =>
-    ({}) as never,
+  (_db: DatabaseSync, _options: MaintenancePassOptions) => EMPTY_PASS,
 );
-const startMaintenanceScheduler = vi.fn();
-vi.mock("./ops/maintenance.server", async () => {
-  const actual = await vi.importActual<
-    typeof import("./ops/maintenance.server")
-  >("./ops/maintenance.server");
-  return { ...actual, runMaintenancePass, startMaintenanceScheduler };
-});
+const startMaintenanceScheduler = vi.fn((_db: DatabaseSync) => {});
+/** Injected through `startStoreMaintenance`'s deps seam. */
+const maintenanceDeps = { runMaintenancePass, startMaintenanceScheduler };
 
-const {
-  installCrashVisibilityHandlers,
-  logBootIntegrity,
-  reconcileRestartedWork,
-  startStoreMaintenance,
-  takeDataRootWriterLock,
-} = await import("./boot.server");
-
-/** The chain only passes the handle through — no query runs in these tests. */
+/**
+ * SAFETY: the chain only passes the handle through — every step that would
+ * query it is an injected stand-in above, and the one real call
+ * (`reapStaleWarmups`, inside `startStoreMaintenance`) already runs under that
+ * function's own catch. No assertion in this file depends on a live database.
+ */
 const db = {} as DatabaseSync;
 
 beforeEach(() => {
@@ -80,7 +90,7 @@ beforeEach(() => {
   recoverStrandedOperatorPlans.mockClear();
   reclaimTerminalTaskWorkspaces.mockClear();
   runMaintenancePass.mockClear();
-  runMaintenancePass.mockImplementation(() => ({}) as never);
+  runMaintenancePass.mockImplementation(() => EMPTY_PASS);
   startMaintenanceScheduler.mockClear();
 });
 
@@ -160,7 +170,18 @@ describe("takeDataRootWriterLock (G1)", () => {
  */
 describe("installCrashVisibilityHandlers (F20-8a)", () => {
   const GUARD = Symbol.for("viberr.crashVisibilityInstalled");
-  const slot = globalThis as unknown as Record<symbol, boolean | undefined>;
+
+  /** The process-global slot boot parks its once-only flag in — the same
+   *  well-known symbol `boot.server.ts` writes, so clearing it here really does
+   *  make the module believe nothing has installed the handlers yet. */
+  interface CrashFlagHost {
+    [GUARD]?: boolean;
+  }
+
+  // SAFETY: `GUARD` is a registry symbol under a viberr-namespaced name that
+  // nothing outside boot.server.ts reads or writes, and `true` is the only
+  // value that file ever stores there — so the slot holds that or nothing.
+  const slot = globalThis as CrashFlagHost;
 
   it("registers uncaughtException + unhandledRejection once, idempotently", () => {
     slot[GUARD] = undefined; // pretend nothing has installed them yet
@@ -181,7 +202,7 @@ describe("installCrashVisibilityHandlers (F20-8a)", () => {
 
 describe("reconcileRestartedWork (P14-RT-09)", () => {
   it("reclaims workspaces only after BOTH recovery passes have COMPLETED", async () => {
-    await reconcileRestartedWork(db);
+    await reconcileRestartedWork(db, reconcileDeps);
 
     expect(calls).toEqual([
       "reply-recovery:start",
@@ -195,7 +216,7 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
   it("a failing recovery pass never stops the rest of the chain", async () => {
     recoverUnreactedAgentRuns.mockRejectedValueOnce(new Error("boom"));
 
-    await expect(reconcileRestartedWork(db)).resolves.toBeUndefined();
+    await expect(reconcileRestartedWork(db, reconcileDeps)).resolves.toBeUndefined();
 
     expect(recoverStrandedOperatorPlans).toHaveBeenCalledTimes(1);
     expect(reclaimTerminalTaskWorkspaces).toHaveBeenCalledTimes(1);
@@ -210,7 +231,7 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
  */
 describe("startStoreMaintenance (gap 15)", () => {
   it("runs a boot pass and ARMS the periodic scheduler", () => {
-    startStoreMaintenance(db);
+    startStoreMaintenance(db, maintenanceDeps);
 
     expect(runMaintenancePass).toHaveBeenCalledTimes(1);
     expect(runMaintenancePass.mock.calls[0]![1]).toMatchObject({
@@ -228,7 +249,7 @@ describe("startStoreMaintenance (gap 15)", () => {
       throw new Error("boom");
     });
 
-    expect(() => startStoreMaintenance(db)).not.toThrow();
+    expect(() => startStoreMaintenance(db, maintenanceDeps)).not.toThrow();
     expect(startMaintenanceScheduler).toHaveBeenCalledTimes(1);
   });
 });
@@ -242,7 +263,14 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
   const bootCtx = createTestDbContext();
   afterEach(bootCtx.cleanup);
 
-  function integrityFields(): Record<string, unknown> {
+  /** The two fields gaps 18 + 16 added to boot's one integrity line — the only
+   *  ones these tests read off it. */
+  interface BootIntegrityLine {
+    build: BuildInfo;
+    disk: { free: string; total: string; status: DiskStatus } | null;
+  }
+
+  function integrityFields(): BootIntegrityLine {
     const info = vi.spyOn(logger, "info").mockImplementation(() => {});
     try {
       logBootIntegrity(bootCtx.makeDb());
@@ -250,7 +278,16 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
         ([msg]) => msg === "boot integrity check",
       );
       expect(line).toBeDefined();
-      return line![1] as Record<string, unknown>;
+      const fields = line![1]!;
+      // SAFETY: the logger types every call's fields as the open bag any caller
+      // may pass, but this line has ONE writer — `logBootIntegrity`, which
+      // builds it from its own `BootIntegrityFields`, where `build` is
+      // `getBuildInfo()`'s return and `disk` its formatted block or null.
+      return {
+        ...fields,
+        build: fields.build as BuildInfo,
+        disk: fields.disk as BootIntegrityLine["disk"],
+      };
     } finally {
       info.mockRestore();
     }

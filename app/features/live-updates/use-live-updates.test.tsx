@@ -1,18 +1,56 @@
 // @vitest-environment jsdom
+import { createContext, useContext, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import {
   REVALIDATE_DEBOUNCE_MS,
   SSE_REOPEN_BACKOFF_MS,
   useLiveUpdates,
 } from "./use-live-updates";
 
-const revalidate = vi.fn(() => Promise.resolve());
+/**
+ * The hook runs under a REAL data router, so `useRevalidator` is React Router's
+ * own and a revalidation is observable the way the product sees one: the route
+ * loader runs again. `hydrationData` starts the router initialized, so the tree
+ * paints synchronously and the initial load is not counted.
+ *
+ * The subject renders through a context slot rather than as the route's own
+ * element, so `rerender` with new props still reaches it.
+ */
+const SubjectContext = createContext<ReactNode>(null);
 
-vi.mock("react-router", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("react-router")>()),
-  useRevalidator: () => ({ revalidate, state: "idle" as const }),
-}));
+function Subject() {
+  return <>{useContext(SubjectContext)}</>;
+}
+
+let loaderRuns = 0;
+let router = makeRouter();
+
+function makeRouter() {
+  loaderRuns = 0;
+  return createMemoryRouter(
+    [
+      {
+        path: "*",
+        Component: Subject,
+        loader: () => {
+          loaderRuns += 1;
+          return null;
+        },
+      },
+    ],
+    { hydrationData: { loaderData: { "0": null } } },
+  );
+}
+
+function DataRouter({ children }: { children: ReactNode }) {
+  return (
+    <SubjectContext.Provider value={children}>
+      <RouterProvider router={router} />
+    </SubjectContext.Provider>
+  );
+}
 
 class FakeEventSource {
   static CONNECTING = 0;
@@ -46,7 +84,7 @@ class FakeEventSource {
   }
   emit(name: string, lastEventId = "") {
     for (const fn of this.listeners.get(name) ?? []) {
-      fn({ data: "{}", lastEventId } as MessageEvent<string>);
+      fn(new MessageEvent<string>(name, { data: "{}", lastEventId }));
     }
   }
   static last(): FakeEventSource {
@@ -65,7 +103,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("EventSource", FakeEventSource);
   FakeEventSource.instances = [];
-  revalidate.mockClear();
+  router = makeRouter();
 });
 
 afterEach(() => {
@@ -76,7 +114,9 @@ afterEach(() => {
 
 describe("useLiveUpdates", () => {
   it("subscribes one EventSource with the scope params", () => {
-    render(<Probe scopes={["project:viberr-core", "user"]} />);
+    render(<Probe scopes={["project:viberr-core", "user"]} />, {
+      wrapper: DataRouter,
+    });
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.last().url).toBe(
       "/resources/events?scope=project%3Aviberr-core&scope=user",
@@ -84,7 +124,7 @@ describe("useLiveUpdates", () => {
   });
 
   it("coalesces an event burst into ONE debounced revalidation", () => {
-    render(<Probe scopes={["user"]} />);
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
 
     act(() => {
@@ -92,28 +132,28 @@ describe("useLiveUpdates", () => {
       es.emit("task.updated", "2");
       es.emit("notification.created", "3");
     });
-    expect(revalidate).not.toHaveBeenCalled();
+    expect(loaderRuns).toBe(0);
 
     act(() => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS - 1);
     });
-    expect(revalidate).not.toHaveBeenCalled();
+    expect(loaderRuns).toBe(0);
 
     act(() => {
       vi.advanceTimersByTime(1);
     });
-    expect(revalidate).toHaveBeenCalledTimes(1);
+    expect(loaderRuns).toBe(1);
 
     // A later, separate event revalidates again.
     act(() => {
       es.emit("projection.rebuilt", "4");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
-    expect(revalidate).toHaveBeenCalledTimes(2);
+    expect(loaderRuns).toBe(2);
   });
 
   it("a fresh event inside the window pushes the trailing edge out", () => {
-    render(<Probe scopes={["user"]} />);
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
 
     act(() => {
@@ -123,24 +163,24 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(200);
     });
     // 400 ms elapsed but the second event reset the 300 ms window.
-    expect(revalidate).not.toHaveBeenCalled();
+    expect(loaderRuns).toBe(0);
     act(() => {
       vi.advanceTimersByTime(100);
     });
-    expect(revalidate).toHaveBeenCalledTimes(1);
+    expect(loaderRuns).toBe(1);
   });
 
   it("ignores the stream.open control hello (connecting must not revalidate)", () => {
-    render(<Probe scopes={["user"]} />);
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     act(() => {
       FakeEventSource.last().emit("stream.open", "9");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
-    expect(revalidate).not.toHaveBeenCalled();
+    expect(loaderRuns).toBe(0);
   });
 
   it("closes the stream and cancels pending revalidation on unmount", () => {
-    const { unmount } = render(<Probe scopes={["user"]} />);
+    const { unmount } = render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
     act(() => {
       es.emit("task.updated", "1");
@@ -150,7 +190,7 @@ describe("useLiveUpdates", () => {
     act(() => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
-    expect(revalidate).not.toHaveBeenCalled();
+    expect(loaderRuns).toBe(0);
   });
 
   /**
@@ -162,7 +202,7 @@ describe("useLiveUpdates", () => {
    * like live governance state.
    */
   it("reports a failed stream as paused and re-opens a FRESH one on backoff", () => {
-    render(<Probe scopes={["user"]} />);
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     const first = FakeEventSource.last();
     expect(lastPaused).toBe(false);
 
@@ -187,7 +227,7 @@ describe("useLiveUpdates", () => {
   });
 
   it("a transient error while the browser is still retrying does not pause", () => {
-    render(<Probe scopes={["user"]} />);
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
     act(() => {
       es.readyState = FakeEventSource.CONNECTING;
@@ -197,7 +237,7 @@ describe("useLiveUpdates", () => {
   });
 
   it("reconnects when the scope set changes", () => {
-    const { rerender } = render(<Probe scopes={["project:p"]} />);
+    const { rerender } = render(<Probe scopes={["project:p"]} />, { wrapper: DataRouter });
     const first = FakeEventSource.last();
     rerender(<Probe scopes={["project:p", "task:p/K-1"]} />);
     expect(first.closed).toBe(true);
@@ -215,13 +255,15 @@ describe("useLiveUpdates", () => {
    * skips the pull (its loaders just ran).
    */
   it("revalidates once when a SCOPE CHANGE reopens the stream (missed-event catch-up)", () => {
-    const { rerender } = render(<Probe scopes={["project:p", "user"]} />);
+    const { rerender } = render(<Probe scopes={["project:p", "user"]} />, {
+      wrapper: DataRouter,
+    });
     act(() => {
       FakeEventSource.last().onopen?.();
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
     // First stream of the surface's life: opening must NOT revalidate.
-    expect(revalidate).not.toHaveBeenCalled();
+    expect(loaderRuns).toBe(0);
 
     rerender(<Probe scopes={["project:p", "task:p/K-1", "user"]} />);
     act(() => {
@@ -229,6 +271,6 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
     // The reopened stream may have missed events emitted in the gap — one pull.
-    expect(revalidate).toHaveBeenCalledTimes(1);
+    expect(loaderRuns).toBe(1);
   });
 });

@@ -16,16 +16,19 @@ function profile(
   id: string,
   verdict: boolean | undefined,
 ): DeployedSpecialistView {
-  return {
+  const view: DeployedSpecialistView = {
     id,
     name: id,
     role: "reviewer",
     backend: "claude",
     model: "sonnet",
-    ...(verdict === undefined
-      ? {}
-      : { capabilities: { delivery: false, verdict, askHuman: false, browser: false } }),
   };
+  // An ABSENT `capabilities` key is the pre-UI-39 loader shape the label has to
+  // keep reading as "unknown", so it is only set when the caller states one.
+  if (verdict !== undefined) {
+    view.capabilities = { delivery: false, verdict, askHuman: false, browser: false };
+  }
+  return view;
 }
 
 describe("reviewingAgentsLabel", () => {

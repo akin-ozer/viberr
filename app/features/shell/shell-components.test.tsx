@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { NotificationView } from "~/features/notifications/notification-item";
@@ -29,7 +30,7 @@ function notification(i: number): NotificationView {
     taskKey: "VIB-142",
     occurredAt: new Date().toISOString(),
     unread: false,
-  } as NotificationView;
+  };
 }
 
 function renderIn(node: React.ReactNode) {
@@ -147,7 +148,7 @@ describe("P16-UI-12: the shell popovers dismiss on Escape, not on any press", ()
 });
 
 describe("Topbar: UI-03 paused chip + UI-55 shortcut hint", () => {
-  const topbar = (props: Record<string, unknown> = {}) => (
+  const topbar = (props: Partial<ComponentProps<typeof Topbar>> = {}) => (
     <Topbar
       projectSlug="viberr-core"
       projectName="Viberr Core"

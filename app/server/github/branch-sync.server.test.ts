@@ -119,6 +119,9 @@ describe("ensureTaskBranch", () => {
       dataRoot: store.dataRoot,
     });
     expect(file?.parsed.frontmatter.branch).toBe(branch);
+    // SAFETY: the SELECT list is the single `task_projections.branch` column, and
+    // the `result`/`file` assertions above already failed the test unless the
+    // reprojected row for VIB-201 exists carrying that branch.
     const row = store.db
       .prepare(
         `SELECT branch FROM task_projections WHERE project_slug = ? AND task_key = 'VIB-201'`,

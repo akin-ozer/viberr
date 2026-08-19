@@ -29,14 +29,14 @@ const DOC = path.join(ROOT, "docs", "architecture", "file-formats.md");
 const DOC_REL = "docs/architecture/file-formats.md";
 
 /** Spelled counts the prose uses; digits are handled separately. */
-const COUNT_WORDS: Record<string, number> = {
-  seven: 7,
-  eight: 8,
-  nine: 9,
-  ten: 10,
-  eleven: 11,
-  twelve: 12,
-};
+const COUNT_WORDS = new Map<string, number>([
+  ["seven", 7],
+  ["eight", 8],
+  ["nine", 9],
+  ["ten", 10],
+  ["eleven", 11],
+  ["twelve", 12],
+]);
 
 const MD = readFileSync(DOC, "utf8");
 
@@ -113,7 +113,7 @@ describe("N19-3: file-formats.md mirrors PACKET_OPTION_KINDS", () => {
         const token = m[1]!;
         const value = /^\d+$/.test(token)
           ? Number(token)
-          : COUNT_WORDS[token.toLowerCase()];
+          : COUNT_WORDS.get(token.toLowerCase());
         // "option kinds", "packet kinds" — prose that states no number.
         if (value !== undefined) stated.push(token);
       }
@@ -125,7 +125,7 @@ describe("N19-3: file-formats.md mirrors PACKET_OPTION_KINDS", () => {
     for (const token of stated) {
       const value = /^\d+$/.test(token)
         ? Number(token)
-        : COUNT_WORDS[token.toLowerCase()]!;
+        : COUNT_WORDS.get(token.toLowerCase())!;
       expect(
         value,
         `${DOC_REL} says "${token}" where PACKET_OPTION_KINDS has ${n}`,

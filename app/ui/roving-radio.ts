@@ -29,12 +29,12 @@ export function rovingRadioKeyDown(event: KeyboardEvent<HTMLElement>): void {
     .filter(
       (el) =>
         el.getAttribute("aria-disabled") !== "true" &&
-        !(el as HTMLButtonElement).disabled,
+        !(el instanceof HTMLButtonElement && el.disabled),
     );
   if (options.length < 2) return;
 
-  const active = document.activeElement as HTMLElement | null;
-  const current = active ? options.indexOf(active) : -1;
+  const active = document.activeElement;
+  const current = options.findIndex((el) => el === active);
   // An unfocused group starts from the checked option, so the first arrow key
   // lands somewhere meaningful rather than always at index 0.
   const from =

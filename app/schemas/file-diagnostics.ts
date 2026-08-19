@@ -34,7 +34,9 @@ export function diagInfo(
   message: string,
   path?: string,
 ): FileDiagnostic {
-  return { severity: "info", code, message, ...(path ? { path } : {}) };
+  const diagnostic: FileDiagnostic = { severity: "info", code, message };
+  if (path) diagnostic.path = path;
+  return diagnostic;
 }
 
 export function diagWarning(
@@ -42,7 +44,9 @@ export function diagWarning(
   message: string,
   path?: string,
 ): FileDiagnostic {
-  return { severity: "warning", code, message, ...(path ? { path } : {}) };
+  const diagnostic: FileDiagnostic = { severity: "warning", code, message };
+  if (path) diagnostic.path = path;
+  return diagnostic;
 }
 
 export function diagError(
@@ -51,11 +55,8 @@ export function diagError(
   path?: string,
   hardStop = false,
 ): FileDiagnostic {
-  return {
-    severity: "error",
-    code,
-    message,
-    ...(path ? { path } : {}),
-    ...(hardStop ? { hardStop: true } : {}),
-  };
+  const diagnostic: FileDiagnostic = { severity: "error", code, message };
+  if (path) diagnostic.path = path;
+  if (hardStop) diagnostic.hardStop = true;
+  return diagnostic;
 }

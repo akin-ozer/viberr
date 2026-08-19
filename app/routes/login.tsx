@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { data, Form, redirect, useNavigation } from "react-router";
+import { z } from "zod";
 import type { Route } from "./+types/login";
 import { assertCsrf, assertTrustedOrigin } from "~/server/auth/csrf.server";
 import {
@@ -26,9 +27,21 @@ import { Icon } from "~/ui/icon";
  *   "reset" — the forced set-new-password step (pwreset_required gate)
  */
 
-export function meta(_: Route.MetaArgs) {
+export function meta() {
   return [{ title: "Viberr — Sign in" }];
 }
+
+/** A form field that must be text: `FormData.get` also yields a `File` for a
+ *  file input, and a filename is not a redirect target. Anything but a string
+ *  reads as absent, which `safeReturnTo` then treats as "no destination". */
+const returnToField = z.string().nullable().catch(null);
+
+/** better-auth's social sign-in reply: the provider URL to hand the browser.
+ *  A reply without a usable one is a failure, handled by the caller's catch —
+ *  so a malformed body must not read as a destination. */
+const socialSignIn = z
+  .object({ url: z.string().min(1).optional().catch(undefined) })
+  .catch({});
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
@@ -56,11 +69,7 @@ export async function action({ request }: Route.ActionArgs) {
   const db = getDb();
   const formData = await request.formData();
   const intent = formData.get("intent");
-  const returnTo = safeReturnTo(
-    typeof formData.get("returnTo") === "string"
-      ? (formData.get("returnTo") as string)
-      : null,
-  );
+  const returnTo = safeReturnTo(returnToField.parse(formData.get("returnTo")));
 
   if (intent === "login") {
     // Already signed in (e.g. double submit / second tab)? Never create a
@@ -393,7 +402,7 @@ export default function Login({
         // fetch() resolves on 4xx/5xx, so an error payload would otherwise be
         // read as a successful sign-in response.
         if (!res.ok) throw new Error("sign-in request failed");
-        const body = (await res.json()) as { url?: string };
+        const body = socialSignIn.parse(await res.json());
         if (body.url) {
           window.location.href = body.url;
           return;

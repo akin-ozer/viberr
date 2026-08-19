@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RouterContextProvider } from "react-router";
 import {
   setupAppTest,
   type AppTestContext,
@@ -26,17 +27,23 @@ afterAll(() => app.cleanup());
 
 async function runLoader(slug: string, cookie?: string) {
   const { loader } = await import("~/routes/project.review");
+  const request = app.request(`/projects/${slug}/review`, cookie ? { cookie } : {});
   return loader({
-    request: app.request(`/projects/${slug}/review`, cookie ? { cookie } : {}),
+    request,
+    url: new URL(request.url),
     params: { slug },
-    context: {},
-  } as never);
+    pattern: "/projects/:slug/review",
+    context: new RouterContextProvider(),
+  });
 }
 
 describe("/projects/:slug/review", () => {
   it("redirects signed-out users to /login", async () => {
     const thrown = await runLoader("viberr-core").catch((e) => e);
     expect(thrown).toBeInstanceOf(Response);
+    // SAFETY: the assertion above pins `thrown instanceof Response` and throws
+    // otherwise — `requireProjectMember` signs a viewer out by throwing
+    // `redirect()`, which is a Response.
     expect((thrown as Response).status).toBe(302);
   });
 
@@ -48,12 +55,7 @@ describe("/projects/:slug/review", () => {
 
   it("splits the seeded review stage: VIB-142 waits on a human, VIB-145 with agents", async () => {
     const { cookie } = await app.cookieFor(ardaId);
-    const result = (await runLoader("viberr-core", cookie)) as {
-      slug: string;
-      ready: ReviewRowView[];
-      working: ReviewRowView[];
-      total: number;
-    };
+    const result = await runLoader("viberr-core", cookie);
 
     expect(result.total).toBe(2);
     // F10-11/F10-15: acceptance readiness is revision-bound now. VIB-142 has a
@@ -82,9 +84,7 @@ describe("/projects/:slug/review", () => {
 
   it("ships the acceptance-authority signal the queue copy needs (P13-D-9)", async () => {
     const { cookie } = await app.cookieFor(ardaId);
-    const result = (await runLoader("viberr-core", cookie)) as {
-      acceptance: { operatorCanAccept: boolean; operatorName: string };
-    };
+    const result = await runLoader("viberr-core", cookie);
     // The loader used to pass `stageNames` and nothing else, so the page's
     // "always a human action" claim could not be qualified at all. The seeded
     // operator holds `completion-for-acceptance: recommend`, so the strict

@@ -17,6 +17,7 @@ import {
   Feedback,
   PointerActivationConstraints,
 } from "@dnd-kit/dom";
+import { z } from "zod";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -34,7 +35,7 @@ import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
-import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import { countLabel } from "~/shared/text/plural";
 
 /**
@@ -50,6 +51,14 @@ import { countLabel } from "~/shared/text/plural";
 type ActionResult =
   | { ok: true; toast: string; stageId?: string }
   | { ok: false; error: string };
+
+/** The route hands the viewer's project role through as a raw string. Decode it
+ *  against the canonical list once, so every gate below reads a domain value
+ *  instead of a hopeful cast — an unrecognized role holds nothing, which is
+ *  what `roleCan` already answered for one. */
+function asProjectRole(raw: string | null): ProjectRole | null {
+  return PROJECT_ROLES.find((role) => role === raw) ?? null;
+}
 
 /* F19-33: the panel-head counts and the trailing panel notes below used to be
    styled by two private consts here — `PANEL_COUNT_STYLE` (a byte copy of the
@@ -300,10 +309,8 @@ const STAGE_PLUGINS = defaultPreset.plugins.filter(
 
 /** Sortable payload — the id of the row below this one, so a drop past a row's
  *  midpoint can resolve to "after it" without a global lookup (board parity). */
-interface StageDragData {
-  nextId: string | null;
-  [key: string]: unknown;
-}
+const stageDragDataSchema = z.object({ nextId: z.string().nullable() });
+type StageDragData = z.infer<typeof stageDragDataSchema>;
 
 /**
  * Resolve a finished stage drag — or a Move-menu pick — into the ordered id
@@ -426,7 +433,7 @@ function StageMoveMenu({
   const onMenuKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const all = items();
     if (all.length === 0) return;
-    const i = all.indexOf(document.activeElement as HTMLButtonElement);
+    const i = all.findIndex((item) => item === document.activeElement);
     if (event.key === "Escape") {
       event.preventDefault();
       // Keep the document-level listener from acting on the same press; focus
@@ -582,7 +589,7 @@ function StageRow({
           onFocus={(e) => e.target.select()}
           onBlur={(e) => onCommitName(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Enter") e.currentTarget.blur();
             if (e.key === "Escape") onCancelRename();
           }}
         />
@@ -717,8 +724,8 @@ export function StagesPanel({
     if (!target || !element) return;
     const rect = element.getBoundingClientRect();
     const id = String(target.id);
-    const nextId =
-      (target.data as Partial<StageDragData> | undefined)?.nextId ?? null;
+    const payload = stageDragDataSchema.safeParse(target.data);
+    const nextId = payload.success ? payload.data.nextId : null;
     const before =
       event.operation.position.current.y < rect.top + rect.height / 2
         ? id
@@ -1425,7 +1432,7 @@ export function DangerZone({
   // action the server actually checks — the same way `canGrant` already routes
   // through the shared helper. (`edit-policy` resolves to admin-only today, so
   // this is behavior-preserving; it stops being a hardcoded assumption.)
-  const canManageLifecycle = roleCan(myRole as ProjectRole | null, "edit-policy");
+  const canManageLifecycle = roleCan(asProjectRole(myRole), "edit-policy");
 
   return (
     <div className="panel danger-panel">
@@ -1541,9 +1548,10 @@ export function SettingsPage({
   // `manage-members` resolve to the same admin tier TODAY — which is exactly
   // why the literal survived and exactly why it can't stay: re-tier either one
   // and the panels that don't belong to it would have followed along.
-  const canEditPolicy = roleCan(myRole as ProjectRole | null, "edit-policy");
-  const canManageMembers = roleCan(myRole as ProjectRole | null, "manage-members");
-  const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
+  const role = asProjectRole(myRole);
+  const canEditPolicy = roleCan(role, "edit-policy");
+  const canManageMembers = roleCan(role, "manage-members");
+  const canGrant = roleCan(role, "grant-github-scope");
   const slug = data.project.slug;
 
   // Stage rename edit-mode lives here so a fresh add-stage response can
@@ -1658,17 +1666,20 @@ export function SettingsPage({
             branchCleanup={data.branchCleanupOnMerge}
             repairBusy={repoFetcher.state !== "idle"}
             repairResult={repoFetcher.data}
-            onRepair={(repoInput, confirmFootprint) =>
+            onRepair={(repoInput, confirmFootprint) => {
+              const fields = {
+                intent: "repair-repo",
+                _csrf: csrf,
+                repo: repoInput,
+              };
+              // Only a confirmed repair carries the field: the route reads it
+              // as `confirmFootprint === "1"`, so it is sent or absent, never
+              // blank.
               repoFetcher.submit(
-                {
-                  intent: "repair-repo",
-                  _csrf: csrf,
-                  repo: repoInput,
-                  ...(confirmFootprint ? { confirmFootprint: "1" } : {}),
-                },
+                confirmFootprint ? { ...fields, confirmFootprint: "1" } : fields,
                 { method: "post" },
-              )
-            }
+              );
+            }}
             onSetBranchCleanup={(enabled) =>
               repoFetcher.submit(
                 {

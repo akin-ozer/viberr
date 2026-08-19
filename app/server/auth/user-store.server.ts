@@ -1,4 +1,8 @@
-import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import type {
+  DatabaseSync,
+  SQLInputValue,
+  SQLOutputValue,
+} from "node:sqlite";
 import {
   mapUserRow,
   type UserRecord,
@@ -25,46 +29,60 @@ const USER_SELECT = `SELECT users.*,
   ) AS has_password
   FROM users`;
 
+/** The single decode point for every USER_SELECT read in this module; an
+ *  absent row (the query matched nothing) decodes to null. */
+function toUserRecord(
+  row: Record<string, SQLOutputValue> | undefined,
+): UserRecord | null {
+  // SAFETY: db/migrations/0001_baseline.sql defines exactly the `users`
+  // columns UserRow names, and USER_SELECT projects all of them plus the
+  // derived `has_password` flag. `role` — the one column carrying a domain
+  // vocabulary — is re-coerced by mapUserRow rather than trusted from the row.
+  const user = row as UserRow | undefined;
+  return user ? mapUserRow(user) : null;
+}
+
+/** `count(*)` always answers with exactly one row holding one integer `c`. */
+function countRows(db: DatabaseSync, sql: string): number {
+  return Number(db.prepare(sql).get()?.c ?? 0);
+}
+
 export function findUserByEmail(
   db: DatabaseSync,
   email: string,
 ): UserRecord | null {
-  const row = db
-    .prepare(`${USER_SELECT} WHERE lower(users.email) = ?`)
-    .get(normalizeEmail(email)) as UserRow | undefined;
-  return row ? mapUserRow(row) : null;
+  return toUserRecord(
+    db
+      .prepare(`${USER_SELECT} WHERE lower(users.email) = ?`)
+      .get(normalizeEmail(email)),
+  );
 }
 
 export function findUserById(
   db: DatabaseSync,
   id: string,
 ): UserRecord | null {
-  const row = db.prepare(`${USER_SELECT} WHERE users.id = ?`).get(id) as
-    | UserRow
-    | undefined;
-  return row ? mapUserRow(row) : null;
+  return toUserRecord(db.prepare(`${USER_SELECT} WHERE users.id = ?`).get(id));
 }
 
 export function listUsers(db: DatabaseSync): UserRecord[] {
-  const rows = db
+  return db
     .prepare(`${USER_SELECT} ORDER BY users.created_at ASC, users.id ASC`)
-    .all() as unknown as UserRow[];
-  return rows.map(mapUserRow);
+    .all()
+    .map(toUserRecord)
+    .filter((user) => user !== null);
 }
 
 export function countUsers(db: DatabaseSync): number {
-  const row = db.prepare(`SELECT count(*) AS c FROM users`).get() as {
-    c: number;
-  };
-  return row.c;
+  return countRows(db, `SELECT count(*) AS c FROM users`);
 }
 
 /** Active (non-disabled) admins — used by the last-admin lockout guard. */
 export function countActiveAdmins(db: DatabaseSync): number {
-  const row = db
-    .prepare(`SELECT count(*) AS c FROM users WHERE role = 'admin' AND disabled = 0`)
-    .get() as { c: number };
-  return row.c;
+  return countRows(
+    db,
+    `SELECT count(*) AS c FROM users WHERE role = 'admin' AND disabled = 0`,
+  );
 }
 
 export interface InsertUserInput {
@@ -107,17 +125,18 @@ export function insertUser(
   return created;
 }
 
-const UPDATABLE_COLUMNS = {
-  name: "name",
-  title: "title",
-  role: "role",
-  disabled: "disabled",
-  idp: "idp",
-  theme: "theme",
-  pwresetRequired: "pwreset_required",
-  avatarTone: "avatar_tone",
-  githubHandle: "github_handle",
-} as const;
+/** Patch field → column. Iteration order is the SET-clause order. */
+const UPDATABLE_COLUMNS = new Map<keyof UserFieldPatch, string>([
+  ["name", "name"],
+  ["title", "title"],
+  ["role", "role"],
+  ["disabled", "disabled"],
+  ["idp", "idp"],
+  ["theme", "theme"],
+  ["pwresetRequired", "pwreset_required"],
+  ["avatarTone", "avatar_tone"],
+  ["githubHandle", "github_handle"],
+]);
 
 export interface UserFieldPatch {
   name?: string;
@@ -139,11 +158,12 @@ export function updateUserFields(
 ): UserRecord | null {
   const sets: string[] = [];
   const values: SQLInputValue[] = [];
-  for (const [key, column] of Object.entries(UPDATABLE_COLUMNS)) {
+  for (const [key, column] of UPDATABLE_COLUMNS) {
     if (!(key in patch)) continue;
-    const value = patch[key as keyof UserFieldPatch];
+    const value = patch[key];
     sets.push(`${column} = ?`);
-    values.push(typeof value === "boolean" ? (value ? 1 : 0) : (value ?? null));
+    // Flags are 0/1 columns; a present-but-undefined field writes NULL.
+    values.push(value === true ? 1 : value === false ? 0 : (value ?? null));
   }
   if (sets.length > 0) {
     sets.push(`updated_at = ?`);

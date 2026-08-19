@@ -38,11 +38,11 @@ import type {
  *     always refuses.
  */
 
-const STRICTNESS: Record<Boundary, number> = {
+const STRICTNESS = {
   auto: 0,
   approval: 1,
   human: 2,
-};
+} satisfies Record<Boundary, number>;
 
 /** The tighter of two boundaries (auto < approval < human). */
 export function strictestBoundary(a: Boundary, b: Boundary): Boundary {
@@ -274,6 +274,13 @@ export function realignChainToStages(
   return chain;
 }
 
+/** The walk's result: the stage ids governance can actually reach in order,
+ *  and the ones no rule reaches. */
+export interface StageFlow {
+  chain: string[];
+  offChain: string[];
+}
+
 /**
  * The governed path through the board, walked from the entry stage along real
  * `workflow` rules — what Policy's flow map draws (P13-D-1). Drawing an arrow
@@ -287,7 +294,7 @@ export function stageFlowPath(
   // `TransitionView` read model straight through — the walk needs endpoints
   // only, and the two shapes agree on those.
   workflow: readonly { from: string; to: string }[],
-): { chain: string[]; offChain: string[] } {
+): StageFlow {
   const known = new Set(stages.map((s) => s.id));
   const chain: string[] = [];
   const seen = new Set<string>();

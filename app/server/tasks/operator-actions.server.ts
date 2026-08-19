@@ -1,5 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { CapabilityMode } from "~/schemas/project-file.schema";
+import { z } from "zod";
+import type {
+  AgentDeploymentDefinition,
+  CapabilityMode,
+} from "~/schemas/project-file.schema";
 import {
   deliveringEngagement,
   supportingEngagements,
@@ -37,6 +41,7 @@ import {
   recordAudit,
   SYSTEM_ACTOR,
   type AuditActor,
+  type AuditEventInput,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -170,21 +175,18 @@ export interface OperatorActionResult {
 
 // ------------------------------------------------------------- authority
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function readAutonomy(definition: unknown): OperatorAutonomy {
-  if (isRecord(definition) && definition.autonomy === "full") return "full";
-  return "supervised";
+function readAutonomy(
+  definition: AgentDeploymentDefinition | undefined,
+): OperatorAutonomy {
+  return definition?.autonomy === "full" ? "full" : "supervised";
 }
 
 /** Autonomy ordered low → high. A run may sit AT or BELOW the project's
  *  configured level; nothing may sit above it. */
-const AUTONOMY_RANK: Record<OperatorAutonomy, number> = {
+const AUTONOMY_RANK = {
   supervised: 0,
   full: 1,
-};
+} satisfies Record<OperatorAutonomy, number>;
 
 /** The audit fact recorded when a run asked for more autonomy than the project
  *  configured and was reduced to the ceiling (R19-A). Exported so the audit
@@ -212,10 +214,17 @@ export const AUTONOMY_CLAMPED_AUDIT_ACTION = "task.operator.autonomy_clamped";
  * Pure and exported so the clamp can be unit-asserted, and so the UI can offer
  * exactly the options that will actually run.
  */
+export interface ClampedAutonomy {
+  /** The level the run actually gets — never above the ceiling. */
+  autonomy: OperatorAutonomy;
+  /** What the run asked for when the clamp BIT; null when nothing was reduced. */
+  clampedFrom: OperatorAutonomy | null;
+}
+
 export function clampAutonomy(
   requested: OperatorAutonomy | undefined,
   ceiling: OperatorAutonomy,
-): { autonomy: OperatorAutonomy; clampedFrom: OperatorAutonomy | null } {
+): ClampedAutonomy {
   if (requested === undefined) return { autonomy: ceiling, clampedFrom: null };
   if (AUTONOMY_RANK[requested] <= AUTONOMY_RANK[ceiling]) {
     return { autonomy: requested, clampedFrom: null };
@@ -241,15 +250,18 @@ function auditAutonomyClamp(
   ceiling: OperatorAutonomy,
 ): void {
   if (!overrides.db) return;
-  recordAudit(overrides.db, {
+  const event: AuditEventInput = {
     action: AUTONOMY_CLAMPED_AUDIT_ACTION,
     actor: overrides.actor ?? SYSTEM_ACTOR,
     subjectKind: "project",
     subjectId: projectSlug,
     projectSlug,
-    ...(overrides.taskKey ? { taskKey: overrides.taskKey } : {}),
     details: { requested: clampedFrom, ranAt: ceiling, configured: ceiling },
-  });
+  };
+  // A project-level resolve carries no task; the audit row stays task-less
+  // rather than pointing at an empty key.
+  if (overrides.taskKey) event.taskKey = overrides.taskKey;
+  recordAudit(overrides.db, event);
 }
 
 /** Per-run overrides + the optional audit context the clamp needs. */
@@ -329,7 +341,7 @@ export function operatorAutonomyFor(
       (a) => effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY).kind === "operator",
     );
     if (!deployment) return "supervised";
-    return readAutonomy((deployment as Record<string, unknown>).definition);
+    return readAutonomy(deployment.definition);
   } catch {
     return "supervised";
   }
@@ -388,7 +400,7 @@ export function resolveOperatorAuthority(
   const policy = new Map<string, CapabilityMode>(
     deployment.capabilities.map((c) => [c.capabilityId, c.mode]),
   );
-  const definition = (deployment as Record<string, unknown>).definition;
+  const definition = deployment.definition;
   const declaredBackend = deploymentBackend(view);
   const backend: RealBackend = overrides.backend ?? declaredBackend;
 
@@ -421,10 +433,7 @@ export function resolveOperatorAuthority(
     skills: view.resources.skills,
     kb: view.resources.kb ?? [],
     mcps: view.resources.mcps ?? [],
-    persona:
-      isRecord(definition) && typeof definition.persona === "string"
-        ? definition.persona.trim() || null
-        : null,
+    persona: definition?.persona?.trim() || null,
     deployed: true,
     humanGatedBeforeWork,
   };
@@ -697,9 +706,11 @@ async function addRecommendation(
     kind: rec.kind,
     label: rec.label,
     detail: reasoning,
-    ...(rec.profileId ? { profileId: rec.profileId } : {}),
-    ...(rec.toStageId ? { toStageId: rec.toStageId } : {}),
   };
+  // A recommendation carries only the targets its kind has — the dedupe below
+  // and the card renderer both read these keys' presence.
+  if (rec.profileId) recommendation.profileId = rec.profileId;
+  if (rec.toStageId) recommendation.toStageId = rec.toStageId;
   // Same disclosure the narration path carries (S5-G3): the reasoning is
   // operator prose and can tag a human, so an ambiguous handle must not vanish.
   const commentText = withAmbiguityDisclosure(
@@ -797,6 +808,20 @@ export interface OperatorOpenPacketInput {
 
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
 
+/** `agent_runs.backend` is NOT NULL with a CHECK; `agent_profile_id` is read
+ *  as nullable because a row that names no profile must not sink the lookup. */
+const lastAgentRunSchema = z.object({
+  backend: z.string(),
+  agent_profile_id: z.string().nullable(),
+});
+
+interface RetryBackendDefaults {
+  /** The backend to retry on — the OTHER one from the failure. */
+  backend: RealBackend;
+  /** The agent to re-run, when one can be identified. */
+  profileId?: string;
+}
+
 /**
  * B1 — what a `retry_other_backend` option retries ON, when the operator did
  * not say.
@@ -820,26 +845,28 @@ function retryOtherBackendDefaults(
   taskKey: string,
   frontmatter: { engagements: Engagement[] },
   authority: OperatorAuthority,
-): { backend: RealBackend; profileId?: string } {
-  const lastAgentRun = db
-    .prepare(
-      `SELECT backend, agent_profile_id FROM agent_runs
+): RetryBackendDefaults {
+  const row = lastAgentRunSchema.safeParse(
+    db
+      .prepare(
+        `SELECT backend, agent_profile_id FROM agent_runs
        WHERE project_slug = ? AND task_key = ? AND kind IN ('primary', 'reviewer')
        ORDER BY rowid DESC LIMIT 1`,
-    )
-    .get(projectSlug, taskKey) as
-    | { backend: string; agent_profile_id: string | null }
-    | undefined;
+      )
+      .get(projectSlug, taskKey),
+  );
+  const lastAgentRun = row.success ? row.data : null;
   const delivering = deliveringEngagement(frontmatter);
   const failed = lastAgentRun?.backend ?? delivering?.backend ?? authority.backend;
   const profileId = lastAgentRun?.agent_profile_id ?? delivering?.profileId;
-  return {
+  const defaults: RetryBackendDefaults = {
     backend: failed === "codex" ? "claude" : "codex",
-    // Stamped so the retry re-runs the agent that failed rather than falling
-    // back to the delivering one, and so `withdrawSupersededStuckPacket` joins
-    // the packet to the right agent's success.
-    ...(profileId ? { profileId } : {}),
   };
+  // Stamped so the retry re-runs the agent that failed rather than falling
+  // back to the delivering one, and so `withdrawSupersededStuckPacket` joins
+  // the packet to the right agent's success.
+  if (profileId) defaults.profileId = profileId;
+  return defaults;
 }
 
 /** Open a typed human-decision packet and notify the task's supervisors. */
@@ -917,16 +944,19 @@ export async function operatorOpenPacket(
     const retry = o.kind === "retry_other_backend" ? retryDefaults : null;
     const backend = o.backend ?? retry?.backend;
     const profileId = o.profileId ?? retry?.profileId;
-    return {
+    const option: PacketOption = {
       kind: o.kind,
       t: o.title.trim() || o.kind,
       d: (o.detail ?? "").trim(),
       rec,
-      ...(o.ev ? { ev: o.ev } : {}),
-      ...(backend ? { backend } : {}),
-      ...(profileId ? { profileId } : {}),
-      ...(o.deleteBranch ? { deleteBranch: true } : {}),
     };
+    // Each of these exists on the stored option ONLY when it was supplied —
+    // `resolvePacket` branches on their presence.
+    if (o.ev) option.ev = o.ev;
+    if (backend) option.backend = backend;
+    if (profileId) option.profileId = profileId;
+    if (o.deleteBranch) option.deleteBranch = true;
+    return option;
   });
   if (!recSeen && options[0]) options[0].rec = true;
 
@@ -1294,6 +1324,27 @@ function capRecommendationLabel(label: string): string {
     : label;
 }
 
+/** One refused recommendation, as the snapshot states it. */
+interface DeclinedRecommendation {
+  kind: string;
+  label: string;
+  /** When the human refused it (the audit row's `occurred_at`). */
+  at: string;
+}
+
+/** `audit_events.occurred_at` is TEXT NOT NULL; `details_json` is nullable. */
+const dismissalRowsSchema = z.array(
+  z.object({ occurred_at: z.string(), details_json: z.string().nullable() }),
+);
+
+/** A dismissal's details. A row that cannot name WHAT was declined is worse
+ *  than silent — it would tell the model "something was refused" with nothing
+ *  to match on — so `label` is required and a junk `kind` degrades instead. */
+const dismissalDetailsSchema = z.object({
+  kind: z.string().catch("unknown"),
+  label: z.string().min(1),
+});
+
 /**
  * [1] The recommendations a human already REFUSED on this task, newest first.
  *
@@ -1307,41 +1358,54 @@ function declinedRecommendations(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-): { kind: string; label: string; at: string }[] {
-  const rows = db
-    .prepare(
-      `SELECT occurred_at, details_json FROM audit_events
+): DeclinedRecommendation[] {
+  const rows = dismissalRowsSchema.parse(
+    db
+      .prepare(
+        `SELECT occurred_at, details_json FROM audit_events
         WHERE project_slug = ? AND task_key = ? AND action = ?
         ORDER BY occurred_at DESC, rowid DESC
         LIMIT ?`,
-    )
-    .all(
-      projectSlug,
-      taskKey,
-      RECOMMENDATION_DISMISSED_AUDIT_ACTION,
-      MAX_SNAPSHOT_RECOMMENDATIONS,
-    ) as { occurred_at: string; details_json: string | null }[];
+      )
+      .all(
+        projectSlug,
+        taskKey,
+        RECOMMENDATION_DISMISSED_AUDIT_ACTION,
+        MAX_SNAPSHOT_RECOMMENDATIONS,
+      ),
+  );
   return rows.flatMap((row) => {
-    let details: { kind?: unknown; label?: unknown };
+    if (!row.details_json) return [];
+    let raw: unknown;
     try {
-      details = row.details_json
-        ? (JSON.parse(row.details_json) as { kind?: unknown; label?: unknown })
-        : {};
+      raw = JSON.parse(row.details_json);
     } catch {
       return [];
     }
-    // A row whose details cannot name WHAT was declined is worse than silent —
-    // it would tell the model "something was refused" with nothing to match on.
-    if (typeof details.label !== "string" || details.label.length === 0) return [];
+    const details = dismissalDetailsSchema.safeParse(raw);
+    if (!details.success) return [];
     return [
       {
-        kind: typeof details.kind === "string" ? details.kind : "unknown",
-        label: capRecommendationLabel(details.label),
+        kind: details.data.kind,
+        label: capRecommendationLabel(details.data.label),
         at: row.occurred_at,
       },
     ];
   });
 }
+
+/** `users.name` is TEXT NOT NULL; a missing row simply has no owner name. */
+const userNameSchema = z.object({ name: z.string() });
+
+/** `agent_runs.kind` and `state` are NOT NULL under CHECK constraints, and the
+ *  query narrows `state` further to the two live values. */
+const liveRunRowsSchema = z.array(
+  z.object({
+    kind: z.enum(["operator", "primary", "reviewer"]),
+    agent_profile_id: z.string().nullable(),
+    state: z.enum(["queued", "running"]),
+  }),
+);
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
 export function operatorSnapshot(
@@ -1373,9 +1437,9 @@ export function operatorSnapshot(
   );
 
   const ownerName = fm.ownerUserId
-    ? ((db
-        .prepare(`SELECT name FROM users WHERE id = ?`)
-        .get(fm.ownerUserId) as { name: string } | undefined)?.name ?? null)
+    ? (userNameSchema.safeParse(
+        db.prepare(`SELECT name FROM users WHERE id = ?`).get(fm.ownerUserId),
+      ).data?.name ?? null)
     : null;
 
   return {
@@ -1463,24 +1527,22 @@ export function operatorSnapshot(
     repo: project.parsed.frontmatter.repo ?? null,
     // R19-8: the "nothing to deliver" shape, stated outright.
     noChanges: noChangeApplies(fm),
-    liveRuns: (
-      db
-        .prepare(
-          `SELECT kind, agent_profile_id, state FROM agent_runs
+    liveRuns: liveRunRowsSchema
+      .parse(
+        db
+          .prepare(
+            `SELECT kind, agent_profile_id, state FROM agent_runs
            WHERE project_slug = ? AND task_key = ?
              AND state IN ('queued', 'running')
            ORDER BY rowid`,
-        )
-        .all(projectSlug, taskKey) as {
-        kind: string;
-        agent_profile_id: string | null;
-        state: string;
-      }[]
-    ).map((r) => ({
-      kind: r.kind as "operator" | "primary" | "reviewer",
-      profileId: r.agent_profile_id,
-      state: r.state as "queued" | "running",
-    })),
+          )
+          .all(projectSlug, taskKey),
+      )
+      .map((r) => ({
+        kind: r.kind,
+        profileId: r.agent_profile_id,
+        state: r.state,
+      })),
     autonomy: authority.autonomy,
     policy: Object.fromEntries(authority.policy),
   };
@@ -1668,6 +1730,15 @@ export async function operatorSetGoal(
   return { outcome: "done", message: "Task goal drafted." };
 }
 
+/** The engagement request both assignment entry points take. */
+export interface OperatorAssignInput {
+  projectSlug: string;
+  taskKey: string;
+  profileId: string;
+  /** The operator's stated reason, when it gave one. */
+  reason?: string;
+}
+
 /**
  * Engage the DELIVERING agent (capability id `assign-primary-specialist`).
  *
@@ -1680,7 +1751,7 @@ export async function operatorSetGoal(
 export async function operatorAssignSpecialist(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; profileId: string; reason?: string },
+  input: OperatorAssignInput,
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   const g = gate(authority, "assign-primary-specialist");
@@ -1748,7 +1819,7 @@ export async function operatorRunSpecialist(
 export async function operatorAssignReviewer(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; profileId: string; reason?: string },
+  input: OperatorAssignInput,
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   const g = gate(authority, "summon-reviewers");
@@ -1849,12 +1920,18 @@ async function ensureTaskBranchBestEffort(
   }
 }
 
+interface TaskContext {
+  title: string;
+  goal: string;
+  stageName: string;
+}
+
 /** Title / goal / current stage name for building a default prompt directive. */
 function taskContext(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-): { title: string; goal: string; stageName: string } {
+): TaskContext {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   const project = readProjectFile({
     projectSlug,
@@ -1868,17 +1945,22 @@ function taskContext(
   return { title, goal, stageName };
 }
 
+/** The prompt request both directive entry points take. */
+export interface OperatorPromptInput {
+  projectSlug: string;
+  taskKey: string;
+  profileId: string;
+  /** The "@handle …" instruction; a default is built when absent. */
+  directive?: string;
+  /** The operator's stated reason, when it gave one. */
+  reason?: string;
+}
+
 /** Engage and prompt the stage's DELIVERING agent, or recommend the handoff. */
 export async function operatorPromptSpecialist(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    profileId: string;
-    directive?: string;
-    reason?: string;
-  },
+  input: OperatorPromptInput,
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   const g = gate(authority, "assign-primary-specialist");
@@ -1958,13 +2040,7 @@ export async function operatorPromptSpecialist(
 export async function operatorPromptReviewer(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    profileId: string;
-    directive?: string;
-    reason?: string;
-  },
+  input: OperatorPromptInput,
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   const g = gate(authority, "summon-reviewers");
@@ -2028,17 +2104,21 @@ export async function operatorPromptReviewer(
 
 // ------------------------------------------------- generic agent dispatch
 
+/** One agent-selection decision, as the trace records it. */
+interface AgentSelection {
+  projectSlug: string;
+  taskKey: string;
+  profileId: string;
+  delivers: boolean;
+  /** The operator's stated reason, when it gave one. */
+  reason?: string;
+}
+
 /** Best-effort audit trace for every operator profile selection. */
 function recordAgentSelectionTrace(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    profileId: string;
-    delivers: boolean;
-    reason?: string;
-  },
+  input: AgentSelection,
 ): void {
   try {
     const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
@@ -2088,21 +2168,14 @@ export async function operatorEngageAgent(
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   const { profileId, projectSlug, taskKey } = input;
-  const base = { projectSlug, taskKey, profileId };
+  const assignment: OperatorAssignInput = { projectSlug, taskKey, profileId };
+  // The reason is the operator's own words; an empty one must not reach the
+  // engagement as a blank rationale.
+  if (input.reason) assignment.reason = input.reason;
   recordAgentSelectionTrace(db, ctx, input);
   return input.delivers
-    ? operatorAssignSpecialist(
-        db,
-        ctx,
-        { ...base, ...(input.reason ? { reason: input.reason } : {}) },
-        authority,
-      )
-    : operatorAssignReviewer(
-        db,
-        ctx,
-        { ...base, ...(input.reason ? { reason: input.reason } : {}) },
-        authority,
-      );
+    ? operatorAssignSpecialist(db, ctx, assignment, authority)
+    : operatorAssignReviewer(db, ctx, assignment, authority);
 }
 
 /** Resolve whether `profileId` names the task's delivering engagement (or the
@@ -2205,25 +2278,46 @@ export async function operatorPromptAgentGeneric(
     input.profileId,
     input.delivers,
   );
-  // F10-35: prompt_agent is also a routing decision — record its selection trace.
-  recordAgentSelectionTrace(db, ctx, {
+  const selection: AgentSelection = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     profileId: input.profileId,
     delivers,
-    ...(input.reason ? { reason: input.reason } : {}),
-  });
-  const base = {
+  };
+  // The reason is the operator's own words; an empty one is no rationale.
+  if (input.reason) selection.reason = input.reason;
+  // F10-35: prompt_agent is also a routing decision — record its selection trace.
+  recordAgentSelectionTrace(db, ctx, selection);
+  const prompt: OperatorPromptInput = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     profileId: input.profileId,
-    ...(input.directive ? { directive: input.directive } : {}),
-    ...(input.reason ? { reason: input.reason } : {}),
   };
+  // Both are optional by contract: an absent directive is what makes the
+  // callee build its default one, and an absent reason is no rationale.
+  if (input.directive) prompt.directive = input.directive;
+  if (input.reason) prompt.reason = input.reason;
   return delivers
-    ? operatorPromptSpecialist(db, ctx, base, authority)
-    : operatorPromptReviewer(db, ctx, base, authority);
+    ? operatorPromptSpecialist(db, ctx, prompt, authority)
+    : operatorPromptReviewer(db, ctx, prompt, authority);
 }
+
+/** The delivery audit row's details. */
+type DeliveryAuditDetails = {
+  status: string;
+  /** Present only when a review PR actually exists. */
+  prNumber?: number;
+};
+
+/** The move an operator transition asks `transitionStage` to perform. */
+type OperatorTransitionMove = {
+  projectSlug: string;
+  taskKey: string;
+  toStageId: string;
+  reason?: string;
+  /** R7-4 rework routing — a validated backward move on failing work. */
+  rework?: boolean;
+};
 
 /**
  * R15-2: DELIVER the task — push the deliverer's branch and open (or reuse) the
@@ -2287,6 +2381,10 @@ export async function operatorDeliverForReview(
     input.taskKey,
     OPERATOR_TASK_ACTOR,
   );
+  // The PR number exists only on a DELIVERED outcome; a `prNumber` key on a
+  // failed delivery would name a pull request that was never opened.
+  const details: DeliveryAuditDetails = { status: outcome.status };
+  if (outcome.status === "delivered") details.prNumber = outcome.prNumber;
   recordAudit(db, {
     action: "github.delivery.operator",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -2294,10 +2392,7 @@ export async function operatorDeliverForReview(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      status: outcome.status,
-      ...(outcome.status === "delivered" ? { prNumber: outcome.prNumber } : {}),
-    },
+    details,
   });
   switch (outcome.status) {
     case "delivered":
@@ -2391,12 +2486,11 @@ export async function operatorTransitionStage(
     );
     return { outcome: "recommended", message: `Recommended moving the task to ${name}.` };
   }
-  const task = await transitionStage(
-    db,
-    { ...input, ...(isRework ? { rework: true } : {}) },
-    OPERATOR_TASK_ACTOR,
-    opCtx(ctx),
-  );
+  const move: OperatorTransitionMove = { ...input };
+  // `rework` is an off-graph escape hatch transitionStage re-validates; it must
+  // reach it only on a genuine rework move.
+  if (isRework) move.rework = true;
+  const task = await transitionStage(db, move, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return { outcome: "done", message: `Moved ${input.taskKey} to ${task.stage}.` };
 }
 

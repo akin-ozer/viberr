@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-import { useState, type ReactNode } from "react";
+import { useState, type ComponentProps, type ReactNode } from "react";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskDetail } from "~/server/projections/task-query.server";
-import type { TaskSchedule } from "~/schemas/task-file.schema";
+import type {
+  PacketOption,
+  PrState,
+  TaskSchedule,
+} from "~/schemas/task-file.schema";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter, createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
@@ -18,6 +22,7 @@ import { GithubTrace, PolicyPanel } from "./task-side-panels";
 import { DiagnosticsPanel, ScheduledActions, TaskHero } from "./task-main-sections";
 import type { DiagnosticRecord } from "~/server/projections/task-query.server";
 import { ReleaseConfirm } from "./release-confirm";
+import type { ActionResult } from "./task-detail-hooks";
 import { TimelineItem } from "./timeline";
 import {
   ExecutionProfile,
@@ -366,7 +371,7 @@ describe("DiagnosticsPanel state semantics (G2)", () => {
 
   /** The finding's pill: the `.k` cell holds exactly one status pill. */
   function pill(container: HTMLElement): HTMLElement {
-    return container.querySelector(".obs .k .pill") as HTMLElement;
+    return container.querySelector<HTMLElement>(".obs .k .pill")!;
   }
 
   it("a SOFT error paints amber 'inconsistency risk' (like the hero), NOT crimson 'blocked'", () => {
@@ -418,12 +423,24 @@ const membersFixture: TaskMemberView[] = [
   { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "violet" } },
 ];
 
+/** VIB-151 as the projection hands it over. The panels below read a handful of
+ *  these fields; the rest carry the neutral values an open, un-delivered task
+ *  has, so no panel branches on a field the fixture forgot. */
 function taskFixture(ownerId: string, ownerName: string): TaskSummary {
   return {
+    projectSlug: "viberr-core",
     key: "VIB-151",
     title: "Compress long-running task timelines",
+    stage: "review",
+    readiness: "ready",
+    displayReadiness: "ready",
     waiting: "agent",
-    packet: null,
+    urgent: false,
+    archived: false,
+    validation: "none",
+    continuity: null,
+    blockReason: null,
+    atAcceptanceBoundary: false,
     owner: {
       kind: "human",
       userId: ownerId,
@@ -431,7 +448,26 @@ function taskFixture(ownerId: string, ownerName: string): TaskSummary {
       initials: "XX",
       tone: "",
     },
-  } as unknown as TaskSummary;
+    specialist: null,
+    reviewers: [],
+    operator: null,
+    branch: null,
+    repo: null,
+    pr: null,
+    prChecks: null,
+    prReview: null,
+    commits: [],
+    changed: null,
+    goal: "Bound the timeline payload and add a Show-older affordance.",
+    packet: null,
+    eventCount: 0,
+    commentCount: 0,
+    diagnosticCount: 0,
+    createdAt: null,
+    updatedAt: null,
+    boardRank: null,
+    filePath: "projects/viberr-core/tasks/VIB-151.md",
+  };
 }
 
 describe("ReleaseConfirm", () => {
@@ -509,11 +545,11 @@ describe("ReleaseConfirm", () => {
 
   it("open packet renders the packet-kind row and cancel (Escape) closes", () => {
     const onCancel = vi.fn();
-    const task = {
+    const task: TaskSummary = {
       ...taskFixture("u-arda", "Arda Kaya"),
       waiting: "human",
-      packet: { type: "input", kind: "Completion report" },
-    } as unknown as TaskSummary;
+      packet: packet142,
+    };
     const { container } = render(
       <ReleaseConfirm
         task={task}
@@ -549,17 +585,13 @@ const deployedFixture: DeployedSpecialistView[] = [
 ];
 
 function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
-  return {
-    ...taskFixture("u-arda", "Arda Kaya"),
-    projectSlug: "viberr-core",
-    specialist: null,
-    reviewers: [],
-    operator: null,
-    ...patch,
-  } as unknown as TaskSummary;
+  return { ...taskFixture("u-arda", "Arda Kaya"), ...patch };
 }
 
-function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> = {}) {
+function renderExec(
+  task: TaskSummary,
+  props: Partial<ComponentProps<typeof ExecutionProfile>> = {},
+) {
   const onAssign = vi.fn();
   const onRun = vi.fn();
   const utils = render(
@@ -599,9 +631,9 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
 describe("ExecutionProfile — assign menu + run button", () => {
   it("no specialist + admin: assign menu lists deployed specialists; picking submits", () => {
     const { container, onAssign } = renderExec(execTask());
-    const btn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
+    const btn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn")).find((b) =>
       b.textContent?.includes("Assign delivering agent"),
-    ) as HTMLButtonElement;
+    )!;
     expect(btn).toBeDefined();
     fireEvent.click(btn);
     const menu = container.querySelector('[aria-label="Assign a delivering agent"]')!;
@@ -619,7 +651,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
     expect(link).not.toBeNull();
     // No "Assign delivering agent" trigger when there is nothing to assign (the
     // owner "Manage" button is a separate .own-btn and may still be present).
-    const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
+    const assignBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn")).find((b) =>
       b.textContent?.includes("Assign delivering agent"),
     );
     expect(assignBtn).toBeUndefined();
@@ -634,12 +666,12 @@ describe("ExecutionProfile — assign menu + run button", () => {
         name: "Codex",
         role: "Implementation",
       },
-    } as unknown as Partial<TaskSummary>);
+    });
     const { container, onRun } = renderExec(task);
     // The primary specialist's Run button — not the operator "Run operator" one.
-    const runBtn = Array.from(container.querySelectorAll("button.btn.primary")).find(
+    const runBtn = Array.from(container.querySelectorAll<HTMLButtonElement>("button.btn.primary")).find(
       (b) => b.textContent?.includes("Run") && !b.textContent?.includes("operator"),
-    ) as HTMLButtonElement;
+    )!;
     expect(runBtn).toBeDefined();
     expect(runBtn.disabled).toBe(false);
     fireEvent.click(runBtn);
@@ -655,11 +687,11 @@ describe("ExecutionProfile — assign menu + run button", () => {
         name: "Codex",
         role: "Implementation",
       },
-    } as unknown as Partial<TaskSummary>);
+    });
     const { container } = renderExec(task, { deliveringActive: true });
-    const runBtn = Array.from(container.querySelectorAll("button.btn.primary")).find(
+    const runBtn = Array.from(container.querySelectorAll<HTMLButtonElement>("button.btn.primary")).find(
       (b) => b.textContent?.includes("Running"),
-    ) as HTMLButtonElement;
+    )!;
     expect(runBtn.disabled).toBe(true);
   });
 
@@ -667,9 +699,8 @@ describe("ExecutionProfile — assign menu + run button", () => {
     const { container } = renderExec(execTask(), {
       myRole: "contributor",
       canRunAgents: false,
-      configuredAutonomy: "supervised" as const,
     });
-    const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
+    const assignBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn")).find((b) =>
       b.textContent?.includes("Assign delivering agent"),
     );
     expect(assignBtn).toBeUndefined();
@@ -708,7 +739,7 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
       execTask({
         operator: attachedOperator,
         displayReadiness: "accepted",
-      } as unknown as Partial<TaskSummary>),
+      }),
     );
     expect(container.textContent).toContain("task closed");
     expect(container.textContent).not.toContain("operator active");
@@ -739,7 +770,7 @@ describe("ExecutionProfile — reviewers", () => {
       reviewers: [
         { kind: "agent", profileId: "reviewer", backend: "claude", name: "Claude Code", role: "Code review" },
       ],
-    } as unknown as Partial<TaskSummary>);
+    });
 
   it("labels the cell 'Reviewing agents' and renders a row with Run + remove", () => {
     const onRunReviewer = vi.fn();
@@ -759,9 +790,9 @@ describe("ExecutionProfile — reviewers", () => {
     const onAssignReviewer = vi.fn();
     // 'reviewer' is already engaged → only 'developer' remains available.
     const { container } = renderExec(reviewerTask(), { onAssignReviewer });
-    const addBtn = Array.from(container.querySelectorAll(".rev-add")).find((b) =>
+    const addBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".rev-add")).find((b) =>
       b.textContent?.includes("Engage reviewer"),
-    ) as HTMLButtonElement;
+    )!;
     expect(addBtn).toBeDefined();
     fireEvent.click(addBtn);
     const menu = container.querySelector('[aria-label="Engage a reviewer"]')!;
@@ -785,11 +816,11 @@ describe("ExecutionProfile — reviewers", () => {
         role: "Implementation",
       },
       reviewers: [],
-    } as unknown as Partial<TaskSummary>);
+    });
     const { container } = renderExec(task);
-    const addBtn = Array.from(container.querySelectorAll(".rev-add")).find((b) =>
+    const addBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".rev-add")).find((b) =>
       b.textContent?.includes("Engage reviewer"),
-    ) as HTMLButtonElement;
+    )!;
     fireEvent.click(addBtn);
     const menu = container.querySelector('[aria-label="Engage a reviewer"]')!;
     const items = [...menu.querySelectorAll(".menu-item")].map((i) => i.textContent);
@@ -805,7 +836,9 @@ describe("ExecutionProfile — reviewers", () => {
     const { container } = renderExec(reviewerTask(), {
       activeReviewerIds: ["reviewer"],
     });
-    const runBtn = container.querySelector(".rev-agent .btn.primary") as HTMLButtonElement;
+    const runBtn = container.querySelector<HTMLButtonElement>(
+      ".rev-agent .btn.primary",
+    )!;
     expect(runBtn.disabled).toBe(true);
     expect(runBtn.textContent).toContain("Running");
   });
@@ -817,7 +850,9 @@ describe("ExecutionProfile — reviewers", () => {
       deliveringActive: true,
       activeReviewerIds: ["some-other-reviewer"],
     });
-    const runBtn = container.querySelector(".rev-agent .btn.primary") as HTMLButtonElement;
+    const runBtn = container.querySelector<HTMLButtonElement>(
+      ".rev-agent .btn.primary",
+    )!;
     expect(runBtn.disabled).toBe(false);
     expect(runBtn.textContent).toContain("Run");
   });
@@ -826,7 +861,6 @@ describe("ExecutionProfile — reviewers", () => {
     const { container } = renderExec(reviewerTask(), {
       myRole: "contributor",
       canRunAgents: false,
-      configuredAutonomy: "supervised" as const,
     });
     expect(container.querySelector(".rev-agent")).not.toBeNull();
     expect(container.querySelector(".rev-agent .btn.primary")).toBeNull();
@@ -845,7 +879,7 @@ describe("ExecutionProfile — reviewers", () => {
 // an engagement that had nothing left to run.
 describe("ExecutionProfile — a closed task offers no new engagements (P14-WL-07)", () => {
   const closedTask = () =>
-    execTask({ displayReadiness: "merged" } as unknown as Partial<TaskSummary>);
+    execTask({ displayReadiness: "merged" });
 
   it("replaces the assign menu with the reason", () => {
     const { container, getByText } = renderExec(closedTask());
@@ -892,9 +926,9 @@ describe("ExecutionProfile — owner hand-off candidates", () => {
     ];
     // Owner is me (u-arda) → candidates are every OTHER member who can own.
     const { container } = renderExec(execTask(), { members: withViewer });
-    const manageBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
+    const manageBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn")).find((b) =>
       b.textContent?.includes("Manage"),
-    ) as HTMLButtonElement;
+    )!;
     expect(manageBtn).toBeDefined();
     fireEvent.click(manageBtn);
     const menu = container.querySelector('[aria-label="Manage task ownership"]')!;
@@ -925,9 +959,9 @@ describe("ExecutionProfile — every menu dismisses the same way", () => {
   for (const [name, trigger, panel] of menus) {
     it(`${name} menu: Escape closes it`, () => {
       const { container } = renderExec(execTask());
-      const btn = Array.from(container.querySelectorAll(".own-btn, .rev-add")).find(
+      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn, .rev-add")).find(
         (b) => b.textContent?.includes(trigger),
-      ) as HTMLButtonElement;
+      )!;
       expect(btn).toBeDefined();
       fireEvent.click(btn);
       expect(container.querySelector(`[aria-label="${panel}"]`)).not.toBeNull();
@@ -937,9 +971,9 @@ describe("ExecutionProfile — every menu dismisses the same way", () => {
 
     it(`${name} menu: a press outside closes it, a press inside does not`, () => {
       const { container } = renderExec(execTask());
-      const btn = Array.from(container.querySelectorAll(".own-btn, .rev-add")).find(
+      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn, .rev-add")).find(
         (b) => b.textContent?.includes(trigger),
-      ) as HTMLButtonElement;
+      )!;
       fireEvent.click(btn);
       const open = () => container.querySelector(`[aria-label="${panel}"]`);
       fireEvent.mouseDown(open()!);
@@ -956,19 +990,17 @@ describe("ExecutionProfile — every menu dismisses the same way", () => {
  *  carries its own `github.com` fallback, so every caller passes one. */
 const GH_HOST = "https://github.com";
 
-function traceTask(patch: Record<string, unknown> = {}): TaskDetail {
+function traceTask(patch: Partial<TaskDetail> = {}): TaskDetail {
   return {
     ...taskFixture("u-arda", "Arda Kaya"),
-    projectSlug: "viberr-core",
     branch: "vib-151",
-    pr: null,
-    blockReason: null,
-    commits: [],
     timeline: [],
     diagnostics: [],
     stages: [],
+    lastActivityAt: null,
+    quiet: false,
     ...patch,
-  } as unknown as TaskDetail;
+  };
 }
 
 /** UX19-2: the panel reads the acceptance gate from the SAME live affordance the
@@ -1015,9 +1047,9 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     );
     // The reason sentence stays out of this panel (it lives in Current state).
     expect(queryByText(/Waiting on 1 required reviewer approval/)).toBeNull();
-    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+    const btn = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
       b.textContent?.includes("Force accept"),
-    ) as HTMLButtonElement;
+    )!;
     expect(btn).toBeDefined();
     fireEvent.click(btn);
     expect(onForceAccept).toHaveBeenCalled();
@@ -1052,9 +1084,9 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(queryByText(/no approving verdict yet/)).toBeNull();
     // The override button, though, still reads the live affordance: from before
     // the boundary it skips the remaining stages too, and says so.
-    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+    const btn = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
       b.textContent?.includes("Force accept"),
-    ) as HTMLButtonElement;
+    )!;
     expect(btn.textContent).toContain("skips the remaining stages");
     expect(btn.title).toContain("skipping the remaining stages");
   });
@@ -1074,9 +1106,9 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
         />
       </MemoryRouter>,
     );
-    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+    const btn = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
       b.textContent?.includes("Force accept"),
-    ) as HTMLButtonElement;
+    )!;
     expect(btn.textContent).toContain("override review gate");
     expect(btn.textContent).not.toContain("skips the remaining stages");
   });
@@ -1103,7 +1135,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     // exact contradiction R16-3 removed from the rail.
     expect(queryByText(/Acceptance is blocked/)).toBeNull();
     expect(
-      Array.from(container.querySelectorAll("button")).find((b) =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
         b.textContent?.includes("Force accept"),
       ),
     ).toBeUndefined();
@@ -1119,7 +1151,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
             branch: null,
             pr: null,
             blockReason: null,
-            packet: { type: "blocked" },
+            packet: { ...packet142, type: "blocked" },
           })}
           acceptance={traceAcceptance()}
           onForceAccept={onForceAccept}
@@ -1129,9 +1161,9 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     // No branch → the GitHub panel shows the empty state, but the admin escape
     // hatch is still rendered (a crashed pre-work wedge must be escapable).
     expect(getByText(/No branch yet/)).toBeTruthy();
-    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+    const btn = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
       b.textContent?.includes("Force accept"),
-    ) as HTMLButtonElement;
+    )!;
     expect(btn).toBeDefined();
     fireEvent.click(btn);
     expect(onForceAccept).toHaveBeenCalled();
@@ -1149,7 +1181,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
         />
       </MemoryRouter>,
     );
-    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+    const btn = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
       b.textContent?.includes("Force accept"),
     );
     expect(btn).toBeUndefined();
@@ -1174,7 +1206,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
           />
         </MemoryRouter>,
       );
-      const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
         b.textContent?.includes("Force accept"),
       );
       expect(btn).toBeUndefined();
@@ -1199,9 +1231,9 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
         />
       </MemoryRouter>,
     );
-    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+    const btn = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
       b.textContent?.includes("Complete merge"),
-    ) as HTMLButtonElement;
+    )!;
     expect(btn).toBeDefined();
     // The hover title names the PR the click is about (it named none before).
     expect(btn.title).toContain("PR #147");
@@ -1379,7 +1411,7 @@ describe("UX19-1: no internal ruling ids in Permissions copy", () => {
           stages={[
             { id: "review", name: "Review", color: "#5b76fe" },
             { id: "done", name: "Done", color: "#00b473" },
-          ] as TaskDetail["stages"]}
+          ]}
           ownsTask={ownsTask}
         />
       </MemoryRouter>,
@@ -1405,7 +1437,7 @@ describe("UX19-1: no internal ruling ids in Permissions copy", () => {
             stages={[
               { id: "review", name: "Review", color: "#5b76fe" },
               { id: "done", name: "Done", color: "#00b473" },
-            ] as TaskDetail["stages"]}
+            ]}
             ownsTask={role === "contributor"}
           />
         </MemoryRouter>,
@@ -1419,15 +1451,12 @@ describe("UX19-1: no internal ruling ids in Permissions copy", () => {
 /* ------------------------------------------------ pass-13 honesty fixes */
 
 describe("UI-36: a rejected PR must not look like an open one", () => {
-  const withPr = (state: string): TaskDetail =>
-    ({
-      ...taskFixture("u-arda", "Arda Kaya"),
-      repo: "akin-ozer/viberr",
-      branch: "vib-151",
-      commits: [],
-      changed: null,
-      pr: { number: 14, state, title: "PR" },
-    }) as unknown as TaskDetail;
+  const withPr = (state: PrState): TaskDetail => ({
+    ...traceTask(),
+    repo: "akin-ozer/viberr",
+    changed: null,
+    pr: { number: 14, state, title: "PR" },
+  });
 
   it("renders a CLOSED (rejected) PR distinctly from one in review", () => {
     const closed = render(<GithubTrace githubHost={GH_HOST} task={withPr("closed")} acceptance={traceAcceptance()} />);
@@ -1459,14 +1488,11 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
 
 describe("LV-09: pluralization + null-ish packet observations", () => {
   it("says 'Diff 1 file', not '1 files'", () => {
-    const task = {
-      ...taskFixture("u-arda", "Arda Kaya"),
+    const task: TaskDetail = {
+      ...traceTask(),
       repo: "akin-ozer/viberr",
-      branch: "vib-151",
-      commits: [],
-      pr: null,
       changed: { files: 1, add: 3, del: 1 },
-    } as unknown as TaskDetail;
+    };
     const { container } = render(<GithubTrace githubHost={GH_HOST} task={task} acceptance={traceAcceptance()} />);
     const diff = [...container.querySelectorAll(".kv-row")].find((r) =>
       r.textContent?.startsWith("Diff"),
@@ -1879,15 +1905,20 @@ describe("UI-41: the release dialog only offers members who can OWN a task", () 
 /* ------------- pass-20 packet governance (F20-6 / F20-17 / F20-18 / N20-16 / C7) --- */
 
 describe("DecisionPacket — pass-20 governance", () => {
+  /** An option as these tests author it — everything but `rec`, which the helper
+   *  fills with the default the parser applies. Spelled with `Pick` because
+   *  `PacketOption` is a loose schema type: its index signature makes `Omit`
+   *  drop the named keys along with `rec`. */
+  type OptionDraft = Partial<PacketOption> &
+    Pick<PacketOption, "kind" | "t" | "d">;
+
   const withOptions = (
-    options: Array<
-      Omit<PacketRender["options"][number], "rec"> & { rec?: boolean }
-    >,
+    options: OptionDraft[],
     over: Partial<PacketRender> = {},
   ): PacketRender => ({
     ...packet142,
     ...over,
-    options: options.map((o) => ({ rec: false, ...o })) as PacketRender["options"],
+    options: options.map((o) => ({ ...o, rec: o.rec ?? false })),
   });
 
   const discardDialog = (container: HTMLElement) =>
@@ -2003,7 +2034,7 @@ describe("DecisionPacket — pass-20 governance", () => {
       />,
     );
     expect(container.textContent).toContain("needs maintainer or admin authority");
-    const send = Array.from(container.querySelectorAll("button")).find((b) =>
+    const send = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
       b.textContent?.includes("Send to a maintainer"),
     )!;
     expect(send).toBeDefined();
@@ -2029,7 +2060,7 @@ describe("DecisionPacket — pass-20 governance", () => {
       />,
     );
     expect(
-      Array.from(container.querySelectorAll("button")).find((b) =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
         b.textContent?.includes("Send to a maintainer"),
       ),
     ).toBeUndefined();
@@ -2102,7 +2133,7 @@ describe("observationLabel", () => {
  *  (`useFetcher`) and the toast context, so they render inside a route stub. */
 function renderWithRouter(
   ui: ReactNode,
-  action: () => unknown = () => ({ ok: true }),
+  action: () => ActionResult = () => ({ ok: true }),
 ) {
   const Stub = createRoutesStub([
     {
@@ -2114,23 +2145,22 @@ function renderWithRouter(
   return render(<Stub initialEntries={["/t"]} />);
 }
 
-function heroTask(patch: Record<string, unknown> = {}): TaskDetail {
+function heroTask(patch: Partial<TaskDetail> = {}): TaskDetail {
   return {
-    key: "VIB-151",
-    title: "Compress long-running task timelines",
-    goal: "Bound the timeline payload and add a Show-older affordance.",
-    filePath: "projects/viberr-core/tasks/VIB-151.md",
-    displayReadiness: "ready",
-    validation: "pass",
+    ...taskFixture("u-arda", "Arda Kaya"),
+    timeline: [],
+    diagnostics: [],
     stages: [],
+    lastActivityAt: null,
+    quiet: false,
     ...patch,
-  } as unknown as TaskDetail;
+  };
 }
 
-function schedule(patch: Record<string, unknown> = {}): TaskSchedule {
+function schedule(patch: Partial<TaskSchedule> = {}): TaskSchedule {
   return {
     id: "sch-1",
-    action: "operator-run",
+    action: "run-operator",
     dueAt: new Date(Date.now() + 3_600_000).toISOString(),
     backend: "claude",
     autonomy: "supervised",
@@ -2143,7 +2173,7 @@ function schedule(patch: Record<string, unknown> = {}): TaskSchedule {
     claimedAt: null,
     retries: 0,
     ...patch,
-  } as unknown as TaskSchedule;
+  };
 }
 
 describe("ScheduledActions panel head (P13-D-38)", () => {
@@ -2264,7 +2294,9 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
       <EditGoalHarness draft={"Diagnostics: improve failure output\n\nDeliverable: name the failing step."} />,
     );
     fireEvent.click(getByText("bump"));
-    const ta = container.querySelector("textarea.goal-textarea") as HTMLTextAreaElement;
+    const ta = container.querySelector<HTMLTextAreaElement>(
+      "textarea.goal-textarea",
+    )!;
     expect(ta).toBeTruthy();
     expect(ta.value).toContain("Diagnostics: improve failure output");
     expect(ta.value).not.toContain("Bound the timeline payload"); // NOT the old goal
@@ -2275,7 +2307,9 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
       <EditGoalHarness draft={null} />,
     );
     fireEvent.click(getByText("bump"));
-    const ta = container.querySelector("textarea.goal-textarea") as HTMLTextAreaElement;
+    const ta = container.querySelector<HTMLTextAreaElement>(
+      "textarea.goal-textarea",
+    )!;
     expect(ta.value).toContain("Bound the timeline payload");
   });
 });
@@ -2337,9 +2371,16 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
   // C12: an unrecognised readiness value must not greenwash. The lookup used to
   // fall back to a green "ready" pill; it now falls back to a neutral "unknown".
   it("C12: an unrecognised readiness value renders a neutral 'unknown' pill, never green 'ready'", () => {
+    const malformedReadiness: string = "in_review";
     const { container } = renderWithRouter(
       <TaskHero
-        task={heroTask({ displayReadiness: "in_review", validation: "none" })}
+        task={heroTask({
+          // SAFETY: deliberately outside the Readiness enum — a hand-edited task
+          // file can hold any string, and this test asserts the pill refuses to
+          // read an unrecognised one as green "ready".
+          displayReadiness: malformedReadiness as TaskDetail["displayReadiness"],
+          validation: "none",
+        })}
         stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
         canEditGoal
       />,
@@ -2358,7 +2399,7 @@ describe("failure toasts use the error kind (P13-D-10)", () => {
       () => ({ ok: false, error: "Nope." }),
     );
     fireEvent.click(getByText("Edit"));
-    const form = container.querySelector("form.goal-edit") as HTMLFormElement;
+    const form = container.querySelector<HTMLFormElement>("form.goal-edit")!;
     fireEvent.submit(form);
     await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
     const toast = document.querySelector(".toast")!;

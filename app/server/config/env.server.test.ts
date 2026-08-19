@@ -66,7 +66,8 @@ describe("parseEnv", () => {
       parseEnv({});
       expect.unreachable();
     } catch (error) {
-      const message = (error as Error).message;
+      if (!(error instanceof Error)) throw error;
+      const message = error.message;
       expect(message).toContain("VIBERR_SESSION_SECRET");
       expect(message).toContain("VIBERR_SECRET_ENCRYPTION_KEY");
     }

@@ -1,5 +1,6 @@
 import { rmSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -11,7 +12,11 @@ import {
   projectFilePath,
   taskFilePath,
 } from "~/server/files/file-store-root.server";
-import type { TaskPacket } from "~/schemas/task-file.schema";
+import type {
+  ParsedTaskFile,
+  TaskFrontmatter,
+  TaskPacket,
+} from "~/schemas/task-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
 import { rebuildAll, rebuildPath, rebuildProject } from "./rebuilder.server";
@@ -74,13 +79,14 @@ describe("rebuilder", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
+    const rowSchema = z.object({ acceptance: z.string().nullable() });
     const acceptanceOf = (key: string) =>
-      (
+      rowSchema.parse(
         store.db
           .prepare(
             `SELECT acceptance FROM task_projections WHERE project_slug = ? AND task_key = ?`,
           )
-          .get(store.slug, key) as { acceptance: string | null }
+          .get(store.slug, key),
       ).acceptance;
     expect(acceptanceOf("VIB-1")).toBe("forced");
     expect(acceptanceOf("VIB-2")).toBeNull();
@@ -121,13 +127,14 @@ describe("rebuilder", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
+    const rowSchema = z.object({ continuity: z.string().nullable() });
     const continuityOf = (key: string) =>
-      (
+      rowSchema.parse(
         store.db
           .prepare(
             `SELECT continuity FROM task_projections WHERE project_slug = ? AND task_key = ?`,
           )
-          .get(store.slug, key) as { continuity: string | null }
+          .get(store.slug, key),
       ).continuity;
     expect(continuityOf("VIB-1")).toBe("degraded");
     expect(continuityOf("VIB-2")).toBeNull();
@@ -144,19 +151,19 @@ describe("rebuilder", () => {
       frontmatter: baseTaskFrontmatter("VIB-1"),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const provenanceBefore = store.db
-      .prepare(`SELECT count(*) AS c FROM provenance`)
-      .get() as { c: number };
+    const countSchema = z.object({ c: z.number() });
+    const provenanceRows = () =>
+      countSchema.parse(
+        store.db.prepare(`SELECT count(*) AS c FROM provenance`).get(),
+      ).c;
+    const provenanceBefore = provenanceRows();
 
     const second = rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(second.changed).toBe(0);
     expect(second.unchanged).toBe(2); // project + task
 
     // Unchanged files record no per-file provenance; only the rescan summary row.
-    const provenanceAfter = store.db
-      .prepare(`SELECT count(*) AS c FROM provenance`)
-      .get() as { c: number };
-    expect(provenanceAfter.c).toBe(provenanceBefore.c + 1);
+    expect(provenanceRows()).toBe(provenanceBefore + 1);
   });
 
   it("single-file incremental rebuild picks up an external edit", () => {
@@ -239,9 +246,13 @@ describe("rebuilder", () => {
     const result = rebuildPath(store.db, absPath, { dataRoot: store.dataRoot });
     expect(result.action).toBe("removed");
     expect(listProjectTasks(store.db, store.slug)).toEqual([]);
-    const removedRow = store.db
-      .prepare(`SELECT action FROM provenance ORDER BY id DESC LIMIT 1`)
-      .get() as { action: string };
+    const removedRow = z
+      .object({ action: z.string() })
+      .parse(
+        store.db
+          .prepare(`SELECT action FROM provenance ORDER BY id DESC LIMIT 1`)
+          .get(),
+      );
     expect(removedRow.action).toBe("removed");
   });
 
@@ -303,7 +314,7 @@ describe("rebuilder", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     let detail = getTaskDetail(store.db, store.slug, "VIB-1");
-    expect("guest" in (detail!.timeline[0]!.actor as object)).toBe(false);
+    expect("guest" in detail!.timeline[0]!.actor).toBe(false);
 
     // Remove elif from the project file → her events re-render as guest.
     const { readProjectFile } = await import("~/server/files/project-writer.server");
@@ -393,13 +404,14 @@ describe("rebuilder", () => {
       dataRoot: store.dataRoot,
     });
 
+    const rowSchema = z.object({ repo: z.string().nullable() });
     const repoOf = () =>
-      (
+      rowSchema.parse(
         store.db
           .prepare(
             `SELECT repo FROM task_projections WHERE project_slug = ? AND task_key = ?`,
           )
-          .get(slug, "FRS-1") as { repo: string | null }
+          .get(slug, "FRS-1"),
       ).repo;
     expect(repoOf()).toBeNull();
 
@@ -653,10 +665,10 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
 
   function seed(
     store: ReturnType<typeof setupTestStore>,
-    patch: Record<string, unknown>,
+    patch: Partial<TaskFrontmatter>,
     packet: TaskPacket | null = null,
   ) {
-    writeTask(store.dataRoot, store.slug, {
+    const file: Partial<ParsedTaskFile> & { frontmatter: TaskFrontmatter } = {
       frontmatter: baseTaskFrontmatter("VIB-9", {
         stage: "review",
         waiting: "human",
@@ -667,8 +679,11 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
         pr: { number: 900, state: "review", title: "Work" },
         ...patch,
       }),
-      ...(packet ? { packet } : {}),
-    });
+    };
+    // Key PRESENCE matters: `writeTask` fills in `packet: null` itself, and a
+    // `packet: undefined` key would override that default instead of leaving it.
+    if (packet) file.packet = packet;
+    writeTask(store.dataRoot, store.slug, file);
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     return listProjectTasks(store.db, store.slug).find((t) => t.key === "VIB-9")!;
   }

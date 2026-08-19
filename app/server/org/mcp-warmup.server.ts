@@ -82,15 +82,14 @@ export function startMcpWarmup(
   // `resources.server` imports THIS module to start a warm-up, so the probe is
   // reached by dynamic import — the same cycle-breaking dance the github/
   // surface uses. A type-only import above keeps the signature checked.
-  void import("./resources.server")
-    .then(({ discoverStdioMcpTools }) =>
-      discoverStdioMcpTools(input.target, {
+  void (async () => {
+    try {
+      const { discoverStdioMcpTools } = await import("./resources.server");
+      const disc = await discoverStdioMcpTools(input.target, {
         ...options,
         token: input.token,
         timeoutMs: capMs,
-      }),
-    )
-    .then((disc) => {
+      });
       const now = new Date().toISOString();
       if (disc.kind === "up") {
         db.prepare(
@@ -119,18 +118,17 @@ export function startMcpWarmup(
         mcp: input.name,
         reason: disc.reason,
       });
-    })
-    .catch((err: unknown) => {
+    } catch (err) {
       // The row must never be left mid-install because the runner threw.
       markWarming(db, input.id, null);
       logger.error("mcp background install crashed", {
         mcp: input.name,
         err: err instanceof Error ? err : new Error(String(err)),
       });
-    })
-    .finally(() => {
+    } finally {
       inFlight.delete(input.id);
-    });
+    }
+  })();
 }
 
 /**
@@ -141,9 +139,13 @@ export function startMcpWarmup(
  * the kind of stale state a reader cannot tell from a live one.
  */
 export function reapStaleWarmups(db: DatabaseSync): number {
+  // SAFETY: the SELECT names exactly these two columns, and `org_mcp_servers.id`
+  // and `.name` are both TEXT NOT NULL in 0001_baseline.
   const stale = db
-    .prepare(`SELECT id, name FROM org_mcp_servers WHERE warming_since IS NOT NULL`)
-    .all() as unknown as { id: string; name: string }[];
+    .prepare(
+      `SELECT id, name FROM org_mcp_servers WHERE warming_since IS NOT NULL`,
+    )
+    .all() as { id: string; name: string }[];
   const orphans = stale.filter((row) => !inFlight.has(row.id));
   for (const row of orphans) {
     db.prepare(

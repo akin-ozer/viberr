@@ -36,7 +36,7 @@ function seedTask(store: TestStore, key = "VIB-1"): void {
 function notifications(store: TestStore) {
   return store.db
     .prepare(`SELECT user_id, kind, text FROM notifications ORDER BY user_id`)
-    .all() as { user_id: string; kind: string; text: string }[];
+    .all();
 }
 
 function timeline(store: TestStore, key = "VIB-1") {
@@ -176,12 +176,12 @@ describe("the completion path attributes and preserves the agent's question (P13
       .prepare(
         `SELECT actor_label, details_json FROM audit_events WHERE action = 'task.agent.packet_opened'`,
       )
-      .get() as { actor_label: string; details_json: string };
+      .get()!;
     // Was OPERATOR_AUDIT_ACTOR ("operator") on this transport, so an
     // actor-filtered audit view credited every Codex agent's question to the
     // operator — the exact misreporting P11-23 fixed on the Claude transport.
     expect(audit.actor_label).toMatch(/^agent:codex\/docs-writer/);
-    expect(JSON.parse(audit.details_json).actorRef).toMatch(
+    expect(JSON.parse(String(audit.details_json)).actorRef).toMatch(
       /^agent:codex\/docs-writer/,
     );
   });

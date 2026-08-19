@@ -6,7 +6,10 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
-import type { OrgSettingsView } from "~/server/org/org-view.server";
+import type {
+  loader as orgLoader,
+  action as orgAction,
+} from "~/routes/org.settings";
 
 /**
  * Route-level tests for /org/settings: admin-only RBAC on loader + action,
@@ -16,7 +19,27 @@ import type { OrgSettingsView } from "~/server/org/org-view.server";
  */
 
 let app: AppTestContext;
-let ids: { arda: string; selin: string };
+let ids: SeededUserIds;
+
+/** The seeded humans every request in this file is issued as. */
+interface SeededUserIds {
+  arda: string;
+  selin: string;
+}
+
+type SettingsActionData = Awaited<ReturnType<typeof orgAction>>;
+type SettingsOkReply = Extract<SettingsActionData, { ok: true }>;
+
+/**
+ * One action reply with react-router's `data()` envelope already peeled off:
+ * the success payload's per-intent fields (each optional — they belong to one
+ * intent apiece) with `ok` widened and the refusal's `error` folded in, since
+ * `unwrap` returns whichever arm the intent took.
+ */
+type SettingsReply = Omit<SettingsOkReply, "ok"> & {
+  ok: boolean;
+  error?: string;
+};
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -38,29 +61,31 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-async function runLoader(userId?: string) {
+async function runLoader(
+  userId?: string,
+): Promise<Awaited<ReturnType<typeof orgLoader>>> {
   const { loader } = await import("~/routes/org.settings");
   const cookie = userId ? (await app.cookieFor(userId)).cookie : undefined;
-  return (await loader({
+  // SAFETY: the loader reads `request` and nothing else; React Router's
+  // generated `LoaderArgs` additionally carries the framework's `context`
+  // provider, which cannot be built outside a real router.
+  return loader({
     request: app.request("/org/settings", cookie ? { cookie } : {}),
     params: {},
     context: {},
-  } as never)) as { view: OrgSettingsView; meId: string };
+  } as never);
 }
 
-type ActionBody = Record<string, unknown>;
-
-function unwrap(result: unknown): ActionBody {
-  if (result && typeof result === "object" && "data" in result) {
-    return (result as { data: ActionBody }).data;
-  }
-  return result as ActionBody;
+/** Refusals travel inside react-router's `data()` envelope; every other reply
+ *  is the body itself. Both arms carry `ok`, which is what the tests read. */
+function unwrap(result: SettingsActionData): SettingsReply {
+  return "data" in result ? result.data : result;
 }
 
 async function postAction(
   userId: string,
   fields: Record<string, string>,
-): Promise<ActionBody> {
+): Promise<SettingsReply> {
   const { action } = await import("~/routes/org.settings");
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
@@ -71,6 +96,8 @@ async function postAction(
     cookie,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
+  // SAFETY: as in runLoader — the action reads `request` only, so this stub
+  // carries everything the call executes.
   const result = await action({ request, params: {}, context: {} } as never);
   return unwrap(result);
 }
@@ -271,6 +298,8 @@ describe("resource + store intents", () => {
     fd.append("filePaths", "hello.md");
     fd.set("_csrf", csrf);
     const request = app.request("/org/settings", { method: "POST", body: fd, cookie });
+    // SAFETY: as in postAction — the multipart upload goes through the same
+    // action, which reads `request` only.
     const result = unwrap(await action({ request, params: {}, context: {} } as never));
     expect(result).toMatchObject({
       ok: true,
@@ -385,23 +414,26 @@ describe("R19-16 sign-in providers, configured in the app", () => {
 
     // …and the LOGIN page offers the button, from the same resolution.
     const { loader: loginLoader } = await import("~/routes/login");
-    const login = (await loginLoader({
+    // SAFETY: the login loader reads `request` only — same generated-args
+    // stand-in as runLoader above.
+    const login = await loginLoader({
       request: app.request("/login"),
       params: {},
       context: {},
-    } as never)) as { providers: { github: boolean } };
+    } as never);
     expect(login.providers.github).toBe(true);
   });
 
   it("a member cannot configure a sign-in provider", async () => {
-    const result = await postAction(ids.selin, {
-      intent: "oauth-save",
-      provider: "github",
-      clientId: "Iv1.sneaky",
-      clientSecret: "nope",
-    }).catch((e: unknown) => e);
     // requireRoleAuth throws a Response for non-admins.
-    expect(result).toBeInstanceOf(Response);
+    await expect(
+      postAction(ids.selin, {
+        intent: "oauth-save",
+        provider: "github",
+        clientId: "Iv1.sneaky",
+        clientSecret: "nope",
+      }),
+    ).rejects.toBeInstanceOf(Response);
   });
 });
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createSdkMcpServer,
   tool,
+  type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
@@ -20,6 +21,8 @@ import {
   buildAgentQuestionPacket,
   stageOutcome,
   type AgentCollab,
+  type AgentOutcome,
+  type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import {
@@ -61,7 +64,7 @@ import {
 
 export interface AgentToolkit {
   /** `{ viberr_agent: <sdk mcp server> }` — merge into the run's mcpServers. */
-  mcpServers: Record<string, unknown>;
+  mcpServers: Record<string, McpSdkServerConfigWithInstance>;
 }
 
 interface AgentToolkitDeps {
@@ -77,6 +80,18 @@ interface AgentToolkitDeps {
 }
 
 const prose = normalizeEscapedNewlines;
+
+const REPORT_OUTCOME_DESCRIPTION =
+  "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.";
+
+/** What `report_outcome` hands its handler. `evidence` is optional HERE because
+ *  the field is only declared on the tool when the profile holds the grant —
+ *  the handler is the same either way. */
+interface ReportedOutcome {
+  verdict: "approve" | "request_changes";
+  summary?: string;
+  evidence?: { label: string; add?: string; del?: string }[];
+}
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };
@@ -138,6 +153,22 @@ export async function postAgentComment(
   });
 }
 
+/** One answer choice offered alongside an agent question. */
+export interface AgentQuestionOption {
+  title: string;
+  detail?: string;
+}
+
+/** The question an agent raises, addressed at a task. */
+export interface AgentQuestionRequest {
+  projectSlug: string;
+  taskKey: string;
+  actorRef: FileActorRef;
+  title: string;
+  body?: string;
+  options?: AgentQuestionOption[];
+}
+
 /** Open an agent-raised QUESTION decision packet (ask-human, G3): type
  * `input`, from = the agent's own ref, options rendered as `custom` choices a
  * human resolves. Open-only — resolution stays with humans/the operator.
@@ -146,14 +177,7 @@ export async function postAgentComment(
 export async function openAgentQuestionPacket(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    actorRef: FileActorRef;
-    title: string;
-    body?: string;
-    options?: { title: string; detail?: string }[];
-  },
+  input: AgentQuestionRequest,
 ): Promise<boolean> {
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) return false;
@@ -162,11 +186,12 @@ export async function openAgentQuestionPacket(
   const role = input.actorRef.kind === "agent"
     ? agentRoleDisplay(input.actorRef)
     : "Agent";
-  const packet = buildAgentQuestionPacket(input.actorRef, {
-    title: input.title,
-    ...(input.body ? { body: input.body } : {}),
-    ...(input.options ? { options: input.options } : {}),
-  });
+  // `body`/`options` stay ABSENT when the agent gave none — the packet builder
+  // reads them with `??`, and an explicit undefined would be a different fact.
+  const question: AgentOutcomeQuestion = { title: input.title };
+  if (input.body) question.body = input.body;
+  if (input.options) question.options = input.options;
+  const packet = buildAgentQuestionPacket(input.actorRef, question);
 
   let opened = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
@@ -270,21 +295,24 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         },
         async (args) => {
           try {
-            const opened = await openAgentQuestionPacket(db, ctx, {
+            // `body`/`options` are set only when the agent supplied them: the
+            // packet builder distinguishes an absent option list from an empty
+            // one, so key PRESENCE is the fact being carried here.
+            const question: AgentQuestionRequest = {
               projectSlug,
               taskKey,
               actorRef,
               title: prose(args.title),
-              ...(args.body ? { body: prose(args.body) } : {}),
-              ...(args.options
-                ? {
-                    options: args.options.map((o) => ({
-                      title: prose(o.title),
-                      ...(o.detail ? { detail: prose(o.detail) } : {}),
-                    })),
-                  }
-                : {}),
-            });
+            };
+            if (args.body) question.body = prose(args.body);
+            if (args.options) {
+              question.options = args.options.map((o) => {
+                const option: AgentQuestionOption = { title: prose(o.title) };
+                if (o.detail) option.detail = prose(o.detail);
+                return option;
+              });
+            }
+            const opened = await openAgentQuestionPacket(db, ctx, question);
             return textResult(
               opened
                 ? "[done] Question raised — a human will decide from the task page. Continue whatever does NOT depend on the answer, then finish with a report of what is pending. You will be resumed in this same session once the decision is made."
@@ -303,71 +331,66 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   }
 
   if (collab.verdict) {
-    tools.push(
-      tool(
-        "report_outcome",
-        "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.",
-        {
-          verdict: z
-            .enum(["approve", "request_changes"])
-            .describe("Your judgment of the work under review."),
-          summary: z
+    const outcomeFields = {
+      verdict: z
+        .enum(["approve", "request_changes"])
+        .describe("Your judgment of the work under review."),
+      summary: z
+        .string()
+        .optional()
+        .describe("One-paragraph justification (markdown allowed)."),
+    };
+    // P13-D-26: the reviewer profile advertises "Attach evidence references"
+    // (agent-catalog.server.ts) and its persona says it keeps raw validation
+    // output OUT of the timeline — but there was no channel to attach anything,
+    // so the `evidence:` block had 42 `null` writers and zero real ones. Gated
+    // exactly like its siblings: the field is only DECLARED when the profile
+    // holds the grant, so an agent without it cannot see or use it.
+    const evidenceField = z
+      .array(
+        z.object({
+          label: z
+            .string()
+            .describe(
+              "What this cites: a suite, a file, a check — e.g. 'unit/policy_gate_test' or 'app/server/tasks/task-actions.server.ts'.",
+            ),
+          add: z
             .string()
             .optional()
-            .describe("One-paragraph justification (markdown allowed)."),
-          // P13-D-26: the reviewer profile advertises "Attach evidence
-          // references" (agent-catalog.server.ts) and its persona says it keeps
-          // raw validation output OUT of the timeline — but there was no channel
-          // to attach anything, so the `evidence:` block had 42 `null` writers
-          // and zero real ones. Gated exactly like its siblings: the field is
-          // only DECLARED when the profile holds the grant, so an agent without
-          // it cannot see or use it.
-          ...(collab.evidence
-            ? {
-                evidence: z
-                  .array(
-                    z.object({
-                      label: z
-                        .string()
-                        .describe(
-                          "What this cites: a suite, a file, a check — e.g. 'unit/policy_gate_test' or 'app/server/tasks/task-actions.server.ts'.",
-                        ),
-                      add: z
-                        .string()
-                        .optional()
-                        .describe("Short signed count, e.g. '+14' or '3 passed'."),
-                      del: z
-                        .string()
-                        .optional()
-                        .describe("Short signed count, e.g. '−4' or '0 failed'."),
-                    }),
-                  )
-                  .optional()
-                  .describe(
-                    "Up to 8 evidence REFERENCES for what you checked or produced — short citations, never raw output (that stays in the run logs). They render as rows on your outcome event and carry into the review PR body.",
-                  ),
-              }
-            : {}),
-        },
-        async (args) => {
-          const evidence = collab.evidence
-            ? normalizeEvidenceRows(
-                (args as { evidence?: { label?: string; add?: string; del?: string }[] })
-                  .evidence,
-              )
-            : null;
-          stageOutcome(db, outcomeKey, {
-            verdict: args.verdict,
-            ...(args.summary ? { summary: prose(args.summary) } : {}),
-            ...(evidence ? { evidence } : {}),
-          });
-          return textResult(
-            `[staged] Verdict '${args.verdict}'${
-              evidence ? ` with ${evidence.length} evidence reference(s)` : ""
-            } will be recorded with your final report. Finish with your full findings.`,
-          );
-        },
-      ),
+            .describe("Short signed count, e.g. '+14' or '3 passed'."),
+          del: z
+            .string()
+            .optional()
+            .describe("Short signed count, e.g. '−4' or '0 failed'."),
+        }),
+      )
+      .optional()
+      .describe(
+        "Up to 8 evidence REFERENCES for what you checked or produced — short citations, never raw output (that stays in the run logs). They render as rows on your outcome event and carry into the review PR body.",
+      );
+    const report = async (args: ReportedOutcome) => {
+      const evidence = collab.evidence ? normalizeEvidenceRows(args.evidence) : null;
+      // Absent, not undefined: `stageOutcome` stores the envelope verbatim and
+      // the completion pipeline distinguishes "no summary" from an empty one.
+      const outcome: AgentOutcome = { verdict: args.verdict };
+      if (args.summary) outcome.summary = prose(args.summary);
+      if (evidence) outcome.evidence = evidence;
+      stageOutcome(db, outcomeKey, outcome);
+      return textResult(
+        `[staged] Verdict '${args.verdict}'${
+          evidence ? ` with ${evidence.length} evidence reference(s)` : ""
+        } will be recorded with your final report. Finish with your full findings.`,
+      );
+    };
+    tools.push(
+      collab.evidence
+        ? tool(
+            "report_outcome",
+            REPORT_OUTCOME_DESCRIPTION,
+            { ...outcomeFields, evidence: evidenceField },
+            report,
+          )
+        : tool("report_outcome", REPORT_OUTCOME_DESCRIPTION, outcomeFields, report),
     );
   }
 

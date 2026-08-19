@@ -4,7 +4,11 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { DEFAULT_NOTIF_PREFS } from "./notification-prefs";
-import { ProfilePage, type ProfileData } from "./profile-page";
+import {
+  ProfilePage,
+  type ProfileActionData,
+  type ProfileData,
+} from "./profile-page";
 
 afterEach(cleanup);
 
@@ -37,12 +41,12 @@ function renderProfile(data: ProfileData = BASE) {
     {
       path: "/profile",
       Component: () => {
-        const identity = useFetcher();
-        const prefs = useFetcher();
+        const identity = useFetcher<ProfileActionData>();
+        const prefs = useFetcher<ProfileActionData>();
         // UI-56: Appearance has its own fetcher now (one per panel).
-        const appearance = useFetcher();
-        const password = useFetcher();
-        const github = useFetcher();
+        const appearance = useFetcher<ProfileActionData>();
+        const password = useFetcher<ProfileActionData>();
+        const github = useFetcher<ProfileActionData>();
         return (
           <ToastProvider>
             <ProfilePage
@@ -51,9 +55,7 @@ function renderProfile(data: ProfileData = BASE) {
               onTheme={(v) => {
                 lastTheme = v;
               }}
-              fetchers={
-                { identity, prefs, appearance, password, github } as never
-              }
+              fetchers={{ identity, prefs, appearance, password, github }}
               submitWith={() => (fields) => {
                 lastSubmit = fields;
               }}
@@ -77,7 +79,7 @@ describe("ProfilePage", () => {
     ).toBeTruthy();
     expect(getByDisplayValue("Arda Kaya")).toBeTruthy();
     expect(getByDisplayValue("Senior engineer")).toBeTruthy();
-    const email = getByDisplayValue("arda@viberr.dev") as HTMLInputElement;
+    const email = getByDisplayValue("arda@viberr.dev").closest("input")!;
     expect(email.disabled).toBe(true);
     // Membership facts + role pill + sign-in method.
     expect(getByText("Member of")).toBeTruthy();
@@ -179,9 +181,9 @@ describe("ProfilePage", () => {
     expect(container.querySelector(".cred-warn")).toBeTruthy();
     // MU-1: Connect starts the real OAuth flow via a button (POST to
     // /api/auth/sign-in/social), not a dead /auth/github link.
-    const connect = container.querySelector(
+    const connect = container.querySelector<HTMLButtonElement>(
       ".cred-warn button.btn",
-    ) as HTMLButtonElement;
+    )!;
     expect(connect).toBeTruthy();
     expect(connect.textContent).toContain("Connect");
     expect(container.querySelector(".cred-warn a.btn")).toBeNull();

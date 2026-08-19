@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { LogLine } from "~/features/runtime/runtime-types";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertRunLine, upsertRun, type InsertRunInput } from "./run-store.server";
 import {
@@ -127,7 +128,7 @@ describe("projectRunsForTask grouping", () => {
       seq: 0,
       occurredAt: "2026-07-11T00:00:00.000Z",
       raw: JSON.stringify({ type: "error", text: "You've hit your usage limit. Try again later." }),
-      display: { kind: "error", text: "usage limit" } as never,
+      display: { t: "00:00:00", ev: "err", tag: "error", text: "usage limit" },
     });
     const [view] = projectRunsForTask(db, SLUG, TASK);
     expect(view!.failedBackendUnavailable).toBe(true);
@@ -145,7 +146,7 @@ describe("projectRunsForTask grouping", () => {
       seq: 0,
       occurredAt: "2026-07-16T00:00:00.000Z",
       raw: JSON.stringify({ type: "error", source: "viberr", message: "Claude Code is unavailable — no usable credential is configured." }),
-      display: { t: "00:00:00", ev: "err", tag: "run·unavailable", text: "Claude Code is unavailable — no usable credential is configured." } as never,
+      display: { t: "00:00:00", ev: "err", tag: "run·unavailable", text: "Claude Code is unavailable — no usable credential is configured." },
     });
     const [view] = projectRunsForTask(db, SLUG, TASK);
     expect(view!.failedBackendUnavailable).toBe(true);
@@ -159,7 +160,7 @@ describe("projectRunsForTask grouping", () => {
       seq: 0,
       occurredAt: "2026-07-11T00:00:00.000Z",
       raw: JSON.stringify({ type: "error", text: "TypeError: cannot read property of undefined" }),
-      display: { kind: "error", text: "task error" } as never,
+      display: { t: "00:00:00", ev: "err", tag: "error", text: "task error" },
     });
     const [view] = projectRunsForTask(db, SLUG, TASK);
     expect(view!.failedBackendUnavailable).toBeUndefined();
@@ -176,7 +177,7 @@ describe("projectRunsForTask — resumed history", () => {
       seq: 0,
       occurredAt: "2026-07-11T00:00:00.000Z",
       raw: "{}",
-      display: { t: "00:00:00", ev: "text", tag: "assistant", text: "first answer" } as never,
+      display: { t: "00:00:00", ev: "text", tag: "assistant", text: "first answer" },
     });
     insert({ id: "run_2", threadId: "primary-b", kind: "primary", backend: "claude", state: "finished" });
     insertRunLine(db, {
@@ -184,11 +185,11 @@ describe("projectRunsForTask — resumed history", () => {
       seq: 0,
       occurredAt: "2026-07-11T00:01:00.000Z",
       raw: "{}",
-      display: { t: "00:01:00", ev: "text", tag: "assistant", text: "second answer" } as never,
+      display: { t: "00:01:00", ev: "text", tag: "assistant", text: "second answer" },
     });
 
     const [view] = projectRunsForTask(db, SLUG, TASK);
-    const texts = view!.lines.map((l) => (l as unknown as { text: string }).text);
+    const texts = view!.lines.map((l) => l.text);
     // Before this fix the console showed ONLY the representative run, so an
     // agent that had answered twice looked like it had answered once and the
     // earlier evidence was unreachable from the UI.
@@ -214,13 +215,12 @@ describe("projectRunsForTask — bounded log window", () => {
         seq: i,
         occurredAt: "2026-07-24T00:00:00.000Z",
         raw: JSON.stringify({ i, filler }),
-        display: { t: "00:00:00", ev: "out", tag: "tool_result", text: `line ${i}` } as never,
+        display: { t: "00:00:00", ev: "out", tag: "tool_result", text: `line ${i}` },
       });
     }
   }
 
-  const textsOf = (lines: unknown[]) =>
-    (lines as { text: string }[]).map((l) => l.text);
+  const textsOf = (lines: LogLine[]) => lines.map((l) => l.text);
 
   it("ships the NEWEST lines only, and reports what it withheld", () => {
     insert({ id: "run_big", threadId: "primary", agentName: "dev", agentProfileId: "dev" });

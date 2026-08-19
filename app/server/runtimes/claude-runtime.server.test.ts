@@ -5,6 +5,8 @@ import {
   resolveClaudeEffort,
   resolveClaudeModel,
   type ClaudeQuery,
+  type ClaudeQueryFn,
+  type ClaudeQueryOptions,
 } from "./claude-runtime.server";
 
 describe("resolveClaudeModel", () => {
@@ -23,10 +25,16 @@ describe("resolveClaudeModel", () => {
   });
 });
 
-/** A fake Query: yields the given messages, records interrupt() calls. */
-function fakeQuery(messages: unknown[], opts: { throwAfter?: number } = {}) {
+/** A fake Query: yields the given messages, records interrupt() calls.
+ *  `rejectWith` fails the stream on its first pull, before any message — what
+ *  the SDK does when the request itself never gets off the ground. */
+function fakeQuery(
+  messages: unknown[],
+  opts: { throwAfter?: number; rejectWith?: Error } = {},
+) {
   let interrupted = false;
   const gen = (async function* () {
+    if (opts.rejectWith) throw opts.rejectWith;
     let i = 0;
     for (const m of messages) {
       if (interrupted) return;
@@ -37,10 +45,11 @@ function fakeQuery(messages: unknown[], opts: { throwAfter?: number } = {}) {
       i += 1;
     }
   })();
-  const q = gen as unknown as ClaudeQuery;
-  (q as { interrupt: () => Promise<void> }).interrupt = async () => {
-    interrupted = true;
-  };
+  const q: ClaudeQuery = Object.assign(gen, {
+    interrupt: async () => {
+      interrupted = true;
+    },
+  });
   return { q, wasInterrupted: () => interrupted };
 }
 
@@ -214,10 +223,11 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // transcript (~30-day retention) — the exact string the export installer
     // warns about. BEFORE it hit no regex and landed as `unknown`, which the
     // escalation narrates as "review the runtime configuration".
-    const q = (async function* () {
-      throw new Error("No conversation found with session ID 8a1f-dead-beef");
-    })() as unknown as ClaudeQuery;
-    (q as { interrupt: () => Promise<void> }).interrupt = async () => {};
+    const { q } = fakeQuery([], {
+      rejectWith: new Error(
+        "No conversation found with session ID 8a1f-dead-beef",
+      ),
+    });
     const lines: EmittedLine[] = [];
     let exit: RunExit | null = null;
     createClaudeAdapter({ queryFn: () => q }).start(
@@ -249,11 +259,9 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // The queryFn itself throws with an fd-exhaustion code — the exact
     // spawn-EBADF class that killed runs silently before A3.
     const boom = () => {
-      const e = new Error("spawn EBADF") as Error & { code: string };
-      e.code = "EBADF";
-      throw e;
+      throw Object.assign(new Error("spawn EBADF"), { code: "EBADF" });
     };
-    const adapter = createClaudeAdapter({ queryFn: boom as never });
+    const adapter = createClaudeAdapter({ queryFn: boom });
     const lines: EmittedLine[] = [];
     let exit: RunExit | null = null;
     adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: (e) => (exit = e) });
@@ -269,7 +277,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     const boom = () => {
       throw new Error("429 usage limit reached for this org");
     };
-    const adapter = createClaudeAdapter({ queryFn: boom as never });
+    const adapter = createClaudeAdapter({ queryFn: boom });
     const lines: EmittedLine[] = [];
     adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
     await drain();
@@ -282,14 +290,14 @@ describe("claude adapter (SDK, injected fake query)", () => {
       { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} },
     ];
     let captured: { model?: string; effort?: string } | undefined;
-    const queryFn = (params: { options?: { model?: string; effort?: string } }) => {
+    const queryFn: ClaudeQueryFn = (params) => {
       captured = params.options;
       const { q } = fakeQuery(result);
       return q;
     };
 
     // With effort set.
-    createClaudeAdapter({ queryFn: queryFn as never }).start(
+    createClaudeAdapter({ queryFn }).start(
       { ...SPEC, model: "sonnet", effort: "xhigh" },
       { onLine: () => {}, onExit: () => {} },
     );
@@ -298,7 +306,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured?.model).toBe("sonnet");
 
     // Without effort → options.effort is absent (SDK default applies).
-    createClaudeAdapter({ queryFn: queryFn as never }).start(
+    createClaudeAdapter({ queryFn }).start(
       { ...SPEC, model: "sonnet" },
       { onLine: () => {}, onExit: () => {} },
     );
@@ -310,12 +318,12 @@ describe("claude adapter (SDK, injected fake query)", () => {
   async function optionsFor(spec: RunSpec): Promise<CapturedOptions> {
     const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
     let captured: CapturedOptions | undefined;
-    const queryFn = (params: { options?: CapturedOptions }) => {
+    const queryFn: ClaudeQueryFn = (params) => {
       captured = params.options;
       const { q } = fakeQuery(result);
       return q;
     };
-    createClaudeAdapter({ queryFn: queryFn as never }).start(spec, {
+    createClaudeAdapter({ queryFn }).start(spec, {
       onLine: () => {},
       onExit: () => {},
     });
@@ -396,13 +404,13 @@ describe("claude adapter (SDK, injected fake query)", () => {
     const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
     // Capture each run's options by index (no reassignment → clean typing).
     const seen: ({ disallowedTools?: string[] } | undefined)[] = [];
-    const queryFn = (params: { options?: { disallowedTools?: string[] } }) => {
+    const queryFn: ClaudeQueryFn = (params) => {
       seen.push(params.options);
       const { q } = fakeQuery(result);
       return q;
     };
     const run = async (spec: RunSpec) => {
-      createClaudeAdapter({ queryFn: queryFn as never }).start(spec, { onLine: () => {}, onExit: () => {} });
+      createClaudeAdapter({ queryFn }).start(spec, { onLine: () => {}, onExit: () => {} });
       await drain();
       return seen[seen.length - 1];
     };
@@ -485,13 +493,13 @@ describe("claude adapter (SDK, injected fake query)", () => {
   // only restriction channel, which is what the interface docstring now says.
   it("forwards the approval list, and has no `tools` restriction channel", async () => {
     const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
-    let captured: Record<string, unknown> | undefined;
-    const queryFn = (params: { options?: Record<string, unknown> }) => {
+    let captured: ClaudeQueryOptions | undefined;
+    const queryFn: ClaudeQueryFn = (params) => {
       captured = params.options;
       const { q } = fakeQuery(result);
       return q;
     };
-    createClaudeAdapter({ queryFn: queryFn as never }).start(
+    createClaudeAdapter({ queryFn }).start(
       { ...SPEC, allowedTools: ["mcp__viberr_agent", "mcp__everything__echo"] },
       { onLine: () => {}, onExit: () => {} },
     );
@@ -533,7 +541,8 @@ describe("resolveClaudeEffort (P13-RT-08)", () => {
     const seen: { effort?: string }[] = [];
     const adapter = createClaudeAdapter({
       queryFn: ({ options }) => {
-        seen.push({ ...(options?.effort ? { effort: options.effort } : {}) });
+        const effort = options?.effort;
+        seen.push(effort ? { effort } : {});
         return fakeQuery([{ type: "result", subtype: "success", is_error: false }]).q;
       },
     });
@@ -559,21 +568,25 @@ describe("claude idle hang guard (P13-RT-11)", () => {
   it("settles a stalled stream as `error` with a classified reason line", async () => {
     process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS = "10";
     let interrupted = false;
-    const stalled = (async function* () {
-      yield { type: "system", subtype: "init", session_id: "s-1" };
-      // Never yields again; only interrupt() ends it.
-      await new Promise<void>((resolve) => {
-        const timer = setInterval(() => {
-          if (interrupted) {
-            clearInterval(timer);
-            resolve();
-          }
-        }, 1);
-      });
-    })() as unknown as ClaudeQuery;
-    (stalled as { interrupt: () => Promise<void> }).interrupt = async () => {
-      interrupted = true;
-    };
+    const stalled: ClaudeQuery = Object.assign(
+      (async function* () {
+        yield { type: "system", subtype: "init", session_id: "s-1" };
+        // Never yields again; only interrupt() ends it.
+        await new Promise<void>((resolve) => {
+          const timer = setInterval(() => {
+            if (interrupted) {
+              clearInterval(timer);
+              resolve();
+            }
+          }, 1);
+        });
+      })(),
+      {
+        interrupt: async () => {
+          interrupted = true;
+        },
+      },
+    );
 
     const lines: EmittedLine[] = [];
     let exit: RunExit | null = null;
@@ -620,24 +633,17 @@ describe("claude idle hang guard (P13-RT-11)", () => {
  * assertions in `runtime-registry.server.test.ts`.
  */
 describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
-  interface McpCapture {
-    mcpServers?: Record<string, unknown>;
-    allowedTools?: string[];
-    strictMcpConfig?: boolean;
-    disallowedTools?: string[];
-  }
-
-  async function optionsFor(spec: RunSpec): Promise<McpCapture> {
+  async function optionsFor(spec: RunSpec): Promise<ClaudeQueryOptions> {
     const result = [
       { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} },
     ];
-    let captured: McpCapture | undefined;
-    const queryFn = (params: { options?: McpCapture }) => {
+    let captured: ClaudeQueryOptions | undefined;
+    const queryFn: ClaudeQueryFn = (params) => {
       captured = params.options;
       const { q } = fakeQuery(result);
       return q;
     };
-    createClaudeAdapter({ queryFn: queryFn as never }).start(spec, {
+    createClaudeAdapter({ queryFn }).start(spec, {
       onLine: () => {},
       onExit: () => {},
     });

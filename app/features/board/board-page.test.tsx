@@ -35,6 +35,7 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     waiting: "none",
     waitingOnMe: false,
     urgent: false,
+    archived: false,
     validation: "none",
     blockReason: null,
     // F19-27: the projected stage gate. "In Progress" is the stage with the
@@ -48,11 +49,12 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     branch: null,
     repo: "akin-ozer/viberr",
     pr: null,
+    prChecks: null,
+    prReview: null,
     commits: [],
     changed: null,
     goal: "",
     packet: null,
-    recommendationCount: 0,
     eventCount: 0,
     commentCount: 0,
     diagnosticCount: 0,
@@ -66,7 +68,7 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     // D4: projected runtime-continuity fact (null = healthy).
     continuity: null,
     ...patch,
-  } as BoardTask;
+  };
 }
 
 function columns(tasks: BoardTask[]): BoardColumnData[] {
@@ -75,6 +77,9 @@ function columns(tasks: BoardTask[]): BoardColumnData[] {
     tasks: tasks.filter((t) => t.stage === stage.id),
   }));
 }
+
+/** One entry of the route table `createRoutesStub` builds a router from. */
+type StubRoute = Parameters<typeof createRoutesStub>[0][number];
 
 function renderBoard(
   tasks: BoardTask[],
@@ -88,23 +93,27 @@ function renderBoard(
     action?: () => { ok: boolean; toast?: string; error?: string };
   } = {},
 ) {
+  // The route carries an `action` key only when a case supplies one: leaving it
+  // absent, rather than setting it to undefined, hands the stub router the same
+  // route object it has always been given.
+  const boardRoute: StubRoute = {
+    path: "/projects/:slug/board",
+    Component: () => (
+      <ToastProvider>
+        <BoardPage
+          columns={columns(tasks)}
+          orphanTasks={[]}
+          canCreate
+          canTransition={opts.canTransition ?? true}
+          canRescan
+          {...(opts.defaultBranch ? { defaultBranch: opts.defaultBranch } : {})}
+        />
+      </ToastProvider>
+    ),
+  };
+  if (opts.action) boardRoute.action = opts.action;
   const Stub = createRoutesStub([
-    {
-      path: "/projects/:slug/board",
-      Component: () => (
-        <ToastProvider>
-          <BoardPage
-            columns={columns(tasks)}
-            orphanTasks={[]}
-            canCreate
-            canTransition={opts.canTransition ?? true}
-            canRescan
-            {...(opts.defaultBranch ? { defaultBranch: opts.defaultBranch } : {})}
-          />
-        </ToastProvider>
-      ),
-      ...(opts.action ? { action: opts.action } : {}),
-    },
+    boardRoute,
     // D19: the destination a card face navigates to, so "Enter opens the
     // focused task" can be asserted as a real navigation rather than a spy.
     {
@@ -556,7 +565,7 @@ describe("R15-5: the board owns its own filter box", () => {
       task({ key: "VIB-1", title: "Attach a project credential" }),
       task({ key: "VIB-2", title: "Rotate the PAT" }),
     ]);
-    const input = getByLabelText("Filter this board") as HTMLInputElement;
+    const input = getByLabelText("Filter this board");
     // The placeholder no longer promises a global "tasks, branches, agents"
     // search it never performed.
     expect(input.getAttribute("placeholder")).toBe("Filter this board…");
@@ -790,7 +799,7 @@ describe("F19-8: an archived card is inert and honest", () => {
       branch: "VIB-9-abandoned",
       pr: { number: 124, state: "accepted", title: "Abandoned" },
       ...patch,
-    } as Partial<BoardTask>);
+    });
 
   it("says `archived` instead of a readiness anyone owes", () => {
     const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
@@ -1256,27 +1265,27 @@ function renderMutableBoard(
   opts: { action?: () => { ok: boolean; toast?: string; error?: string } } = {},
 ) {
   let set!: (next: BoardTask[]) => void;
-  const Stub = createRoutesStub([
-    {
-      path: "/projects/:slug/board",
-      Component: () => {
-        const [tasks, setTasks] = useState(initial);
-        set = setTasks;
-        return (
-          <ToastProvider>
-            <BoardPage
-              columns={columns(tasks)}
-              orphanTasks={[]}
-              canCreate
-              canTransition
-              canRescan
-            />
-          </ToastProvider>
-        );
-      },
-      ...(opts.action ? { action: opts.action } : {}),
+  const boardRoute: StubRoute = {
+    path: "/projects/:slug/board",
+    Component: () => {
+      const [tasks, setTasks] = useState(initial);
+      set = setTasks;
+      return (
+        <ToastProvider>
+          <BoardPage
+            columns={columns(tasks)}
+            orphanTasks={[]}
+            canCreate
+            canTransition
+            canRescan
+          />
+        </ToastProvider>
+      );
     },
-  ]);
+  };
+  // As in `renderBoard`: no action supplied means no `action` key at all.
+  if (opts.action) boardRoute.action = opts.action;
+  const Stub = createRoutesStub([boardRoute]);
   const r = render(<Stub initialEntries={["/projects/viberr-core/board"]} />);
   return {
     ...r,
@@ -1374,13 +1383,21 @@ describe("D19: arrow-key traversal over the board (R19-10)", () => {
   ];
   const cardFor = (c: HTMLElement, key: string) =>
     cards(c).find((el) => el.dataset.boardCard === key)!;
-  const focused = () =>
-    (document.activeElement as HTMLElement | null)?.dataset.boardCard ?? null;
+  const focused = () => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement
+      ? (active.dataset.boardCard ?? null)
+      : null;
+  };
   /** Press `key` on a card face, the way the roving focus reaches it. */
   const press = (el: HTMLElement, key: string) => {
     el.focus();
     fireEvent.keyDown(el, { key });
   };
+  // SAFETY: every case focuses a card face before pressing, and jsdom's
+  // `activeElement` falls back to <body> — an HTMLElement either way, so a lost
+  // focus lands the press somewhere inert and the case's own assertion reports
+  // it, rather than this helper throwing first.
   const pressFocused = (key: string) =>
     press(document.activeElement as HTMLElement, key);
 
@@ -1538,9 +1555,7 @@ describe("D19: arrow-key traversal over the board (R19-10)", () => {
     item.focus();
     fireEvent.keyDown(item, { key: "ArrowDown" });
     expect(document.activeElement).not.toBe(cardFor(container, "VIB-2"));
-    expect(
-      (document.activeElement as HTMLElement).closest(".stage-menu-pop"),
-    ).not.toBeNull();
+    expect(document.activeElement!.closest(".stage-menu-pop")).not.toBeNull();
   });
 
   it("names each lane as a list so a reader is told where focus landed", () => {

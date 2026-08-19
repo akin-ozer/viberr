@@ -30,12 +30,12 @@ export function KBModal({ initial, onClose }: { initial: KbView | null; onClose:
       onSave={() => {
         if (!canSave) return;
         setErr(null);
-        action.submit({
-          intent: "kb-save",
-          ...(initial ? { kbId: initial.id } : {}),
-          name: name.trim(),
-          refresh,
-        });
+        const fields: Record<string, string> = {};
+        fields.intent = "kb-save";
+        if (initial) fields.kbId = initial.id;
+        fields.name = name.trim();
+        fields.refresh = refresh;
+        action.submit(fields);
       }}
     >
       <div className="field">
@@ -131,15 +131,15 @@ export function McpModal({
       onSave={() => {
         if (!canSave) return;
         setErr(null);
-        action.submit({
-          intent: "mcp-save",
-          ...(initial ? { mcpId: initial.id } : {}),
-          name: slugify(name),
-          transport,
-          target: target.trim(),
-          cred: cred.trim(),
-          ...(clearCred ? { clearCred: "1" } : {}),
-        });
+        const fields: Record<string, string> = {};
+        fields.intent = "mcp-save";
+        if (initial) fields.mcpId = initial.id;
+        fields.name = slugify(name);
+        fields.transport = transport;
+        fields.target = target.trim();
+        fields.cred = cred.trim();
+        if (clearCred) fields.clearCred = "1";
+        action.submit(fields);
       }}
     >
       <div className="key-row">
@@ -314,20 +314,20 @@ export function SkillModal({
       onSave={() => {
         if (!canSave) return;
         setErr(null);
-        action.submit({
-          intent: "skill-save",
-          ...(initial ? { skillId: initial.id } : {}),
-          name: slugify(name),
-          summary: filesMode ? "" : summary.trim(),
-          body: filesMode ? "" : body,
-          contentMode: filesMode ? "files" : "write",
-          // P13-KM-18: an empty body means "keep what's on disk" (the editor
-          // only round-trips a truncated read for very large files), so
-          // BLANKING a SKILL.md was impossible from the UI — the server's
-          // explicit `clearBody` escape hatch had no caller. Emptying the
-          // editor on an existing skill now says so.
-          ...(initial && body.trim() === "" ? { clearBody: "1" } : {}),
-        });
+        const fields: Record<string, string> = {};
+        fields.intent = "skill-save";
+        if (initial) fields.skillId = initial.id;
+        fields.name = slugify(name);
+        fields.summary = filesMode ? "" : summary.trim();
+        fields.body = filesMode ? "" : body;
+        fields.contentMode = filesMode ? "files" : "write";
+        // P13-KM-18: an empty body means "keep what's on disk" (the editor
+        // only round-trips a truncated read for very large files), so
+        // BLANKING a SKILL.md was impossible from the UI — the server's
+        // explicit `clearBody` escape hatch had no caller. Emptying the
+        // editor on an existing skill now says so.
+        if (initial && body.trim() === "") fields.clearBody = "1";
+        action.submit(fields);
       }}
     >
       <div className="field">

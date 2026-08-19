@@ -25,7 +25,7 @@ import { getProject } from "./board-query.server";
  * Done-stage tasks (the project's LAST stage) contribute nothing.
  */
 
-interface DeploymentTaskRow {
+type DeploymentTaskRow = {
   task_key: string;
   title: string;
   stage: string;
@@ -36,13 +36,13 @@ interface DeploymentTaskRow {
   /** 1 when this task carries an open decision packet (the same predicate
    *  decisions.server.ts and home-query.server.ts use). */
   has_packet: number;
-}
+};
 
-interface RunningRunRow {
+type RunningRunRow = {
   task_key: string;
   kind: "operator" | "primary" | "reviewer";
   thread_id: string;
-}
+};
 
 /**
  * UXV19-7: this derived the label from `waiting` ALONE — every operator on a
@@ -92,6 +92,11 @@ export function listAgentDeployments(
   const lastStageId =
     project?.stages[project.stages.length - 1]?.id ?? "done";
 
+  // SAFETY: the SELECT names exactly DeploymentTaskRow's members, and
+  // 0001_baseline declares every one of them NOT NULL on `task_projections`
+  // except `specialist_json`/`operator_json` (typed nullable here); `waiting`
+  // is CHECK-constrained to the three Waiting values, and `has_packet` is the
+  // CASE expression's own 1/0.
   const tasks = db
     .prepare(
       `SELECT task_key, title, stage, waiting, specialist_json,
@@ -104,15 +109,18 @@ export function listAgentDeployments(
         WHERE project_slug = ? AND archived = 0
         ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
     )
-    .all(projectSlug) as unknown as DeploymentTaskRow[];
+    .all(projectSlug) as DeploymentTaskRow[];
 
+  // SAFETY: the SELECT names three `agent_runs` columns 0001_baseline declares
+  // NOT NULL, and its CHECK restricts `kind` to exactly the three values
+  // RunningRunRow lists.
   const runningRows = db
     .prepare(
       `SELECT task_key, kind, thread_id
          FROM agent_runs
         WHERE project_slug = ? AND state = 'running'`,
     )
-    .all(projectSlug) as unknown as RunningRunRow[];
+    .all(projectSlug) as RunningRunRow[];
   const running = new Map<string, Set<string>>();
   for (const row of runningRows) {
     const key =
@@ -133,6 +141,11 @@ export function listAgentDeployments(
   for (const task of tasks) {
     if (task.stage === lastStageId) continue; // done tasks contribute nothing
 
+    // SAFETY: `operator_json` has ONE writer — the rebuilder stores
+    // `fm.operator ? JSON.stringify(fm.operator) : null`, and `fm.operator` is
+    // `operatorRefSchema.nullable()` output. The same holds for the specialist
+    // and reviewer columns below, which the rebuilder fills from the file's
+    // (schema-parsed) engagements; AgentRef is the subset this roster reads.
     const operator = task.operator_json
       ? (JSON.parse(task.operator_json) as OperatorRef)
       : null;
@@ -149,6 +162,7 @@ export function listAgentDeployments(
       });
     }
 
+    // SAFETY: see the operator note above — same writer, same guarantee.
     const specialist = task.specialist_json
       ? (JSON.parse(task.specialist_json) as AgentRef)
       : null;
@@ -165,6 +179,9 @@ export function listAgentDeployments(
       });
     }
 
+    // SAFETY: `reviewers_json` is NOT NULL and always a JSON array — the
+    // rebuilder writes `JSON.stringify(supportingEngagements(fm))`, defaulting
+    // to '[]' in the schema.
     const reviewers = JSON.parse(task.reviewers_json) as AgentRef[];
     reviewers.forEach((reviewer, index) => {
       instances.push({

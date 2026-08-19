@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   cleanup,
@@ -54,9 +55,12 @@ function baseData(projects: HomeProjectCard[]): HomePageData {
       id: "u_arda",
       name: "Arda Kaya",
       email: "arda@viberr.dev",
+      title: null,
       role: "admin",
+      theme: "system",
+      idp: "local",
       avatarTone: "",
-    } as HomePageData["user"],
+    },
     greet: "Good evening",
     projects,
     prefs: { view: "grid", stars: {} },
@@ -75,7 +79,23 @@ function baseData(projects: HomeProjectCard[]): HomePageData {
   };
 }
 
-function renderHome(data: HomePageData, extra: Record<string, unknown> = {}) {
+/** The optional HomePage props a case drives directly (the live-stream state). */
+type HomeOverrides = Omit<ComponentProps<typeof HomePage>, "data" | "theme">;
+
+/** A query answers a plain `HTMLElement`, but `.value`/`setSelectionRange` live
+ *  on the concrete control — so the node is CHECKED against its element class
+ *  rather than asserted into it, and a wrong node fails here. */
+function control<T extends HTMLElement>(
+  node: Element | null,
+  kind: new () => T,
+): T {
+  if (!(node instanceof kind)) {
+    throw new Error(`expected ${kind.name}, got ${node?.nodeName ?? "nothing"}`);
+  }
+  return node;
+}
+
+function renderHome(data: HomePageData, extra: HomeOverrides = {}) {
   const Stub = createRoutesStub([
     {
       path: "/",
@@ -216,7 +236,7 @@ describe("LV-07: the New-project modal explains itself", () => {
       baseData([card()]),
     );
     fireEvent.click(getAllByText("New project")[0]!);
-    const key = getByLabelText(/Task key/) as HTMLInputElement;
+    const key = control(getByLabelText(/Task key/), HTMLInputElement);
 
     fireEvent.change(key, { target: { value: "P13" } });
     // Letters-only is the stored contract (`taskPrefix` is /^[A-Za-z]+$/), but
@@ -227,8 +247,8 @@ describe("LV-07: the New-project modal explains itself", () => {
     ).toBeTruthy();
 
     // …and Create says WHY it is disabled instead of being a dead button.
-    const foot = container.querySelector(".modal-foot")!;
-    expect(within(foot as HTMLElement).getByText(/Enter a project name/)).toBeTruthy();
+    const foot = container.querySelector<HTMLElement>(".modal-foot")!;
+    expect(within(foot).getByText(/Enter a project name/)).toBeTruthy();
   });
 });
 
@@ -243,7 +263,7 @@ describe("B-FD4: the Settings tiles are admin-only links", () => {
     const data = baseData([card()]);
     const { container, getAllByText, getByText } = renderHome({
       ...data,
-      user: { ...data.user, role: "member" } as HomePageData["user"],
+      user: { ...data.user, role: "member" },
     });
     // The tiles still summarize the org…
     expect(getByText("5 users")).toBeTruthy();
@@ -256,7 +276,7 @@ describe("B-FD4: the Settings tiles are admin-only links", () => {
     const data = baseData([card()]);
     const { getAllByText, container } = renderHome({
       ...data,
-      user: { ...data.user, role: "member" } as HomePageData["user"],
+      user: { ...data.user, role: "member" },
       // The loader ships null for a non-admin (B-FD4).
       storeRoot: null,
     });
@@ -314,8 +334,7 @@ describe("R15-5: ⌘K is one shortcut app-wide", () => {
     expect(container.querySelector("dialog.cmdk-card")).toBeTruthy();
     // Home's own box keeps its honest, board-local job.
     expect(
-      (container.querySelector(".top-search input") as HTMLInputElement)
-        .placeholder,
+      container.querySelector<HTMLInputElement>(".top-search input")!.placeholder,
     ).toBe("Find a project…");
   });
 
@@ -348,7 +367,7 @@ describe("F14: derived name-fields must not be typed INTO", () => {
     fireEvent.change(getByPlaceholderText("e.g. Payments Gateway"), {
       target: { value: "Viberr" },
     });
-    const repo = getByLabelText(/GitHub repository/) as HTMLInputElement;
+    const repo = control(getByLabelText(/GitHub repository/), HTMLInputElement);
     expect(repo.value).toBe("viberr");
 
     repo.setSelectionRange(6, 6);
@@ -370,7 +389,7 @@ describe("F14: derived name-fields must not be typed INTO", () => {
     fireEvent.change(getByPlaceholderText("e.g. Payments Gateway"), {
       target: { value: "Viberr" },
     });
-    const repo = getByLabelText(/GitHub repository/) as HTMLInputElement;
+    const repo = control(getByLabelText(/GitHub repository/), HTMLInputElement);
     fireEvent.change(repo, { target: { value: "viberr-app" } });
     repo.setSelectionRange(10, 10);
     fireEvent.focus(repo);
@@ -386,7 +405,7 @@ describe("F14: derived name-fields must not be typed INTO", () => {
     fireEvent.change(getByPlaceholderText("e.g. Payments Gateway"), {
       target: { value: "Viberr" },
     });
-    const key = getByLabelText(/Task key/) as HTMLInputElement;
+    const key = control(getByLabelText(/Task key/), HTMLInputElement);
     expect(key.value).toBe("VIB");
     // Put the caret where a click would leave it — after the derived text.
     key.setSelectionRange(3, 3);

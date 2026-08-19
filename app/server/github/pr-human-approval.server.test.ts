@@ -55,12 +55,15 @@ function revision(headSha = DELIVERED): WorkRevision {
 }
 
 function prWith(approval: PrHumanApproval | null): PrRef {
-  return {
+  const pr: PrRef = {
     number: 318,
     state: "review",
     title: "Attach execution workspace",
-    ...(approval ? { [PR_HUMAN_APPROVAL_KEY]: approval } : {}),
-  } as PrRef;
+  };
+  // The key's PRESENCE is the fact under test — `readPrHumanApproval` reads a
+  // PR that never carried an approval differently from one carrying a null.
+  if (approval) pr[PR_HUMAN_APPROVAL_KEY] = approval;
+  return pr;
 }
 
 /** A delivered task sitting at the review boundary with no agent reviewer
@@ -244,7 +247,9 @@ describe("humanVerdictApproval — the binding is re-checked on every READ", () 
   });
 
   it("garbage in the file reads as 'no approval', never as a throw", () => {
-    const pr = { number: 1, state: "review", title: "t", humanApproval: "yes" } as PrRef;
+    // `prRefSchema` is loose, so a hand-edited string under the approval key is
+    // a type-valid PrRef — exactly the garbage a task.md can carry at rest.
+    const pr: PrRef = { number: 1, state: "review", title: "t", humanApproval: "yes" };
     expect(readPrHumanApproval(pr)).toBeNull();
     expect(humanVerdictApproval({ pr, workRevision: revision() })).toBeNull();
   });

@@ -243,6 +243,17 @@ export function resolveRunModel(
   return m && isKnownModel(backend, m) ? m : defaultModelFor(backend);
 }
 
+/** Intensity rank of every effort tier either backend offers — the shared
+ *  scale a cross-backend retry translates through. */
+const EFFORT_RANK = new Map<string, number>([
+  ["minimal", 0],
+  ["low", 1],
+  ["medium", 2],
+  ["high", 3],
+  ["xhigh", 4],
+  ["max", 5],
+]);
+
 /**
  * Resolve a reasoning-effort tier to a VALID one for `backend`. Backends have
  * different tiers (Claude: low…max; Codex: low…xhigh), so a "retry on the
@@ -258,22 +269,14 @@ export function resolveRunEffort(
   const e = (effort ?? "").trim();
   const cat = backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED;
   if (e && cat.efforts.includes(e)) return e;
-  // Map by intensity RANK across the two tier scales so a cross-backend retry
+  // Map by intensity rank across the two tier scales so a cross-backend retry
   // keeps a comparable level instead of snapping to the default.
-  const RANK: Record<string, number> = {
-    minimal: 0,
-    low: 1,
-    medium: 2,
-    high: 3,
-    xhigh: 4,
-    max: 5,
-  };
-  if (e && e in RANK) {
-    const wanted = RANK[e]!;
+  const wanted = EFFORT_RANK.get(e);
+  if (wanted !== undefined) {
     let best = cat.defaultEffort;
     let bestDist = Infinity;
     for (const opt of cat.efforts) {
-      const d = Math.abs((RANK[opt] ?? 2) - wanted);
+      const d = Math.abs((EFFORT_RANK.get(opt) ?? 2) - wanted);
       if (d < bestDist) {
         bestDist = d;
         best = opt;
@@ -350,8 +353,17 @@ interface CacheEntry {
 
 const CATALOG_KEY = Symbol.for("viberr.modelCatalog");
 
+/** The process-global slot the live cache lives in — a well-known symbol, so a
+ *  dev-server HMR reload of this module keeps serving the same cache. */
+interface CatalogCacheHost {
+  [CATALOG_KEY]?: Map<RealBackend, CacheEntry>;
+}
+
 function getCache(): Map<RealBackend, CacheEntry> {
-  const g = globalThis as unknown as Record<symbol, Map<RealBackend, CacheEntry> | undefined>;
+  // SAFETY: `CATALOG_KEY` is a registry symbol under a viberr-namespaced key
+  // that only this module reads or writes, so the slot holds either the map
+  // this function put there or nothing at all.
+  const g = globalThis as CatalogCacheHost;
   let cache = g[CATALOG_KEY];
   if (!cache) {
     cache = new Map();
@@ -381,20 +393,28 @@ function liveCatalogModelValues(backend: RealBackend): Set<string> {
 /** Map a `supportedModels()` row to a catalog model. */
 function mapSdkModel(m: SdkModelInfo): CatalogModel {
   const supportsEffort = m.supportsEffort === true;
-  return {
+  const mapped: CatalogModel = {
     value: m.value,
     displayName: m.displayName || m.value,
     description: m.description || "",
     supportsEffort,
-    ...(supportsEffort && Array.isArray(m.supportedEffortLevels)
-      ? { efforts: [...m.supportedEffortLevels] }
-      : {}),
   };
+  // A model the SDK gave no level list for carries NO `efforts` key at all, so
+  // the picker falls back to the catalog's effort superset for it.
+  if (supportsEffort && Array.isArray(m.supportedEffortLevels)) {
+    mapped.efforts = [...m.supportedEffortLevels];
+  }
+  return mapped;
 }
 
 let cachedQueryFn: ClaudeQueryFn | null = null;
 async function realQueryFn(): Promise<ClaudeQueryFn> {
   if (cachedQueryFn) return cachedQueryFn;
+  // SAFETY: `ClaudeQueryFn` widens the SDK's own `query` signature (prompt
+  // `AsyncIterable<unknown>`, our `ClaudeQueryOptions`), so the SDK type is not
+  // directly assignable to it. The widening is unreachable here: the module's
+  // ONLY call is `fetchLiveClaudeModels`, which passes the string prompt `""`
+  // and `claudeProbeOptions()` — both inside what the SDK's signature accepts.
   const mod = (await import("@anthropic-ai/claude-agent-sdk")) as {
     query: ClaudeQueryFn;
   };
@@ -434,6 +454,14 @@ export function claudeProbeOptions(): ClaudeQueryOptions {
   };
 }
 
+/** The probe surface of an SDK query object. `ClaudeQuery` describes the
+ *  STREAMING contract a run consumes; `supportedModels()` is the extra method
+ *  this probe wants and older SDK builds may not carry, hence both optional. */
+interface ModelProbeQuery {
+  supportedModels?: () => Promise<SdkModelInfo[]>;
+  interrupt?: () => Promise<void>;
+}
+
 /** A lightweight query whose ONLY purpose is calling `.supportedModels()`.
  *  We never iterate the stream — the query object exposes the method directly.
  *  The options are still the confined ones: constructing the query is what
@@ -442,11 +470,8 @@ async function fetchLiveClaudeModels(
   queryFn: ClaudeQueryFn,
   timeoutMs: number,
 ): Promise<SdkModelInfo[]> {
-  const q = queryFn({ prompt: "", options: claudeProbeOptions() }) as unknown as {
-    supportedModels?: () => Promise<SdkModelInfo[]>;
-    interrupt?: () => Promise<void>;
-  };
-  if (typeof q.supportedModels !== "function") {
+  const q: ModelProbeQuery = queryFn({ prompt: "", options: claudeProbeOptions() });
+  if (!q.supportedModels) {
     throw new Error("query() has no supportedModels()");
   }
   const timeout = new Promise<never>((_, reject) => {

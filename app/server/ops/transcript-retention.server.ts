@@ -103,12 +103,15 @@ function entries(dir: string): Dirent[] {
   }
 }
 
+/** What one `pruneFile` attempt did — `bytes` is 0 unless the file was removed. */
+interface PrunedFile {
+  removed: boolean;
+  bytes: number;
+}
+
 /** Delete `file` when its mtime is older than `cutoffMs`. A removed EMPTY file
  *  still counts as removed, so the count never disagrees with the disk. */
-function pruneFile(
-  file: string,
-  cutoffMs: number,
-): { removed: boolean; bytes: number } {
+function pruneFile(file: string, cutoffMs: number): PrunedFile {
   let size = 0;
   try {
     const stats = statSync(file);

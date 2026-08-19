@@ -165,29 +165,48 @@ export type Guardrail = z.infer<typeof guardrailSchema>;
 
 // -------------------------------------------------------- frontmatter
 
+/* Each frontmatter field gets its own named schema. The tolerant parse below
+ * validates one field at a time, so it needs the individual validators —
+ * naming them keeps `projectFrontmatterSchema` the single composition of the
+ * same instances rather than a second definition to drift from. */
+
+const projectNameSchema = z.string().min(1);
+const projectSlugSchema = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
+/** Archived projects are hidden from the active workspace (restorable by an
+ * admin). Absent for active projects — only archived ones carry the key, so
+ * it stays optional in the frontmatter type; the tolerant parse fills a
+ * concrete `false` on read. */
+const archivedSchema = z.boolean().optional();
+/** The project's GitHub repo ("owner/name"). One project, one repository —
+ * P13-D-5 deleted the task-level override (nothing ever wrote `task.repo`
+ * and the admin toggle gated nothing). */
+const repoSchema = z.string().nullable();
+const defaultBranchSchema = z.string().min(1);
+/** Task key prefix ("VIB" → VIB-142). */
+const taskPrefixSchema = z.string().regex(/^[A-Za-z]+$/);
+/** Next task number for the atomic per-project counter. */
+const nextTaskNumberSchema = z.number().int().min(1).nullable();
+const stagesSchema = z.array(stageSchema);
+const workflowSchema = z.array(workflowBoundarySchema);
+const membersSchema = z.array(memberSchema);
+const agentsSchema = z.array(agentDeploymentSchema);
+const projectCredentialPolicySchema = credentialPolicySchema.nullable();
+const guardrailsSchema = z.array(guardrailSchema);
+
 export const projectFrontmatterSchema = z.object({
-  name: z.string().min(1),
-  slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
-  /** Archived projects are hidden from the active workspace (restorable by an
-   * admin). Absent for active projects — only archived ones carry the key, so
-   * it stays optional in the frontmatter type; the tolerant parse fills a
-   * concrete `false` on read. */
-  archived: z.boolean().optional(),
-  /** The project's GitHub repo ("owner/name"). One project, one repository —
-   * P13-D-5 deleted the task-level override (nothing ever wrote `task.repo`
-   * and the admin toggle gated nothing). */
-  repo: z.string().nullable(),
-  defaultBranch: z.string().min(1),
-  /** Task key prefix ("VIB" → VIB-142). */
-  taskPrefix: z.string().regex(/^[A-Za-z]+$/),
-  /** Next task number for the atomic per-project counter. */
-  nextTaskNumber: z.number().int().min(1).nullable(),
-  stages: z.array(stageSchema),
-  workflow: z.array(workflowBoundarySchema),
-  members: z.array(memberSchema),
-  agents: z.array(agentDeploymentSchema),
-  credentialPolicy: credentialPolicySchema.nullable(),
-  guardrails: z.array(guardrailSchema),
+  name: projectNameSchema,
+  slug: projectSlugSchema,
+  archived: archivedSchema,
+  repo: repoSchema,
+  defaultBranch: defaultBranchSchema,
+  taskPrefix: taskPrefixSchema,
+  nextTaskNumber: nextTaskNumberSchema,
+  stages: stagesSchema,
+  workflow: workflowSchema,
+  members: membersSchema,
+  agents: agentsSchema,
+  credentialPolicy: projectCredentialPolicySchema,
+  guardrails: guardrailsSchema,
 });
 export type ProjectFrontmatter = z.infer<typeof projectFrontmatterSchema>;
 
@@ -207,31 +226,40 @@ export const PROJECT_FRONTMATTER_KEYS: readonly (keyof ProjectFrontmatter)[] = [
   "guardrails",
 ];
 
+/** Widened to `string` so the raw-key scan below can test membership without
+ * asserting a YAML key into `keyof ProjectFrontmatter`. */
+const PROJECT_FRONTMATTER_KEY_SET = new Set<string>(PROJECT_FRONTMATTER_KEYS);
+
+/** The frontmatter mapping as YAML handed it over: keys exactly as written,
+ * every value still undecoded (the field schemas above do the decoding, one
+ * field at a time). This is also the contract for the leftover keys the writer
+ * round-trips back into the file verbatim — those are never parsed at all, so
+ * their values stay whatever YAML produced. */
+const rawFrontmatterSchema = z.record(z.string(), z.unknown());
+export type RawFrontmatter = z.infer<typeof rawFrontmatterSchema>;
+
 export interface TolerantProjectFrontmatterResult {
   frontmatter: ProjectFrontmatter;
-  unknown: Record<string, unknown>;
+  unknown: RawFrontmatter;
   diagnostics: FileDiagnostic[];
 }
 
 export interface ParsedProjectFile {
   frontmatter: ProjectFrontmatter;
-  unknownFrontmatter: Record<string, unknown>;
+  unknownFrontmatter: RawFrontmatter;
   /** Markdown body — the project description. */
   description: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function tolerant<T>(
   diagnostics: FileDiagnostic[],
-  path: string,
-  value: unknown,
+  data: RawFrontmatter,
+  path: keyof ProjectFrontmatter,
   schema: z.ZodType<T>,
   fallback: T,
   required = false,
 ): T {
+  const value = data[path];
   if (value === undefined) {
     if (required) {
       diagnostics.push(
@@ -266,11 +294,12 @@ function tolerant<T>(
  */
 function tolerantArray<T>(
   diagnostics: FileDiagnostic[],
-  path: string,
-  value: unknown,
+  data: RawFrontmatter,
+  path: keyof ProjectFrontmatter,
   arraySchema: z.ZodArray<z.ZodType<T>>,
   required = false,
 ): T[] {
+  const value = data[path];
   if (value === undefined) {
     if (required) {
       diagnostics.push(
@@ -318,28 +347,19 @@ function derivePrefix(slug: string): string {
 }
 
 /**
- * Tolerant project frontmatter parse. `fallbackSlug` (the project directory
- * name) rescues files with a missing/invalid `slug`.
+ * Tolerant project frontmatter parse. `data` is the frontmatter mapping the
+ * reader decoded off disk — a file whose frontmatter is not a mapping arrives
+ * here empty, so every field falls back to its default. `fallbackSlug` (the
+ * project directory name) rescues files with a missing/invalid `slug`.
  */
 export function parseProjectFrontmatter(
-  raw: unknown,
+  data: RawFrontmatter,
   context: { fallbackSlug?: string } = {},
 ): TolerantProjectFrontmatterResult {
   const diagnostics: FileDiagnostic[] = [];
-  const data: Record<string, unknown> = isRecord(raw) ? raw : {};
-  if (!isRecord(raw)) {
-    diagnostics.push(
-      diagError(
-        "frontmatter.not_a_map",
-        "Frontmatter is not a YAML mapping — all fields fall back to defaults.",
-        undefined,
-        true,
-      ),
-    );
-  }
 
   let slug: string;
-  const slugResult = projectFrontmatterSchema.shape.slug.safeParse(data.slug);
+  const slugResult = projectSlugSchema.safeParse(data.slug);
   if (slugResult.success) {
     slug = slugResult.data;
     if (context.fallbackSlug && slug !== context.fallbackSlug) {
@@ -374,90 +394,44 @@ export function parseProjectFrontmatter(
   }
 
   const frontmatter: ProjectFrontmatter = {
-    name: tolerant(
-      diagnostics,
-      "name",
-      data.name,
-      projectFrontmatterSchema.shape.name,
-      slug,
-      true,
-    ),
+    name: tolerant(diagnostics, data, "name", projectNameSchema, slug, true),
     slug,
-    archived: tolerant(
-      diagnostics,
-      "archived",
-      data.archived,
-      projectFrontmatterSchema.shape.archived,
-      false,
-    ),
-    repo: tolerant(
-      diagnostics,
-      "repo",
-      data.repo,
-      projectFrontmatterSchema.shape.repo,
-      null,
-    ),
+    archived: tolerant(diagnostics, data, "archived", archivedSchema, false),
+    repo: tolerant(diagnostics, data, "repo", repoSchema, null),
     defaultBranch: tolerant(
       diagnostics,
+      data,
       "defaultBranch",
-      data.defaultBranch,
-      projectFrontmatterSchema.shape.defaultBranch,
+      defaultBranchSchema,
       "main",
     ),
     taskPrefix: tolerant(
       diagnostics,
+      data,
       "taskPrefix",
-      data.taskPrefix,
-      projectFrontmatterSchema.shape.taskPrefix,
+      taskPrefixSchema,
       derivePrefix(slug),
     ),
     nextTaskNumber: tolerant(
       diagnostics,
+      data,
       "nextTaskNumber",
-      data.nextTaskNumber,
-      projectFrontmatterSchema.shape.nextTaskNumber,
+      nextTaskNumberSchema,
       null,
     ),
     // F18: per-entry — one bad row drops only itself, never the whole list.
-    stages: tolerantArray(
-      diagnostics,
-      "stages",
-      data.stages,
-      projectFrontmatterSchema.shape.stages,
-      true,
-    ),
-    workflow: tolerantArray(
-      diagnostics,
-      "workflow",
-      data.workflow,
-      projectFrontmatterSchema.shape.workflow,
-    ),
-    members: tolerantArray(
-      diagnostics,
-      "members",
-      data.members,
-      projectFrontmatterSchema.shape.members,
-    ),
-    agents: tolerantArray(
-      diagnostics,
-      "agents",
-      data.agents,
-      projectFrontmatterSchema.shape.agents,
-    ),
+    stages: tolerantArray(diagnostics, data, "stages", stagesSchema, true),
+    workflow: tolerantArray(diagnostics, data, "workflow", workflowSchema),
+    members: tolerantArray(diagnostics, data, "members", membersSchema),
+    agents: tolerantArray(diagnostics, data, "agents", agentsSchema),
     credentialPolicy: tolerant(
       diagnostics,
+      data,
       "credentialPolicy",
-      data.credentialPolicy,
-      projectFrontmatterSchema.shape.credentialPolicy,
+      projectCredentialPolicySchema,
       null,
     ),
-    guardrails: tolerant(
-      diagnostics,
-      "guardrails",
-      data.guardrails,
-      projectFrontmatterSchema.shape.guardrails,
-      [],
-    ),
+    guardrails: tolerant(diagnostics, data, "guardrails", guardrailsSchema, []),
   };
 
   if (frontmatter.stages.length === 0) {
@@ -470,9 +444,9 @@ export function parseProjectFrontmatter(
     );
   }
 
-  const unknown: Record<string, unknown> = {};
+  const unknown: RawFrontmatter = {};
   for (const [k, v] of Object.entries(data)) {
-    if (!(PROJECT_FRONTMATTER_KEYS as readonly string[]).includes(k)) {
+    if (!PROJECT_FRONTMATTER_KEY_SET.has(k)) {
       unknown[k] = v;
     }
   }

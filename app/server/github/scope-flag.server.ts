@@ -10,6 +10,7 @@ import {
 } from "~/server/files/task-writer.server";
 import {
   openScopeViolation,
+  type OpenScopeViolationInput,
   resolveScopeViolation,
   type ScopeViolationRecord,
 } from "~/server/projections/policy-violations.server";
@@ -113,13 +114,16 @@ export async function flagScopeViolation(
   input: FlagScopeViolationInput,
   ctx: ScopeFlagContext = {},
 ): Promise<{ violation: ScopeViolationRecord; created: boolean }> {
-  const { violation, created } = openScopeViolation(db, {
+  const open: OpenScopeViolationInput = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     scope: input.scope,
     detail: input.detail,
-    ...(input.actor ? { actor: input.actor } : {}),
-  });
+  };
+  // Optional key — with no actor named, the violations API records its own
+  // system actor.
+  if (input.actor) open.actor = input.actor;
+  const { violation, created } = openScopeViolation(db, open);
   if (!created) return { violation, created };
 
   if (input.taskKey) {

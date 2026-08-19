@@ -25,10 +25,11 @@ const renderLogin = (providersOn: { github: boolean; google: boolean }) => {
     returnTo: null,
     providers: providersOn,
   };
-  // Route components receive generated props; the stub can't supply them, so
-  // hand the two the component reads (same cast style as the GithubViewPage
-  // tests).
-  const LoginStub = Login as unknown as React.ComponentType<{
+  // SAFETY: `Login` destructures exactly `loaderData` and `actionData` off its
+  // generated `Route.ComponentProps` (login.tsx) — the two this stub supplies.
+  // The rest of the generated props (params, matches) are never read, and the
+  // stub has no way to produce them.
+  const LoginStub = Login as React.ComponentType<{
     loaderData: typeof loaderData;
     actionData: undefined;
   }>;

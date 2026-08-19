@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRevalidator } from "react-router";
+import { z } from "zod";
 import { buildEventsUrl, sseScopes } from "~/features/live-updates/event-types";
 import {
   isRunBoundary,
@@ -63,21 +64,28 @@ export interface RunLogState {
   loadOlder: (threadId: string) => void;
 }
 
-interface RunLogAppendedData {
-  projectSlug: string;
-  taskKey: string;
-  runId: string;
-  threadId: string;
-  seq: number;
-}
+/** The two runtime frames this consumer subscribes, as the broker puts them on
+ *  the wire (`app/schemas/sse-event.schema.ts`). Parsed rather than trusted: a
+ *  frame that does not match is dropped, the way a malformed one always was. */
+const runLogAppendedSchema = z.object({
+  data: z.object({
+    projectSlug: z.string(),
+    taskKey: z.string(),
+    runId: z.string(),
+    threadId: z.string(),
+    seq: z.number(),
+  }),
+});
 
-interface RunStateChangedData {
-  projectSlug: string;
-  taskKey: string;
-  runId: string;
-  threadId: string;
-  state: string;
-}
+const runStateChangedSchema = z.object({
+  data: z.object({
+    projectSlug: z.string(),
+    taskKey: z.string(),
+    runId: z.string(),
+    threadId: z.string(),
+    state: z.string(),
+  }),
+});
 
 /** Per-thread bookkeeping: the run id + the highest seq we hold. */
 interface ThreadCursor {
@@ -318,6 +326,11 @@ export function useRunLogStream(input: {
             );
             return;
           }
+          // SAFETY: a 200 from this app's own `/resources/run-log` loader, which
+          // answers `Response.json({ data: RunLog })`; every other body it
+          // produces carries a non-200 status and returned above. `data` stays
+          // optional and is checked below, so a 200 that is not that body (a
+          // proxy interstitial) surfaces as a load failure instead of throwing.
           const body = (await res.json()) as {
             data?: {
               lines: { seq: number; display: LogLine; raw: string }[];
@@ -421,6 +434,9 @@ export function useRunLogStream(input: {
           );
           return;
         }
+        // SAFETY: same single producer as the backward page above — a 200 from
+        // our own `/resources/run-log` loader, with `data` left optional and
+        // guarded so anything else stops the tail rather than throwing.
         const body = (await res.json()) as {
           data?: {
             threadId: string;
@@ -466,8 +482,9 @@ export function useRunLogStream(input: {
     source.onopen = () => setStreamError(null);
     source.addEventListener("run.log-appended", (event) => {
       try {
-        const parsed = JSON.parse(event.data) as { data: RunLogAppendedData };
-        const d = parsed.data;
+        const parsed = runLogAppendedSchema.safeParse(JSON.parse(event.data));
+        if (!parsed.success) return;
+        const d = parsed.data.data;
         if (d.projectSlug !== projectSlug || d.taskKey !== taskKey) return;
         const cursor = cursorsRef.current.get(d.runId);
         const since = cursor ? cursor.headSeq : -1;
@@ -479,10 +496,11 @@ export function useRunLogStream(input: {
     });
     source.addEventListener("run.state-changed", (event) => {
       try {
-        const parsed = JSON.parse(event.data) as { data: RunStateChangedData };
+        const parsed = runStateChangedSchema.safeParse(JSON.parse(event.data));
+        if (!parsed.success) return;
         if (
-          parsed.data.projectSlug !== projectSlug ||
-          parsed.data.taskKey !== taskKey
+          parsed.data.data.projectSlug !== projectSlug ||
+          parsed.data.data.taskKey !== taskKey
         ) {
           return;
         }

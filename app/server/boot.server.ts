@@ -8,6 +8,7 @@ import {
   DataRootLockedError,
   forceDataRootTakeover,
   startDataRootLockGuard,
+  type AcquireDataRootLockOptions,
 } from "./db/data-root-lock.server";
 import { getDb } from "./db/sqlite.server";
 import { startEventPublisher } from "./events/event-publisher.server";
@@ -22,8 +23,12 @@ import { startKbWatcher } from "./files/kb-watch.service.server";
 import { startGithubReconcilePoller } from "./github/reconcile-poller.server";
 import { reapStaleWarmups } from "~/server/org/mcp-warmup.server";
 import { logger, writeFatalSync } from "./logging/logger.server";
-import { getBuildInfo } from "./ops/build-info.server";
-import { formatBytes, measureDataRootSpace } from "./ops/disk-space.server";
+import { getBuildInfo, type BuildInfo } from "./ops/build-info.server";
+import {
+  formatBytes,
+  measureDataRootSpace,
+  type DiskStatus,
+} from "./ops/disk-space.server";
 import {
   runMaintenancePass,
   startMaintenanceScheduler,
@@ -45,6 +50,21 @@ const BOOT_KEY = Symbol.for("viberr.booted");
 // Installed once (survives HMR via a well-known symbol), same pattern as BOOT_KEY.
 const CRASH_HANDLERS_KEY = Symbol.for("viberr.crashVisibilityInstalled");
 
+/** The process-global slots boot parks its two once-only flags in — well-known
+ *  symbols, so a dev-server HMR reload of this module still sees what the
+ *  previous instance already did. */
+interface BootFlagHost {
+  [BOOT_KEY]?: boolean;
+  [CRASH_HANDLERS_KEY]?: boolean;
+}
+
+function bootFlags(): BootFlagHost {
+  // SAFETY: both keys are registry symbols under viberr-namespaced names that
+  // nothing outside this module reads or writes, and the only value this file
+  // ever stores in either is `true` — so a slot holds that or nothing at all.
+  return globalThis as BootFlagHost;
+}
+
 /**
  * F20-8(a): make a fatal process death VISIBLE. On 2026-08-14 the app process
  * vanished with zero output — `docker logs -t` went straight from a 200 request
@@ -62,7 +82,7 @@ const CRASH_HANDLERS_KEY = Symbol.for("viberr.crashVisibilityInstalled");
  * request — `bootServer` is awaited from `entry.server.tsx` module scope.
  */
 export function installCrashVisibilityHandlers(): void {
-  const slot = globalThis as unknown as Record<symbol, boolean | undefined>;
+  const slot = bootFlags();
   if (slot[CRASH_HANDLERS_KEY]) return;
   slot[CRASH_HANDLERS_KEY] = true;
   process.on("uncaughtException", (error) => {
@@ -77,6 +97,29 @@ export function installCrashVisibilityHandlers(): void {
     });
     process.exit(1);
   });
+}
+
+/** The one line `logBootIntegrity` writes. */
+type BootIntegrityFields = {
+  dataRoot: string;
+  dataRootDirsOk: boolean;
+  /** Absent when every expected data-root directory is present. */
+  missingDirs?: string[];
+  migrationsApplied: number;
+  latestMigration: string | null;
+  projections: { projects: number; tasks: number };
+  users: number;
+  build: BuildInfo;
+  disk: { free: string; total: string; status: DiskStatus } | null;
+};
+
+/** One `count(*) AS c` aggregate → its number. */
+function countRows(db: DatabaseSync, sql: string): number {
+  // SAFETY: every caller passes a `SELECT count(*) AS c` aggregate with no
+  // GROUP BY, which sqlite answers with exactly one row whose only column is
+  // the integer `c`.
+  const row = db.prepare(sql).get() as { c: number };
+  return row.c;
 }
 
 /**
@@ -96,47 +139,49 @@ export function logBootIntegrity(db: DatabaseSync): void {
   const missingDirs = DATA_ROOT_SUBDIRS.filter(
     (dir) => !existsSync(path.join(root, dir)),
   );
+  // SAFETY: `count()`/`max()` with no GROUP BY is an aggregate — sqlite answers
+  // it with exactly one row, and this SELECT names both of its columns: `c`
+  // (integer count) and `latest` (max of `schema_migrations.filename`, null on
+  // an empty table).
   const migrations = db
     .prepare(
       `SELECT count(*) AS c, max(filename) AS latest FROM schema_migrations`,
     )
     .get() as { c: number; latest: string | null };
-  const projects = (
-    db.prepare(`SELECT count(*) AS c FROM projects`).get() as { c: number }
-  ).c;
-  const tasks = (
-    db.prepare(`SELECT count(*) AS c FROM task_projections`).get() as {
-      c: number;
-    }
-  ).c;
-  const users = (
-    db.prepare(`SELECT count(*) AS c FROM users`).get() as { c: number }
-  ).c;
-  const build = getBuildInfo();
+  const projects = countRows(db, `SELECT count(*) AS c FROM projects`);
+  const tasks = countRows(db, `SELECT count(*) AS c FROM task_projections`);
+  const users = countRows(db, `SELECT count(*) AS c FROM users`);
   const disk = measureDataRootSpace();
-  logger.info("boot integrity check", {
+  const fields: BootIntegrityFields = {
     dataRoot: root,
     dataRootDirsOk: missingDirs.length === 0,
-    ...(missingDirs.length > 0 ? { missingDirs } : {}),
     migrationsApplied: migrations.c,
     latestMigration: migrations.latest,
     projections: { projects, tasks },
     users,
     // Which build this is. Nulls are honest — an image built without a version
     // stamp says so rather than printing a placeholder.
-    build,
+    build: getBuildInfo(),
     // Gap 16: how much room is left, at the one moment an operator is already
     // reading this log. `null` when the filesystem could not be measured.
-    ...(disk
+    disk: disk
       ? {
-          disk: {
-            free: formatBytes(disk.freeBytes),
-            total: formatBytes(disk.totalBytes),
-            status: disk.status,
-          },
+          free: formatBytes(disk.freeBytes),
+          total: formatBytes(disk.totalBytes),
+          status: disk.status,
         }
-      : { disk: null }),
-  });
+      : null,
+  };
+  // Named only when some are actually gone: a healthy boot has nothing to list,
+  // and an empty `missingDirs: []` reads like a finding that isn't there.
+  if (missingDirs.length > 0) fields.missingDirs = missingDirs;
+  logger.info("boot integrity check", fields);
+}
+
+/** The two maintenance entry points `startStoreMaintenance` wires. */
+interface StoreMaintenanceDeps {
+  runMaintenancePass: typeof runMaintenancePass;
+  startMaintenanceScheduler: typeof startMaintenanceScheduler;
 }
 
 /**
@@ -153,9 +198,14 @@ export function logBootIntegrity(db: DatabaseSync): void {
  * flight is touched (P14-RT-09). Doing it here as well would reintroduce
  * exactly that race. The periodic pass has its own active-run guard instead.
  *
- * Exported so the wiring is testable without booting a real server.
+ * Exported so the wiring is testable without booting a real server; the two
+ * maintenance entry points are injectable for the same reason, defaulting to
+ * the real implementations.
  */
-export function startStoreMaintenance(db: DatabaseSync): void {
+export function startStoreMaintenance(
+  db: DatabaseSync,
+  deps: StoreMaintenanceDeps = { runMaintenancePass, startMaintenanceScheduler },
+): void {
   try {
     // R19-18: a background MCP install belongs to the process that started it,
     // so a restart leaves rows flagged "installing" with no installer behind
@@ -171,13 +221,20 @@ export function startStoreMaintenance(db: DatabaseSync): void {
     });
   }
   try {
-    runMaintenancePass(db, { reason: "boot", reclaimWorkspaces: false });
+    deps.runMaintenancePass(db, { reason: "boot", reclaimWorkspaces: false });
   } catch (error) {
     logger.error("boot maintenance pass failed", {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
-  startMaintenanceScheduler(db);
+  deps.startMaintenanceScheduler(db);
+}
+
+/** The three steps of the boot reconcile chain, in the order they must run. */
+interface ReconcileRestartedWorkDeps {
+  recoverUnreactedAgentRuns: typeof recoverUnreactedAgentRuns;
+  recoverStrandedOperatorPlans: typeof recoverStrandedOperatorPlans;
+  reclaimTerminalTaskWorkspaces: typeof reclaimTerminalTaskWorkspaces;
 }
 
 /**
@@ -199,26 +256,34 @@ export function startStoreMaintenance(db: DatabaseSync): void {
  * P14-RT-09: the reclaim used to run right after SCHEDULING step 1 while
  * claiming to run "after the recovery pass above", so a recovered run's delivery
  * reconcile could race the `rmSync` of the very workspace it reads. It is
- * sequenced now, which is what the claim always said. Exported so that ordering
+ * sequenced now, which is what the claim always said. Exported — and the three
+ * steps injectable, defaulting to the real implementations — so that ordering
  * is testable rather than only asserted in a comment.
  */
-export async function reconcileRestartedWork(db: DatabaseSync): Promise<void> {
+export async function reconcileRestartedWork(
+  db: DatabaseSync,
+  deps: ReconcileRestartedWorkDeps = {
+    recoverUnreactedAgentRuns,
+    recoverStrandedOperatorPlans,
+    reclaimTerminalTaskWorkspaces,
+  },
+): Promise<void> {
   try {
-    await recoverUnreactedAgentRuns(db);
+    await deps.recoverUnreactedAgentRuns(db);
   } catch (error) {
     logger.error("agent-reply recovery failed", {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
   try {
-    await recoverStrandedOperatorPlans(db);
+    await deps.recoverStrandedOperatorPlans(db);
   } catch (error) {
     logger.error("codex operator plan recovery failed", {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
   try {
-    const reclaimed = reclaimTerminalTaskWorkspaces(db);
+    const reclaimed = deps.reclaimTerminalTaskWorkspaces(db);
     if (reclaimed.removed > 0) {
       logger.info("reclaimed finished task workspaces", {
         workspaces: reclaimed.removed,
@@ -264,11 +329,14 @@ export function takeDataRootWriterLock(
   } = {},
 ): void {
   const io = opts.io ?? PROCESS_REFUSAL_IO;
+  const lockOptions: AcquireDataRootLockOptions = {
+    force: forceDataRootTakeover(env),
+  };
+  // Only the test override names a root; production leaves the key off so the
+  // lock resolves the configured one itself.
+  if (opts.dataRoot) lockOptions.dataRoot = opts.dataRoot;
   try {
-    acquireDataRootLock({
-      force: forceDataRootTakeover(env),
-      ...(opts.dataRoot ? { dataRoot: opts.dataRoot } : {}),
-    });
+    acquireDataRootLock(lockOptions);
   } catch (error) {
     if (!(error instanceof DataRootLockedError)) throw error;
     io.write(`${error.message}\n`);
@@ -288,7 +356,7 @@ export async function bootServer(): Promise<void> {
   // F20-8(a): first of all, so even a failure DURING boot — before the lock, the
   // db, the first request — dies loudly instead of vanishing.
   installCrashVisibilityHandlers();
-  const cache = globalThis as unknown as Record<symbol, boolean | undefined>;
+  const cache = bootFlags();
   if (cache[BOOT_KEY]) return;
 
   const env = getEnv();

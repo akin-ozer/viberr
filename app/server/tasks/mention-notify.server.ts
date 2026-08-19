@@ -1,5 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import { createNotification } from "~/server/projections/notifications.server";
+import { z } from "zod";
+import {
+  type CreateNotificationInput,
+  createNotification,
+} from "~/server/projections/notifications.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import { extractMentions } from "~/ui/mention-spans";
 
@@ -134,11 +138,16 @@ export function ambiguousMentionNote(handles: readonly string[]): string {
   return `_${list} ${subject} more than one person here, so nobody was notified — mention the full name (“@First Last”) or the email handle._`;
 }
 
+/** `users.id` is the TEXT primary key; `email` and `name` are TEXT NOT NULL. */
+const mentionableUserRowsSchema = z.array(
+  z.object({ id: z.string(), email: z.string(), name: z.string() }),
+);
+
 /** The enabled users the fan-out and the ambiguity report both resolve against. */
 function enabledUsers(db: DatabaseSync): MentionableUser[] {
-  return db
-    .prepare(`SELECT id, email, name FROM users WHERE disabled = 0`)
-    .all() as unknown as MentionableUser[];
+  return mentionableUserRowsSchema.parse(
+    db.prepare(`SELECT id, email, name FROM users WHERE disabled = 0`).all(),
+  );
 }
 
 /**
@@ -216,15 +225,17 @@ export function fanOutMentions(
   for (const userId of userIds) {
     if (input.excludeUserId && userId === input.excludeUserId) continue;
     mentioned.push(userId);
-    createNotification(db, {
+    const notification: CreateNotificationInput = {
       userId,
       kind: "mention",
       text: `mentioned you — “${clip(input.text)}”`,
       from: input.from,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
-    });
+    };
+    // No caller timestamp ⇒ leave the key off and let the writer stamp `now`.
+    if (input.occurredAt) notification.occurredAt = input.occurredAt;
+    createNotification(db, notification);
   }
   return { mentioned, ambiguous };
 }

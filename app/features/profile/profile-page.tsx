@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
+import { z } from "zod";
 import { useNavigate, type FetcherWithComponents } from "react-router";
 import { Avatar } from "~/ui/avatar";
 import { initialsOf } from "~/ui/initials";
@@ -521,6 +522,14 @@ function ProfileAccess({
 
 // -------------------------------------------------------- GitHub identity
 
+/** better-auth's social sign-in reply: the provider URL to hand the browser.
+ *  A reply without a usable one is a failure the caller's catch reports, so a
+ *  malformed body must not read as a destination (same schema the login screen
+ *  parses this endpoint with). */
+const socialSignIn = z
+  .object({ url: z.string().min(1).optional().catch(undefined) })
+  .catch({});
+
 function ProfileGithub({
   data,
   onNav,
@@ -563,7 +572,7 @@ function ProfileGithub({
         // fetch() resolves on 4xx/5xx, so an error payload would otherwise be
         // read as a successful connect response.
         if (!res.ok) throw new Error("connect request failed");
-        const body = (await res.json()) as { url?: string };
+        const body = socialSignIn.parse(await res.json());
         if (body.url) {
           window.location.href = body.url;
           return;

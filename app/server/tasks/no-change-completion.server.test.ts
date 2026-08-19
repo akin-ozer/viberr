@@ -1,13 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
+import {
+  fakeGithubFetch,
+  unreachableFetch,
+  type FakeGithub,
+  type FakeResponder,
+} from "../../../test-support/fake-github";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
   acceptanceNoChangeCheck,
   noChangeApplies,
@@ -25,75 +34,47 @@ import {
  * these gate is irreversible (F19-21).
  */
 
-vi.mock("~/server/github/github-context.server", () => ({
-  getProjectGithubContext: vi.fn(),
-}));
-
-import { getProjectGithubContext } from "~/server/github/github-context.server";
-
-const ghCtxMock = vi.mocked(getProjectGithubContext);
-
 let ctx: TestDbContext;
 let store: TestStore;
+let github: FakeGithub;
 
-const RATE_LIMIT = { limit: 5000, remaining: 4999, reset: null };
 const BASE_SHA = "b".repeat(40);
+const HEAD_SHA = "c".repeat(40);
+const REPO_PATH = "/repos/akin-ozer/viberr";
+const ACTOR = { userId: "u_probe", label: "arda@viberr.test" };
 
-function okResponse(data: unknown) {
-  return {
-    ok: true as const,
-    status: 200,
-    data,
-    etag: null,
-    rateLimit: RATE_LIMIT,
-    scopesHeader: null,
-    tokenExpiration: null,
-  };
-}
+const refBody = (sha: string) => ({ body: { object: { sha } } });
+const compareBody = (aheadBy: number) => ({
+  body: { ahead_by: aheadBy, behind_by: 0, status: aheadBy > 0 ? "ahead" : "identical", commits: [] },
+});
+const httpError = (status: number, message = "Not Found") => ({
+  status,
+  body: { message },
+});
 
-function httpError(status: number, message = "Not Found") {
-  return {
-    ok: false as const,
-    kind: "http" as const,
-    status,
-    message,
-    data: null,
-    rateLimit: RATE_LIMIT,
-  };
-}
-
-const NETWORK_ERROR = {
-  ok: false as const,
-  kind: "network" as const,
-  message: "fetch failed",
-};
-
-/** A fake GitHub transport routed by path: the task-branch ref, the default
- *  branch ref, and the compare. `requestSpy` proves the ordinary PR path never
- *  touches the network at all. */
-const requestSpy = vi.fn();
-
+/**
+ * Point the probe at a real GitHub context — a real credential on a real repo —
+ * served by the canned transport. An OMITTED route answers 404, which is
+ * literally the "no such branch" case the probe reads, so the fixtures only
+ * name the routes a scenario changes.
+ */
 function installGithub(routes: {
-  branchRef?: unknown;
-  baseRef?: unknown;
-  compare?: unknown;
+  branchRef?: FakeResponder;
+  baseRef?: FakeResponder;
+  compare?: FakeResponder;
+  branch?: string;
 }): void {
-  requestSpy.mockImplementation(async (_method: string, path: string) => {
-    if (path.includes("/compare/")) {
-      return routes.compare ?? okResponse({ ahead_by: 0, behind_by: 0, status: "identical", commits: [] });
-    }
-    if (path.endsWith("/heads/main")) {
-      return routes.baseRef ?? okResponse({ object: { sha: BASE_SHA } });
-    }
-    return routes.branchRef ?? okResponse({ object: { sha: "c".repeat(40) } });
-  });
-  ghCtxMock.mockReturnValue({
-    status: "ok",
-    client: { request: requestSpy } as never,
-    repo: "akin-ozer/viberr",
-    owner: "akin-ozer",
-    defaultBranch: "main",
-    patId: "pat_1",
+  const pat = createPat(
+    store.db,
+    { userId: store.users.arda.id, label: "bot", token: "ghp_nochange000000000000000000000001" },
+    ACTOR,
+  );
+  setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
+  const branch = routes.branch ?? "vib-1";
+  github = fakeGithubFetch({
+    [`GET ${REPO_PATH}/git/ref/heads/${branch}`]: routes.branchRef ?? refBody(HEAD_SHA),
+    [`GET ${REPO_PATH}/git/ref/heads/main`]: routes.baseRef ?? refBody(BASE_SHA),
+    [`GET ${REPO_PATH}/compare/main...${branch}`]: routes.compare ?? compareBody(0),
   });
 }
 
@@ -111,13 +92,15 @@ function seed(patch: Partial<TaskFrontmatter> = {}): void {
 }
 
 function dataCtx() {
-  return { dataRoot: store.dataRoot };
+  return { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl };
 }
 
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  vi.clearAllMocks();
+  // The default fixture: a repo with no credential yet. Tests that need one
+  // call `installGithub`, which seeds it along with the canned routes.
+  github = fakeGithubFetch({});
 });
 
 afterEach(() => ctx.cleanup());
@@ -145,7 +128,7 @@ describe("probeNothingToDeliver — only three bases verify", () => {
     // CANARY: delete the `aheadBy > 0` arm and every existing branch verifies.
     seed();
     installGithub({
-      compare: okResponse({ ahead_by: 3, behind_by: 0, status: "ahead", commits: [] }),
+      compare: compareBody(3),
     });
     const probe = await probeNothingToDeliver(store.db, dataCtx(), store.slug, "VIB-1");
     expect(probe.status).toBe("has_work");
@@ -158,8 +141,13 @@ describe("probeNothingToDeliver — only three bases verify", () => {
   it("an unreachable GitHub fails CLOSED", async () => {
     // CANARY: return `verified` from the network/catch arm.
     seed();
-    installGithub({ branchRef: NETWORK_ERROR });
-    const probe = await probeNothingToDeliver(store.db, dataCtx(), store.slug, "VIB-1");
+    installGithub({});
+    const probe = await probeNothingToDeliver(
+      store.db,
+      { dataRoot: store.dataRoot, fetchImpl: unreachableFetch() },
+      store.slug,
+      "VIB-1",
+    );
     expect(probe.status).toBe("unverifiable");
     if (probe.status !== "unverifiable") return;
     expect(probe.refusal).toMatch(/could not be reached/i);
@@ -174,11 +162,7 @@ describe("probeNothingToDeliver — only three bases verify", () => {
 
   it("a missing credential fails CLOSED", async () => {
     // CANARY: treat `no_pat_configured` like `no_repo_configured`.
-    seed();
-    ghCtxMock.mockReturnValue({
-      status: "no_pat_configured",
-      repo: "akin-ozer/viberr",
-    });
+    seed(); // no `installGithub` — the project has a repo and no credential
     const probe = await probeNothingToDeliver(store.db, dataCtx(), store.slug, "VIB-1");
     expect(probe.status).toBe("unverifiable");
     if (probe.status !== "unverifiable") return;
@@ -199,7 +183,9 @@ describe("probeNothingToDeliver — only three bases verify", () => {
     // pre-existing R17-2 coverage in acceptance-closed-pr.server.test.ts, which
     // is the point: planning / non-repo work stays acceptable.
     seed();
-    ghCtxMock.mockReturnValue({ status: "no_repo_configured" });
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...project.parsed.frontmatter, repo: null });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const probe = await probeNothingToDeliver(store.db, dataCtx(), store.slug, "VIB-1");
     expect(probe.status).toBe("verified");
     if (probe.status !== "verified") return;
@@ -230,7 +216,7 @@ describe("acceptanceNoChangeCheck — the accept-time gate", () => {
       // R20-2: an ordinary task (has a PR) fails noChangeCandidate → never probed.
       autoDetected: false,
     });
-    expect(requestSpy).not.toHaveBeenCalled();
+    expect(github.calls).toHaveLength(0);
   });
 
   it("applies (and verifies) for a flagged task with no PR", async () => {
@@ -245,7 +231,7 @@ describe("acceptanceNoChangeCheck — the accept-time gate", () => {
   it("applies and REFUSES when the branch gained commits", async () => {
     seed({ noChanges: true, branch: "vib-1" });
     installGithub({
-      compare: okResponse({ ahead_by: 2, behind_by: 0, status: "ahead", commits: [] }),
+      compare: compareBody(2),
     });
     const check = await acceptanceNoChangeCheck(store.db, dataCtx(), store.slug, "VIB-1");
     expect(check.applies).toBe(true);

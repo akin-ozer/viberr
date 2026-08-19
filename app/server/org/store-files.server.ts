@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { StoreNode } from "~/features/kb-browser/tree";
 import { countKbFiles } from "~/features/kb-browser/tree";
 import {
@@ -18,7 +19,10 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
-import { createGithubClient } from "~/server/github/github-client.server";
+import {
+  createGithubClient,
+  type GithubClientOptions,
+} from "~/server/github/github-client.server";
 // C5-followup: the editor's own copy of this list is gone. What Viberr will
 // author, list as editable and inject is now ONE set — three hand-maintained
 // copies is how `.json`/`.yaml` came to be authorable but never injectable.
@@ -28,7 +32,10 @@ import {
 } from "~/shared/text/store-extensions";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { getDefaultConnectionTokenFresh } from "./connections.server";
+import {
+  getDefaultConnectionTokenFresh,
+  type FreshnessOptions,
+} from "./connections.server";
 
 /**
  * StoreBrowser server layer (kb-browser spec §5): every operation is a
@@ -201,13 +208,11 @@ function touchResource(db: DatabaseSync, target: StoreTarget): void {
     // for one. `updated_at` still moves — the row DID change — but only the
     // re-scan button (or watcher-driven mode) may move the index stamp.
     const pinned =
-      (
-        db
-          .prepare(
-            `SELECT refresh FROM org_knowledge_bases WHERE id = ? OR dir = ?`,
-          )
-          .get(target.id, dir) as { refresh?: string } | undefined
-      )?.refresh === "manual";
+      db
+        .prepare(
+          `SELECT refresh FROM org_knowledge_bases WHERE id = ? OR dir = ?`,
+        )
+        .get(target.id, dir)?.refresh === "manual";
     const indexClause = pinned
       ? `SET updated_at = ?`
       : `SET last_indexed_at = ?, updated_at = ?`;
@@ -545,11 +550,15 @@ const IMPORT_MAX_BLOB_BYTES = 1024 * 1024;
 /** Provenance dotfile written next to an imported snapshot (P13-KM-13). */
 const IMPORT_MARKER = ".viberr-import.json";
 
+/** The marker's payload. Only `source` is ever read back, and a marker that
+ *  does not carry one is treated as no provenance at all. */
+const importMarkerSchema = z.object({ source: z.string() });
+
 function importSourceOf(rootAbs: string, folder: string): string | null {
   try {
     const raw = readFileSync(path.join(rootAbs, folder, IMPORT_MARKER), "utf8");
-    const parsed = JSON.parse(raw) as { source?: unknown };
-    return typeof parsed.source === "string" ? parsed.source : null;
+    const marker = importMarkerSchema.safeParse(JSON.parse(raw));
+    return marker.success ? marker.data.source : null;
   } catch {
     return null;
   }
@@ -583,12 +592,40 @@ export type GithubImportResult =
   | { status: "no_connection"; message: string }
   | { status: "failed"; message: string };
 
-interface GitTreeEntry {
-  path: string;
-  type: string;
-  sha: string;
-  size?: number;
-}
+/** `GET git/trees` — entries keep `path`/`sha` strict (both feed the blob
+ *  fetches and the write paths); `type` and `size` carry their readers'
+ *  filter/`??` tolerance. A mangled listing parses to no tree at all, which the
+ *  `?? []` read reports as "no importable files". */
+const gitTreeSchema = z
+  .object({
+    tree: z
+      .array(
+        z.object({
+          path: z.string(),
+          type: z.string().optional().catch(undefined),
+          sha: z.string(),
+          size: z.number().optional().catch(undefined),
+        }),
+      )
+      .optional()
+      .catch(undefined),
+    truncated: z.boolean().optional().catch(undefined),
+  })
+  .catch({});
+
+/** `GET git/blobs/{sha}` — both fields are read with fallbacks, so each parses
+ *  to `undefined` on drift and the decode degrades exactly as before. */
+const gitBlobSchema = z
+  .object({
+    content: z.string().optional().catch(undefined),
+    encoding: z.string().optional().catch(undefined),
+  })
+  .catch({});
+
+/** `GET /repos/{r}` — only the default branch is read, with a `?? "main"`. */
+const repoInfoSchema = z
+  .object({ default_branch: z.string().optional().catch(undefined) })
+  .catch({});
 
 export async function importGithubSnapshot(
   db: DatabaseSync,
@@ -617,14 +654,16 @@ export async function importGithubSnapshot(
   // B-GH7: re-prove a stale `valid` verdict before handing the token out — the
   // other consumer (runSetCredential) already does, and this one could import
   // with a token GitHub revoked months ago.
-  const tokenInfo = await getDefaultConnectionTokenFresh(db, {
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  });
+  // Only a test hands a transport over; production must reach the real `fetch`.
+  const freshness: FreshnessOptions = {};
+  if (options.fetchImpl) freshness.fetchImpl = options.fetchImpl;
+  const tokenInfo = await getDefaultConnectionTokenFresh(db, freshness);
   const anonymous = tokenInfo === null;
-  const client = createGithubClient({
+  const clientOptions: GithubClientOptions = {
     token: tokenInfo?.token ?? null,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  });
+  };
+  if (options.fetchImpl) clientOptions.fetchImpl = options.fetchImpl;
+  const client = createGithubClient(clientOptions);
 
   // The two refusals that having no credential EXPLAINS. Both are repaired by
   // adding a connection, so they surface as the no-connection state — the
@@ -646,9 +685,10 @@ export async function importGithubSnapshot(
     (res.status === 403 || res.status === 429);
 
   if (!branch) {
-    const info = await client.request<{ default_branch?: string }>(
+    const info = await client.request(
       "GET",
       `/repos/${owner}/${repo}`,
+      repoInfoSchema,
     );
     if (!info.ok) {
       if (rateLimited(info)) return noConnectionState(RATE_HINT);
@@ -668,12 +708,12 @@ export async function importGithubSnapshot(
     branch = info.data.default_branch ?? "main";
   }
 
-  const treeRes = await client.request<{
-    tree?: GitTreeEntry[];
-    truncated?: boolean;
-  }>("GET", `/repos/${owner}/${repo}/git/trees/${branch}`, {
-    searchParams: { recursive: "1" },
-  });
+  const treeRes = await client.request(
+    "GET",
+    `/repos/${owner}/${repo}/git/trees/${branch}`,
+    gitTreeSchema,
+    { searchParams: { recursive: "1" } },
+  );
   if (!treeRes.ok) {
     if (rateLimited(treeRes)) return noConnectionState(RATE_HINT);
     // A 404 HERE is ambiguous when anonymous: a wrong branch on a public repo
@@ -682,7 +722,7 @@ export async function importGithubSnapshot(
     // /tree/<branch> link), so guessing would mislabel every private-repo
     // import as a bad branch. One probe of the repo endpoint settles it.
     if (anonymous && treeRes.kind === "http" && treeRes.status === 404) {
-      const probe = await client.request("GET", `/repos/${owner}/${repo}`);
+      const probe = await client.request("GET", `/repos/${owner}/${repo}`, z.unknown());
       if (!probe.ok) return noConnectionState(PRIVATE_HINT);
     }
     return {
@@ -734,9 +774,10 @@ export async function importGithubSnapshot(
   if (singleFile) {
     const blob = blobs[0]!;
     const filename = subPath.split("/").filter(Boolean).pop()!;
-    const blobRes = await client.request<{ content?: string; encoding?: string }>(
+    const blobRes = await client.request(
       "GET",
       `/repos/${owner}/${repo}/git/blobs/${blob.sha}`,
+      gitBlobSchema,
     );
     if (!blobRes.ok) {
       if (rateLimited(blobRes)) return noConnectionState(RATE_HINT);
@@ -833,10 +874,11 @@ export async function importGithubSnapshot(
       const rel = subPath ? blob.path.slice(prefix.length) : blob.path;
       const parts = cleanRelPath(rel);
       if (!parts) return 0;
-      const blobRes = await client.request<{
-        content?: string;
-        encoding?: string;
-      }>("GET", `/repos/${owner}/${repo}/git/blobs/${blob.sha}`);
+      const blobRes = await client.request(
+        "GET",
+        `/repos/${owner}/${repo}/git/blobs/${blob.sha}`,
+        gitBlobSchema,
+      );
       if (!blobRes.ok) {
         if (rateLimited(blobRes)) anonQuotaHit = true;
         return 0;
