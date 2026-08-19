@@ -8,7 +8,12 @@ import {
   resolveTaskFilePath,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { encodeRefPath, type GithubClient } from "./github-client.server";
+import { logger } from "~/server/logging/logger.server";
+import {
+  encodeRefPath,
+  githubFailureMessage,
+  type GithubClient,
+} from "./github-client.server";
 import {
   getProjectGithubContext,
   type GithubContextFailure,
@@ -50,12 +55,35 @@ export interface BranchCompare {
   status: string;
   /** Commits the branch is ahead by (short sha + first message line). */
   commits: { sha: string; msg: string }[];
+  /**
+   * F21-8 — how many entries of that list GitHub sent and this reader could not
+   * decode. `commits` is consumed as the branch's FOOTPRINT (task-key commit
+   * association, the branch panel, delivery evidence), so a dropped entry is a
+   * fact the caller has to be able to see: 0 means the list is complete.
+   */
+  droppedCommits: number;
 }
+
+/** ONE compare commit. `sha` is the identity — an entry without one names no
+ *  commit — so the entry is dropped WHOLE (and counted, below) rather than
+ *  admitted with a blank sha. The message carries its reader's `??`-tolerance. */
+const ghCompareCommitSchema = z.object({
+  sha: z.string(),
+  commit: z
+    .object({ message: z.string().optional().catch(undefined) })
+    .optional()
+    .catch(undefined),
+});
 
 /**
  * The compare payload's read slice, with the readers' own `??`-tolerance baked
  * in — every field degrades to the caller's fallback on drift, so a mangled
  * response yields the same "identical / 0 / 0" answer the raw reads produced.
+ *
+ * The commit entries are tolerated ONE BY ONE (`null` = undecodable). Voiding
+ * the array on a single bad entry emptied the whole list while `ahead_by`
+ * survived — a branch that reads "4 commits ahead" with no commits to show,
+ * and a delivery footprint silently reduced to nothing.
  */
 const ghCompareSchema = z
   .object({
@@ -63,15 +91,7 @@ const ghCompareSchema = z
     behind_by: z.number().optional().catch(undefined),
     status: z.string().optional().catch(undefined),
     commits: z
-      .array(
-        z.object({
-          sha: z.string(),
-          commit: z
-            .object({ message: z.string().optional().catch(undefined) })
-            .optional()
-            .catch(undefined),
-        }),
-      )
+      .array(ghCompareCommitSchema.nullable().catch(null))
       .optional()
       .catch(undefined),
   })
@@ -102,16 +122,37 @@ export async function getBranchCompare(
     { searchParams: { per_page: 250 } },
   );
   if (result.ok) {
+    const entries = result.data.commits ?? [];
+    const commits = entries.flatMap((c) =>
+      c === null
+        ? []
+        : [
+            {
+              sha: c.sha.slice(0, 7),
+              msg: (c.commit?.message ?? "").split("\n", 1)[0] ?? "",
+            },
+          ],
+    );
+    const droppedCommits = entries.length - commits.length;
+    if (droppedCommits > 0) {
+      // The diagnostic half of the tolerant read: the surviving commits are
+      // still returned, and the count says the list is short.
+      logger.warn("compare payload dropped undecodable commit entries", {
+        repo,
+        base,
+        head,
+        kept: commits.length,
+        dropped: droppedCommits,
+      });
+    }
     return {
       status: "ok",
       compare: {
         aheadBy: result.data.ahead_by ?? 0,
         behindBy: result.data.behind_by ?? 0,
         status: result.data.status ?? "identical",
-        commits: (result.data.commits ?? []).map((c) => ({
-          sha: c.sha.slice(0, 7),
-          msg: (c.commit?.message ?? "").split("\n", 1)[0] ?? "",
-        })),
+        commits,
+        droppedCommits,
       },
     };
   }
@@ -135,9 +176,14 @@ export async function getBranchCompare(
     }
     return { status: "forbidden", message: result.message };
   }
+  // Residual — including a payload that did not decode, which names itself
+  // rather than degrading to "unknown".
   return {
     status: "network_unavailable",
-    message: result.kind === "http" ? `GitHub ${result.status}` : "unknown",
+    message:
+      result.kind === "http"
+        ? `GitHub ${result.status}`
+        : githubFailureMessage(result),
   };
 }
 
@@ -260,7 +306,10 @@ export async function ensureTaskBranch(
         }
         return {
           status: "network_unavailable",
-          message: baseRef.kind === "http" ? baseRef.message : "unknown",
+          // Includes the strict-schema `decode` failure: a ref answer without
+          // `object.sha` never creates a branch from nothing, and now says so
+          // as a value instead of throwing out of the call.
+          message: githubFailureMessage(baseRef),
         };
       }
       // 3. …and create the branch ref from it.
@@ -303,7 +352,7 @@ export async function ensureTaskBranch(
       } else {
         return {
           status: "network_unavailable",
-          message: createRef.kind === "http" ? createRef.message : "unknown",
+          message: githubFailureMessage(createRef),
         };
       }
     } else if (existing.kind === "http" && existing.status === 403) {
@@ -329,7 +378,7 @@ export async function ensureTaskBranch(
     } else {
       return {
         status: "network_unavailable",
-        message: existing.kind === "http" ? existing.message : "unknown",
+        message: githubFailureMessage(existing),
       };
     }
   }

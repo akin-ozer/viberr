@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
-import { createGithubClient, githubWebHost } from "./github-client.server";
+import {
+  createGithubClient,
+  githubFailureMessage,
+  githubWebHost,
+} from "./github-client.server";
 
 function client(routes: Parameters<typeof fakeGithubFetch>[0]) {
   const gh = fakeGithubFetch(routes);
@@ -120,6 +124,32 @@ describe("github-client", () => {
     }
   });
 
+  it("F21-9: a body that dies MID-READ is a typed network failure, not a throw", async () => {
+    // The fetch resolved — headers, status, the lot — and the BODY stream then
+    // errored (a truncated response, an aborted socket, the timeout firing
+    // between headers and body). Only the request was wrapped, so this rejected
+    // out of the client and past every caller's degraded mode: a project sweep
+    // 500ed on one bad response, and a merge's post-merge cleanup took the whole
+    // completed merge down with it.
+    // Canary: drop the try/catch around `readBody` → this test rejects.
+    const c = createGithubClient({
+      token: "ghp_x",
+      fetchImpl: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new TypeError("terminated"));
+            },
+          }),
+          { status: 200 },
+        ),
+    });
+    const result = await c.request("GET", "/user", z.object({ login: z.string() }));
+    expect(result.ok).toBe(false);
+    if (result.ok || result.kind !== "network") throw new Error("expected network");
+    expect(result.message).toContain("terminated");
+  });
+
   it("serializes JSON bodies and appends search params", async () => {
     const { gh, client: c } = client({
       "POST /repos/o/r/git/refs": { status: 201, body: {} },
@@ -158,6 +188,29 @@ describe("github-client", () => {
       // junk is stripped.
       expect(result.data).toEqual({ number: 7 });
     }
+  });
+
+  it("F21-9: a body the schema REFUSES is a typed failure, never a throw", async () => {
+    // The contract in this module's header is "typed results, never throws", and
+    // `schema.parse` broke it: a strict field GitHub drifted on threw a ZodError
+    // out of every caller — 500ing the route that clicked Reconcile, and (after
+    // a POST) losing the record of a resource GitHub had already created.
+    const { client: c } = client({
+      "GET /pr": { body: { number: "not-a-number", html_url: "https://x" } },
+    });
+    const result = await c.request(
+      "GET",
+      "/pr",
+      z.object({ number: z.number(), html_url: z.string() }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok || result.kind !== "decode") throw new Error("expected decode");
+    expect(result.status).toBe(200);
+    // Names the shape problem and its path, and carries no payload value.
+    expect(result.message).toContain("number");
+    // The raw body rides along so a caller can salvage what it needs.
+    expect(result.data).toEqual({ number: "not-a-number", html_url: "https://x" });
+    expect(githubFailureMessage(result)).toBe(result.message);
   });
 
   it("hands the body over unparsed on the schema-less (deprecated) form", async () => {

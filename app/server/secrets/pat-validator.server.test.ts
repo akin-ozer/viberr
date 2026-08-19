@@ -335,6 +335,79 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
     ).toHaveLength(0);
   });
 
+  it("F21-11: one drifted permission key does not void the block — a proven read-only repo still refuses", async () => {
+    // The exact payload from the finding: GitHub asserts push:false (read-only)
+    // next to a `triage` that is not a boolean. Five strict booleans inside a
+    // block-level catch discarded the WHOLE block for that one key, so
+    // repoWriteOk went null → scope `assumed` → status "valid": a silent
+    // UPGRADE claiming write access GitHub had just denied.
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": {
+        body: {
+          full_name: REPO,
+          permissions: {
+            admin: false,
+            maintain: false,
+            push: false,
+            triage: "yes",
+            pull: true,
+          },
+        },
+      },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+    });
+    const result = await validatePatToken(FINE, {
+      repo: REPO,
+      requiredScopes: ["repo"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("insufficient_scope");
+    expect(result.missingScopes).toEqual(["repo"]);
+    expect(result.scopes[0]).toMatchObject({
+      ok: false,
+      source: "probe",
+      note: "repository readable but not writable",
+    });
+  });
+
+  it("F21-11: a drifted key does not fabricate a verdict either — push:true still proves write", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true, triage: "yes" } },
+      },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+    });
+    const result = await validatePatToken(FINE, {
+      repo: REPO,
+      requiredScopes: ["repo"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("valid");
+    expect(result.scopes[0]).toMatchObject({ ok: true, source: "probe" });
+  });
+
+  it("F21-11: an all-drifted block proves nothing — assumed, exactly like no block", async () => {
+    // Nothing decoded, so nothing was asserted: `null` is the honest answer and
+    // the chip says the write is unverified rather than refusing on a guess.
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: "yes", pull: "yes" } },
+      },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+    });
+    const result = await validatePatToken(FINE, {
+      repo: REPO,
+      requiredScopes: ["repo"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("valid");
+    expect(result.scopes[0]).toMatchObject({ ok: true, source: "assumed" });
+    expect(result.scopes[0]!.note).toContain("write is unverified");
+  });
+
   it("no permissions block → readable-but-unverified, reported as ASSUMED (never a false 'proven')", async () => {
     const gh = fakeGithubFetch({
       "GET /user": { body: { login: "viberr-bot" } },

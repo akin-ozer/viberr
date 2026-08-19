@@ -5,7 +5,11 @@ import type {
   PrReviewState,
   PrState,
 } from "~/schemas/task-file.schema";
-import type { GithubClient } from "./github-client.server";
+import { logger } from "~/server/logging/logger.server";
+import {
+  githubFailureMessage,
+  type GithubClient,
+} from "./github-client.server";
 
 /**
  * PR linker (Phase 7): finds the pull request for a task's execution
@@ -41,8 +45,22 @@ export function mapPrToCacheState(pr: {
   return "review"; // open + draft both read "in review" (ruling 12)
 }
 
-/** One source of truth for the shape — the persisted `pr.checks` schema. */
-export type PrChecksSummary = PrChecks;
+/**
+ * One source of truth for the shape — the persisted `pr.checks` schema — plus
+ * the drift count it carries through its loose extra keys.
+ *
+ * `unknown` is the count of check runs GitHub REPORTED but Viberr could not
+ * read: an entry that did not decode, a conclusion outside the known
+ * vocabulary, or the shortfall between `total_count` and the entries the
+ * payload actually carried. It exists because the alternative is a lie —
+ * uncounted runs used to leave `passing: 0, failing: 0, pending: 0` against a
+ * non-zero total, which `mapPrChecks` read as "everything passed". The key is
+ * OMITTED when nothing drifted, so a healthy summary is byte-identical to the
+ * one this module always wrote.
+ */
+export interface PrChecksSummary extends PrChecks {
+  unknown?: number;
+}
 
 export interface PrFacts {
   number: number;
@@ -55,7 +73,9 @@ export interface PrFacts {
   changed: { files: number; add: number; del: number } | null;
   /** Check-runs summary for the head sha. `null` = NOT READ (no head sha, or
    * the check-runs call failed) — UNKNOWN, so callers keep the cached value.
-   * A repo with no CI reads as `{ total: 0, … }`, which is a real answer. */
+   * A repo with no CI reads as `{ total: 0, … }`, which is a real answer; runs
+   * that were reported but not readable are counted in `unknown`, never left to
+   * pass as green (F21-7). */
   checks: PrChecksSummary | null;
   /** P13-D-28: GitHub review state. The key is ABSENT when the reviews were not
    * read this pass (terminal PR, or the call failed) — UNKNOWN, so callers keep
@@ -80,10 +100,18 @@ export type PrLinkResult =
 
 /** A pulls LIST item's read slice. The identity fields are on every PR payload;
  *  the rest carry their readers' optional-chain tolerance (`undefined` on
- *  drift, never a voided response). */
+ *  drift, never a voided response).
+ *
+ *  `number` and `state` stay STRICT on purpose. A PR with no number is not a PR
+ *  the task can record, and `state` decides the cache vocabulary — an absent one
+ *  would map to "review" (`mapPrToCacheState`'s open default) and claim a closed
+ *  PR is open, which is the silent UPGRADE this layer must never produce. Both
+ *  now fail as a typed `decode` result (never a throw), and the caller keeps its
+ *  cached PR facts rather than replacing them with a guess. `title` is
+ *  recoverable — an empty one costs a label, nothing else. */
 const ghPullListItemSchema = z.object({
   number: z.number(),
-  title: z.string(),
+  title: z.string().catch(""),
   state: z.string(),
   draft: z.boolean().optional().catch(undefined),
   merged_at: z.string().nullable().optional().catch(undefined),
@@ -114,20 +142,23 @@ const ghPullDetailSchema = ghPullListItemSchema.extend({
 });
 type GhPullDetail = z.output<typeof ghPullDetailSchema>;
 
-/** The check-runs summary's read slice — only each run's `conclusion` is
- *  consumed, and `null` (still running) is distinct from absent/mangled
- *  (counts toward nothing, exactly like the raw read). */
+/** ONE check run's read slice — only `conclusion` is consumed. `null` means
+ *  "still running", which is a real answer; anything else is drift, and drift
+ *  is COUNTED (see {@link summarizeCheckRuns}), never quietly skipped. */
+const ghCheckRunSchema = z.object({
+  conclusion: z.string().nullable().optional(),
+});
+
+/** The check-runs payload's read slice. An entry that does not decode becomes
+ *  `null` — kept DISTINCT from a run GitHub sent without a conclusion, so the
+ *  accounting can never mistake one for a real answer — and, above all, it does
+ *  not void the array: one bad entry used to discard every readable sibling
+ *  alongside it. */
 const ghCheckRunsSchema = z
   .object({
     total_count: z.number().optional().catch(undefined),
     check_runs: z
-      .array(
-        z
-          .object({
-            conclusion: z.string().nullable().optional().catch(undefined),
-          })
-          .catch({}),
-      )
+      .array(ghCheckRunSchema.nullable().catch(null))
       .optional()
       .catch(undefined),
   })
@@ -192,6 +223,54 @@ const prChangeStatsSchema = z.object({
 
 const PASSING = new Set(["success", "neutral", "skipped"]);
 const FAILING = new Set(["failure", "timed_out", "cancelled", "action_required"]);
+
+/** One decoded check-run entry, or `null` for an entry that did not decode. */
+type GhCheckRun = z.output<typeof ghCheckRunSchema> | null;
+
+/**
+ * F21-7 — the check-runs rollup, where every run GitHub reported is accounted
+ * for by exactly one counter.
+ *
+ * The old rollup counted `passing` and `failing` off the entries it could read
+ * and took `total` from `total_count`, so anything it could NOT read simply
+ * vanished from the three counters while still inflating the total. A payload
+ * like `{ total_count: 3, check_runs: [null, "x"] }` summed to
+ * `{ total: 3, passing: 0, failing: 0, pending: 0 }` — which the pill mapper
+ * reads as "3 checks passing" and the reconciler then persists into task.md.
+ * Drift is not a green build.
+ *
+ * So: `null` conclusion = pending (still running, a real answer); a conclusion
+ * in the known vocabularies = passing/failing; an undecodable entry, an ABSENT
+ * conclusion, an unrecognized one (GitHub's `stale`) and the shortfall against
+ * `total_count` all land in `unknown`. `total` is never below what was counted.
+ *
+ * Exported for direct unit coverage of the accounting.
+ */
+export function summarizeCheckRuns(input: {
+  totalCount: number | undefined;
+  runs: readonly GhCheckRun[] | undefined;
+}): PrChecksSummary {
+  let passing = 0;
+  let failing = 0;
+  let pending = 0;
+  let unknown = 0;
+  for (const run of input.runs ?? []) {
+    const conclusion = run?.conclusion;
+    if (conclusion === null) pending += 1;
+    else if (conclusion === undefined) unknown += 1;
+    else if (PASSING.has(conclusion)) passing += 1;
+    else if (FAILING.has(conclusion)) failing += 1;
+    else unknown += 1;
+  }
+  const counted = passing + failing + pending + unknown;
+  // A `total_count` BELOW the entries carried is itself drift; the entries are
+  // the floor, so the counters can never exceed the total they are read against.
+  const total = Math.max(input.totalCount ?? counted, counted);
+  const unaccounted = total - counted;
+  const summary: PrChecksSummary = { total, passing, failing, pending };
+  if (unknown + unaccounted > 0) summary.unknown = unknown + unaccounted;
+  return summary;
+}
 
 /**
  * P13-D-28 — the PR's CURRENT review state from GitHub's review EVENT log.
@@ -323,10 +402,9 @@ export async function findPrForBranch(
       // the repo as 404) — surface as forbidden, the caller decides.
       return { status: "forbidden", message: list.message };
     }
-    return {
-      status: "network_unavailable",
-      message: list.kind === "http" ? list.message : "unknown",
-    };
+    // Everything else — including a payload that did not decode — degrades to
+    // "we could not read GitHub", carrying the reason instead of "unknown".
+    return { status: "network_unavailable", message: githubFailureMessage(list) };
   }
   const head = list.data[0];
   if (!head) return { status: "none" };
@@ -379,21 +457,20 @@ export async function findPrForBranch(
       { searchParams: { per_page: 100 } },
     );
     if (checkRuns.ok) {
-      const runs = checkRuns.data.check_runs ?? [];
-      // `== null` spans `null` (still running — pending below) and absent/
-      // drifted (counts toward nothing, exactly like the raw read).
-      const passing = runs.filter(
-        (r) => r.conclusion != null && PASSING.has(r.conclusion),
-      ).length;
-      const failing = runs.filter(
-        (r) => r.conclusion != null && FAILING.has(r.conclusion),
-      ).length;
-      checks = {
-        total: checkRuns.data.total_count ?? runs.length,
-        passing,
-        failing,
-        pending: runs.filter((r) => r.conclusion === null).length,
-      };
+      checks = summarizeCheckRuns({
+        totalCount: checkRuns.data.total_count,
+        runs: checkRuns.data.check_runs,
+      });
+      // The DIAGNOSTIC half of the tolerant-parsing rule: the summary degrades
+      // the pill on its own, and this names the payload that caused it.
+      if (checks.unknown) {
+        logger.warn("check-runs payload partly unreadable — CI reads unknown", {
+          repo,
+          headSha,
+          total: checks.total,
+          unknown: checks.unknown,
+        });
+      }
     }
   }
 

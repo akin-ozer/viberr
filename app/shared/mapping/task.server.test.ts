@@ -33,6 +33,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
     repo: null,
     pr_json: null,
     github_json: null,
+    work_revision_sha: null,
     goal: "",
     packet_json: null,
     recommendation_count: 0,
@@ -123,6 +124,23 @@ describe("N20-14: acceptance fact surfaces on the summary", () => {
   });
 });
 
+describe("ruling 53/88: the delivered revision surfaces on the summary", () => {
+  it("carries the projected head sha through to TaskSummary", () => {
+    // The board's acceptance ceremony discloses this row and echoes it back for
+    // the server to compare against the live task — it can only do that if the
+    // summary the board renders from carries the sha.
+    expect(
+      summarize(row({ work_revision_sha: "a".repeat(40) }), false)
+        .workRevisionSha,
+    ).toBe("a".repeat(40));
+  });
+  it("is null before delivery — the ceremony's honest-absence row", () => {
+    expect(
+      summarize(row({ work_revision_sha: null }), false).workRevisionSha,
+    ).toBeNull();
+  });
+});
+
 describe("D4: continuity fact surfaces on the summary", () => {
   it("carries the projected 'degraded' continuity through to TaskSummary", () => {
     expect(summarize(row({ continuity: "degraded" }), false).continuity).toBe(
@@ -152,6 +170,42 @@ describe("mapPrChecks / mapPrReview (P13-D-28)", () => {
     expect(
       mapPrChecks(pr({ checks: { total: 2, passing: 2, failing: 0, pending: 0 } })),
     ).toMatchObject({ state: "passing" });
+  });
+
+  it("F21-7: runs nobody could read degrade to unknown — never to passing", () => {
+    // The linker's own count (a drifted check-runs payload).
+    expect(
+      mapPrChecks(
+        pr({ checks: { total: 3, passing: 0, failing: 0, pending: 0, unknown: 3 } }),
+      ),
+    ).toMatchObject({ state: "unknown", unknown: 3, total: 3 });
+    // The belt: counters that do not add up to `total` are short by the
+    // difference, whoever wrote them and whether or not they said so.
+    expect(
+      mapPrChecks(pr({ checks: { total: 3, passing: 1, failing: 0, pending: 0 } })),
+    ).toMatchObject({ state: "unknown", unknown: 2 });
+    // A drifted `unknown` on the loose persisted object is read tolerantly, and
+    // the arithmetic still answers.
+    expect(
+      mapPrChecks(
+        pr({ checks: { total: 2, passing: 0, failing: 0, pending: 0, unknown: "lots" } }),
+      ),
+    ).toMatchObject({ state: "unknown", unknown: 2 });
+    // Real failures and real running checks still outrank it.
+    expect(
+      mapPrChecks(
+        pr({ checks: { total: 3, passing: 0, failing: 1, pending: 0, unknown: 2 } }),
+      ),
+    ).toMatchObject({ state: "failing" });
+    expect(
+      mapPrChecks(
+        pr({ checks: { total: 3, passing: 0, failing: 0, pending: 1, unknown: 2 } }),
+      ),
+    ).toMatchObject({ state: "pending" });
+    // A complete, clean read is still green.
+    expect(
+      mapPrChecks(pr({ checks: { total: 2, passing: 2, failing: 0, pending: 0 } })),
+    ).toMatchObject({ state: "passing", unknown: 0 });
   });
 
   it("null when there is nothing honest to draw", () => {

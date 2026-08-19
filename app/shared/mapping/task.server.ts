@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   AgentRef,
   GithubCache,
@@ -55,6 +56,8 @@ export type TaskProjectionRow = {
   repo: string | null;
   pr_json: string | null;
   github_json: string | null;
+  /** Ruling 53/88: the delivered revision's head sha, NULL before delivery. */
+  work_revision_sha: string | null;
   goal: string;
   packet_json: string | null;
   /** Pending operator recommendations on the task file (F7-NOTIF1). */
@@ -177,6 +180,32 @@ export interface TaskSummary {
   prReview: PrReviewState | null;
   commits: { sha: string; msg: string }[];
   changed: { files: number; add: number; del: number } | null;
+  /**
+   * Ruling 53 + ruling 88 — the DELIVERED revision's head sha, or null before
+   * delivery.
+   *
+   * The board's acceptance ceremony (board-page.tsx `AcceptOnBoardConfirm`) is
+   * the same dialog the task page renders, and ruling 53 requires it to disclose
+   * what it accepts; ruling 88 then makes the confirmed click echo that
+   * disclosure back for the server to compare against the live task. A board
+   * card holds nothing but this summary, so the ceremony had to disclose "No
+   * delivered revision recorded." on every task — and the server refused the
+   * resulting `"none"` echo as stale on any task that HAD delivered, i.e. a
+   * board drop onto the terminal stage could never accept delivered work.
+   *
+   * The task page reads the same fact straight off the task file
+   * (routes/project.task.tsx) because it already holds the file; both derive it
+   * from `workRevision.headSha`, which is also what the server compares against
+   * (`acceptanceDisclosureOf`). One fact, one expression, three readers.
+   *
+   * Optional like `acceptance` above, and safe to be: `mapTaskProjectionRow`
+   * always sets it, and an absent value degrades to the honest "no revision"
+   * row, which fails CLOSED — the server refuses that echo against a task that
+   * really has one, and `acceptanceDisclosureDrift` never treats "none" as a
+   * wildcard. So the worst a caller constructing this shape by hand can do is
+   * disclose less and be refused, never disclose less and merge.
+   */
+  workRevisionSha?: string | null;
   goal: string;
   packet: PacketRender | null;
   eventCount: number;
@@ -199,12 +228,38 @@ export interface TaskSummary {
  *   failing — at least one check-run concluded failure/timed_out/cancelled/
  *             action_required
  *   pending — nothing failed but at least one run has no conclusion yet
+ *   unknown — nothing failed, nothing is running, and some of the runs the head
+ *             commit reported could not be read (F21-7)
  *   passing — every run concluded success/neutral/skipped
  */
-export type PrChecksState = "passing" | "failing" | "pending";
+export type PrChecksState = "passing" | "failing" | "pending" | "unknown";
 
 export interface PrChecksRender extends PrChecks {
   state: PrChecksState;
+  /** How many of `total` are unaccounted for — 0 on a clean read. Drives the
+   *  "N/M checks unknown" label; see {@link mapPrChecks}. Optional so the
+   *  render shape stays constructible from the four persisted counters alone. */
+  unknown?: number;
+}
+
+/** The drift count as it comes off the LOOSE persisted `checks` object — a
+ *  count or nothing, and anything else reads as nothing. Parsed here because
+ *  this is that key's boundary: `prChecksSchema` keeps unmodeled keys as-is. */
+const recordedUnknownChecks = z.number().int().min(0).catch(0);
+
+/**
+ * F21-7 — the runs `total` claims that no counter accounts for.
+ *
+ * Two sources, and the LARGER wins: the `unknown` count the linker recorded,
+ * and the arithmetic shortfall of the three counters against `total`. The
+ * second is the belt: a summary written before this counter existed — or by any
+ * other writer — still cannot present unaccounted runs as passing.
+ */
+function unaccountedChecks(checks: PrChecks): number {
+  const recorded = recordedUnknownChecks.parse(checks.unknown);
+  const shortfall =
+    checks.total - (checks.passing + checks.failing + checks.pending);
+  return Math.max(recorded, shortfall, 0);
 }
 
 /**
@@ -212,13 +267,24 @@ export interface PrChecksRender extends PrChecks {
  * `checks` key is absent — see the schema), or the head commit genuinely ran no
  * checks (`total: 0`, i.e. the repo has no CI). "Zero checks" must not render as
  * a green passing pill.
+ *
+ * Neither may runs nobody could read: `passing` is reserved for a summary where
+ * every one of `total` runs was counted and concluded well. The precedence is
+ * the worst TRUE statement first — failing, then still-running, then unknown.
  */
 export function mapPrChecks(pr: PrRef | null): PrChecksRender | null {
   const checks = pr?.checks;
   if (!checks || checks.total <= 0) return null;
+  const unknown = unaccountedChecks(checks);
   const state: PrChecksState =
-    checks.failing > 0 ? "failing" : checks.pending > 0 ? "pending" : "passing";
-  return { ...checks, state };
+    checks.failing > 0
+      ? "failing"
+      : checks.pending > 0
+        ? "pending"
+        : unknown > 0
+          ? "unknown"
+          : "passing";
+  return { ...checks, unknown, state };
 }
 
 /**
@@ -424,6 +490,7 @@ export function mapTaskProjectionRow(
     prReview: mapPrReview(pr),
     commits: github?.commits ?? [],
     changed: github?.changed ?? null,
+    workRevisionSha: row.work_revision_sha,
     goal: row.goal,
     packet: mapPacket(columns.packet),
     eventCount: row.event_count,

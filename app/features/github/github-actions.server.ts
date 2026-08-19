@@ -28,6 +28,7 @@ import {
   type RevalidateContext,
 } from "~/server/secrets/pat-validator.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
+import { logger } from "~/server/logging/logger.server";
 import { grantScopeToast, reconcileToast } from "./github-copy";
 import { invalidateRepoAccess } from "./github-query.server";
 
@@ -61,7 +62,32 @@ export async function runReconcile(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<GithubActionOutcome> {
-  const summary = await reconcileProject(db, projectSlug, actor, ctx);
+  // F21-9: the module contract above says these wrappers never throw for
+  // expected states — but the pass reaches file, db and GitHub payloads, and an
+  // UNEXPECTED failure used to leave the route with a raw 500 and the human
+  // with a dead button. The per-task boundary inside the reconciler keeps one
+  // bad task from ending the sweep; this is the last one, so the click always
+  // gets an answer that says what happened.
+  let summary: Awaited<ReturnType<typeof reconcileProject>>;
+  try {
+    summary = await reconcileProject(db, projectSlug, actor, ctx);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("project reconcile failed unexpectedly", {
+      projectSlug,
+      err: message,
+    });
+    // One line, capped: the toast names the cause the log carries in full, and
+    // a multi-line stack-shaped message never lands in the UI.
+    const detail = (message.split("\n", 1)[0] ?? "").slice(0, 200);
+    return {
+      ok: true,
+      toast: detail
+        ? `Checking GitHub failed — nothing was changed: ${detail}`
+        : "Checking GitHub failed — nothing was changed, and the failure carried no message",
+      result: "error",
+    };
+  }
   // F15-02: a pass that scanned nothing must not read as "synced" — name the
   // no-branched-tasks case; degraded contexts keep their own honest copy below.
   if (summary.status === "ok" && summary.results.length === 0) {

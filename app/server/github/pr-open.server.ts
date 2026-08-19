@@ -17,6 +17,7 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { appOrigin } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import { taskBranchName } from "./branch-sync.server";
+import { githubWebHost } from "./github-client.server";
 import {
   getProjectGithubContext,
   type GithubContextFailure,
@@ -136,9 +137,12 @@ export type OpenTaskPrResult =
     }
   | { status: "scope_violation"; scope: string; violationId: string }
   | { status: "auth_failed"; message: string }
-  /** GitHub 422 on POST /pulls — the branch has no commits ahead of base, so
-   *  there is nothing to review. An honest "nothing to review", NOT a network
-   *  failure (which is how it used to be mislabeled). */
+  /** GitHub said "No commits between <base> and <head>" — the branch has no
+   *  commits ahead of base, so there is nothing to review. An honest "nothing to
+   *  review", NOT a network failure (which is how it used to be mislabeled).
+   *  ONLY that refusal: the other 422s on POST /pulls mean different things and
+   *  must not arrive here — a task whose PR already exists has not "produced no
+   *  change", and the delivery path acts on this by flagging the task `noChanges`. */
   | { status: "nothing_to_review"; message: string }
   | { status: "network_unavailable"; message: string };
 
@@ -147,12 +151,17 @@ export type OpenTaskPrResult =
  * create response alike. The identity fields are on every PR payload GitHub
  * sends; the merge facts (absent on list items) and the head sha carry the
  * tolerance their optional-chained readers already had, parsing to `undefined`
- * on drift rather than voiding the response.
+ * on drift rather than voiding the response. `title` is recoverable (an empty
+ * label costs nothing else), so it degrades instead of voiding; `number`,
+ * `html_url` and `state` stay strict — a PR record with a guessed number or an
+ * assumed state is worse than a typed refusal, and the create path salvages a
+ * refused response through {@link ghCreatedPrSalvageSchema} rather than losing
+ * the PR entirely.
  */
 const ghPullSchema = z.object({
   number: z.number(),
   html_url: z.string(),
-  title: z.string(),
+  title: z.string().catch(""),
   state: z.string(),
   /** Merge facts from GET /pulls/{n} (absent on list items). */
   merged: z.boolean().optional().catch(undefined),
@@ -164,6 +173,40 @@ const ghPullSchema = z.object({
     .catch(undefined),
 });
 type GhPull = z.output<typeof ghPullSchema>;
+
+/**
+ * F21-9 — what is still worth keeping from a CREATE response that did not
+ * decode.
+ *
+ * `POST /pulls` is a write: by the time the body is read the pull request
+ * EXISTS on GitHub. Losing the response therefore loses the task's only record
+ * of a PR that is out there collecting reviews — the orphan window this
+ * salvage closes. Only the number is required (it is the PR's identity and the
+ * thing every later reconcile keys on); the rest degrades, and the task keeps a
+ * minimal but true `pr` record instead of nothing. `state` defaults to "open"
+ * because that is what a just-created pull request IS — not a guess about a
+ * value GitHub sent.
+ */
+const ghCreatedPrSalvageSchema = z.object({
+  number: z.number(),
+  html_url: z.string().catch(""),
+  title: z.string().catch(""),
+  state: z.string().catch("open"),
+});
+
+/**
+ * A 422's `errors[]` rows — where GitHub actually says WHICH validation failed.
+ * The envelope's `message` is the constant "Validation Failed", so a reader that
+ * sniffs only that text can tell no two 422s apart. Tolerant end to end (every
+ * level catches to an empty result): this decodes a FAILURE body purely to
+ * explain and classify it, and drift there must cost the explanation, nothing
+ * more — so `parse` on any input at all yields rows, never a throw.
+ */
+const ghValidationBodySchema = z
+  .object({
+    errors: z.array(z.object({ message: z.string().catch("") })).catch([]),
+  })
+  .catch({ errors: [] });
 
 /**
  * Open (or reuse) the review pull request for a task's execution branch
@@ -249,51 +292,79 @@ export async function openTaskPr(
 
   const owner = gh.repo.split("/")[0] ?? "";
 
-  // 1. Idempotency: reuse an existing open PR for this head branch — but only
-  //    when it is genuinely THIS task's (R16-1). The branch name alone proved it
-  //    can bind a foreign PR to a task that delivered nothing (H8), so the head
-  //    sha must be the delivered revision. A name-matched PR that fails the rule
-  //    is a branch COLLISION: creating a second PR for the same head is
-  //    impossible on GitHub anyway (422), so delivery stops here and says why.
-  const existing = await gh.client.request(
-    "GET",
-    `/repos/${gh.repo}/pulls`,
-    z.array(ghPullSchema),
-    { searchParams: { head: `${owner}:${branch}`, state: "open", per_page: 1 } },
-  );
-  if (existing.ok && existing.data.length > 0) {
-    const pr = existing.data[0]!;
-    const adoption =
-      fm.pr?.number === pr.number
-        ? { adopt: true as const }
-        : decidePrAdoption({
-            state: mapPrToCacheState(pr),
-            prHeadSha: pr.head?.sha ?? null,
-            revisionHeadSha: fm.workRevision?.headSha ?? null,
-          });
-    if (!adoption.adopt) {
-      return {
-        status: "branch_collision",
-        prNumber: pr.number,
-        branch,
-        message: prAdoptionRefusalNote({
-          refusal: adoption.refusal,
-          taskKey: input.taskKey,
-          branch,
+  /**
+   * 1. Idempotency: what already occupies this head branch? `null` — and only
+   *    `null` — clears the way for the create below, because "another PR is on
+   *    this head" and "we could not find out" both forbid a second attempt.
+   *
+   *    Reuse is ADOPTION (R16-1): the branch name alone proved it can bind a
+   *    foreign PR to a task that delivered nothing (H8), so the head sha must be
+   *    the delivered revision. A name-matched PR that fails the rule is a branch
+   *    COLLISION: creating a second PR for the same head is impossible on GitHub
+   *    anyway (422), so delivery stops here and says why.
+   *
+   *    A function rather than a straight-line step because the 422 arm below
+   *    asks the same question again — GitHub itself says a PR exists there, and
+   *    the answer has to name which one. (An arrow const, not a declaration: a
+   *    hoisted `function` would forfeit `gh`'s narrowing to the ok-context.)
+   */
+  const prAlreadyOnHead = async (): Promise<OpenTaskPrResult | null> => {
+    const existing = await gh.client.request(
+      "GET",
+      `/repos/${gh.repo}/pulls`,
+      z.array(ghPullSchema),
+      { searchParams: { head: `${owner}:${branch}`, state: "open", per_page: 1 } },
+    );
+    if (existing.ok) {
+      const pr = existing.data[0];
+      if (!pr) return null;
+      const adoption =
+        fm.pr?.number === pr.number
+          ? { adopt: true as const }
+          : decidePrAdoption({
+              state: mapPrToCacheState(pr),
+              prHeadSha: pr.head?.sha ?? null,
+              revisionHeadSha: fm.workRevision?.headSha ?? null,
+            });
+      if (!adoption.adopt) {
+        return {
+          status: "branch_collision",
           prNumber: pr.number,
-          revisionHeadSha: fm.workRevision?.headSha ?? null,
-        }),
-      };
+          branch,
+          message: prAdoptionRefusalNote({
+            refusal: adoption.refusal,
+            taskKey: input.taskKey,
+            branch,
+            prNumber: pr.number,
+            revisionHeadSha: fm.workRevision?.headSha ?? null,
+          }),
+        };
+      }
+      await writePrToTask(db, ref, input, gh, pr, actor, false, ctx, fm.pr);
+      return { status: "ok", prNumber: pr.number, created: false, url: pr.html_url };
     }
-    await writePrToTask(db, ref, input, gh, pr, actor, false, ctx, fm.pr);
-    return { status: "ok", prNumber: pr.number, created: false, url: pr.html_url };
-  }
-  if (!existing.ok && existing.kind === "network") {
-    return { status: "network_unavailable", message: existing.message };
-  }
-  if (!existing.ok && existing.kind === "http" && existing.status === 401) {
-    return { status: "auth_failed", message: existing.message };
-  }
+    if (existing.kind === "network") {
+      return { status: "network_unavailable", message: existing.message };
+    }
+    // F21-9 (residual): a 2xx whose body this reader refused says NOTHING about
+    // what is on the head — and "I could not tell" is not "the head is free".
+    // Falling through turned an unreadable answer into a create attempt against
+    // a head that may already carry a PR: GitHub answers that with a 422 the
+    // delivery path used to record as "this branch produced no change".
+    if (existing.kind === "decode") {
+      return { status: "network_unavailable", message: existing.message };
+    }
+    if (existing.kind === "http" && existing.status === 401) {
+      return { status: "auth_failed", message: existing.message };
+    }
+    // A 403/404 on the LIST is not proof either way (fine-grained tokens mask
+    // both), and the create below fails honestly on its own terms — including
+    // opening the scope violation a 403 there earns.
+    return null;
+  };
+
+  const occupied = await prAlreadyOnHead();
+  if (occupied) return occupied;
 
   // 2. Create the PR.
   // N20-4 (§5a): the back-link origin comes from `appOrigin()` (BETTER_AUTH_URL),
@@ -346,6 +417,47 @@ export async function openTaskPr(
       url: created.data.html_url,
     };
   }
+  // F21-9: GitHub CREATED the pull request and then sent a body this reader
+  // could not decode. The write already happened, so returning a failure here
+  // and recording nothing left a real PR with no task record — the next
+  // delivery would try to open a second one for the same head (422) and the
+  // human would see a task claiming no PR exists. Salvage the identity and
+  // record the minimal true fact instead.
+  if (created.kind === "decode") {
+    const salvaged = ghCreatedPrSalvageSchema.safeParse(created.data);
+    if (!salvaged.success) {
+      logger.error("PR created on GitHub but its response was unreadable", {
+        taskKey: input.taskKey,
+        projectSlug: input.projectSlug,
+        repo: gh.repo,
+        branch,
+        reason: created.message,
+      });
+      return { status: "network_unavailable", message: created.message };
+    }
+    const pr = salvaged.data;
+    const url =
+      pr.html_url || `${githubWebHost()}/${gh.repo}/pull/${pr.number}`;
+    logger.warn("PR created on GitHub with a partly unreadable response", {
+      taskKey: input.taskKey,
+      projectSlug: input.projectSlug,
+      repo: gh.repo,
+      prNumber: pr.number,
+      reason: created.message,
+    });
+    await writePrToTask(
+      db,
+      ref,
+      input,
+      gh,
+      { number: pr.number, html_url: url, title: pr.title, state: pr.state },
+      actor,
+      true,
+      ctx,
+      fm.pr,
+    );
+    return { status: "ok", prNumber: pr.number, created: true, url };
+  }
   if (created.kind === "network") {
     return { status: "network_unavailable", message: created.message };
   }
@@ -374,11 +486,42 @@ export async function openTaskPr(
       violationId: violation.id,
     };
   }
-  // GitHub 422 on create = "No commits between <base> and <head>" — the branch
-  // carries no diff, so there is nothing to open a review PR for. That's an
-  // honest empty-diff state, not a network failure.
+  // GitHub answers 422 to SEVERAL different refusals on POST /pulls, and they
+  // are not interchangeable:
+  //  · "No commits between <base> and <head>" — the branch carries no diff, so
+  //    there is nothing to review. An honest empty-diff state, not a network
+  //    failure, and the delivery path turns it into a no-change completion.
+  //  · "A pull request already exists for <owner>:<head>" — the OPPOSITE claim:
+  //    a review PR is out there right now. Reading it as the empty-diff case
+  //    flagged a task that HAS a live PR as having produced no change, and
+  //    marked it `noChanges` on the way. Ask the head who won instead.
+  //  · anything else — an unmapped validation refusal, which stays with the
+  //    residual below rather than borrowing either meaning.
   if (created.kind === "http" && created.status === 422) {
-    return { status: "nothing_to_review", message: created.message };
+    // GitHub's refusal in one line: the envelope message plus the specific
+    // reasons under it. Both halves matter — the distinguishing sentence rides
+    // in either place depending on the endpoint and the error.
+    const reasons = ghValidationBodySchema
+      .parse(created.data)
+      .errors.map((e) => e.message)
+      .filter((reason) => reason.trim() !== "");
+    const detail =
+      reasons.length > 0
+        ? `${created.message}: ${reasons.join("; ")}`
+        : created.message;
+    if (/no commits between/i.test(detail)) {
+      return { status: "nothing_to_review", message: detail };
+    }
+    if (/already exists/i.test(detail)) {
+      // The probe above found the head free, so a PR landed on it between the
+      // two calls (or the list read could not see it). Re-read the head: the
+      // same adoption rule decides whether that PR is this task's to reuse or a
+      // collision to report, and the answer names its number instead of
+      // guessing one.
+      const raced = await prAlreadyOnHead();
+      if (raced) return raced;
+    }
+    return { status: "network_unavailable", message: detail };
   }
   return {
     status: "network_unavailable",

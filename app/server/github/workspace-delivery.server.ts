@@ -238,7 +238,10 @@ export async function reconcileWorkspaceDelivery(
     dataRoot,
     exec = defaultExec,
     backend = "claude",
-    role = "Specialist",
+    // U12: "specialist" is retired display vocabulary — this default flows into
+    // the RENDERED timeline actor role (roleHint → actor-ref). Mirrors
+    // DEFAULT_PROFILE_ROLE_LABEL.specialist in app/features/agents/agent-types.ts.
+    role = "Agent profile",
   } = input;
 
   const noop = (

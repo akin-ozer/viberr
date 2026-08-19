@@ -48,6 +48,7 @@ import {
   type PrHumanApproval,
 } from "./pr-human-approval.server";
 import { getProject } from "~/server/projections/board-query.server";
+import { logger } from "~/server/logging/logger.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import {
   POLICY_ENGINE_ACTOR,
@@ -149,6 +150,9 @@ interface GithubProvenanceDetails {
   prReview?: PrRef["review"];
   prChecks?: PrRef["checks"];
   commits?: number | null;
+  /** F21-8: compare entries GitHub sent that did not decode. Written only when
+   *  non-zero, so a complete list leaves no key at all. */
+  commitsDropped?: number;
   sha?: string | null;
   /** A pass over a project with no branched task at all (F15-02). */
   heartbeat?: boolean;
@@ -209,7 +213,15 @@ export type TaskReconcileResult =
   | GithubContextFailure
   | { status: "scope_violation"; taskKey: string; scope: string; violationId: string }
   | { status: "auth_failed"; message: string }
-  | { status: "network_unavailable"; message: string };
+  | { status: "network_unavailable"; message: string }
+  /**
+   * F21-9 — this ONE task's pass threw. Every expected degradation above is a
+   * value, so reaching here means something no reader anticipated (a payload
+   * shape, a file, the db). It is a per-task FAILURE, not the pass's: the
+   * sweep finishes the remaining tasks and the human's Reconcile button answers
+   * with an honest count instead of a 500.
+   */
+  | { status: "task_error"; taskKey: string; message: string };
 
 /** Notification sender for R8-6 GitHub divergence alerts (an `ActorRender`
  * system identity, matching the "Policy engine" timeline actor). */
@@ -437,6 +449,16 @@ async function reconcileTaskUnlocked(
   // "diverged" head (delivered revision NOT an ancestor) is a REFUSAL handled by
   // `acceptancePrHeadMismatch`, so we record drift only for a clean "ahead".
   const reviewedSha = fm.workRevision?.headSha ?? null;
+  // F21-17 (residual): drift is only MEASURABLE on a live PR — a settled one
+  // gets no compare call, deliberately. But unlike `review` or `mergeable`, the
+  // fact does not stop being TRUE when the PR settles: those extra commits were
+  // on the head and the review never saw them, and a merged PR shipped them.
+  // The PR-closed recovery packet is precisely where a human needs to read it,
+  // so a pass that cannot measure carries the last measurement forward instead
+  // of erasing it (see `owned.revisionDrift` below). While the PR IS measurable
+  // the computed answer is authoritative — including "no drift", which is how a
+  // re-delivery that catches the head up clears a stale record.
+  const driftMeasurable = prState === "review" || prState === "accepted";
   let revisionDrift: PrRef["revisionDrift"] = null;
   if (
     pr &&
@@ -444,7 +466,7 @@ async function reconcileTaskUnlocked(
     reviewedSha &&
     pr.headSha &&
     pr.headSha !== reviewedSha &&
-    (prState === "review" || prState === "accepted")
+    driftMeasurable
   ) {
     const driftCompare = await getBranchCompare(
       gh.client,
@@ -497,7 +519,11 @@ async function reconcileTaskUnlocked(
     if (checks) owned.checks = checks;
     if (review) owned.review = review;
     if (mergeable) owned.mergeable = mergeable;
-    if (revisionDrift) owned.revisionDrift = revisionDrift;
+    // A measured drift wins; on a settled PR (nothing measured this pass) the
+    // last measurement is carried forward for the SAME PR — see `driftMeasurable`.
+    const carriedDrift =
+      revisionDrift ?? (driftMeasurable ? null : (cachedPr?.revisionDrift ?? null));
+    if (carriedDrift) owned.revisionDrift = carriedDrift;
     if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
     newPr = owned;
   }
@@ -739,12 +765,8 @@ async function reconcileTaskUnlocked(
 
   // DG-3: skip the no-change heartbeat row on poller ticks so provenance doesn't
   // grow unboundedly; still record every observation for a human-triggered reconcile.
-  if (changed || !ctx.skipUnchangedProvenance)
-  recordGithubProvenance(db, {
-    absPath: resolveTaskFilePath(ref),
-    dataRoot: ctx.dataRoot,
-    action: "github.reconcile",
-    details: {
+  if (changed || !ctx.skipUnchangedProvenance) {
+    const details: GithubProvenanceDetails = {
       repo: gh.repo,
       branch,
       changed,
@@ -757,8 +779,19 @@ async function reconcileTaskUnlocked(
       prReview: review ?? null,
       prChecks: checks,
       commits: branchCommits?.length ?? null,
-    },
-  });
+    };
+    // F21-8: an incomplete commit list is recorded as such — the observation row
+    // is where a later reader learns the footprint it shows is short.
+    if (compare && compare.droppedCommits > 0) {
+      details.commitsDropped = compare.droppedCommits;
+    }
+    recordGithubProvenance(db, {
+      absPath: resolveTaskFilePath(ref),
+      dataRoot: ctx.dataRoot,
+      action: "github.reconcile",
+      details,
+    });
+  }
   recordAudit(db, {
     action: "github.reconcile.task",
     actor,
@@ -800,7 +833,23 @@ export function reconcileTask(
     // The data root is part of the key so two test stores that happen to share
     // a project slug do not serialize against each other.
     `${ctx.dataRoot ?? ""}::${input.projectSlug}/${input.taskKey}`,
-    () => reconcileTaskUnlocked(db, input, actor, ctx),
+    async () => {
+      try {
+        return await reconcileTaskUnlocked(db, input, actor, ctx);
+      } catch (error) {
+        // F21-9: the outermost per-task boundary. One task's unexpected failure
+        // used to abort the whole project sweep (and 500 the Reconcile button),
+        // taking every task after it with it — the poller's next tick then hit
+        // the same task first and lost the board again.
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error("task reconcile failed unexpectedly", {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          err: message,
+        });
+        return { status: "task_error", taskKey: input.taskKey, message };
+      }
+    },
   );
 }
 

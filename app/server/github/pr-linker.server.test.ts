@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
+import { checksPill } from "~/features/github/github-pills";
+import { mapPrChecks } from "~/shared/mapping/task.server";
 import { createGithubClient } from "./github-client.server";
 import {
   deriveMergeable,
@@ -7,6 +9,7 @@ import {
   deriveReviewState,
   findPrForBranch,
   mapPrToCacheState,
+  summarizeCheckRuns,
   type GhReview,
 } from "./pr-linker.server";
 
@@ -235,6 +238,176 @@ describe("findPrForBranch", () => {
     expect((await findPrForBranch(offline, REPO, "b")).status).toBe(
       "network_unavailable",
     );
+  });
+});
+
+// ------------------------------------------------ F21-7 check-runs accounting
+
+describe("summarizeCheckRuns (F21-7)", () => {
+  it("counts every run GitHub reported into exactly one bucket", () => {
+    expect(
+      summarizeCheckRuns({
+        totalCount: 4,
+        runs: [
+          { conclusion: "success" },
+          { conclusion: "skipped" },
+          { conclusion: "failure" },
+          { conclusion: null },
+        ],
+      }),
+    ).toEqual({ total: 4, passing: 2, failing: 1, pending: 1 });
+  });
+
+  it("undecodable entries, absent and unrecognized conclusions are UNKNOWN", () => {
+    // A conclusion GitHub added later ("stale") is not a pass, an entry with no
+    // conclusion at all is not a pass, and an entry that did not decode (null)
+    // is not a pass.
+    expect(
+      summarizeCheckRuns({
+        totalCount: 3,
+        runs: [null, {}, { conclusion: "stale" }],
+      }),
+    ).toEqual({ total: 3, passing: 0, failing: 0, pending: 0, unknown: 3 });
+  });
+
+  it("a total GitHub reported but did not carry is unaccounted, not passing", () => {
+    // The whole array drifted away (`check_runs` non-array → undefined) while
+    // total_count survived: three runs exist and none of them were read.
+    expect(summarizeCheckRuns({ totalCount: 3, runs: undefined })).toEqual({
+      total: 3,
+      passing: 0,
+      failing: 0,
+      pending: 0,
+      unknown: 3,
+    });
+    // Entries beyond the reported total raise the total instead of going
+    // missing — the counters can never exceed what they are shown against.
+    expect(
+      summarizeCheckRuns({
+        totalCount: 1,
+        runs: [{ conclusion: "success" }, { conclusion: "success" }],
+      }),
+    ).toEqual({ total: 2, passing: 2, failing: 0, pending: 0 });
+  });
+
+  it("omits the key entirely on a clean read", () => {
+    const summary = summarizeCheckRuns({
+      totalCount: 2,
+      runs: [{ conclusion: "success" }, { conclusion: "neutral" }],
+    });
+    expect(summary.unknown).toBeUndefined();
+    expect(Object.keys(summary).sort()).toEqual([
+      "failing",
+      "passing",
+      "pending",
+      "total",
+    ]);
+  });
+});
+
+describe("findPrForBranch check-runs drift (F21-7)", () => {
+  /** A check-runs answer as these cases send it: GitHub's two fields, with the
+   *  drift each case injects into the entries. */
+  interface CheckRunsBody {
+    total_count?: number;
+    check_runs?: unknown;
+  }
+
+  /** The PR fixture the drifted check-runs payloads hang off. */
+  function driftedChecks(checkRunsBody: CheckRunsBody) {
+    return client({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [
+          {
+            number: 318,
+            title: "Attach execution workspace",
+            state: "open",
+            draft: false,
+            merged_at: null,
+            head: { sha: "headsha318" },
+          },
+        ],
+      },
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: {
+          number: 318,
+          title: "Attach execution workspace",
+          state: "open",
+          merged: false,
+          head: { sha: "headsha318" },
+        },
+      },
+      [`GET ${REPO_PATH}/commits/headsha318/check-runs`]: {
+        body: checkRunsBody,
+      },
+    });
+  }
+
+  it("a null / non-object entry can never inflate 'passing'", async () => {
+    // The reported failure: `{ total_count: 3, check_runs: [null, "x"] }` used
+    // to summarize as 3 total with nothing counted, which the pill mapper reads
+    // as "3 checks passing" and the reconciler then persists into task.md.
+    const { client: c } = driftedChecks({
+      total_count: 3,
+      check_runs: [null, "x"],
+    });
+    const result = await findPrForBranch(c, REPO, "vib-142-attach-workspace");
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    expect(result.pr.checks).toEqual({
+      total: 3,
+      passing: 0,
+      failing: 0,
+      pending: 0,
+      unknown: 3,
+    });
+    expect(mapPrChecks({ number: 318, state: "review", title: "t", checks: result.pr.checks })).toMatchObject({
+      state: "unknown",
+    });
+    expect(
+      checksPill(
+        mapPrChecks({ number: 318, state: "review", title: "t", checks: result.pr.checks })!,
+      ).kind,
+    ).not.toBe("ready");
+  });
+
+  it("an undecodable or conclusion-less run is unknown, and its readable siblings still count", async () => {
+    // Per-ENTRY tolerance: one bad entry used to void the whole array, which
+    // discarded the runs GitHub reported perfectly well next to it.
+    const { client: c } = driftedChecks({
+      total_count: 4,
+      check_runs: [
+        { status: "completed", conclusion: "success" },
+        null,
+        { status: "completed" },
+        { status: "completed", conclusion: "failure" },
+      ],
+    });
+    const result = await findPrForBranch(c, REPO, "vib-142-attach-workspace");
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    expect(result.pr.checks).toEqual({
+      total: 4,
+      passing: 1,
+      failing: 1,
+      pending: 0,
+      unknown: 2,
+    });
+    // A real failure still outranks the drift.
+    expect(mapPrChecks({ number: 318, state: "review", title: "t", checks: result.pr.checks })).toMatchObject({
+      state: "failing",
+    });
+  });
+
+  it("a non-array check_runs leaves the reported total unaccounted", async () => {
+    const { client: c } = driftedChecks({ total_count: 2, check_runs: {} });
+    const result = await findPrForBranch(c, REPO, "vib-142-attach-workspace");
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    expect(result.pr.checks).toMatchObject({ total: 2, unknown: 2 });
+    expect(mapPrChecks({ number: 318, state: "review", title: "t", checks: result.pr.checks })).toMatchObject({
+      state: "unknown",
+    });
   });
 });
 

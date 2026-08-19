@@ -12,9 +12,11 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { createGithubClient } from "./github-client.server";
 import {
   deriveSyncState,
   ensureTaskBranch,
+  getBranchCompare,
   taskBranchName,
   taskCommits,
 } from "./branch-sync.server";
@@ -84,6 +86,74 @@ describe("taskCommits ([VIB-n] prefix convention)", () => {
       "a91f7c2",
       "4ce0b18",
     ]);
+  });
+});
+
+describe("getBranchCompare commit tolerance (F21-8)", () => {
+  const REPO = "akin-ozer/viberr";
+
+  /** A compare answer as these cases send it — GitHub's counters, plus the
+   *  commit list whose entries each case drifts. */
+  interface ComparePayload {
+    ahead_by?: number;
+    behind_by?: number;
+    status?: string;
+    commits?: unknown[];
+  }
+
+  function compareClient(body: ComparePayload) {
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/compare/main...vib-201`]: { body },
+    });
+    return createGithubClient({ token: "ghp_x", fetchImpl: gh.fetchImpl });
+  }
+
+  it("keeps the entries that decode and counts the ones that do not", async () => {
+    // One entry without a sha names no commit. Voiding the array for it emptied
+    // the WHOLE list while `ahead_by: 3` survived — a branch reading "3 commits
+    // ahead" with nothing to show, and a delivery footprint reduced to nothing.
+    const result = await getBranchCompare(
+      compareClient({
+        ahead_by: 3,
+        behind_by: 0,
+        status: "ahead",
+        commits: [
+          { sha: "a91f7c2ffff", commit: { message: "[VIB-201] first\n\nbody" } },
+          { commit: { message: "[VIB-201] no sha" } },
+          { sha: "4ce0b18ffff", commit: { message: "[VIB-201] third" } },
+        ],
+      }),
+      REPO,
+      "main",
+      "vib-201",
+    );
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.compare.commits).toEqual([
+      { sha: "a91f7c2", msg: "[VIB-201] first" },
+      { sha: "4ce0b18", msg: "[VIB-201] third" },
+    ]);
+    expect(result.compare.droppedCommits).toBe(1);
+    // The counters GitHub sent are untouched by the drop.
+    expect(result.compare.aheadBy).toBe(3);
+  });
+
+  it("a complete list reports nothing dropped", async () => {
+    const result = await getBranchCompare(
+      compareClient({
+        ahead_by: 1,
+        behind_by: 0,
+        status: "ahead",
+        commits: [{ sha: "a91f7c2ffff", commit: { message: "[VIB-201] only" } }],
+      }),
+      REPO,
+      "main",
+      "vib-201",
+    );
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.compare.commits).toHaveLength(1);
+    expect(result.compare.droppedCommits).toBe(0);
   });
 });
 
