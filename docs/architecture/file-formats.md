@@ -154,8 +154,12 @@ operator:                         # null in triage (ruling 16: store stage id;
 recommendations: []               # pending operator recommendation cards
 schedules: []                     # pending/fired scheduled operator re-runs (O-3)
 urgent: true                      # optional; absent ≡ false
-validation: changed               # healthy | changed | failing | none — DERIVED
-                                  # cache, recomputed on every write
+validation: changed               # healthy | changed | failing | none | bypassed
+                                  # (`bypassed` = a human force-accepted past the
+                                  # verdict gate, N20-14) — DERIVED cache,
+                                  # recomputed on every write. This list IS
+                                  # VALIDATION_VALUES (task-file.schema.ts), and
+                                  # task_projections' CHECK mirrors it (F21-1)
 workRevision:                     # the immutable revision under review, or null
   id: rev_9f2c
   headSha: a91f7c2e…              # full SHA

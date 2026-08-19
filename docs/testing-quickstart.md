@@ -14,6 +14,15 @@ npm test
 
 Use `npm run test` before pushing changes to verify the unit tests still pass.
 
+## Lint
+
+Run oxlint with the vendored `anti-slop` plugin. It is a required CI gate and must
+exit 0 — findings are fixed, not suppressed (ruling 86 / R21-3):
+
+```sh
+npm run lint
+```
+
 ## Typecheck
 
 Generate React Router types and run TypeScript checks:
@@ -33,7 +42,10 @@ npm run build
 ## End-to-end
 
 CI's second job. It is the only gate that runs a real CLI entrypoint, so run it
-before opening a PR even when the three above are green:
+before opening a PR even when the four above are green (it runs one Playwright
+browser project, `chromium`, behind a `setup` login fixture — Safari and Firefox
+are declared support that nothing here exercises; see the PRD's browser-matrix
+note):
 
 ```sh
 npm run e2e

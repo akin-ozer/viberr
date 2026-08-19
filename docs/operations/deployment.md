@@ -221,6 +221,34 @@ ghost. Rebuilding projections cannot fix it — the ids in the files are the pro
 there is no re-mapping tool. Treat a `projects/`-only restore as a new instance whose
 memberships and owners must be re-established by hand.
 
+## Re-baselining the projection database
+
+Boot's integrity line is followed by a `projection schema drift` **WARN** when this
+database's `task_projections` CHECK constraints no longer admit every value the running
+build produces (F21-1). It names what the CHECK `refuses`. Migrations are squashed into
+`0001_baseline.sql` and forward-only, so widening a CHECK changes what a **fresh**
+`projection.sqlite` gets and nothing else — a root opened by an older build keeps the
+constraint it was created with, and every task whose derived value lands on a refused
+member stops projecting behind a generic `projection rebuild failed`.
+
+The remedy is to recreate the file:
+
+```bash
+npm run backup                       # FIRST — see the cost below
+docker compose down                  # one writer per root; never delete state while it runs
+rm ./docker-data/state/projection.sqlite*   # -wal and -shm too
+docker compose up -d                 # migrations re-apply, projections rebuild from projects/
+```
+
+**Name the cost before you run it.** The projection *tables* are derived and rebuild from
+`projects/` at boot — but they share the file with rows that exist nowhere else: users and
+better-auth credentials, sessions, AES-sealed PATs and MCP credentials, the audit trail,
+notifications, org resources and run history. Deleting the file deletes those too. Expect
+to sign in again as a freshly minted bootstrap admin, and read the ghost-membership warning
+under *Persistence, backup & restore* first: the surviving task and project files still
+carry the OLD user ids. Restoring the backup afterwards puts the drifted schema back, so it
+is a safety net for the data, not a way to undo the re-baseline.
+
 ## Upgrades
 
 New app version → rebuild the image and `docker compose up -d`. Migrations apply at boot;

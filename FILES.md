@@ -9,10 +9,12 @@ Generated from Git’s tracked-file index. Paths are grouped by top-level direct
 .env.example
 .gitignore
 .nvmrc
+.oxlintrc.json
 CONTRIBUTING.md
 Dockerfile
 FILES.md
 README.md
+compose.e2e.yml
 compose.yml
 doctor.config.ts
 package-lock.json
@@ -91,6 +93,7 @@ app/features/board/board-filters.test.ts
 app/features/board/board-filters.ts
 app/features/board/board-page.tsx
 app/features/github/credential-card.tsx
+app/features/github/credential-visibility.server.ts
 app/features/github/github-actions.server.ts
 app/features/github/github-copy.test.ts
 app/features/github/github-copy.ts
@@ -417,7 +420,11 @@ app/server/tasks/model-prose.server.test.ts
 app/server/tasks/model-prose.server.ts
 app/server/tasks/operator-actions.server.test.ts
 app/server/tasks/operator-actions.server.ts
+app/server/tasks/operator-repo-read.server.test.ts
+app/server/tasks/operator-repo-read.server.ts
 app/server/tasks/operator-toolkit.server.ts
+app/server/tasks/repo-mirror.server.test.ts
+app/server/tasks/repo-mirror.server.ts
 app/server/tasks/schedule.server.test.ts
 app/server/tasks/schedule.server.ts
 app/server/tasks/specialist-mcp.server.test.ts
@@ -432,6 +439,7 @@ app/server/tasks/task-governance.server.test.ts
 app/server/tasks/timeline-compaction.server.test.ts
 app/server/tasks/timeline-compaction.server.ts
 app/server/theme/theme-cookie.server.ts
+app/shared/acceptance-disclosure.ts
 app/shared/auth/password-policy.ts
 app/shared/capabilities.test.ts
 app/shared/capabilities.ts
@@ -593,6 +601,17 @@ scripts/seed-demo.ts
 scripts/seed.ts
 ```
 
+## test-artifacts/
+
+```text
+test-artifacts/pass20-askfirst.txt
+test-artifacts/pass20-base-move.txt
+test-artifacts/pass20-canaries.txt
+test-artifacts/pass20-codex-browser.txt
+test-artifacts/pass20-validate.txt
+test-artifacts/pass20-vib1.txt
+```
+
 ## test-support/
 
 ```text
@@ -606,4 +625,30 @@ test-support/setup-env.ts
 test-support/test-app.ts
 test-support/test-db.ts
 test-support/test-store.ts
+```
+
+## tools/
+
+```text
+tools/oxlint/anti-slop/effect/index.ts
+tools/oxlint/anti-slop/effect/rules/no-service-constructor-imports.ts
+tools/oxlint/anti-slop/index.ts
+tools/oxlint/anti-slop/rules/no-chained-type-assertions.ts
+tools/oxlint/anti-slop/rules/no-conditional-empty-object-spread.ts
+tools/oxlint/anti-slop/rules/no-known-value-widening.ts
+tools/oxlint/anti-slop/rules/no-module-mocking.ts
+tools/oxlint/anti-slop/rules/no-object-parameters.ts
+tools/oxlint/anti-slop/rules/no-reflect-apply.ts
+tools/oxlint/anti-slop/rules/no-reflect-get.ts
+tools/oxlint/anti-slop/rules/no-runtime-typeof.ts
+tools/oxlint/anti-slop/rules/no-shape-in-symbol-names.ts
+tools/oxlint/anti-slop/rules/no-unknown-parameters.ts
+tools/oxlint/anti-slop/rules/no-unknown-returns.ts
+tools/oxlint/anti-slop/rules/no-unknown-type-aliases.ts
+tools/oxlint/anti-slop/rules/no-unsafe-dictionary-type.ts
+tools/oxlint/anti-slop/rules/no-widen-then-assert.ts
+tools/oxlint/anti-slop/rules/require-safety-comment-for-type-assertion.ts
+tools/oxlint/anti-slop/shared/dictionary-types.ts
+tools/oxlint/anti-slop/shared/lexical-type-parameters.ts
+tools/oxlint/anti-slop/shared/reflect-method.ts
 ```
