@@ -38,28 +38,56 @@ export function getProjectionDbPath(): string {
 
 // Singleton survives dev-server HMR module reloads via a well-known symbol.
 const DB_CACHE_KEY = Symbol.for("viberr.db");
+/** F21-24: set once the graceful shutdown has closed the database. Symbol-keyed
+ *  for the same HMR reason as the handle itself. */
+const DB_SHUTDOWN_KEY = Symbol.for("viberr.dbShutdown");
 
 interface DbSlot {
   [DB_CACHE_KEY]?: DatabaseSync;
+  [DB_SHUTDOWN_KEY]?: boolean;
 }
 
 function dbSlot(): DbSlot {
-  // SAFETY: `globalThis` carries no static type for a symbol-keyed slot. The key
-  // is module-private, and the only writes to it anywhere in the process are the
-  // two below (`getDb` stores the handle it just opened, `closeDb` clears it), so
-  // nothing else can put another shape there.
+  // SAFETY: `globalThis` carries no static type for a symbol-keyed slot. The keys
+  // are module-private, and the only writes to them anywhere in the process are
+  // the ones below (`getDb` stores the handle it just opened, `closeDb` clears it
+  // and the flag, `shutdownDatabase` raises the flag), so nothing else can put
+  // another shape there.
   return globalThis as DbSlot;
+}
+
+/**
+ * F21-24: has the process closed the database for shutdown?
+ *
+ * Read by the run pipeline, which is the one thing still writing when this
+ * flips: it degrades to a single summarizing warning instead of one error per
+ * streamed line (run-sink.server.ts).
+ */
+export function isDatabaseShuttingDown(): boolean {
+  return dbSlot()[DB_SHUTDOWN_KEY] === true;
 }
 
 /**
  * Returns the process-wide app database handle. On first call it opens
  * ${VIBERR_DATA_ROOT}/state/projection.sqlite and applies any pending
  * migrations from db/migrations/.
+ *
+ * F21-24: once `shutdownDatabase` has run, this REFUSES to open a new handle.
+ * Live (UC-31, `docker restart` mid-run) an incoming request took the lazy-open
+ * branch between "sqlite closed" and process exit and logged "sqlite ready" —
+ * re-opening the database (and re-running migrations) on a process that had just
+ * released it, which is precisely what the single-writer story forbids. A
+ * request arriving during the drain gets a fast, honest error instead.
  */
 export function getDb(): DatabaseSync {
   const cache = dbSlot();
   let db = cache[DB_CACHE_KEY];
   if (!db || !db.isOpen) {
+    if (isDatabaseShuttingDown()) {
+      throw new Error(
+        "The server is shutting down — the database is closed and will not be reopened.",
+      );
+    }
     const dbPath = getProjectionDbPath();
     db = openDatabase(dbPath);
     const result = runMigrations(db);
@@ -73,12 +101,15 @@ export function getDb(): DatabaseSync {
   return db;
 }
 
-/** Closes and forgets the cached handle (tests / graceful shutdown). */
+/** Closes and forgets the cached handle (tests / graceful shutdown). Clears the
+ *  shutdown flag: a test that closes the db between cases is re-opening on
+ *  purpose, and `shutdownDatabase` re-raises the flag AFTER calling this. */
 export function closeDb(): void {
   const cache = dbSlot();
   const db = cache[DB_CACHE_KEY];
   if (db?.isOpen) db.close();
   cache[DB_CACHE_KEY] = undefined;
+  cache[DB_SHUTDOWN_KEY] = false;
 }
 
 /**
@@ -102,7 +133,12 @@ export function closeDb(): void {
 export function shutdownDatabase(): void {
   const cache = dbSlot();
   const db = cache[DB_CACHE_KEY];
-  if (!db?.isOpen) return;
+  if (!db?.isOpen) {
+    // Nothing to close, but the intent still stands: no lazy reopen from here on
+    // (F21-24). A shutdown that found the handle already gone must still latch.
+    cache[DB_SHUTDOWN_KEY] = true;
+    return;
+  }
   try {
     db.exec(`PRAGMA wal_checkpoint(TRUNCATE);`);
   } catch (error) {
@@ -117,5 +153,10 @@ export function shutdownDatabase(): void {
     logger.error("sqlite close failed during shutdown", {
       err: error instanceof Error ? error : new Error(String(error)),
     });
+  } finally {
+    // F21-24: latch AFTER `closeDb` (which clears the flag for the test path),
+    // and in a `finally` so a failed close still stops the lazy reopener. Every
+    // statement in this function is synchronous, so nothing can slip in between.
+    cache[DB_SHUTDOWN_KEY] = true;
   }
 }
