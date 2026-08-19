@@ -11,6 +11,7 @@
     "build": "react-router build",
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
+    "lint": "oxlint",
     "test": "vitest run",
     "e2e": "tsx scripts/e2e.ts",
     "seed": "tsx scripts/seed.ts",
@@ -47,6 +48,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
+    "@oxlint/plugins": "^1.79.0",
     "@playwright/test": "^1.62.1",
     "@react-router/dev": "^8.3.0",
     "@testing-library/react": "^16.3.2",
@@ -54,6 +56,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "jsdom": "^30.0.1",
+    "oxlint": "^1.79.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.0",
     "vitest": "^4.1.10"

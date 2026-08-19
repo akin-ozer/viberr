@@ -5,7 +5,13 @@
     "**/.client/**/*",
     ".react-router/types/**/*"
   ],
-  "exclude": ["data", "docker-data", "build", "node_modules"],
+  "exclude": [
+    "data",
+    "docker-data",
+    "build",
+    "node_modules",
+    "tools/oxlint/anti-slop"
+  ],
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ES2025"],
     "types": ["node", "vite/client"],
