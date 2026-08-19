@@ -206,7 +206,12 @@ test("a Done-stage drop asks before it accepts, and dismissing writes nothing", 
   await page.mouse.up();
 
   // The confirm names the task and what accepting does, per ruling 20 (R15-1).
-  const confirm = page.locator('dialog[aria-label="Accept completion"]');
+  // D3 (pass 20): the board now renders the ONE shared acceptance ceremony
+  // (task-detail/accept-confirm), matched by its stable data-screen-label; its
+  // aria-label carries the task key ("Accept by moving to Done: VIB-142").
+  const confirm = page.locator(
+    'dialog[data-screen-label="Accept completion dialog"]',
+  );
   await expect(confirm).toBeVisible();
   await expect(confirm).toContainText("VIB-142");
   await expect(confirm).toContainText("Merging is one-way");
@@ -236,9 +241,13 @@ test("confirming a Done-stage drop still meets the verdict gate, and the board s
   const request = reorderPost(page, (body) => body.includes("taskKey=VIB-142"));
   await page.mouse.up();
 
-  const confirm = page.locator('dialog[aria-label="Accept completion"]');
+  const confirm = page.locator(
+    'dialog[data-screen-label="Accept completion dialog"]',
+  );
   await expect(confirm).toBeVisible();
-  await confirm.getByRole("button", { name: /^Accept →/ }).click();
+  // The shared ceremony's confirm reads "Move → Done" in its stage-move mode
+  // (with "& merge" appended because VIB-142 carries a PR).
+  await confirm.getByRole("button", { name: /^Move → Done/ }).click();
   await request;
 
   const toast = page.locator('.toast[data-kind="error"]');
