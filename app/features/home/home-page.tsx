@@ -138,11 +138,11 @@ export function HomePage({
   // silently reverting on the next revalidation.
   useFetcherResult(prefsFetcher, (d) => {
     if (!d.ok) {
-      push(d.error ?? "Couldn't save that preference — please try again", "error");
+      push(d.error ?? "Couldn't save that preference. Please try again", "error");
       return;
     }
     if (d.intent === "pin") {
-      push(d.pinned ? "Pinned — it will stay at the top" : "Unpinned");
+      push(d.pinned ? "Pinned. It will stay at the top" : "Unpinned");
     }
   });
 
@@ -152,12 +152,12 @@ export function HomePage({
   // scan had succeeded. Both outcomes toast now, mirroring the rebuild handler.
   useFetcherResult(rescanFetcher, (d) => {
     if (!d.ok) {
-      push(d.error ?? "Re-scan failed — check the server log", "error");
+      push(d.error ?? "Re-scan failed. Check the server log", "error");
       return;
     }
     const drift = (d.changed ?? 0) + (d.removed ?? 0) + (d.errors ?? 0);
     push(
-      "Store re-scanned — " +
+      "Store re-scanned: " +
         d.projects +
         " project dirs, " +
         (drift === 0 ? "no drift found" : drift + " changed"),
@@ -194,8 +194,8 @@ export function HomePage({
       const d = rebuildFetcher.data;
       push(
         d.ok
-          ? `Projections rebuilt from files — ${countLabel(d.projects ?? 0, "project")}, ${countLabel(d.tasks ?? 0, "task")} re-projected`
-          : (d.error ?? "Rebuild failed — check the server log"),
+          ? `Projections rebuilt from files: ${countLabel(d.projects ?? 0, "project")}, ${countLabel(d.tasks ?? 0, "task")} re-projected`
+          : (d.error ?? "Rebuild failed. Check the server log"),
         // D5: the failure branch borrowed the success tick — the sibling rescan
         // handler already passes the kind, this one did not.
         d.ok ? "success" : "error",
@@ -232,7 +232,7 @@ export function HomePage({
     <div
       className="home"
       data-density="comfortable"
-      data-screen-label="Home — project selection"
+      data-screen-label="Home · project selection"
     >
       {/* UI-12: bypass block ahead of the brand/search/bell/avatar header. */}
       <SkipLink />

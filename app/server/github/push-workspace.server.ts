@@ -721,9 +721,9 @@ export async function pushWorkspaceBranch(
           // human-facing form is one line; the untouched multi-line excerpt
           // rides the structured field and the log line.
           pushRes.timedOut
-            ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
+            ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
             : detail
-              ? `git push failed — git said: ${oneLine(detail)}`
+              ? `git push failed (git said: ${oneLine(detail)})`
               : "git push returned non-zero, and git printed nothing to explain it",
           detail,
         );
@@ -751,7 +751,7 @@ export async function pushWorkspaceBranch(
     logger.info("workspace branch push errored — skipping", fields);
     return pushFailed(
       detail
-        ? `the push could not run — ${oneLine(detail)}`
+        ? `the push could not run (${oneLine(detail)})`
         : "the push could not run, and the failure carried no message",
       detail,
     );

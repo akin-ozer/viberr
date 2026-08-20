@@ -11,7 +11,7 @@
 
 export const RECONCILE_START_TOAST = "Updating branch and PR status from GitHub…";
 export const RECONCILE_DONE_TOAST =
-  "Status updated — every branch and PR maps to its task key";
+  "Status updated. Every branch and PR maps to its task key";
 
 /** Input distilled from a ProjectReconcileSummary (server maps to this). */
 export interface ReconcileToastInput {
@@ -24,7 +24,7 @@ export interface ReconcileToastInput {
 
 export function reconcileToast(input: ReconcileToastInput): string {
   if (input.status === "no_pat_configured") {
-    return "No GitHub credential configured — connect a PAT to reconcile branches and PRs.";
+    return "No GitHub credential configured. Connect a PAT to reconcile branches and PRs.";
   }
   if (input.status === "no_repo_configured") {
     return "No repository configured for this project.";
@@ -32,9 +32,9 @@ export function reconcileToast(input: ReconcileToastInput): string {
   if (input.failed === 0) return RECONCILE_DONE_TOAST;
   if (input.allFailuresOffline) {
     // Spec §7.10: stale-but-labeled beats blank — last-known data stays up.
-    return "GitHub is unreachable — showing the last-known branch and PR state.";
+    return "GitHub is unreachable. Showing the last-known branch and PR state.";
   }
-  return `Reconciled ${input.reconciled} of ${input.reconciled + input.failed} branches — ${input.failed} couldn't sync; last-known state kept.`;
+  return `Reconciled ${input.reconciled} of ${input.reconciled + input.failed} branches. ${input.failed} couldn't sync; last-known state kept.`;
 }
 
 /** Input distilled from a RevalidateProjectCredentialResult (+ post-state). */
@@ -51,10 +51,10 @@ export interface GrantScopeToastInput {
 
 export function grantScopeToast(input: GrantScopeToastInput): string {
   if (input.status === "no_pat_configured") {
-    return "No GitHub credential configured — connect a PAT before re-checking scopes.";
+    return "No GitHub credential configured. Connect a PAT before re-checking scopes.";
   }
   if (input.status === "network_unavailable") {
-    return "GitHub is unreachable — kept the last-known scope results.";
+    return "GitHub is unreachable. Kept the last-known scope results.";
   }
   if (input.resolvedCount > 0) {
     // Mock string with the flagged task interpolated (spec §5.3).
@@ -63,18 +63,18 @@ export function grantScopeToast(input: GrantScopeToastInput): string {
   }
   switch (input.validationStatus) {
     case "revoked":
-      return "Re-check failed — the credential was revoked on GitHub.";
+      return "Re-check failed: the credential was revoked on GitHub.";
     case "expired":
-      return "Re-check failed — the credential has expired.";
+      return "Re-check failed: the credential has expired.";
     case "repo_not_found":
-      return "Re-check couldn't see the repository — the credential may lack repo access.";
+      return "Re-check couldn't see the repository. The credential may lack repo access.";
     case "org_approval_missing":
-      return "Re-check blocked — the token is pending organization approval.";
+      return "Re-check blocked: the token is pending organization approval.";
     default:
       break;
   }
   if (input.stillMissingScope) {
-    return `Re-checked — ${input.stillMissingScope} is still missing on the project credential.`;
+    return `Re-checked. ${input.stillMissingScope} is still missing on the project credential.`;
   }
-  return "Scopes re-checked — all required scopes granted.";
+  return "Scopes re-checked. All required scopes granted.";
 }

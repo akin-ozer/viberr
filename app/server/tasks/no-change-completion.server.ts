@@ -140,7 +140,7 @@ export async function probeNothingToDeliver(
       return {
         status: "unverifiable",
         refusal:
-          `${taskKey} could not be closed as "no changes" — this project has no GitHub ` +
+          `${taskKey} could not be closed as "no changes": this project has no GitHub ` +
           `credential, so \`${branch}\` could not be checked on the remote. Add a credential ` +
           `and accept again (an admin can force-accept, which records that the check did not run).`,
       };
@@ -173,7 +173,7 @@ export async function probeNothingToDeliver(
           return {
             status: "unverifiable",
             refusal:
-              `${taskKey} could not be closed as "no changes" — no \`${branch}\` branch exists, ` +
+              `${taskKey} could not be closed as "no changes": no \`${branch}\` branch exists, ` +
               `but the default branch \`${gh.defaultBranch}\` could not be read, so there is ` +
               `nothing to record the outcome against. Try again once GitHub is reachable.`,
           };
@@ -191,7 +191,7 @@ export async function probeNothingToDeliver(
       return {
         status: "unverifiable",
         refusal:
-          `${taskKey} could not be closed as "no changes" — GitHub could not be reached to ` +
+          `${taskKey} could not be closed as "no changes": GitHub could not be reached to ` +
           `check \`${branch}\` (${head.kind === "http" ? `GitHub ${head.status}` : head.kind === "network" ? head.message : "no response"}). ` +
           `Nothing verified that there is no work on the branch, so the task stays open.`,
       };
@@ -208,7 +208,7 @@ export async function probeNothingToDeliver(
       return {
         status: "unverifiable",
         refusal:
-          `${taskKey} could not be closed as "no changes" — \`${branch}\` exists but could not be ` +
+          `${taskKey} could not be closed as "no changes": \`${branch}\` exists but could not be ` +
           `compared against \`${gh.defaultBranch}\` (${compare.status.replace(/_/g, " ")}). ` +
           `Nothing verified that the branch is empty, so the task stays open.`,
       };
@@ -220,7 +220,7 @@ export async function probeNothingToDeliver(
         status: "has_work",
         refusal:
           `${taskKey}'s branch \`${branch}\` carries ${compare.compare.aheadBy} commit(s) ahead ` +
-          `of \`${gh.defaultBranch}\` — it cannot be completed as "no changes". Deliver the ` +
+          `of \`${gh.defaultBranch}\`, so it cannot be completed as "no changes". Deliver the ` +
           `branch & open the review PR, or archive the task.`,
       };
     }
@@ -244,7 +244,7 @@ export async function probeNothingToDeliver(
     return {
       status: "unverifiable",
       refusal:
-        `${taskKey} could not be closed as "no changes" — the remote branch check failed ` +
+        `${taskKey} could not be closed as "no changes": the remote branch check failed ` +
         `unexpectedly, so nothing verified that there is no work to deliver.`,
     };
   }
@@ -346,7 +346,7 @@ export function assertVerifiedNoChangeStillApplies(
   const stillApplies = check.autoDetected ? noChangeCandidate(fm) : noChangeApplies(fm);
   if (stillApplies === check.applies) return;
   throw AppError.conflict(
-    `${taskKey} changed while the acceptance was being verified — it is ` +
+    `${taskKey} changed while the acceptance was being verified: it is ` +
       `${noChangeApplies(fm) ? "now" : "no longer"} a no-change completion, and the state ` +
       `about to be closed is not the state that was checked. Refresh the task and accept again.`,
   );
@@ -389,18 +389,18 @@ export function noChangeCompletionEvent(input: {
   let text: string;
   if (verification === null) {
     text =
-      `${who} — **${taskKey} closed as "no changes"** WITHOUT a passing remote re-check. ` +
+      `${who}: **${taskKey} closed as "no changes"** WITHOUT a passing remote re-check. ` +
       (input.forcedRefusal
         ? `The check said: ${input.forcedRefusal} `
         : `The re-check could not be performed. `) +
       `Nothing verified this outcome; nothing was delivered and there was no pull request to merge.`;
   } else if (verification.basis === "no_repo") {
     text =
-      `${who} — **${taskKey} completed with no changes**. This project has no GitHub ` +
+      `${who}: **${taskKey} completed with no changes**. This project has no GitHub ` +
       `repository, so there was nothing to deliver and no pull request to merge.`;
   } else if (verification.basis === "no_branch") {
     text =
-      `${who} — **${taskKey} completed with no changes**. Nothing was delivered and there was ` +
+      `${who}: **${taskKey} completed with no changes**. Nothing was delivered and there was ` +
       `no pull request to merge: no \`${verification.branch}\` branch exists on the remote, ` +
       `checked against \`${verification.baseBranch}\`` +
       (verification.baseSha ? ` at \`${verification.baseSha.slice(0, 12)}\`` : "") +
@@ -408,10 +408,10 @@ export function noChangeCompletionEvent(input: {
       autoClause;
   } else {
     text =
-      `${who} — **${taskKey} completed with no changes**. Branch \`${verification.branch}\` ` +
+      `${who}: **${taskKey} completed with no changes**. Branch \`${verification.branch}\` ` +
       `carries no commits ahead of \`${verification.baseBranch}\`` +
       (verification.baseSha ? ` (\`${verification.baseSha.slice(0, 12)}\`)` : "") +
-      `, re-checked at acceptance — so there was nothing to deliver and no pull request to merge.` +
+      `, re-checked at acceptance, so there was nothing to deliver and no pull request to merge.` +
       autoClause;
   }
 
@@ -419,7 +419,7 @@ export function noChangeCompletionEvent(input: {
     occurredAt: input.occurredAt,
     type: "completion",
     actor: input.actor,
-    title: "Completed — no changes",
+    title: "Completed with no changes",
     text,
     toAgent: false,
     evidence: null,

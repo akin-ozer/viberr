@@ -913,6 +913,71 @@ describe("F18-14: the govern/governance copy ban holds on every surface a human 
 });
 
 /**
+ * P21 (owner, 2026-08-20) — the humanizer sweep: em and en dashes are banned
+ * from copy a human reads. They are the most reliable tell of machine-written
+ * prose (the app's copy was written entirely by models), and the owner asked
+ * for every rendered sentence to read as natural language. Scope is the same
+ * render surface the govern ban walks — `app/features`, `app/routes`, `app/ui`,
+ * `app.css` and the top-level render files, which INCLUDES the features-level
+ * `.server.ts` toast/refusal copy — plus the seed assets an org admin reads and
+ * edits in the definition UI. `app/server/**` prompt machinery stays ungated
+ * here: those literals are dense with model-addressed prose where a dash harms
+ * nobody, and gating them would take a hundred-entry allowlist that rots.
+ *
+ * The MINUS SIGN (−, U+2212) and arrows (→) stay legal: they are typography
+ * for counts and direction, not prose punctuation. Comments keep their dashes —
+ * the stripper removes them before the scan, so explanations stay free.
+ */
+const BANNED_DASH = /[–—]/;
+
+/**
+ * Empty on purpose, same contract as CLASSLESS_BY_DESIGN: an entry here is a
+ * dash a human reads, which is the exact defect this gate exists to catch. Do
+ * NOT grow it to keep a red build green — reword the sentence instead.
+ */
+const DASH_ALLOW: readonly string[] = [];
+
+describe("P21: em/en dashes are banned in rendered copy and seed assets", () => {
+  it("no rendered line under the render roots carries an em or en dash", () => {
+    const offenders: string[] = [];
+    const files = [...ROOTS.flatMap(walk), ...EXTRA_RENDER_FILES];
+    for (const file of files) {
+      const src = stripComments(readFileSync(file, "utf8"));
+      src.split("\n").forEach((line, i) => {
+        if (!BANNED_DASH.test(redact(line, DASH_ALLOW))) return;
+        offenders.push(
+          `${path.relative(APP, file)}:${i + 1} → ${line.trim().slice(0, 100)}`,
+        );
+      });
+    }
+    expect(files.length).toBeGreaterThan(100);
+    expect(
+      offenders,
+      `em/en dash in rendered copy — reword (comma, period, colon, or parentheses):\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("no seeded agent definition or skill doc carries one either", () => {
+    const offenders: string[] = [];
+    const files = walkAll(ASSETS);
+    for (const file of files) {
+      const rel = path.relative(ASSETS, file);
+      readFileSync(file, "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          if (!BANNED_DASH.test(redact(line, DASH_ALLOW))) return;
+          offenders.push(`${rel}:${i + 1} → ${line.trim().slice(0, 100)}`);
+        });
+    }
+    expect(files.length).toBeGreaterThanOrEqual(7);
+    expect(
+      offenders,
+      `em/en dash in a seed asset an admin reads — reword:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+});
+
+/**
  * F19-12 — the retired "primary specialist" vocabulary.
  *
  * Since the generic-agents work (2026-07-19) a task carries one `engagements[]`

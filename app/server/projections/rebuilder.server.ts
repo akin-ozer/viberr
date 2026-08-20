@@ -338,7 +338,7 @@ function acceptanceBlockReason(
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Same sentence the writers refuse with.
     (ctx.blockedPacket
-      ? "This task has an open blocked decision — resolve the operator's packet before accepting it."
+      ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
     // P14-LV-07: a PR GitHub cannot merge cannot be accepted.
     conflictingPrBlockedReason(fm, fm.key)

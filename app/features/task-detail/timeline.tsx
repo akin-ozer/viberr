@@ -428,7 +428,7 @@ export function Timeline({
         {/* R7-6: Done tasks stay commentable — one subtle line, no freeze. */}
         {taskClosed && (
           <div className="fine xs">
-            This task is closed — comments are still recorded.
+            This task is closed. Comments are still recorded.
           </div>
         )}
         <div className="composer-box">
@@ -489,12 +489,12 @@ export function Timeline({
         {items.length === 0 ? (
           <div className="empty">
             {events.length === 0
-              ? "No activity yet — this task hasn't started its operator loop."
+              ? "No activity yet. This task hasn't started its operator loop."
               : f === "comment"
-                ? "No comments in the loaded history — switch to All, or load older events."
+                ? "No comments in the loaded history. Switch to All, or load older events."
                 : // F18-14: "governance" is a banned UI word (design/CONVERSATION-SUMMARY
                   // line 22); this is the "Important" filter's empty state, so name that tab.
-                  "No important events in the loaded history — switch to All, or load older events."}
+                  "No important events in the loaded history. Switch to All, or load older events."}
           </div>
         ) : (
           items.map((ev) => (

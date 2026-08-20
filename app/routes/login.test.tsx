@@ -52,8 +52,8 @@ describe("R17-4: local form leads when no OAuth provider is configured", () => {
     });
     // The two disabled buttons are gone entirely…
     expect(container.querySelector(".login-providers")).toBeNull();
-    expect(queryByText("GitHub — not configured")).toBeNull();
-    expect(queryByText("Google — not configured")).toBeNull();
+    expect(queryByText("GitHub (not configured)")).toBeNull();
+    expect(queryByText("Google (not configured)")).toBeNull();
     // …the "or a local account" divider with them (the form IS the account
     // path, not the fallback)…
     expect(queryByText("or a local account")).toBeNull();
@@ -76,7 +76,7 @@ describe("R17-4: local form leads when no OAuth provider is configured", () => {
     expect(providersEl).toBeTruthy();
     expect(getByText("Continue with GitHub")).toBeTruthy();
     // D12: the unconfigured provider renders disabled, not hidden.
-    const googleBtn = getByText("Google — not configured").closest("button")!;
+    const googleBtn = getByText("Google (not configured)").closest("button")!;
     expect(googleBtn.disabled).toBe(true);
     expect(getByText("or a local account")).toBeTruthy();
     expect(

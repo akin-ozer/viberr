@@ -493,9 +493,9 @@ describe("ReleaseConfirm", () => {
     expect(obs[0]!.textContent).toContain("Arda Kaya");
     expect(obs[0]!.textContent).toContain("· you");
     expect(obs[1]!.textContent).toContain(
-      "Agent work in progress — no boundary is waiting",
+      "Agent work in progress. No boundary is waiting",
     );
-    expect(obs[2]!.textContent).toContain("Unowned — review & acceptance stall");
+    expect(obs[2]!.textContent).toContain("Unowned: review & acceptance stall");
     // No admin-release pill on a self release.
     expect(container.querySelector(".rel-owner .pill")).toBeNull();
     // Candidates exclude the owner (me) → 3 chips, none marked "· you".
@@ -526,7 +526,7 @@ describe("ReleaseConfirm", () => {
       "admin release",
     );
     expect(container.querySelector(".foot-hint")!.textContent).toBe(
-      "Admin release — recorded as a typed event and in the audit trail.",
+      "Admin release. Recorded as a typed event and in the audit trail.",
     );
     expect(container.querySelector(".btn.danger")!.textContent).toContain(
       "Release Selin",
@@ -713,7 +713,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
       ),
     ).toBe(false);
     // The read-only "None yet …" copy is shown instead.
-    expect(container.textContent).toContain("the operator assigns one");
+    expect(container.textContent).toContain("The operator assigns one");
   });
 });
 
@@ -891,7 +891,7 @@ describe("ExecutionProfile — a closed task offers no new engagements (P14-WL-0
         b.textContent?.includes("Assign delivering agent"),
       ),
     ).toBe(false);
-    expect(getByText(/Task closed — reopen it from Current state/)).toBeTruthy();
+    expect(getByText(/Task closed\. Reopen it from Current state/)).toBeTruthy();
   });
 
   it("replaces the reviewer menu with the reason", () => {
@@ -901,7 +901,7 @@ describe("ExecutionProfile — a closed task offers no new engagements (P14-WL-0
         b.textContent?.includes("Engage reviewer"),
       ),
     ).toBe(false);
-    expect(getByText("Task closed — no new reviewer engagements.")).toBeTruthy();
+    expect(getByText("Task closed. No new reviewer engagements.")).toBeTruthy();
   });
 
   it("still offers both on an OPEN task", () => {
@@ -1366,7 +1366,7 @@ describe("F19-22: the GitHub panel names the last CHANGE, not the last check", (
     // The change row now points at the check row instead of ending on a bare
     // "not an unchecked one" the panel could not previously substantiate.
     expect(change.querySelector(".v")!.getAttribute("title")).toContain(
-      "the Checked row above says when GitHub was last read",
+      "The Checked row above says when GitHub was last read",
     );
   });
 
@@ -1527,7 +1527,7 @@ describe("LV-09: pluralization + null-ish packet observations", () => {
     const obs = container.querySelectorAll(".packet-obs .obs");
     expect(obs[0]!.textContent).toContain("unassigned");
     expect(obs[0]!.textContent).not.toContain("null");
-    expect(obs[1]!.textContent).toContain("—");
+    expect(obs[1]!.textContent).toContain("none");
   });
 });
 

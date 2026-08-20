@@ -266,7 +266,7 @@ describe("set-role", () => {
     })) as PolicyRefusal;
     expect(demoteArda.init?.status).toBe(409);
     expect(demoteArda.data?.error).toBe(
-      "Viberr Core needs at least one admin — promote someone else first",
+      "Viberr Core needs at least one admin. Promote someone else first",
     );
 
     // Restore elif.
@@ -316,7 +316,7 @@ describe("set-boundary", () => {
     // beside an Auto-advance selection). Reverting the `rule.by = …` recompute
     // in setTransitionBoundary makes this go red.
     expect(changed.by).toBe(
-      "Operator, within policy — no human decision required",
+      "Operator, within policy; no human decision required",
     );
     const audit = listAuditEvents(app.db, {
       action: "project.policy.boundary_changed",
@@ -347,7 +347,7 @@ describe("set-boundary", () => {
     })) as PolicyRefusal;
     expect(result.init?.status).toBe(403);
     expect(result.data?.error).toBe(
-      "Completion is human-authorized in V1 — this boundary can't be delegated",
+      "Completion is human-authorized in V1, so this boundary can't be delegated",
     );
     const { view } = await runLoader(ids.arda);
     expect(

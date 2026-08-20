@@ -94,7 +94,7 @@ function ProviderModal({
       onClose={onClose}
       canSave={canSave}
       saveLabel={action.busy ? "Saving…" : "Save credentials"}
-      footHint="saving never switches sign-in on — test the pair first"
+      footHint="saving never switches sign-in on. Test the pair first"
       onSave={apply}
     >
       <div className="field">
@@ -201,7 +201,7 @@ export function SsoPanel({
   const activeCount = providers.filter((p) => p.active).length;
 
   return (
-    <section className="panel" data-screen-label="Settings — Sign-in & SSO">
+    <section className="panel" data-screen-label="Settings · Sign-in & SSO">
       <div className="panel-head">
         <Icon name="shield" />
         <h2>Sign-in &amp; SSO</h2>
@@ -211,12 +211,12 @@ export function SsoPanel({
         <span>
           <strong>
             {activeCount === 0
-              ? "No single sign-on — local accounts only."
+              ? "No single sign-on: local accounts only."
               : activeCount === 1
                 ? "1 single sign-on method is live."
                 : "2 single sign-on methods are live."}
           </strong>{" "}
-          Configure a provider here and it applies immediately — no redeploy.
+          Configure a provider here and it applies immediately, no redeploy.
           Credentials set here override the ones a deployment passes in its
           environment. Who may actually sign in is still the whitelist under{" "}
           <strong>Users &amp; access</strong>.
@@ -240,7 +240,7 @@ export function SsoPanel({
                       ? `Client ID ${p.clientId}`
                       : "Configured here"
                     : p.source === "env"
-                      ? "From this deployment's environment — set credentials here to take it over"
+                      ? "From this deployment's environment. Set credentials here to take it over"
                       : "Not configured"}
                   {proved && (
                     <>
@@ -254,7 +254,7 @@ export function SsoPanel({
                 {proved && p.verifiedDetail && (
                   <span className="sub">
                     {p.verifiedDetail} The callback URL above still has to be
-                    registered on the provider — that is only exercised by a real
+                    registered on the provider. That is only exercised by a real
                     sign-in.
                   </span>
                 )}
@@ -305,7 +305,7 @@ export function SsoPanel({
                   disabled={action.busy || (!proved && !p.active)}
                   title={
                     !proved && !p.active
-                      ? "Test the credentials first — a sign-in method is only offered once the provider has accepted it"
+                      ? "Test the credentials first: a sign-in method is only offered once the provider has accepted it"
                       : undefined
                   }
                   onClick={() =>
@@ -347,7 +347,7 @@ export function SsoPanel({
           detail={
             confirm.envAvailable
               ? `${PROVIDER_META[confirm.provider].label} sign-in falls back to the credentials in this deployment's environment.`
-              : `${PROVIDER_META[confirm.provider].label} sign-in stops being offered. People who signed in this way keep their accounts — they will need another method.`
+              : `${PROVIDER_META[confirm.provider].label} sign-in stops being offered. People who signed in this way keep their accounts but will need another method.`
           }
           onCancel={() => setConfirm(null)}
           onConfirm={() => {

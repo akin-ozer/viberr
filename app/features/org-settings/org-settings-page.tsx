@@ -74,7 +74,7 @@ export function OrgSettingsPage({
       countLabel(view.mcps.length, "MCP server"),
       countLabel(view.skills.length, "skill"),
     ].join(" · ") +
-      ` — plus ${countLabel(view.gagents.length, "agent profile")}`,
+      `, plus ${countLabel(view.gagents.length, "agent profile")}`,
   } satisfies Record<OrgSettingsTab, string>;
 
   return (
@@ -91,7 +91,7 @@ export function OrgSettingsPage({
               scope; these two were the exception in both directions. */}
           <h1>Instance settings</h1>
           <p className="sub">
-            Instance level — shared by every project and board. Board-level workflow
+            Instance level, shared by every project and board. Board-level workflow
             &amp; policy live inside each project.
           </p>
         </div>

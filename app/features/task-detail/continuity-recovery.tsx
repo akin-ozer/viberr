@@ -309,7 +309,7 @@ export function ContinuityRecoveryPanel({
         <div className="obs">
           <span className="k">still authoritative</span>
           <span>
-            <code>task.md</code> — goal, decisions, timeline, execution refs and
+            <code>task.md</code>: goal, decisions, timeline, execution refs and
             the delivered revision. Nothing in it depended on the lost session.
           </span>
         </div>
@@ -328,7 +328,7 @@ export function ContinuityRecoveryPanel({
             <div className="obs" key={agent.threadId}>
               <span className="k">lost</span>
               <span>
-                {agent.roleLabel} <strong>{agent.name}</strong> —{" "}
+                {agent.roleLabel} <strong>{agent.name}</strong>:{" "}
                 {agent.backendLabel} conversation history
                 {agent.sessionId ? (
                   <>

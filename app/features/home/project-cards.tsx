@@ -50,7 +50,7 @@ export function StageMeter({
     // utility (which carries 2rem padding and would inflate this 6px bar — the
     // "weird task view" bug on freshly-created projects).
     return (
-      <div className="pj-meter is-empty" title="No tasks yet — ready for its first">
+      <div className="pj-meter is-empty" title="No tasks yet. Ready for its first">
         {stages.map((s) => (
           <span
             key={s.id}
@@ -143,7 +143,7 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
           an admin with 2 personal and 3 override-eligible decisions used to see
           no trace of the other 3. */}
       {p.overrideWaiting > 0 && (
-        <span title="These need a decision your project role can't make — reachable through your org-admin override.">
+        <span title="These need a decision your project role can't make. They're reachable through your org-admin override.">
           <Pill kind="neutral" sm>
             {p.overrideWaiting} override-available
           </Pill>
@@ -175,7 +175,7 @@ export function ProjectCard({
   showDesc?: boolean;
 }) {
   return (
-    <article className="pj-card" data-screen-label={"Project card — " + p.name}>
+    <article className="pj-card" data-screen-label={"Project card · " + p.name}>
       <Link
         className="pj-link"
         to={`/projects/${p.slug}/board`}
@@ -230,7 +230,7 @@ export function ProjectRow({
   onStar: (slug: string) => void;
 }) {
   return (
-    <article className="pj-row" data-screen-label={"Project row — " + p.name}>
+    <article className="pj-row" data-screen-label={"Project row · " + p.name}>
       <Link
         className="pj-link"
         to={`/projects/${p.slug}/board`}

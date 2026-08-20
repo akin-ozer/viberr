@@ -148,7 +148,7 @@ export function ProjectPanel({
                 (rbac.ts) and its label is "Edit workflow & policy"; the old
                 "Change project settings (project admin or maintainer)" invented a
                 grant and wrongly promised maintainers. Matches the Policy page. */}
-            Read-only — editing project settings needs the{" "}
+            Read-only. Editing project settings needs the{" "}
             <strong>Edit workflow &amp; policy</strong> grant (project admin).
           </span>
         </div>
@@ -489,7 +489,7 @@ function StageMoveMenu({
         className={"own-btn" + (open ? " open" : "")}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Move ${stage.name} — currently stage ${position} of ${total}`}
+        aria-label={`Move ${stage.name}, currently stage ${position} of ${total}`}
         title="Move this stage in the workflow order"
         onClick={() => setOpen(!open)}
       >
@@ -598,7 +598,7 @@ function StageRow({
           up — and it is where the entry/terminal lock glyph lives. */}
       <span
         className="stg-handle off"
-        title={locked ? `${stage.name} is fixed — ${locked}` : undefined}
+        title={locked ? `${stage.name} is fixed: ${locked}` : undefined}
       >
         {locked && <Icon name="lock" />}
       </span>
@@ -709,7 +709,7 @@ export function StagesPanel({
     const locked = stageLockReason(s.id, stages);
     if (locked) {
       // D5: a refusal must not render the success tick.
-      push(`${s.name} can't be removed — ${locked}`, "error");
+      push(`${s.name} can't be removed: ${locked}`, "error");
       return;
     }
     const n = count(s.id);
@@ -824,8 +824,8 @@ export function StagesPanel({
           {canManage ? (
             <>
               Drag a row to reorder, or use its Move menu · click a name to rename.
-              Adding or removing a stage re-wires the transition chain around it —
-              the new hop inherits the boundary it replaced. Loosen or tighten a
+              Adding or removing a stage re-wires the transition chain around it.
+              The new hop inherits the boundary it replaced. Loosen or tighten a
               boundary in{" "}
               <button type="button" className="keybtn" onClick={onNavPolicy}>
                 Policy → Workflow rules
@@ -834,7 +834,7 @@ export function StagesPanel({
           ) : (
             <>
               {/* F20-16: real grant + tier (see the identity card note). */}
-              Read-only — editing the workflow stages needs the{" "}
+              Read-only. Editing the workflow stages needs the{" "}
               <strong>Edit workflow &amp; policy</strong> grant (project admin).
               Boundaries are shown in{" "}
               <button type="button" className="keybtn" onClick={onNavPolicy}>
@@ -927,7 +927,7 @@ export function MembersPanel({
     ) {
       // D5: a refusal must not render the success tick.
       push(
-        `${m.name} is the only admin — assign another admin in Policy first`,
+        `${m.name} is the only admin. Assign another admin in Policy first`,
         "error",
       );
       return;
@@ -958,7 +958,7 @@ export function MembersPanel({
         <div className="pol-note">
           <Icon name="lock" />
           <span>
-            Read-only — adding or removing project members needs the{" "}
+            Read-only. Adding or removing project members needs the{" "}
             <strong>Manage members &amp; roles</strong> grant (project admin).
           </span>
         </div>
@@ -990,7 +990,7 @@ export function MembersPanel({
               </div>
               <div className="em">
                 {m.missing
-                  ? "The org account was deleted — remove this stale membership."
+                  ? "The org account was deleted. Remove this stale membership."
                   : m.email}
               </div>
             </span>
@@ -1135,8 +1135,8 @@ function RepairRepoDialog({
       <h3>Repair repository</h3>
       <p>
         Currently <code className="mono">{current ?? "unset"}</code>. Enter the
-        corrected <span className="mono">owner/name</span> — for the project
-        that was misconfigured at creation, not for moving healthy work.
+        corrected <span className="mono">owner/name</span>. This is for the
+        project that was misconfigured at creation, not for moving healthy work.
       </p>
       <div className="field">
         <input
@@ -1150,7 +1150,7 @@ function RepairRepoDialog({
       </div>
       <p className="repair-note">
         {hasCredential
-          ? "The new repository is verified with the attached credential before anything changes — a repo the token can't see refuses the repair."
+          ? "The new repository is verified with the attached credential before anything changes. A repo the token can't see refuses the repair."
           : "No credential is attached, so the new repository can't be verified until one is."}
       </p>
       {footprintTasks > 0 && (
@@ -1266,7 +1266,7 @@ export function RepoPanel({
           <Icon name="lock" />
           <span>
             {/* F20-16: real grant + tier (see the identity card note). */}
-            Read-only — repairing the repository binding and changing the
+            Read-only. Repairing the repository binding and changing the
             after-merge branch policy need the{" "}
             <strong>Edit workflow &amp; policy</strong> grant (project admin).
           </span>
@@ -1280,14 +1280,14 @@ export function RepoPanel({
             {repo ? (
               <span className="mono">{repo}</span>
             ) : (
-              <span className="fine md dim">—</span>
+              <span className="fine md dim">not set</span>
             )}
             {canRepair && (
               <button
                 type="button"
                 className="btn ghost sm repair-btn"
                 onClick={() => setRepairing(true)}
-                title="Fix a repository that was misconfigured at creation — verified against the attached credential before anything changes"
+                title="Fix a repository that was misconfigured at creation. The fix is verified against the attached credential before anything changes"
               >
                 Repair…
               </button>
@@ -1499,7 +1499,7 @@ export function DangerZone({
         <p className="deny-note before">
           <Icon name="lock" />
           Archiving and deleting {projectName} need the{" "}
-          <strong>Edit workflow &amp; policy</strong> grant — ask a project
+          <strong>Edit workflow &amp; policy</strong> grant. Ask a project
           admin.
         </p>
       )}
@@ -1510,7 +1510,7 @@ export function DangerZone({
           </div>
           <div className="dd">
             {archived
-              ? "This project is archived — hidden from the workspace. Restore it to make it active again."
+              ? "This project is archived and hidden from the workspace. Restore it to make it active again."
               : "Hides the project from the workspace and moves it to the Home “Archived” section. Timelines are preserved and it can be restored anytime."}
           </div>
         </span>

@@ -50,13 +50,13 @@ export interface ReviewRowView {
  */
 function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   if (pr.state === "merged") {
-    return `PR #${pr.number} is merged on GitHub — accept the completion to close the task.`;
+    return `PR #${pr.number} is merged on GitHub. Accept the completion to close the task.`;
   }
   if (pr.state === "closed") {
-    return `PR #${pr.number} was closed on GitHub without merging — rework and reopen it, or archive the task.`;
+    return `PR #${pr.number} was closed on GitHub without merging. Rework and reopen it, or archive the task.`;
   }
   if (pr.mergeable === "conflicting") {
-    return `PR #${pr.number} conflicts with the base branch — GitHub can't merge it until the branch is rebased.`;
+    return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the branch is rebased.`;
   }
   // F19-32 / ruling 40 (R16-6): "accepted" means a human (or a direct-grant
   // operator) accepted the completion and the REAL merge is still outstanding.
@@ -65,13 +65,13 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   // above stays first: a conflicting accepted PR is stuck for a reason a rebase
   // fixes, which is the more actionable half of the same fact.
   if (pr.state === "accepted") {
-    return `PR #${pr.number} is accepted — the merge is still pending; a human completes it on the task.`;
+    return `PR #${pr.number} is accepted. The merge is still pending; a human completes it on the task.`;
   }
   // R17-1 (F17-L12): commits landed on the PR head after the review — accepting
   // still merges them, but they ship unreviewed, so the boundary says so.
   if (pr.revisionDrift && pr.revisionDrift.aheadBy > 0) {
     const n = pr.revisionDrift.aheadBy;
-    return `PR #${pr.number} is open — ${n} commit${n === 1 ? "" : "s"} added since review would merge unreviewed.`;
+    return `PR #${pr.number} is open. ${n} commit${n === 1 ? "" : "s"} added since review would merge unreviewed.`;
   }
   return `PR #${pr.number} is open for review on GitHub.`;
 }
@@ -96,7 +96,7 @@ export function reviewRowSub(t: ReviewRowView): string {
   // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
   // no delivered revision) instead of a generic "needs a human decision".
   if (t.blockReason) return t.blockReason;
-  if (t.packet) return t.packet.kind + " — " + t.packet.title;
+  if (t.packet) return t.packet.kind + ": " + t.packet.title;
   // P14-LV-05: live PR state outranks the newest timeline note.
   if (t.pr) return prStateSub(t.pr);
   if (t.latestEventText) return plainText(t.latestEventText);
@@ -104,7 +104,7 @@ export function reviewRowSub(t: ReviewRowView): string {
   // task that is waiting on a HUMAN (R8-3, same fix as the wait-tag) — a human-
   // waiting row needs a person, not an agent.
   if (t.waiting === "human") {
-    return "Waiting at the review boundary — needs a human decision.";
+    return "Waiting at the review boundary. Needs a human decision.";
   }
   // F19-31: `none` used to fall through to the agent sentence, so the legal
   // `review + none` combination (nothing is waiting on either side) claimed a
@@ -112,7 +112,7 @@ export function reviewRowSub(t: ReviewRowView): string {
   // for the same stored value. One value, two claims. It gets its own honest
   // line: the row is at the boundary with no run and no decision behind it.
   if (t.waiting === "none") {
-    return "At the review boundary — no agent is running and no decision is pending.";
+    return "At the review boundary: no agent is running and no decision is pending.";
   }
-  return "Agent working — the packet arrives at the boundary.";
+  return "Agent working. The packet arrives at the boundary.";
 }

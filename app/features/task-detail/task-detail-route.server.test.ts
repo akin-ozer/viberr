@@ -500,7 +500,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     })) as { ok: true; kind: string; toast: string };
     expect(result.kind).toBe("hold_runtime_debug");
     expect(result.toast).toBe(
-      "Held for runtime debug — the session is recorded per audit policy",
+      "Held for runtime debug · the session is recorded per audit policy",
     );
     const after = await runLoader("VIB-160", ids.murat);
     // R20-1 (F20-5): still a hold (readiness stays blocked, no run starts), but
@@ -540,7 +540,7 @@ describe("ownership actions", () => {
     // The assign event sits at the top of the timeline…
     expect(after.task.timeline[0]!.type).toBe("assign");
     expect(after.task.timeline[0]!.text).toBe(
-      "Took task ownership — owner is the human reviewer and acceptance authority for this task.",
+      "Took task ownership. The owner is the human reviewer and acceptance authority for this task.",
     );
     // …board state is untouched: no fabricated ready/agent flip (VIB-148 stays
     // input_required + waiting on a human — ownership is orthogonal to
@@ -569,7 +569,7 @@ describe("ownership actions", () => {
     const after = await runLoader("VIB-148", ids.arda);
     expect(after.task.owner).toBeNull();
     expect(after.task.timeline[0]!.text).toBe(
-      "Released task ownership — review & acceptance stall until another member takes the seat.",
+      "Released task ownership. Review & acceptance stall until another member takes the seat.",
     );
     // Re-taking is a clean ownership mutation: just the assign event on top,
     // no operator scheduling reaction to re-fire (F19).
@@ -582,7 +582,7 @@ describe("ownership actions", () => {
     const after2 = await runLoader("VIB-148", ids.selin);
     expect(after2.task.timeline[0]).toMatchObject({ type: "assign" });
     expect(after2.task.timeline[0]!.text).toBe(
-      "Took task ownership — owner is the human reviewer and acceptance authority for this task.",
+      "Took task ownership. The owner is the human reviewer and acceptance authority for this task.",
     );
   });
 
@@ -615,7 +615,7 @@ describe("ownership actions", () => {
     let after = await runLoader("VIB-151", ids.arda);
     expect(after.task.owner).toMatchObject({ name: "Murat Yıldız" });
     expect(after.task.timeline[0]!.text).toBe(
-      "Handed task ownership to **Murat Yıldız** — they hold review & acceptance for this task now.",
+      "Handed task ownership to **Murat Yıldız**. They hold review & acceptance for this task now.",
     );
 
     // SAFETY: the admin release returns the ownership arm too, with `forced` set.
@@ -629,7 +629,7 @@ describe("ownership actions", () => {
     // F19-11: "any project member" was the wrong RBAC sentence (a viewer is a
     // member and cannot own) — the copy and this pin are corrected together.
     expect(after.task.timeline[0]!.text).toBe(
-      "Released **Murat Yıldız** from task ownership (admin) — the seat is open to any contributor or above.",
+      "Released **Murat Yıldız** from task ownership (admin). The seat is open to any contributor or above.",
     );
 
     // Admin release promise: recorded in the audit trail (spec §4.5).
@@ -653,7 +653,7 @@ describe("ownership actions", () => {
     expect(result.ok).toBe(true);
     const after = await runLoader("VIB-148", ids.murat);
     expect(after.task.timeline[0]!.text).toBe(
-      "Took over task ownership from **Selin Aksoy** — owner is the human reviewer and acceptance authority.",
+      "Took over task ownership from **Selin Aksoy**. The owner is the human reviewer and acceptance authority.",
     );
   });
 

@@ -41,7 +41,7 @@ export function KBModal({
     <MiniModal
       icon={<Icon name="memory" />}
       title={initial ? "Edit knowledge base" : "New knowledge base"}
-      sub="A folder in the store — drop docs in, or let agents append"
+      sub="A folder in the store. Drop docs in, or let agents append"
       onClose={onClose}
       canSave={canSave}
       saveLabel={
@@ -113,7 +113,7 @@ export function KBModal({
             <div className="def-note">
               <Icon name="file" />
               <span>
-                Creates the folder and opens its file browser — upload files or
+                Creates the folder and opens its file browser. Upload files or
                 a folder, import from GitHub, or write documents there. Agents
                 read the live folder from the first run.
               </span>
@@ -133,11 +133,11 @@ export function KBModal({
         <div className="def-note">
           <Icon name="file" />
           <span>
-            Content is plain files inside the folder — inspectable and editable outside
+            Content is plain files inside the folder, inspectable and editable outside
             Viberr. This setting controls the <strong>doc count and freshness stamp</strong>{" "}
             only: <strong>on change</strong> re-scans automatically whenever a file in the
             folder changes, <strong>manual</strong> only when you click re-scan. It does not
-            pin what an agent reads — every run loads the live folder either way.
+            pin what an agent reads. Every run loads the live folder either way.
           </span>
         </div>
       </div>
@@ -191,7 +191,7 @@ export function McpModal({
       }
       footHint={
         transport === "stdio"
-          ? "spawned per run — it runs with the server's own privileges"
+          ? "spawned per run, with the server's own privileges"
           : "a real MCP handshake runs on save & test"
       }
       onSave={() => {
@@ -297,7 +297,7 @@ export function McpModal({
           Credential{" "}
           <span className="fhint">
             optional · token / API key
-            {initial?.hasCred ? " · a credential is set — leave blank to keep it" : ""}
+            {initial?.hasCred ? " · a credential is set (leave blank to keep it)" : ""}
           </span>
         </label>
         <input
@@ -462,8 +462,8 @@ export function SkillModal({
             <div className="def-note">
               <Icon name="shield" />
               <span>
-                Creates the empty skill folder and opens its file browser —
-                upload files or a folder, import from GitHub, or write
+                Creates the empty skill folder and opens its file browser.
+                Upload files or a folder, import from GitHub, or write
                 documents there. The summary comes from your SKILL.md&apos;s
                 frontmatter <span className="mono">description:</span> once it
                 lands (or add one via Edit).

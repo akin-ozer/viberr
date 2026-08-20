@@ -199,7 +199,7 @@ export async function updateProjectIdentity(
   const prefix = input.prefix.trim().toUpperCase().slice(0, 4);
   if (!name) throw AppError.validation("Project name is required.");
   if (!/^[A-Z]{1,4}$/.test(prefix)) {
-    throw AppError.validation("Task prefix must be 1–4 letters.");
+    throw AppError.validation("Task prefix must be 1 to 4 letters.");
   }
   const description = input.description.trim();
 
@@ -374,7 +374,7 @@ export async function repairProjectRepo(
   const footprint = repoFootprintTasks(db, input.projectSlug);
   if (footprint > 0 && !input.confirmFootprint) {
     throw AppError.validation(
-      `${footprint} task${footprint === 1 ? "" : "s"} in this project carry branch/PR records against ${from ?? "the current repo"} — confirm the repair to proceed; those records keep their history but future sync runs against ${repo}.`,
+      `${footprint} task${footprint === 1 ? "" : "s"} in this project carry branch/PR records against ${from ?? "the current repo"}. Confirm the repair to proceed; those records keep their history but future sync runs against ${repo}.`,
     );
   }
 
@@ -396,26 +396,26 @@ export async function repairProjectRepo(
       // PROVEN read-only target; an unknown/absent permissions block still passes.
       if (repoPushable(probe.permissions) === false) {
         throw AppError.validation(
-          `The attached credential can see ${repo} but cannot push to it — a project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then repair again. Nothing was changed.`,
+          `The attached credential can see ${repo} but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then repair again. Nothing was changed.`,
         );
       }
       probed = true;
       defaultBranch = probe.default_branch;
     } else if (res.kind === "network") {
       throw AppError.validation(
-        `GitHub is unreachable (${res.message}) — the repair was NOT applied. Try again when it is.`,
+        `GitHub is unreachable (${res.message}). The repair was NOT applied. Try again when it is.`,
       );
     } else if (res.status === 404) {
       throw AppError.validation(
-        `The attached credential cannot see ${repo} — check the owner/name, the token's repository access, or a pending organization approval. Nothing was changed.`,
+        `The attached credential cannot see ${repo}. Check the owner/name, the token's repository access, or a pending organization approval. Nothing was changed.`,
       );
     } else if (res.status === 401) {
       throw AppError.validation(
-        "GitHub rejected the attached credential — update the token in org settings, then repair again. Nothing was changed.",
+        "GitHub rejected the attached credential. Update the token in org settings, then repair again. Nothing was changed.",
       );
     } else {
       throw AppError.validation(
-        `GitHub refused the check on ${repo} (${res.status}${res.kind === "http" ? `: ${res.message}` : ""}) — nothing was changed.`,
+        `GitHub refused the check on ${repo} (${res.status}${res.kind === "http" ? `: ${res.message}` : ""}). Nothing was changed.`,
       );
     }
   }
@@ -441,8 +441,8 @@ export async function repairProjectRepo(
 
   return {
     toast: probed
-      ? `Repository repaired — ${from ?? "unset"} → ${repo}${defaultBranch ? ` (default branch ${defaultBranch})` : ""}`
-      : `Repository set to ${repo} — attach a credential to verify access`,
+      ? `Repository repaired: ${from ?? "unset"} → ${repo}${defaultBranch ? ` (default branch ${defaultBranch})` : ""}`
+      : `Repository set to ${repo}. Attach a credential to verify access`,
     changed: true,
     repo,
   };
@@ -473,7 +473,7 @@ export async function renameStage(
     changed = true;
   });
 
-  const toast = `Stage renamed to "${name}" — board and policy follow`;
+  const toast = `Stage renamed to "${name}". Board and policy follow`;
   if (!changed) return { toast, changed: false };
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
@@ -540,7 +540,7 @@ export async function addStage(
     details: { id: stageId, name },
   });
   return {
-    toast: `"${name}" added — it appears on the board immediately`,
+    toast: `"${name}" added. It appears on the board immediately`,
     stageId,
   };
 }
@@ -588,7 +588,7 @@ export async function removeStage(
     stageName = stage.name;
     const locked = stageLockReason(input.stageId, parsed.frontmatter.stages);
     if (locked) {
-      throw AppError.conflict(`${stage.name} can't be removed — ${locked}`);
+      throw AppError.conflict(`${stage.name} can't be removed: ${locked}`);
     }
     if (count > 0) {
       throw AppError.conflict(
@@ -686,7 +686,7 @@ export async function removeStage(
   });
   return {
     toast: removal.tightening
-      ? `Stage "${stageName}" removed — ${removal.tightening.from} → ${removal.tightening.to} now needs ${BOUNDARY_LABEL[removal.tightening.boundary]} (the removed stage's stricter gate was kept)`
+      ? `Stage "${stageName}" removed. ${removal.tightening.from} → ${removal.tightening.to} now needs ${BOUNDARY_LABEL[removal.tightening.boundary]} (the removed stage's stricter gate was kept)`
       : `Stage "${stageName}" removed`,
   };
 }
@@ -706,7 +706,7 @@ export async function reorderStages(
       input.orderedIds.length !== stages.length ||
       input.orderedIds.some((id) => !byId.has(id))
     ) {
-      throw AppError.validation("Stage order is out of date — try again.");
+      throw AppError.validation("Stage order is out of date. Try again.");
     }
     const next = input.orderedIds.map((id) => byId.get(id)!);
     // Server re-applies the normalization — never trust client order
@@ -744,7 +744,7 @@ export async function reorderStages(
     projectSlug: input.projectSlug,
     details: { order: input.orderedIds },
   });
-  return { toast: "Stage order updated — board columns follow" };
+  return { toast: "Stage order updated. Board columns follow" };
 }
 
 // ------------------------------------------------------------------ members
@@ -830,8 +830,8 @@ export async function inviteMember(
   // what actually happened, and for a freshly minted account point at where the
   // sign-in credential is completed.
   const toast = tempPassword
-    ? `Added ${email} — joins as Viewer. Set their sign-in password in Users & access.`
-    : `Added ${email} — joins as Viewer`;
+    ? `Added ${email}, who joins as Viewer. Set their sign-in password in Users & access.`
+    : `Added ${email}, who joins as Viewer`;
   const result: InviteMemberResult = { toast, userId };
   if (tempPassword) result.tempPassword = tempPassword;
   return result;
@@ -889,7 +889,7 @@ export async function removeMember(
       const admins = countLiveAdmins(db, parsed.frontmatter.members);
       if (targetLive && admins <= 1) {
         throw AppError.conflict(
-          `${displayName} is the only admin — assign another admin in Policy first`,
+          `${displayName} is the only admin. Assign another admin in Policy first`,
         );
       }
     }
@@ -959,7 +959,7 @@ export async function setProjectArchived(
   });
   return {
     toast: input.archived
-      ? `Project "${projectName}" archived — find it under Archived on Home`
+      ? `Project "${projectName}" archived. Find it under Archived on Home`
       : `Project "${projectName}" restored`,
     archived: input.archived,
   };

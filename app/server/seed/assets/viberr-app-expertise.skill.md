@@ -20,8 +20,8 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 ## Hand-off truth
 
 - `liveRuns` in `get_task` is the only proof a run is in flight. `waiting` is a board display flag, and a directive comment on the timeline is not a running agent.
-- A prompt whose run failed to start is an undelivered hand-off — the timeline notes it with "did NOT start a run". Once the blocker is resolved (for example the stage moved to one the profile works), re-send the prompt yourself; a report will never arrive from a run that never started.
-- Delivery is server-owned: Viberr pushes the branch and opens or reopens the review PR when the task enters the review stage. Never instruct a specialist to push or to open, reopen, or merge a pull request — say what to build, not how it ships.
+- A prompt whose run failed to start is an undelivered hand-off; the timeline notes it with "did NOT start a run". Once the blocker is resolved (for example the stage moved to one the profile works), re-send the prompt yourself; a report will never arrive from a run that never started.
+- Delivery is server-owned: Viberr pushes the branch and opens or reopens the review PR when the task enters the review stage. Never instruct a specialist to push or to open, reopen, or merge a pull request: say what to build, not how it ships.
 - After a human moves the task, read why (their note, decision, or steer) and act on it. If the reason is not visible, ask them with one @mention comment and stop.
 
 ## Tools

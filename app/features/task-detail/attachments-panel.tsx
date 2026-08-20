@@ -48,7 +48,7 @@ export function AttachmentsPanel({
         </div>
         <p className="empty">
           No attachments yet. A browser-capable agent on this task saves the
-          screenshots and files it captures here — none have landed. They appear
+          screenshots and files it captures here, and none have landed. They appear
           the next time such an agent runs and produces evidence.
         </p>
       </section>

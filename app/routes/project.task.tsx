@@ -484,13 +484,13 @@ export async function action({ request, params }: Route.ActionArgs) {
                 // (it used to hold the task and deep-nav to settings).
                 "Policy / credential updated · the operator re-runs to re-check"
               : option.kind === "hold_runtime_debug"
-                ? "Held for runtime debug — the session is recorded per audit policy"
+                ? "Held for runtime debug · the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
                   ? retryStarted
                     ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude Code"} · streaming to agent logs`
-                    : "Decision recorded, but the retry could NOT start — the reason is on the timeline"
+                    : "Decision recorded, but the retry could NOT start. The reason is on the timeline"
                   : option.kind === "edit_goal"
-                    ? "Decision recorded — type the new goal; the packet clears when it lands"
+                    ? "Decision recorded · type the new goal; the packet clears when it lands"
                     : `Decision recorded: ${option.t}`;
         const resolved = {
           ok: true as const,
@@ -532,8 +532,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast:
             notified > 0
-              ? `Sent to ${notified} maintainer${notified === 1 ? "" : "s"} — they'll decide`
-              : "Sent — a maintainer will decide",
+              ? `Sent to ${notified} maintainer${notified === 1 ? "" : "s"} · they'll decide`
+              : "Sent · a maintainer will decide",
         };
       }
       case "complete-merge": {
@@ -545,7 +545,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast: result.merged
             ? result.message
-            : `Not merged — ${result.message}`,
+            : `Not merged: ${result.message}`,
         };
       }
       case "accept-completion": {
@@ -606,7 +606,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           : data(
               {
                 ok: false as const,
-                error: `Delivery did not complete — ${outcome.message}`,
+                error: `Delivery did not complete: ${outcome.message}`,
               },
               { status: 409 },
             );
@@ -636,7 +636,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `Force-accepted ${taskKey} — moved to Done (review gate overridden)`,
+          toast: `Force-accepted ${taskKey} · moved to Done (review gate overridden)`,
         };
       }
       case "owner-take": {
@@ -729,8 +729,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast:
             result.outcome === "interrupted"
-              ? "Run interrupted — the thread stays resumable"
-              : "That run already finished — nothing to interrupt",
+              ? "Run interrupted · the thread stays resumable"
+              : "That run already finished · nothing to interrupt",
         };
       }
       case "assign-specialist": {
@@ -1041,7 +1041,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   const params = useParams();
   const notFound = isRouteErrorResponse(error) && error.status === 404;
   return (
-    <div className="task-preview" data-screen-label="Task detail — not found">
+    <div className="task-preview" data-screen-label="Task detail · not found">
       <section className="panel">
         <div className="panel-head">
           <h2>{notFound ? "Task not found" : "Something went wrong"}</h2>

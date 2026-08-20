@@ -83,8 +83,8 @@ export async function runReconcile(
     return {
       ok: true,
       toast: detail
-        ? `Checking GitHub failed — nothing was changed: ${detail}`
-        : "Checking GitHub failed — nothing was changed, and the failure carried no message",
+        ? `Checking GitHub failed (nothing was changed): ${detail}`
+        : "Checking GitHub failed (nothing was changed), and the failure carried no message",
       result: "error",
     };
   }
@@ -93,7 +93,7 @@ export async function runReconcile(
   if (summary.status === "ok" && summary.results.length === 0) {
     return {
       ok: true,
-      toast: "Checked GitHub — no task has a delivery branch yet, nothing to sync.",
+      toast: "Checked GitHub. No task has a delivery branch yet, nothing to sync.",
       result: "no_branched_tasks",
     };
   }
@@ -272,7 +272,7 @@ export async function runSetCredential(
   if (!connection) {
     return {
       ok: true,
-      toast: "No GitHub connection to attach — add one in org settings first",
+      toast: "No GitHub connection to attach. Add one in org settings first",
       result: "no_connection",
     };
   }
@@ -287,7 +287,7 @@ export async function runSetCredential(
   if (fresh && fresh.validationState === "failed") {
     return {
       ok: true,
-      toast: `GitHub rejected ${connection.owner}'s token — replace it in org settings, then attach it here`,
+      toast: `GitHub rejected ${connection.owner}'s token. Replace it in org settings, then attach it here`,
       result: "connection_invalid",
     };
   }
@@ -305,7 +305,7 @@ export async function runSetCredential(
     if (probe.status === "access_miss") {
       return {
         ok: true,
-        toast: `${connection.owner}'s token cannot reach ${repo} — ${probe.detail}. Add a PAT for ${repoOwner} in org settings, or fix the repository here.`,
+        toast: `${connection.owner}'s token cannot reach ${repo}: ${probe.detail}. Add a PAT for ${repoOwner} in org settings, or fix the repository here.`,
         result: "no_repo_access",
       };
     }
@@ -323,11 +323,11 @@ export async function runSetCredential(
   const head = wasBound
     ? `Credential rotated to ${connection.owner}'s connection`
     : `Credential attached from ${connection.owner}'s connection`;
-  let toast = wasBound ? `${head} — sync uses it now` : head;
+  let toast = wasBound ? `${head}. Sync uses it now` : head;
   if (!owned && repo) {
     toast = borrowedUnverified
-      ? `${head} — no ${repoOwner} PAT, and ${borrowedUnverified}, so its access to ${repo} is unverified`
-      : `${head} — no ${repoOwner} PAT, but this token reaches ${repo}`;
+      ? `${head}. No ${repoOwner} PAT, and ${borrowedUnverified}, so its access to ${repo} is unverified`
+      : `${head}. No ${repoOwner} PAT, but this token reaches ${repo}`;
   }
   return { ok: true, toast, result: wasBound ? "rotated" : "attached" };
 }
@@ -349,7 +349,7 @@ export function runClearCredential(
   return {
     ok: true,
     toast: cleared
-      ? "Credential removed — branch and PR sync goes offline until one is attached"
+      ? "Credential removed. Branch and PR sync goes offline until one is attached"
       : "No credential was attached",
     result: cleared ? "cleared" : "noop",
   };

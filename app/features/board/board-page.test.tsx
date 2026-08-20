@@ -387,7 +387,7 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
       { search: "filter=risk&q=zzz" },
     );
     const clear = getByTitle(
-      "Show every task again — clears the board filter and the search",
+      "Show every task again. Clears the board filter and the search",
     );
     fireEvent.click(clear);
     // Both hiding mechanisms are gone: the card is back and the chip retires.
@@ -1367,7 +1367,7 @@ describe("F19-27: a pending acceptance is never stranded", () => {
     const dialog = r.container.querySelector("dialog");
     expect(dialog).not.toBeNull();
     expect(dialog!.textContent!.replace(/\s+/g, " ")).toContain(
-      "VIB-1 is archived — restore it before accepting the completion.",
+      "VIB-1 is archived. Restore it before accepting the completion.",
     );
   });
 });
@@ -1994,7 +1994,7 @@ describe("D9: the board announces moves to a screen reader", () => {
   it("announces the outcome of a confirmed acceptance from the board", async () => {
     const { container, getByLabelText, getByRole } = renderBoard(
       [task({ key: "VIB-1", stage: "impl" })],
-      { action: () => ({ ok: true as const, toast: "Accepted VIB-1 — moved to Done" }) },
+      { action: () => ({ ok: true as const, toast: "Accepted VIB-1, moved to Done" }) },
     );
     fireEvent.click(getByLabelText("Change stage (currently In Progress)"));
     fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
@@ -2003,7 +2003,7 @@ describe("D9: the board announces moves to a screen reader", () => {
     expect(region(container)!.textContent).toBe("Move requested: VIB-1 to Done.");
     await waitFor(() =>
       expect(region(container)!.textContent).toBe(
-        "Accepted VIB-1 — moved to Done",
+        "Accepted VIB-1, moved to Done",
       ),
     );
   });

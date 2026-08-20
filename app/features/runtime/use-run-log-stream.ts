@@ -324,7 +324,7 @@ export function useRunLogStream(input: {
             fail(
               res.status === 403
                 ? "Older lines are project-member only."
-                : `Could not load older lines — the log endpoint returned ${res.status}.`,
+                : `Could not load older lines: the log endpoint returned ${res.status}.`,
             );
             return;
           }
@@ -342,7 +342,7 @@ export function useRunLogStream(input: {
           };
           const data = body.data;
           if (!data) {
-            fail("Could not load older lines — malformed response.");
+            fail("Could not load older lines: malformed response.");
             return;
           }
           const from = cursor.runIdx;
@@ -397,7 +397,7 @@ export function useRunLogStream(input: {
           return { ...prev, [threadId]: { hasMore: false, withheld: 0, loading: false, error: null } };
         });
       } catch {
-        fail("Could not load older lines — the request failed.");
+        fail("Could not load older lines: the request failed.");
       } finally {
         pagingRef.current.delete(threadId);
       }
@@ -434,8 +434,8 @@ export function useRunLogStream(input: {
           // to be swallowed, leaving a console that silently stopped following.
           setStreamError(
             res.status === 403
-              ? "Live tail stopped — raw run logs are project-member only."
-              : `Live tail stopped — the log endpoint returned ${res.status}.`,
+              ? "Live tail stopped: raw run logs are project-member only."
+              : `Live tail stopped: the log endpoint returned ${res.status}.`,
           );
           return;
         }
@@ -480,7 +480,7 @@ export function useRunLogStream(input: {
     source.onerror = () => {
       if (source.readyState === EventSource.CLOSED) {
         setStreamError(
-          "Live tail disconnected — reload the page to resume following.",
+          "Live tail disconnected. Reload the page to resume following.",
         );
       }
     };

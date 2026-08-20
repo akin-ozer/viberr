@@ -140,7 +140,7 @@ export function searchWorkspace(
         -- task, not a newer one whose title merely mentions the key (e.g.
         -- "VIB-1" also matches VIB-2's title "…verify the merged VIB-1 marker").
         -- Rank an exact key match first, then a key-prefix match, and only then
-        -- fall back to recency — so title/branch ("fuzzy") matches are still
+        -- fall back to recency, so title/branch ("fuzzy") matches are still
         -- returned, just never ahead of the key the query names.
         ORDER BY
           CASE

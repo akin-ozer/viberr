@@ -267,7 +267,7 @@ describe("resource + store intents", () => {
     });
     expect(result).toMatchObject({
       ok: true,
-      toast: "Architecture notes re-scanned — 6 docs agents can read",
+      toast: "Architecture notes re-scanned: 6 docs agents can read",
     });
   });
 

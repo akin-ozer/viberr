@@ -574,7 +574,7 @@ async function reconcileTaskUnlocked(
     fm.pr.number === newPr.number;
   // P14-GV-09: ONE text for the timeline note and the inbox alert below.
   const acceptedClosedText = acceptedClosedExternally
-    ? `**Note:** accepted PR #${newPr!.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`
+    ? `**Note:** accepted PR #${newPr!.number} was closed on GitHub without merging, so the pending merge can no longer be completed from Viberr.`
     : null;
 
   // R8-6: out-of-band GitHub actions that leave the governed task stranded. A
@@ -602,8 +602,8 @@ async function reconcileTaskUnlocked(
   const prJustReopened = fm.pr?.state === "closed" && newPr?.state === "review";
   const reopenedText = prJustReopened
     ? fm.pr!.number === newPr!.number
-      ? `**Note:** PR #${newPr!.number} was reopened on GitHub — ${fm.key}'s review is live again and the closed-PR block is lifted.`
-      : `**Note:** PR #${newPr!.number} now tracks ${fm.key}'s branch on GitHub, replacing closed PR #${fm.pr!.number} — the closed-PR block is lifted.`
+      ? `**Note:** PR #${newPr!.number} was reopened on GitHub. ${fm.key}'s review is live again and the closed-PR block is lifted.`
+      : `**Note:** PR #${newPr!.number} now tracks ${fm.key}'s branch on GitHub, replacing closed PR #${fm.pr!.number}, so the closed-PR block is lifted.`
     : null;
 
   const changed =
@@ -615,7 +615,7 @@ async function reconcileTaskUnlocked(
     // R8-6: surface a merged/closed-out-of-band divergence (typed event now, a
     // notification below). Never auto-advances the STAGE — a human closes the loop.
     const divergenceText = mergedButNotDone
-      ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr — its stage is unchanged. Accept the completion (or move it to Done) so the task reflects the merge.`
+      ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr, so its stage is unchanged. Accept the completion (or move it to Done) so the task reflects the merge.`
       : closedButActive
         ? `**Divergence:** PR #${newPr!.number} was closed on GitHub without merging, but ${fm.key} is still active. Decide whether to rework and reopen, or archive the task.`
         : null;
@@ -719,12 +719,12 @@ async function reconcileTaskUnlocked(
           taskKey: input.taskKey,
           kind: "policy",
           title: mergedButNotDone
-            ? `PR #${newPr!.number} merged on GitHub — accept ${fm.key}`
+            ? `PR #${newPr!.number} merged on GitHub: accept ${fm.key}`
             : divergenceText
-              ? `PR #${newPr!.number} closed on GitHub — ${fm.key} needs a decision`
+              ? `PR #${newPr!.number} closed on GitHub: ${fm.key} needs a decision`
               : acceptedClosedText
-                ? `Accepted PR #${newPr!.number} closed on GitHub — ${fm.key}'s merge can't complete`
-                : `PR #${newPr!.number} live again on GitHub — ${fm.key} resumes`,
+                ? `Accepted PR #${newPr!.number} closed on GitHub: ${fm.key}'s merge can't complete`
+                : `PR #${newPr!.number} live again on GitHub: ${fm.key} resumes`,
           text: noticeText,
           from: POLICY_ENGINE_NOTIFY_FROM,
         },
@@ -1164,7 +1164,7 @@ export async function mergeTaskPr(
       return {
         status: "not_mergeable",
         prNumber,
-        message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\` — rebase the branch, then merge.`,
+        message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\`. Rebase the branch, then merge.`,
         mergeable,
       };
     }
@@ -1266,10 +1266,10 @@ export async function mergeTaskPr(
           cleanup.status === "deleted" || cleanup.status === "no_branch"
             ? null
             : cleanup.status === "already_gone"
-              ? `Branch \`${cleanup.branch}\` was already gone on GitHub — nothing left to clean up.`
+              ? `Branch \`${cleanup.branch}\` was already gone on GitHub. Nothing was left to clean up.`
               : cleanup.status === "refused"
-                ? `Branch \`${cleanup.branch}\` was **not** deleted after the merge — ${cleanup.message}`
-                : "The merged branch was **not** deleted — this project has no GitHub repo or credential configured.";
+                ? `Branch \`${cleanup.branch}\` was **not** deleted after the merge. ${cleanup.message}`
+                : "The merged branch was **not** deleted because this project has no GitHub repo or credential configured.";
         if (note) {
           await appendTimelineEvent(ref, {
             occurredAt: new Date().toISOString(),
@@ -1394,14 +1394,14 @@ export async function deleteTaskRemoteBranch(
     return {
       status: "refused",
       branch,
-      message: `\`${branch}\` is the project's default branch — Viberr never deletes it.`,
+      message: `\`${branch}\` is the project's default branch. Viberr never deletes it.`,
     };
   }
   if (fm.pr && (fm.pr.state === "review" || fm.pr.state === "accepted")) {
     return {
       status: "refused",
       branch,
-      message: `PR #${fm.pr.number} is still open on \`${branch}\` — deleting the branch would silently close it. Close or merge the PR first.`,
+      message: `PR #${fm.pr.number} is still open on \`${branch}\`, and deleting the branch would silently close it. Close or merge the PR first.`,
     };
   }
 

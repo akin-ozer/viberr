@@ -144,7 +144,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       recommend: [],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
-    "Implements stage work on the task-key branch: writes code, runs local validation, and commits with traceable messages. Hands the committed branch back to the operator at the review boundary — Viberr pushes it and opens the review PR on the Review transition.",
+    "Implements stage work on the task-key branch: writes code, runs local validation, and commits with traceable messages. Hands the committed branch back to the operator at the review boundary. Viberr pushes it and opens the review PR on the Review transition.",
   ),
   profile(
     {
@@ -173,7 +173,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // policy actually denies (git push + git commit), not a decorative extra.
       forbidden: ["Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
     },
-    "The task's quality specialist: authors and runs the validation suite during implementation, then reviews the diff at the review boundary — raising typed quality flags and recommending approve or request-changes. Keeps raw validation output in evidence, not the timeline, and re-anchors on the canonical task file before each pass.",
+    "The task's quality specialist: authors and runs the validation suite during implementation, then reviews the diff at the review boundary. Raises typed quality flags and recommends approve or request-changes. Keeps raw validation output in evidence, not the timeline, and re-anchors on the canonical task file before each pass.",
   ),
 ];
 

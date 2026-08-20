@@ -279,7 +279,7 @@ describe("action RBAC + degraded no-PAT results", () => {
     expect(result).toEqual({
       ok: true,
       toast:
-        "No GitHub credential configured — connect a PAT to reconcile branches and PRs.",
+        "No GitHub credential configured. Connect a PAT to reconcile branches and PRs.",
       result: "no_pat_configured",
     });
   });
@@ -289,7 +289,7 @@ describe("action RBAC + degraded no-PAT results", () => {
     expect(result).toEqual({
       ok: true,
       toast:
-        "No GitHub credential configured — connect a PAT before re-checking scopes.",
+        "No GitHub credential configured. Connect a PAT before re-checking scopes.",
       result: "no_pat_configured",
     });
   });
@@ -367,7 +367,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
       "utf8",
     );
     expect(file).toContain(
-      "**Policy update:** `pull_request:write` granted on the project credential. The earlier violation is resolved — operations needing `pull_request:write` will work now.",
+      "**Policy update:** `pull_request:write` granted on the project credential. The earlier violation is resolved, and operations needing `pull_request:write` will work now.",
     );
     // …and projection (newest-first timeline).
     const detail = getTaskDetail(app.db, "viberr-core", "VIB-142")!;
@@ -395,7 +395,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
       { dataRoot: app.dataRoot, fetchImpl: gh.fetchImpl },
     );
     expect(outcome.result).toBe("revalidated");
-    expect(outcome.toast).toBe("Scopes re-checked — all required scopes granted.");
+    expect(outcome.toast).toBe("Scopes re-checked. All required scopes granted.");
   });
 
   it("grant-scope while offline → network_unavailable copy, violation state untouched", async () => {
@@ -420,7 +420,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     );
     expect(outcome.result).toBe("network_unavailable");
     expect(outcome.toast).toBe(
-      "GitHub is unreachable — kept the last-known scope results.",
+      "GitHub is unreachable. Kept the last-known scope results.",
     );
   });
 
@@ -500,7 +500,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     expect(outcome.ok).toBe(true);
     expect(outcome.result).toBe("ok");
     expect(outcome.toast).toBe(
-      "Status updated — every branch and PR maps to its task key",
+      "Status updated. Every branch and PR maps to its task key",
     );
 
     const view = (await getGithubViewData(app.db, "viberr-core", {
@@ -556,7 +556,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     );
     expect(outcome.result).toBe("ok");
     expect(outcome.toast).toBe(
-      "GitHub is unreachable — showing the last-known branch and PR state.",
+      "GitHub is unreachable. Showing the last-known branch and PR state.",
     );
     // Last-known projection data survives (spec §7.10).
     const view = (await getGithubViewData(app.db, "viberr-core", {

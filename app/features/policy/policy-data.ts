@@ -68,7 +68,7 @@ export const BCLS = {
  * inline the phrasing anywhere else — import it.
  */
 export const TRANSITION_TO_DONE_EXCEPTION =
-  "except an operator at full autonomy with an explicit Accept completion into Done grant — see below";
+  "except an operator at full autonomy with an explicit Accept completion into Done grant (see below)";
 
 /** The capability whose id is scoped to the operator exception above. */
 export const TRANSITION_TO_DONE_CAPABILITY_ID = "transition-to-done";

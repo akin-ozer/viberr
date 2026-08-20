@@ -317,7 +317,7 @@ export function AcceptConfirm({
                 // true of the task in hand — the branch when there is one, its
                 // absence when there is not.
                 <>
-                  Nothing — <strong>completed with no changes</strong>.{" "}
+                  Nothing: <strong>completed with no changes</strong>.{" "}
                   {task.branch ? (
                     <>
                       <span className="mono">{task.branch}</span> carries no
@@ -325,8 +325,8 @@ export function AcceptConfirm({
                     </>
                   ) : (
                     <>
-                      {task.key} never opened a branch or a pull request —
-                      nothing merges.
+                      {task.key} never opened a branch or a pull request.
+                      Nothing merges.
                     </>
                   )}
                 </>
@@ -352,7 +352,7 @@ export function AcceptConfirm({
                   the acceptance is refused and says how many commits.
                 </>
               ) : (
-                <>No linked pull request — the task closes without a merge.</>
+                <>No linked pull request. The task closes without a merge.</>
               )}
             </span>
           </div>
@@ -383,7 +383,7 @@ export function AcceptConfirm({
                     was not — `aheadBy: 1` rendered "1 commit added since
                     review; THEY MERGE unreviewed", on the row whose whole job
                     is disclosing what ships unreviewed. */}
-                — {pr.revisionDrift.aheadBy} commit
+                · {pr.revisionDrift.aheadBy} commit
                 {pr.revisionDrift.aheadBy === 1 ? "" : "s"} added since review;{" "}
                 {pr.revisionDrift.aheadBy === 1 ? "it merges" : "they merge"}{" "}
                 unreviewed.
@@ -400,7 +400,7 @@ export function AcceptConfirm({
                   approved — a gate a human satisfied cannot pass silently
                   (ruling 19). */}
               {verdictSatisfiedBy && (
-                <span className="fine xs"> — {verdictSatisfiedBy}</span>
+                <span className="fine xs"> · {verdictSatisfiedBy}</span>
               )}
             </span>
           </div>
@@ -419,7 +419,7 @@ export function AcceptConfirm({
                     <strong>{skippedStages.join(" → ")}</strong>, and{" "}
                   </>
                 )}
-                {skippedStages.length > 0 ? "the" : "The"} review gate —{" "}
+                {skippedStages.length > 0 ? "the" : "The"} review gate:{" "}
                 {task.key} goes straight to {terminalName}
                 {pr ? " and the pull request merges" : ""}.
               </span>
@@ -439,7 +439,7 @@ export function AcceptConfirm({
       <div className="modal-foot">
         <span className="foot-hint">
           {force
-            ? "Admin override — the bypassed gate is recorded to the audit log."
+            ? "Admin override. The bypassed gate is recorded to the audit log."
             : // F21-23: before the one-way warning, because a PR GitHub already
               // merged is not one-way from HERE — there is nothing left to do
               // that could be undone, and warning about it invents a decision.
@@ -451,13 +451,13 @@ export function AcceptConfirm({
                 // still performs the acceptance itself — it just performs it
                 // without a merge — so only this arm may say nothing is written.
                 mergeOnly
-                ? "Nothing merges — the pull request was already merged on GitHub. Nothing is written either: this task's completion is already on the timeline."
-                : "Nothing merges — the pull request was already merged on GitHub. The completion event is recorded on the timeline."
+                ? "Nothing merges: the pull request was already merged on GitHub. Nothing is written either, because this task's completion is already on the timeline."
+                : "Nothing merges: the pull request was already merged on GitHub. The completion event is recorded on the timeline."
               : mergeOnly
                 ? "Merging is one-way. The merge and its result are recorded on the timeline."
                 : pr
                   ? "Merging is one-way. The completion event and the merge are recorded on the timeline."
-                  : "The completion event is recorded on the timeline. Nothing is merged — this task has no pull request."}
+                  : "The completion event is recorded on the timeline. Nothing is merged: this task has no pull request."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>

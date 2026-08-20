@@ -433,7 +433,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     );
     expect(result.changed).toBe(true);
     expect(result.repo).toBe(REPO_OK);
-    expect(result.toast).toContain("Repository repaired — akin/viberr → akin-ozer/viberr");
+    expect(result.toast).toContain("Repository repaired: akin/viberr → akin-ozer/viberr");
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     expect(fm.repo).toBe(REPO_OK);
@@ -535,7 +535,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
       { dataRoot: store.dataRoot },
     );
     expect(result.changed).toBe(true);
-    expect(result.toast).toContain("attach a credential to verify");
+    expect(result.toast).toContain("Attach a credential to verify");
     expect(
       readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed
         .frontmatter.repo,
@@ -718,6 +718,6 @@ describe("inviteMember", () => {
     );
     // No new account → no temp password to hand over.
     expect(result.tempPassword).toBeUndefined();
-    expect(result.toast).toBe(`Added ${store.users.deniz.email} — joins as Viewer`);
+    expect(result.toast).toBe(`Added ${store.users.deniz.email}, who joins as Viewer`);
   });
 });

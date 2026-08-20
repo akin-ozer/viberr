@@ -196,7 +196,7 @@ function ModalHead({
             ? "A reusable agent the operator can assign to tasks."
             : forksTemplate
               ? `Saving forks this profile for ${projectName}: it keeps its own copy and stops tracking later changes to the global profile.`
-              : "Update this project's copy — changes apply to future assignments."}
+              : "Update this project's copy. Changes apply to future assignments."}
         </div>
       </div>
       <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
@@ -295,7 +295,7 @@ function BackendField({
               title={
                 usable
                   ? undefined
-                  : `${b.label} isn't configured — add its credential to run agents on it`
+                  : `${b.label} isn't configured. Add its credential to run agents on it`
               }
             >
               <AgentGlyph backend={b.id} />
@@ -439,7 +439,7 @@ function ModelEffortFields({
               title={m.unavailable ? m.unavailable.reason : m.description}
             >
               {m.displayName}
-              {m.unavailable ? " — unavailable for this account" : ""}
+              {m.unavailable ? " (unavailable for this account)" : ""}
             </option>
           ))}
         </select>
@@ -447,7 +447,7 @@ function ModelEffortFields({
           // A stored profile pinned to a now-refused model: name the provider's
           // own sentence and tell the admin to pick another (a run would 400).
           <span className="fhint flush err">
-            <Icon name="alert" /> Unavailable for this account —{" "}
+            <Icon name="alert" /> Unavailable for this account:{" "}
             {selectedModel.unavailable.reason} Pick another model.
           </span>
         ) : selectedModel?.description ? (
@@ -469,7 +469,7 @@ function ModelEffortFields({
             onChange={(e) => setEffort(e.target.value)}
             disabled={!backend || catalogLoading}
             >
-            {(!backend || effort === "") && <option value="">—</option>}
+            {(!backend || effort === "") && <option value="">no effort yet</option>}
             {effort && !effortOptions.includes(effort) && (
               <option value={effort}>{effortLabel(effort)}</option>
             )}
@@ -544,8 +544,8 @@ function DefinitionField({
           Description
           <span className="fhint">
             {isOperator
-              ? "one short paragraph — a human-readable summary of this operator"
-              : "one short paragraph — the OPERATOR reads this to pick the right agent for a task"}
+              ? "one short paragraph: a human-readable summary of this operator"
+              : "one short paragraph: the OPERATOR reads this to pick the right agent for a task"}
           </span>
         </label>
         <textarea
@@ -561,8 +561,8 @@ function DefinitionField({
           Persona / instructions
           <span className="fhint">
             {isOperator
-              ? "extra operator guidance — appended to the built-in operator manual on every run; markdown ok"
-              : "the agent's working instructions — injected as its system prompt on every run; markdown ok"}
+              ? "extra operator guidance, appended to the built-in operator manual on every run; markdown ok"
+              : "the agent's working instructions, injected as its system prompt on every run; markdown ok"}
           </span>
         </label>
         <textarea
@@ -600,7 +600,7 @@ function CapabilityGrants({
       <span className="flabel" id={capId}>
         Capability policy
         <span className="fhint">
-          how each action is enforced — adjust the defaults
+          how each action is enforced · adjust the defaults
         </span>
       </span>
       <div className="cap-matrix">
@@ -662,7 +662,7 @@ function CapabilityGrants({
                       <Icon name="lock" />
                       <span>
                         <strong>The locked rows can&apos;t be granted here.</strong>{" "}
-                        They stay reserved for humans on every profile — saving
+                        They stay reserved for humans on every profile. Saving
                         stores <strong>Human-only</strong> whatever this form
                         sends.
                       </span>
@@ -711,7 +711,7 @@ function CapabilityGrants({
                           role="radiogroup"
                           aria-label={
                             locked
-                              ? `Policy for ${capDef.label} — locked, reserved for humans`
+                              ? `Policy for ${capDef.label} (locked, reserved for humans)`
                               : `Policy for ${capDef.label}`
                           }
                           onKeyDown={rovingRadioKeyDown}
@@ -835,7 +835,7 @@ function ResourcePicker({
                         }
                         title={
                           it.missing
-                            ? "No longer in the store — click to remove this grant"
+                            ? "No longer in the store. Click to remove this grant"
                             : undefined
                         }
                         // F19-5: these grant chips are toggles like the backend,
@@ -852,7 +852,7 @@ function ResourcePicker({
                   </div>
                   {displayItems.length === 0 && (
                     <p className="ctx-empty">
-                      None in the store yet — add {g.group.toLowerCase()} in org
+                      None in the store yet. Add {g.group.toLowerCase()} in org
                       settings.
                     </p>
                   )}
@@ -1113,11 +1113,11 @@ export function CreateProfileModal({
         // a glitch — and, before the hold existed, what let the click through.
         modelPending
         ? catalogLoading
-          ? `Loading the models available on ${backendLabel} — saving is held until this profile has one of them.`
-          : `Pick a model available on ${backendLabel} — saving is held until this profile has one.`
+          ? `Loading the models available on ${backendLabel}. Saving is held until this profile has one of them.`
+          : `Pick a model available on ${backendLabel}. Saving is held until this profile has one.`
         : editing
           ? forksTemplate
-            ? `Ready to save — this forks ${initial.name} for ${projectName}.`
+            ? `Ready to save: this forks ${initial.name} for ${projectName}.`
             : "Ready to save changes."
           : `Ready to add to ${projectName}.`;
 

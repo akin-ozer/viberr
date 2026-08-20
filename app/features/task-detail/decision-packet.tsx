@@ -97,7 +97,7 @@ export function observationValue(key: string, value: string): string {
     value.trim().toLowerCase() === "undefined" ||
     value.trim().toLowerCase() === "none";
   if (!empty) return value;
-  return /owner|assignee/i.test(key) ? "unassigned" : "—";
+  return /owner|assignee/i.test(key) ? "unassigned" : "none";
 }
 
 /**
@@ -214,7 +214,7 @@ function PacketArchiveConfirm({
               the acceptance dialog names its own entry point (F19-7). */}
           <div className="obs">
             <span className="k">Decision</span>
-            <span>“{option.t}” — confirming it archives {subject}.</span>
+            <span>Confirming “{option.t}” archives {subject}.</span>
           </div>
           {deletesBranch && (
             <div className="obs warn">
@@ -229,7 +229,7 @@ function PacketArchiveConfirm({
                   <>This task's remote branch on GitHub,</>
                 )}{" "}
                 and every commit that exists only there.{" "}
-                <strong>Deleting it cannot be undone</strong> — restoring the
+                <strong>Deleting it cannot be undone.</strong> Restoring the
                 task later does not bring the branch back.
               </span>
             </div>
@@ -238,7 +238,7 @@ function PacketArchiveConfirm({
             <span className="k">After</span>
             <span>
               Off the board and out of the review queue. The task file, its
-              timeline and its audit trail are kept exactly as they are — the
+              timeline and its audit trail are kept exactly as they are. The
               archive itself is a disposition, not a delete, and a maintainer
               can restore it.
             </span>
@@ -246,7 +246,7 @@ function PacketArchiveConfirm({
           <div className="obs">
             <span className="k">Withdrawn</span>
             <span>
-              {withdrawn.join(" and ")} — restoring the task reopens the
+              {withdrawn.join(" and ")}. Restoring the task reopens the
               question.
             </span>
           </div>
@@ -333,7 +333,7 @@ function PacketDiscardConfirm({
         <div className="packet-obs flush">
           <div className="obs">
             <span className="k">Decision</span>
-            <span>&ldquo;{option.t}&rdquo; — confirming it discards the branch.</span>
+            <span>Confirming &ldquo;{option.t}&rdquo; discards the branch.</span>
           </div>
           <div className="obs warn">
             <span className="k">Deletes</span>
@@ -351,7 +351,7 @@ function PacketDiscardConfirm({
           <div className="obs">
             <span className="k">GitHub</span>
             <span>
-              Nothing on GitHub changes — this branch was never pushed. (If it
+              Nothing on GitHub changes: this branch was never pushed. (If it
               had been, the discard is refused and the archive option is the
               path.)
             </span>
@@ -664,7 +664,7 @@ export function DecisionPacket({
                 style={blocked ? { opacity: 0.55 } : undefined}
                 title={
                   goalBlocked
-                    ? "Editing the goal is reserved for maintainers and admins — ask one to refine it"
+                    ? "Editing the goal is reserved for maintainers and admins. Ask one to refine it"
                     : archiveBlocked
                       ? "Archiving is reserved for maintainers and admins"
                       : discardBlocked
@@ -682,13 +682,13 @@ export function DecisionPacket({
                   <div className="od">
                     {o.d}
                     {goalBlocked
-                      ? " · your role can't edit the goal — a maintainer or admin must"
+                      ? " · your role can't edit the goal (a maintainer or admin must)"
                       : ""}
                     {archiveBlocked
-                      ? " · your role can't archive — a maintainer or admin must"
+                      ? " · your role can't archive (a maintainer or admin must)"
                       : ""}
                     {discardBlocked
-                      ? " · your role can't discard the branch — a maintainer or admin must"
+                      ? " · your role can't discard the branch (a maintainer or admin must)"
                       : ""}
                   </div>
                 </span>
@@ -736,7 +736,7 @@ export function DecisionPacket({
               <span>
                 <div className="ot">Write your own directive</div>
                 <div className="od">
-                  Answer in your own words — the operator (and the asking agent,
+                  Answer in your own words. The operator (and the asking agent,
                   if one raised this) re-engages with exactly what you type.
                 </div>
               </span>
@@ -775,8 +775,8 @@ export function DecisionPacket({
           <p className="packet-lede" style={REDELIVER_NOTE_STYLE}>
             Not in this list: the GitHub panel on this page still offers{" "}
             <strong>{DELIVER_LABEL}</strong>. It pushes this task&rsquo;s branch
-            again and opens a new review pull request — Viberr never reopens a
-            closed one — so a pull request closed by mistake is recovered from
+            again and opens a new review pull request (Viberr never reopens a
+            closed one), so a pull request closed by mistake is recovered from
             here, with no trip to GitHub. Delivering does not resolve this
             packet, and the archive option that deletes the branch ends that
             path.
@@ -820,7 +820,7 @@ export function DecisionPacket({
         {!canResolve && (
           <p className="deny-note" style={DENY_NOTE_STYLE}>
             <Icon name="lock" />
-            You can&rsquo;t resolve this decision — a maintainer, an admin, or
+            You can&rsquo;t resolve this decision: a maintainer, an admin, or
             this task&rsquo;s owner can. You can still comment or ask the operator
             below.
           </p>
@@ -834,7 +834,7 @@ export function DecisionPacket({
           <div className="deny-note" style={DENY_NOTE_STYLE}>
             <Icon name="lock" />
             <span>
-              Every listed option needs maintainer or admin authority — you own{" "}
+              Every listed option needs maintainer or admin authority. You own{" "}
               {archiveDisclosure?.taskKey ?? "this task"} and raised this
               decision, but settling it with one of them is above your role. You
               can still answer with your own directive above.
@@ -931,7 +931,7 @@ export function DecisionPacket({
             type="button"
             className="btn ghost"
             onClick={onAsk}
-            title="Starts a comment mentioning @operator below — send it to pull the operator in"
+            title="Starts a comment mentioning @operator below. Send it to pull the operator in"
           >
             <Icon name="message" />
             Ask operator

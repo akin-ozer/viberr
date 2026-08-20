@@ -397,7 +397,7 @@ export async function saveKnowledgeBase(
     kb: getKnowledgeBase(db, id, ctx)!,
     toast: oldDir
       ? `${name} updated`
-      : `${name} created — folder ready at store://kb/${dir}/`,
+      : `${name} created. Folder ready at store://kb/${dir}/`,
   };
 }
 
@@ -423,7 +423,7 @@ export async function deleteKnowledgeBase(
     subjectId: kb.id,
     details: { name: kb.name, dir: kb.dir, files: kb.fileCount },
   });
-  return { toast: `${kb.name} deleted — agents lose it on next context load` };
+  return { toast: `${kb.name} deleted. Agents lose it on next context load` };
 }
 
 /** What a re-index reports back: the docs a run can read, plus the toast. */
@@ -475,7 +475,7 @@ export function reindexKnowledgeBase(
   return {
     docCount: kb.injectableCount,
     toast:
-      `${kb.name} re-scanned — ${kb.injectableCount} doc${kb.injectableCount === 1 ? "" : "s"} agents can read` +
+      `${kb.name} re-scanned: ${kb.injectableCount} doc${kb.injectableCount === 1 ? "" : "s"} agents can read` +
       (skipped > 0
         ? ` · ${skipped} non-text file${skipped === 1 ? "" : "s"} skipped`
         : ""),
@@ -682,7 +682,7 @@ function openMcpCredential(
     return {
       state: "unreadable",
       reason:
-        "its stored credential is not in the current sealed format — re-enter it in Settings → MCP servers",
+        "its stored credential is not in the current sealed format. Re-enter it in Settings → MCP servers",
     };
   }
   try {
@@ -718,7 +718,7 @@ function openMcpCredential(
     return {
       state: "unreadable",
       reason:
-        "its stored credential cannot be decrypted — the secret-encryption key changed. Set VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS to the old key, or re-enter the credential in Settings → MCP servers",
+        "its stored credential cannot be decrypted because the secret-encryption key changed. Set VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS to the old key, or re-enter the credential in Settings → MCP servers",
     };
   }
 }
@@ -991,7 +991,7 @@ export async function discoverStdioMcpTools(
         kind: "down",
         reason:
           err instanceof Error && err.message
-            ? `command not found — ${err.message}`
+            ? `command not found (${err.message})`
             : "command not found",
       });
       return;
@@ -1022,7 +1022,7 @@ export async function discoverStdioMcpTools(
       const detail = redactGitOutput([extra, stderr].filter(Boolean).join("\n"), {
         token: options.token ?? null,
       });
-      return detail ? `${base} — ${detail}` : base;
+      return detail ? `${base}: ${detail}` : base;
     };
     const finish = (result: StdioDiscovery) => {
       if (settled) return;
@@ -1055,9 +1055,9 @@ export async function discoverStdioMcpTools(
         kind: "down",
         reason: withDetail(
           installing
-            ? `still installing after ${Math.round(timeoutMs / 1000)}s — the first run of this command fetches its dependencies`
+            ? `still installing after ${Math.round(timeoutMs / 1000)}s. The first run of this command fetches its dependencies`
             : firstRunInstaller
-              ? `no response in ${Math.round(timeoutMs / 1000)}s — \`${parts[0]}\` fetches its package on first use, so this is probably still downloading`
+              ? `no response in ${Math.round(timeoutMs / 1000)}s. \`${parts[0]}\` fetches its package on first use, so this is probably still downloading`
               : `timed out after ${Math.round(timeoutMs / 1000)}s`,
         ),
       };
@@ -1108,7 +1108,7 @@ export async function discoverStdioMcpTools(
       const base = sig
         ? `killed by ${sig}`
         : codeNum !== null && codeNum !== 0
-          ? `exited before responding — exit code ${codeNum}`
+          ? `exited before responding (exit code ${codeNum})`
           : "exited before responding";
       finish({ kind: "down", reason: withDetail(base) });
     });
@@ -1377,7 +1377,7 @@ export async function discoverHttpMcpTools(
         reason:
           initRes.status === 401 || initRes.status === 403
             ? "authentication rejected"
-            : `endpoint answered ${initRes.status} — not an MCP endpoint?`,
+            : `endpoint answered ${initRes.status} (not an MCP endpoint?)`,
       };
     }
     sessionId = initRes.headers.get("mcp-session-id");
@@ -1452,7 +1452,7 @@ export async function saveMcpServer(
     // long by construction, so the floor only applies to fresh plaintext.
     if (!isSecretBox(rawCred) && rawCred.length < 8) {
       throw AppError.validation(
-        "That credential is too short — enter at least 8 characters, or leave it blank for no auth.",
+        "That credential is too short. Enter at least 8 characters, or leave it blank for no auth.",
       );
     }
     cred = isSecretBox(rawCred) ? rawCred : sealSecret(rawCred);
@@ -1473,7 +1473,7 @@ export async function saveMcpServer(
   // per backend, so refuse it at save instead of accepting a dead server.
   if (isReservedMcpName(name)) {
     throw AppError.validation(
-      `"${name}" is reserved for Viberr's built-in agent tools — pick another name.`,
+      `"${name}" is reserved for Viberr's built-in agent tools. Pick another name.`,
     );
   }
   if (target.length < 4) {
@@ -1542,16 +1542,16 @@ export async function saveMcpServer(
     : "";
   const toast =
     (disc.kind === "up"
-      ? `${name} saved — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} discovered${spawnNote}`
+      ? `${name} saved: ${disc.tools} tool${disc.tools === 1 ? "" : "s"} discovered${spawnNote}`
       : transport === "stdio"
         // R19-17: the wrapper used to add "command didn't respond" in front of
         // a reason that now says what actually happened, giving
         // "didn't respond (exited before responding — …)". The reason speaks
         // for itself; the prefix only has to say the server was saved anyway.
         ? warmable
-          ? `${name} saved — installing in the background; this page updates when it finishes`
-          : `${name} saved, but it did not answer — ${disc.reason}`
-        : `${name} saved — endpoint didn't answer as an MCP server (${disc.reason})`) +
+          ? `${name} saved. It is installing in the background; this page updates when it finishes`
+          : `${name} saved, but it did not answer: ${disc.reason}`
+        : `${name} saved, but the endpoint didn't answer as an MCP server (${disc.reason})`) +
     credNote;
 
   let id = input.id ?? null;
@@ -1667,7 +1667,7 @@ export async function testMcpServer(
     const fresh = getMcpServer(db, id)!;
     return {
       mcp: fresh,
-      toast: `${fresh.name} healthy — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} · ${disc.latencyMs}ms${credNote}`,
+      toast: `${fresh.name} healthy: ${disc.tools} tool${disc.tools === 1 ? "" : "s"} · ${disc.latencyMs}ms${credNote}`,
     };
   }
   db.prepare(
@@ -1704,13 +1704,13 @@ export async function testMcpServer(
     const warming = getMcpServer(db, id)!;
     return {
       mcp: warming,
-      toast: `${warming.name} is installing in the background — this page updates when it finishes${credNote}`,
+      toast: `${warming.name} is installing in the background; this page updates when it finishes${credNote}`,
     };
   }
   const fresh = getMcpServer(db, id)!;
   return {
     mcp: fresh,
-    toast: `${fresh.name} unreachable — ${disc.reason}${credNote}`,
+    toast: `${fresh.name} unreachable: ${disc.reason}${credNote}`,
   };
 }
 
@@ -1825,7 +1825,7 @@ function assertSkillBodyWritable(name: string, ctx: OrgSeedContext): void {
   const dir = skillDirPath(name, ctx.dataRoot);
   const uncontained = () =>
     AppError.validation(
-      `SKILL.md for ${name} is a symlink (or sits under one), so it points outside the skills store. Viberr never reads or writes through a link out of the store — replace it with a real file to edit it here.`,
+      `SKILL.md for ${name} is a symlink (or sits under one), so it points outside the skills store. Viberr never reads or writes through a link out of the store. Replace it with a real file to edit it here.`,
     );
   const dirStat = lstatOr(dir);
   if (dirStat?.isSymbolicLink()) throw uncontained();
@@ -1876,7 +1876,7 @@ function deriveSkillSummary(name: string, ctx: OrgSeedContext): string {
       if (firstLine) return firstLine.trim();
     }
   }
-  return "On-disk skill — add a summary to describe it";
+  return "On-disk skill. Add a summary to describe it";
 }
 
 /** Builds a skill view from a disk folder, layering a metadata row when
@@ -2009,7 +2009,7 @@ export async function saveSkill(
     skillBodyTruncatedOnDisk(oldName, ctx)
   ) {
     throw AppError.validation(
-      `SKILL.md for ${oldName} is larger than the 256 KB editor limit, so the editor only loaded a truncated copy. Saving would overwrite the full file with that truncated text — edit SKILL.md on disk (or re-upload it) instead.`,
+      `SKILL.md for ${oldName} is larger than the 256 KB editor limit, so the editor only loaded a truncated copy. Saving would overwrite the full file with that truncated text. Edit SKILL.md on disk (or re-upload it) instead.`,
     );
   }
 
@@ -2043,8 +2043,8 @@ export async function saveSkill(
     writeFileSync(path.join(dir, "SKILL.md"), body);
   }
   const updatedToast = keepExistingBody
-    ? `Skill ${name} updated — existing SKILL.md kept`
-    : `Skill ${name} updated — SKILL.md rewritten`;
+    ? `Skill ${name} updated. Existing SKILL.md kept`
+    : `Skill ${name} updated. SKILL.md rewritten`;
 
   if (existing) {
     db.prepare(
@@ -2089,8 +2089,8 @@ export async function saveSkill(
     toast: oldName
       ? updatedToast
       : filesMode
-        ? `Skill ${name} created — add SKILL.md and supporting files`
-        : `Skill ${name} created — SKILL.md written`,
+        ? `Skill ${name} created. Add SKILL.md and supporting files`
+        : `Skill ${name} created. SKILL.md written`,
   };
 }
 

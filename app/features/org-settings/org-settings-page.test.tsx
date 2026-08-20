@@ -433,7 +433,7 @@ describe("ResourcesPanel", () => {
     );
     // R20-4 (N20-2): softened to one copy for both the evidence and heuristic
     // warm-up bases — the reader can act on neither distinction.
-    expect(container.textContent).toContain("first run — installing in the background");
+    expect(container.textContent).toContain("first run, installing in the background");
     expect(container.textContent).not.toContain("unreachable");
     // Its own dot state, and no red error block shouting while it works.
     expect(container.querySelector(".stat-dot.warming")).toBeTruthy();
@@ -568,7 +568,7 @@ describe("ResourcesPanel", () => {
     // edit does not silently reach an already-adopted project on its next run.
     expect(
       getByText(
-        "adopted by 4 projects — each keeps its own copy; re-adopt to pick up this edit",
+        "adopted by 4 projects. Each keeps its own copy; re-adopt to pick up this edit",
       ),
     ).toBeTruthy();
     // Three ctx groups over the org resources; the selected skill chip is on.
@@ -581,11 +581,11 @@ describe("ResourcesPanel", () => {
     const { getByText } = renderResources();
     fireEvent.click(getByText("Architecture notes", { selector: "button.linkish" }));
     expect(
-      document.querySelector('[aria-label="Files — Architecture notes"]'),
+      document.querySelector('[aria-label="Files · Architecture notes"]'),
     ).toBeTruthy();
     expect(getByText("overview.md")).toBeTruthy();
     expect(
-      getByText(/This is the real folder on disk — files added outside Viberr/),
+      getByText(/This is the real folder on disk\. Files added outside Viberr/),
     ).toBeTruthy();
   });
 
@@ -628,7 +628,7 @@ describe("ResourcesPanel", () => {
     const { getByText, queryByText } = renderPanel(
       <ResourcesPanel kbs={missing} mcps={[]} skills={[]} gagents={[]} stages={STAGES} />,
     );
-    expect(getByText(/folder missing — no docs reach a granted agent/)).toBeTruthy();
+    expect(getByText(/folder missing: no docs reach a granted agent/)).toBeTruthy();
     // It must NOT read like a normal empty KB.
     expect(queryByText(/0 docs · agents read the live folder/)).toBeNull();
   });
@@ -800,7 +800,7 @@ describe("ConnectionsPanel — scope evidence", () => {
     );
     expect(container.querySelectorAll(".conn-row .scope-chip").length).toBe(0);
     expect(container.querySelector(".conn-row .scope-chips")!.textContent).toContain(
-      "repo, pull_request:write unproven — verified when attached to a project",
+      "repo, pull_request:write unproven. Verified when attached to a project",
     );
   });
 
@@ -975,7 +975,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
     expect(h1s[0]!.textContent).toBe("Instance settings");
     expect(h1s[0]!.textContent).not.toContain("Viberr");
     // The subtitle already carried the scope; it must keep doing so.
-    expect(container.textContent).toContain("Instance level — shared by every project");
+    expect(container.textContent).toContain("Instance level, shared by every project");
   });
 });
 

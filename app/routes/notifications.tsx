@@ -74,7 +74,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
     push(
       data.ok
         ? "All notifications marked read"
-        : (data.error ?? "Marking notifications read failed — try again"),
+        : (data.error ?? "Marking notifications read failed. Try again"),
       // P13-D-10: the failure branch rendered the success tick (the bell's
       // twin handler in top-bell.tsx already passed the kind).
       data.ok ? "success" : "error",

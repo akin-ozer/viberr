@@ -572,10 +572,10 @@ describe("ProfileDetail", () => {
       />,
     );
     expect(
-      getByText("declared stages don't exist here — eligible everywhere"),
+      getByText("declared stages don't exist here · eligible everywhere"),
     ).toBeTruthy();
     expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(3);
-    expect(getByText(/the declaration says nothing here/)).toBeTruthy();
+    expect(getByText(/The declaration says nothing here/)).toBeTruthy();
   });
 
   it("LV-02: a profile that declares no stages is unrestricted, not ineligible", () => {
@@ -594,7 +594,7 @@ describe("ProfileDetail", () => {
     );
     // Mirrors specialistEligibleForStage: no declared stages = eligible
     // everywhere (the guard treats it that way, so the panel must too).
-    expect(getByText("no stage restriction — eligible everywhere")).toBeTruthy();
+    expect(getByText("no stage restriction · eligible everywhere")).toBeTruthy();
     expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(
       STAGES.length,
     );
@@ -949,7 +949,7 @@ describe("CreateProfileModal", () => {
     fireEvent.click(getByText("Knowledge bases"));
     // Both dangling ids now render AS chips, flagged missing + removable.
     const ghosts = getAllByTitle(
-      "No longer in the store — click to remove this grant",
+      "No longer in the store. Click to remove this grant",
     );
     expect(ghosts).toHaveLength(2);
     expect(container.querySelectorAll(".pick-chip.missing")).toHaveLength(2);
@@ -1430,7 +1430,7 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
       ),
     ).toBeTruthy();
     expect(
-      getByText("Ready to save — this forks Developer for Viberr Core."),
+      getByText("Ready to save: this forks Developer for Viberr Core."),
     ).toBeTruthy();
   });
 
@@ -1439,7 +1439,7 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
       initial: mkProfile({ source: "project", name: "Migrations" }),
     });
     expect(
-      getByText("Update this project's copy — changes apply to future assignments."),
+      getByText("Update this project's copy. Changes apply to future assignments."),
     ).toBeTruthy();
     expect(queryByText(/forks/)).toBeNull();
   });
@@ -1790,7 +1790,7 @@ describe("UXA-15: the Agents page explains its read-only state", () => {
 
   it("an admin sees no read-only note", () => {
     const { container } = renderAs("admin");
-    expect(container.textContent).not.toContain("Read-only —");
+    expect(container.textContent).not.toContain("Read-only");
   });
 });
 

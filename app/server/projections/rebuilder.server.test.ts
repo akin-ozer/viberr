@@ -640,7 +640,7 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
     const store = setupTestStore(ctx);
     const task = seedDelivered(store, "closed");
     expect(task.blockReason).toBe(
-      "VIB-3's review PR was closed on GitHub without merging — it can't be accepted. Rework and reopen the PR, or archive the task.",
+      "VIB-3's review PR was closed on GitHub without merging, so it can't be accepted. Rework and reopen the PR, or archive the task.",
     );
     expect(task.blockReason).not.toContain("force-accept");
     expect(task.blockReason).not.toContain("approving verdict");
@@ -651,7 +651,7 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
     expect(seedDelivered(store, "review").blockReason).toBe(
       // R19-B: a project member's GitHub approval is now a third way to satisfy
       // the gate, and the sentence names it.
-      "VIB-3's delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.",
+      "VIB-3's delivered revision has no approving verdict yet. Run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.",
     );
   });
 
@@ -873,7 +873,7 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     // which used to be left to each reader to re-derive (and one of them didn't).
     expect(task.validation).toBe("healthy");
     expect(task.blockReason).toBe(
-      "VIB-9's review PR #900 conflicts with the base branch — GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
+      "VIB-9's review PR #900 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
     );
   });
 
@@ -893,7 +893,7 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
       },
     );
     expect(task.blockReason).toBe(
-      "This task has an open blocked decision — resolve the operator's packet before accepting it.",
+      "This task has an open blocked decision. Resolve the operator's packet before accepting it.",
     );
   });
 

@@ -916,7 +916,7 @@ describe("resolvePacket kind matrix", () => {
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected — coordination is paused and no operator run was started. Use **Run operator** on the task page when the inspection is done.",
+      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected. Coordination is paused and no operator run was started. Use **Run operator** on the task page when the inspection is done.",
     );
     // A repeat confirm on the resolved packet is refused.
     await expect(
@@ -1376,7 +1376,7 @@ describe("resolvePacket kind matrix", () => {
     expect(back.frontmatter.waiting).toBe("human");
     // …but it is no longer stranded silently — the restore note names the next
     // step, so "Waiting on: Human decision" reads as actionable.
-    expect(back.timeline[0]!.text).toContain("run the operator");
+    expect(back.timeline[0]!.text).toContain("Run the operator");
   });
 
   // F20-18 (N20-7): a contributor-owner handed a packet whose every option needs

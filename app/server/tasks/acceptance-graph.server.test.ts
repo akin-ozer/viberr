@@ -785,7 +785,7 @@ describe("F19-38: an archived task cannot be moved on the board", () => {
       ),
     ).rejects.toMatchObject({
       status: 409,
-      message: "VIB-1 is archived — restore it before moving it between stages.",
+      message: "VIB-1 is archived. Restore it before moving it between stages.",
     });
     expect(taskFile(store).parsed.frontmatter.stage).toBe("impl");
   });

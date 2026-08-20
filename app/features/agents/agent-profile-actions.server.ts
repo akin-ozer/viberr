@@ -231,7 +231,7 @@ function parseForm(raw: SubmittedProfileForm): ProfileFormInput {
   const foreign = foreignModelBackend(parsed.data.backend, parsed.data.model);
   if (foreign) {
     throw AppError.validation(
-      `${modelDisplayName(foreign, parsed.data.model)} is a ${BACKEND_LABEL[foreign]} model — ` +
+      `${modelDisplayName(foreign, parsed.data.model)} is a ${BACKEND_LABEL[foreign]} model. ` +
         `${BACKEND_LABEL[parsed.data.backend]} cannot run it. Pick a model from the ` +
         `${BACKEND_LABEL[parsed.data.backend]} list.`,
     );
@@ -394,7 +394,7 @@ export async function createAgentProfile(
       scope: `Created in ${parsed.frontmatter.name}`,
       desc:
         form.definition.trim() ||
-        `${form.name} — a ${form.role.toLowerCase()} specialist.`,
+        `${form.name}, a ${form.role.toLowerCase()} specialist.`,
     };
     // The long persona (D6) — the run's system-prompt material. Written only
     // when the form carries one, in its catalog position, so an empty box
@@ -744,10 +744,10 @@ export async function updateAgentProfile(
   let governanceNotice: { message: string } | undefined;
   if (autonomyElevatedToFull || directAcceptNewlyGranted) {
     const message = directDoneLive
-      ? `${form.name} now runs at full autonomy with “Accept completion into Done” granted — it can move tasks to Done without a human.`
+      ? `${form.name} now runs at full autonomy with “Accept completion into Done” granted. It can move tasks to Done without a human.`
       : autonomyElevatedToFull
-        ? `${form.name} autonomy raised to full — it performs approval-boundary transitions itself. “Accept completion into Done” still needs its direct grant to close tasks.`
-        : `“Accept completion into Done” granted to ${form.name} — it takes effect only at full autonomy (currently ${gov.newAutonomy}).`;
+        ? `${form.name} autonomy raised to full. It performs approval-boundary transitions itself. “Accept completion into Done” still needs its direct grant to close tasks.`
+        : `“Accept completion into Done” granted to ${form.name}. It takes effect only at full autonomy (currently ${gov.newAutonomy}).`;
     governanceNotice = { message };
     recordAudit(db, {
       action: "project.operator.autonomy_changed",

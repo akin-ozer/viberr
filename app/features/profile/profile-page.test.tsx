@@ -74,7 +74,7 @@ describe("ProfilePage", () => {
     expect(getByText("Profile & preferences")).toBeTruthy();
     expect(
       getByText(
-        "Personal to your account — project policy and roles stay in Policy",
+        "Personal to your account. Project policy and roles stay in Policy",
       ),
     ).toBeTruthy();
     expect(getByDisplayValue("Arda Kaya")).toBeTruthy();
@@ -153,7 +153,7 @@ describe("ProfilePage", () => {
     fireEvent.click(motion);
     expect(lastSubmit).toEqual({ intent: "set-motion", motion: "reduce" });
     expect(document.documentElement.dataset.motion).toBe("reduce");
-    expect(queryByText("Motion reduced — pulses and animation paused")).toBeNull();
+    expect(queryByText("Motion reduced. Pulses and animation paused")).toBeNull();
 
     fireEvent.click(getByText("Important"));
     expect(lastSubmit).toEqual({ intent: "set-tl-default", tlDefault: "typed" });

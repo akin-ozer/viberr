@@ -136,7 +136,7 @@ describe("listAuditLog", () => {
       taskKey: "VIB-142",
       scope: "pull_request:write",
       detail:
-        "Project credential is missing `pull_request:write` — flagged by the policy engine on VIB-142.",
+        "Project credential is missing `pull_request:write`. Flagged by the policy engine on VIB-142.",
     });
     const seeded = listAuditLog(store.db, store.slug).find(
       (e) => e.kind === "violation",
@@ -144,7 +144,7 @@ describe("listAuditLog", () => {
     expect(seeded.status).toBe("open");
     expect(seeded.taskKey).toBe("VIB-142");
     expect(seeded.text).toBe(
-      "Project credential is missing `pull_request:write` — flagged by the policy engine on",
+      "Project credential is missing `pull_request:write`. Flagged by the policy engine on",
     );
 
     const { violation } = openScopeViolation(store.db, {
@@ -213,14 +213,14 @@ describe("listAuditLog", () => {
     const blocked = byKind("blockedact");
     expect(blocked).toHaveLength(1);
     expect(blocked[0]!.text).toBe(
-      "Blocked: review PR merge refused — the project credential is missing `pull_request:write` — on",
+      "Blocked: review PR merge refused (the project credential is missing `pull_request:write`) on",
     );
     expect(blocked[0]!.taskKey).toBe("VIB-201");
 
     const audit = byKind("audit");
     expect(audit).toHaveLength(1);
     expect(audit[0]!.text).toBe(
-      `${arda.name} released the task owner — recorded per audit policy on`,
+      `${arda.name} released the task owner. Recorded per audit policy on`,
     );
 
     expect(entries.some((e) => e.text.includes("task comment"))).toBe(false);
@@ -262,7 +262,7 @@ describe("listAuditLog", () => {
     expect(texts).toContain(`${arda.name} added workflow stage **Hold**.`);
     expect(texts).toContain(`${arda.name} removed workflow stage **Hold**.`);
     expect(texts).toContain(
-      `${arda.name} removed workflow stage **Parked** — **Ready → In Progress** is now human only.`,
+      `${arda.name} removed workflow stage **Parked**. **Ready → In Progress** is now human only.`,
     );
     // A removal whose details drop the name still renders (older rows / no name).
     recordAudit(store.db, {
@@ -326,15 +326,36 @@ describe("listAuditLog", () => {
       },
     });
 
+    // The de-dashed shape `acceptanceRefusalReason` stores today: reason and
+    // remediation split by a sentence boundary rather than an em dash. The
+    // reader must extract the same reason half from both generations of rows.
+    recordAudit(store.db, {
+      action: "task.acceptance.forced",
+      actor: { userId: arda.id, label: arda.email },
+      subjectKind: "task",
+      subjectId: "VIB-202",
+      projectSlug: store.slug,
+      taskKey: "VIB-202",
+      details: {
+        bypassed:
+          "VIB-202's delivered revision has no approving verdict yet. Run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.",
+      },
+    });
+
     const entries = listAuditLog(store.db, store.slug);
     const forced = entries.find((e) => e.taskKey === "VIB-201")!;
     expect(forced.kind).toBe("audit");
     expect(forced.text).toBe(
-      `${arda.name} force-accepted the completion, overriding the acceptance gate (VIB-201's delivered revision has no approving verdict yet) — on`,
+      `${arda.name} force-accepted the completion, overriding the acceptance gate (VIB-201's delivered revision has no approving verdict yet) on`,
     );
     // The remediation half is advice about a decision already made — it must not
     // survive into the record of the override.
     expect(forced.text).not.toContain("an admin can force-accept");
+    const forcedNew = entries.find((e) => e.taskKey === "VIB-202")!;
+    expect(forcedNew.text).toBe(
+      `${arda.name} force-accepted the completion, overriding the acceptance gate (VIB-202's delivered revision has no approving verdict yet) on`,
+    );
+    expect(forcedNew.text).not.toContain("an admin can force-accept");
     const override = entries.find((e) => e.text.includes("org-admin override"))!;
     expect(override.kind).toBe("audit");
     expect(override.text).toBe(
@@ -366,7 +387,7 @@ describe("listAuditLog", () => {
     const entry = listAuditLog(store.db, store.slug)[0]!;
     expect(entry.kind).toBe("blockedact");
     expect(entry.text).toBe(
-      `Blocked: ${elif.name} tried to change the policy — their project role (viewer) is not permitted.`,
+      `Blocked: ${elif.name} tried to change the policy, but their project role (viewer) is not permitted.`,
     );
     expect(countAuditLog(store.db, store.slug)).toBe(1);
   });

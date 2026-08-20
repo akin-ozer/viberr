@@ -922,8 +922,8 @@ export async function operatorOpenPacket(
     return {
       outcome: "noop",
       message:
-        `A decision packet is already open on ${input.taskKey} ("${existing.parsed.packet.title}") — ` +
-        "answer from it, or withdraw it with resolve_decision_packet if it is moot, before opening another.",
+        `A decision packet is already open on ${input.taskKey} ("${existing.parsed.packet.title}"). ` +
+        "Answer from it, or withdraw it with resolve_decision_packet if it is moot, before opening another.",
     };
   }
 
@@ -1012,7 +1012,7 @@ export async function operatorOpenPacket(
   if (!opened) {
     return {
       outcome: "noop",
-      message: `Another decision packet was opened on ${input.taskKey} first — this one was not written.`,
+      message: `Another decision packet was opened on ${input.taskKey} first; this one was not written.`,
     };
   }
   reproject(db, ctx, input.projectSlug, input.taskKey);
@@ -1034,7 +1034,7 @@ export async function operatorOpenPacket(
       ptype: input.packetType,
       title:
         input.packetType === "blocked"
-          ? `Blocked — decision needed: ${title}`
+          ? `Blocked, decision needed: ${title}`
           : `Decision needed: ${title}`,
       text: packet.body || title,
     },
@@ -1084,8 +1084,8 @@ export async function operatorResolvePacket(
     return {
       outcome: "denied",
       message:
-        `The open packet "${packet.title}" was raised by ${packet.from}, not by you — ` +
-        "only a human can resolve an agent's question. Answer it in a comment or leave it standing.",
+        `The open packet "${packet.title}" was raised by ${packet.from}, not by you. ` +
+        "Only a human can resolve an agent's question. Answer it in a comment or leave it standing.",
     };
   }
   const reason =
@@ -1112,7 +1112,7 @@ export async function operatorResolvePacket(
       type: "transition",
       actor: { kind: "operator" },
       title: null,
-      text: `**Packet withdrawn:** ${packet.title} — ${reason}`,
+      text: `**Packet withdrawn:** ${packet.title}. ${reason}`,
       toAgent: false,
       evidence: null,
     });
@@ -1120,7 +1120,7 @@ export async function operatorResolvePacket(
   if (!withdrawn) {
     return {
       outcome: "noop",
-      message: `The open packet on ${input.taskKey} changed before it could be withdrawn — nothing was removed.`,
+      message: `The open packet on ${input.taskKey} changed before it could be withdrawn; nothing was removed.`,
     };
   }
   reproject(db, ctx, input.projectSlug, input.taskKey);
@@ -1717,7 +1717,7 @@ export async function operatorFlagContextConflict(
     return {
       outcome: "noop",
       message:
-        "A conflict needs BOTH sources named — the knowledge-base document and the repository file it disagrees with.",
+        "A conflict needs BOTH sources named: the knowledge-base document and the repository file it disagrees with.",
     };
   }
   if (gate(authority, "append-typed-events") === "deny") {
@@ -1762,7 +1762,7 @@ export async function operatorFlagContextConflict(
   );
   return {
     outcome: "done",
-    message: `Recorded — \`${repoSource}\` wins; a human will settle it.`,
+    message: `Recorded: \`${repoSource}\` wins; a human will settle it.`,
   };
 }
 
@@ -1789,7 +1789,7 @@ export async function operatorSetGoal(
     return {
       outcome: "noop",
       message:
-        "The goal is already specified — open an edit_goal packet to propose a change instead of overwriting it.",
+        "The goal is already specified. Open an edit_goal packet to propose a change instead of overwriting it.",
     };
   }
   if (current === goal) {
@@ -1817,7 +1817,7 @@ export async function operatorSetGoal(
       actor: { kind: "operator" },
       title: "Goal drafted",
       text: input.reason?.trim()
-        ? `The operator drafted the task goal — ${input.reason.trim()}. Downstream agents re-anchor on the new goal.`
+        ? `The operator drafted the task goal: ${input.reason.trim()}. Downstream agents re-anchor on the new goal.`
         : "The operator drafted the task goal from the request. Downstream agents re-anchor on the new goal.",
       toAgent: false,
       evidence: null,
@@ -2389,7 +2389,7 @@ export async function operatorRunAgent(
           outcome: "noop",
           message:
             `"${input.profileId}" is not the delivering agent ("${current}" is). ` +
-            "Engage it as the deliverer first if you want it to deliver — a delivering run always runs the current deliverer.",
+            "Engage it as the deliverer first if you want it to deliver; a delivering run always runs the current deliverer.",
         };
       }
     }
@@ -2502,7 +2502,7 @@ export async function operatorDeliverForReview(
     // report the live PR instead.
     return {
       outcome: "noop",
-      message: `PR #${pr.number} is already open for review — nothing to deliver.`,
+      message: `PR #${pr.number} is already open for review; there is nothing to deliver.`,
     };
   }
   if (g === "recommend") {
@@ -2560,8 +2560,8 @@ export async function operatorDeliverForReview(
         outcome: "noop",
         message:
           `Delivery push CONFLICTED: ${outcome.message}. No PR was opened. This is a ` +
-          `branch-history conflict on \`${outcome.branch}\`, not a credential problem — ` +
-          `open a decision packet so a human resolves the remote branch (delete/rename ` +
+          `branch-history conflict on \`${outcome.branch}\`, not a credential problem. ` +
+          `Open a decision packet so a human resolves the remote branch (delete/rename ` +
           `or deliberate force-push) or archives the task.`,
       };
     case "grant_withheld":
@@ -2748,7 +2748,7 @@ function completionCapabilityRefusal(
       ? "that capability is reserved for a human here"
       : "that capability is withheld from the operator here";
   return (
-    `Accepting completion is not permitted for the operator here — ${because}, ` +
+    `Accepting completion is not permitted for the operator here: ${because}, ` +
     `so I am not recommending it either. ${taskKey} stays where it is; ` +
     `a maintainer accepts it on the task page.`
   );
@@ -2837,12 +2837,12 @@ export async function operatorAcceptCompletion(
         kind: "accept_completion",
         toStageId: doneStageId,
         label: noChange
-          ? `Complete ${input.taskKey} with no changes — move it to ${doneName}`
-          : `Accept completion — move ${input.taskKey} to ${doneName}`,
+          ? `Complete ${input.taskKey} with no changes and move it to ${doneName}`
+          : `Accept completion and move ${input.taskKey} to ${doneName}`,
       },
       noChange
-        ? `The review is clean and there is nothing to deliver — no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
-        : `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable — otherwise it records the PR as accepted (merge pending).`,
+        ? `The review is clean and there is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
+        : `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`,
     );
     recordAudit(db, {
       action: "task.operator.recommended_completion",
@@ -2855,7 +2855,7 @@ export async function operatorAcceptCompletion(
     });
     return {
       outcome: "recommended",
-      message: `Recommended accepting completion — move ${input.taskKey} to ${doneName}.`,
+      message: `Recommended accepting completion: move ${input.taskKey} to ${doneName}.`,
     };
   }
 
@@ -2901,8 +2901,8 @@ export async function operatorAcceptCompletion(
           title: "Completion accepted",
           text:
             (hasPr
-              ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
-              : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`) +
+              ? `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
+              : `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to Done.`) +
             driftNote,
           toAgent: false,
           evidence: null,
@@ -2929,5 +2929,5 @@ export async function operatorAcceptCompletion(
     taskKey: input.taskKey,
     details: { autonomy: "full", toStage: doneStageId },
   });
-  return { outcome: "done", message: `Accepted completion — ${input.taskKey} moved to Done.` };
+  return { outcome: "done", message: `Accepted completion: ${input.taskKey} moved to Done.` };
 }

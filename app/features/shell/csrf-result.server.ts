@@ -30,7 +30,7 @@ export async function csrfError(
         {
           ok: false as const,
           error:
-            "That request expired — reload the page and try again (security token mismatch).",
+            "That request expired. Reload the page and try again (security token mismatch).",
         },
         { status: 403 },
       );

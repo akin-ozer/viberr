@@ -414,7 +414,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(task().frontmatter.stage).toBe("done");
     expect(task().frontmatter.pr).toBeNull();
     const completion = completionEvent();
-    expect(completion?.title).toBe("Completed — no changes");
+    expect(completion?.title).toBe("Completed with no changes");
     expect(completion?.text).toContain("completed with no changes");
     expect(completion?.text).toContain(BASE_SHA.slice(0, 12));
     expect(completion?.text).not.toMatch(/merged/i);
@@ -473,7 +473,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     );
     expect(task().frontmatter.stage).toBe("done");
     const completion = completionEvent();
-    expect(completion?.title).toBe("Completed — no changes");
+    expect(completion?.title).toBe("Completed with no changes");
     expect(completion?.text).toContain("WITHOUT a passing remote re-check");
     expect(completion?.text).not.toContain("completed with no changes");
     expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(1);
@@ -509,7 +509,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
       dataCtx(),
     );
     expect(task().frontmatter.stage).toBe("done");
-    expect(completionEvent()?.title).toBe("Completed — no changes");
+    expect(completionEvent()?.title).toBe("Completed with no changes");
     expect(completionEvent()?.text).not.toMatch(/merged/i);
   });
 });
@@ -549,7 +549,7 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
     );
     expect(result.outcome).toBe("done");
     expect(task().frontmatter.stage).toBe("done");
-    expect(completionEvent()?.title).toBe("Completed — no changes");
+    expect(completionEvent()?.title).toBe("Completed with no changes");
     expect(completionEvent()?.text).toContain("full-autonomy");
     expect(completionEvent()?.text).not.toMatch(/merged/i);
   });

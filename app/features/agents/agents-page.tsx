@@ -188,7 +188,7 @@ function ProfileItem({
   const unusable =
     backendHealth && !backendHealth.available
       ? (backendHealth.detail ??
-        `${backendHealth.backend === "claude" ? "Claude Code" : "Codex"} is not configured on this instance — runs for this profile would fail.`)
+        `${backendHealth.backend === "claude" ? "Claude Code" : "Codex"} is not configured on this instance, so runs for this profile would fail.`)
       : undefined;
   return (
     <button type="button" className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
@@ -284,7 +284,7 @@ function ResGroup({
               className={missing ? "res-chip missing" : "res-chip"}
               key={x}
               {...(missing
-                ? { title: `${x} is no longer in the store — this grant reaches no run` }
+                ? { title: `${x} is no longer in the store, so this grant reaches no run` }
                 : {})}
             >
               <Icon name={missing ? "alert" : icon} />
@@ -363,7 +363,7 @@ function DeleteConfirm({
               {activeCount} active task{activeCount > 1 ? "s" : ""}
             </strong>
             . Those engagements stay on the tasks, and nothing reassigns them
-            for you — until someone assigns a replacement from each task's
+            for you. Until someone assigns a replacement from each task's
             Execution profile, runs there can't deliver, comment, ask a question
             or attach evidence.
           </>
@@ -430,9 +430,9 @@ export function StageEligibility({
   const summary = a.spanAll
     ? "active across the whole lifecycle"
     : a.stages.length === 0
-      ? "no stage restriction — eligible everywhere"
+      ? "no stage restriction · eligible everywhere"
       : resolved.length === 0
-        ? "declared stages don't exist here — eligible everywhere"
+        ? "declared stages don't exist here · eligible everywhere"
         : `${onBoard} of ${countLabel(stages.length, "stage")}`;
   return (
     <div className="panel">
@@ -461,7 +461,7 @@ export function StageEligibility({
           <span
             key={id}
             className="stage-chip off"
-            title={`This profile grants the stage “${id}”, which is neither a stage on this board nor a role any stage here fills — the grant does nothing.`}
+            title={`This profile grants the stage “${id}”, which is neither a stage on this board nor a role any stage here fills, so the grant does nothing.`}
           >
             <span className="sdot" />
             {id} · not on this board
@@ -475,7 +475,7 @@ export function StageEligibility({
       {!a.spanAll && a.stages.length > 0 && resolved.length === 0 && (
         <div className="empty xs">
           None of this profile's declared stages ({a.stages.join(", ")}) exist on
-          this board, by id or by role — the declaration says nothing here, so
+          this board, by id or by role. The declaration says nothing here, so
           the profile is eligible everywhere. Edit it to restrict the profile to
           this board's stages.
         </div>
@@ -798,7 +798,7 @@ export function ProfileDetail({
             <Icon name="arrow" />
             <span>
               <strong>{stageTransitionsLabel}</strong> is a recommendation at the
-              boundaries this project gates — a boundary set to{" "}
+              boundaries this project gates. A boundary set to{" "}
               <strong>{AUTO_BOUNDARY_LABEL}</strong> is moved directly. The
               Policy page lists which boundary is which.
             </span>
@@ -828,8 +828,8 @@ export function ProfileDetail({
             <div className="cap-advisory-body">
               <p>
                 These describe how the profile is meant to work. Nothing in the
-                runtime enforces them, so they never grant or refuse anything —
-                the binding policy is the three columns above.
+                runtime enforces them, so they never grant or refuse anything.
+                The binding policy is the three columns above.
               </p>
               <ul>
                 {advisory.map((x) => (
@@ -903,7 +903,7 @@ export function ProfileDetail({
                 {!a.modelKnown && (
                   <span
                     className="model-sub"
-                    title={`The saved model “${a.model}” isn't a recognized model id — runs use the default (${a.modelLabel}). Open Edit profile to pick a model.`}
+                    title={`The saved model “${a.model}” isn't a recognized model id, so runs use the default (${a.modelLabel}). Open Edit profile to pick a model.`}
                   >
                     <Icon name="alert" />
                     default
@@ -915,7 +915,7 @@ export function ProfileDetail({
                 {a.modelUnavailable && (
                   <span
                     className="model-sub"
-                    title={`${a.modelUnavailable.reason} A run on this model would be refused — open Edit profile to pick another.`}
+                    title={`${a.modelUnavailable.reason} A run on this model would be refused. Open Edit profile to pick another.`}
                   >
                     <Icon name="alert" />
                     unavailable
@@ -941,8 +941,8 @@ export function ProfileDetail({
           <div className="def-note">
             <Icon name="alert" />
             <span>
-              <b>{backendLabel} has no usable credential on this instance</b> —
-              a run assigned to this profile refuses before it starts.{" "}
+              <b>{backendLabel} has no usable credential on this instance</b>. A
+              run assigned to this profile refuses before it starts.{" "}
               {runHealth?.detail ?? ""}
             </span>
           </div>
@@ -960,7 +960,7 @@ export function ProfileDetail({
         {insts.length === 0 ? (
           <div className="empty sm">
             {backendMissing
-              ? `Not currently engaged on any task. This profile is approved, but ${backendLabel} is not configured — assigning it would produce a refused run.`
+              ? `Not currently engaged on any task. This profile is approved, but ${backendLabel} is not configured, so assigning it would produce a refused run.`
               : "Not currently engaged on any task. This profile is approved and available for assignment."}
           </div>
         ) : (
@@ -1126,7 +1126,7 @@ export function LiveRoster({
                     {...(resolved
                       ? {}
                       : {
-                          title: `No profile named ${d.profileId} is approved on this project — the engagement outlived its profile.`,
+                          title: `No profile named ${d.profileId} is approved on this project. The engagement outlived its profile.`,
                         })}
                   >
                     {resolved ?? "profile no longer here"}
@@ -1403,7 +1403,7 @@ export function AgentsPage({
               contradicted the card one click away in both directions. Point at
               the card instead of asserting for it. */}
           <div className="sub">
-            Reusable agent profiles, eligible stages, and capability policy — the
+            Reusable agent profiles, eligible stages, and capability policy. The
             operator engages one per task as the delivering agent, others as
             supporting. Each profile names where it came from, and whether this
             project's copy has since diverged.
@@ -1473,7 +1473,7 @@ export function AgentsPage({
                 The old copy invented "Manage agents … (project admin or
                 maintainer)", telling a maintainer they hold a grant this page
                 then refuses. */}
-            Read-only — deploying, editing or removing agent profiles needs the{" "}
+            Read-only: deploying, editing or removing agent profiles needs the{" "}
             <strong>Manage agent profiles</strong> grant, held by a project
             admin. The capability matrix below is readable by every member.
           </span>

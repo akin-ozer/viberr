@@ -124,7 +124,7 @@ describe("F20-6: the no-PR auto-detect arm", () => {
     // It must NOT fall back to the ordinary "closes without a merge" line, and
     // it must NOT claim the merge is one-way (nothing merges here).
     expect(text).not.toContain(
-      "No linked pull request — the task closes without a merge",
+      "No linked pull request. The task closes without a merge",
     );
     expect(text).not.toContain("Merging is one-way");
   });
@@ -291,7 +291,7 @@ describe("F21-23: an already-merged PR is not promised a merge", () => {
     const merged = ceremonyDialog({ pr: MERGED });
     expect(merged.confirm).toBe("Apply → Done");
     expect(merged.text).toContain(
-      "Nothing merges — the pull request was already merged on GitHub.",
+      "Nothing merges: the pull request was already merged on GitHub.",
     );
     expect(merged.text).not.toContain("Merging is one-way");
     // Every disclosure row survives: the PR, the revision and the verdict are

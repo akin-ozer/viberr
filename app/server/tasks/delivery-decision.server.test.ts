@@ -165,7 +165,7 @@ function dataCtx(): TaskActionContext {
 }
 
 describe("R15-2: transitionStage no longer auto-delivers on review entry", () => {
-  it("entering the review stage opens NO PR and instead writes the typed 'Review reached — no PR yet' event", async () => {
+  it("entering the review stage opens NO PR and instead writes the typed 'Review reached with no PR yet' event", async () => {
     // Fails on main twice over: openTaskPr fired on the review transition, and
     // no such event existed (a non-delivering Review entry was silent, F15-17).
     seed({ stage: "impl" });

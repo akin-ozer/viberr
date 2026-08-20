@@ -68,19 +68,19 @@ const KB_SEEDS: {
         rel: "decisions/adr-001-task-store.md",
         date: [3, 30],
         content:
-          "# ADR-001 — Task files are the canonical store\n\n## Status\nAccepted.\n\n## Decision\nEvery task lives as `tasks/<KEY>/task.md` under the project folder. SQLite rows are projections, rebuilt from files — never the other way around.\n\n## Consequences\n- External edits are first-class: the watcher reprojects on change.\n- Rollback is `git checkout` of a folder, not a DB migration.\n",
+          "# ADR-001: Task files are the canonical store\n\n## Status\nAccepted.\n\n## Decision\nEvery task lives as `tasks/<KEY>/task.md` under the project folder. SQLite rows are projections, rebuilt from files, never the other way around.\n\n## Consequences\n- External edits are first-class: the watcher reprojects on change.\n- Rollback is `git checkout` of a folder, not a DB migration.\n",
       },
       {
         rel: "decisions/adr-002-operator-model.md",
         date: [4, 14],
         content:
-          "# ADR-002 — One operator per active task\n\n## Status\nAccepted.\n\n## Decision\nA dedicated operator runtime is instantiated per active task. It coordinates specialists and compresses agent work into decision packets; it never writes code and never closes a task.\n\n## Consequences\nHuman acceptance stays the only path to Done.\n",
+          "# ADR-002: One operator per active task\n\n## Status\nAccepted.\n\n## Decision\nA dedicated operator runtime is instantiated per active task. It coordinates specialists and compresses agent work into decision packets; it never writes code and never closes a task.\n\n## Consequences\nHuman acceptance stays the only path to Done.\n",
       },
       {
         rel: "decisions/adr-003-event-types.md",
         date: [5, 2],
         content:
-          "# ADR-003 — Nine typed timeline events\n\n## Status\nAccepted.\n\n## Decision\n`comment · completion · github · policy · quality · transition · blocked · agent · assign` — everything else is rejected before it reaches the timeline.\n",
+          "# ADR-003: Nine typed timeline events\n\n## Status\nAccepted.\n\n## Decision\nThe nine types are `comment · completion · github · policy · quality · transition · blocked · agent · assign`. Everything else is rejected before it reaches the timeline.\n",
       },
       {
         rel: "diagrams/context-map.md",
@@ -98,7 +98,7 @@ const KB_SEEDS: {
         rel: "glossary.md",
         date: [6, 20],
         content:
-          "# Glossary\n\n- **Packet** — an operator decision request with options.\n- **Readiness** — ready · input_required · inconsistency_risk_detected · blocked.\n- **Boundary** — auto · approval · human transition gate.\n",
+          "# Glossary\n\n- **Packet**: an operator decision request with options.\n- **Readiness**: ready · input_required · inconsistency_risk_detected · blocked.\n- **Boundary**: auto · approval · human transition gate.\n",
       },
     ],
   },
@@ -113,7 +113,7 @@ const KB_SEEDS: {
         rel: "endpoints/tasks.md",
         date: [6, 28],
         content:
-          "# Task endpoints\n\nLoaders return route-shaped data; the rare JSON endpoints use `{ data, meta? }` on success and `{ error: { code, message } }` on failure.\n\n- `GET /projects/:slug/board` — board projection.\n- `POST /projects/:slug/tasks/:key` — intents: comment, resolve-packet, owner, transition.\n",
+          "# Task endpoints\n\nLoaders return route-shaped data; the rare JSON endpoints use `{ data, meta? }` on success and `{ error: { code, message } }` on failure.\n\n- `GET /projects/:slug/board` returns the board projection.\n- `POST /projects/:slug/tasks/:key` accepts the intents comment, resolve-packet, owner, and transition.\n",
       },
       {
         rel: "endpoints/projects.md",
@@ -137,7 +137,7 @@ const KB_SEEDS: {
         rel: "schemas/event-types.md",
         date: [6, 2],
         content:
-          "# Event types\n\nSSE names are lowercase dot-separated facts: `task.updated`, `projection.rebuilt`, `run.log-appended` — payloads are compact facts, never fat objects.\n",
+          "# Event types\n\nSSE names are lowercase dot-separated facts: `task.updated`, `projection.rebuilt`, `run.log-appended`. Payloads are compact facts, never fat objects.\n",
       },
       {
         rel: "versioning.md",
@@ -158,13 +158,13 @@ const KB_SEEDS: {
         rel: "incidents/rollback.md",
         date: [6, 9],
         content:
-          "# Rollback\n\n1. `git revert` the release merge — never force-push main.\n2. Re-run the deploy pipeline with the revert SHA.\n3. Write a `blocked` event on the affected tasks with the incident link.\n",
+          "# Rollback\n\n1. `git revert` the release merge; never force-push main.\n2. Re-run the deploy pipeline with the revert SHA.\n3. Write a `blocked` event on the affected tasks with the incident link.\n",
       },
       {
         rel: "incidents/hotfix-flow.md",
         date: [6, 9],
         content:
-          "# Hotfix flow\n\nBranch from the release tag, task-key prefix as usual, review boundary stays human — hotfixes are not an excuse to skip acceptance.\n",
+          "# Hotfix flow\n\nBranch from the release tag, task-key prefix as usual, review boundary stays human. Hotfixes are not an excuse to skip acceptance.\n",
       },
       {
         rel: "release-checklist.md",

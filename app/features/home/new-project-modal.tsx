@@ -138,7 +138,7 @@ function NewProjectConnectionField({
               aria-pressed={connOwner === owner}
               title={
                 state === "failed"
-                  ? "This connection's token failed validation — delivery will not be able to push."
+                  ? "This connection's token failed validation. Delivery will not be able to push."
                   : state === "unvalidated"
                     ? "This connection has not been validated yet."
                     : undefined
@@ -166,7 +166,7 @@ function NewProjectConnectionField({
           <span>
             {picked === "failed"
               ? "This connection's token failed validation. The project will be created, but agents won't be able to push until it's replaced in Instance settings → GitHub connections."
-              : "This connection hasn't been validated yet — check it in Instance settings → GitHub connections if delivery fails."}
+              : "This connection hasn't been validated yet. Check it in Instance settings → GitHub connections if delivery fails."}
           </span>
         </div>
       )}
@@ -185,7 +185,7 @@ function NewProjectConnectionField({
           <Icon name="alert" />
           {isAdmin ? (
             <span>
-              No GitHub connections yet — every project needs a repository. Add
+              No GitHub connections yet. Every project needs a repository. Add
               a PAT in{" "}
               <Link to="/org/settings?tab=connections">
                 <b>Instance settings → GitHub connections</b>
@@ -194,7 +194,7 @@ function NewProjectConnectionField({
             </span>
           ) : (
             <span>
-              No GitHub connections yet — every project needs a repository, and
+              No GitHub connections yet. Every project needs a repository, and
               an org admin adds the PAT under{" "}
               <b>Instance settings → GitHub connections</b>. Ask an admin to add
               one, then come back.
@@ -246,7 +246,7 @@ function NewProjectRepoField({
           {!effOwner
             ? "requires a GitHub connection"
             : derived && repo
-              ? "from the project name — type to replace"
+              ? "from the project name (type to replace)"
               : "every task in this project uses it"}
         </span>
       </label>
@@ -267,7 +267,7 @@ function NewProjectRepoField({
           silently slugifies to a wrong repo under the fixed owner. Say so. */}
       {effOwner && (
         <span className="fhint">
-          Owner is fixed by the <b>{effOwner}</b> connection — enter just the
+          Owner is fixed by the <b>{effOwner}</b> connection. Enter just the
           repository name.
         </span>
       )}
@@ -342,7 +342,7 @@ function NewProjectPolicyField({
       <div className="def-note">
         <Icon name="shield" />
         <span>
-          Completion stays human-authorized — except an{" "}
+          Completion stays human-authorized. The exception is an{" "}
           <b>Autonomous within policy</b> operator granted <b>direct</b>{" "}
           completion authority, which may accept work itself (disclosed on the
           Policy page). Stages, RBAC and the agent capability matrix can be
@@ -512,7 +512,7 @@ export function NewProjectModal({
       closedRef.current = true;
       push(
         fetcher.data.key +
-          " initialized — task store created at " +
+          " initialized. Task store created at " +
           fetcher.data.storePath,
       );
       // UI-09: the repo probe's outcome, when it wasn't clean. Creation used to

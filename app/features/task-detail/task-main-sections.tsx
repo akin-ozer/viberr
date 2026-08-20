@@ -72,7 +72,7 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecor
               )}
             </span>
             <span>
-              <code className="mono">{d.code}</code> — {d.message}
+              <code className="mono">{d.code}</code> · {d.message}
             </span>
           </div>
         ))}
@@ -352,7 +352,7 @@ export function ScheduledActions({
         // D8: absent → why it matters → next action (P16), not a bare label.
         <p className="empty flush">
           {canSchedule
-            ? "No scheduled operator re-runs. Use the form below to have the operator revisit this task at a set time — handy when you're waiting on something external."
+            ? "No scheduled operator re-runs. Use the form below to have the operator revisit this task at a set time, handy when you're waiting on something external."
             : "No scheduled operator re-runs. A re-run has the operator revisit this task at a set time; scheduling one needs the run-agents grant."}
         </p>
       ) : (
@@ -367,7 +367,7 @@ export function ScheduledActions({
               </div>
               <div className="sched-meta">
                 operator · {s.autonomy} · {s.backend === "claude" ? "Claude Code" : "Codex"}
-                {s.note ? ` — ${s.note}` : ""}
+                {s.note ? ` · ${s.note}` : ""}
                 {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
               </div>
               {/* P13-D-19: `btn btn-ghost` -> `btn ghost`. */}
@@ -425,10 +425,10 @@ export function ScheduledActions({
                   is stated at click time. */}
               <select name="backend" defaultValue={defaultBackend}>
                 <option value="claude" disabled={!backendAvailable.claude}>
-                  Claude Code{backendAvailable.claude ? "" : " — not configured"}
+                  Claude Code{backendAvailable.claude ? "" : " (not configured)"}
                 </option>
                 <option value="codex" disabled={!backendAvailable.codex}>
-                  Codex{backendAvailable.codex ? "" : " — not configured"}
+                  Codex{backendAvailable.codex ? "" : " (not configured)"}
                 </option>
               </select>
             </label>

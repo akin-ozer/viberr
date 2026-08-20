@@ -94,7 +94,7 @@ describe("engagementVocabulary", () => {
       "Engage agent",
       "Engage an agent",
       "All deployed agents are already engaged.",
-      "Task closed — no new engagements.",
+      "Task closed. No new engagements.",
       "Release agent",
       "Release Documentation agent",
     ]);
@@ -113,7 +113,7 @@ describe("engagementVocabulary", () => {
       "Engage reviewer",
       "Engage a reviewer",
       "All deployed agents are already reviewing.",
-      "Task closed — no new reviewer engagements.",
+      "Task closed. No new reviewer engagements.",
       "Release reviewer",
     ]);
     expect(v.releaseOf("Code review")).toBe("Release Code review reviewer");

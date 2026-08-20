@@ -165,7 +165,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       <div className="cmdk-list" ref={listRef}>
         {!typed ? (
           <p className="cmdk-empty">
-            Type to jump to a task, a branch, an agent or a project — across
+            Type to jump to a task, a branch, an agent or a project, across
             every project you can open.
           </p>
         ) : hits.length === 0 ? (

@@ -554,7 +554,7 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
       // R19-B added a third way to satisfy the gate, so the sentence names it.
       // Telling a reader only two of the three ways to unblock is the same
       // half-truth this pass has been removing everywhere else.
-      /no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept/,
+      /no approving verdict yet\. Run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept/,
     );
   });
 

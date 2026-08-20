@@ -62,7 +62,7 @@ const AUDIT: AuditLogEntryView[] = [
   {
     id: "sv_1",
     kind: "violation",
-    text: "Project credential is missing `pull_request:write` — flagged by the policy engine on",
+    text: "Project credential is missing `pull_request:write`. Flagged by the policy engine on",
     taskKey: "VIB-142",
     occurredAt: iso(0, 9, 38),
     status: "open",
@@ -341,7 +341,7 @@ describe("stream vocabulary (P14-UI-62)", () => {
  * back — with its own real timestamp — on one click.
  */
 const RUNTIME_SESSION_TEXT =
-  "operator opened the Developer runtime session — recorded per audit policy on";
+  "operator opened the Developer runtime session. Recorded per audit policy on";
 
 function session(id: number, h: number, m: number): AuditLogEntryView {
   return {
@@ -427,7 +427,7 @@ describe("audit-column compaction (R19-7)", () => {
    *
    * Derived from the projection's own `AUDIT_ACTION_KINDS` map rather than a
    * hand-listed set: add a new "audit" action whose sentence happens to end
-   * `runtime session — recorded per audit policy on` and this fails.
+   * `runtime session. Recorded per audit policy on` and this fails.
    */
   it("a member cannot spoof the fold with their display name", () => {
     const src = readFileSync(
@@ -448,8 +448,8 @@ describe("audit-column compaction (R19-7)", () => {
     // sentence the fold looks for.
     const names = [
       "Mallory (opened the dev runtime session)",
-      "Mallory (opened the dev runtime session — recorded per audit policy on)",
-      "opened the dev runtime session — recorded per audit policy on",
+      "Mallory (opened the dev runtime session. Recorded per audit policy on)",
+      "opened the dev runtime session. Recorded per audit policy on",
     ];
 
     for (const action of auditActions) {
@@ -459,8 +459,8 @@ describe("audit-column compaction (R19-7)", () => {
       // default fallback: the `AUDIT_ACTION_KINDS` docstring blesses it for
       // "additions that land here before a bespoke sentence does", and RECONCILE
       // §1.2 registered R19-A's `task.operator.autonomy_clamped` as a map entry
-      // only. The default is `${actor} — <action words>.` — it ALWAYS ends in
-      // ".", so it can never carry the `runtime session — recorded per audit
+      // only. The default is `${actor}: <action words>.` — it ALWAYS ends in
+      // ".", so it can never carry the `runtime session. Recorded per audit
       // policy on` tail the fold looks for. The spoof-must-fail law (R19-7) is
       // asserted over it below all the same, so a name still cannot fold it.
       let templates: string[];
@@ -469,7 +469,7 @@ describe("audit-column compaction (R19-7)", () => {
           src,
           "an untemplated audit kind must fall through to the documented default",
         ).toContain('${row.action.replace(/[._]/g, " ")}');
-        templates = ["${actor} — " + action.replace(/[._]/g, " ") + "."];
+        templates = ["${actor}: " + action.replace(/[._]/g, " ") + "."];
       } else {
         const rest = src.slice(from + action.length + 8);
         const stop = /\n    (?:case "|default:)/.exec(rest);
@@ -506,7 +506,7 @@ describe("audit-column compaction (R19-7)", () => {
     const forced: AuditLogEntryView = {
       id: "evt_forced",
       kind: "audit",
-      text: `${spoof} force-accepted the completion, bypassing the required reviewer — on`,
+      text: `${spoof} force-accepted the completion, overriding the acceptance gate (the required reviewer had not approved) on`,
       taskKey: "VC-4",
       occurredAt: iso(0, 9, 20),
       status: null,
@@ -550,7 +550,7 @@ describe("audit-column compaction (R19-7)", () => {
     expect(
       isRuntimeSessionOpen({
         ...session(1, 9, 0),
-        text: "operator interrupted an agent run — recorded per audit policy on",
+        text: "operator interrupted an agent run. Recorded per audit policy on",
       }),
     ).toBe(false);
   });
@@ -704,15 +704,15 @@ describe("per-panel feed filters (P21)", () => {
   it("renders one filter bar per panel, with the panel's own vocabulary", () => {
     const { getByLabelText } = renderActivity();
     // Stream bar.
-    expect(getByLabelText("Search — activity stream")).not.toBeNull();
-    expect(getByLabelText("Filter by type — activity stream")).not.toBeNull();
-    expect(getByLabelText("Filter by task id — activity stream")).not.toBeNull();
-    expect(getByLabelText("From date — activity stream")).not.toBeNull();
+    expect(getByLabelText("Search the activity stream")).not.toBeNull();
+    expect(getByLabelText("Filter the activity stream by type")).not.toBeNull();
+    expect(getByLabelText("Filter the activity stream by task id")).not.toBeNull();
+    expect(getByLabelText("From date for the activity stream")).not.toBeNull();
     // Audit bar — its type filter speaks in the panel's four display kinds.
     // SAFETY: the aria-label belongs to the audit bar's kind <select>
     // (FeedFilters); the bound query cannot state the element type.
     const kindSelect = getByLabelText(
-      "Filter by kind — audit logs",
+      "Filter the audit logs by kind",
     ) as HTMLSelectElement;
     const kinds = [...kindSelect.options].map((o) => o.value);
     expect(kinds).toEqual(["", "violation", "blockedact", "change", "audit"]);
@@ -721,19 +721,19 @@ describe("per-panel feed filters (P21)", () => {
   it("typing a search writes the panel's own URL param and Clear removes it", () => {
     const { getByLabelText, getByText, queryByText } = renderActivity();
     expect(queryByText("Clear")).toBeNull();
-    fireEvent.change(getByLabelText("Search — activity stream"), {
+    fireEvent.change(getByLabelText("Search the activity stream"), {
       target: { value: "merge" },
     });
     // The param IS the state (the board's ?q= pattern): the bar re-reads it.
     // SAFETY: the aria-label belongs to the stream bar's search <input>
     // (FeedFilters); the bound query cannot state the element type.
     expect(
-      (getByLabelText("Search — activity stream") as HTMLInputElement).value,
+      (getByLabelText("Search the activity stream") as HTMLInputElement).value,
     ).toBe("merge");
     fireEvent.click(getByText("Clear"));
     // SAFETY: same search <input> as above.
     expect(
-      (getByLabelText("Search — activity stream") as HTMLInputElement).value,
+      (getByLabelText("Search the activity stream") as HTMLInputElement).value,
     ).toBe("");
   });
 });

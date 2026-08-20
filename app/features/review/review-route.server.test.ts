@@ -125,16 +125,16 @@ describe("/projects/:slug/review", () => {
     };
     // Nothing is waiting on either side — say exactly that, claim no agent.
     expect(reviewRowSub(bare)).toBe(
-      "At the review boundary — no agent is running and no decision is pending.",
+      "At the review boundary: no agent is running and no decision is pending.",
     );
     // The agent sentence is not deleted, just no longer the catch-all: a row
     // that really IS waiting on an agent still gets it.
     expect(reviewRowSub({ ...bare, waiting: "agent" })).toBe(
-      "Agent working — the packet arrives at the boundary.",
+      "Agent working. The packet arrives at the boundary.",
     );
     // R8-3, unchanged: a human-waiting bare row names a person, not an agent.
     expect(reviewRowSub({ ...bare, waiting: "human" })).toBe(
-      "Waiting at the review boundary — needs a human decision.",
+      "Waiting at the review boundary. Needs a human decision.",
     );
   });
 });

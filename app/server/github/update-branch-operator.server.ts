@@ -107,7 +107,7 @@ function conflictOptions(branch: string, base: string) {
       kind: "redirect" as const,
       title: "Have the delivering agent resolve the conflict",
       detail:
-        `Its workspace already has \`origin/${base}\` fetched — it merges and resolves ` +
+        `Its workspace already has \`origin/${base}\` fetched: it merges and resolves ` +
         `the conflicting files, and the next delivery pushes the result.`,
       recommended: true,
       ev:
@@ -124,7 +124,7 @@ function conflictOptions(branch: string, base: string) {
     },
     {
       kind: "archive_task" as const,
-      title: "Archive the task — the work is superseded",
+      title: "Archive the task: the work is superseded",
       detail: "Keeps the record and the branch; the task leaves the board.",
       ev: `**Decision:** archive the task rather than resolve \`${branch}\` against \`${base}\`.`,
     },
@@ -137,7 +137,7 @@ function outcomeSentence(r: UpdateBranchResult): string {
     case "updated":
       return `Brought \`${r.branch}\` up to date with \`${r.base}\` (${r.commits} commit${r.commits === 1 ? "" : "s"} merged in).`;
     case "already_current":
-      return `\`${r.branch}\` is already up to date with \`${r.base}\` — nothing to do.`;
+      return `\`${r.branch}\` is already up to date with \`${r.base}\`. Nothing to do.`;
     case "conflict":
       return (
         `\`${r.branch}\` CONFLICTS with \`${r.base}\`` +
@@ -147,7 +147,7 @@ function outcomeSentence(r: UpdateBranchResult): string {
     case "push_conflict":
       return `The update could not be published: ${r.reason}.`;
     case "update_failed":
-      return `The branch was not updated: ${r.reason}${r.detail ? ` — ${r.detail}` : ""}`;
+      return `The branch was not updated: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`;
     default:
       return `The branch was not updated: ${r.reason}.`;
   }
@@ -248,7 +248,7 @@ export async function operatorUpdateBranchFromBase(
             : `\`${result.branch}\` diverged from its remote`,
         body:
           result.status === "conflict"
-            ? `The task branch cannot be brought up to date automatically — the merge was aborted and the branch is exactly as it was. A person decides how this is resolved.`
+            ? `The task branch cannot be brought up to date automatically. The merge was aborted and the branch is exactly as it was. A person decides how this is resolved.`
             : `The remote branch holds commits this task's workspace does not, so the update was rolled back rather than forced. A person decides how this is resolved.`,
         observations: [
           { k: "Branch", v: result.branch, code: true },

@@ -232,7 +232,7 @@ describe("stage editor", () => {
     );
     expect(result.ok).toBe(true);
     expect(result.toast).toBe(
-      '"Hardening pass" added — it appears on the board immediately',
+      '"Hardening pass" added. It appears on the board immediately',
     );
     newStageId = result.stageId ?? "";
 
@@ -263,7 +263,7 @@ describe("stage editor", () => {
       }),
     );
     expect(result.toast).toBe(
-      'Stage renamed to "Hardening" — board and policy follow',
+      'Stage renamed to "Hardening". Board and policy follow',
     );
     const { view } = await runLoader(ids.arda);
     expect(view.stages.find((s) => s.id === newStageId)!.name).toBe("Hardening");
@@ -286,7 +286,7 @@ describe("stage editor", () => {
         orderedIds: shuffled.join(","),
       }),
     );
-    expect(result.toast).toBe("Stage order updated — board columns follow");
+    expect(result.toast).toBe("Stage order updated. Board columns follow");
     const after = await runLoader(ids.arda);
     const orderedIds = after.view.stages.map((s) => s.id);
     expect(orderedIds[0]).toBe("triage");
@@ -307,7 +307,7 @@ describe("stage editor", () => {
       }),
     );
     expect(locked.status).toBe(409);
-    expect(locked.error).toBe("Triage can't be removed — it's the entry point");
+    expect(locked.error).toBe("Triage can't be removed: it's the entry point");
 
     const nonEmpty = actionOutcome(
       await postAction(ids.arda, {
@@ -345,7 +345,7 @@ describe("members", () => {
     // N20-6: no mailer exists — the toast names what happened, not a sent email.
     expect(result).toEqual({
       ok: true,
-      toast: "Added deniz@viberr.dev — joins as Viewer",
+      toast: "Added deniz@viberr.dev, who joins as Viewer",
     });
     const { view } = await runLoader(ids.arda);
     const deniz = view.members.find((m) => m.userId === ids.deniz)!;
@@ -463,7 +463,7 @@ describe("grant-scope", () => {
     expect(result).toEqual({
       ok: true,
       toast:
-        "No GitHub credential configured — connect a PAT before re-checking scopes.",
+        "No GitHub credential configured. Connect a PAT before re-checking scopes.",
       result: "no_pat_configured",
     });
   });

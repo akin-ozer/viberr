@@ -317,7 +317,7 @@ describe("createTask", () => {
     ).rejects.toMatchObject({
       status: 400,
       message:
-        "New tasks start at Triage — the triage gate is where a goal is " +
+        "New tasks start at Triage, the triage gate where a goal is " +
         "refined. Move the task through the workflow after it is created.",
     });
   });
@@ -966,7 +966,7 @@ describe("ownership", () => {
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({
       type: "assign",
-      text: "Took task ownership — owner is the human reviewer and acceptance authority for this task.",
+      text: "Took task ownership. The owner is the human reviewer and acceptance authority for this task.",
     });
   });
 
@@ -981,7 +981,7 @@ describe("ownership", () => {
     );
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      `Took over task ownership from **${store.users.murat.name}** — owner is the human reviewer and acceptance authority.`,
+      `Took over task ownership from **${store.users.murat.name}**. The owner is the human reviewer and acceptance authority.`,
     );
   });
 
@@ -1015,7 +1015,7 @@ describe("ownership", () => {
     );
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      `Handed task ownership to **${store.users.selin.name}** — they hold review & acceptance for this task now.`,
+      `Handed task ownership to **${store.users.selin.name}**. They hold review & acceptance for this task now.`,
     );
   });
 
@@ -1046,7 +1046,7 @@ describe("ownership", () => {
     // admin|maintainer|contributor, and a VIEWER is a project member who can
     // never take the seat. The test pinned the wrong copy; both are corrected.
     expect(detail?.timeline[0]?.text).toBe(
-      `Released **${store.users.selin.name}** from task ownership (admin) — the seat is open to any contributor or above.`,
+      `Released **${store.users.selin.name}** from task ownership (admin). The seat is open to any contributor or above.`,
     );
     const audit = listAuditEvents(store.db, {
       action: "task.ownership.admin_released",
@@ -1072,7 +1072,7 @@ describe("ownership", () => {
       { dataRoot: store.dataRoot },
     );
     expect(getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]?.text).toBe(
-      "Released task ownership — review & acceptance stall until another member takes the seat.",
+      "Released task ownership. Review & acceptance stall until another member takes the seat.",
     );
   });
 });
@@ -1292,7 +1292,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     // self-contradictory "Review passed / Validation: failing"; it is an honest
     // "Approval noted — rework still needed".
     const quality = file.parsed.timeline.find((e) => e.type === "quality");
-    expect(quality?.title).toBe("Approval noted — rework still needed");
+    expect(quality?.title).toBe("Approval noted, rework still needed");
     expect(quality?.text).toContain("Validation:** failing");
     expect(quality?.text).not.toContain("approved the work");
   });
@@ -1777,7 +1777,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     // whose accept-time text is re-proved LIVE against the remote (no_branch
     // basis) — never the merge path's title or wording. (Replaces A's older
     // "completed with no changes required" / "nothing was delivered or merged".)
-    expect(event.title).toBe("Completed — no changes");
+    expect(event.title).toBe("Completed with no changes");
     expect(event.text).toContain("completed with no changes");
     expect(event.text).toContain("no pull request to merge");
     expect(event.text).toContain("no `vib-1` branch exists");

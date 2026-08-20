@@ -73,7 +73,7 @@ function MissingChips({
           key={id}
           className={"pick-chip missing on" + (mono ? " mono" : "")}
           aria-pressed={true}
-          title="No longer in the store — click to remove this grant"
+          title="No longer in the store. Click to remove this grant"
           onClick={() => onDrop(id)}
         >
           {id}
@@ -165,7 +165,7 @@ export function AgentModal({
     <MiniModal
       icon={<AgentGlyph backend={backend} />}
       title={initial ? "Edit agent profile" : "New agent profile"}
-      sub="Global base definition — projects grant eligibility & capabilities"
+      sub="Global base definition. Projects grant eligibility & capabilities"
       onClose={onClose}
       canSave={canSave}
       saveLabel={initial ? "Save changes" : "Create profile"}
@@ -175,8 +175,8 @@ export function AgentModal({
             initial.used +
             " project" +
             (initial.used === 1 ? "" : "s") +
-            " — each keeps its own copy; re-adopt to pick up this edit"
-          : "a template — add it to a project from Agents → Add from library"
+            ". Each keeps its own copy; re-adopt to pick up this edit"
+          : "a template: add it to a project from Agents → Add from library"
       }
       onSave={() => {
         if (!canSave) return;
@@ -264,7 +264,7 @@ export function AgentModal({
       <div className="def-note">
         <Icon name="shield" />
         <span>
-          A template starts with <strong>delivery withheld</strong> — it can read,
+          A template starts with <strong>delivery withheld</strong>. It can read,
           validate and comment, but not write to the repository. Capability policy is a
           per-project decision: open the profile in a project&rsquo;s Agents page to grant
           branch, commit or pull-request rights there.
@@ -274,7 +274,7 @@ export function AgentModal({
         <label className="flabel" htmlFor="ga-persona">
           Persona / instructions{" "}
           <span className="fhint">
-            the agent's working instructions — its system prompt on every run; markdown ok
+            the agent's working instructions, its system prompt on every run; markdown ok
           </span>
         </label>
         <textarea

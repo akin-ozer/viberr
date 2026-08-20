@@ -12,7 +12,7 @@ describe("reconcile toast matrix", () => {
       "Updating branch and PR status from GitHub…",
     );
     expect(RECONCILE_DONE_TOAST).toBe(
-      "Status updated — every branch and PR maps to its task key",
+      "Status updated. Every branch and PR maps to its task key",
     );
   });
 
@@ -36,7 +36,7 @@ describe("reconcile toast matrix", () => {
         allFailuresOffline: false,
       }),
     ).toBe(
-      "No GitHub credential configured — connect a PAT to reconcile branches and PRs.",
+      "No GitHub credential configured. Connect a PAT to reconcile branches and PRs.",
     );
     expect(
       reconcileToast({
@@ -57,7 +57,7 @@ describe("reconcile toast matrix", () => {
         allFailuresOffline: true,
       }),
     ).toBe(
-      "GitHub is unreachable — showing the last-known branch and PR state.",
+      "GitHub is unreachable. Showing the last-known branch and PR state.",
     );
   });
 
@@ -70,7 +70,7 @@ describe("reconcile toast matrix", () => {
         allFailuresOffline: false,
       }),
     ).toBe(
-      "Reconciled 5 of 7 branches — 2 couldn't sync; last-known state kept.",
+      "Reconciled 5 of 7 branches. 2 couldn't sync; last-known state kept.",
     );
   });
 });
@@ -78,14 +78,14 @@ describe("reconcile toast matrix", () => {
 describe("grant-scope toast matrix", () => {
   it("no PAT → typed honest copy (never a crash)", () => {
     expect(grantScopeToast({ status: "no_pat_configured", resolvedCount: 0 })).toBe(
-      "No GitHub credential configured — connect a PAT before re-checking scopes.",
+      "No GitHub credential configured. Connect a PAT before re-checking scopes.",
     );
   });
 
   it("offline → last-known copy", () => {
     expect(
       grantScopeToast({ status: "network_unavailable", resolvedCount: 0 }),
-    ).toBe("GitHub is unreachable — kept the last-known scope results.");
+    ).toBe("GitHub is unreachable. Kept the last-known scope results.");
   });
 
   it("resolution → the mock string with the task key interpolated", () => {
@@ -102,19 +102,19 @@ describe("grant-scope toast matrix", () => {
   it("revoked / expired / repo_not_found / org approval → honest failures", () => {
     const base = { status: "revalidated", resolvedCount: 0 } as const;
     expect(grantScopeToast({ ...base, validationStatus: "revoked" })).toBe(
-      "Re-check failed — the credential was revoked on GitHub.",
+      "Re-check failed: the credential was revoked on GitHub.",
     );
     expect(grantScopeToast({ ...base, validationStatus: "expired" })).toBe(
-      "Re-check failed — the credential has expired.",
+      "Re-check failed: the credential has expired.",
     );
     expect(
       grantScopeToast({ ...base, validationStatus: "repo_not_found" }),
     ).toBe(
-      "Re-check couldn't see the repository — the credential may lack repo access.",
+      "Re-check couldn't see the repository. The credential may lack repo access.",
     );
     expect(
       grantScopeToast({ ...base, validationStatus: "org_approval_missing" }),
-    ).toBe("Re-check blocked — the token is pending organization approval.");
+    ).toBe("Re-check blocked: the token is pending organization approval.");
   });
 
   it("still-missing scope after a clean re-check → named in the copy", () => {
@@ -126,7 +126,7 @@ describe("grant-scope toast matrix", () => {
         stillMissingScope: "pull_request:write",
       }),
     ).toBe(
-      "Re-checked — pull_request:write is still missing on the project credential.",
+      "Re-checked. pull_request:write is still missing on the project credential.",
     );
   });
 
@@ -138,6 +138,6 @@ describe("grant-scope toast matrix", () => {
         resolvedCount: 0,
         stillMissingScope: null,
       }),
-    ).toBe("Scopes re-checked — all required scopes granted.");
+    ).toBe("Scopes re-checked. All required scopes granted.");
   });
 });

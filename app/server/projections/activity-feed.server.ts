@@ -387,7 +387,7 @@ function auditText(
         const tt = tightened.to ?? "?";
         const tb =
           BOUNDARY_LABEL.get(tightened.boundary ?? "") ?? tightened.boundary;
-        if (tb) return `${base} — **${tf} → ${tt}** is now ${tb}.`;
+        if (tb) return `${base}. **${tf} → ${tt}** is now ${tb}.`;
       }
       return `${base}.`;
     }
@@ -412,7 +412,7 @@ function auditText(
     case "project.deleted":
       return `${actor} deleted the project.`;
     case "github.reconcile.project":
-      return `${actor} reconciled the project against GitHub — recorded per audit policy on`;
+      return `${actor} reconciled the project against GitHub. Recorded per audit policy on`;
     case "github.credential.assigned":
       return `${actor} assigned the project GitHub credential.`;
     case "github.credential.cleared":
@@ -421,26 +421,26 @@ function auditText(
       // The grant-scope / re-check attempt with its typed outcome (Phase 10).
       const outcome = d.outcome;
       if (outcome === "no_pat_configured") {
-        return `${actor} requested a scope grant — no GitHub credential configured.`;
+        return `${actor} requested a scope grant, but no GitHub credential is configured.`;
       }
       if (outcome === "network_unavailable") {
-        return `${actor} re-checked the project credential — GitHub was unreachable.`;
+        return `${actor} re-checked the project credential, but GitHub was unreachable.`;
       }
       const resolved = d.resolvedViolations;
       return resolved > 0
-        ? `${actor} re-validated the project credential — ${resolved} policy flag${resolved === 1 ? "" : "s"} resolved.`
+        ? `${actor} re-validated the project credential and resolved ${resolved} policy flag${resolved === 1 ? "" : "s"}.`
         : `${actor} re-checked the project credential scopes.`;
     }
     case "github.pr.merge_refused":
-      return `Blocked: review PR merge refused — the project credential is missing \`${d.scope ?? "a scope"}\` — on`;
+      return `Blocked: review PR merge refused (the project credential is missing \`${d.scope ?? "a scope"}\`) on`;
     case "task.ownership.admin_released":
-      return `${actor} released the task owner — recorded per audit policy on`;
+      return `${actor} released the task owner. Recorded per audit policy on`;
     case "runtime.run.started": {
       const role = d.role ?? "agent";
-      return `${actor} opened the ${role} runtime session — recorded per audit policy on`;
+      return `${actor} opened the ${role} runtime session. Recorded per audit policy on`;
     }
     case "runtime.run.interrupted":
-      return `${actor} interrupted an agent run — recorded per audit policy on`;
+      return `${actor} interrupted an agent run. Recorded per audit policy on`;
     // P13-D-7: the admin override that bypasses the review gate.
     //
     // `bypassed` is NOT a gate NAME, whatever the old comment here claimed: the
@@ -451,14 +451,19 @@ function auditText(
     // review for a verdict, or an admin can force-accept." Read it as the quoted
     // reason it is, and drop the remediation half: the reader is looking at a
     // record of an override that already happened, so "or an admin can
-    // force-accept" is advice for a decision nobody still has to make.
+    // force-accept" is advice for a decision nobody still has to make. The
+    // reason/remediation halves are split by a sentence boundary; rows recorded
+    // before the copy was de-dashed used an em dash, so both are handled.
     case "task.acceptance.forced": {
       const bypassed = d.bypassed;
       if (!bypassed || bypassed.startsWith("no gate")) {
-        return `${actor} force-accepted the completion — on`;
+        return `${actor} force-accepted the completion on`;
       }
-      const reason = bypassed.split(" — ")[0]!.replace(/\.$/, "");
-      return `${actor} force-accepted the completion, overriding the acceptance gate (${reason}) — on`;
+      const reason = bypassed
+        .split(" — ")[0]!
+        .split(/(?<=\.)\s/)[0]!
+        .replace(/\.$/, "");
+      return `${actor} force-accepted the completion, overriding the acceptance gate (${reason}) on`;
     }
     // P13-D-7: the D2 emergency override — an org admin acting above (or
     // without) their project membership. `what` is the guard's own copy.
@@ -472,15 +477,15 @@ function auditText(
     case "project.authority.denied": {
       const what = d.what ?? "act on this project";
       const memberRole = d.memberRole;
-      return `Blocked: ${actor} tried to ${what} — ${
+      return `Blocked: ${actor} tried to ${what}, but ${
         memberRole
           ? `their project role (${memberRole}) is not permitted`
-          : "not a project member"
+          : "they are not a project member"
       }.`;
     }
     default:
       // Whitelisted-but-untemplated (future additions): honest fallback.
-      return `${actor} — ${row.action.replace(/[._]/g, " ")}.`;
+      return `${actor}: ${row.action.replace(/[._]/g, " ")}.`;
   }
 }
 
@@ -579,8 +584,8 @@ function collectAuditEntries(
               id: v.id,
               kind: "violation",
               text: v.taskKey
-                ? `Project credential is missing \`${v.scope}\` — flagged by the policy engine on`
-                : `Project credential is missing \`${v.scope}\` — flagged by the policy engine.`,
+                ? `Project credential is missing \`${v.scope}\`. Flagged by the policy engine on`
+                : `Project credential is missing \`${v.scope}\`. Flagged by the policy engine.`,
               taskKey: v.taskKey,
               occurredAt: v.createdAt,
               status: v.status,

@@ -72,10 +72,10 @@ describe("audit panel — Phase 10 action kinds render readably", () => {
     );
     const texts = entries.map((e) => e.text);
     expect(texts).toContain(
-      "Arda Test requested a scope grant — no GitHub credential configured.",
+      "Arda Test requested a scope grant, but no GitHub credential is configured.",
     );
     expect(texts).toContain(
-      "Arda Test re-validated the project credential — 1 policy flag resolved.",
+      "Arda Test re-validated the project credential and resolved 1 policy flag.",
     );
     for (const e of entries) {
       expect(e.kind).toBe("change");
@@ -96,7 +96,7 @@ describe("audit panel — Phase 10 action kinds render readably", () => {
     const entry = listAuditLog(store.db, store.slug)[0]!;
     expect(entry.kind).toBe("audit");
     expect(entry.text).toBe(
-      "operator opened the Developer runtime session — recorded per audit policy on",
+      "operator opened the Developer runtime session. Recorded per audit policy on",
     );
     expect(entry.taskKey).toBe("VIB-7");
   });

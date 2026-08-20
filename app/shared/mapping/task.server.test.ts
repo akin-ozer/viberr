@@ -310,7 +310,7 @@ describe("mapOperatorRef sinceLabel (F7-UI2)", () => {
   it("an unknown/removed stage id renders an honest dash", () => {
     expect(mapOperatorRef({ assignedAtStageId: "ghost" }, STAGES)).toMatchObject({
       sinceStageIndex: null,
-      sinceLabel: "since —",
+      sinceLabel: "since a removed stage",
     });
   });
 

@@ -361,9 +361,9 @@ export function mapOperatorRef(
     name: "Operator",
     assignedAtStageId: ref.assignedAtStageId,
     sinceStageIndex,
-    // The real stage NAME (F7-UI2) — an unknown/removed stage id renders "—"
-    // rather than pretending a position.
-    sinceLabel: idx === -1 ? "since —" : `since ${stages[idx]!.name}`,
+    // The real stage NAME (F7-UI2) — an unknown/removed stage id renders a
+    // plain admission rather than pretending a position.
+    sinceLabel: idx === -1 ? "since a removed stage" : `since ${stages[idx]!.name}`,
   };
 }
 

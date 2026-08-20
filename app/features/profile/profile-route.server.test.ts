@@ -136,7 +136,7 @@ describe("/profile action", () => {
       title: "Staff engineer",
     });
     expect(data.ok).toBe(true);
-    expect(data.toast).toBe("Profile saved — visible to Viberr Core members");
+    expect(data.toast).toBe("Profile saved. Visible to Viberr Core members");
     const { findUserById } = await import("~/server/auth/user-store.server");
     const user = findUserById(app.db, murId)!;
     expect(user.name).toBe("Murat Yıldız");
@@ -252,7 +252,7 @@ describe("/profile action", () => {
       ),
     );
     expect(result.ok).toBe(true);
-    expect(result.toast).toBe("Password updated — other sessions were signed out");
+    expect(result.toast).toBe("Password updated. Other sessions were signed out");
 
     const { loginWithCredentials } = await import(
       "~/server/auth/login.server"
@@ -306,7 +306,7 @@ describe("/profile action", () => {
     const { data } = await postAction(ardaId, { intent: "github-disconnect" });
     expect(data.ok).toBe(true);
     expect(data.toast).toBe(
-      "GitHub disconnected — audit falls back to your workspace identity",
+      "GitHub disconnected. Audit falls back to your workspace identity",
     );
     const { findUserById } = await import("~/server/auth/user-store.server");
     expect(findUserById(app.db, ardaId)!.idp).toBe("local");

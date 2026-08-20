@@ -598,7 +598,7 @@ export async function startRun(
   const modelSubstitution = foreignBackend
     ? `The agent's model **${modelDisplayName(foreignBackend, input.model)}** ` +
       `(\`${input.model}\`) is a ${BACKEND_LABEL[foreignBackend]} model and cannot run on ` +
-      `${BACKEND_LABEL[input.backend]} — this run used \`${model}\` instead. ` +
+      `${BACKEND_LABEL[input.backend]}, so this run used \`${model}\` instead. ` +
       "Pick a model from this backend's list on the agent profile."
     : null;
   if (modelSubstitution) {
@@ -649,7 +649,7 @@ export async function startRun(
         code: ERROR_CODES.CONFLICT,
         status: 409,
         userMessage:
-          "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
+          "A delivering agent run is already in progress on this task. Wait for it to finish or interrupt it before starting another.",
       });
     }
     throw err;
@@ -792,9 +792,9 @@ export function backendUnavailableMessage(backend: RealBackend): string {
     // dir it checked instead of re-suggesting the flag that is already set.
     const claude = claudeCliAuthDiagnostics();
     if (claude.optIn && claude.verified === "refuted") {
-      return `Claude Code is unavailable — VIBERR_CLAUDE_USE_CLI_AUTH=1 is set, but \`${claude.configDir}\` holds no \`claude\` login (no ${claude.credentialsPath}, and the CLI has never run against that config dir). Point CLAUDE_CONFIG_DIR at the logged-in dir, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN, or run this agent on another backend. No agent process was started.`;
+      return `Claude Code is unavailable: VIBERR_CLAUDE_USE_CLI_AUTH=1 is set, but \`${claude.configDir}\` holds no \`claude\` login (no ${claude.credentialsPath}, and the CLI has never run against that config dir). Point CLAUDE_CONFIG_DIR at the logged-in dir, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN, or run this agent on another backend. No agent process was started.`;
     }
-    return "Claude Code is unavailable — no usable credential is configured. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (or opt in with VIBERR_CLAUDE_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
+    return "Claude Code is unavailable: no usable credential is configured. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (or opt in with VIBERR_CLAUDE_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
   }
   const diag = codexCliAuthDiagnostics();
   // D1: the source==run-home misconfiguration must be named FIRST. The generic
@@ -802,12 +802,12 @@ export function backendUnavailableMessage(backend: RealBackend): string {
   // home, which in this state cements the misconfiguration instead of fixing it.
   const misconfigured = codexAuthMisconfiguration(diag);
   if (misconfigured) {
-    return `Codex is unavailable — ${misconfigured} No agent process was started.`;
+    return `Codex is unavailable. ${misconfigured} No agent process was started.`;
   }
   if (diag.optIn && !diag.authJsonExists) {
-    return `Codex is unavailable — VIBERR_CODEX_USE_CLI_AUTH=1 is set, but the Codex CLI login file is missing at ${diag.authJsonPath}. Copy it from a logged-in machine (docker: \`docker compose cp ~/.codex/auth.json app:${diag.authJsonPath}\`) — the next run picks it up without a restart. Or set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY, or run this agent on another backend. No agent process was started.`;
+    return `Codex is unavailable: VIBERR_CODEX_USE_CLI_AUTH=1 is set, but the Codex CLI login file is missing at ${diag.authJsonPath}. Copy it from a logged-in machine (docker: \`docker compose cp ~/.codex/auth.json app:${diag.authJsonPath}\`) and the next run picks it up without a restart. Or set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY, or run this agent on another backend. No agent process was started.`;
   }
-  return "Codex is unavailable — no usable credential is configured. Set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY (or opt in with VIBERR_CODEX_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
+  return "Codex is unavailable: no usable credential is configured. Set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY (or opt in with VIBERR_CODEX_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
 }
 
 // ------------------------------------------- continuity recovery (P13-D-2)
@@ -826,7 +826,7 @@ const SESSION_MISSING_TAG = "run·session_missing";
  *  authentication" — the credential is fine; the transcript is not. */
 function sessionMissingMessage(backend: RealBackend, sessionId: string): string {
   const label = backend === "claude" ? "Claude Code" : "Codex";
-  return `The ${label} session ${sessionId} no longer exists on this machine — its provider transcript is gone (retention sweep or a wiped runtime volume), so the conversation could not be resumed. The agent re-anchored on task.md and continued with a fresh session.`;
+  return `The ${label} session ${sessionId} no longer exists on this machine. Its provider transcript is gone (retention sweep or a wiped runtime volume), so the conversation could not be resumed. The agent re-anchored on task.md and continued with a fresh session.`;
 }
 
 /**

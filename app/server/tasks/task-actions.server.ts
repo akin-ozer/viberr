@@ -429,7 +429,7 @@ export async function createTask(
   }
   if (input.stageId !== undefined && input.stageId !== stage.id) {
     throw AppError.validation(
-      `New tasks start at ${stage.name} — the triage gate is where a goal is refined. Move the task through the workflow after it is created.`,
+      `New tasks start at ${stage.name}, the triage gate where a goal is refined. Move the task through the workflow after it is created.`,
     );
   }
   const stageId = stage.id;
@@ -554,7 +554,7 @@ export async function updateTaskGoal(
       type: "note",
       actor: humanActorRef(db, actor),
       title: "Goal updated",
-      text: "The task goal / acceptance criteria were edited — downstream agents re-anchor on the new goal.",
+      text: "The task goal / acceptance criteria were edited. Downstream agents re-anchor on the new goal.",
       toAgent: false,
       evidence: null,
     });
@@ -1696,7 +1696,7 @@ async function openStuckLoopPacket(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         packetType: "blocked",
-        title: `Work stalled — pick a recovery path`,
+        title: `Work stalled: pick a recovery path`,
         body: `${input.reason} Coordination is paused until a human chooses how to proceed.`,
         observations: [
           { k: "Agent", v: `@${input.agentHandle}` },
@@ -1785,7 +1785,7 @@ async function withdrawSupersededStuckPacket(
         type: "transition",
         actor: { kind: "operator" },
         title: null,
-        text: `**Packet withdrawn:** "${p.title}" is moot — the ${input.role} agent run completed successfully after it was opened.`,
+        text: `**Packet withdrawn:** "${p.title}" is moot. The ${input.role} agent run completed successfully after it was opened.`,
         toAgent: false,
         evidence: null,
       });
@@ -2078,16 +2078,16 @@ export async function recordAgentCompletion(
           // bases are different facts (no branch at all vs. a branch carrying
           // nothing), so the sentence must not state one for the other.
           summary = noChangeMint
-            ? `${roleDisplay} approved: there is nothing to deliver — ` +
+            ? `${roleDisplay} approved: there is nothing to deliver. ` +
               (noChangeMint.basis === "no_branch"
-                ? `no \`${noChangeMint.branch}\` branch exists on the remote`
+                ? `No \`${noChangeMint.branch}\` branch exists on the remote`
                 : `\`${noChangeMint.branch}\` carries no commits ahead of \`${noChangeMint.baseBranch}\``) +
               `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. Accepting completes this task with no changes.`
             : `${roleDisplay} approved the work.`;
         } else {
           // Approved, but not yet cleared: another required reviewer is
           // outstanding or has requested changes on the current revision.
-          title = "Approval noted — rework still needed";
+          title = "Approval noted, rework still needed";
           summary = `${roleDisplay} approved, but the current revision is not yet cleared by all required reviewers.`;
         }
         // A not-yet-acceptable state makes a pending accept-completion
@@ -2176,7 +2176,7 @@ export async function recordAgentCompletion(
           actor: actorRef,
           title: null,
           text:
-            `**Question held — a decision is already open:** ${questionDeferred}` +
+            `**Question held (a decision is already open):** ${questionDeferred}` +
             (question.body?.trim() ? `\n\n${question.body.trim()}` : "") +
             "\n\nAnswer it alongside the open decision, or re-prompt the agent once that decision is resolved.",
           toAgent: false,
@@ -2552,9 +2552,9 @@ export async function applyAgentCompletionEffects(
         : failure?.kind === "auth"
           ? `${backendLabel} rejected the credentials`
           : failure?.kind === "unavailable"
-            ? `${backendLabel} is unavailable (no usable credential configured — the run was refused, no agent process started)`
+            ? `${backendLabel} is unavailable (no usable credential configured, so the run was refused and no agent process started)`
             : failure?.kind === "max_turns"
-              ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work — not a task failure (its partial report, if any, is above)`
+              ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
               // P13-D-2: a dead provider transcript is its own class. It used to
               // fall through to the generic branch below, which reads like a
               // runtime error and sent people to check a credential that was
@@ -2574,7 +2574,7 @@ export async function applyAgentCompletionEffects(
         type: "blocked",
         actor: actorRef,
         title: null,
-        text: `The ${input.role} ${roleLabel} run did not complete — ${reasonText}.${
+        text: `The ${input.role} ${roleLabel} run did not complete: ${reasonText}.${
           failure?.kind === "max_turns" ? "" : " No changes were delivered."
         }${
           failure?.kind === "quota" || failure?.kind === "auth"
@@ -2631,7 +2631,7 @@ export async function applyAgentCompletionEffects(
             {
               kind: "retry_other_backend" as const,
               title: `Retry on ${altLabel}`,
-              detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks — later prompts follow it.`,
+              detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks, and later prompts follow it.`,
               recommended: true,
               backend: altBackend,
               profileId: failedProfileId,
@@ -2642,7 +2642,7 @@ export async function applyAgentCompletionEffects(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       agentHandle: input.agentHandle,
-      reason: `The ${input.role} ${roleLabel} run failed — ${reasonText}.`,
+      reason: `The ${input.role} ${roleLabel} run failed: ${reasonText}.`,
     };
     if (retryOption.length) stuck.extraOptions = retryOption;
     if (providerText) stuck.providerText = providerText;
@@ -2653,7 +2653,7 @@ export async function applyAgentCompletionEffects(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         kind: "quality",
-        text: `${input.role} run failed — ${reasonText}.`,
+        text: `${input.role} run failed: ${reasonText}.`,
       },
       ctx,
     );
@@ -2777,7 +2777,7 @@ export async function applyAgentCompletionEffects(
         taskKey: input.taskKey,
         agentHandle: input.agentHandle,
         reason: noProgress
-          ? "The agent repeated its previous report verbatim — no forward progress."
+          ? "The agent repeated its previous report verbatim, with no forward progress."
           : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
       });
     }
@@ -2977,7 +2977,7 @@ export async function operatorPromptAgent(
           type: "note",
           actor: { kind: "system", systemId: "policy-engine" },
           title: null,
-          text: `**Note:** the prompt above did NOT start a run — ${message} @${input.handle} has not been engaged; the directive needs to be re-sent once the blocker is resolved.`,
+          text: `**Note:** the prompt above did NOT start a run: ${message} @${input.handle} has not been engaged; the directive needs to be re-sent once the blocker is resolved.`,
           toAgent: false,
           evidence: null,
         });
@@ -3064,11 +3064,11 @@ export async function setOwner(
   let text: string;
   if (isTake && !currentOwnerId) {
     text =
-      "Took task ownership — owner is the human reviewer and acceptance authority for this task.";
+      "Took task ownership. The owner is the human reviewer and acceptance authority for this task.";
   } else if (isTake) {
-    text = `Took over task ownership from **${userName(db, currentOwnerId!)}** — owner is the human reviewer and acceptance authority.`;
+    text = `Took over task ownership from **${userName(db, currentOwnerId!)}**. The owner is the human reviewer and acceptance authority.`;
   } else {
-    text = `Handed task ownership to **${userName(db, input.targetUserId)}** — they hold review & acceptance for this task now.`;
+    text = `Handed task ownership to **${userName(db, input.targetUserId)}**. They hold review & acceptance for this task now.`;
   }
 
   const event: TaskFileEvent = {
@@ -3152,8 +3152,8 @@ export async function releaseOwner(
   // was corrected to "a contributor or above can take it"; this timeline event
   // is the server half, read by exactly the same humans.
   const text = isSelf
-    ? "Released task ownership — review & acceptance stall until another member takes the seat."
-    : `Released **${userName(db, currentOwnerId)}** from task ownership (admin) — the seat is open to any contributor or above.`;
+    ? "Released task ownership. Review & acceptance stall until another member takes the seat."
+    : `Released **${userName(db, currentOwnerId)}** from task ownership (admin). The seat is open to any contributor or above.`;
 
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
@@ -3388,7 +3388,7 @@ export async function transitionStage(
     if (current !== fromStageId) {
       throw AppError.conflict(
         `${input.taskKey} moved to ${stageName(project, current)} while this change was being ` +
-          `applied — it is no longer at ${stageName(project, fromStageId)}. Refresh the task and try again.`,
+          `applied. It is no longer at ${stageName(project, fromStageId)}. Refresh the task and try again.`,
       );
     }
     moved = true;
@@ -3493,7 +3493,7 @@ export async function transitionStage(
         agentHandle: "operator",
         reason:
           `The operator made ${OPERATOR_TRANSITION_CHAIN_CAP} consecutive stage ` +
-          `transitions with no agent run or human action in between — a coordination loop.`,
+          `transitions with no agent run or human action in between, which is a coordination loop.`,
       });
     } else {
       void autoInvokeOperator(
@@ -3534,7 +3534,7 @@ export async function transitionStage(
         ctx,
         input.projectSlug,
         input.taskKey,
-        "Review reached — no PR yet",
+        "Review reached with no PR yet",
         `${input.taskKey} entered ${stageName(project, input.toStageId)} with no live review pull request. ` +
           `The operator decides delivery (push + review PR); a maintainer or the task owner can also ` +
           `deliver from the task page's GitHub panel.`,
@@ -3756,7 +3756,7 @@ export async function performDelivery(
         taskKey,
         "Delivery push conflicted",
         `${taskKey}'s delivery was not pushed: ${push.reason}. This is a branch-history ` +
-          `conflict, not a credential problem. No review PR was opened — it would review ` +
+          `conflict, not a credential problem. No review PR was opened; it would review ` +
           `the stale remote content instead of the delivery. Resolve the remote branch ` +
           `\`${push.branch}\` (delete or rename it, or force-push deliberately), then deliver again.`,
       );
@@ -3769,7 +3769,7 @@ export async function performDelivery(
     if (push.status === "push_failed" || push.status === "no_pat") {
       const message =
         `${taskKey}'s execution branch could not be pushed (${push.status === "no_pat" ? "no project credential" : push.reason}). ` +
-        `No review PR was opened — a PR over a remote missing the newest commits would ` +
+        `No review PR was opened; a PR over a remote missing the newest commits would ` +
         `review the wrong content. Fix the push, then deliver again.`;
       await surfaceDeliveryEvent(
         db,
@@ -3870,20 +3870,20 @@ export async function performDelivery(
         push.status === "no_commits"
           ? `${taskKey}'s workspace carries no commits ahead of the default branch, so there is ` +
             `nothing to review and no PR was opened. If the agent produced work, it never reached ` +
-            `the task branch — re-run the delivering agent, then deliver again.`
+            `the task branch. Re-run the delivering agent, then deliver again.`
           : verifiedNoChange
             ? `${taskKey} has never produced a branch, a commit or a pull request, and the server ` +
-              `inspected its workspace before recording this: ${push.reason} — recorded as ` +
+              `inspected its workspace before recording this: ${push.reason}. The task is recorded as ` +
               `**completed with no changes**. ` +
               (baseRevision
                 ? `The subject the required reviewers now approve is the repository as it stands, at ` +
                   `\`${baseRevision.headSha.slice(0, 12)}\` on \`${baseRevision.branch}\`. Nothing has ` +
-                  `been accepted — the ordinary verdict path still runs over that revision.`
+                  `been accepted; the ordinary verdict path still runs over that revision.`
                 : `The default-branch head could not be read from GitHub, so no revision was recorded ` +
-                  `for the reviewers to approve — deliver again once GitHub is reachable.`)
+                  `for the reviewers to approve. Deliver again once GitHub is reachable.`)
             : push.status === "no_workspace"
               ? `${taskKey} has no workspace clone to deliver from, so its branch was not pushed and ` +
-                `no review PR was opened — one opened now would review whatever the remote branch ` +
+                `no review PR was opened. One opened now would review whatever the remote branch ` +
                 `already holds, not this task's work. Run the delivering agent, then deliver again.`
               : push.status === "no_repo"
                 ? `${taskKey}'s project has no GitHub repository configured, so nothing could be ` +
@@ -3892,7 +3892,7 @@ export async function performDelivery(
                 : push.status === "no_branch"
                   ? `${taskKey}'s workspace is not on a task branch, so nothing was pushed and no ` +
                     `review PR was opened: ${push.reason}. The delivering run must commit on the ` +
-                    `task branch — re-run it, then deliver again.`
+                    `task branch. Re-run it, then deliver again.`
                   : `${taskKey} has no canonical task file, so nothing could be delivered.`;
       await surfaceDeliveryEvent(
         db,
@@ -4079,7 +4079,7 @@ export async function performDelivery(
     //    push cases returned above with their own precise reason, P11-12/P11-11).
     if (result.status === "nothing_to_review") {
       const message =
-        "No review pull request could be opened — the execution branch has no " +
+        "No review pull request could be opened: the execution branch has no " +
         "commits ahead of the default branch. The delivery may have produced no " +
         "change, or the commits never reached the remote.";
       // R17-2 (F17-L9): the branch is verified empty (zero commits ahead of the
@@ -4124,7 +4124,7 @@ export async function performDelivery(
         projectSlug,
         taskKey,
         "Review PR could not be opened",
-        `No pull request could be opened for ${taskKey} — ${why}. ` +
+        `No pull request could be opened for ${taskKey}: ${why}. ` +
           "Fix the repository/credential settings, then deliver again.",
       );
       return { status: "failed", message: why };
@@ -4311,7 +4311,7 @@ async function recordDeliveredNextStep(
     const reviewName = stageName(project, reviewStageId);
     const label = `Move the task to ${reviewName}`;
     const detail =
-      `Recorded by Viberr when the delivery landed — this is not the operator agent's ` +
+      `Recorded by Viberr when the delivery landed; this is not the operator agent's ` +
       `judgement. Review pull request #${prNumber} is open while ${taskKey} is still on ` +
       `${stageName(project, fm.stage)}, and nothing had proposed a next step. Apply it to ` +
       `move the task to ${reviewName}, or dismiss it if the work is not ready for review.`;
@@ -4409,7 +4409,7 @@ type AcceptanceMergeOutcome =
 
 /** The historical (and still correct) cause for an offline/unconfigured store. */
 const UNREACHABLE_MERGE_CAUSE =
-  "no reachable GitHub merge — merge it manually or reconcile once credentials are set";
+  "no reachable GitHub merge; merge it manually or reconcile once credentials are set";
 
 /**
  * Attempt the REAL GitHub merge of the task's review PR (FR31, human-authorized)
@@ -4454,24 +4454,24 @@ async function attemptAcceptanceMerge(
           kind: "unmergeable",
           reason:
             result.mergeable === "conflicting"
-              ? `${taskKey}'s review PR #${result.prNumber} conflicts with the base branch — GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`
+              ? `${taskKey}'s review PR #${result.prNumber} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`
               : `GitHub refuses to merge ${taskKey}'s review PR #${result.prNumber}: ${result.message}`,
           cause:
             result.mergeable === "conflicting"
-              ? "the PR conflicts with the base branch — rebase it, then merge"
+              ? "the PR conflicts with the base branch; rebase it, then merge"
               : `GitHub refuses the merge: ${result.message}`,
         };
       case "head_changed":
         return {
           kind: "unmergeable",
-          reason: `PR #${result.prNumber}'s head changed on GitHub while it was being accepted — re-review the new head, then accept. (${result.message})`,
-          cause: "the PR head changed on GitHub — re-review the new head, then merge",
+          reason: `PR #${result.prNumber}'s head changed on GitHub while it was being accepted. Re-review the new head, then accept. (${result.message})`,
+          cause: "the PR head changed on GitHub; re-review the new head, then merge",
         };
       case "scope_violation":
         return {
           kind: "pending",
           cause:
-            "the project credential is missing `pull_request:write` — grant the scope, then complete the merge",
+            "the project credential is missing `pull_request:write`; grant the scope, then complete the merge",
         };
       case "auth_failed":
         return { kind: "pending", cause: "GitHub rejected the project credential" };
@@ -4675,7 +4675,7 @@ export async function setTaskArchived(
   // what restore actually does instead.
   const withdrawnNote =
     withdrawn.length > 0
-      ? ` ${withdrawn.join(", ")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn — restoring the task brings it back to a human, who can run the operator to reopen the decision.`
+      ? ` ${withdrawn.join(", ")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn. Restoring the task brings it back to a human, who can run the operator to reopen the decision.`
       : "";
 
   const event: TaskFileEvent = {
@@ -4685,10 +4685,10 @@ export async function setTaskArchived(
     actor: humanActorRef(db, actor),
     title: null,
     text: input.archived
-      ? `**Archived:** ${input.taskKey} was archived — it leaves the board and the review queue, and its record is kept.${withdrawnNote}`
+      ? `**Archived:** ${input.taskKey} was archived. It leaves the board and the review queue, and its record is kept.${withdrawnNote}`
       : // F20-25: a restored task waits on a human but carries no decision object
         // — name the next step so it is not stranded on a silent "Human decision".
-        `**Restored:** ${input.taskKey} was restored from the archive and is back on the board, waiting on a human — run the operator to reopen coordination, or move the task on yourself.`,
+        `**Restored:** ${input.taskKey} was restored from the archive and is back on the board, waiting on a human. Run the operator to reopen coordination, or move the task on yourself.`,
     toAgent: false,
     evidence: null,
   };
@@ -4741,7 +4741,7 @@ export async function setTaskArchived(
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
     archived: input.archived,
     toast: input.archived
-      ? `${input.taskKey} archived — find it under Archived on the board.`
+      ? `${input.taskKey} archived. Find it under Archived on the board.`
       : `${input.taskKey} restored to ${stageName(project, existing.parsed.frontmatter.stage)}.`,
   };
 }
@@ -4806,7 +4806,7 @@ export async function resolvePacket(
   const customDirective = input.custom?.trim() ?? "";
   if (customDirective.length > 4000) {
     throw AppError.validation(
-      "Custom directive is too long — 4,000 characters max.",
+      "Custom directive is too long: 4,000 characters max.",
     );
   }
   // A custom answer resolves as a synthetic option of the un-gated `custom`
@@ -4834,7 +4834,7 @@ export async function resolvePacket(
   // kind that legitimately stays open.
   if (packet.awaiting) {
     throw AppError.conflict(
-      `This decision was already made on ${input.taskKey} — the packet is waiting for the edited goal. ` +
+      `This decision was already made on ${input.taskKey}. The packet is waiting for the edited goal. ` +
         `Save the goal to clear it.`,
     );
   }
@@ -4980,7 +4980,7 @@ export async function resolvePacket(
                 packetIdentity(fresh.parsed.packet) !== resolvedPacketIdentity
               ) {
                 throw AppError.conflict(
-                  "This decision was replaced by a newer one — refresh the task and choose again.",
+                  "This decision was replaced by a newer one. Refresh the task and choose again.",
                 );
               }
               const refusal = fresh
@@ -5106,7 +5106,7 @@ export async function resolvePacket(
         text:
           option.ev ??
           `**Decision:** hold for runtime debug. ${key} stays blocked while the provider-native ` +
-            `session is inspected — coordination is paused and no operator run was started. ` +
+            `session is inspected. Coordination is paused and no operator run was started. ` +
             `Use **Run operator** on the task page when the inspection is done.`,
         toAgent: false,
         evidence: null,
@@ -5131,7 +5131,7 @@ export async function resolvePacket(
         title: null,
         text:
           option.ev ??
-          `**Decision:** ${option.t}. Waiting for the edited goal — the packet clears as soon as it lands.`,
+          `**Decision:** ${option.t}. Waiting for the edited goal; the packet clears as soon as it lands.`,
         toAgent: false,
         evidence: null,
       };
@@ -5276,7 +5276,7 @@ export async function resolvePacket(
     // different identity — reject rather than apply the stale choice to it.
     if (packetIdentity(parsed.packet) !== resolvedPacketIdentity) {
       throw AppError.conflict(
-        "This decision was replaced by a newer one — refresh the task and choose again.",
+        "This decision was replaced by a newer one. Refresh the task and choose again.",
       );
     }
     mutate(parsed.frontmatter);
@@ -5411,12 +5411,12 @@ export async function resolvePacket(
         outcome.status === "deleted"
           ? null
           : outcome.status === "already_gone"
-            ? `Branch \`${outcome.branch}\` was already gone on GitHub — nothing left to delete.`
+            ? `Branch \`${outcome.branch}\` was already gone on GitHub: nothing left to delete.`
             : outcome.status === "no_branch"
-              ? "The task has no delivery branch — nothing to delete."
+              ? "The task has no delivery branch, so there is nothing to delete."
               : outcome.status === "refused"
-                ? `Branch \`${outcome.branch}\` was **not** deleted — ${outcome.message}`
-                : "The branch was **not** deleted — this project has no GitHub repo or credential configured.";
+                ? `Branch \`${outcome.branch}\` was **not** deleted: ${outcome.message}`
+                : "The branch was **not** deleted: this project has no GitHub repo or credential configured.";
       if (outcomeText) {
         await updateTaskFile(
           taskRef(ctx, input.projectSlug, input.taskKey),
@@ -5474,7 +5474,7 @@ export async function resolvePacket(
                 title: null,
                 text:
                   `The local workspace branch \`${local.branch}\` (\`${local.sha.slice(0, 12)}\`) ` +
-                  `was discarded too — "discard work" now leaves no commit to re-deliver.`,
+                  `was discarded too, so "discard work" now leaves no commit to re-deliver.`,
                 toAgent: false,
                 evidence: null,
               });
@@ -5513,7 +5513,7 @@ export async function resolvePacket(
             type: "note",
             actor: { kind: "system", systemId: "policy-engine" },
             title: null,
-            text: "This task has no workspace branch — nothing to discard.",
+            text: "This task has no workspace branch, so there is nothing to discard.",
             toAgent: false,
             evidence: null,
           });
@@ -5538,16 +5538,16 @@ export async function resolvePacket(
       const noteText =
         outcome.status === "deleted"
           ? `Branch \`${outcome.branch}\` (\`${outcome.sha.slice(0, 12)}\`) was deleted from this ` +
-            `task's workspace. It existed only there — nothing was pushed to GitHub, so nothing on ` +
+            `task's workspace. It existed only there: nothing was pushed to GitHub, so nothing on ` +
             `the remote changed.`
           : outcome.status === "not_found"
-            ? `Branch \`${outcome.branch}\` was not in this task's workspace — nothing to discard.`
+            ? `Branch \`${outcome.branch}\` was not in this task's workspace, so there was nothing to discard.`
             : outcome.status === "on_remote"
-              ? `Branch \`${outcome.branch}\` was **not** discarded — it exists on GitHub, so it is ` +
+              ? `Branch \`${outcome.branch}\` was **not** discarded: it exists on GitHub, so it is ` +
                 `no longer a local-only branch. Use archive with branch deletion to remove a pushed branch.`
               : outcome.status === "no_workspace"
-                ? `Branch \`${outcome.branch}\` was **not** discarded — this task has no workspace clone.`
-                : `Branch \`${outcome.branch}\` was **not** discarded — ${outcome.reason}`;
+                ? `Branch \`${outcome.branch}\` was **not** discarded: this task has no workspace clone.`
+                : `Branch \`${outcome.branch}\` was **not** discarded: ${outcome.reason}`;
       await updateTaskFile(
         taskRef(ctx, input.projectSlug, input.taskKey),
         (parsed) => {
@@ -5616,7 +5616,7 @@ export async function resolvePacket(
           type: "blocked",
           actor: { kind: "operator" },
           title: null,
-          text: `The retry could not start — ${message}`,
+          text: `The retry could not start: ${message}`,
           toAgent: false,
           evidence: null,
         });
@@ -5677,7 +5677,7 @@ export async function requestPacketMaintainerDecision(
   );
   if (canResolveDirectly) {
     throw AppError.validation(
-      "You can resolve this decision yourself — no need to route it to a maintainer.",
+      "You can resolve this decision yourself; there is no need to route it to a maintainer.",
     );
   }
   if (!isOwner) {
@@ -5789,7 +5789,7 @@ function acceptanceStageBlockedReason(
   // has not reached the boundary yet is not wedged — it has stages left to
   // cross — so naming an escape hatch that is neither offered nor appropriate
   // just sends the reader looking for a button that is not there.
-  return `${taskKey} is at ${stageName(project, fromStageId)}, not ${reviewName} — a completion can only be accepted from the boundary the workflow puts before ${stageName(project, terminalId)}. Move the task through the workflow first.`;
+  return `${taskKey} is at ${stageName(project, fromStageId)}, not ${reviewName}. A completion can only be accepted from the boundary the workflow puts before ${stageName(project, terminalId)}. Move the task through the workflow first.`;
 }
 
 /**
@@ -5836,7 +5836,7 @@ function acceptanceRefusalReason(
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Resolving the packet clears readiness.
     (opts.blockedPacket
-      ? "This task has an open blocked decision — resolve the operator's packet before accepting it."
+      ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
     // P14-LV-07: a conflicting PR cannot be merged, so it cannot be accepted.
     conflictingPrBlockedReason(fm, taskKey)
@@ -5961,7 +5961,7 @@ function assertVerifiedHeadStillApplies(
   }
   throw AppError.conflict(
     `${taskKey}'s pull request or delivered revision changed while the acceptance was being ` +
-      `verified — the PR head was never checked against what would be closed now. Refresh the ` +
+      `verified. The PR head was never checked against what would be closed now. Refresh the ` +
       `task and accept again.`,
   );
 }
@@ -6020,7 +6020,7 @@ export async function acceptancePrHeadMismatch(
     }
     return (
       `PR #${pr.number}'s head (${headSha.slice(0, 7)}) does not contain the delivered ` +
-      `revision ${rev.headSha.slice(0, 7)} — the PR carries different content than was ` +
+      `revision ${rev.headSha.slice(0, 7)}: the PR carries different content than was ` +
       `delivered. Re-deliver the branch (or fix the remote branch), then re-review.`
     );
   } catch (error) {
@@ -6211,7 +6211,7 @@ export function revisionDriftNote(fm: TaskFrontmatter): string {
   // F19-23: the noun was switched and the VERB was not, so a single-commit drift
   // rendered "1 commit were added to the PR head" — live on VC-4's timeline and
   // in the Activity stream, on the one sentence a Done task's record leans on.
-  return ` ${n === 1 ? "1 commit was" : `${n} commits were`} added to the PR head (\`${drift.headSha.slice(0, 12)}\`) after the review — outside the reviewed revision.`;
+  return ` ${n === 1 ? "1 commit was" : `${n} commits were`} added to the PR head (\`${drift.headSha.slice(0, 12)}\`) after the review, outside the reviewed revision.`;
 }
 
 /**
@@ -6277,13 +6277,13 @@ function emptyBranchNote(
   switch (disposition.kind) {
     case "keep":
       return (
-        ` The empty branch \`${disposition.branch}\` was left on GitHub — this project's ` +
+        ` The empty branch \`${disposition.branch}\` was left on GitHub because this project's ` +
         `"delete the branch after merge" setting is off.`
       );
     case "collision":
       return (
         ` A branch named \`${disposition.branch}\` exists on the remote, but ${taskKey} never ` +
-        `recorded a branch of its own — the name matches, the work does not. It was left ` +
+        `recorded a branch of its own. The name matches, the work does not. It was left ` +
         `untouched, and nothing here describes what is on it.`
       );
     default:
@@ -6346,8 +6346,8 @@ function assertAcceptanceDisclosure(
       message: `acceptance of ${taskKey} carried no disclosure acknowledgment`,
       userMessage:
         `Accepting ${taskKey} needs the confirmation dialog: this request carried no record of ` +
-        `what was shown — which pull request merges, which delivered revision, and what the ` +
-        `review said. Open the task and accept from the dialog.`,
+        `what was shown (which pull request merges, which delivered revision, and what the ` +
+        `review said). Open the task and accept from the dialog.`,
       details: { taskKey },
     });
   }
@@ -6358,7 +6358,7 @@ function assertAcceptanceDisclosure(
     status: 409,
     message: `acceptance of ${taskKey} was confirmed against stale state: ${drift.join("; ")}`,
     userMessage:
-      `${taskKey} changed after the accept dialog was opened — ${drift.join("; ")}. Nothing was ` +
+      `${taskKey} changed after the accept dialog was opened: ${drift.join("; ")}. Nothing was ` +
       `accepted or merged. Close the dialog, re-open it, and accept what is true now.`,
     details: { taskKey, scope },
   });
@@ -6712,7 +6712,7 @@ async function acceptCompletion(
           (!hasPr
             ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
             : alreadyMerged
-              ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
+              ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR had already been merged on GitHub (out of band).`
               : reallyMerged
                 ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
                 : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
@@ -6784,11 +6784,11 @@ async function acceptCompletion(
       // so the record never implies a cleanup that did not happen.
       const refusedText =
         outcome.status === "refused"
-          ? `The empty branch \`${outcome.branch}\` was **not** deleted — ${outcome.message}`
+          ? `The empty branch \`${outcome.branch}\` was **not** deleted: ${outcome.message}`
           : outcome.status === "deleted" || outcome.status === "already_gone" ||
               outcome.status === "no_branch"
             ? null
-            : `The empty branch \`${branchDisposition.branch}\` was **not** deleted — this ` +
+            : `The empty branch \`${branchDisposition.branch}\` was **not** deleted: this ` +
               `project has no reachable GitHub repository or credential.`;
       if (refusedText) {
         await updateTaskFile(
@@ -6964,7 +6964,7 @@ export async function completeTaskMerge(
     return {
       task: summaryOrThrow(db, input.projectSlug, input.taskKey),
       merged: true,
-      message: `PR #${pr.number} was already merged on GitHub — nothing merged now.`,
+      message: `PR #${pr.number} was already merged on GitHub; nothing merged now.`,
     };
   }
   // Every other state is still refused, unchanged: a PR in review has not been
@@ -7074,7 +7074,7 @@ export async function applyRecommendation(
   // (which mis-describes an unknown/stale id). Hedge to what is actually known.
   if (!rec)
     throw AppError.conflict(
-      "That recommendation is no longer available — it may have been resolved, dismissed, or replaced by a newer one. Refresh to see the current recommendations.",
+      "That recommendation is no longer available. It may have been resolved, dismissed, or replaced by a newer one. Refresh to see the current recommendations.",
     );
 
   // R15-3 (owner ruling 2026-07-28): the task OWNER may apply ANY operator
@@ -7175,7 +7175,7 @@ export async function applyRecommendation(
       actor,
     );
     if (outcome.status !== "delivered") {
-      throw AppError.conflict(`Delivery did not complete — ${outcome.message}`);
+      throw AppError.conflict(`Delivery did not complete: ${outcome.message}`);
     }
   } else if (rec.kind === "accept_completion") {
     // The operator's "accept completion → Done" recommendation. Applying it is
@@ -7299,7 +7299,7 @@ export async function dismissRecommendation(
       actor: humanActorRef(db, actor),
       title: RECOMMENDATION_DECLINED_TITLE,
       text:
-        `**Decision:** declined — ${rec.label}. The operator's recommendation was not applied; ` +
+        `**Decision:** "${rec.label}" was declined. The operator's recommendation was not applied; ` +
         `do not re-propose it unless something material about the task changes.`,
       toAgent: false,
       evidence: null,

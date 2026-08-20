@@ -144,16 +144,16 @@ export function runInputRows(inputs: RunInputs): RunInputRow[] {
       (inputs.cwd ?? "no working directory") +
       (inputs.repo
         ? inputs.cloned
-          ? ` — checkout of ${inputs.repo}`
-          : ` — ${inputs.repo} was NOT checked out; the agent ran against an empty workspace`
-        : " — no repository attached to this project"),
+          ? ` · checkout of ${inputs.repo}`
+          : ` · ${inputs.repo} was NOT checked out; the agent ran against an empty workspace`
+        : " · no repository attached to this project"),
   });
 
   const anchor: RunInputRow = {
     tag: "anchor",
     text:
       inputs.anchor ??
-      "No canonical task state was sent to this run — it saw the goal and its directive only.",
+      "No canonical task state was sent to this run. It saw the goal and its directive only.",
   };
   // Only the canonical text is verbatim; the stand-in sentence is prose and
   // must reflow like every other row.
@@ -164,7 +164,7 @@ export function runInputRows(inputs: RunInputs): RunInputRow[] {
     tag: "persona",
     text: inputs.personaChars
       ? `${inputs.personaChars} chars of agent definition, attached skills and knowledge bases (the persona itself is on the Agents page)`
-      : "no persona was sent — this run had no resolvable agent definition",
+      : "no persona was sent: this run had no resolvable agent definition",
   });
 
   rows.push({
@@ -210,7 +210,7 @@ export function runInputRows(inputs: RunInputs): RunInputRow[] {
     rows.push({
       tag: "missing",
       text:
-        "granted, but their content never reached this run — " +
+        "granted, but their content never reached this run: " +
         inputs.unresolvedResources.map((r) => `${r.name} (${r.reason})`).join("; "),
     });
   }
@@ -232,7 +232,7 @@ export function runInputRows(inputs: RunInputs): RunInputRow[] {
     text: inputs.directive
       ? `${inputs.directive.chars} chars` +
         (inputs.directive.from ? ` from ${inputs.directive.from}` : " (no named author)")
-      : "none — this turn worked from the goal and the canonical task state",
+      : "none (this turn worked from the goal and the canonical task state)",
   });
 
   rows.push({
@@ -504,7 +504,7 @@ export function agentMessageProse(line: LogLine): string | null {
     if (question.options?.length) {
       parts.push(`Options: ${question.options.join(" · ")}`);
     }
-    if (parts.length) out.push(`Question: ${parts.join(" — ")}`);
+    if (parts.length) out.push(`Question: ${parts.join(" · ")}`);
   }
   // An envelope with nothing human-readable (every field null) is degenerate;
   // returning null lets the raw JSON stand rather than blanking the row.

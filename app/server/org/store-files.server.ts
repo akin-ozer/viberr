@@ -180,7 +180,7 @@ function assertInsideRoot(rootAbs: string, absPath: string): void {
   const realRel = path.relative(realRoot, realPath);
   if (realRel.startsWith("..") || path.isAbsolute(realRel)) {
     throw AppError.validation(
-      "That path leaves the store folder — Viberr does not follow links out of it.",
+      "That path leaves the store folder. Viberr does not follow links out of it.",
     );
   }
 }
@@ -296,7 +296,7 @@ export function writeStoreFiles(
     assertInsideRoot(target.rootAbs, abs);
     if (existsSync(abs) && statSync(abs).isDirectory()) {
       throw AppError.validation(
-        `A folder named “${file.parts[file.parts.length - 1]}” already exists there — rename the file first.`,
+        `A folder named “${file.parts[file.parts.length - 1]}” already exists there. Rename the file first.`,
       );
     }
     // Every intermediate segment must not be an existing FILE.
@@ -472,12 +472,12 @@ export function writeStoreDoc(
   const existed = existsSync(abs);
   if (existed && statSync(abs).isDirectory()) {
     throw AppError.validation(
-      `A folder named “${withExt}” already exists there — pick another name.`,
+      `A folder named “${withExt}” already exists there. Pick another name.`,
     );
   }
   if (existed && !opts.overwrite) {
     throw AppError.conflict(
-      `${[...base, withExt].join("/")} already exists — open it to edit, or pick another name.`,
+      `${[...base, withExt].join("/")} already exists. Open it to edit, or pick another name.`,
     );
   }
   mkdirSync(dirAbs, { recursive: true });
@@ -542,7 +542,7 @@ export const GITHUB_IMPORT_URL_RE =
   /github\.com\/([\w.-]+)\/([\w.-]+)(?:\/(?:tree|blob)\/([\w.-]+)\/?(.*))?/;
 
 export const GITHUB_IMPORT_URL_ERROR =
-  "Paste a GitHub link — a repo, a folder (…/tree/main/docs), or a single file (…/blob/main/SKILL.md).";
+  "Paste a GitHub link: a repo, a folder (…/tree/main/docs), or a single file (…/blob/main/SKILL.md).";
 
 const IMPORT_MAX_FILES = 100;
 const IMPORT_MAX_BLOB_BYTES = 1024 * 1024;
@@ -673,11 +673,11 @@ export async function importGithubSnapshot(
     message,
   });
   const PRIVATE_HINT =
-    `${owner}/${repo} is not readable without credentials — if it is private, ` +
+    `${owner}/${repo} is not readable without credentials. If it is private, ` +
     `add a GitHub connection under GitHub connections first.`;
   const RATE_HINT =
-    "GitHub's unauthenticated rate limit (60 requests/hour per IP) is used up — " +
-    "add a GitHub connection to import against its own quota.";
+    "GitHub's unauthenticated rate limit (60 requests/hour per IP) is used up. " +
+    "Add a GitHub connection to import against its own quota.";
   /** 403/429 with no token is the anonymous IP quota, at any call site. */
   const rateLimited = (res: { kind: string; status?: number }): boolean =>
     anonymous &&
@@ -701,8 +701,8 @@ export async function importGithubSnapshot(
         status: "failed",
         message:
           info.kind === "http" && info.status === 404
-            ? `The connection can't see ${owner}/${repo} — repository not found.`
-            : `GitHub is unreachable — nothing was imported.`,
+            ? `The connection can't see ${owner}/${repo}: repository not found.`
+            : `GitHub is unreachable, so nothing was imported.`,
       };
     }
     branch = info.data.default_branch ?? "main";
@@ -730,7 +730,7 @@ export async function importGithubSnapshot(
       message:
         treeRes.kind === "http" && treeRes.status === 404
           ? `Branch or path not found on ${owner}/${repo}.`
-          : `GitHub refused the tree listing — nothing was imported.`,
+          : `GitHub refused the tree listing, so nothing was imported.`,
     };
   }
 
@@ -783,7 +783,7 @@ export async function importGithubSnapshot(
       if (rateLimited(blobRes)) return noConnectionState(RATE_HINT);
       return {
         status: "failed",
-        message: "GitHub refused the file contents — nothing was imported.",
+        message: "GitHub refused the file contents, so nothing was imported.",
       };
     }
     const content = blobRes.data.content ?? "";
@@ -820,7 +820,7 @@ export async function importGithubSnapshot(
       skipped: 0,
       source: fileSource,
       truncated: false,
-      toast: `${filename} ${refreshedFile ? "re-imported" : "imported"} from ${fileSource} — snapshot, not a live sync`,
+      toast: `${filename} ${refreshedFile ? "re-imported" : "imported"} from ${fileSource} (a snapshot, not a live sync)`,
     };
   }
 
@@ -859,7 +859,7 @@ export async function importGithubSnapshot(
         code: ERROR_CODES.INTERNAL,
         status: 503,
         message: `import collision scan exceeded ${COLLISION_CAP} attempts under ${baseAbs}`,
-        userMessage: `Could not find a free folder under "${baseName}" after ${COLLISION_CAP} attempts — the data root may be unreachable. Nothing was imported.`,
+        userMessage: `Could not find a free folder under "${baseName}" after ${COLLISION_CAP} attempts; the data root may be unreachable. Nothing was imported.`,
       });
     }
     folder = `${baseName}-${i++}`;
@@ -900,7 +900,7 @@ export async function importGithubSnapshot(
     if (anonQuotaHit) return noConnectionState(RATE_HINT);
     return {
       status: "failed",
-      message: "GitHub refused the file contents — nothing was imported.",
+      message: "GitHub refused the file contents, so nothing was imported.",
     };
   }
   // E5: per-blob failures (refused blob fetch, unwritable path) used to sum
@@ -930,7 +930,7 @@ export async function importGithubSnapshot(
   const suffix = [
     ...(truncated ? [" (truncated)"] : []),
     ...(skipped > 0
-      ? [` — ${skipped} file${skipped === 1 ? "" : "s"} skipped (fetch failed)`]
+      ? [` · ${skipped} file${skipped === 1 ? "" : "s"} skipped (fetch failed)`]
       : []),
   ].join("");
   return {
@@ -940,6 +940,6 @@ export async function importGithubSnapshot(
     skipped,
     source,
     truncated,
-    toast: `${written} file${written === 1 ? "" : "s"} ${refreshed ? "re-imported" : "imported"} from ${source} into ${destination}/ — snapshot, not a live sync${suffix}`,
+    toast: `${written} file${written === 1 ? "" : "s"} ${refreshed ? "re-imported" : "imported"} from ${source} into ${destination}/ (a snapshot, not a live sync)${suffix}`,
   };
 }

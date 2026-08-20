@@ -959,7 +959,7 @@ describe("F20-5 / N20-17: the operator run control's honest off-states", () => {
     // live while the server refuses the run as a paid no-op.
     expect(runOperator.disabled).toBe(true);
     expect(container.textContent).toContain(
-      "Open decision — resolve it before running the operator.",
+      "Open decision. Resolve it before running the operator.",
     );
   });
 
@@ -1106,7 +1106,7 @@ describe("P14-GV-04: the Permissions panel tells the owner the truth", () => {
       myRole: "contributor",
       meId: "u-selin",
     });
-    expect(getByText("You own this task — you can accept it → Done")).toBeTruthy();
+    expect(getByText("You own this task, so you can accept it → Done")).toBeTruthy();
     // The row used to read "Maintainer or admin only" while the server let this
     // very user accept — the "Run agents" row below it still says that, and for
     // a contributor it is true.
@@ -1791,7 +1791,7 @@ describe("UX19-4: the engagements cell speaks ONE vocabulary", () => {
       deployedSpecialists: [docs, perf],
     });
     expect(engagementsCell(supporting.container).textContent).toContain(
-      "Task closed — no new engagements.",
+      "Task closed. No new engagements.",
     );
     cleanup();
     const reviewing = renderExec({
@@ -1802,7 +1802,7 @@ describe("UX19-4: the engagements cell speaks ONE vocabulary", () => {
       deployedSpecialists: [senior],
     });
     expect(engagementsCell(reviewing.container).textContent).toContain(
-      "Task closed — no new reviewer engagements.",
+      "Task closed. No new reviewer engagements.",
     );
   });
 });

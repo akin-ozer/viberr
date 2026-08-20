@@ -102,7 +102,7 @@ export function Topbar({
           <Icon name="board" />
         </button>
       )}
-      <Link className="home-brand" to="/" title="Home — all projects">
+      <Link className="home-brand" to="/" title="Home · all projects">
         <span className="mark">V</span>
         <b>Viberr</b>
       </Link>
@@ -151,8 +151,8 @@ export function Topbar({
       {orgAdminOverride && (
         <span
           className="pill risk sm"
-          title="You are not a member of this project — you're acting with org-admin emergency authority. Every override is recorded in the audit log."
-          aria-label="org-admin override — you are not a member of this project; you're acting with org-admin emergency authority, and every override is recorded in the audit log."
+          title="You are not a member of this project. You're acting with org-admin emergency authority. Every override is recorded in the audit log."
+          aria-label="org-admin override: you are not a member of this project; you're acting with org-admin emergency authority, and every override is recorded in the audit log."
         >
           org-admin override
         </span>
@@ -169,7 +169,7 @@ export function Topbar({
           title="The live update stream dropped (often an expired session). Counts and board state on this page may be out of date."
           onClick={() => onReconnect?.()}
         >
-          live updates paused — retry
+          live updates paused · retry
         </button>
       )}
       {/* R15-5: a BUTTON, not an input — everything typed here is answered by

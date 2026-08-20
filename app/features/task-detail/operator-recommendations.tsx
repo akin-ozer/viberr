@@ -117,7 +117,7 @@ export function OperatorRecommendations({
                   onClick={() => onApply(r.id)}
                   title={
                     r.kind === "accept_completion"
-                      ? "Apply the operator's recommendation — asks before merging"
+                      ? "Apply the operator's recommendation (asks before merging)"
                       : "Apply the operator's recommendation"
                   }
                 >

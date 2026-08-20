@@ -22,7 +22,7 @@ export function PageOverlay({
     <dialog
       className="page-overlay"
       aria-label={label}
-      data-screen-label={label + " — overlay"}
+      data-screen-label={label + " · overlay"}
       ref={panelRef}
     >
       <button

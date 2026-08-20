@@ -20,7 +20,7 @@ resources:
   skills:
     - viberr-app-expertise
   # P14-KM-14: no `viberr` grant. The in-process governance server is mounted by
-  # `buildOperatorToolkit` unconditionally — granting it here changed nothing and
+  # `buildOperatorToolkit` unconditionally, so granting it here changed nothing and
   # rendered as a toggle an admin could flip with no effect.
   mcps: []
   # No KB grants on the BASE template: `seedDefaultAgentAssets` installs the

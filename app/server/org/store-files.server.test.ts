@@ -331,7 +331,7 @@ describe("github import", () => {
     if (result.status === "imported") {
       expect(result).toMatchObject({ folder: "docs", fileCount: 2 });
       expect(result.toast).toContain(
-        "2 files imported from owner/repo/docs into docs/ — snapshot, not a live sync",
+        "2 files imported from owner/repo/docs into docs/ (a snapshot, not a live sync)",
       );
     }
     expect(readFileSync(path.join(target.rootAbs, "docs", "readme.md"), "utf8")).toBe(

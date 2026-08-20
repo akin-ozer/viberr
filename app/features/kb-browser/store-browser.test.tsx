@@ -98,7 +98,7 @@ function renderBrowser(
 describe("StoreBrowser", () => {
   it("renders the tree (top-level dirs expanded), footer stats and def-note", () => {
     const { getByText } = renderBrowser();
-    expect(document.querySelector('[aria-label="Files — Architecture notes"]')).toBeTruthy();
+    expect(document.querySelector('[aria-label="Files · Architecture notes"]')).toBeTruthy();
     expect(getByText("decisions")).toBeTruthy();
     expect(getByText("adr-001.md")).toBeTruthy(); // expanded by default
     expect(getByText("overview.md")).toBeTruthy();
@@ -117,7 +117,7 @@ describe("StoreBrowser", () => {
   it("empty tree renders the empty state", () => {
     const { getByText } = renderBrowser({ tree: [] });
     expect(
-      getByText("Empty — drag files or folders here, upload, or import from GitHub."),
+      getByText("Empty. Drag files or folders here, upload, or import from GitHub."),
     ).toBeTruthy();
   });
 
@@ -210,7 +210,7 @@ describe("StoreBrowser", () => {
     const { getByText, getByPlaceholderText } = renderBrowser();
     fireEvent.click(getByText("Add from GitHub"));
     fireEvent.click(getByText("Import"));
-    expect(getByText(/Paste a GitHub link — a repo, or a folder like/)).toBeTruthy();
+    expect(getByText(/Paste a GitHub link: a repo, or a folder like/)).toBeTruthy();
     expect(lastForm).toBeNull();
 
     fireEvent.change(getByPlaceholderText("https://github.com/owner/repo/tree/main/docs"), {
@@ -436,7 +436,7 @@ describe("StoreBrowser upload that uploads nothing (P13-UI-08)", () => {
     });
     await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
     expect(document.querySelector(".toast")!.textContent).toContain(
-      "Nothing uploaded — 2 hidden items skipped",
+      "Nothing uploaded: 2 hidden items skipped",
     );
     // Nothing was posted — the filter is client-side, and it stays that way.
     expect(lastForm).toBeNull();

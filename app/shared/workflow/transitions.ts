@@ -57,7 +57,7 @@ export function strictestBoundary(a: Boundary, b: Boundary): Boundary {
 export function defaultTransitionBy(boundary: Boundary): string {
   switch (boundary) {
     case "auto":
-      return "Operator, within policy — no human decision required";
+      return "Operator, within policy; no human decision required";
     case "approval":
       return "Operator transition request, approved by a human";
     case "human":

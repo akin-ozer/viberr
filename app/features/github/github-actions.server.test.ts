@@ -155,7 +155,7 @@ describe("runReconcile on a project with no branched tasks", () => {
     // Fails on wave-1/main: result was "ok" with the generic reconciled toast,
     // and latestProjectReconcileAt stayed null forever.
     expect(outcome.result).toBe("no_branched_tasks");
-    expect(outcome.toast).toContain("no task has a delivery branch");
+    expect(outcome.toast).toContain("No task has a delivery branch");
     expect(latestProjectReconcileAt(store.db, store.slug)).not.toBeNull();
   });
 
@@ -283,7 +283,7 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
       getConnection(store.db, "hepapi")!.patId,
     );
     // The toast is honest about WHY it used a differently-labelled connection.
-    expect(outcome.toast).toContain("no akin-ozer PAT");
+    expect(outcome.toast).toContain("No akin-ozer PAT");
     expect(outcome.toast).toContain(REPO);
   });
 

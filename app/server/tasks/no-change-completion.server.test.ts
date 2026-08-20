@@ -268,7 +268,7 @@ describe("noChangeCompletionEvent — one builder, and it never claims a merge",
         branch: "vc-5",
       },
     });
-    expect(event.title).toBe("Completed — no changes");
+    expect(event.title).toBe("Completed with no changes");
     expect(event.type).toBe("completion");
     expect(event.text).toContain("VC-5 completed with no changes");
     expect(event.text).toContain("`vc-5`");

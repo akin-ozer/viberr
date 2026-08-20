@@ -595,7 +595,7 @@ export async function reconcileWorkspaceDelivery(
                 type: "note",
                 actor: POLICY_ENGINE_ACTOR,
                 title: null,
-                text: `**Note:** accepted PR #${detected.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
+                text: `**Note:** accepted PR #${detected.number} was closed on GitHub without merging, so the pending merge can no longer be completed from Viberr.`,
                 toAgent: false,
                 evidence: null,
               });

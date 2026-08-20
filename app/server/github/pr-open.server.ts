@@ -56,13 +56,13 @@ export function composePrBody(input: {
   const lines: string[] = [];
   if (input.appOrigin) {
     const url = `${input.appOrigin}/projects/${input.projectSlug}/tasks/${input.taskKey}`;
-    lines.push(`**Viberr task:** [${input.taskKey} — ${input.title}](${url})`);
+    lines.push(`**Viberr task:** [${input.taskKey} · ${input.title}](${url})`);
   } else {
     // N20-4 (§5a): no absolute origin to link to — name the task by its store
     // key so a reviewer can still find it, rather than emitting a relative link
     // that dead-ends on github.com (ruling 3: the store-relative key is the
     // honest fallback).
-    lines.push(`**Viberr task:** ${input.taskKey} — ${input.title}`);
+    lines.push(`**Viberr task:** ${input.taskKey} · ${input.title}`);
   }
   lines.push("");
   lines.push("## Goal");
@@ -79,7 +79,7 @@ export function composePrBody(input: {
   }
   lines.push("");
   lines.push(
-    `---\n_Opened by Viberr for task ${input.taskKey}. Review and merge are human-authorized; accepting the completion in Viberr merges this PR when GitHub is reachable — otherwise the acceptance is recorded as merge-pending until a human completes the merge._`,
+    `---\n_Opened by Viberr for task ${input.taskKey}. Review and merge are human-authorized; accepting the completion in Viberr merges this PR when GitHub is reachable. When it is not, the acceptance is recorded as merge-pending until a human completes the merge._`,
   );
   return lines.join("\n");
 }

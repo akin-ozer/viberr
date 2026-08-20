@@ -130,7 +130,7 @@ describe("UI-10: the hero must not assert activity at zero", () => {
   it("reads as quiet with no runs and nothing waiting", () => {
     const { getByText, container } = renderHome(baseData([card()]));
     expect(
-      getByText(/All quiet — no agent runs right now\./),
+      getByText(/All quiet\. No agent runs right now\./),
     ).toBeTruthy();
     // P14-WL-04: the hero's count is org-wide (every project the viewer is in),
     // so it says so — the board header and the Agents page count other things.
@@ -376,7 +376,7 @@ describe("F14: derived name-fields must not be typed INTO", () => {
     expect(repo.selectionEnd).toBe("viberr".length);
     // …and the field says where the value came from, so the selection is not a
     // surprise.
-    expect(fieldContains(repo, "from the project name — type to replace")).toBe(
+    expect(fieldContains(repo, "from the project name (type to replace)")).toBe(
       true,
     );
   });

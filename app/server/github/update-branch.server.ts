@@ -191,7 +191,7 @@ export async function updateWorkspaceBranchFromBase(
       return {
         status: "no_workspace",
         reason:
-          "no workspace git repo — the branch is only writable from the delivering engagement's workspace",
+          "no workspace git repo (the branch is only writable from the delivering engagement's workspace)",
       };
     }
 
@@ -223,7 +223,7 @@ export async function updateWorkspaceBranchFromBase(
       return {
         status: "dirty_workspace",
         reason:
-          "the workspace has uncommitted changes — deliver or discard them before updating the branch",
+          "the workspace has uncommitted changes (deliver or discard them before updating the branch)",
       };
     }
 
@@ -265,7 +265,7 @@ export async function updateWorkspaceBranchFromBase(
         logger.warn("branch update could not fetch the base branch", fields);
         return updateFailed(
           fetchRes.timedOut
-            ? `fetching \`${base}\` was cancelled after ${FETCH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
+            ? `fetching \`${base}\` was cancelled after ${FETCH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
             : `could not fetch \`${base}\` from origin`,
           detail,
         );
@@ -371,7 +371,7 @@ export async function updateWorkspaceBranchFromBase(
         logger.warn("branch update merge failed", fields);
         return updateFailed(
           mergeRes.timedOut
-            ? `merging \`${base}\` was cancelled after ${MERGE_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
+            ? `merging \`${base}\` was cancelled after ${MERGE_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
             : `merging \`${base}\` into \`${branch}\` failed`,
           detail,
         );
@@ -401,7 +401,7 @@ export async function updateWorkspaceBranchFromBase(
             base,
             reason:
               `the remote branch \`${branch}\` holds commits that are not in this ` +
-              `workspace (non-fast-forward) — the update was rolled back, not forced`,
+              `workspace (non-fast-forward), so the update was rolled back, not forced`,
           };
         }
         const detail = redactGitOutput(pushRes.stderr, { token });
@@ -411,8 +411,8 @@ export async function updateWorkspaceBranchFromBase(
         logger.warn("branch update push failed", fields);
         return updateFailed(
           pushRes.timedOut
-            ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
-            : "pushing the updated branch returned non-zero — the update was rolled back",
+            ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
+            : "pushing the updated branch returned non-zero, so the update was rolled back",
           detail,
         );
       }

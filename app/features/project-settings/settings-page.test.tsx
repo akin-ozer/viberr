@@ -302,11 +302,11 @@ describe("StagesPanel", () => {
       expect(queryByLabelText(/^Move Done/)).toBeNull();
       // The label names the current position, like StageMenu's does.
       expect(
-        getByLabelText("Move Ready — currently stage 2 of 5"),
+        getByLabelText("Move Ready, currently stage 2 of 5"),
       ).toBeTruthy();
 
       // First movable row: forward moves only.
-      fireEvent.click(getByLabelText("Move Ready — currently stage 2 of 5"));
+      fireEvent.click(getByLabelText("Move Ready, currently stage 2 of 5"));
       const labels = Array.from(
         document.querySelectorAll('[role="menuitem"]'),
       ).map((n) => n.textContent);
@@ -323,7 +323,7 @@ describe("StagesPanel", () => {
           onRemove={() => {}}
         />,
       );
-      fireEvent.click(getByLabelText("Move Review — currently stage 4 of 5"));
+      fireEvent.click(getByLabelText("Move Review, currently stage 4 of 5"));
       fireEvent.click(getByText("Move to first"));
       // Review hops to the front of the MOVABLE window; triage/done stay pinned.
       expect(onReorder).toHaveBeenCalledWith([
@@ -343,7 +343,7 @@ describe("StagesPanel", () => {
       // the row's `<button>` menu trigger; the test needs the element identity
       // back as a focus target, which RTL hands over as a bare `HTMLElement`.
       const trigger = getByLabelText(
-        "Move In Progress — currently stage 3 of 5",
+        "Move In Progress, currently stage 3 of 5",
       ) as HTMLButtonElement;
       fireEvent.click(trigger);
       const menu = document.querySelector('[role="menu"]')!;
@@ -370,7 +370,7 @@ describe("StagesPanel", () => {
       const { getByLabelText } = render(
         <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
       );
-      fireEvent.click(getByLabelText("Move Ready — currently stage 2 of 5"));
+      fireEvent.click(getByLabelText("Move Ready, currently stage 2 of 5"));
       expect(document.querySelector('[role="menu"]')).not.toBeNull();
       fireEvent.mouseDown(document.body);
       expect(document.querySelector('[role="menu"]')).toBeNull();

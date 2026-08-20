@@ -142,7 +142,7 @@ function InviteModal({
     <MiniModal
       icon={<Icon name="user" />}
       title="Allow access"
-      sub="Whitelist who can sign in — no invite emails, access on first login"
+      sub="Whitelist who can sign in: no invite emails, access on first login"
       onClose={onClose}
       canSave={canSave}
       saveLabel={
@@ -465,14 +465,14 @@ function EditUserModal({
             <div className="cred-ok">
               <Icon name="check" />
               <span>
-                Reset pending — {user.name} will be prompted to set a new password at
+                Reset pending: {user.name} will be prompted to set a new password at
                 next sign-in.
                 {tempPassword && (
                   <>
                     {" "}
                     Temp sign-in password:{" "}
-                    <code className="mono">{tempPassword}</code> — shown once, hand it
-                    over out-of-band.
+                    <code className="mono">{tempPassword}</code> (shown once, hand it
+                    over out-of-band).
                   </>
                 )}
               </span>
@@ -495,7 +495,7 @@ function EditUserModal({
             <div className="def-note after">
               <Icon name="lock" />
               <span>
-                No email is sent — a temp password is generated for you to hand over;
+                No email is sent. A temp password is generated for you to hand over;
                 they're prompted to set a new password at their next sign-in.
                 {(user.pwreset || user.status === "invited") &&
                   " Generating again replaces any temp password you handed over earlier."}
@@ -600,7 +600,7 @@ export function UsersPanel({
   const editing = editingId ? (users.find((x) => x.id === editingId) ?? null) : null;
 
   return (
-    <section className="panel" data-screen-label="Settings — Users & access">
+    <section className="panel" data-screen-label="Settings · Users & access">
       <div className="panel-head">
         <Icon name="user" />
         <h2>Users &amp; access</h2>
@@ -614,7 +614,7 @@ export function UsersPanel({
       <div className="pol-note">
         <Icon name="shield" />
         <span>
-          <strong>{countLabel(users.length, "instance account")}</strong> — GitHub &amp;
+          <strong>{countLabel(users.length, "instance account")}</strong>. GitHub &amp;
           Google access
           is whitelist-based: allowed people simply sign in, no invite emails. Board
           permissions are granted per project.
@@ -624,7 +624,7 @@ export function UsersPanel({
         <div className="cred-ok">
           <Icon name="check" />
           <span>
-            Account created for <span className="mono">{setupNotice.email}</span> — temp
+            Account created for <span className="mono">{setupNotice.email}</span>. Temp
             sign-in password: <code className="mono">{setupNotice.tempPassword}</code>{" "}
             (shown once, hand it over out-of-band).
           </span>

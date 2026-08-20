@@ -111,14 +111,14 @@ describe("LiveRunPanel", () => {
 describe("AgentLogsPanel", () => {
   it("renders the exact empty state when the task has no runtime", () => {
     const { getByText } = render(<AgentLogsPanel runtime={[]} sel={null} onSel={() => {}} linesByThread={{}} />);
-    expect(getByText("No agent runs yet — runtime streams appear here once the operator engages a specialist.")).toBeTruthy();
+    expect(getByText("No agent runs yet. Runtime streams appear here once the operator engages a specialist.")).toBeTruthy();
   });
 
   it("running thread: streaming footer + cursor line + running pill", () => {
     const { container, getByText } = render(
       <AgentLogsPanel runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "init", tag: "system·init", text: "x" }, raw: "{}" }] }} />,
     );
-    expect(getByText("streaming — raw output stays here as evidence, never in the task record")).toBeTruthy();
+    expect(getByText("streaming: raw output stays here as evidence, never in the task record")).toBeTruthy();
     expect(container.querySelector(".log-line.cursor")).not.toBeNull();
     expect(container.querySelector(".logs-bar .pill.agent")).not.toBeNull();
   });
@@ -128,7 +128,7 @@ describe("AgentLogsPanel", () => {
     const { container, getByText } = render(
       <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: run.lines.map((d, i) => ({ display: d, raw: run.raw[i]! })) }} />,
     );
-    expect(getByText("run finished at 9:41 — thread can be re-engaged")).toBeTruthy();
+    expect(getByText("run finished at 9:41; thread can be re-engaged")).toBeTruthy();
     expect(container.querySelector(".log-line.cursor")).toBeNull();
   });
 
@@ -137,7 +137,7 @@ describe("AgentLogsPanel", () => {
     const { container, getByText } = render(
       <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "err", tag: "tool_result", text: "boom" }, raw: "{}" }] }} />,
     );
-    expect(getByText("stream ended on a continuity error — see the blocked packet")).toBeTruthy();
+    expect(getByText("stream ended on a continuity error; see the blocked packet")).toBeTruthy();
     expect(container.querySelector(".logs-bar .pill.blocked")).not.toBeNull();
   });
 
@@ -391,7 +391,7 @@ describe("AgentLogsPanel", () => {
     );
     expect(getByText("dev is streaming")).toBeTruthy();
     // Streaming footer confirms the live (running) dev thread is selected.
-    expect(getByText("streaming — raw output stays here as evidence, never in the task record")).toBeTruthy();
+    expect(getByText("streaming: raw output stays here as evidence, never in the task record")).toBeTruthy();
   });
 
   it("session id is trimmed but expandable and copyable in full", () => {
@@ -671,7 +671,7 @@ describe("the run picker speaks the same vocabulary as the panel around it", () 
       "interrupted · by Arda",
     );
     expect(container.textContent).toContain(
-      "interrupted by Arda — the thread stays resumable",
+      "interrupted by Arda; the thread stays resumable",
     );
   });
 });

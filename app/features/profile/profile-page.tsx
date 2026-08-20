@@ -251,7 +251,7 @@ function ProfileNotifications({
       push(p.toast);
     } else {
       setNtf(p.rollback);
-      push(data.error ?? "Saving notification routing failed — change not applied", "error");
+      push(data.error ?? "Saving notification routing failed. Change not applied", "error");
     }
   });
 
@@ -349,7 +349,7 @@ function ProfileAppearance({
       push(p.toast);
     } else {
       p.rollback();
-      push(data.error ?? "That preference could not be saved — change not applied", "error");
+      push(data.error ?? "That preference could not be saved. Change not applied", "error");
     }
   });
 
@@ -361,7 +361,7 @@ function ProfileAppearance({
     pending.current = {
       toast:
         next === "reduce"
-          ? "Motion reduced — pulses and animation paused"
+          ? "Motion reduced. Pulses and animation paused"
           : "Motion restored",
       rollback: () => {
         setMo(previous);
@@ -398,7 +398,7 @@ function ProfileAppearance({
                 choice follows the account to every browser. */}
             <div className="pd">
               Light and dark both hold the WCAG AA baseline. Saved to your
-              account — it follows you to every browser you sign in from.
+              account. It follows you to every browser you sign in from.
             </div>
           </span>
           <span className="mini-seg" role="group" aria-label="Theme">
@@ -426,7 +426,7 @@ function ProfileAppearance({
           <span className="pref-main">
             <div className="pn">Timeline opens showing</div>
             <div className="pd">
-              Default filter when you open a task — typed important events are
+              Default filter when you open a task. Typed important events are
               kept either way.
             </div>
           </span>
@@ -485,7 +485,7 @@ function ProfileAccess({
                   <Icon name="check" />
                 </span>
               ) : (
-                <span className="rbac-no">—</span>
+                <span className="rbac-no">−</span>
               )}
             </div>
           ))}
@@ -493,7 +493,7 @@ function ProfileAccess({
       ) : (
         // D8: absent → why it matters → next action (P16), not a bare label.
         <div className="empty">
-          No project membership yet. A project role — assigned by an admin — is
+          No project membership yet. A project role, assigned by an admin, is
           what unlocks that project&rsquo;s board, tasks and the actions listed
           above. Ask an admin to add you to a project.
         </div>
@@ -581,7 +581,7 @@ function ProfileGithub({
       } catch {
         setConnectBusy(false);
         setConnectErr(
-          "GitHub sign-in couldn't start — it may not be configured on this deployment. Ask an admin, or use your workspace identity.",
+          "GitHub sign-in couldn't start. It may not be configured on this deployment. Ask an admin, or use your workspace identity.",
         );
       }
     })();
@@ -630,7 +630,7 @@ function ProfileGithub({
           <Icon name="github" />
           <span className="cred-name">Personal OAuth identity</span>
           <span className="mono push faint">
-            {gh ? "oauth" : "—"}
+            {gh ? "oauth" : "−"}
           </span>
         </div>
         <div className="scope-chips">
@@ -647,7 +647,7 @@ function ProfileGithub({
           <div className="cred-ok">
             <Icon name="check" />
             <span>
-              Connected — your approvals, acceptances, and runtime-session
+              Connected. Your approvals, acceptances, and runtime-session
               opens are attributed to{" "}
               <strong>
                 {user.githubHandle ? `@${user.githubHandle}` : user.email}
@@ -666,7 +666,7 @@ function ProfileGithub({
           <div className="cred-warn">
             <Icon name="alert" />
             <span>
-              Not connected — actions record under your workspace identity
+              Not connected. Actions record under your workspace identity
               only, and your GitHub review approvals can't be matched back to
               you.
             </span>
@@ -704,8 +704,8 @@ function ProfileGithub({
             </button>
           ) : (
             <strong>Settings → Repository &amp; credentials</strong>
-          )}{" "}
-          — secrets never appear in task records.
+          )}
+          . Secrets never appear in task records.
         </span>
       </div>
     </div>
@@ -908,7 +908,7 @@ export function ProfilePage({
         <div>
           <h1>Profile &amp; preferences</h1>
           <div className="sub">
-            Personal to your account — project policy and roles stay in Policy
+            Personal to your account. Project policy and roles stay in Policy
           </div>
         </div>
       </div>

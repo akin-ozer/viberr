@@ -81,9 +81,9 @@ function refusalCause(input: {
 }): string {
   switch (input.refusal) {
     case "merged":
-      return `that PR is already merged — its work is on the base branch, so a fresh delivery fast-forwards cleanly once the stale branch name is cleared`;
+      return `that PR is already merged and its work is on the base branch, so a fresh delivery fast-forwards cleanly once the stale branch name is cleared`;
     case "closed":
-      return `that PR was closed without merging — the remote branch still holds its commits, so a fresh push would conflict until the branch is cleared`;
+      return `that PR was closed without merging and the remote branch still holds its commits, so a fresh push would conflict until the branch is cleared`;
     case "no_revision":
       return `${input.taskKey} has delivered no revision, so no pull request can stand for its work yet`;
     case "head_unknown":
@@ -110,7 +110,7 @@ export function prAdoptionRefusalNote(input: {
 }): string {
   return (
     `**Branch name collision:** GitHub already has PR #${input.prNumber} on branch ` +
-    `\`${input.branch}\`, but it is NOT ${input.taskKey}'s review PR — ${refusalCause(input)}. ` +
+    `\`${input.branch}\`, but it is NOT ${input.taskKey}'s review PR: ${refusalCause(input)}. ` +
     `Viberr will not track it as one. This happens when a task key is reused (a new data ` +
     `root restarts keys at 1) while the old branch still exists on GitHub. Delete or rename ` +
     `the remote branch \`${input.branch}\`, or give this task a different branch, before delivering.`

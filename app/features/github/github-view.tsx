@@ -93,7 +93,7 @@ export function RepositoryPanel({
             {data.project.repo ? (
               <span className="mono">{data.project.repo}</span>
             ) : (
-              <span className="fine md dim">—</span>
+              <span className="fine md dim">−</span>
             )}
           </span>
         </div>
@@ -117,7 +117,7 @@ export function RepositoryPanel({
             </Pill>
             {showProbeNote && (
               <span className="probe-note">
-                Live repository probe — the stored project credential is shown
+                Live repository probe. The stored project credential is shown
                 below.
               </span>
             )}
@@ -195,7 +195,7 @@ export function PullRequestsPanel({
           <div className="pol-note last">
             <Icon name="pr" />
             <span>
-              No pull requests yet — one is opened at the review boundary by the
+              No pull requests yet. One is opened at the review boundary by the
               server or the delivering agent.
             </span>
           </div>
@@ -256,7 +256,7 @@ export function PullRequestsPanel({
       <div className="pol-note after last">
         <Icon name="lock" />
         <span>
-          Merging stays reserved for humans — accepting a completion on its task
+          Merging stays reserved for humans. Accepting a completion on its task
           page merges its PR when GitHub is reachable; otherwise it records
           accepted (merge pending).
         </span>
@@ -292,7 +292,7 @@ export function BranchesPanel({
           {branches.length === 0 && (
             // Empty state the mock never designed (spec §7.9b).
             <div className="empty sm">
-              No execution branches yet — a task-key branch is created when
+              No execution branches yet. A task-key branch is created when
               execution starts.
             </div>
           )}
@@ -361,7 +361,7 @@ export function BranchesPanel({
                       )}
                     </>
                   ) : (
-                    <span className="fine md dim">—</span>
+                    <span className="fine md dim">−</span>
                   )}
                 </span>
                 <span>
@@ -377,8 +377,8 @@ export function BranchesPanel({
       <div className="pol-note after last">
         <Icon name="branch" />
         <span>
-          Branch names and commit messages carry the task key — task → branch →
-          commit → PR stays traceable without asking.
+          Branch names and commit messages carry the task key, so task → branch
+          → commit → PR stays traceable without asking.
         </span>
       </div>
     </div>
@@ -556,13 +556,13 @@ export function GithubViewPage({
       : "No changes recorded";
   const freshnessTitle = reconcileCheck.at
     ? staleCache
-      ? "No reconcile pass has completed for over an hour, though the background poller re-checks GitHub every 5 minutes. Either every branched task here is finished — the poller skips terminal tasks, so a wrapped-up project goes quiet legitimately — or the poller or credential is down and the branch and PR state below is out of date. Update status checks now."
-      : "When a reconcile pass last completed, and when one last found a change. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so a much older last change means a quiet repository — Update status forces a check now."
+      ? "No reconcile pass has completed for over an hour, though the background poller re-checks GitHub every 5 minutes. Either every branched task here is finished (the poller skips terminal tasks, so a wrapped-up project goes quiet legitimately), or the poller or credential is down and the branch and PR state below is out of date. Update status checks now."
+      : "When a reconcile pass last completed, and when one last found a change. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so a much older last change means a quiet repository. Update status forces a check now."
     : staleCache
-      ? "No branch or PR change has been recorded for over an hour. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so this is also what a quiet repository looks like — Update status forces a check now."
+      ? "No branch or PR change has been recorded for over an hour. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so this is also what a quiet repository looks like. Update status forces a check now."
       : data.reconcile.at
-        ? "When the cached branch/PR state last CHANGED. A background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new — Update status forces a check now."
-        : "No branch or PR change has been recorded yet — nothing is wrong. Update status checks GitHub now.";
+        ? "When the cached branch/PR state last CHANGED. A background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new. Update status forces a check now."
+        : "No branch or PR change has been recorded yet. Nothing is wrong. Update status checks GitHub now.";
 
   return (
     <div className="board-wrap" data-screen-label="GitHub">
@@ -576,7 +576,7 @@ export function GithubViewPage({
         <div>
           <h1>GitHub</h1>
           <div className="sub">
-            Execution surface for {data.project.name} — branches, pull requests,
+            Execution surface for {data.project.name}: branches, pull requests,
             and credential health
           </div>
         </div>

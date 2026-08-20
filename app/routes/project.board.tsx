@@ -96,7 +96,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // Honest copy (C4): dragging into Done is an ACCEPTANCE (merge attempt +
         // completion), not a bare move.
         toast: result.acceptedIntoDone
-          ? `Accepted ${result.task.key} — moved to ${result.toName}`
+          ? `Accepted ${result.task.key}, moved to ${result.toName}`
           : result.movedStage
             ? `Moved ${result.task.key} to ${result.toName}`
             : `Reordered ${result.task.key}`,

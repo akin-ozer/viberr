@@ -284,7 +284,7 @@ function SessionIdChip({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  if (!sid) return <span className="mono faint">—</span>;
+  if (!sid) return <span className="mono faint">−</span>;
   const short = sid.length > 10 ? sid.slice(0, 8) + "…" : sid;
   const copy = async () => {
     try {
@@ -303,7 +303,7 @@ function SessionIdChip({
   // `codex resume`. (Or continue in-app by @mentioning the agent.)
   const scopeNote =
     "Runtime session, stored inside the app. It can be resumed on your own " +
-    "machine with your own subscription — use Export to download an installer " +
+    "machine with your own subscription. Use Export to download an installer " +
     "that sets up `claude --resume` / `codex resume`. (Or @mention the agent to " +
     "continue here.)";
   return (
@@ -313,7 +313,7 @@ function SessionIdChip({
         className="session-id-val mono"
         title={expanded ? "Click to trim" : sid + "\n\n" + scopeNote}
         aria-label={
-          "Session id " + sid + ", stored in the app runtime — click to " +
+          "Session id " + sid + ", stored in the app runtime. Click to " +
           (expanded ? "trim" : "expand")
         }
         onClick={() => setExpanded((e) => !e)}
@@ -520,7 +520,7 @@ export function AgentLogsPanel({
           <h2>Agent logs</h2>
         </div>
         <div className="empty">
-          No agent runs yet — runtime streams appear here once the operator engages a specialist.
+          No agent runs yet. Runtime streams appear here once the operator engages a specialist.
         </div>
       </div>
     );
@@ -554,23 +554,23 @@ export function AgentLogsPanel({
   const altLabel = cur!.altBackend === "codex" ? "Codex" : "Claude Code";
   const footer =
     cur!.state === "running"
-      ? "streaming — raw output stays here as evidence, never in the task record"
+      ? "streaming: raw output stays here as evidence, never in the task record"
       : cur!.lifecycle === "queued"
         ? // UI-57: a QUEUED run is not an idle thread. The strip renders only for
           // `running`, so a queued run used to show a "queued" pill next to the
           // footer "thread alive — no run executing", which contradicted it.
-          "queued — waiting for a runtime slot; output appears once it starts"
+          "queued: waiting for a runtime slot; output appears once it starts"
         : cur!.lifecycle === "interrupted"
-          ? `interrupted${cur!.interruptedBy ? " by " + cur!.interruptedBy.label.split(" ")[0] : ""} — the thread stays resumable`
+          ? `interrupted${cur!.interruptedBy ? " by " + cur!.interruptedBy.label.split(" ")[0] : ""}; the thread stays resumable`
           : cur!.state === "done"
             ? "run finished at " +
-              (cur!.finished ? finishedClock(cur!.finished, hydrated) : "—") +
-              " — thread can be re-engaged"
+              (cur!.finished ? finishedClock(cur!.finished, hydrated) : "−") +
+              "; thread can be re-engaged"
             : cur!.state === "error"
               ? backendUnavailable
-                ? `${cur!.backend === "codex" ? "Codex" : "Claude Code"} was unavailable (quota / rate limit)${canRetryBackend ? ` — retry on ${altLabel}` : " — a maintainer can retry it on the other backend"}`
-                : "stream ended on a continuity error — see the blocked packet"
-              : "thread alive — no run executing";
+                ? `${cur!.backend === "codex" ? "Codex" : "Claude Code"} was unavailable (quota / rate limit)${canRetryBackend ? `. Retry on ${altLabel}` : ". A maintainer can retry it on the other backend"}`
+                : "stream ended on a continuity error; see the blocked packet"
+              : "thread alive, no run executing";
 
   return (
     <div className="panel" data-comment-anchor="agent-logs">
@@ -601,7 +601,7 @@ export function AgentLogsPanel({
             className="btn primary sm"
             disabled={retrying}
             onClick={() => onRetryBackend!(cur!.altBackend!, cur!)}
-            title={`Re-run the ${cur!.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel} — the current backend was unavailable`}
+            title={`Re-run the ${cur!.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}
           >
             <Icon name="refresh" />
             Retry on {altLabel}

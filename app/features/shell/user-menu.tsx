@@ -79,7 +79,7 @@ export function UserMenu({
   useFetcherResult(fetcher, (data) => {
     if (data.ok && data.theme) push(themeToast(data.theme));
     else if (!data.ok)
-      push(data.error ?? "Theme change failed — try again", "error");
+      push(data.error ?? "Theme change failed. Try again", "error");
   });
 
   // UI-45: the panel is rendered BEFORE its trigger, so without this a keyboard

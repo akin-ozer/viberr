@@ -151,7 +151,7 @@ export function ResourcesPanel({
     browsing?.kind === "skill" ? (skills.find((s) => s.id === browsing.id) ?? null) : null;
 
   return (
-    <div data-screen-label="Settings — Agent resources">
+    <div data-screen-label="Settings · Agent resources">
       <div className="rsrc-grid">
         <KbPanel
           kbs={kbs}
@@ -213,7 +213,7 @@ export function ResourcesPanel({
         <span>
           These are the shared base definitions. Each project's policy decides which
           profiles are eligible, which of their context resources may load, and what they
-          may do — without changing the global.
+          may do, without changing the global.
         </span>
       </div>
 

@@ -168,7 +168,7 @@ const PEV_META: AuditKindTable = {
 
 /**
  * A `runtime.run.started` row, recognised by the sentence its projection
- * writes: `${actor} opened the ${role} runtime session — recorded per audit
+ * writes: `${actor} opened the ${role} runtime session. Recorded per audit
  * policy on` (`app/server/projections/activity-feed.server.ts`, the
  * `runtime.run.started` case). `AuditLogEntryView` carries no action name —
  * only the display kind and the rendered text — and threading one through
@@ -189,16 +189,16 @@ const PEV_META: AuditKindTable = {
  * fold that hides the row from the reader who never expands it.
  *
  * A display name cannot reach the end of the string: every audit template puts
- * fixed words after `${actor}`, and no other one ends in `runtime session —
- * recorded per audit policy on` (`runtime.run.interrupted` ends `agent run —
- * …`, `github.reconcile.project` `GitHub — …`, `task.ownership.admin_released`
- * `task owner — …`, `task.acceptance.forced` and the overrides elsewhere
+ * fixed words after `${actor}`, and no other one ends in `runtime session.
+ * Recorded per audit policy on` (`runtime.run.interrupted` ends `agent run.
+ * …`, `github.reconcile.project` `GitHub. …`, `task.ownership.admin_released`
+ * `task owner. …`, `task.acceptance.forced` and the overrides elsewhere
  * entirely). The trailing ` on` is the task-chip dangler, which every run row
  * keeps: `startRun` always audits with a `taskKey`, so `finishText` never
  * rewrites it to `.`.
  */
 const RUNTIME_SESSION_OPENED =
-  /\bopened the .+ runtime session — recorded per audit policy on$/;
+  /\bopened the .+ runtime session\. Recorded per audit policy on$/;
 
 export function isRuntimeSessionOpen(entry: AuditLogEntryView): boolean {
   return entry.kind === "audit" && RUNTIME_SESSION_OPENED.test(entry.text);
@@ -291,7 +291,7 @@ function AuditRow({
                     (entry.resolvedAt
                       ? ` · ${timeLabel(entry.resolvedAt)}`
                       : "")
-                  : "Open — grant the missing scope to resolve"
+                  : "Open: grant the missing scope to resolve"
               }
             >
               <Pill kind={resolved ? "done" : "input"} sm>
@@ -333,7 +333,7 @@ function CompactedSessions({
           <Icon name="agents" />
         </span>
         <span className="pev-main">
-          <strong>{entries.length} runtime sessions opened</strong> — each one
+          <strong>{entries.length} runtime sessions opened</strong>, each one
           recorded per audit policy.{" "}
           <button
             type="button"
@@ -535,14 +535,14 @@ function FeedFilters({
           type="search"
           value={get(params.q)}
           placeholder="Search…"
-          aria-label={`Search — ${legend}`}
+          aria-label={`Search the ${legend}`}
           onChange={(e) => setParam(params.q, e.target.value)}
         />
       </label>
       <select
         className="ff-sel"
         value={get(params.type)}
-        aria-label={`Filter by ${typeLabel} — ${legend}`}
+        aria-label={`Filter the ${legend} by ${typeLabel}`}
         onChange={(e) => setParam(params.type, e.target.value)}
       >
         <option value="">any {typeLabel}</option>
@@ -555,7 +555,7 @@ function FeedFilters({
       <select
         className="ff-sel"
         value={get(params.actor)}
-        aria-label={`Filter by actor — ${legend}`}
+        aria-label={`Filter the ${legend} by actor`}
         onChange={(e) => setParam(params.actor, e.target.value)}
       >
         <option value="">any actor</option>
@@ -570,14 +570,14 @@ function FeedFilters({
         type="search"
         value={get(params.task)}
         placeholder="Task id"
-        aria-label={`Filter by task id — ${legend}`}
+        aria-label={`Filter the ${legend} by task id`}
         onChange={(e) => setParam(params.task, e.target.value)}
       />
       <input
         className="ff-date"
         type="date"
         value={get(params.from)}
-        aria-label={`From date — ${legend}`}
+        aria-label={`From date for the ${legend}`}
         onChange={(e) => setParam(params.from, e.target.value)}
       />
       <span className="ff-dash" aria-hidden="true">
@@ -587,7 +587,7 @@ function FeedFilters({
         className="ff-date"
         type="date"
         value={get(params.to)}
-        aria-label={`To date — ${legend}`}
+        aria-label={`To date for the ${legend}`}
         onChange={(e) => setParam(params.to, e.target.value)}
       />
       {active && (
@@ -753,7 +753,7 @@ export function ActivityPage({
                     </span>
                     <span className="pev-main">
                       <strong className="act-actor">
-                        {r.actor ? r.actor.name : "—"}
+                        {r.actor ? r.actor.name : "−"}
                       </strong>
                       <span className="act-sep">·</span>
                       <ActivityText text={r.text} />{" "}
@@ -796,7 +796,7 @@ export function ActivityPage({
             )}
             {streamCapped && (
               <div className="sub feed-capped">
-                Showing the newest {STREAM_MAX} events — older activity stays in
+                Showing the newest {STREAM_MAX} events. Older activity stays in
                 the task timelines.
               </div>
             )}

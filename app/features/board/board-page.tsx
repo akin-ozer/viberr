@@ -889,7 +889,7 @@ function boardAcceptRefusal(
       : // The server's own sentence names the resolved review stage; a summary
         // holds no stage roles, and "the boundary" is the truer phrasing anyway
         // for a graph with several edges into the terminal stage.
-        `${task.key} is at ${fromStageName}, not the boundary the workflow puts before ${terminalName} — a completion can only be accepted from there. Move the task through the workflow first.`) ??
+        `${task.key} is at ${fromStageName}, not the boundary the workflow puts before ${terminalName}. A completion can only be accepted from there. Move the task through the workflow first.`) ??
     task.blockReason ??
     (task.readiness === "blocked" && task.packet?.type === "blocked"
       ? "An open blocked decision is holding this task."
@@ -1030,7 +1030,7 @@ function NewTaskModal({
         fetcher.data.key +
           " created in " +
           fetcher.data.stageName +
-          " — its task.md is in the store",
+          ". Its task.md is in the store",
       );
       onClose();
     }
@@ -1364,7 +1364,7 @@ function FilterBar({
           type="button"
           className="fchip"
           onClick={onClear}
-          title="Show every task again — clears the board filter and the search"
+          title="Show every task again. Clears the board filter and the search"
         >
           <Icon name="x" />
           Clear
@@ -1380,7 +1380,7 @@ function OrphanBanner({ orphanTasks }: { orphanTasks: TaskSummary[] }) {
       <Icon name="alert" />
       <span className="board-orphans-label">
         {orphanTasks.length} unstaged{" "}
-        {orphanTasks.length === 1 ? "task" : "tasks"} — the stage in the file
+        {orphanTasks.length === 1 ? "task" : "tasks"}: the stage in the file
         doesn't match any board column. Fix the task file to place it.
       </span>
       <span className="board-orphans-keys">
@@ -1764,7 +1764,7 @@ export function BoardPage({
     if (!pendingAccept || pendingAcceptTask) return;
     setPendingAccept(null);
     push(
-      `${pendingAccept.taskKey} left the board before its acceptance was confirmed — nothing was accepted.`,
+      `${pendingAccept.taskKey} left the board before its acceptance was confirmed. Nothing was accepted.`,
       "error",
     );
   }, [pendingAccept, pendingAcceptTask, push]);
@@ -1957,7 +1957,7 @@ export function BoardPage({
       // leave the "Re-scanning…" toast as the last word (MU-3).
       push(
         rescanFetcher.data.ok
-          ? "Re-scan complete — board matches the file-native store"
+          ? "Re-scan complete. The board matches the file-native store"
           : (rescanFetcher.data.error ?? "Re-scan failed."),
         // P13-D-10: same handler, both outcomes — the failure branch used to
         // borrow the success glyph.
@@ -2010,7 +2010,7 @@ export function BoardPage({
         <div className="board-orphans" role="status">
           <Icon name="lock" />
           <span className="board-orphans-label">
-            Archived tasks — abandoned work kept for the record. Their timelines
+            Archived tasks: abandoned work kept for the record. Their timelines
             and audit are intact, they are out of the review queue, and a
             maintainer can restore one from its task page.
           </span>

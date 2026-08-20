@@ -79,7 +79,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         {
           error: {
             code: "validation",
-            message: `Invalid scope "${raw}" — expected project:<slug>, task:<slug>/<key>, projects or user.`,
+            message: `Invalid scope "${raw}". Expected project:<slug>, task:<slug>/<key>, projects or user.`,
           },
         },
         { status: 400 },

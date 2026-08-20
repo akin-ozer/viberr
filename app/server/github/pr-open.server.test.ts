@@ -85,7 +85,7 @@ describe("composePrBody", () => {
       evidence: ["unit tests pass"],
     });
     expect(body).toContain(
-      "[VIB-201 — Attach workspace](https://viberr.example/projects/core/tasks/VIB-201)",
+      "[VIB-201 · Attach workspace](https://viberr.example/projects/core/tasks/VIB-201)",
     );
     expect(body).toContain("## Goal");
     expect(body).toContain("Wire the workspace.");
@@ -106,7 +106,7 @@ describe("composePrBody", () => {
       goal: "Wire.",
       appOrigin: null,
     });
-    expect(body).toContain("**Viberr task:** VIB-1 — Wire it");
+    expect(body).toContain("**Viberr task:** VIB-1 · Wire it");
     // No markdown link at all, and no relative path a github.com reader could
     // click into a 404.
     expect(body).not.toContain("](");
@@ -122,7 +122,7 @@ describe("composePrBody", () => {
       appOrigin: "https://v.example",
     });
     expect(body).toContain(
-      "[VIB-1 — Wire it](https://v.example/projects/core/tasks/VIB-1)",
+      "[VIB-1 · Wire it](https://v.example/projects/core/tasks/VIB-1)",
     );
   });
 });
