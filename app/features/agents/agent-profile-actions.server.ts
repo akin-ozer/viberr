@@ -5,8 +5,10 @@ import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   coerceSpecialistCapabilityMode,
   conservativeGrantsFor,
+  applyGrantCouplings,
+  repairBrowserEgressGrants,
   repairDeliveryGrants,
-  type DeliveryGrantNotice,
+  type GrantCouplingNotice,
 } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -62,14 +64,15 @@ export interface ProfileActor {
   label: string;
 }
 
-/** What a profile save produced. `notice` is present only when the saved grants
- * needed a delivery-headline decision — materialized (`repaired`) or refused
- * (`withheld`, an explicit withholding that leaves the profile unable to
- * deliver). Callers surface its `message` next to the success toast. */
+/** What a profile save produced. `notices` is non-empty only when the saved
+ * grants needed a coupling decision (the delivery headline, or web egress
+ * under the browser) — materialized (`repaired`) or refused (`withheld`, an
+ * explicit withholding that leaves the profile unable to deliver). Callers
+ * surface each `message` next to the success toast. */
 export interface ProfileSaveResult {
   profileId: string;
   name: string;
-  notice?: DeliveryGrantNotice;
+  notices?: GrantCouplingNotice[];
   /** F20-20: a governance-significant change the save just made — today, raising
    *  an operator to FULL autonomy and/or granting it "Accept completion into
    *  Done". Surfaced next to the success toast (the generic "updated" tick alone
@@ -82,17 +85,17 @@ export interface ProfileMutationContext {
   dataRoot?: string;
 }
 
-/** What one grant-deciding pass produced: the grants to persist, plus the
- * delivery-headline decision it had to make (`null` when there was none). */
+/** What one grant-deciding pass produced: the grants to persist, plus every
+ * coupling decision it had to make (empty when there was none). */
 interface GrantDecision {
   grants: { capabilityId: string; mode: CapabilityMode }[];
-  notice: DeliveryGrantNotice | null;
+  notices: GrantCouplingNotice[];
 }
 
-/** A holder, not a `let`: the notice is decided inside the file-writer
- * callback, and narrowing would otherwise type the result as `null` here. */
+/** A holder, not a `let`: the notices are decided inside the file-writer
+ * callback, and narrowing would otherwise type the result as `[]` here. */
 interface DeliveryNoticeHolder {
-  notice: DeliveryGrantNotice | null;
+  notices: GrantCouplingNotice[];
 }
 
 /** F20-20: the operator governance transition one save makes — read before the
@@ -105,36 +108,56 @@ interface OperatorGovernanceTransition {
   newDirectAccept: boolean;
 }
 
-/** Audit `details` for the three profile-save rows. The delivery keys are
- * ABSENT unless the save actually decided a delivery headline (B-AG1) — the
- * presence of the key IS the disclosure, so they are set, never defaulted. */
-type ProfileCreatedAuditDetails = {
+/** Audit `details` for the three profile-save rows. The coupling keys are
+ * ABSENT unless the save actually decided one (B-AG1) — the presence of the
+ * key IS the disclosure, so they are set, never defaulted. */
+type CouplingAuditKeys = {
+  deliveryGrants?: GrantCouplingNotice["kind"];
+  deliveryNote?: string;
+  browserEgress?: GrantCouplingNotice["kind"];
+  browserEgressNote?: string;
+};
+
+type ProfileCreatedAuditDetails = CouplingAuditKeys & {
   name: string;
   role: string;
   backend: "codex" | "claude";
   projectName: string;
-  deliveryGrants?: DeliveryGrantNotice["kind"];
-  deliveryNote?: string;
 };
 
-type ProfileDeployedAuditDetails = {
+type ProfileDeployedAuditDetails = CouplingAuditKeys & {
   name: string;
   source: "library";
   projectName: string;
-  deliveryGrants?: DeliveryGrantNotice["kind"];
-  deliveryNote?: string;
 };
 
-type ProfileUpdatedAuditDetails = {
+type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
   name: string;
   role: string;
   backend: "codex" | "claude";
   operatorAutonomy?: "supervised" | "full";
   acceptCompletionIntoDone?: "direct" | "off";
   acceptCompletionActsDirectly?: boolean;
-  deliveryGrants?: DeliveryGrantNotice["kind"];
-  deliveryNote?: string;
 };
+
+/** Stamp every coupling decision onto the audit row and the save result — a
+ * decision the save made (or refused to make) is never silent (B-AG1). */
+function carryCouplingNotices(
+  details: CouplingAuditKeys,
+  result: ProfileSaveResult,
+  notices: GrantCouplingNotice[],
+): void {
+  for (const n of notices) {
+    if (n.rule === "delivery-headline") {
+      details.deliveryGrants = n.kind;
+      details.deliveryNote = n.message;
+    } else {
+      details.browserEgress = n.kind;
+      details.browserEgressNote = n.message;
+    }
+  }
+  if (notices.length > 0) result.notices = notices;
+}
 
 const modeSchema = z.enum(["direct", "recommend", "human", "off"]);
 
@@ -286,8 +309,10 @@ function grantsFor(
   // F14: never persist a deliverer whose headline `execute-code-or-write-repo`
   // is merely ABSENT while its scoped delivery grants are actionable (the edit
   // path used to materialize that absence as `off` and silently veto delivery).
-  // B-AG1: an EXPLICIT withholding is reported, never overturned.
-  return repairDeliveryGrants(grants);
+  // B-AG1: an EXPLICIT delivery withholding is reported, never overturned. The
+  // browser→egress coupling runs in the same pass (owner ruling 2026-08-20:
+  // a granted browser carries web egress with it).
+  return applyGrantCouplings(grants);
 }
 
 /** CREATE-path grants: persist the modal caps the form submitted, with the
@@ -342,8 +367,18 @@ function createModalGrants(caps: Record<string, CapMode>): GrantDecision {
     grants.push({ capabilityId, mode });
   }
   // F14: a deliverer must hold the headline repo-write capability (master gate).
-  // The headline is materialized above, so this only re-checks and reports.
-  return { grants, notice: submittedDelivery.notice };
+  // The delivery decision is authoritative on the SUBMITTED view above (the
+  // materialized `off` for an omitted headline is a loop artifact, not admin
+  // intent); the browser→egress coupling runs over the MATERIALIZED grants,
+  // because an omitted egress row becomes an explicit `off` in the loop and
+  // must still follow a submitted browser grant.
+  const browser = repairBrowserEgressGrants(grants);
+  return {
+    grants: browser.grants,
+    notices: [submittedDelivery.notice, browser.notice].filter(
+      (n): n is GrantCouplingNotice => n !== null,
+    ),
+  };
 }
 
 // ------------------------------------------------------------------ create
@@ -363,7 +398,7 @@ export async function createAgentProfile(
   };
 
   let profileId = "";
-  const delivery: DeliveryNoticeHolder = { notice: null };
+  const delivery: DeliveryNoticeHolder = { notices: [] };
   await updateProjectFile(ref, (parsed) => {
     const taken = new Set(parsed.frontmatter.agents.map((a) => a.profileId));
     // Server-generated slug id with a uniqueness check (agents spec §4.5) —
@@ -405,7 +440,7 @@ export async function createAgentProfile(
     definition.resources = form.resources;
 
     const created = createModalGrants(form.caps);
-    delivery.notice = created.notice;
+    delivery.notices = created.notices;
     const deployment: AgentDeployment = {
       profileId,
       capabilities: created.grants,
@@ -422,12 +457,10 @@ export async function createAgentProfile(
     backend: form.backend,
     projectName,
   };
-  // B-AG1: a delivery-headline decision the save made (or refused to make)
-  // is never silent — the audit row carries it and the caller shows it.
-  if (delivery.notice) {
-    details.deliveryGrants = delivery.notice.kind;
-    details.deliveryNote = delivery.notice.message;
-  }
+  const result: ProfileSaveResult = { profileId, name: form.name };
+  // B-AG1: a coupling decision the save made (or refused to make) is never
+  // silent — the audit row carries it and the caller shows it.
+  carryCouplingNotices(details, result, delivery.notices);
   recordAudit(db, {
     action: "project.agent_profile.created",
     actor: { userId: actor.userId, label: actor.label },
@@ -436,8 +469,6 @@ export async function createAgentProfile(
     projectSlug: input.projectSlug,
     details,
   });
-  const result: ProfileSaveResult = { profileId, name: form.name };
-  if (delivery.notice) result.notice = delivery.notice;
   return result;
 }
 
@@ -508,7 +539,7 @@ export async function deployAgentProfileFromLibrary(
   // the no-audit shape B-AG1 was filed against: a template whose scoped delivery
   // is on with the headline explicitly off deploys as a profile that cannot
   // deliver, and nothing said so.
-  const deployDelivery = repairDeliveryGrants(
+  const deployDelivery = applyGrantCouplings(
     (fm.capabilities.length
       ? fm.capabilities
       : conservativeGrantsFor("agent")
@@ -576,10 +607,8 @@ export async function deployAgentProfileFromLibrary(
     source: "library",
     projectName,
   };
-  if (deployDelivery.notice) {
-    details.deliveryGrants = deployDelivery.notice.kind;
-    details.deliveryNote = deployDelivery.notice.message;
-  }
+  const result: ProfileSaveResult = { profileId, name: fm.name };
+  carryCouplingNotices(details, result, deployDelivery.notices);
   recordAudit(db, {
     action: "project.agent_profile.deployed",
     actor: { userId: actor.userId, label: actor.label },
@@ -588,8 +617,6 @@ export async function deployAgentProfileFromLibrary(
     projectSlug: input.projectSlug,
     details,
   });
-  const result: ProfileSaveResult = { profileId, name: fm.name };
-  if (deployDelivery.notice) result.notice = deployDelivery.notice;
   return result;
 }
 
@@ -603,7 +630,7 @@ export async function updateAgentProfile(
 ): Promise<ProfileSaveResult> {
   requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
-  const delivery: DeliveryNoticeHolder = { notice: null };
+  const delivery: DeliveryNoticeHolder = { notices: [] };
   // F20-20: capture the operator governance transition this save makes, so the
   // audit + toast can name it instead of the generic "profile updated". Filled
   // inside the writer callback where the prior view and the saved grants exist.
@@ -641,7 +668,7 @@ export async function updateAgentProfile(
     const saved = grantsFor(form.caps, governedDefaults, {
       specialist: !isOperator,
     });
-    delivery.notice = saved.notice;
+    delivery.notices = saved.notices;
     deployment.capabilities = [...saved.grants, ...preserved];
 
     // F20-20: record the operator's autonomy + direct-accept transition. The
@@ -728,10 +755,11 @@ export async function updateAgentProfile(
     details.acceptCompletionIntoDone = gov.newDirectAccept ? "direct" : "off";
     details.acceptCompletionActsDirectly = directDoneLive;
   }
-  if (delivery.notice) {
-    details.deliveryGrants = delivery.notice.kind;
-    details.deliveryNote = delivery.notice.message;
-  }
+  const result: ProfileSaveResult = {
+    profileId: input.profileId,
+    name: form.name,
+  };
+  carryCouplingNotices(details, result, delivery.notices);
   recordAudit(db, {
     action: "project.agent_profile.updated",
     actor: { userId: actor.userId, label: actor.label },
@@ -766,11 +794,7 @@ export async function updateAgentProfile(
     });
   }
 
-  const result: ProfileSaveResult = {
-    profileId: input.profileId,
-    name: form.name,
-  };
-  if (delivery.notice) result.notice = delivery.notice;
+
   if (governanceNotice) result.governanceNotice = governanceNotice;
   return result;
 }

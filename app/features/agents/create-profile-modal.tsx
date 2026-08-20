@@ -1,7 +1,11 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
-import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
+import {
+  ALWAYS_HUMAN_CAPABILITY_IDS,
+  BROWSER_CAP_ID,
+  WEB_EGRESS_CAP_ID,
+} from "~/shared/capabilities";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { rovingRadioKeyDown } from "~/ui/roving-radio";
@@ -126,11 +130,25 @@ const SUMMARY_MODES: readonly { id: CapMode; word: string }[] = [
 // Repo-write grants that mark a profile as a DELIVERING builder (mirrors
 // listDeployedSpecialists' delivery heuristic) — used to seed the verdict
 // toggle from its RUNTIME-effective mode below.
+/** Owner ruling (2026-08-20): a granted browser carries web egress with it —
+ * the browser IS egress, and `resolveBrowserMcp` refuses to mount the pair in
+ * disagreement, so the editor never lets the disagreement exist. Applied on
+ * every state write AND on seed (a stored profile from before the rule can
+ * still carry the contradiction; the save layer repairs it identically, so
+ * seeding it coupled shows the admin what the next save persists — the same
+ * F19 UX-13 round-trip honesty the verdict row follows below). */
+function coupleGrants(sel: CapSelection): CapSelection {
+  return sel[BROWSER_CAP_ID] === "direct" &&
+    sel[WEB_EGRESS_CAP_ID] !== "direct"
+    ? { ...sel, [WEB_EGRESS_CAP_ID]: "direct" }
+    : sel;
+}
+
 function seedCaps(
   initial: AgentProfileView | null,
   defaults: Readonly<CapSelection>,
 ): CapSelection {
-  if (!initial) return { ...defaults };
+  if (!initial) return coupleGrants({ ...defaults });
   const caps: CapSelection = {};
   for (const id of Object.keys(defaults)) caps[id] = "off";
   // F10-07: seed EVERY toggle from the STORED grant only — never synthesize an
@@ -153,7 +171,7 @@ function seedCaps(
           : grant.mode;
     }
   }
-  return caps;
+  return coupleGrants(caps);
 }
 
 /**
@@ -676,6 +694,14 @@ function CapabilityGrants({
                     // drops "Human-only", which persists `off` — it is an
                     // explicit-`direct`-or-nothing grant.
                     const locked = ALWAYS_HUMAN.has(capDef.id);
+                    // Browser→egress coupling: while the browser is Allowed,
+                    // the egress row is pinned to Allowed — `coupleGrants`
+                    // keeps the STATE coherent, this keeps the CONTROL honest
+                    // about it (a row that any click would instantly revert
+                    // must not offer the click).
+                    const pinned =
+                      capDef.id === WEB_EGRESS_CAP_ID &&
+                      caps[BROWSER_CAP_ID] === "direct";
                     const rowModes =
                       capDef.id === VERDICT_CAP_ID
                         ? capModes.filter((m) => m.id !== "human")
@@ -707,12 +733,21 @@ function CapabilityGrants({
                             model it did not have, and every radio was its own
                             tab stop (15 instead of 5 for Collaboration). */}
                         <div
-                          className={"cap-seg" + (locked ? " locked" : "")}
+                          className={
+                            "cap-seg" + (locked || pinned ? " locked" : "")
+                          }
                           role="radiogroup"
                           aria-label={
                             locked
                               ? `Policy for ${capDef.label} (locked, reserved for humans)`
-                              : `Policy for ${capDef.label}`
+                              : pinned
+                                ? `Policy for ${capDef.label} (required by Drive a live web browser: the browser is web egress)`
+                                : `Policy for ${capDef.label}`
+                          }
+                          title={
+                            pinned
+                              ? "Required by Drive a live web browser: the browser is web egress. Set the browser to Human-only or Off to change this."
+                              : undefined
                           }
                           onKeyDown={rovingRadioKeyDown}
                         >
@@ -723,12 +758,14 @@ function CapabilityGrants({
                               role="radio"
                               aria-checked={caps[capDef.id] === m.id}
                               tabIndex={mi === tabIdx ? 0 : -1}
-                              disabled={locked}
+                              disabled={locked || pinned}
                               className={
                                 m.id + (caps[capDef.id] === m.id ? " on" : "")
                               }
                               onClick={() =>
-                                setCaps((p) => ({ ...p, [capDef.id]: m.id }))
+                                setCaps((p) =>
+                                  coupleGrants({ ...p, [capDef.id]: m.id }),
+                                )
                               }
                             >
                               {m.label}

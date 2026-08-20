@@ -1099,6 +1099,88 @@ describe("CreateProfileModal", () => {
     expect(container.querySelector(".cap-seg button.recommend")).not.toBeNull();
   });
 
+  /** Owner ruling 2026-08-20 — browser→egress coupling in the editor. The live
+   * failure shape: an admin granted "Drive a live web browser", left "Search &
+   * fetch from the web" off, and got run after run honestly reporting "browser
+   * not mounted" against a matrix that said Allowed (`resolveBrowserMcp`
+   * refuses the pair in disagreement). The editor now makes the disagreement
+   * inexpressible: granting the browser flips egress with it, and the egress
+   * row pins (disabled, reason in its accessible name) while the browser stays
+   * Allowed. */
+  it("granting the browser flips web egress with it and pins the row", () => {
+    const { container, getByText } = renderModal({ initial: null });
+    fireEvent.click(getByText("Collaboration"));
+    const rowFor = (label: string) =>
+      container.querySelector<HTMLElement>(
+        `[role="radiogroup"][aria-label^="Policy for ${label}"]`,
+      )!;
+    const modeBtn = (row: HTMLElement, label: string) =>
+      Array.from(row.querySelectorAll("button")).find(
+        (b) => b.textContent === label,
+      )!;
+
+    // Default state: browser off, egress row free — withhold egress
+    // EXPLICITLY first, so the flip below is load-bearing (the create-mode
+    // default for egress is already Allowed, which would mask a dead
+    // coupling).
+    const egressBefore = rowFor("Search & fetch from the web");
+    expect(modeBtn(egressBefore, "Allowed").disabled).toBe(false);
+    fireEvent.click(modeBtn(egressBefore, "Off"));
+    expect(modeBtn(egressBefore, "Off").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+
+    fireEvent.click(modeBtn(rowFor("Drive a live web browser"), "Allowed"));
+
+    const egress = rowFor("Search & fetch from the web");
+    expect(egress.getAttribute("aria-label")).toContain(
+      "required by Drive a live web browser",
+    );
+    expect(modeBtn(egress, "Allowed").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    // SAFETY: the radiogroup renders only <button> children (the rowModes
+    // map above), so every match is an HTMLButtonElement.
+    for (const b of egress.querySelectorAll<HTMLButtonElement>("button")) {
+      expect(b.disabled).toBe(true);
+    }
+
+    // Releasing the browser releases the row (the value stays Allowed — the
+    // admin can then withhold egress explicitly).
+    fireEvent.click(modeBtn(rowFor("Drive a live web browser"), "Off"));
+    const released = rowFor("Search & fetch from the web");
+    expect(released.getAttribute("aria-label")).not.toContain("required by");
+    expect(modeBtn(released, "Allowed").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(modeBtn(released, "Off").disabled).toBe(false);
+  });
+
+  it("a stored pre-rule contradiction (browser on, egress off) seeds coupled", () => {
+    // The save layer repairs the pair on the next write, so the editor shows
+    // what that write will persist (F19 UX-13 round-trip honesty).
+    const { container, getByText } = renderModal({
+      initial: mkProfile({
+        capabilities: [
+          { capabilityId: "use-browser", mode: "direct" },
+          { capabilityId: "use-web-search-fetch", mode: "off" },
+        ],
+      }),
+    });
+    fireEvent.click(getByText("Collaboration"));
+    const egress = container.querySelector<HTMLElement>(
+      '[role="radiogroup"][aria-label^="Policy for Search & fetch from the web"]',
+    )!;
+    expect(egress.getAttribute("aria-label")).toContain(
+      "required by Drive a live web browser",
+    );
+    expect(
+      Array.from(egress.querySelectorAll("button"))
+        .find((b) => b.textContent === "Allowed")!
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
   it("edit mode: seeds model + effort from the profile", async () => {
     const { container, getByText, getByDisplayValue } = renderModal({
       initial: mkProfile({ backends: ["claude"], model: "opus", effort: "max" }),
