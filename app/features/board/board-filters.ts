@@ -211,7 +211,7 @@ export function boardEmptyCopy({
   // non-empty and would silently skip the teaching line. A filter or search that
   // is actively hiding something still wins — that message is more informative.
   if (boardTotal === 0 && isEntryColumn && !filterLabel && !query.trim()) {
-    return "No tasks yet — create one to start the flow";
+    return "No tasks yet. Create one to start the flow";
   }
   if (total === 0) return "No tasks";
   const subject = total === 1 ? "The 1 task here is" : `All ${total} tasks here are`;

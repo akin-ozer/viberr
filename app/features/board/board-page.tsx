@@ -48,6 +48,10 @@ import {
   reviewPill,
 } from "~/features/github/github-pills";
 import { AcceptConfirm } from "~/features/task-detail/accept-confirm";
+import {
+  acceptanceDisclosureFields,
+  type AcceptanceDisclosure,
+} from "~/shared/acceptance-disclosure";
 import { LocalRelative } from "~/ui/local-time";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
@@ -885,7 +889,7 @@ function boardAcceptRefusal(
       : // The server's own sentence names the resolved review stage; a summary
         // holds no stage roles, and "the boundary" is the truer phrasing anyway
         // for a graph with several edges into the terminal stage.
-        `${task.key} is at ${fromStageName}, not the boundary the workflow puts before ${terminalName} — a completion can only be accepted from there. Move the task through the workflow first.`) ??
+        `${task.key} is at ${fromStageName}, not the boundary the workflow puts before ${terminalName}. A completion can only be accepted from there. Move the task through the workflow first.`) ??
     task.blockReason ??
     (task.readiness === "blocked" && task.packet?.type === "blocked"
       ? "An open blocked decision is holding this task."
@@ -910,16 +914,24 @@ function boardAcceptRefusal(
  * its `stage-move` ceremony mode — the mode written for exactly this path (a
  * human move into the terminal stage IS accepting completion, F19-37). The board
  * maps its projection summary onto the component's structural `task` shape and
- * supplies the stage list from its columns. The three task-FILE facts a board
- * summary does not carry are passed honestly rather than invented:
- *   - `workRevisionSha: null` → the shared "No delivered revision recorded." row
- *     (the fork drew no revision row at all);
+ * supplies the stage list from its columns. The task-FILE facts a board summary
+ * does not carry are passed honestly rather than invented:
  *   - `defaultBranch` → the merge target, threaded from the project record —
  *     the fact the fork could not name and sent people to the task page for;
  *   - `noChanges` / `noPullRequest: false` → the board cannot run the accept-time
  *     branch re-probe the task-detail loader drives, so it keeps the plain no-PR
  *     sentence rather than promising an auto-detect it can't perform.
  * The refusals a board summary CAN answer are composed by `boardAcceptRefusal`.
+ *
+ * The delivered REVISION used to be in that list — hardcoded `null`, so the
+ * ceremony always drew "No delivered revision recorded." — and once ruling 88
+ * made the confirmed click echo its own disclosure back, that hardcoded absence
+ * stopped being merely a thinner disclosure and became a dead door: the server
+ * compares the echo against the live task, so every board drop onto the terminal
+ * stage of a task that had actually DELIVERED was refused as stale. The revision
+ * is projected now (`TaskSummary.workRevisionSha`) and disclosed like every
+ * other fact — which is also what ruling 53 asked for. `?? null` keeps the
+ * honest-absence row for a task with nothing delivered.
  */
 function AcceptOnBoardConfirm({
   task,
@@ -941,7 +953,9 @@ function AcceptOnBoardConfirm({
   defaultBranch: string;
   busy: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
+  /** Ruling 88: the shared ceremony hands the confirmed click its own
+   *  disclosure — the board POSTs it, exactly like the task page. */
+  onConfirm: (disclosure: AcceptanceDisclosure) => void;
 }) {
   const terminalName = stages[stages.length - 1]?.name ?? "Done";
   return (
@@ -955,7 +969,7 @@ function AcceptOnBoardConfirm({
         branch: task.branch,
         pr: task.pr,
       }}
-      workRevisionSha={null}
+      workRevisionSha={task.workRevisionSha ?? null}
       noChanges={false}
       noPullRequest={false}
       defaultBranch={defaultBranch}
@@ -1016,7 +1030,7 @@ function NewTaskModal({
         fetcher.data.key +
           " created in " +
           fetcher.data.stageName +
-          " — its task.md is in the store",
+          ". Its task.md is in the store",
       );
       onClose();
     }
@@ -1047,8 +1061,8 @@ function NewTaskModal({
         <div className="mh-main">
           <h2>New task</h2>
           <div className="mh-sub">
-            Creates a canonical task file in the store — agents anchor on it
-            from the first event.
+            Creates the task as a single file in the store. Agents read that
+            file and work from it.
           </div>
         </div>
         <button
@@ -1084,22 +1098,22 @@ function NewTaskModal({
               choice the server would refuse. */}
           <span className="flabel">Stage</span>
           <span className="fine sm">
-            Starts in {entryStageName} — the triage gate is where the goal is
-            refined before work begins.
+            Starts in {entryStageName}. The goal gets refined at triage before
+            any work begins.
           </span>
         </div>
         <div className="field">
           <label className="flabel" htmlFor="new-task-goal">
             Goal
             <span className="fhint">
-              what done means — the operator and specialists anchor on this
+              what counts as done, for the operator and the agents
             </span>
           </label>
           <textarea
             id="new-task-goal"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
-            placeholder="One or two sentences. Underspecified goals get flagged at the triage quality gate."
+            placeholder="One or two sentences. A vague goal gets flagged by the operator at triage."
           />
         </div>
       </div>
@@ -1113,7 +1127,7 @@ function NewTaskModal({
             ? serverError
             : titleTouched && !valid
               ? "A title is required."
-              : "The task key is assigned on create."}
+              : "The task key is assigned automatically."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>
@@ -1350,7 +1364,7 @@ function FilterBar({
           type="button"
           className="fchip"
           onClick={onClear}
-          title="Show every task again — clears the board filter and the search"
+          title="Show every task again. Clears the board filter and the search"
         >
           <Icon name="x" />
           Clear
@@ -1366,7 +1380,7 @@ function OrphanBanner({ orphanTasks }: { orphanTasks: TaskSummary[] }) {
       <Icon name="alert" />
       <span className="board-orphans-label">
         {orphanTasks.length} unstaged{" "}
-        {orphanTasks.length === 1 ? "task" : "tasks"} — the stage in the file
+        {orphanTasks.length === 1 ? "task" : "tasks"}: the stage in the file
         doesn't match any board column. Fix the task file to place it.
       </span>
       <span className="board-orphans-keys">
@@ -1634,7 +1648,16 @@ export function BoardPage({
   };
 
   /** Commit a confirmed board acceptance (B1). */
-  const submitReorder = (taskKey: string, to: string, beforeKey: string) => {
+  const submitReorder = (
+    taskKey: string,
+    to: string,
+    beforeKey: string,
+    // Ruling 88 (F21-2): set ONLY for a move onto the FINAL column, which the
+    // server reads as an acceptance (`reorderTask` → `transitionStage` →
+    // `acceptCompletion` — the real merge). It is the echo of what the ceremony
+    // above just displayed; without it the server refuses the acceptance.
+    disclosure?: AcceptanceDisclosure,
+  ) => {
     setArrivedKey(taskKey);
     announceMove(taskKey, to); // D9
     const fd = new FormData();
@@ -1643,6 +1666,13 @@ export function BoardPage({
     fd.set("taskKey", taskKey);
     fd.set("to", to);
     fd.set("beforeKey", beforeKey);
+    if (disclosure) {
+      for (const [field, value] of Object.entries(
+        acceptanceDisclosureFields(disclosure),
+      )) {
+        fd.set(field, value);
+      }
+    }
     transitionFetcher.submit(fd, { method: "post" });
   };
 
@@ -1734,7 +1764,7 @@ export function BoardPage({
     if (!pendingAccept || pendingAcceptTask) return;
     setPendingAccept(null);
     push(
-      `${pendingAccept.taskKey} left the board before its acceptance was confirmed — nothing was accepted.`,
+      `${pendingAccept.taskKey} left the board before its acceptance was confirmed. Nothing was accepted.`,
       "error",
     );
   }, [pendingAccept, pendingAcceptTask, push]);
@@ -1927,7 +1957,7 @@ export function BoardPage({
       // leave the "Re-scanning…" toast as the last word (MU-3).
       push(
         rescanFetcher.data.ok
-          ? "Re-scan complete — board matches the file-native store"
+          ? "Re-scan complete. The board matches the file-native store"
           : (rescanFetcher.data.error ?? "Re-scan failed."),
         // P13-D-10: same handler, both outcomes — the failure branch used to
         // borrow the success glyph.
@@ -1980,7 +2010,7 @@ export function BoardPage({
         <div className="board-orphans" role="status">
           <Icon name="lock" />
           <span className="board-orphans-label">
-            Archived tasks — abandoned work kept for the record. Their timelines
+            Archived tasks: abandoned work kept for the record. Their timelines
             and audit are intact, they are out of the review queue, and a
             maintainer can restore one from its task page.
           </span>
@@ -2052,10 +2082,13 @@ export function BoardPage({
           defaultBranch={defaultBranch}
           busy={transitionFetcher.state !== "idle"}
           onCancel={() => setPendingAccept(null)}
-          onConfirm={() => {
+          onConfirm={(disclosure) => {
             const p = pendingAccept;
             setPendingAccept(null);
-            submitReorder(p.taskKey, p.to, p.beforeKey);
+            // Ruling 88: the drop commits with the ceremony's own echo of what
+            // it disclosed — the same acknowledgment the task page's stage move
+            // sends, on the same server contract.
+            submitReorder(p.taskKey, p.to, p.beforeKey, disclosure);
           }}
         />
       )}

@@ -12,6 +12,7 @@ import {
 } from "../../../test-support/test-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { taskDir } from "~/server/files/file-store-root.server";
+import { logger } from "~/server/logging/logger.server";
 import {
   defaultExec,
   discardLocalTaskBranch,
@@ -229,6 +230,38 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     expect(res.status).toBe("pushed");
     // Never even asked for a count it could not trust.
     expect(git.calls.some((c) => c.includes("--count"))).toBe(false);
+  });
+
+  it("F21-22: the push log states a real count, or states that it has none", async () => {
+    bindPat();
+    const info = vi.spyOn(logger, "info");
+    const counted = fakeGit({ branch: "vib-1-work", ahead: 2 });
+    await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: counted.exec,
+    });
+    const pushedLog = () =>
+      info.mock.calls.find((c) => c[0] === "pushed workspace branch to origin")?.[1] ?? {};
+    expect(pushedLog()).toMatchObject({ commits: 2 });
+    expect(pushedLog()).not.toHaveProperty("commitsUnknown");
+
+    // The same line on a history that could not be counted (a shallow clone
+    // whose deepen failed — the operator-deliver shape). It used to log
+    // `commits: null`, which a reader takes for zero.
+    info.mockClear();
+    const unknown = fakeGit({
+      branch: "vib-1-work", ahead: 0, shallow: true, deepenOk: false,
+    });
+    await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: unknown.exec,
+    });
+    expect(pushedLog()).toEqual({
+      taskKey: "VIB-1",
+      branch: "vib-1-work",
+      commitsUnknown: true,
+    });
+    info.mockRestore();
   });
 
   it("COMMITS the agent's uncommitted changes, then pushes (delivery finalization)", async () => {

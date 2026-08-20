@@ -18,10 +18,13 @@ export async function requireFormAction(request: Request) {
   };
 }
 
-export function appErrorResponse(error: unknown) {
-  if (!isAppError(error)) throw error;
+/** Render a CAUGHT throwable as an action response — or re-throw it untouched
+ *  when it is not one of ours, so a genuine defect still reaches the error
+ *  boundary instead of being flattened into a 500-shaped payload. */
+export function appErrorResponse(cause: unknown) {
+  if (!isAppError(cause)) throw cause;
   return data(
-    { ok: false as const, error: error.userMessage },
-    { status: error.status },
+    { ok: false as const, error: cause.userMessage },
+    { status: cause.status },
   );
 }

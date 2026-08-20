@@ -84,11 +84,16 @@ const prose = normalizeEscapedNewlines;
 const REPORT_OUTCOME_DESCRIPTION =
   "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.";
 
-/** What `report_outcome` hands its handler. `evidence` is optional HERE because
- *  the field is only declared on the tool when the profile holds the grant —
- *  the handler is the same either way. */
+/** U11: the same tool for a profile granted evidence but NOT the verdict — it
+ *  has no judgment to report, so the description must not ask for one. */
+const REPORT_EVIDENCE_ONLY_DESCRIPTION =
+  "Report your structured OUTCOME for this task: the evidence REFERENCES for what you checked or produced, plus a one-paragraph summary. Call it exactly once, at the END of your work, right before your final report. It is recorded together with your final report when you finish. You do NOT judge the work — this task's verdict is someone else's.";
+
+/** What `report_outcome` hands its handler. BOTH fields are optional HERE
+ *  because each is only declared on the tool when the profile holds its grant
+ *  (U11: verdict, P13-D-26: evidence) — the handler is the same either way. */
 interface ReportedOutcome {
-  verdict: "approve" | "request_changes";
+  verdict?: "approve" | "request_changes";
   summary?: string;
   evidence?: { label: string; add?: string; del?: string }[];
 }
@@ -330,16 +335,28 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     );
   }
 
-  if (collab.verdict) {
+  // U11: `report_outcome` is the ONLY structured channel a Claude run has, so it
+  // must mount for EITHER grant that uses it — verdict or evidence. It used to
+  // mount on `collab.verdict` alone, which made `attach-evidence-references`
+  // grant literally nothing on Claude unless the profile ALSO held the verdict
+  // grant: the exact asymmetry P13-D-26 fixed on Codex (where `useEnvelopeSchema`
+  // already reads `verdict || ask || evidence`), left standing on the other
+  // backend. A profile whose whole job is citing evidence had no way to cite.
+  if (collab.verdict || collab.evidence) {
     const outcomeFields = {
-      verdict: z
-        .enum(["approve", "request_changes"])
-        .describe("Your judgment of the work under review."),
+      // The verdict FIELD stays gated on the verdict grant — mounting the tool
+      // for an evidence-only profile must not hand it a judgment channel it was
+      // never granted. Declared optional in the type, present in the schema only
+      // when granted (same "the field is only DECLARED when the profile holds
+      // the grant" rule the evidence field follows).
       summary: z
         .string()
         .optional()
         .describe("One-paragraph justification (markdown allowed)."),
     };
+    const verdictField = z
+      .enum(["approve", "request_changes"])
+      .describe("Your judgment of the work under review.");
     // P13-D-26: the reviewer profile advertises "Attach evidence references"
     // (agent-catalog.server.ts) and its persona says it keeps raw validation
     // output OUT of the timeline — but there was no channel to attach anything,
@@ -372,26 +389,56 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
       const evidence = collab.evidence ? normalizeEvidenceRows(args.evidence) : null;
       // Absent, not undefined: `stageOutcome` stores the envelope verbatim and
       // the completion pipeline distinguishes "no summary" from an empty one.
-      const outcome: AgentOutcome = { verdict: args.verdict };
+      // U11: an evidence-only run stages NO verdict — the field is not on its
+      // tool, and `AgentOutcome.verdict` is optional precisely so the Codex
+      // envelope's `verdict: null` arm and this one record the same shape.
+      const outcome: AgentOutcome = {};
+      if (collab.verdict && args.verdict) outcome.verdict = args.verdict;
       if (args.summary) outcome.summary = prose(args.summary);
       if (evidence) outcome.evidence = evidence;
       stageOutcome(db, outcomeKey, outcome);
+      const staged = [
+        outcome.verdict ? `Verdict '${outcome.verdict}'` : null,
+        evidence ? `${evidence.length} evidence reference(s)` : null,
+      ].filter((part): part is string => part !== null);
       return textResult(
-        `[staged] Verdict '${args.verdict}'${
-          evidence ? ` with ${evidence.length} evidence reference(s)` : ""
-        } will be recorded with your final report. Finish with your full findings.`,
+        `[staged] ${staged.length ? staged.join(" with ") : "Your outcome"} will be recorded with your final report. Finish with your full findings.`,
       );
     };
-    tools.push(
-      collab.evidence
-        ? tool(
-            "report_outcome",
-            REPORT_OUTCOME_DESCRIPTION,
-            { ...outcomeFields, evidence: evidenceField },
-            report,
-          )
-        : tool("report_outcome", REPORT_OUTCOME_DESCRIPTION, outcomeFields, report),
-    );
+    // Each field is DECLARED only when its grant is held — an ungranted field is
+    // invisible to the model and unusable, which is this toolkit's whole gating
+    // rule (an ungranted capability's tool is not even built). Spelled out per
+    // grant pair rather than assembled conditionally, so the exact shape the
+    // model is shown for each pair is readable in one place. The final arm is
+    // the evidence-only one: the enclosing `if` admits nothing else.
+    if (collab.verdict && collab.evidence) {
+      tools.push(
+        tool(
+          "report_outcome",
+          REPORT_OUTCOME_DESCRIPTION,
+          { ...outcomeFields, verdict: verdictField, evidence: evidenceField },
+          report,
+        ),
+      );
+    } else if (collab.verdict) {
+      tools.push(
+        tool(
+          "report_outcome",
+          REPORT_OUTCOME_DESCRIPTION,
+          { ...outcomeFields, verdict: verdictField },
+          report,
+        ),
+      );
+    } else {
+      tools.push(
+        tool(
+          "report_outcome",
+          REPORT_EVIDENCE_ONLY_DESCRIPTION,
+          { ...outcomeFields, evidence: evidenceField },
+          report,
+        ),
+      );
+    }
   }
 
   if (tools.length === 0) return null;

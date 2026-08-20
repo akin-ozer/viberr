@@ -84,9 +84,15 @@ import {
   resolveRunEffort,
 } from "~/server/runtimes/model-catalog.server";
 import { taskBranchName } from "~/server/github/branch-sync.server";
-import type { RunMcpServers } from "~/server/runtimes/adapter.server";
 import {
+  RUN_PHASE,
+  type RunMcpServers,
+} from "~/server/runtimes/adapter.server";
+import {
+  assertRunReservationLive,
+  reserveRun,
   startRun,
+  type RunReservation,
   type StartRunInput,
 } from "~/server/runtimes/run-service.server";
 import { publishRunLogAppended } from "~/server/runtimes/run-events.server";
@@ -119,10 +125,13 @@ import {
   CLONE_TIMEOUT_MS,
   cloneFailureLogDetails,
   cloneFailureSentence,
-  createGitHubClonePlan,
   githubRemoteSanitizationArgs,
   type CloneFailureLogDetails,
 } from "./git-clone-auth.server";
+import {
+  cloneWorkspaceRepo,
+  type WorkspaceCloneInput,
+} from "./repo-mirror.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 
 /** The mount call's own input contract — named so `dataRoot` can be OMITTED
@@ -788,6 +797,19 @@ export interface AssignReviewerResult {
   backend: RealBackend;
   /** True when the profile was already engaged as a reviewer (idempotent no-op). */
   alreadyEngaged: boolean;
+  /**
+   * Whether this engagement actually holds verdict authority — i.e. whether
+   * acceptance waits on its approval (F10-15's engage-time snapshot).
+   *
+   * F21-6: the timeline event learned to say "a supporting agent" for a
+   * verdict-less engagement, but every OTHER surface kept calling it a reviewer
+   * because the result carried no way to tell them apart. Callers announce from
+   * this, so the toast a human reads and the event the task records make the
+   * same claim about authority. On the `alreadyEngaged` arm it is the EXISTING
+   * engagement's snapshot — that snapshot, not today's grants, is what the
+   * acceptance gate consults.
+   */
+  verdictCapable: boolean;
 }
 
 /**
@@ -827,16 +849,20 @@ export async function assignReviewer(
   // Already engaged in ANY capacity (delivering OR supporting): no-op. Scanning
   // only the supporting list let the CURRENT deliverer be re-added as a
   // supporting reviewer, duplicating its profileId in engagements[].
-  const alreadyEngaged = existing.parsed.frontmatter.engagements.some(
+  const engaged = existing.parsed.frontmatter.engagements.find(
     (r) => r.profileId === reviewer.profileId,
   );
-  if (alreadyEngaged) {
+  if (engaged) {
     return {
       profileId: reviewer.profileId,
       name: reviewer.name,
       role: reviewer.role,
       backend: reviewer.backend,
       alreadyEngaged: true,
+      // The snapshot the acceptance gate reads, not a fresh resolution of the
+      // profile's current grants — those two can differ, and only one of them
+      // governs.
+      verdictCapable: engaged.verdictCapable,
     };
   }
 
@@ -846,8 +872,18 @@ export async function assignReviewer(
     backend: reviewer.backend,
     role: reviewer.role,
   };
+  // F10-15: a supporting engagement with an explicit verdict grant is a REQUIRED
+  // reviewer — acceptance waits for its approval of the current revision.
+  // Snapshot it at engage time from the resolved grants.
+  const verdictCapable = resolveAgentCollab(reviewer.capabilities).verdict;
+  // F21-6: "as a reviewer" is a claim about AUTHORITY, and it was announced for
+  // every supporting engagement regardless of grants. Live (VIB-1) a profile
+  // with verdict=Off was announced "as a reviewer" while the execution profile
+  // listed it under SUPPORTING AGENTS and acceptance never waited on it — the
+  // timeline said the task had a reviewer it did not have.
   const event = agentEvent(
-    `Engaged **${reviewer.name}** (${reviewer.role}, ${backendLabel}) as a reviewer.`,
+    `Engaged **${reviewer.name}** (${reviewer.role}, ${backendLabel}) as ` +
+      (verdictCapable ? "a reviewer." : "a supporting agent."),
   );
 
   await updateTaskFile(
@@ -856,10 +892,7 @@ export async function assignReviewer(
       parsed.frontmatter.engagements.push({
         ...ref,
         delivers: false,
-        // F10-15: a supporting engagement with an explicit verdict grant is a
-        // REQUIRED reviewer — acceptance waits for its approval of the current
-        // revision. Snapshot it at engage time from the resolved grants.
-        verdictCapable: resolveAgentCollab(reviewer.capabilities).verdict,
+        verdictCapable,
       });
       // Clear a matching pending "engage reviewer" recommendation.
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
@@ -900,6 +933,7 @@ export async function assignReviewer(
     role: reviewer.role,
     backend: reviewer.backend,
     alreadyEngaged: false,
+    verdictCapable,
   };
 }
 
@@ -979,26 +1013,61 @@ export interface StartAgentRunResult {
   role: string;
 }
 
-/** Start an engaged agent from its current deployment and task workspace. */
+/** The reservation `dispatchAgentRun` claims mid-flight, so the exported
+ *  wrapper can release it when preparation throws (R21-4). A box, not a return
+ *  value: the throw is exactly the path that produces no return value. */
+interface PendingReservation {
+  reservation: RunReservation | null;
+}
+
+/**
+ * Start an engaged agent from its current deployment and task workspace.
+ *
+ * R21-4: the dispatch claims a live run row BEFORE the workspace clone (so the
+ * task page shows "Preparing workspace" instead of nothing for minutes). That
+ * row is `running` and, for a delivering run, occupies the single-flight slot —
+ * so a preparation failure has to release it here, or the task would refuse
+ * every further delivering run until the process restarts.
+ */
+export interface StartAgentRunInput {
+  projectSlug: string;
+  taskKey: string;
+  /** The engaged profile to run; omitted → the delivering engagement. */
+  profileId?: string;
+  directive?: string;
+  /** Display name of the human whose words `directive` quotes, when there is
+   *  one (an @mention comment). The prompt tells the agent to tag them back —
+   *  the tag is what notifies a person (NEW-4). */
+  directiveFrom?: string;
+  /** Force this run onto a specific backend regardless of the profile's
+   *  default — "retry on the other backend" after an availability /
+   *  quota failure (D4). */
+  backendOverride?: RealBackend;
+}
+
 export async function startAgentRun(
   db: DatabaseSync,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    /** The engaged profile to run; omitted → the delivering engagement. */
-    profileId?: string;
-    directive?: string;
-    /** Display name of the human whose words `directive` quotes, when there is
-     *  one (an @mention comment). The prompt tells the agent to tag them back —
-     *  the tag is what notifies a person (NEW-4). */
-    directiveFrom?: string;
-    /** Force this run onto a specific backend regardless of the profile's
-     *  default — "retry on the other backend" after an availability /
-     *  quota failure (D4). */
-    backendOverride?: RealBackend;
-  },
+  input: StartAgentRunInput,
   actor: TaskActor,
   ctx: TaskMutationContext = {},
+): Promise<StartAgentRunResult> {
+  const pending: PendingReservation = { reservation: null };
+  try {
+    return await dispatchAgentRun(db, input, actor, ctx, pending);
+  } catch (error) {
+    pending.reservation?.abandon(
+      error instanceof Error ? error.message : String(error),
+    );
+    throw error;
+  }
+}
+
+async function dispatchAgentRun(
+  db: DatabaseSync,
+  input: StartAgentRunInput,
+  actor: TaskActor,
+  ctx: TaskMutationContext,
+  pending: PendingReservation,
 ): Promise<StartAgentRunResult> {
   const auditActor = runtimeAuditActor(
     db,
@@ -1185,6 +1254,43 @@ export async function startAgentRun(
   // working tree (R7-2: no credential → fail fast or gated test engine, neither
   // needs a checkout).
   const realBackend = isBackendAvailable(backend);
+
+  // Thread prefix: the delivering agent streams on `primary-…`; each
+  // supporting agent groups on its `r<index>-…` prefix (the agents deployment
+  // projection groups on it). Unique suffix so re-runs never collide on
+  // agent_runs' unique(project, task, thread). Computed HERE, before the
+  // workspace work, because the reservation below claims the row with it.
+  const supportingIndex = delivers
+    ? -1
+    : supportingEngagements(existing.parsed.frontmatter).findIndex(
+        (r) => r.profileId === engagement.profileId,
+      );
+  const threadId =
+    (delivers ? "primary-" : `r${supportingIndex}-`) +
+    newId("t").replace("t_", "").slice(0, 8);
+
+  // R21-4 / OBS-8: claim the run row NOW, before the clone. A cold task-repo
+  // clone ran 3+ minutes live on a 113 MB repository, and for that whole window
+  // the task page showed an empty timeline, no live-run strip and no hint that
+  // anything was happening — the product looked dead while it was working. The
+  // reserved row renders the strip with a real phase; `startRun` adopts it (id,
+  // thread and started_at) instead of minting a second row, and the catch in
+  // `startAgentRun` abandons it if preparation throws.
+  pending.reservation = reserveRun(db, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    threadId,
+    role: engagement.role,
+    kind: delivers ? "primary" : "reviewer",
+    backend,
+    model,
+    agentName,
+    agentProfileId: engagement.profileId,
+    phase: RUN_PHASE.preparing,
+    step:
+      repo && realBackend ? `Cloning ${repo}` : "Setting up the run workspace",
+  });
+
   const clone =
     repo && realBackend
       ? await cloneRepo(db, {
@@ -1207,6 +1313,22 @@ export async function startAgentRun(
   if (runWorkdir && !existsSync(runWorkdir)) {
     mkdirSync(runWorkdir, { recursive: true });
   }
+  // C4-opres: the clone above is the MINUTES-long window in which the human can
+  // (and does) press Stop on the strip this reservation put on the page. That
+  // interrupt is the run's outcome — so stop here, before mounting skills,
+  // resolving MCP servers and building a persona for a run nobody wants. The
+  // wrapper's catch releases the reservation, and `abandon` will not demote the
+  // recorded `interrupted`. `startRun` re-checks immediately before adopting.
+  if (pending.reservation) {
+    assertRunReservationLive(db, pending.reservation.runId);
+  }
+  // The checkout is done; the rest of preparation (skill mount, KB/persona
+  // assembly, MCP pre-flight) is seconds, not minutes — but it is still time the
+  // strip would otherwise spend showing the clone that already finished.
+  pending.reservation?.phase(
+    RUN_PHASE.preparing,
+    "Mounting the agent's granted resources",
+  );
 
   // Mount the granted skills into the checkout so the Claude SDK discovers them
   // natively (progressive disclosure: metadata now, full body only when the
@@ -1385,7 +1507,18 @@ export async function startAgentRun(
     }
     if (collab.verdict) {
       collabNotes.push(
-        "- `report_outcome` — REQUIRED at the end of your review: report `approve` or `request_changes` with a one-paragraph justification, then finish with your full findings.",
+        "- `report_outcome` — REQUIRED at the end of your review: report `approve` or `request_changes` with a one-paragraph justification" +
+          (collab.evidence
+            ? ", plus `evidence` — short REFERENCES to what you checked (a suite, a file, a check), never raw output"
+            : "") +
+          ", then finish with your full findings.",
+      );
+    } else if (collab.evidence) {
+      // U11 (the Claude half of B-AG3): an evidence-only profile now MOUNTS
+      // `report_outcome`, so the prompt has to name the channel — an unannounced
+      // tool is the same silent-resource class as an unmounted grant.
+      collabNotes.push(
+        "- `report_outcome` — at the end of your work, report `evidence`: short REFERENCES to what you checked or produced (a suite, a file, a check), never raw output, with a one-paragraph summary. You do NOT judge the work; there is no verdict on this tool for you.",
       );
     }
   } else if (
@@ -1424,19 +1557,6 @@ export async function startAgentRun(
   const prompt = collabNotes.length
     ? `${basePrompt}\n\n## Collaboration\n\n${collabNotes.join("\n")}`
     : basePrompt;
-
-  // Thread prefix: the delivering agent streams on `primary-…`; each
-  // supporting agent groups on its `r<index>-…` prefix (the agents deployment
-  // projection groups on it). Unique suffix so re-runs never collide on
-  // agent_runs' unique(project, task, thread).
-  const supportingIndex = delivers
-    ? -1
-    : supportingEngagements(existing.parsed.frontmatter).findIndex(
-        (r) => r.profileId === engagement.profileId,
-      );
-  const threadId =
-    (delivers ? "primary-" : `r${supportingIndex}-`) +
-    newId("t").replace("t_", "").slice(0, 8);
 
   // Collaboration transports (G3/G4):
   //   Claude → in-process toolkit tools (post_comment / ask_human /
@@ -1509,8 +1629,14 @@ export async function startAgentRun(
   if (useEnvelopeSchema) runInput.outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
   if (runWorkdir) runInput.workdir = runWorkdir;
   if (realBackend) runInput.env = baseRunEnv;
+  // R21-4: hand the reserved row over — `startRun` adopts it rather than
+  // minting a second one.
+  if (pending.reservation) runInput.reservation = pending.reservation;
 
   const { runId } = await startRun(db, runInput);
+  // Adopted: from here the row belongs to the RUN, and the wrapper's catch must
+  // not finalize it as an error just because a post-start write threw.
+  pending.reservation = null;
 
   // P19-G8/G11: the run's INPUTS, on the run, before its first provider line.
   // Everything here was already resolved above and, until now, thrown away.
@@ -2571,24 +2697,22 @@ async function cloneRepo(
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
     hadCredential = !!token;
-    // No credential ⇒ no `token` key at all: the plan's askpass leg keys off the
-    // property's presence, so a public-repo clone must not carry an empty one.
-    const clonePlan: Parameters<typeof createGitHubClonePlan>[0] = {
-      repo: input.repo,
-      destination: dir,
-    };
-    if (token) clonePlan.token = token;
-    const clone = createGitHubClonePlan(clonePlan);
     try {
-      await execFileAsync("git", clone.args, {
-        timeout: CLONE_TIMEOUT_MS,
-        env: clone.env,
-      });
+      // R21-4: through the project's mirror cache — the FIRST task in a project
+      // pays the network clone, the rest are hardlinked from it in seconds. Any
+      // cache trouble falls back to a direct GitHub clone inside this call.
+      const cloneInput: WorkspaceCloneInput = {
+        projectSlug: input.projectSlug,
+        repo: input.repo,
+        destination: dir,
+        token,
+      };
+      if (input.dataRoot) cloneInput.dataRoot = input.dataRoot;
+      await cloneWorkspaceRepo(cloneInput);
       await setIdentity(dir);
       await stripUngovernedRepoCatalog(dir);
       return { dir };
     } finally {
-      clone.dispose();
       // A clone killed mid-transfer can leave a partial tree behind. Left in
       // place it is worse than nothing: the next run's `.git` check treats it as
       // "already cloned for this task" and hands the agent a truncated checkout

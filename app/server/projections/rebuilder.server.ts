@@ -338,7 +338,7 @@ function acceptanceBlockReason(
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Same sentence the writers refuse with.
     (ctx.blockedPacket
-      ? "This task has an open blocked decision — resolve the operator's packet before accepting it."
+      ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
     // P14-LV-07: a PR GitHub cannot merge cannot be accepted.
     conflictingPrBlockedReason(fm, fm.key)
@@ -495,11 +495,11 @@ export function rebuildTaskFile(
        (project_slug, task_key, title, stage, readiness, stored_readiness,
         waiting, urgent, archived, validation, validation_block_reason, acceptance, continuity, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
-        goal, packet_json, recommendation_count,
+        work_revision_sha, goal, packet_json, recommendation_count,
         schedules_json, event_count, comment_count,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -514,7 +514,9 @@ export function rebuildTaskFile(
        reviewers_json = excluded.reviewers_json,
        operator_json = excluded.operator_json, branch = excluded.branch,
        repo = excluded.repo, pr_json = excluded.pr_json,
-       github_json = excluded.github_json, goal = excluded.goal,
+       github_json = excluded.github_json,
+       work_revision_sha = excluded.work_revision_sha,
+       goal = excluded.goal,
        packet_json = excluded.packet_json,
        recommendation_count = excluded.recommendation_count,
        schedules_json = excluded.schedules_json,
@@ -555,6 +557,14 @@ export function rebuildTaskFile(
     project?.repo ?? null, // P13-D-5: no task-level repo override
     fm.pr ? JSON.stringify(fm.pr) : null,
     fm.github ? JSON.stringify(fm.github) : null,
+    // Ruling 53/88: the delivered revision the board's acceptance ceremony
+    // discloses and then echoes back for the server to verify. Written from the
+    // SAME expression the server's own `acceptanceDisclosureOf` reads
+    // (`fm.workRevision?.headSha ?? "none"`, task-actions.server.ts), so a board
+    // echo built from this column can only differ from the live task when the
+    // task really moved under the dialog — which is the refusal the echo exists
+    // to produce.
+    fm.workRevision?.headSha ?? null,
     parsed.goal,
     parsed.packet ? JSON.stringify(parsed.packet) : null,
     fm.recommendations.length,
@@ -576,8 +586,9 @@ export function rebuildTaskFile(
   const insertEvent = db.prepare(
     `INSERT INTO task_events
        (project_slug, task_key, position, occurred_at, type, actor_kind,
-        actor_ref, actor_json, title, text, to_agent, evidence_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        actor_ref, actor_json, title, text, to_agent, evidence_json,
+        attachments_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   parsed.timeline.forEach((event, position) => {
     // Tolerantly-kept unrecognized authors project as system actors so their
@@ -613,6 +624,9 @@ export function rebuildTaskFile(
       event.text,
       event.toAgent ? 1 : 0,
       event.evidence ? JSON.stringify(event.evidence) : null,
+      event.attachments && event.attachments.length > 0
+        ? JSON.stringify(event.attachments)
+        : null,
     );
   });
 

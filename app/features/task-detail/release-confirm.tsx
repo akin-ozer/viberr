@@ -124,14 +124,14 @@ export function ReleaseConfirm({
               ) : task.waiting === "human" ? (
                 "A human decision is pending on this task"
               ) : (
-                "Agent work in progress — no boundary is waiting"
+                "Agent work in progress. No boundary is waiting"
               )}
             </span>
           </div>
           <div className="obs">
             <span className="k">After</span>
             <span>
-              Unowned — review &amp; acceptance stall until another member takes
+              Unowned: review &amp; acceptance stall until another member takes
               the seat
             </span>
           </div>
@@ -139,7 +139,7 @@ export function ReleaseConfirm({
         {candidates.length > 0 && (
           <div>
             <div className="rel-lbl">
-              Hand off instead — keeps the boundary owned
+              Hand off instead (keeps the boundary owned)
             </div>
             <div className="rel-row">
               {candidates.map((m) => {
@@ -174,7 +174,7 @@ export function ReleaseConfirm({
         <span className="foot-hint">
           {mine
             ? "Recorded as a typed ownership event on the timeline."
-            : "Admin release — recorded as a typed event and in the audit trail."}
+            : "Admin release. Recorded as a typed event and in the audit trail."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>

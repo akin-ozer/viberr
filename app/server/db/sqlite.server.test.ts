@@ -7,6 +7,7 @@ import {
   closeDb,
   getDb,
   getProjectionDbPath,
+  isDatabaseShuttingDown,
   openDatabase,
   shutdownDatabase,
 } from "./sqlite.server";
@@ -78,15 +79,42 @@ describe("shutdownDatabase", () => {
     }
   });
 
-  it("forgets the cached handle so the next getDb() reopens", () => {
+  /**
+   * F21-24 (live, UC-31 — `docker restart` mid-run): SIGTERM closed sqlite, and
+   * then an in-flight request took `getDb`'s lazy-open branch and logged "sqlite
+   * ready" BETWEEN "sqlite closed" and process exit. The drain re-opened the
+   * database it had just checkpointed and released, re-ran migrations against
+   * it, and left a second handle for a process that was dying — which is exactly
+   * what the single-writer story (B-FD1/F18-5) exists to prevent.
+   *
+   * This test USED to assert the opposite ("forgets the cached handle so the
+   * next getDb() reopens"), which is how the behavior survived: the defect was
+   * pinned as the contract.
+   */
+  it("refuses to lazily reopen once the shutdown has closed it", () => {
     const first = getDb();
     shutdownDatabase();
-    const second = getDb();
-    // Identity compared as a boolean: vitest pretty-prints a mismatch, and
-    // inspecting a CLOSED DatabaseSync throws "database is not open".
-    expect(second === first).toBe(false);
     expect(first.isOpen).toBe(false);
-    expect(second.isOpen).toBe(true);
+    expect(isDatabaseShuttingDown()).toBe(true);
+    expect(() => getDb()).toThrow(/shutting down/i);
+    // Twice: the refusal is a latch, not a one-shot.
+    expect(() => getDb()).toThrow(/shutting down/i);
+  });
+
+  it("latches even when the handle was already closed — a total shutdown path", () => {
+    getDb();
+    closeDb();
+    shutdownDatabase();
+    expect(isDatabaseShuttingDown()).toBe(true);
+    expect(() => getDb()).toThrow(/shutting down/i);
+  });
+
+  it("closeDb clears the latch, so tests (and only tests) can reopen", () => {
+    getDb();
+    shutdownDatabase();
+    closeDb();
+    expect(isDatabaseShuttingDown()).toBe(false);
+    expect(getDb().isOpen).toBe(true);
   });
 
   it("is a no-op (never throws) when nothing is open — the shutdown path must be total", () => {

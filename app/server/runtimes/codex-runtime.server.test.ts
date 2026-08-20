@@ -1164,3 +1164,68 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
     expect(JSON.stringify(withSkills)).not.toContain("developer-expertise");
   });
 });
+
+/**
+ * R21-4a / G5 (FR28) — the Codex half of the Live-run strip's phase rows.
+ *
+ * Same defect, same fix, and deliberately the same vocabulary as the Claude
+ * adapter: the strip must read identically whichever backend is running, so the
+ * step is derived from the PROJECTED display line (which both backends already
+ * compute) rather than from each backend's own envelope shape.
+ */
+describe("codex adapter run phases (R21-4a / FR28)", () => {
+  function capturePhases(events: unknown[]) {
+    const { factory } = fakeCodex(events);
+    const adapter = createCodexAdapter({ codexFactory: factory });
+    const phases: [string | null, string | null][] = [];
+    adapter.start(SPEC, {
+      onLine: () => {},
+      onExit: () => {},
+      onPhase: (phase, step) => phases.push([phase, step]),
+    });
+    return phases;
+  }
+
+  it("emits starting → working → finishing across a turn", async () => {
+    const phases = capturePhases([
+      { type: "thread.started", thread_id: "0199abc" },
+      { type: "item.completed", item: { type: "agent_message", text: "advice" } },
+      { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } },
+    ]);
+    await drain();
+
+    expect(phases[0]).toEqual(["Starting", null]);
+    expect(phases.map(([p]) => p)).toContain("Working");
+    expect(phases.at(-1)).toEqual(["Finishing", null]);
+  });
+
+  it("names the command the run is inside — the same 'Tool · detail' shape Claude emits", async () => {
+    const phases = capturePhases([
+      { type: "thread.started", thread_id: "0199abc" },
+      {
+        type: "item.started",
+        item: { type: "command_execution", command: "npm test", aggregated_output: "", status: "in_progress" },
+      },
+      { type: "item.completed", item: { type: "agent_message", text: "done" } },
+      { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } },
+    ]);
+    await drain();
+
+    const steps = phases.filter(([p]) => p === "Working").map(([, s]) => s);
+    expect(steps[1]).toContain("exec");
+    expect(steps[1]).toContain("npm test");
+    // Sticky through the following agent message, like the Claude adapter.
+    expect(steps[2]).toBe(steps[1]);
+  });
+
+  it("falls back to the in-flight turn number before the first tool call", async () => {
+    const phases = capturePhases([
+      { type: "thread.started", thread_id: "0199abc" },
+      { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } },
+    ]);
+    await drain();
+
+    const steps = phases.filter(([p]) => p === "Working").map(([, s]) => s);
+    expect(steps[0]).toBe("turn 1");
+  });
+});

@@ -50,7 +50,13 @@ export const TOKEN_PATTERN_SOURCE = [
 const URL_USERINFO_RE = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*:[^\s/@]*@/gi;
 
 /** ANSI CSI escape sequences (`ESC [ … m` and friends): git colourises
- *  `error:`/`hint:` when it thinks it has a TTY. */
+ *  `error:`/`hint:` when it thinks it has a TTY.
+ *
+ *  The leading ESC IS a control character, and matching it is the entire point
+ *  of the pattern — the same waiver `C0_CONTROL_RE` below already carries.
+ *  Stated rather than dodged: assembling ESC at runtime to hide it from the
+ *  linter would buy nothing and cost the reader the pattern. */
+// eslint-disable-next-line no-control-regex
 const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
 /** C0 control characters that survive the line split (NUL, BEL, …). `\t` (	)
@@ -134,13 +140,13 @@ export function redactGitOutput(
  */
 export const PROVIDER_TEXT_CHARS = 240;
 export function redactProviderText(
-  raw: unknown,
+  cause: unknown,
   token?: string | null,
 ): string {
   // Walk `cause` the same three levels `classifyCodexFailure` does — the SDK
   // wraps the real message a couple of layers down.
   const parts: string[] = [];
-  let current: unknown = raw;
+  let current: unknown = cause;
   for (let depth = 0; depth < 3 && current != null; depth += 1) {
     if (current instanceof Error) {
       parts.push(current.message);
@@ -170,12 +176,12 @@ export function redactProviderText(
 const gitStderrSchema = z.object({ stderr: z.string() });
 const gitMessageSchema = z.object({ message: z.string() });
 
-export function gitErrorText(error: unknown): string {
-  const withStderr = gitStderrSchema.safeParse(error);
+export function gitErrorText(cause: unknown): string {
+  const withStderr = gitStderrSchema.safeParse(cause);
   if (withStderr.success) {
     const stderr = withStderr.data.stderr.trim();
     if (stderr) return stderr;
   }
-  const withMessage = gitMessageSchema.safeParse(error);
+  const withMessage = gitMessageSchema.safeParse(cause);
   return withMessage.success ? withMessage.data.message : "";
 }

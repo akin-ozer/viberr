@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { LogLine, RunBackend, RunState } from "~/features/runtime/runtime-types";
+import { isDatabaseShuttingDown } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import { publishRunLogAppended, publishRunStateChanged } from "./run-events.server";
@@ -19,6 +20,19 @@ import {
 
 /** Terminal run states — reaching one is the run's final answer. */
 const TERMINAL_STATES: readonly RunState[] = ["finished", "error", "interrupted"];
+
+/**
+ * F21-24: is the projection database gone for good?
+ *
+ * Shared, because every writer on the run path needs the SAME answer: the sink's
+ * line/phase/finalize arms here, and anything that persists on a run's behalf
+ * (see `launch` in run-service). A drained database is not a fault to report per
+ * write — `getDb` refuses to reopen, the raw `.jsonl` still holds the stream, and
+ * boot finalization recovers the run.
+ */
+export function runPersistDrained(db: DatabaseSync): boolean {
+  return isDatabaseShuttingDown() || !db.isOpen;
+}
 
 /**
  * B-FD7: the FIRST terminal state a run reaches is its outcome.
@@ -195,6 +209,58 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
   };
 
   /**
+   * F21-24: the database is CLOSED under us (graceful shutdown drained while
+   * this run streamed).
+   *
+   * Live (UC-31, `docker restart` mid-Codex-run) the pipeline kept a stale
+   * handle and sprayed ~10 "run line persist failed" + "divergence marker could
+   * not be persisted" errors, one pair per streamed line — noise that says the
+   * same thing ten times and buries the one fact that matters. It is not a
+   * per-line fault and there is nothing to retry: the run is finalized at boot
+   * ("finalized non-terminal runs at boot"), and the raw `.jsonl` — a plain
+   * append, unaffected by the database — still holds the full stream.
+   */
+  const persistDrained = () => runPersistDrained(db);
+  /** The ONE line this run logs about the drain, however much it loses. */
+  let drainWarned = false;
+  const warnDrainedOnce = () => {
+    if (drainWarned) return;
+    drainWarned = true;
+    logger.warn(
+      "the database closed mid-run — run rows and lines are no longer being persisted; the raw transcript is intact and the run is finalized at boot",
+      { runId: spec.runId, taskKey: spec.taskKey },
+    );
+  };
+  /**
+   * Run `write` unless the database is already drained, and treat a failure that
+   * IS the drain as the drain rather than as a fault.
+   *
+   * The line path had this from the start; `phase` and `finalize` did not, so a
+   * shutdown mid-run still sprayed "run phase persist failed" — one per streamed
+   * phase, from `launch`'s own catch — which is the same noise F21-24 removed one
+   * arm of. The check runs twice on purpose: before the write (the common case,
+   * where nothing is attempted at all) and again after a throw (the database
+   * closed between the two). Returns whether the row was actually written, so a
+   * caller does not publish an SSE state for a row that does not carry it.
+   */
+  const persistOrDrain = (write: () => void): boolean => {
+    if (persistDrained()) {
+      warnDrainedOnce();
+      return false;
+    }
+    try {
+      write();
+      return true;
+    } catch (error) {
+      if (persistDrained()) {
+        warnDrainedOnce();
+        return false;
+      }
+      throw error;
+    }
+  };
+
+  /**
    * B-FD7: a persist failure used to be logged to stdout and nothing else — the
    * console silently missed a line the raw `.jsonl` has, while the footer count
    * (read from the DB) claimed completeness. Record the divergence ON the run,
@@ -205,6 +271,12 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
   let divergenceReported = false;
   const markDivergent = (cause: unknown) => {
     if (divergenceReported) return;
+    // A drained database cannot take the marker either — writing it would only
+    // produce the second half of the per-line error pair.
+    if (persistDrained()) {
+      divergenceReported = true;
+      return;
+    }
     divergenceReported = true;
     const now = new Date().toISOString();
     const text =
@@ -250,15 +322,19 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
     markRunning(startedAtIso?: string) {
       if (started) return;
       started = true;
-      patchRun(db, spec.runId, {
-        state: "running",
-        startedAt: startedAtIso ?? new Date().toISOString(),
+      const written = persistOrDrain(() => {
+        patchRun(db, spec.runId, {
+          state: "running",
+          startedAt: startedAtIso ?? new Date().toISOString(),
+        });
       });
-      publishState("running");
+      if (written) publishState("running");
     },
 
     phase(phase: string | null, step: string | null) {
-      patchRun(db, spec.runId, { phase, step });
+      persistOrDrain(() => {
+        patchRun(db, spec.runId, { phase, step });
+      });
     },
 
     line(line: EmittedLine) {
@@ -316,6 +392,13 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
           });
         }
       } catch (error) {
+        // F21-24: shutdown drain, not a fault — ONE warning for the whole run,
+        // then silence. Anything else keeps the per-line error, which is the
+        // signal that a genuine persist failure needs.
+        if (persistDrained()) {
+          warnDrainedOnce();
+          return;
+        }
         logger.error("run line persist failed", {
           runId: spec.runId,
           err: error instanceof Error ? error : new Error(String(error)),
@@ -326,6 +409,14 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
 
     finalize(exit: RunExit, byInterrupt?: { userId: string }) {
       if (exit.sessionId) sessionId = exit.sessionId;
+      // F21-24: a run that reaches its exit AFTER the drain has nothing to
+      // record — boot finalization stamps its terminal state from the row it
+      // finds. Publishing an SSE state for it would be a claim about a row that
+      // was never written, so the whole arm is skipped, not just the write.
+      if (persistDrained()) {
+        warnDrainedOnce();
+        return;
+      }
       const desired: RunState =
         exit.outcome === "finished"
           ? "finished"
@@ -351,8 +442,10 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
       // one already carries the real instant (B-FD7 above).
       if (state === desired) patch.finishedAt = new Date().toISOString();
       if (byInterrupt) patch.interruptedBy = byInterrupt.userId;
-      patchRun(db, spec.runId, patch);
-      publishState(state);
+      const written = persistOrDrain(() => {
+        patchRun(db, spec.runId, patch);
+      });
+      if (written) publishState(state);
     },
   };
 }

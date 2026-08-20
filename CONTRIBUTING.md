@@ -40,7 +40,7 @@ Docker setup, and the architecture overview.
   `generic-agents`).
 - Keep commits focused and use clear, descriptive commit messages.
 - Open a pull request against `main`. CI (`.github/workflows/ci.yml`) must pass before
-  merge. It runs two jobs: `verify` (typecheck → unit/integration tests → build) and
+  merge. It runs two jobs: `verify` (lint → typecheck → unit/integration tests → build) and
   `e2e` (Playwright against the production Docker image in an isolated Compose stack —
   `scripts/e2e.ts` builds it, seeds the demo fixture, and tears it down; never a dev
   server).
@@ -52,13 +52,17 @@ Docker setup, and the architecture overview.
 Run these from the repository root after `npm ci`:
 
 ```sh
+npm run lint        # oxlint + the vendored anti-slop plugin — a required gate (ruling 86)
 npm run typecheck   # route typegen + tsc
 npm test            # vitest unit + integration suite
 npm run build       # production build, the `verify` job's final gate
 npm run e2e         # Playwright vs the production Docker image — CI's second job
 ```
 
-Don't skip `npm run e2e` because the other three are green. It is the only gate that
+`npm run lint` must exit 0: findings are fixed, never left standing as "accepted" —
+there is no suppression list, so anything it reports is new (ruling 86 / R21-3).
+
+Don't skip `npm run e2e` because the other four are green. It is the only gate that
 boots the shipped production image end to end (Docker required): the pass-13 install
 regression passed typecheck, 1663 unit tests and the build, and was caught here.
 

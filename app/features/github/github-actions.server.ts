@@ -28,6 +28,7 @@ import {
   type RevalidateContext,
 } from "~/server/secrets/pat-validator.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
+import { logger } from "~/server/logging/logger.server";
 import { grantScopeToast, reconcileToast } from "./github-copy";
 import { invalidateRepoAccess } from "./github-query.server";
 
@@ -61,13 +62,38 @@ export async function runReconcile(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<GithubActionOutcome> {
-  const summary = await reconcileProject(db, projectSlug, actor, ctx);
+  // F21-9: the module contract above says these wrappers never throw for
+  // expected states — but the pass reaches file, db and GitHub payloads, and an
+  // UNEXPECTED failure used to leave the route with a raw 500 and the human
+  // with a dead button. The per-task boundary inside the reconciler keeps one
+  // bad task from ending the sweep; this is the last one, so the click always
+  // gets an answer that says what happened.
+  let summary: Awaited<ReturnType<typeof reconcileProject>>;
+  try {
+    summary = await reconcileProject(db, projectSlug, actor, ctx);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("project reconcile failed unexpectedly", {
+      projectSlug,
+      err: message,
+    });
+    // One line, capped: the toast names the cause the log carries in full, and
+    // a multi-line stack-shaped message never lands in the UI.
+    const detail = (message.split("\n", 1)[0] ?? "").slice(0, 200);
+    return {
+      ok: true,
+      toast: detail
+        ? `Checking GitHub failed (nothing was changed): ${detail}`
+        : "Checking GitHub failed (nothing was changed), and the failure carried no message",
+      result: "error",
+    };
+  }
   // F15-02: a pass that scanned nothing must not read as "synced" — name the
   // no-branched-tasks case; degraded contexts keep their own honest copy below.
   if (summary.status === "ok" && summary.results.length === 0) {
     return {
       ok: true,
-      toast: "Checked GitHub — no task has a delivery branch yet, nothing to sync.",
+      toast: "Checked GitHub. No task has a delivery branch yet, nothing to sync.",
       result: "no_branched_tasks",
     };
   }
@@ -246,7 +272,7 @@ export async function runSetCredential(
   if (!connection) {
     return {
       ok: true,
-      toast: "No GitHub connection to attach — add one in org settings first",
+      toast: "No GitHub connection to attach. Add one in org settings first",
       result: "no_connection",
     };
   }
@@ -261,7 +287,7 @@ export async function runSetCredential(
   if (fresh && fresh.validationState === "failed") {
     return {
       ok: true,
-      toast: `GitHub rejected ${connection.owner}'s token — replace it in org settings, then attach it here`,
+      toast: `GitHub rejected ${connection.owner}'s token. Replace it in org settings, then attach it here`,
       result: "connection_invalid",
     };
   }
@@ -279,7 +305,7 @@ export async function runSetCredential(
     if (probe.status === "access_miss") {
       return {
         ok: true,
-        toast: `${connection.owner}'s token cannot reach ${repo} — ${probe.detail}. Add a PAT for ${repoOwner} in org settings, or fix the repository here.`,
+        toast: `${connection.owner}'s token cannot reach ${repo}: ${probe.detail}. Add a PAT for ${repoOwner} in org settings, or fix the repository here.`,
         result: "no_repo_access",
       };
     }
@@ -297,11 +323,11 @@ export async function runSetCredential(
   const head = wasBound
     ? `Credential rotated to ${connection.owner}'s connection`
     : `Credential attached from ${connection.owner}'s connection`;
-  let toast = wasBound ? `${head} — sync uses it now` : head;
+  let toast = wasBound ? `${head}. Sync uses it now` : head;
   if (!owned && repo) {
     toast = borrowedUnverified
-      ? `${head} — no ${repoOwner} PAT, and ${borrowedUnverified}, so its access to ${repo} is unverified`
-      : `${head} — no ${repoOwner} PAT, but this token reaches ${repo}`;
+      ? `${head}. No ${repoOwner} PAT, and ${borrowedUnverified}, so its access to ${repo} is unverified`
+      : `${head}. No ${repoOwner} PAT, but this token reaches ${repo}`;
   }
   return { ok: true, toast, result: wasBound ? "rotated" : "attached" };
 }
@@ -323,7 +349,7 @@ export function runClearCredential(
   return {
     ok: true,
     toast: cleared
-      ? "Credential removed — branch and PR sync goes offline until one is attached"
+      ? "Credential removed. Branch and PR sync goes offline until one is attached"
       : "No credential was attached",
     result: cleared ? "cleared" : "noop",
   };

@@ -14,6 +14,8 @@ import {
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { checksPill } from "~/features/github/github-pills";
+import { mapPrChecks } from "~/shared/mapping/task.server";
 import { updateUserFields } from "~/server/auth/user-store.server";
 import { readPrHumanApproval } from "./pr-human-approval.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -25,6 +27,10 @@ import {
 } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  operatorSnapshot,
+  resolveOperatorAuthority,
+} from "~/server/tasks/operator-actions.server";
 import {
   BRANCH_CLEANUP_GUARDRAIL_DESC,
   BRANCH_CLEANUP_GUARDRAIL_ID,
@@ -47,20 +53,22 @@ afterEach(ctx.cleanup);
 const REPO_PATH = "/repos/akin-ozer/viberr";
 
 /**
- * A 200 whose body fails mid-read — a truncated response. Reading it throws
- * PAST the GitHub client's network-error handling, which wraps the fetch call
- * itself and not the body read, so this is how a test reaches the code paths
- * that must survive a throw from inside the client.
+ * FAULT INJECTION: a 200 whose HEADERS throw on read. Every header read in the
+ * GitHub client sits outside its try/catch, so this reaches the code paths that
+ * must survive an unexpected throw from inside a pass.
+ *
+ * It used to be a truncated BODY, which no longer qualifies: F21-9 wraps the
+ * body read, so a stream that dies mid-read is now a typed `network` failure —
+ * a degraded mode the callers handle, not a throw that escapes them.
  */
-function truncatedResponse(): Response {
-  return new Response(
-    new ReadableStream({
-      start(controller) {
-        controller.error(new TypeError("terminated"));
-      },
-    }),
-    { status: 200 },
-  );
+function unreadableResponse(): Response {
+  const response = new Response("{}", { status: 200 });
+  Object.defineProperty(response, "headers", {
+    get(): never {
+      throw new TypeError("terminated");
+    },
+  });
+  return response;
 }
 
 function setup() {
@@ -216,6 +224,74 @@ describe("reconcileTask", () => {
     expect(listAuditEvents(store.db, { action: "github.reconcile.task" })).toHaveLength(1);
   });
 
+  it("F21-7: a drifted check-runs payload persists as UNKNOWN, and the board reads it that way", async () => {
+    const { store, actor } = setup();
+    const routes = happyRoutes();
+    // GitHub reports three runs and sends two entries this reader cannot use.
+    routes[`GET ${REPO_PATH}/commits/headsha318/check-runs`] = {
+      body: { total_count: 3, check_runs: [null, "x"] },
+    };
+    const gh = fakeGithubFetch(routes);
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // What task.md keeps is the honest count — not "3 checks, none of them bad".
+    expect(fm.pr).toMatchObject({
+      checks: { total: 3, passing: 0, failing: 0, pending: 0, unknown: 3 },
+    });
+    // And every surface that renders that cache says unknown, not passing.
+    expect(mapPrChecks(fm.pr ?? null)).toMatchObject({ state: "unknown" });
+    expect(checksPill(mapPrChecks(fm.pr ?? null)!).kind).not.toBe("ready");
+  });
+
+  it("F21-8: one malformed compare commit drops only itself, and the observation says so", async () => {
+    const { store, actor } = setup();
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: {
+        ahead_by: 3,
+        behind_by: 0,
+        status: "ahead",
+        commits: [
+          { sha: "a91f7c2ffff", commit: { message: "[VIB-301] add repo attach policy gate" } },
+          { commit: { message: "[VIB-301] a commit with no sha" } },
+          { sha: "4ce0b18ffff", commit: { message: "[VIB-301] branch reconciler" } },
+        ],
+      },
+    };
+    const gh = fakeGithubFetch(routes);
+    const result = await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    // The two readable commits survive — the branch footprint is not emptied.
+    expect(result).toMatchObject({ status: "reconciled", commits: 2 });
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.github?.commits).toEqual([
+      { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
+      { sha: "4ce0b18", msg: "[VIB-301] branch reconciler" },
+    ]);
+    // SAFETY: the SELECT names one column of the row this reconcile just wrote.
+    const prov = store.db
+      .prepare(`SELECT details_json FROM provenance WHERE action = 'github.reconcile'`)
+      .all() as { details_json: string }[];
+    expect(JSON.parse(prov[0]!.details_json)).toMatchObject({ commitsDropped: 1 });
+  });
+
   it("R17-1: an owned PR head AHEAD of the reviewed revision records revisionDrift", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
@@ -262,6 +338,105 @@ describe("reconcileTask", () => {
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
     expect(fm.pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+  });
+
+  it("F21-17: the drift fact SURVIVES the PR closing — the recovery packet can still state it", async () => {
+    // Drift was computed ONLY for an open PR and written nowhere else, so the
+    // moment a human closed the PR the reconciler rewrote `pr` without it. The
+    // pr-closed recovery packet — the one surface that has to say "the head is 2
+    // commits past what was reviewed" while a human decides rework vs archive —
+    // was therefore structurally blind to it, one pass after it was true.
+    // Canary: drop the carry-forward → drift is `undefined` after the close.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "review", title: "Attach execution workspace" },
+        workRevision: {
+          id: "rev_1",
+          headSha: "rev0delivered",
+          treeSha: null,
+          branch: "vib-301-workspace",
+          createdAt: "2026-08-04T08:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler04" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    const readFm = () =>
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-301",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter;
+
+    // Pass 1 — the PR is open and its head carries 2 commits the review never saw.
+    const openRoutes = happyRoutes();
+    openRoutes[`GET ${REPO_PATH}/compare/rev0delivered...headsha318`] = {
+      body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [] },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(openRoutes).fetchImpl },
+    );
+    expect(readFm().pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+
+    // Pass 2 — a human CLOSES the PR on GitHub. A settled PR deliberately buys
+    // no compare call, and NO drift compare route is registered here, so the
+    // only place the surviving fact can come from is the cache.
+    const closedRoutes = happyRoutes();
+    closedRoutes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "closed",
+        merged: false,
+        merged_at: null,
+        head: { sha: "headsha318" },
+        additions: 412,
+        deletions: 87,
+        changed_files: 9,
+      },
+    };
+    // The branch still points at the PR head, so the closed PR stays linked (F26).
+    closedRoutes[`GET ${REPO_PATH}/branches/vib-301-workspace`] = {
+      body: { commit: { sha: "headsha318" } },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(closedRoutes).fetchImpl },
+    );
+    const closed = readFm();
+    expect(closed.pr?.state).toBe("closed");
+    expect(closed.pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+
+    // …and it reaches the operator on the surface where that packet is written:
+    // `get_task` carries the same fact after the close, not just the task file.
+    const snapshot = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-301",
+      resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug),
+    );
+    expect(snapshot.pr).toMatchObject({
+      state: "closed",
+      revisionDrift: { aheadBy: 2, headSha: "headsha318" },
+    });
   });
 
   it("R17-1: a head IDENTICAL to the reviewed revision records no drift (no extra compare)", async () => {
@@ -739,16 +914,18 @@ describe("reconcileTask", () => {
     expect(results[1]).toMatchObject({ status: "reconciled", changed: false });
   });
 
-  it("F19-19: a REJECTED pass never strands the next one on the same task", async () => {
-    // The chain link stored in the map absorbs the failure. Without that, one
-    // thrown reconcile would leave the task's chain permanently rejected and
-    // every later pass — poller and button alike — would silently never run.
-    // Canary: drop the rejection handler from `tail` (`run.then(() => undefined)`)
-    // → passes 2 and 3 never run and the test times out.
+  it("F19-19/F21-9: a THROWN pass returns task_error and never strands the next one", async () => {
+    // Two invariants on one fault. F21-9: an unexpected throw inside the pass
+    // comes back as a typed per-task failure, so a project sweep finishes and
+    // the Reconcile button answers instead of 500ing. F19-19: the chain link
+    // stored in the map absorbs it, so later passes on the SAME task still run
+    // — without that, poller and button alike would silently never run again.
+    // Canary: drop the try/catch in `reconcileTask` → pass 1 rejects; drop the
+    // rejection handler from `tail` → passes 2 and 3 never run (test times out).
     const { store, actor } = setup();
-    // Fault injection: a transport whose every answer fails mid-body, so the
+    // Fault injection: a transport whose every answer is unreadable, so the
     // first GitHub read of the pass throws instead of degrading.
-    const explodingFetch: typeof fetch = async () => truncatedResponse();
+    const explodingFetch: typeof fetch = async () => unreadableResponse();
     const gh = fakeGithubFetch(happyRoutes());
     const settled = await Promise.allSettled([
       reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
@@ -758,7 +935,10 @@ describe("reconcileTask", () => {
       reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
         { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
     ]);
-    expect(settled[0]!.status).toBe("rejected");
+    expect(settled[0]).toMatchObject({
+      status: "fulfilled",
+      value: { status: "task_error", taskKey: "VIB-301" },
+    });
     expect(settled[1]).toMatchObject({ status: "fulfilled", value: { status: "reconciled" } });
     expect(settled[2]).toMatchObject({ status: "fulfilled", value: { status: "reconciled" } });
   });
@@ -1754,12 +1934,12 @@ describe("R15-6 post-merge branch cleanup", () => {
   it("a THROWING cleanup never demotes the merge either", async () => {
     const { store, actor } = mergeableTask();
     const gh = fakeGithubFetch(mergeRoutes());
-    // The merge succeeds; the branch delete that rides it comes back truncated,
+    // The merge succeeds; the branch delete that rides it comes back unreadable,
     // so the client throws INSIDE the cleanup block — after GitHub has merged.
     const fetchImpl: typeof fetch = async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       return url.pathname === `${REPO_PATH}/git/refs/heads/vib-410`
-        ? truncatedResponse()
+        ? unreadableResponse()
         : gh.fetchImpl(input, init);
     };
     const result = await mergeTaskPr(

@@ -278,3 +278,99 @@ describe("OPERATOR_TOOLKIT_INSTRUCTIONS — reading is expected, writing is not 
     expect(wired).toBe(OPERATOR_TOOLKIT_INSTRUCTIONS);
   });
 });
+
+/**
+ * F21-21 (live VIB-7) — the operator's "read-only repository view" is the
+ * SHARED task workspace, so once the delivering agent commits it stands on the
+ * TASK branch. The operator read a row its own deliverer had just written and
+ * raised a blocking packet claiming the DEFAULT branch already contained it.
+ * The anchored read has to be a TOOL: `Bash` is denied for every operator run,
+ * so `git show origin/main:…` is not something the model can reach.
+ */
+describe("buildOperatorToolkit — read_default_branch_file (F21-21)", () => {
+  it("is offered when the run holds a checkout, and names the anchoring in its description", () => {
+    const db = ctxDb.makeDb();
+    const toolkit = buildOperatorToolkit({
+      db,
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: authority([]),
+      workspace: { dir: "/tmp/nowhere", defaultBranch: "main" },
+    });
+    expect(toolkit.allowedTools).toContain("mcp__viberr__read_default_branch_file");
+    const def = toolkit.tools.find((t) => t.name === "read_default_branch_file")!;
+    expect(def.description).toContain("origin/main");
+    expect(def.description).toContain("DELIVERING AGENT'S workspace");
+    expect(def.description).toContain("never conclude from it that work landed out-of-band");
+  });
+
+  it("is withheld when the run has no checkout — a read that could only fail", () => {
+    const db = ctxDb.makeDb();
+    const toolkit = buildOperatorToolkit({
+      db,
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: authority([]),
+    });
+    expect(toolkit.allowedTools).not.toContain("mcp__viberr__read_default_branch_file");
+    expect(toolkit.tools.some((t) => t.name === "read_default_branch_file")).toBe(false);
+  });
+});
+
+/**
+ * F21-3 — the operator run pre-flights its stdio MCP mounts now
+ * (`operatorMcpResolution`), and hands the VERIFIED set here. A second resolve
+ * inside the toolkit would silently re-mount a server the pre-flight had just
+ * dropped, so the prompt would announce one set and the run would mount another.
+ */
+describe("buildOperatorToolkit — mounts the caller's pre-flighted resolution (F21-3)", () => {
+  /** A db where `everything-mcp` IS registered and healthy — so a second
+   *  resolve inside the toolkit would happily mount it. That is what makes the
+   *  assertion below a real pin rather than an empty-registry tautology. */
+  async function dbWithRegisteredServer() {
+    const db = ctxDb.makeDb();
+    await saveMcpServer(
+      db,
+      { name: "everything-mcp", transport: "stdio", target: "/bin/echo hi", cred: "" },
+      ACTOR,
+      { spawnImpl: () => { throw new Error("no spawn in test"); } },
+    );
+    return db;
+  }
+
+  it("mounts exactly what the caller verified — a dropped server is NOT re-resolved", async () => {
+    // Canary: ignore `deps.orgMcpServers` and resolve again here; the grant
+    // re-appears and this fails.
+    const toolkit = buildOperatorToolkit({
+      db: await dbWithRegisteredServer(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: authority(["everything-mcp"]),
+      // What the run's pre-flight produced: the dead stdio mount was dropped.
+      orgMcpServers: {},
+    });
+    expect(Object.keys(toolkit.mcpServers)).toEqual(["viberr"]);
+    expect(toolkit.allowedTools).not.toContain("mcp__everything-mcp");
+  });
+
+  it("still resolves for a caller with no resolution of its own", async () => {
+    const db = ctxDb.makeDb();
+    await saveMcpServer(
+      db,
+      { name: "everything-mcp", transport: "stdio", target: "/bin/echo hi", cred: "" },
+      ACTOR,
+      { spawnImpl: () => { throw new Error("no spawn in test"); } },
+    );
+    const toolkit = buildOperatorToolkit({
+      db,
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: authority(["everything-mcp"]),
+    });
+    expect(Object.keys(toolkit.mcpServers).sort()).toEqual(["everything-mcp", "viberr"]);
+  });
+});

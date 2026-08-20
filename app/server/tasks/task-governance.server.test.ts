@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
@@ -916,7 +916,7 @@ describe("resolvePacket kind matrix", () => {
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected — coordination is paused and no operator run was started. Use **Run operator** on the task page when the inspection is done.",
+      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected. Coordination is paused and no operator run was started. Use **Run operator** on the task page when the inspection is done.",
     );
     // A repeat confirm on the resolved packet is refused.
     await expect(
@@ -1376,7 +1376,7 @@ describe("resolvePacket kind matrix", () => {
     expect(back.frontmatter.waiting).toBe("human");
     // …but it is no longer stranded silently — the restore note names the next
     // step, so "Waiting on: Human decision" reads as actionable.
-    expect(back.timeline[0]!.text).toContain("run the operator");
+    expect(back.timeline[0]!.text).toContain("Run the operator");
   });
 
   // F20-18 (N20-7): a contributor-owner handed a packet whose every option needs
@@ -1781,6 +1781,92 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("still refuses a CLOSED PR — the arm below relaxes only the merged one", async () => {
+    // R16-3: a PR closed without merging can never be merged. The already-merged
+    // no-op must not become a blanket "any settled PR is fine".
+    const store = prepared();
+    withTask(store, {
+      stage: "done",
+      pr: { number: 7, state: "closed", title: "PR" },
+    });
+    await expect(
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("F21-23: an already-merged PR settles as a no-op success, not a 409", async () => {
+    // Live (UC-15): a human merged the PR on GitHub while the merge-pending
+    // ceremony sat open. The poller adopted `state: merged`, the dialog
+    // re-rendered as "Nothing merges … Finish accepting VIB-1" — and this door
+    // threw "This PR is already merged." at the button it had just relabelled.
+    // The dialog promised what the server refused.
+    //
+    // CANARY: restore the `pr.state === "merged"` arm of the old conflict throw.
+    const store = prepared();
+    withTask(store, {
+      stage: "done",
+      pr: { number: 7, state: "merged", title: "PR" },
+    });
+    // Typed through the seam's own contract: a call would resolve "merged", so
+    // the assertion below cannot pass merely because the double is inert.
+    const merge = vi.fn(async () => ({
+      status: "merged" as const,
+      prNumber: 7,
+      sha: null,
+    }));
+    const before = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+
+    const result = await completeTaskMerge(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: merge } },
+    );
+
+    // Honest on both halves: merged on GitHub, nothing merged now.
+    expect(result.merged).toBe(true);
+    expect(result.message).toMatch(/already merged on GitHub/);
+    expect(result.message).toMatch(/nothing merged now/);
+    // No merge was attempted, and the no-op wrote nothing — the acceptance that
+    // stamped this PR "accepted" already recorded its completion.
+    expect(merge).not.toHaveBeenCalled();
+    const after = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(after.frontmatter.pr?.state).toBe("merged");
+    expect(after.frontmatter.stage).toBe(before.frontmatter.stage);
+    expect(after.timeline).toHaveLength(before.timeline.length);
+  });
+
+  it("keeps the merge authority on the no-op arm (contributor still forbidden)", async () => {
+    // The early return must sit BEHIND `requireAcceptCompletion`, or an
+    // already-merged PR becomes a free read of the task summary for anyone.
+    const store = prepared();
+    withTask(store, {
+      stage: "done",
+      pr: { number: 7, state: "merged", title: "PR" },
+    });
+    await expect(
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.selin), // contributor
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
   });
 
   it("is admin|maintainer only (contributor forbidden)", async () => {

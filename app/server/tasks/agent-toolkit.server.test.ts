@@ -163,7 +163,9 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
    *  directly. `summary` and the evidence columns are optional because the
    *  withheld-grant case sends the partial payload a model would. */
   interface ReportOutcomeArgs {
-    verdict: string;
+    /** Optional since U11: an evidence-only profile's tool has no verdict
+     *  field, so its handler is called without one. */
+    verdict?: string;
     summary?: string;
     evidence?: { label: string; add?: string; del?: string }[];
   }
@@ -282,5 +284,80 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       {},
     );
     expect(takeStagedOutcome(lastStore.db, "oc_d")!.evidence).toBeUndefined();
+  });
+
+  /**
+   * U11 — `attach-evidence-references` must mean something on Claude WITHOUT a
+   * verdict grant.
+   *
+   * `report_outcome` is the only structured channel a Claude run has, and it
+   * mounted on `collab.verdict` alone. So an agent granted attach-evidence and
+   * nothing else got NO tool at all: the capability the profile editor offers on
+   * every backend granted literally nothing here. Codex had the mirror bug and
+   * P13-D-26 fixed it — `useEnvelopeSchema` reads `verdict || ask || evidence`
+   * — which left the two backends disagreeing about what the same grant does.
+   */
+  describe("U11 — evidence granted, verdict withheld", () => {
+    const EVIDENCE_ONLY = {
+      comment: false,
+      ask: false,
+      verdict: false,
+      evidence: true,
+    };
+
+    it("mounts report_outcome — the grant is not silently inert", () => {
+      const tools = toolkitTools(EVIDENCE_ONLY, "oc_u11a");
+      expect(tools.report_outcome).toBeDefined();
+    });
+
+    it("advertises evidence but NOT verdict — the tool grants no judgment", () => {
+      const tool = toolkitTools(EVIDENCE_ONLY, "oc_u11b").report_outcome!;
+      const keys = Object.keys(tool.inputSchema["shape"] ?? tool.inputSchema);
+      expect(keys).toContain("evidence");
+      expect(keys).toContain("summary");
+      expect(keys).not.toContain("verdict");
+    });
+
+    it("stages the evidence with no verdict, and refuses a smuggled one", async () => {
+      const tools = toolkitTools(EVIDENCE_ONLY, "oc_u11c");
+      await tools.report_outcome!.handler(
+        {
+          // The field is not on the tool; a model that invents it anyway must
+          // not acquire the authority the profile withholds.
+          verdict: "approve",
+          summary: "Ran the suite.",
+          evidence: [{ label: "unit/policy_gate_test", add: "+14", del: "0" }],
+        },
+        {},
+      );
+      const staged = takeStagedOutcome(lastStore.db, "oc_u11c")!;
+      expect(staged.verdict).toBeUndefined();
+      expect(staged.summary).toBe("Ran the suite.");
+      expect(staged.evidence).toEqual([
+        { label: "unit/policy_gate_test", add: "+14", del: "0" },
+      ]);
+    });
+
+    it("mounts NOTHING when neither grant is held (the gate still binds)", () => {
+      // Widening the gate from `verdict` to `verdict || evidence` must not
+      // widen it to "always" — a profile holding neither still gets no server
+      // at all, which is what `buildAgentToolkit` returning null means.
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      expect(
+        buildAgentToolkit({
+          db: store.db,
+          ctx: { dataRoot: store.dataRoot },
+          projectSlug: store.slug,
+          taskKey: "VIB-3",
+          actorRef: AGENT_REF,
+          outcomeKey: "oc_u11d",
+          collab: { comment: false, ask: false, verdict: false, evidence: false },
+        }),
+      ).toBeNull();
+    });
   });
 });

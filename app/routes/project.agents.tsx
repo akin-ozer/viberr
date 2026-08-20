@@ -158,7 +158,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       );
       const created: ProfileMutationSuccess = {
         ok: true,
-        toast: `Profile "${result.name}" created — available for future assignments`,
+        toast: `Profile "${result.name}" created · available for future assignments`,
         profileId: result.profileId,
       };
       if (result.notice) created.notice = result.notice;
@@ -175,7 +175,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       );
       const deployed: ProfileMutationSuccess = {
         ok: true,
-        toast: `"${result.name}" added from the global library — the operator can assign it now`,
+        toast: `"${result.name}" added from the global library · the operator can assign it now`,
         profileId: result.profileId,
       };
       if (result.notice) deployed.notice = result.notice;
@@ -193,7 +193,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       );
       const updated: ProfileMutationSuccess = {
         ok: true,
-        toast: `Profile "${result.name}" updated — changes apply to future assignments`,
+        toast: `Profile "${result.name}" updated · changes apply to future assignments`,
         profileId: result.profileId,
       };
       if (result.notice) updated.notice = result.notice;
@@ -212,7 +212,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       );
       return {
         ok: true as const,
-        toast: `Profile "${result.name}" deleted — its engagements can't deliver or comment until a replacement is assigned`,
+        toast: `Profile "${result.name}" deleted. Its engagements can't deliver or comment until a replacement is assigned`,
         profileId: "operator",
       };
     }

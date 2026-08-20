@@ -62,6 +62,27 @@ export function listTaskAttachments(
   return entries.slice(0, LIST_CAP);
 }
 
+/**
+ * Names of the attachments written at-or-after `sinceIso`, newest first — the
+ * files a just-finished run produced. The runtime is the directory's only
+ * writer (the browser MCP's `--output-dir`) and run start is recorded before
+ * the process spawns on the same host clock, so an mtime window bounded by the
+ * run's `started_at` names exactly that run's files. A file re-saved under the
+ * same name by a later run re-attributes to the later run, which is the honest
+ * reading (its content is the later run's).
+ */
+export function attachmentNamesSince(
+  slug: string,
+  key: string,
+  sinceIso: string,
+  dataRoot?: string,
+): string[] {
+  if (Number.isNaN(Date.parse(sinceIso))) return [];
+  return listTaskAttachments(slug, key, dataRoot)
+    .filter((entry) => entry.modifiedAt >= sinceIso)
+    .map((entry) => entry.name);
+}
+
 /** Absolute path of one attachment, traversal-contained. Throws on an unsafe
  *  name (the route maps that to 404). */
 export function resolveTaskAttachment(

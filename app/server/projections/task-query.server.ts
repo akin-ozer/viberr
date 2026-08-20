@@ -3,7 +3,10 @@ import type { DiagnosticSeverity } from "~/schemas/file-diagnostics";
 import type { Readiness } from "~/schemas/task-file.schema";
 import { readinessEffectOf } from "~/server/interpretation/diagnostics-policy.server";
 import { isAcceptedDisplayState } from "~/server/interpretation/readiness-policy.server";
-import { createActorRenderOverlay } from "~/shared/mapping/actor.server";
+import {
+  createActorRenderOverlay,
+  type ActorRender,
+} from "~/shared/mapping/actor.server";
 import {
   mapTaskEventRow,
   type TaskEventRow,
@@ -124,6 +127,53 @@ export function listTaskEvents(
     const event = mapTaskEventRow(row);
     return { ...event, actor: overlay(event.actor) };
   });
+}
+
+/** Producer attribution for one attachment name — the panel's "added by …"
+ *  line, sourced from the timeline event that claims the name. */
+export interface AttachmentProducer {
+  actor: string;
+  occurredAt: string;
+}
+
+/**
+ * Attachment name → who produced it and when, read from the timeline events
+ * that claim names (`attachments_json`). Newest claim wins: a file re-saved
+ * under the same name belongs to the run that last wrote it. Names that no
+ * event claims (pre-attribution files) are simply absent — the panel then
+ * shows the file without a producer line rather than guessing.
+ */
+export function attachmentProducers(db: DatabaseSync, slug: string, key: string) {
+  // SAFETY: the three columns are `task_events` columns with the same
+  // nullability, and `attachments_json IS NOT NULL` pins the third; all three
+  // have one writer (rebuilder.server.ts).
+  const rows = db
+    .prepare(
+      `SELECT occurred_at, actor_json, attachments_json FROM task_events
+       WHERE project_slug = ? AND task_key = ? AND attachments_json IS NOT NULL
+       ORDER BY position DESC`,
+    )
+    .all(slug, key) as Array<{
+    occurred_at: string;
+    actor_json: string;
+    attachments_json: string;
+  }>;
+  const overlay = createActorRenderOverlay(db);
+  const producers: Record<string, AttachmentProducer> = {};
+  // position DESC iterates oldest-first (0 = newest), so later iterations —
+  // newer events — overwrite earlier claims.
+  for (const row of rows) {
+    // SAFETY: `actor_json` has one writer (rebuilder.server.ts), which
+    // stringifies an ActorRender by construction.
+    const actor = overlay(JSON.parse(row.actor_json) as ActorRender);
+    // SAFETY: same single writer — `attachments_json` is the stringified
+    // parsed event's `string[]`.
+    const names = JSON.parse(row.attachments_json) as string[];
+    for (const name of names) {
+      producers[name] = { actor: actor.name, occurredAt: row.occurred_at };
+    }
+  }
+  return producers;
 }
 
 export function listTaskDiagnostics(

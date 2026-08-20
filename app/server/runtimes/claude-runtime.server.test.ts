@@ -711,3 +711,83 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
     expect(captured.allowedTools).toContain("mcp__viberr_agent");
   });
 });
+
+/**
+ * R21-4a / G5 (FR28) — the Live-run strip's phase rows.
+ *
+ * `onPhase` had been declared on `RunCallbacks` and wired through
+ * `run-service.launch` since the phase-6 build, and NO adapter ever called it.
+ * `agent_runs.phase`/`.step` therefore stayed null for the whole life of every
+ * run, and the strip rendered two empty rows next to a spinner while an agent
+ * worked — the FR28 progress row existed as markup and as a column, with
+ * nothing in between.
+ */
+describe("claude adapter run phases (R21-4a / FR28)", () => {
+  /** Every (phase, step) pair the adapter emitted, oldest first. */
+  function capturePhases(messages: unknown[]) {
+    const { q } = fakeQuery(messages);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const phases: [string | null, string | null][] = [];
+    adapter.start(SPEC, {
+      onLine: () => {},
+      onExit: () => {},
+      onPhase: (phase, step) => phases.push([phase, step]),
+    });
+    return phases;
+  }
+
+  it("emits starting → working → finishing across a run", async () => {
+    const phases = capturePhases([
+      { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
+      { type: "assistant", message: { content: [{ type: "text", text: "hi" }], usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 0 } } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: { input_tokens: 10, output_tokens: 2 }, total_cost_usd: 0 },
+    ]);
+    await drain();
+
+    expect(phases[0]).toEqual(["Starting", null]);
+    expect(phases.map(([p]) => p)).toContain("Working");
+    expect(phases.at(-1)).toEqual(["Finishing", null]);
+  });
+
+  it("names the tool the run is inside, and keeps naming it while the model thinks", async () => {
+    const phases = capturePhases([
+      { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
+      { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "npm test" } }] } },
+      // A plain text turn AFTER the tool: the step must not blank out.
+      { type: "assistant", message: { content: [{ type: "text", text: "thinking" }] } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 },
+    ]);
+    await drain();
+
+    const steps = phases.filter(([p]) => p === "Working").map(([, s]) => s);
+    expect(steps[1]).toContain("Bash");
+    expect(steps[1]).toContain("npm test");
+    // Sticky: the next (non-tool) message still reports the tool in flight.
+    expect(steps[2]).toBe(steps[1]);
+  });
+
+  it("falls back to a climbing turn count before the first tool call", async () => {
+    const phases = capturePhases([
+      { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
+      { type: "assistant", message: { content: [{ type: "text", text: "one" }], usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0 } } },
+      { type: "assistant", message: { content: [{ type: "text", text: "two" }], usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0 } } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: { input_tokens: 1, output_tokens: 2 }, total_cost_usd: 0 },
+    ]);
+    await drain();
+
+    const steps = phases.filter(([p]) => p === "Working").map(([, s]) => s);
+    expect(steps[1]).toBe("turn 1");
+    expect(steps[2]).toBe("turn 2");
+  });
+
+  it("is optional — an adapter caller without onPhase still runs (the pre-R21-4 contract)", async () => {
+    const { q } = fakeQuery([
+      { type: "result", subtype: "success", is_error: false, num_turns: 0, usage: { input_tokens: 0, output_tokens: 0 }, total_cost_usd: 0 },
+    ]);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    let exit: RunExit | null = null;
+    adapter.start(SPEC, { onLine: () => {}, onExit: (e) => (exit = e) });
+    await drain();
+    expect(exit).toMatchObject({ outcome: "finished" });
+  });
+});

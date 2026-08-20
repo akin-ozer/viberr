@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { AcceptConfirm, type AcceptConfirmTask } from "./accept-confirm";
+import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 
 afterEach(cleanup);
 
@@ -123,7 +124,7 @@ describe("F20-6: the no-PR auto-detect arm", () => {
     // It must NOT fall back to the ordinary "closes without a merge" line, and
     // it must NOT claim the merge is one-way (nothing merges here).
     expect(text).not.toContain(
-      "No linked pull request — the task closes without a merge",
+      "No linked pull request. The task closes without a merge",
     );
     expect(text).not.toContain("Merging is one-way");
   });
@@ -169,5 +170,175 @@ describe("the revision-drift row agrees with its own number", () => {
 
   it("keeps the plural for more than one", () => {
     expect(withDrift(3)).toContain("3 commits added since review; they merge unreviewed.");
+  });
+});
+
+/**
+ * F21-2 / ruling 88 — the confirmed click hands back the disclosure this render
+ * made, so the submit can echo it and the server can verify it. Read off the
+ * SAME props the three rows above display: a value the human never saw would
+ * acknowledge nothing.
+ */
+describe("the confirmed click carries the disclosure it just made", () => {
+  function confirmed(props: {
+    task?: Partial<AcceptConfirmTask>;
+    workRevisionSha?: string | null;
+    mode?: "accept" | "force";
+  }): AcceptanceDisclosure | null {
+    let got: AcceptanceDisclosure | null = null;
+    const { container } = render(
+      <AcceptConfirm
+        task={detail(props.task ?? {})}
+        workRevisionSha={props.workRevisionSha ?? null}
+        defaultBranch="main"
+        ceremony={{ mode: props.mode ?? "accept" }}
+        blockedReason={null}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={(disclosure) => {
+          got = disclosure;
+        }}
+      />,
+    );
+    const confirm = [
+      ...container.ownerDocument.querySelectorAll<HTMLButtonElement>(
+        'dialog[data-screen-label="Accept completion dialog"] .foot-actions button',
+      ),
+    ].at(-1);
+    confirm?.click();
+    return got;
+  }
+
+  it("echoes the PR state, the delivered revision and the verdict", () => {
+    expect(
+      confirmed({
+        workRevisionSha: "a".repeat(40),
+        task: {
+          validation: "healthy",
+          pr: { number: 150, state: "review", title: "[VIB-151] work" },
+        },
+      }),
+    ).toEqual({ pr: "review", revision: "a".repeat(40), verdict: "healthy" });
+  });
+
+  it("says 'none' for the facts the dialog itself reports as absent", () => {
+    // The rows read "No linked pull request" and "No delivered revision
+    // recorded" — the echo has to say the same thing, or the server would be
+    // comparing a silence against a value.
+    expect(
+      confirmed({ workRevisionSha: null, task: { pr: null, validation: "none" } }),
+    ).toEqual({ pr: "none", revision: "none", verdict: "none" });
+  });
+
+  it("force discloses on the same terms", () => {
+    expect(
+      confirmed({ mode: "force", workRevisionSha: null, task: { validation: "changed" } }),
+    ).toEqual({ pr: "none", revision: "none", verdict: "changed" });
+  });
+});
+
+/**
+ * F21-23 (live, UC-15) — a human merged PR #172 on GitHub out of band. The
+ * poller adopted `state: merged`, the reviewer verdict still ran, and this
+ * dialog's Merges row correctly read "PR #172 · merged into main" — while the
+ * button under it said "Apply → Done & merge" and the footer "Merging is
+ * one-way." The dialog knew the merge had happened and promised to perform it.
+ *
+ * The disclosure rows are the point of the ceremony and are unchanged; what
+ * changes is the two lines that PREDICT a merge.
+ */
+describe("F21-23: an already-merged PR is not promised a merge", () => {
+  const MERGED = {
+    number: 172,
+    state: "merged" as const,
+    title: "[VIB-151] work",
+  };
+  const OPEN_PR = {
+    number: 172,
+    state: "review" as const,
+    title: "[VIB-151] work",
+  };
+
+  function ceremonyDialog(props: {
+    pr: AcceptConfirmTask["pr"];
+    mode?: "accept" | "apply-recommendation" | "complete-merge" | "stage-move";
+  }) {
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({ pr: props.pr })}
+        workRevisionSha={"a".repeat(40)}
+        defaultBranch="main"
+        ceremony={{ mode: props.mode ?? "apply-recommendation", label: "Accept completion" }}
+        blockedReason={null}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    return {
+      text: dialog.textContent ?? "",
+      confirm:
+        [
+          ...dialog.querySelectorAll<HTMLButtonElement>(".foot-actions button"),
+        ].at(-1)?.textContent ?? "",
+    };
+  }
+
+  it("the recommendation button drops '& merge' and the footer says nothing merges", () => {
+    const merged = ceremonyDialog({ pr: MERGED });
+    expect(merged.confirm).toBe("Apply → Done");
+    expect(merged.text).toContain(
+      "Nothing merges: the pull request was already merged on GitHub.",
+    );
+    expect(merged.text).not.toContain("Merging is one-way");
+    // Every disclosure row survives: the PR, the revision and the verdict are
+    // exactly what the human is accepting against.
+    expect(merged.text).toContain("PR #172");
+    expect(merged.text).toContain("into main");
+    expect(merged.text).toContain("a".repeat(12));
+    expect(merged.text).toContain("Verdict");
+  });
+
+  it("an OPEN pull request still promises the merge it is about to perform", () => {
+    // Canary: the fix must be about the PR's state, not about the mode.
+    const open = ceremonyDialog({ pr: OPEN_PR });
+    expect(open.confirm).toBe("Apply → Done & merge");
+    expect(open.text).toContain("Merging is one-way");
+    expect(open.text).not.toContain("already merged on GitHub");
+  });
+
+  it("the merge-pending ceremony stops offering to merge a merged PR", () => {
+    // R16-6's second half can find the PR merged out of band between the
+    // recommendation and the click — "Merge PR #172 into main" would name work
+    // GitHub has already done.
+    const merged = ceremonyDialog({ pr: MERGED, mode: "complete-merge" });
+    expect(merged.confirm).toBe("Finish accepting VIB-151");
+    expect(merged.text).toContain("Nothing merges");
+
+    cleanup();
+    const pending = ceremonyDialog({ pr: OPEN_PR, mode: "complete-merge" });
+    expect(pending.confirm).toBe("Merge PR #172 into main");
+    expect(pending.text).toContain("Merging is one-way");
+  });
+
+  it("promises no record either on the arm where the server writes nothing", () => {
+    // Residual: "Finish accepting VIB-151" sat above "The completion event is
+    // recorded on the timeline", and on THIS arm nothing is recorded — the task
+    // was accepted when the PR was stamped "accepted" (that write put the
+    // completion on the timeline), and `completeTaskMerge` now settles an
+    // already-merged PR as a no-op success. Only this arm may say so: every
+    // other mode still performs the acceptance write, merge or no merge.
+    const finishing = ceremonyDialog({ pr: MERGED, mode: "complete-merge" });
+    expect(finishing.text).toContain("Nothing is written either");
+
+    cleanup();
+    const applying = ceremonyDialog({ pr: MERGED });
+    expect(applying.text).toContain(
+      "The completion event is recorded on the timeline.",
+    );
+    expect(applying.text).not.toContain("Nothing is written either");
   });
 });

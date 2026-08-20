@@ -276,7 +276,7 @@ async function createProjectImpl(
   }
   const key = input.key.trim().toUpperCase();
   if (!/^[A-Z]{2,4}$/.test(key)) {
-    throw AppError.validation("Task key must be 2–4 letters.");
+    throw AppError.validation("Task key must be 2-4 letters.");
   }
   const owner = input.owner.trim();
   const repoName = input.repoName.trim();
@@ -286,7 +286,7 @@ async function createProjectImpl(
   // therefore gated behind adding a PAT connection.
   if (!owner || !repoName) {
     throw AppError.validation(
-      "A GitHub repository is required — pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first.",
+      "A GitHub repository is required. Pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first.",
     );
   }
   const slug = slugifyProjectName(name);
@@ -318,7 +318,7 @@ async function createProjectImpl(
   const connection = getConnection(db, owner);
   if (!connection) {
     throw AppError.validation(
-      `No GitHub connection for "${owner}" — add a PAT for that owner in Instance settings → GitHub connections first.`,
+      `No GitHub connection for "${owner}". Add a PAT for that owner in Instance settings → GitHub connections first.`,
     );
   }
   let defaultBranch = "main";
@@ -333,13 +333,13 @@ async function createProjectImpl(
         // The repo exists and is visible, so we can adopt its default branch —
         // but the token can't push, so delivery will fail until it's fixed.
         if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
-        repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it — agents won't be able to open branches or PRs there until it's granted write access.`;
+        repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
       } else if (probe.status === "not_found") {
-        repoWarning = `GitHub has no repository ${repo} that this connection can see — check the name, or create it before agents start delivering.`;
+        repoWarning = `GitHub has no repository ${repo} that this connection can see. Check the name, or create it before agents start delivering.`;
       } else if (probe.status === "forbidden") {
-        repoWarning = `The ${owner} connection's token was refused for ${repo} — agents won't be able to deliver until it's replaced.`;
+        repoWarning = `The ${owner} connection's token was refused for ${repo}. Agents won't be able to deliver until it's replaced.`;
       } else {
-        repoWarning = `Couldn't reach GitHub to verify ${repo} — the project was created with the default branch "main".`;
+        repoWarning = `Couldn't reach GitHub to verify ${repo}. The project was created with the default branch "main".`;
       }
     }
   }

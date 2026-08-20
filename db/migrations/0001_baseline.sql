@@ -85,7 +85,15 @@ CREATE TABLE task_projections (
   -- board/queue/inbox read model reads this table and each of them has to hide
   -- archived tasks without re-reading task files on a loader path.
   archived INTEGER NOT NULL DEFAULT 0,
-  validation TEXT NOT NULL CHECK (validation IN ('healthy', 'changed', 'failing', 'none')),
+  -- F21-1: this list IS VALIDATION_VALUES (task-file.schema.ts) — the rebuilder
+  -- binds `deriveValidation(fm)` straight in, so a value the enum admits and the
+  -- CHECK does not aborts the whole task rebuild ("projection rebuild failed")
+  -- and leaves the row stale. `bypassed` (N20-14 force-accept) was missed here,
+  -- which bricked reprojection of a force-accepted task that also had a
+  -- `workRevision` — without one `deriveValidation` returns `none` first, which
+  -- is what hid it. Widen this list whenever the enum grows.
+  validation TEXT NOT NULL CHECK (validation IN
+    ('healthy', 'changed', 'failing', 'none', 'bypassed')),
   -- Derived from the revision-bound review model (acceptanceBlockedReason): NULL
   -- when the current revision is acceptance-ready, a human-readable reason
   -- otherwise. Projected (P11-50) so the review-queue read model doesn't re-read
@@ -120,6 +128,19 @@ CREATE TABLE task_projections (
   repo TEXT,
   pr_json TEXT,
   github_json TEXT,
+  -- Ruling 53 + ruling 88: the DELIVERED revision's head sha
+  -- (`workRevision.headSha`), NULL before delivery. The board's acceptance
+  -- ceremony has to DISCLOSE what it accepts, and its echo of that disclosure is
+  -- what the server compares against the live task before it merges anything
+  -- (acceptance-disclosure.ts). A board card is rendered from this table alone,
+  -- so without the column the ceremony disclosed "No delivered revision
+  -- recorded." on every task and the server refused the resulting `"none"` echo
+  -- as stale — a board drop onto the terminal stage could never accept DELIVERED
+  -- work. Projected rather than re-read per card because this is the hottest
+  -- loader path in the app (see board-query.server.ts). The sha only, never the
+  -- revision object: nothing here needs its id, branch or author, and a column
+  -- carries what it is read for.
+  work_revision_sha TEXT,
   goal TEXT NOT NULL DEFAULT '',
   packet_json TEXT,
   -- Pending operator recommendations on the task file (F7-NOTIF1): projected
@@ -156,7 +177,10 @@ CREATE TABLE task_events (
   title TEXT,
   text TEXT NOT NULL,
   to_agent INTEGER NOT NULL DEFAULT 0,
-  evidence_json TEXT
+  evidence_json TEXT,
+  -- Names of files the event's run saved into the task's attachments/ dir
+  -- (JSON array). The directory stays the truth; these attribute producers.
+  attachments_json TEXT
 );
 CREATE TABLE diagnostics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

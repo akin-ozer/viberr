@@ -147,6 +147,9 @@ function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
     // F17: the phantom-workspace literal is gone from the seed; the fixture
     // must not keep teaching it (see agent-catalog.server.test.ts).
     scope: "Global base",
+    // OBS-7: the default fixture is a deployment that still tracks its global
+    // base; the fork case sets this explicitly.
+    customized: false,
     desc: "Implements stage work on the task-key branch.",
     definition: "",
     stages: ["ready", "impl"],
@@ -210,6 +213,96 @@ describe("ProfileDetail", () => {
     expect(getByText("running on 1 task")).toBeTruthy();
     fireEvent.click(container.querySelector(".deploy-row")!);
     expect(onOpen).toHaveBeenCalledWith("VIB-142");
+  });
+
+  /**
+   * OBS-4 (live): a SUPERVISED operator moved Triage→Ready and Ready→In
+   * Progress itself while this card listed "Stage transitions" flatly under
+   * RECOMMENDS ONLY. Both are true — the mode governs the boundaries the
+   * workflow GATES, and an auto-advance boundary has no approval to recommend
+   * into — so the column is a simplification that reads as a promise. The card
+   * qualifies it where the qualifier applies: the operator's recommend column.
+   */
+  it("OBS-4: the operator card qualifies a recommend-only Stage transitions row", () => {
+    const note = (a: Parameters<typeof mkProfile>[0]) =>
+      render(
+        <ProfileDetail
+          a={mkProfile(a)}
+          stages={STAGES}
+          workflow={WORKFLOW}
+          insts={[]}
+          projectName="Viberr Core"
+          canManage
+          onOpen={() => {}}
+          onDelete={() => {}}
+          onEdit={() => {}}
+        />,
+      ).container.textContent ?? "";
+
+    const operatorActions = {
+      direct: ["Assign the delivering agent"],
+      recommend: ["Stage transitions"],
+      forbidden: ["Transition a task to Done"],
+    };
+    const qualified = note({ kind: "operator", name: "Operator", role: "Orchestration", actions: operatorActions });
+    // Non-vacuity: the row this note is about really is in the column.
+    expect(qualified).toContain("Stage transitions");
+    expect(qualified).toContain("is a recommendation at the boundaries this project gates");
+    expect(qualified).toContain("Auto-advance");
+    cleanup();
+
+    // The same operator with the grant DIRECT has nothing to qualify.
+    const direct = note({
+      kind: "operator",
+      name: "Operator",
+      role: "Orchestration",
+      actions: { ...operatorActions, direct: ["Stage transitions"], recommend: [] },
+    });
+    expect(direct).toContain("Stage transitions");
+    expect(direct).not.toContain("is a recommendation at the boundaries");
+    cleanup();
+
+    // A specialist never holds the capability, so its card never says this.
+    expect(note({ actions: operatorActions })).not.toContain(
+      "is a recommendation at the boundaries",
+    );
+  });
+
+  /**
+   * OBS-7 (live): Developer, deployed from the global base and then edited in
+   * the project, kept the flat "Global base" scope line — while the edit modal
+   * promises the save "keeps its own copy and stops tracking the global". The
+   * header carries BOTH facts now: where the profile came from, and that this
+   * project's copy has diverged. An untracked profile is untouched.
+   */
+  it("OBS-7: a forked global profile says it is customized; an untouched one does not", () => {
+    const scopeLine = (a: Parameters<typeof mkProfile>[0]) =>
+      render(
+        <ProfileDetail
+          a={mkProfile(a)}
+          stages={STAGES}
+          workflow={WORKFLOW}
+          insts={[]}
+          projectName="Viberr Core"
+          canManage
+          onOpen={() => {}}
+          onDelete={() => {}}
+          onEdit={() => {}}
+        />,
+      ).container.querySelector(".ag-scope")!.textContent;
+
+    expect(scopeLine({ scope: "Global base", customized: false })).toBe(
+      "Global base",
+    );
+    cleanup();
+    expect(scopeLine({ scope: "Global base", customized: true })).toBe(
+      "Global base · customized for Viberr Core",
+    );
+    cleanup();
+    // A profile created in the project already names it — nothing is appended.
+    expect(
+      scopeLine({ scope: "Created in Viberr Core", customized: false }),
+    ).toBe("Created in Viberr Core");
   });
 
   /**
@@ -479,10 +572,10 @@ describe("ProfileDetail", () => {
       />,
     );
     expect(
-      getByText("declared stages don't exist here — eligible everywhere"),
+      getByText("declared stages don't exist here · eligible everywhere"),
     ).toBeTruthy();
     expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(3);
-    expect(getByText(/the declaration says nothing here/)).toBeTruthy();
+    expect(getByText(/The declaration says nothing here/)).toBeTruthy();
   });
 
   it("LV-02: a profile that declares no stages is unrestricted, not ineligible", () => {
@@ -501,7 +594,7 @@ describe("ProfileDetail", () => {
     );
     // Mirrors specialistEligibleForStage: no declared stages = eligible
     // everywhere (the guard treats it that way, so the panel must too).
-    expect(getByText("no stage restriction — eligible everywhere")).toBeTruthy();
+    expect(getByText("no stage restriction · eligible everywhere")).toBeTruthy();
     expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(
       STAGES.length,
     );
@@ -781,7 +874,12 @@ describe("CreateProfileModal", () => {
     });
     fireEvent.click(getByText("Codex"));
     fireEvent.click(getByText("Ready"));
-    expect(getByText("Ready to add to Viberr Core.")).toBeTruthy();
+    // F21-13: every required field is set, but the backend's model list has not
+    // answered yet — the form is NOT ready and the hint says which half is
+    // missing (it used to read "Ready to add" over an empty model).
+    expect(
+      getByText(/Loading the models available on Codex/),
+    ).toBeTruthy();
 
     // The catalog fetch resolves the codex default model + effort.
     await waitFor(() =>
@@ -790,6 +888,7 @@ describe("CreateProfileModal", () => {
           ?.value,
       ).toBe("gpt-5-codex"),
     );
+    expect(getByText("Ready to add to Viberr Core.")).toBeTruthy();
     await waitFor(() =>
       expect(
         container.querySelector<HTMLSelectElement>('select[aria-label="Effort"]')
@@ -850,7 +949,7 @@ describe("CreateProfileModal", () => {
     fireEvent.click(getByText("Knowledge bases"));
     // Both dangling ids now render AS chips, flagged missing + removable.
     const ghosts = getAllByTitle(
-      "No longer in the store — click to remove this grant",
+      "No longer in the store. Click to remove this grant",
     );
     expect(ghosts).toHaveLength(2);
     expect(container.querySelectorAll(".pick-chip.missing")).toHaveLength(2);
@@ -884,6 +983,81 @@ describe("CreateProfileModal", () => {
       "xhigh",
       "max",
     ]);
+  });
+
+  /**
+   * F21-13 (live) — Edit Developer (Codex · gpt-5.6-terra) → click "Claude
+   * Code" → the model select reads "loading available models…" while Save stays
+   * ENABLED → the save lands `backends: [claude]` next to a Codex model id, and
+   * the run silently substitutes a Claude model. The editor now clears the
+   * model on the switch and holds Save until the new backend's catalog answers,
+   * so the incoherent pair has no window to be submitted in.
+   */
+  it("F21-13: a backend switch clears the model, holds Save, and remaps to the new backend's default", async () => {
+    const onSubmit = vi.fn();
+    const { container, getByText } = renderModal({
+      initial: mkProfile({
+        backends: ["codex"],
+        model: "gpt-5-codex",
+        effort: "medium",
+      }),
+      onSubmit,
+    });
+    const modelSel = () =>
+      container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!;
+    const save = () =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+        (b) => b.textContent?.includes("Save changes"),
+      )!;
+    // Control: the stored Codex model resolves and the profile is saveable.
+    await waitFor(() => expect(modelSel().value).toBe("gpt-5-codex"));
+    expect(save().disabled).toBe(false);
+
+    fireEvent.click(getByText("Claude Code"));
+    // The Codex id is gone on the click — not "still shown but about to change".
+    expect(modelSel().value).toBe("");
+    expect(save().disabled).toBe(true);
+    expect(getByText(/Loading the models available on Claude Code/)).toBeTruthy();
+    // The exact race: a save inside the window submits nothing at all.
+    fireEvent.click(save());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // The claude catalog answers → its default model + effort, Save released.
+    await waitFor(() => expect(modelSel().value).toBe("sonnet"));
+    expect(save().disabled).toBe(false);
+    fireEvent.click(save());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({
+      backend: "claude",
+      model: "sonnet",
+      // The Codex effort ("medium") went with the Codex model — the pair the
+      // new backend answers with is the one that gets saved.
+      effort: "high",
+    });
+  });
+
+  /**
+   * OBS-12 (live): with `stage-transitions: direct` left on the deployment, a
+   * SUPERVISED operator transitioned approval boundaries directly — the display
+   * was right, the help text was not. "supervised recommends at approval
+   * boundaries" reads as a guarantee of the setting; it is a ceiling, and the
+   * rows below it decide per action.
+   */
+  it("OBS-12: the autonomy help says the capability rows can override the setting", () => {
+    const { getByText, container } = renderModal({
+      initial: mkProfile({
+        id: "operator",
+        kind: "operator",
+        name: "Operator",
+        role: "Orchestration",
+        autonomy: "supervised",
+      }),
+    });
+    // Non-vacuity: the operator-only autonomy control is on screen.
+    expect(container.textContent).toContain("Default autonomy");
+    expect(
+      getByText(/capability rows may override this per action/),
+    ).toBeTruthy();
   });
 
   it("R7-5 — a specialist cap row offers 3 honest modes (Allowed/Human-only/Off), no Recommend", () => {
@@ -1256,7 +1430,7 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
       ),
     ).toBeTruthy();
     expect(
-      getByText("Ready to save — this forks Developer for Viberr Core."),
+      getByText("Ready to save: this forks Developer for Viberr Core."),
     ).toBeTruthy();
   });
 
@@ -1265,7 +1439,7 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
       initial: mkProfile({ source: "project", name: "Migrations" }),
     });
     expect(
-      getByText("Update this project's copy — changes apply to future assignments."),
+      getByText("Update this project's copy. Changes apply to future assignments."),
     ).toBeTruthy();
     expect(queryByText(/forks/)).toBeNull();
   });
@@ -1616,7 +1790,7 @@ describe("UXA-15: the Agents page explains its read-only state", () => {
 
   it("an admin sees no read-only note", () => {
     const { container } = renderAs("admin");
-    expect(container.textContent).not.toContain("Read-only —");
+    expect(container.textContent).not.toContain("Read-only");
   });
 });
 

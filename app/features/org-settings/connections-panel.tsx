@@ -75,10 +75,10 @@ function ConnectionModal({
   return (
     <MiniModal
       icon={<Icon name="github" />}
-      title={initial ? "Update token — " + initial.owner : "New GitHub connection"}
+      title={initial ? "Update token for " + initial.owner : "New GitHub connection"}
       sub={
         initial
-          ? "The current token is never shown — paste a replacement"
+          ? "The current token is never shown. Paste a replacement"
           : "A PAT authenticates every repo action for this owner"
       }
       onClose={onClose}
@@ -109,6 +109,12 @@ function ConnectionModal({
             value={owner}
             disabled={!!initial}
             placeholder="owner"
+            // Owner report 2026-08-20: a text input followed by a password input
+            // reads as a LOGIN form, and browsers filled a saved email here.
+            autoComplete="off"
+            spellCheck={false}
+            data-1p-ignore
+            data-lpignore="true"
             onChange={(e) => {
               setOwner(e.target.value);
               setErr(null);
@@ -123,7 +129,7 @@ function ConnectionModal({
             input cannot explain itself; say it where the reader is looking. */}
         {initial && (
           <div className="fhint">
-            The owner can&apos;t be changed — add a separate connection for a
+            The owner can&apos;t be changed. Add a separate connection for a
             different account or organisation.
           </div>
         )}
@@ -145,9 +151,13 @@ function ConnectionModal({
           type="password"
           className="mono"
           value={token}
-          autoComplete="off"
+          // `off` is ignored by browsers on login-shaped pairs (owner report
+          // 2026-08-20: a saved password landed in this field) — `new-password`
+          // is the value password managers actually honor for "never fill".
+          autoComplete="new-password"
           spellCheck={false}
           data-1p-ignore
+          data-lpignore="true"
           placeholder="ghp_…"
           onChange={(e) => {
             setToken(e.target.value);
@@ -171,7 +181,7 @@ function ConnectionModal({
           <span>
             Verified when you apply: a classic PAT publishes its scopes, so a
             missing one refuses the token and nothing is saved. A{" "}
-            <strong>fine-grained</strong> PAT publishes none — its permissions
+            <strong>fine-grained</strong> PAT publishes none. Its permissions
             are proven by real probes (including write dry-runs) once the
             connection is attached to a project with a repository.
           </span>
@@ -211,7 +221,7 @@ export function ConnectionsPanel({
   };
 
   return (
-    <section className="panel" data-screen-label="Settings — GitHub connections">
+    <section className="panel" data-screen-label="Settings · GitHub connections">
       <div className="panel-head">
         <Icon name="github" />
         <h2>GitHub connections</h2>
@@ -226,7 +236,7 @@ export function ConnectionsPanel({
         <Icon name="shield" />
         <span>
           <strong>{countLabel(connections.length, "connection")}.</strong>{" "}
-          Every project picks one at creation — it sets the repository root. Each
+          Every project picks one at creation. It sets the repository root. Each
           authenticates with a <strong>PAT</strong>, validated against the minimum
           scopes before anything is saved.
         </span>
@@ -247,8 +257,8 @@ export function ConnectionsPanel({
                 </b>
                 <span className="sub mono">
                   PAT {c.masked}
-                  {c.repos !== null ? ` · ${c.repos} repos` : ""} · expires{" "}
-                  {expiry || "—"}
+                  {c.repos !== null ? ` · ${c.repos} repos` : ""} ·{" "}
+                  {expiry ? `expires ${expiry}` : "no expiry date"}
                 </span>
                 <span className="scope-chips">
                   {/* P13-UI-01 + owner ruling 2026-07-25: chips are PROVEN
@@ -284,8 +294,8 @@ export function ConnectionsPanel({
                             title={unproven.map((s) => s.note ?? s.id).join(" · ")}
                           >
                             {proven.length > 0 ? " · " : ""}
-                            {unproven.map((s) => s.id).join(", ")} unproven —
-                            verified when attached to a project
+                            {unproven.map((s) => s.id).join(", ")} unproven.
+                            Verified when attached to a project
                           </span>
                         )}
                       </>
@@ -333,7 +343,7 @@ export function ConnectionsPanel({
           );
         })}
         {connections.length === 0 && (
-          <div className="empty">No connections yet — add one first: every project binds to a GitHub repo through a connection.</div>
+          <div className="empty">No connections yet. Add one first: every project binds to a GitHub repo through a connection.</div>
         )}
       </div>
       {modal && (

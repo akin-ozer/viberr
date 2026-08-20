@@ -232,7 +232,7 @@ function approverLabel(approval: PrHumanApproval): string {
 export function humanVerdictNote(approval: PrHumanApproval): string {
   return (
     `Approved on GitHub by ${approverLabel(approval)} on the delivered revision ` +
-    `\`${(approval.commitSha ?? "").slice(0, 7)}\` — a project member's PR approval is the verdict.`
+    `\`${(approval.commitSha ?? "").slice(0, 7)}\`. A project member's PR approval is the verdict.`
   );
 }
 
@@ -257,7 +257,7 @@ export function humanApprovalRefusalNote(fm: {
     if (humanVerdictApproval(fm)) return null;
     return (
       `${approverLabel(approval)} approved commit \`${(approval.commitSha ?? "unknown").slice(0, 7)}\` ` +
-      `on GitHub, which is no longer the delivered revision — re-approve the current head.`
+      `on GitHub, which is no longer the delivered revision. Re-approve the current head.`
     );
   }
   switch (approval.status) {
@@ -265,22 +265,22 @@ export function humanApprovalRefusalNote(fm: {
       return (
         `${approverLabel(approval)} approved commit ` +
         `\`${(approval.commitSha ?? "unknown").slice(0, 7)}\` on GitHub, not the delivered ` +
-        `revision — the approval cannot stand in for a verdict until they approve the current head.`
+        `revision. The approval cannot stand in for a verdict until they approve the current head.`
       );
     case "unlinked_handle":
       return (
         `@${approval.login} approved the pull request on GitHub, but no Viberr account carries ` +
-        `that GitHub handle — link it on their profile and it will count as the verdict.`
+        `that GitHub handle. Link it on their profile and it will count as the verdict.`
       );
     case "ambiguous_handle":
       return (
         `@${approval.login} approved the pull request on GitHub, but more than one Viberr account ` +
-        `claims that handle — resolve the duplicate before the approval can count.`
+        `claims that handle. Resolve the duplicate before the approval can count.`
       );
     case "not_a_member":
       return (
         `${approverLabel(approval)} approved the pull request on GitHub, but they are not a member ` +
-        `of this project — only a project member's approval can be the verdict.`
+        `of this project. Only a project member's approval can be the verdict.`
       );
   }
 }
@@ -322,7 +322,7 @@ export function verdictGateReason(
     // outcome. There is nothing to open a PR for; acceptance closes it to Done
     // without a merge, after re-proving the basis live.
     if (fm.noChanges || fm.workRevision.kind === "verified") return null;
-    return `${taskKey} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
+    return `${taskKey} has delivered work but no review pull request. Deliver the branch & open the PR before accepting.`;
   }
   // `healthy` clears the gate; `failing` was already named precisely by
   // `acceptanceBlockedReason`, which runs first in both callers.
@@ -341,7 +341,7 @@ export function verdictGateReason(
   // sending the reviewer to look for a review that already happened.
   const nearMiss = humanApprovalRefusalNote(fm);
   if (nearMiss) {
-    return `${taskKey}'s delivered revision has no approving verdict yet — ${nearMiss}`;
+    return `${taskKey}'s delivered revision has no approving verdict yet. ${nearMiss}`;
   }
-  return `${taskKey}'s delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.`;
+  return `${taskKey}'s delivered revision has no approving verdict yet. Run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.`;
 }

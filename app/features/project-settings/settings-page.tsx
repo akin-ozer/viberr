@@ -35,7 +35,12 @@ import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
-import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
+import {
+  PROJECT_ROLES,
+  roleCan,
+  type ProjectRole,
+  type RbacAction,
+} from "~/shared/rbac";
 import { countLabel } from "~/shared/text/plural";
 
 /**
@@ -59,6 +64,25 @@ type ActionResult =
 function asProjectRole(raw: string | null): ProjectRole | null {
   return PROJECT_ROLES.find((role) => role === raw) ?? null;
 }
+
+/**
+ * The gate a panel here asks for its OWN action id. `roleCan` is the only
+ * implementation the product ships and the default every caller gets — the
+ * parameter exists so a caller can substitute a different one WITHOUT replacing
+ * the module.
+ *
+ * E3 is why that seam is worth having: `edit-policy`, `manage-members` and
+ * `grant-github-scope` are three DIFFERENT server guards that happen to resolve
+ * to the same admin tier today. A check that only varies the ROLE therefore
+ * cannot tell one id from another — which is exactly how a `myRole === "admin"`
+ * literal survived on this page for so long. A gate that answers for exactly one
+ * action id pins each panel to the id it really asks for; re-tier any of the
+ * three and the pinning still holds.
+ */
+export type ProjectActionGate = (
+  role: ProjectRole | null,
+  action: RbacAction,
+) => boolean;
 
 /* F19-33: the panel-head counts and the trailing panel notes below used to be
    styled by two private consts here — `PANEL_COUNT_STYLE` (a byte copy of the
@@ -124,7 +148,7 @@ export function ProjectPanel({
                 (rbac.ts) and its label is "Edit workflow & policy"; the old
                 "Change project settings (project admin or maintainer)" invented a
                 grant and wrongly promised maintainers. Matches the Policy page. */}
-            Read-only — editing project settings needs the{" "}
+            Read-only. Editing project settings needs the{" "}
             <strong>Edit workflow &amp; policy</strong> grant (project admin).
           </span>
         </div>
@@ -465,7 +489,7 @@ function StageMoveMenu({
         className={"own-btn" + (open ? " open" : "")}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Move ${stage.name} — currently stage ${position} of ${total}`}
+        aria-label={`Move ${stage.name}, currently stage ${position} of ${total}`}
         title="Move this stage in the workflow order"
         onClick={() => setOpen(!open)}
       >
@@ -574,7 +598,7 @@ function StageRow({
           up — and it is where the entry/terminal lock glyph lives. */}
       <span
         className="stg-handle off"
-        title={locked ? `${stage.name} is fixed — ${locked}` : undefined}
+        title={locked ? `${stage.name} is fixed: ${locked}` : undefined}
       >
         {locked && <Icon name="lock" />}
       </span>
@@ -685,7 +709,7 @@ export function StagesPanel({
     const locked = stageLockReason(s.id, stages);
     if (locked) {
       // D5: a refusal must not render the success tick.
-      push(`${s.name} can't be removed — ${locked}`, "error");
+      push(`${s.name} can't be removed: ${locked}`, "error");
       return;
     }
     const n = count(s.id);
@@ -800,8 +824,8 @@ export function StagesPanel({
           {canManage ? (
             <>
               Drag a row to reorder, or use its Move menu · click a name to rename.
-              Adding or removing a stage re-wires the transition chain around it —
-              the new hop inherits the boundary it replaced. Loosen or tighten a
+              Adding or removing a stage re-wires the transition chain around it.
+              The new hop inherits the boundary it replaced. Loosen or tighten a
               boundary in{" "}
               <button type="button" className="keybtn" onClick={onNavPolicy}>
                 Policy → Workflow rules
@@ -810,7 +834,7 @@ export function StagesPanel({
           ) : (
             <>
               {/* F20-16: real grant + tier (see the identity card note). */}
-              Read-only — editing the workflow stages needs the{" "}
+              Read-only. Editing the workflow stages needs the{" "}
               <strong>Edit workflow &amp; policy</strong> grant (project admin).
               Boundaries are shown in{" "}
               <button type="button" className="keybtn" onClick={onNavPolicy}>
@@ -903,7 +927,7 @@ export function MembersPanel({
     ) {
       // D5: a refusal must not render the success tick.
       push(
-        `${m.name} is the only admin — assign another admin in Policy first`,
+        `${m.name} is the only admin. Assign another admin in Policy first`,
         "error",
       );
       return;
@@ -934,7 +958,7 @@ export function MembersPanel({
         <div className="pol-note">
           <Icon name="lock" />
           <span>
-            Read-only — adding or removing project members needs the{" "}
+            Read-only. Adding or removing project members needs the{" "}
             <strong>Manage members &amp; roles</strong> grant (project admin).
           </span>
         </div>
@@ -966,7 +990,7 @@ export function MembersPanel({
               </div>
               <div className="em">
                 {m.missing
-                  ? "The org account was deleted — remove this stale membership."
+                  ? "The org account was deleted. Remove this stale membership."
                   : m.email}
               </div>
             </span>
@@ -1111,8 +1135,8 @@ function RepairRepoDialog({
       <h3>Repair repository</h3>
       <p>
         Currently <code className="mono">{current ?? "unset"}</code>. Enter the
-        corrected <span className="mono">owner/name</span> — for the project
-        that was misconfigured at creation, not for moving healthy work.
+        corrected <span className="mono">owner/name</span>. This is for the
+        project that was misconfigured at creation, not for moving healthy work.
       </p>
       <div className="field">
         <input
@@ -1126,7 +1150,7 @@ function RepairRepoDialog({
       </div>
       <p className="repair-note">
         {hasCredential
-          ? "The new repository is verified with the attached credential before anything changes — a repo the token can't see refuses the repair."
+          ? "The new repository is verified with the attached credential before anything changes. A repo the token can't see refuses the repair."
           : "No credential is attached, so the new repository can't be verified until one is."}
       </p>
       {footprintTasks > 0 && (
@@ -1242,7 +1266,7 @@ export function RepoPanel({
           <Icon name="lock" />
           <span>
             {/* F20-16: real grant + tier (see the identity card note). */}
-            Read-only — repairing the repository binding and changing the
+            Read-only. Repairing the repository binding and changing the
             after-merge branch policy need the{" "}
             <strong>Edit workflow &amp; policy</strong> grant (project admin).
           </span>
@@ -1256,14 +1280,14 @@ export function RepoPanel({
             {repo ? (
               <span className="mono">{repo}</span>
             ) : (
-              <span className="fine md dim">—</span>
+              <span className="fine md dim">not set</span>
             )}
             {canRepair && (
               <button
                 type="button"
                 className="btn ghost sm repair-btn"
                 onClick={() => setRepairing(true)}
-                title="Fix a repository that was misconfigured at creation — verified against the attached credential before anything changes"
+                title="Fix a repository that was misconfigured at creation. The fix is verified against the attached credential before anything changes"
               >
                 Repair…
               </button>
@@ -1314,35 +1338,56 @@ export function RepoPanel({
         />
       )}
 
-      <CredentialCard
-        credential={credential}
-        onOpenTask={onOpenTask}
-        warnActions={
-          // "Grant scope" re-checks a credential — on the no-credential card it
-          // can only no-op into a toast, so it doesn't render there.
-          canGrant && credential.source !== "none" ? (
-            <button
-              type="button"
-              className="btn sm push"
-              onClick={onGrantScope}
-              disabled={busy}
-              title="Re-check the credential's scopes against GitHub"
-            >
-              <Icon name="check" />
-              Grant scope
-            </button>
-          ) : undefined
-        }
-        manageActions={
-          <CredentialManageActions
-            configured={credential.source === "pat"}
-            canManage={canGrant}
-            busy={credBusy}
-            onSet={onSetCredential}
-            onClear={onClearCredential}
-          />
-        }
-      />
+      {/* F21-5 (R19-11 / owner ruling Q-V1, PAT half): the credential card is
+          the project's token fingerprint, its scope verdicts and its
+          rotate/remove controls. Every one of those actions gates on
+          `grant-github-scope` server-side (this route's action), so the card is
+          WITHDRAWN below that tier rather than rendered read-only — ruling 37's
+          precedent, and byte-for-byte what /projects/:slug/github already does
+          with the same component. The /github page fixed this in pass 19 and
+          Settings did not, so a project Viewer read the masked tail here. The
+          loader redacts the same fields it hides, so the withheld detail never
+          reaches the browser at all. */}
+      {canGrant ? (
+        <CredentialCard
+          credential={credential}
+          onOpenTask={onOpenTask}
+          warnActions={
+            // "Grant scope" re-checks a credential — on the no-credential card
+            // it can only no-op into a toast, so it doesn't render there.
+            credential.source !== "none" ? (
+              <button
+                type="button"
+                className="btn sm push"
+                onClick={onGrantScope}
+                disabled={busy}
+                title="Re-check the credential's scopes against GitHub"
+              >
+                <Icon name="check" />
+                Grant scope
+              </button>
+            ) : undefined
+          }
+          manageActions={
+            <CredentialManageActions
+              configured={credential.source === "pat"}
+              canManage={canGrant}
+              busy={credBusy}
+              onSet={onSetCredential}
+              onClear={onClearCredential}
+            />
+          }
+        />
+      ) : (
+        <div className="pol-note after last">
+          <Icon name="lock" />
+          <span>
+            Credential details need the <strong>Grant GitHub scope</strong>{" "}
+            grant (project admin or maintainer). The project GitHub page still
+            shows whether this repository is reachable.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1416,6 +1461,7 @@ export function DangerZone({
   busy,
   onArchive,
   onDelete,
+  gate = roleCan,
 }: {
   projectName: string;
   myRole: string | null;
@@ -1423,6 +1469,8 @@ export function DangerZone({
   busy: boolean;
   onArchive: (archived: boolean) => void;
   onDelete: (confirmName: string) => void;
+  /** See `ProjectActionGate`. Defaults to the shared `roleCan`. */
+  gate?: ProjectActionGate;
 }) {
   const [confirming, setConfirming] = useState(false);
   // RU-3: archive AND delete both gate on the `edit-policy` action server-side
@@ -1432,7 +1480,7 @@ export function DangerZone({
   // action the server actually checks — the same way `canGrant` already routes
   // through the shared helper. (`edit-policy` resolves to admin-only today, so
   // this is behavior-preserving; it stops being a hardcoded assumption.)
-  const canManageLifecycle = roleCan(asProjectRole(myRole), "edit-policy");
+  const canManageLifecycle = gate(asProjectRole(myRole), "edit-policy");
 
   return (
     <div className="panel danger-panel">
@@ -1451,7 +1499,7 @@ export function DangerZone({
         <p className="deny-note before">
           <Icon name="lock" />
           Archiving and deleting {projectName} need the{" "}
-          <strong>Edit workflow &amp; policy</strong> grant — ask a project
+          <strong>Edit workflow &amp; policy</strong> grant. Ask a project
           admin.
         </p>
       )}
@@ -1462,7 +1510,7 @@ export function DangerZone({
           </div>
           <div className="dd">
             {archived
-              ? "This project is archived — hidden from the workspace. Restore it to make it active again."
+              ? "This project is archived and hidden from the workspace. Restore it to make it active again."
               : "Hides the project from the workspace and moves it to the Home “Archived” section. Timelines are preserved and it can be restored anytime."}
           </div>
         </span>
@@ -1519,10 +1567,13 @@ export function SettingsPage({
   data,
   meId,
   myRole,
+  gate = roleCan,
 }: {
   data: SettingsViewData;
   meId: string | null;
   myRole: string | null;
+  /** See `ProjectActionGate`. Defaults to the shared `roleCan`. */
+  gate?: ProjectActionGate;
 }) {
   const navigate = useNavigate();
   const csrf = useCsrfToken();
@@ -1549,9 +1600,9 @@ export function SettingsPage({
   // why the literal survived and exactly why it can't stay: re-tier either one
   // and the panels that don't belong to it would have followed along.
   const role = asProjectRole(myRole);
-  const canEditPolicy = roleCan(role, "edit-policy");
-  const canManageMembers = roleCan(role, "manage-members");
-  const canGrant = roleCan(role, "grant-github-scope");
+  const canEditPolicy = gate(role, "edit-policy");
+  const canManageMembers = gate(role, "manage-members");
+  const canGrant = gate(role, "grant-github-scope");
   const slug = data.project.slug;
 
   // Stage rename edit-mode lives here so a fresh add-stage response can
@@ -1722,6 +1773,7 @@ export function SettingsPage({
         <DangerZone
           projectName={data.project.name}
           myRole={myRole}
+          gate={gate}
           archived={data.project.archived}
           busy={dangerFetcher.state !== "idle"}
           onArchive={(archived) =>

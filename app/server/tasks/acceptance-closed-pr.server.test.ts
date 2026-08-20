@@ -297,7 +297,7 @@ describe("path 3 — operatorAcceptCompletion", () => {
     // and its text names the basis the LIVE re-check established — here
     // `no_repo` (this fixture's project has `repo: null`), which is why a
     // repo-less project stays acceptable.
-    expect(completion?.title).toBe("Completed — no changes");
+    expect(completion?.title).toBe("Completed with no changes");
     expect(completion?.text).toContain("completed with no changes");
     expect(completion?.text).toContain("no GitHub repository");
     // Nothing was merged — no PR ever existed, and the record never says it was.
@@ -372,6 +372,9 @@ describe("path 3 — operatorAcceptCompletion", () => {
       number: 318,
       state: "closed",
       title: "[VIB-1] Attach execution workspace",
+      // F21-17: null here because this fixture's head IS the reviewed revision;
+      // when it is not, the fact travels into the recovery packet.
+      revisionDrift: null,
     });
   });
 

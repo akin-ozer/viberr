@@ -78,6 +78,7 @@ function evidenceEvent(label: string): TimelineEventRender {
     title: null,
     text: "Reported completion",
     toAgent: false,
+    attachments: null,
     evidence: [{ label, add: "+2", del: "−0" }],
   };
 }
@@ -118,5 +119,81 @@ describe("TimelineItem evidence linkify", () => {
     );
     expect(container.querySelector(".ev-file")).toBeNull();
     expect(container.textContent).toContain("see board-after.png");
+  });
+});
+
+/* ---------------------------------------- P21: producer attribution + chips */
+
+describe("AttachmentsPanel producer attribution (P21)", () => {
+  const producers = {
+    "home-page.png": { actor: "Web Verifier", occurredAt: "2026-08-14T10:00:00.000Z" },
+    "report.pdf": { actor: "Reviewer", occurredAt: "2026-08-14T11:00:00.000Z" },
+  };
+
+  it("names who added each file, thumbnails and rows alike", () => {
+    const { container } = render(
+      <AttachmentsPanel
+        base={BASE}
+        attachments={[entry("home-page.png"), entry("report.pdf", 10240)]}
+        producers={producers}
+      />,
+    );
+    const thumbBy = container.querySelector(".attach-thumb .attach-by")!;
+    expect(thumbBy.textContent).toContain("added by Web Verifier");
+    const fileBy = container.querySelector(".attach-file .attach-by")!;
+    expect(fileBy.textContent).toContain("by Reviewer");
+  });
+
+  it("omits the producer line for a name no event claims — never a guess", () => {
+    const { container } = render(
+      <AttachmentsPanel
+        base={BASE}
+        attachments={[entry("pre-attribution.png")]}
+        producers={producers}
+      />,
+    );
+    expect(container.querySelector(".attach-by")).toBeNull();
+  });
+});
+
+describe("TimelineItem attachment chips (P21 — the producing message shows its files)", () => {
+  const withFiles = (attachments: string[] | null): TimelineEventRender => ({
+    id: 9,
+    type: "comment",
+    occurredAt: "2026-08-14T10:00:00.000Z",
+    actor: { kind: "agent", backend: "claude", name: "Web Verifier", role: "verification" },
+    title: null,
+    text: "Captured the page.",
+    toAgent: false,
+    evidence: null,
+    attachments,
+  });
+
+  it("renders one chip per saved file, linking to the serving route", () => {
+    const { container } = render(
+      <TimelineItem
+        ev={withFiles(["home page.png", "capture.yml"])}
+        attachmentsBase={BASE}
+      />,
+    );
+    const chips = container.querySelectorAll<HTMLAnchorElement>(".tl-attach-chip");
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.getAttribute("href")).toBe(`${BASE}/home%20page.png`);
+    expect(chips[0]!.textContent).toContain("home page.png");
+    expect(chips[1]!.getAttribute("href")).toBe(`${BASE}/capture.yml`);
+  });
+
+  it("renders no chips without the serving base (withheld lists, bare renders)", () => {
+    const { container } = render(<TimelineItem ev={withFiles(["a.png"])} />);
+    expect(container.querySelector(".tl-attach")).toBeNull();
+    // The message text itself still renders.
+    expect(container.textContent).toContain("Captured the page.");
+  });
+
+  it("renders no chip row at all for an event with no files", () => {
+    const { container } = render(
+      <TimelineItem ev={withFiles(null)} attachmentsBase={BASE} />,
+    );
+    expect(container.querySelector(".tl-attach")).toBeNull();
   });
 });

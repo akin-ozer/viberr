@@ -37,6 +37,11 @@ import {
   resolveSpecialistMcpServers,
   type SpecialistMcpServerConfig,
 } from "./specialist-mcp.server";
+import { listDeployedSpecialists } from "./specialist-run.server";
+import {
+  readDefaultBranchFile,
+  DEFAULT_BRANCH_READ_MAX_BYTES,
+} from "./operator-repo-read.server";
 
 /**
  * The operator's in-process governance TOOLS — a Claude Agent SDK MCP server
@@ -68,6 +73,16 @@ export interface OperatorToolkit {
   /** The `mcp__*` tool names this run AUTO-APPROVES (P14-KM-12: confinement is
    *  the deny list, not this). */
   allowedTools: string[];
+  /**
+   * The in-process governance tools, as definitions. The run itself reads them
+   * through `mcpServers.viberr`; this is the seam that lets a test CALL one —
+   * the alternative is reaching into the MCP SDK's private `_registeredTools`,
+   * which would pass silently the day the SDK renames it. Behaviour that only
+   * appears when a handler actually runs (R20-9's delegated-ask disclosure) is
+   * otherwise untestable without a live model.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: SdkMcpToolDefinition<any>[];
 }
 
 interface ToolkitDeps {
@@ -76,6 +91,27 @@ interface ToolkitDeps {
   projectSlug: string;
   taskKey: string;
   authority: OperatorAuthority;
+  /**
+   * F21-21: the task checkout this run really got, when it got one. Its presence
+   * is what offers `read_default_branch_file` — the operator's only anchored way
+   * to ask what the DEFAULT branch contains (the checkout itself sits on the
+   * task branch once the deliverer commits, and the operator holds no `Bash`).
+   */
+  workspace?: {
+    /** Absolute checkout path. */
+    dir: string;
+    /** The project's default branch, e.g. `main`. */
+    defaultBranch: string;
+  };
+  /**
+   * F21-3: the org MCP servers this run already resolved AND pre-flighted
+   * (`operatorMcpResolution`). Passed in so the toolkit mounts exactly what the
+   * system prompt announced: resolving a second time here would re-mount a
+   * stdio server the pre-flight just dropped, and the prompt and the mount would
+   * disagree about what the run has. Omitted only by callers with no resolution
+   * of their own (tests), which fall back to the un-pre-flighted resolve.
+   */
+  orgMcpServers?: Record<string, SpecialistMcpServerConfig>;
 }
 
 /** Every tool answers with one text block — the SDK's tool-result shape. */
@@ -132,6 +168,77 @@ export const OPERATOR_TOOLKIT_INSTRUCTIONS =
   "you make about the repository must come from reading it, never from the task folder you are " +
   "standing in.";
 
+/**
+ * R20-9 / ruling 84 — the DELEGATED-ASK disclosure, made mechanical.
+ *
+ * The ruling was prompt-only: an operator that consults a specialist and then
+ * raises the human-facing packet itself must say whose ask it is carrying,
+ * because the timeline otherwise reads as if that agent never held the
+ * question. A rule the model must remember is a rule it will eventually forget,
+ * so the server remembers instead: every profile a run actually PROMPTED is
+ * recorded, and the packet writer appends the disclosure when that same run
+ * then opens a packet.
+ *
+ * Band-3 follow-up: the ledger and the writer live HERE, not inside
+ * `buildOperatorToolkit`, because the Claude toolkit is only one of the two
+ * paths that open packets. The Codex plan executor
+ * (`executeCodexPlan`, operator-run.server.ts) opens them itself, so a
+ * closure-scoped disclosure covered exactly one backend and a Codex plan that
+ * prompted an agent and then opened a packet reached the human with nothing
+ * said. One ledger + one writer, both backends.
+ *
+ * Deliberately in-run and in-memory: the point is "you consulted an agent
+ * DURING this turn and are now asking a human", which is exactly one run's
+ * scope. Prompt guidance stays (the model should still say WHY in its own
+ * words); this only guarantees the fact is never absent.
+ */
+export function noteConsultedProfile(
+  into: string[],
+  profileId: string,
+  outcome: OperatorActionResult["outcome"],
+): void {
+  // A denied / recommended / no-op prompt consulted nobody — disclosing it
+  // would be a different lie from the one this fixes.
+  if (outcome !== "done") return;
+  if (!into.includes(profileId)) into.push(profileId);
+}
+
+/** The disclosure line for the profiles this run really prompted, or "". */
+function consultationDisclosure(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  consultedProfileIds: readonly string[],
+): string {
+  if (consultedProfileIds.length === 0) return "";
+  const deployed = listDeployedSpecialists(projectSlug, ctx);
+  const names = consultedProfileIds.map(
+    (id) => deployed.find((s) => s.id === id)?.name ?? id,
+  );
+  return (
+    `\n\n_Disclosure: before opening this, the operator prompted ${names.join(", ")} on this task — ` +
+    "this decision is being raised with you by the operator, not by that agent._"
+  );
+}
+
+/**
+ * THE packet writer for both operator backends: `operatorOpenPacket` with the
+ * R20-9 disclosure appended for whichever profiles this run consulted
+ * (`noteConsultedProfile`). Pass an empty array when nothing was consulted —
+ * the disclosure is a FACT, so it is absent unless a prompt actually landed.
+ */
+export async function operatorOpenPacketDisclosed(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: OperatorOpenPacketInput,
+  authority: OperatorAuthority,
+  consultedProfileIds: readonly string[],
+): Promise<OperatorActionResult> {
+  const body = `${input.body ?? ""}${consultationDisclosure(ctx, input.projectSlug, consultedProfileIds)}`;
+  const disclosed: OperatorOpenPacketInput = { ...input };
+  if (body) disclosed.body = body;
+  return operatorOpenPacket(db, ctx, disclosed, authority);
+}
+
 /** Build the operator's toolkit for one task run. */
 export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   const { db, ctx, projectSlug, taskKey, authority } = deps;
@@ -146,12 +253,16 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     allowed.push(`mcp__viberr__${name}`);
   };
 
+  /** R20-9: the profiles THIS run prompted, for the disclosure the shared
+   *  packet writer appends (`operatorOpenPacketDisclosed`). */
+  const consultedProfileIds: string[] = [];
+
   // get_task — always available (read-only). Also reports the operator's own
   // policy + autonomy so the model knows which actions it may take.
   add(
     tool(
       "get_task",
-      "Read the current task snapshot: stage, readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can engage, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do), and your own capability policy + autonomy. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions) — never by guessing from names.",
+      "Read the current task snapshot: stage, readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can engage, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do; `pr.revisionDrift` names commits pushed to the PR head AFTER the last reviewed revision, which ship UNREVIEWED and must be stated wherever you reason about that PR), and `operatorPolicy` + autonomy. TWO SCOPES, do not mix them: `operatorPolicy` is YOUR OWN capability policy (`operatorPolicy.scope: \"operator\"`, and read its `note`), while each agent's own grants are `deployedSpecialists[].capabilities` — never quote a row of yours as evidence about an agent. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions; browser = can drive a live browser; web = holds web search/fetch egress) — never by guessing from names.",
       {},
       async () =>
         textResult(
@@ -164,6 +275,61 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     ),
     "get_task",
   );
+
+  // F21-21: the ONE anchored answer to "what is on the default branch?".
+  //
+  // The checkout under the operator's cwd is the delivering agent's workspace,
+  // so after that agent commits it stands on the TASK branch — reading it and
+  // calling the result "the default branch" is what produced a live blocking
+  // packet accusing a healthy flow of an out-of-band merge (VIB-7). The
+  // operator cannot run `git show` itself (`Bash` is denied for every operator
+  // run), so the anchored read has to be a tool. Offered only when the run
+  // actually has a checkout — a tool that can never answer is worse than none.
+  if (deps.workspace) {
+    const workspace = deps.workspace;
+    add(
+      tool(
+        "read_default_branch_file",
+        `Read one file AS THE DEFAULT BRANCH (\`${workspace.defaultBranch}\`) HAS IT — the only valid way to answer "is this already on ${workspace.defaultBranch}?". The repository checkout under your working directory is the DELIVERING AGENT'S workspace and stands on THIS TASK's branch once it starts work, so Read/Grep/Glob there show the task's own in-progress changes — never treat that as the default branch, and never conclude from it that work landed out-of-band. This tool reads \`origin/${workspace.defaultBranch}\` directly (refreshing it from GitHub when a credential is available) and says plainly when the path is NOT on that branch.`,
+        {
+          path: z
+            .string()
+            .describe(
+              "Repository-relative file path, e.g. 'docs/guide.md' (no leading slash).",
+            ),
+        },
+        async (args) => {
+          const read = await readDefaultBranchFile(db, {
+            projectSlug,
+            dir: workspace.dir,
+            defaultBranch: workspace.defaultBranch,
+            path: args.path,
+          });
+          if (read.kind === "absent") {
+            return textResult(
+              `[absent] \`${args.path}\` does NOT exist on \`${workspace.defaultBranch}\`.`,
+            );
+          }
+          if (read.kind === "unavailable") {
+            return textResult(
+              `[unavailable] \`${args.path}\` could not be read from \`${workspace.defaultBranch}\`: ${read.reason}. ` +
+                "Say so rather than substituting a read of the checkout — that tree is on the task branch.",
+            );
+          }
+          const freshness = read.refreshed
+            ? `\`origin/${workspace.defaultBranch}\`, just refreshed from GitHub`
+            : `\`origin/${workspace.defaultBranch}\` as of this task's checkout (the refresh from GitHub did not run — treat it as slightly stale)`;
+          const cut = read.truncated
+            ? `\n\n[truncated at ${DEFAULT_BRANCH_READ_MAX_BYTES} characters]`
+            : "";
+          return textResult(
+            `[found] \`${args.path}\` on ${freshness}:\n\n${read.text}${cut}`,
+          );
+        },
+      ),
+      "read_default_branch_file",
+    );
+  }
 
   // R19-1 (owner ruling): the operator reads the repository from the FULL
   // read-only checkout provisioned under its cwd (`ensureOperatorRepoCheckout`
@@ -247,7 +413,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "open_decision_packet",
-        "Open a STRUCTURED decision or blocking packet for a human to resolve — the canonical governed hand-off (not a comment). Use it when you reach a genuine decision point or the limit of your authority (a task stuck after repeated no-progress, a policy/credential block, or a completion the human must accept). Prefer this over a plain comment for anything requiring a human choice. Set `packetType` to 'blocked' when work is stuck (also marks the task blocked) or 'input' for a decision. Give 2-4 `options`, each with a stable `kind` and a short title; mark exactly one `recommended`. Use kind 'edit_goal' for an option that asks the human to refine/specify the task GOAL — confirming it opens the goal editor and the packet clears automatically when the edited goal is saved. ONE packet stands at a time: this REFUSES while a packet is already open (whoever is answering it must not be stranded) — answer from that packet, or withdraw it with resolve_decision_packet when it is genuinely moot, then open yours. The human resolves it from the task page.",
+        "Open a STRUCTURED decision or blocking packet for a human to resolve — the canonical governed hand-off (not a comment). Use it when you reach a genuine decision point or the limit of your authority (a task stuck after repeated no-progress, a policy/credential block, or a completion the human must accept). Prefer this over a plain comment for anything requiring a human choice. Set `packetType` to 'blocked' when work is stuck (also marks the task blocked) or 'input' for a decision. Give 2-4 `options`, each with a stable `kind` and a short title; mark exactly one `recommended`. Use kind 'edit_goal' for an option that asks the human to refine/specify the task GOAL — confirming it opens the goal editor and the packet clears automatically when the edited goal is saved. ONE packet stands at a time: this REFUSES while a packet is already open (whoever is answering it must not be stranded) — answer from that packet, or withdraw it with resolve_decision_packet when it is genuinely moot, then open yours. Ruling 85: when the blocker is a CAPABILITY no deployed agent declares (see `deployedSpecialists[].capabilities` — browser, web, verdict, delivery), state the gap as an observation AND name the product's remedy — that capability is grantable on an agent profile from the project's Agents surface — and offer it as an option beside any workaround; a packet that offers only workarounds hides the fix. You never change that configuration yourself. The human resolves it from the task page.",
         {
           packetType: z
             .enum(["input", "blocked"])
@@ -326,8 +492,18 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               return observed;
             });
           }
+          // R20-9 / ruling 84: the delegated-ask disclosure is appended by the
+          // SHARED writer, so a packet raised after the operator consulted an
+          // agent this run can never reach a human without saying so — even for
+          // a body the model left empty, and on either backend.
           return resultText(
-            await operatorOpenPacket(db, ctx, input, authority),
+            await operatorOpenPacketDisclosed(
+              db,
+              ctx,
+              input,
+              authority,
+              consultedProfileIds,
+            ),
           );
         },
       ),
@@ -425,9 +601,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             directive: prose(args.prompt),
           };
           if (args.delivers !== undefined) input.delivers = args.delivers;
-          return resultText(
-            await operatorPromptAgentGeneric(db, ctx, input, authority),
-          );
+          const result = await operatorPromptAgentGeneric(db, ctx, input, authority);
+          // R20-9: remember the consultation so a packet opened later in THIS
+          // run discloses it without the model having to remember.
+          noteConsultedProfile(consultedProfileIds, args.profileId, result.outcome);
+          return resultText(result);
         },
       ),
       "prompt_agent",
@@ -532,7 +710,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   // Their tools must also be auto-approved: `allowedTools` is the APPROVAL list,
   // not a restriction (P14-KM-12) — without the entry every org MCP call would
   // stall on a permission prompt no human is there to answer.
-  const orgServers = resolveSpecialistMcpServers(db, authority.mcps);
+  //
+  // F21-3: prefer the caller's ALREADY PRE-FLIGHTED resolution. Resolving again
+  // here would undo the pre-flight — a stdio server that failed to start was
+  // dropped from the prompt but would be mounted anyway by this second resolve.
+  const orgServers = deps.orgMcpServers ?? resolveSpecialistMcpServers(db, authority.mcps);
   for (const name of Object.keys(orgServers)) {
     allowed.push(`mcp__${name}`);
   }
@@ -540,5 +722,6 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   return {
     mcpServers: { viberr: server, ...orgServers },
     allowedTools: allowed,
+    tools,
   };
 }

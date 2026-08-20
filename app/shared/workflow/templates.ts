@@ -46,7 +46,7 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
       from: "triage",
       to: "ready",
       boundary: "auto",
-      by: "Operator, once the goal is scoped — flags underspecified tasks instead",
+      by: "Operator, once the goal is scoped. Flags underspecified tasks instead.",
       locked: false,
     },
     {
@@ -86,9 +86,9 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
  * that silently disables timeline compaction and operator brevity enforcement.
  */
 export const DEFAULT_GUARDRAILS: Guardrail[] = [
-  { id: "meaningful-comment", desc: "Agent comments must add information — status chatter is rejected before it reaches the timeline.", on: true },
+  { id: "meaningful-comment", desc: "Agent comments must add information. Status chatter is rejected before it reaches the timeline.", on: true },
   { id: "operator-brevity", desc: "Operator packets keep to observed → changed → recommended → decision required.", on: true },
   { id: "no-duplicate-summary", desc: "A summary that restates an earlier one is dropped instead of appended.", on: true },
   { id: "compression-threshold", desc: "Long timelines compress once routine events pass the threshold; typed events are always kept.", on: true, value: 40, unit: "events" },
-  { id: "evidence-separation", desc: "Raw validation output stays in evidence references — never inline in the task record.", on: true },
+  { id: "evidence-separation", desc: "Raw validation output stays in evidence references, never inline in the task record.", on: true },
 ];

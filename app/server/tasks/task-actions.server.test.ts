@@ -22,7 +22,11 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { getTaskDetail } from "~/server/projections/task-query.server";
+import { listProjectTasks } from "~/server/projections/board-query.server";
+import {
+  attachmentProducers,
+  getTaskDetail,
+} from "~/server/projections/task-query.server";
 import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import {
@@ -42,7 +46,14 @@ import {
   revisionDriftNote,
   specialistReplyDirective,
   transitionStage,
+  acceptanceDisclosureOf,
+  applyRecommendation,
+  forceAcceptCompletion,
+  reorderTask,
+  resolvePacket,
 } from "./task-actions.server";
+import type { TaskActionDeps } from "./task-actions.server";
+import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 
 /**
@@ -306,7 +317,7 @@ describe("createTask", () => {
     ).rejects.toMatchObject({
       status: 400,
       message:
-        "New tasks start at Triage — the triage gate is where a goal is " +
+        "New tasks start at Triage, the triage gate where a goal is " +
         "refined. Move the task through the workflow after it is created.",
     });
   });
@@ -955,7 +966,7 @@ describe("ownership", () => {
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({
       type: "assign",
-      text: "Took task ownership — owner is the human reviewer and acceptance authority for this task.",
+      text: "Took task ownership. The owner is the human reviewer and acceptance authority for this task.",
     });
   });
 
@@ -970,7 +981,7 @@ describe("ownership", () => {
     );
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      `Took over task ownership from **${store.users.murat.name}** — owner is the human reviewer and acceptance authority.`,
+      `Took over task ownership from **${store.users.murat.name}**. The owner is the human reviewer and acceptance authority.`,
     );
   });
 
@@ -1004,7 +1015,7 @@ describe("ownership", () => {
     );
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      `Handed task ownership to **${store.users.selin.name}** — they hold review & acceptance for this task now.`,
+      `Handed task ownership to **${store.users.selin.name}**. They hold review & acceptance for this task now.`,
     );
   });
 
@@ -1035,7 +1046,7 @@ describe("ownership", () => {
     // admin|maintainer|contributor, and a VIEWER is a project member who can
     // never take the seat. The test pinned the wrong copy; both are corrected.
     expect(detail?.timeline[0]?.text).toBe(
-      `Released **${store.users.selin.name}** from task ownership (admin) — the seat is open to any contributor or above.`,
+      `Released **${store.users.selin.name}** from task ownership (admin). The seat is open to any contributor or above.`,
     );
     const audit = listAuditEvents(store.db, {
       action: "task.ownership.admin_released",
@@ -1061,7 +1072,7 @@ describe("ownership", () => {
       { dataRoot: store.dataRoot },
     );
     expect(getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]?.text).toBe(
-      "Released task ownership — review & acceptance stall until another member takes the seat.",
+      "Released task ownership. Review & acceptance stall until another member takes the seat.",
     );
   });
 });
@@ -1281,7 +1292,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     // self-contradictory "Review passed / Validation: failing"; it is an honest
     // "Approval noted — rework still needed".
     const quality = file.parsed.timeline.find((e) => e.type === "quality");
-    expect(quality?.title).toBe("Approval noted — rework still needed");
+    expect(quality?.title).toBe("Approval noted, rework still needed");
     expect(quality?.text).toContain("Validation:** failing");
     expect(quality?.text).not.toContain("approved the work");
   });
@@ -1766,7 +1777,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     // whose accept-time text is re-proved LIVE against the remote (no_branch
     // basis) — never the merge path's title or wording. (Replaces A's older
     // "completed with no changes required" / "nothing was delivered or merged".)
-    expect(event.title).toBe("Completed — no changes");
+    expect(event.title).toBe("Completed with no changes");
     expect(event.text).toContain("completed with no changes");
     expect(event.text).toContain("no pull request to merge");
     expect(event.text).toContain("no `vib-1` branch exists");
@@ -2088,5 +2099,997 @@ describe("F19-23: the revision-drift note agrees with its own number", () => {
 
   it("says nothing at all when the merged head IS the reviewed one", () => {
     expect(revisionDriftNote(baseTaskFrontmatter("VIB-4"))).toBe("");
+  });
+});
+
+/**
+ * U3 (pass 21, HIGH) — NFR16: *"retries do not create duplicate official task
+ * transitions"*.
+ *
+ * Both writers checked "is it already there?" against a read taken OUTSIDE the
+ * file lock and then wrote unconditionally, so a CONCURRENT double-submit — a
+ * double-clicked stage dropdown, a retried in-flight POST, the operator racing a
+ * human — landed twice: two "**Transition:**" entries (or two `completion`
+ * events) in the canonical task.md and two audit rows for ONE human act. A
+ * sequential retry was always caught, which is why 20 passes never saw it.
+ *
+ * The races below are deterministic, not timing-dependent: `transitionStage`
+ * runs synchronously up to its first `await`, so calling it twice before
+ * awaiting is exactly the interleaving that used to double-write. Every
+ * assertion here fails on pre-fix main.
+ */
+describe("U3: a concurrent double-submit writes ONE transition", () => {
+  function timeline(store: TestStore) {
+    return readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+  }
+
+  it("an ordinary stage move: one timeline entry, one audit row", async () => {
+    // CANARY: move the `parsed.frontmatter.stage === input.toStageId` check back
+    // out of the `updateTaskFile` callback — both counts become 2.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "triage",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const move = () =>
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    // Both calls are issued before either is awaited — the double-submit.
+    const [first, second] = [move(), move()];
+    await Promise.all([first, second]);
+
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.stage).toBe("ready");
+    expect(
+      file.parsed.timeline.filter((e) => e.type === "transition"),
+    ).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "task.transition" })).toHaveLength(1);
+  });
+
+  it("an acceptance: one completion event, one audit row", async () => {
+    // The same shape on the most consequential write the product has. CANARY:
+    // delete the already-Done check from applyAcceptanceWrite's callback — two
+    // "Completion accepted" events land on one task.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const accept = () =>
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    const [first, second] = [accept(), accept()];
+    await Promise.all([first, second]);
+
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.stage,
+    ).toBe("done");
+    expect(timeline(store).filter((e) => e.type === "completion")).toHaveLength(1);
+    const rows = listAuditEvents(store.db, { action: "task.transition" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ via: "accept_completion" });
+  });
+
+  it("a task moved somewhere ELSE mid-flight is refused, not rewritten", async () => {
+    // The other half of the in-lock re-read: every guard above it (the boundary,
+    // the RBAC tier) was evaluated against the stage the task HAD, and the
+    // timeline sentence already names it.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "triage",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const toReady = transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const toImpl = transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await toReady;
+    await expect(toImpl).rejects.toMatchObject({ status: 409 });
+    await expect(toImpl).rejects.toThrow(/no longer at Triage/);
+
+    expect(
+      timeline(store).filter((e) => e.type === "transition"),
+    ).toHaveLength(1);
+  });
+});
+
+/**
+ * F21-2 / ruling 88 (pass 21) — the acceptance ceremony, server-side.
+ *
+ * R15-1 put every writer to Done behind one dialog; pass 21 found the whole
+ * contract was CLIENT architecture. `AcceptConfirm` states what merges, which
+ * revision, and what the review said — and a POST that skipped it accepted and
+ * merged anyway. The invariant: the acceptance doors demand the ceremony's own
+ * echo of those three facts, compare it against the live task, and refuse both
+ * a missing echo and a stale one (which is also the R17-1 hardening — the dialog
+ * has surfaced head drift since pass 17 while the server enforced nothing).
+ */
+describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
+  /** The pass-15 acceptable shape: delivered revision, its approving verdict,
+   *  and a review PR — so the acceptance really would merge something. The
+   *  `patch` / `packet` seams carry the standing OFFER each door is reached
+   *  through (a recommendation card, an open decision packet); the acceptable
+   *  state underneath stays identical, so every door is proved against one
+   *  fixture rather than four that could drift apart. */
+  function seedReviewed(
+    store: TestStore,
+    patch: Partial<TaskFrontmatter> = {},
+    packet: TaskPacket | null = null,
+  ): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        branch: "vib-1-work",
+        workRevision: workRev("rev_1"),
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_1",
+            headSha: "a".repeat(40),
+            result: "approve",
+            reason: "looks right",
+            at: "2026-08-19T09:30:00.000Z",
+          },
+        ],
+        validation: "healthy",
+        pr: { number: 7, state: "review", title: "[VIB-1] work" },
+        ...patch,
+      }),
+      packet,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  function live(store: TestStore): AcceptanceDisclosure {
+    return acceptanceDisclosureOf(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter,
+    );
+  }
+
+  function task(store: TestStore) {
+    return readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+  }
+
+  it("a bare POST — no acknowledgment at all — is refused", async () => {
+    // The live F21-2 defect verbatim: skip the dialog, accept anyway. CANARY:
+    // drop the `ack === null` arm from assertAcceptanceDisclosure.
+    const store = prepared();
+    seedReviewed(store);
+
+    const rejected = transitionStage(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "done",
+        manual: true,
+        ack: null,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await expect(rejected).rejects.toMatchObject({
+      status: 400,
+      code: "accept_disclosure_missing",
+    });
+    // Nothing moved, nothing was recorded, and — the point of checking before
+    // the merge — no merge was attempted.
+    expect(task(store).frontmatter.stage).toBe("review");
+    expect(task(store).frontmatter.pr?.state).toBe("review");
+    expect(task(store).timeline.filter((e) => e.type === "completion")).toHaveLength(0);
+  });
+
+  it("an acknowledgment that no longer matches the task is refused (R17-1 drift, enforced)", async () => {
+    // The dialog was rendered against an earlier head; a re-delivery landed
+    // while it sat open. CANARY: drop the drift comparison — the acceptance
+    // merges a revision the human never saw.
+    const store = prepared();
+    seedReviewed(store);
+
+    const stale: AcceptanceDisclosure = { ...live(store), revision: "9".repeat(40) };
+    const rejected = transitionStage(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "done",
+        manual: true,
+        ack: stale,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await expect(rejected).rejects.toMatchObject({
+      status: 409,
+      code: "accept_disclosure_stale",
+    });
+    await expect(rejected).rejects.toThrow(/the delivered revision is now/);
+    expect(task(store).frontmatter.stage).toBe("review");
+  });
+
+  it("a verdict that landed after the dialog opened is refused too", async () => {
+    const store = prepared();
+    seedReviewed(store);
+    // The dialog was opened while the review was still pending.
+    const stale: AcceptanceDisclosure = { ...live(store), verdict: "changed" };
+    await expect(
+      transitionStage(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          toStageId: "done",
+          manual: true,
+          ack: stale,
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ code: "accept_disclosure_stale" });
+    expect(task(store).frontmatter.stage).toBe("review");
+  });
+
+  it("the ceremony's own echo accepts — exactly once", async () => {
+    const store = prepared();
+    seedReviewed(store);
+    const echo = live(store);
+    expect(echo).toEqual({
+      pr: "review",
+      revision: "a".repeat(40),
+      verdict: "healthy",
+    });
+
+    await transitionStage(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "done",
+        manual: true,
+        ack: echo,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task(store).frontmatter.stage).toBe("done");
+    expect(task(store).timeline.filter((e) => e.type === "completion")).toHaveLength(1);
+
+    // A replay of the same submit is the idempotent no-op it always was — an
+    // already-Done task has nothing left to disclose or to write.
+    await transitionStage(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "done",
+        manual: true,
+        ack: echo,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task(store).timeline.filter((e) => e.type === "completion")).toHaveLength(1);
+  });
+
+  it("force-accept is held to the same disclosure — and records no bypass row for the attempt", async () => {
+    // Force overrides the GATES, never the record of what the human was shown.
+    // CANARY: drop the check from forceAcceptCompletion — a bare force POST
+    // both accepts AND leaves a `task.acceptance.forced` row behind.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        branch: "vib-1-work",
+        workRevision: workRev("rev_1"),
+        validation: "changed",
+        pr: { number: 8, state: "review", title: "[VIB-1] work" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await expect(
+      forceAcceptCompletion(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", ack: null },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ code: "accept_disclosure_missing" });
+    expect(task(store).frontmatter.stage).toBe("review");
+    expect(
+      listAuditEvents(store.db, { action: "task.acceptance.forced" }),
+    ).toHaveLength(0);
+
+    // With the ceremony's echo it goes through, and the bypass row follows the
+    // write it actually made.
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", ack: live(store) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task(store).frontmatter.stage).toBe("done");
+    expect(
+      listAuditEvents(store.db, { action: "task.acceptance.forced" }),
+    ).toHaveLength(1);
+  });
+
+  /**
+   * The three doors that reach acceptance INDIRECTLY — through an operator
+   * recommendation, a decision packet, or a card dropped on the board's final
+   * column. Each renders the same ceremony (`AcceptConfirm`, in its
+   * `apply-recommendation` / `packet` / `stage-move` mode) and each used to
+   * complete the acceptance on a POST that carried nothing back from it. Their
+   * server-side pins — the recommendation id, the packet identity — prove WHICH
+   * decision is being settled; neither proves the human saw what merges, which
+   * is what ruling 88 is about.
+   */
+  const ACCEPT_REC = {
+    id: "rec-accept",
+    kind: "accept_completion" as const,
+    toStageId: "done",
+    label: "Accept completion — move VIB-1 to Done",
+    detail: "",
+  };
+
+  /** The acceptance packet the operator opens at the review boundary — the
+   *  option whose "Confirm decision" button runs the real merge (F19-7). */
+  const ACCEPT_PACKET: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "Accept completion, or send back?",
+    body: "The review is clean.",
+    observations: [],
+    options: [
+      {
+        kind: "accept_completion",
+        t: "Accept completion",
+        d: "Move to Done and merge the review PR.",
+        rec: true,
+      },
+    ],
+  };
+
+  function completions(store: TestStore): TaskFileEvent[] {
+    return task(store).timeline.filter((e) => e.type === "completion");
+  }
+
+  it("an applied accept_completion recommendation is refused bare, refused stale, and accepted with the echo", async () => {
+    // F19-3 was live-proven: ONE Apply click merged an unreviewed head into
+    // main. Pass 19 put the ceremony in front of that click; this is the server
+    // half. CANARY: drop the `"ack" in input` line from applyRecommendation's
+    // accept_completion arm — the bare apply merges again.
+    const store = prepared();
+    seedReviewed(store, { recommendations: [ACCEPT_REC] });
+
+    const bare = applyRecommendation(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        recId: ACCEPT_REC.id,
+        ack: null,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await expect(bare).rejects.toMatchObject({
+      status: 400,
+      code: "accept_disclosure_missing",
+    });
+    // Nothing moved, nothing merged — and the card SURVIVES, so the human can
+    // re-open the ceremony and apply it properly.
+    expect(task(store).frontmatter.stage).toBe("review");
+    expect(task(store).frontmatter.pr?.state).toBe("review");
+    expect(task(store).frontmatter.recommendations).toHaveLength(1);
+    expect(completions(store)).toHaveLength(0);
+
+    // The card sat on screen across a re-delivery (R17-1 drift).
+    await expect(
+      applyRecommendation(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          recId: ACCEPT_REC.id,
+          ack: { ...live(store), revision: "9".repeat(40) },
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "accept_disclosure_stale" });
+    expect(task(store).frontmatter.stage).toBe("review");
+
+    await applyRecommendation(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        recId: ACCEPT_REC.id,
+        ack: live(store),
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task(store).frontmatter.stage).toBe("done");
+    expect(completions(store)).toHaveLength(1);
+    // The apply keeps its own audit identity (R15-3's owner seam lives on it).
+    expect(
+      listAuditEvents(store.db, { action: "task.recommendation.applied" }),
+    ).toHaveLength(1);
+  });
+
+  it("a recommended TRANSITION onto the terminal stage is held to it too — an ordinary move is not", async () => {
+    // F19-26: the gate is the card's TARGET, never its `kind`. A supervised
+    // operator recommends a plain `transition` to Done; applying it runs the
+    // identical acceptance contract under a label that says only "move it".
+    const store = prepared();
+    seedReviewed(store, {
+      recommendations: [
+        {
+          id: "rec-move-done",
+          kind: "transition",
+          toStageId: "done",
+          label: "Move the task to Done",
+          detail: "",
+        },
+      ],
+    });
+    await expect(
+      applyRecommendation(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          recId: "rec-move-done",
+          ack: null,
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ code: "accept_disclosure_missing" });
+    expect(task(store).frontmatter.stage).toBe("review");
+
+    // The counterweight — and the reason the check is on the target rather than
+    // on the intent: a recommended move that is NOT an acceptance discloses
+    // nothing, asks nothing, and applies on a bare POST exactly as before.
+    seedReviewed(store, {
+      recommendations: [
+        {
+          id: "rec-rework",
+          kind: "transition",
+          toStageId: "impl",
+          label: "Move the task back to In Progress",
+          detail: "",
+        },
+      ],
+    });
+    await applyRecommendation(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        recId: "rec-rework",
+        ack: null,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task(store).frontmatter.stage).toBe("impl");
+  });
+
+  it("resolving an accept_completion packet option is refused bare, refused stale, and accepted with the echo", async () => {
+    // F19-7: the option that merges to main is confirmed by a button labelled
+    // "Confirm decision", whose only disclosure was the operator's freeform
+    // title. CANARY: drop the `assertAcceptanceDisclosure` call from
+    // resolvePacket's accept arm.
+    const store = prepared();
+    seedReviewed(store, {}, ACCEPT_PACKET);
+
+    await expect(
+      resolvePacket(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          optionIndex: 0,
+          ack: null,
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "accept_disclosure_missing",
+    });
+    // The packet is still open — a refused resolution decides nothing.
+    expect(task(store).packet).not.toBeNull();
+    expect(task(store).frontmatter.stage).toBe("review");
+    expect(completions(store)).toHaveLength(0);
+
+    await expect(
+      resolvePacket(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          optionIndex: 0,
+          ack: { ...live(store), verdict: "changed" },
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "accept_disclosure_stale" });
+    expect(task(store).packet).not.toBeNull();
+
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        ack: live(store),
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task(store).frontmatter.stage).toBe("done");
+    expect(task(store).packet).toBeNull();
+    expect(completions(store)).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, { action: "task.packet.resolved" }),
+    ).toHaveLength(1);
+  });
+
+  it("a NON-accepting packet resolution stays ack-free", async () => {
+    // The scope line of ruling 88: the ceremony fronts acceptances, not
+    // decisions. `hold_runtime_debug` resolves the packet, writes no Done and
+    // merges nothing — a bare resolve is exactly right for it.
+    const store = prepared();
+    seedReviewed(
+      store,
+      { readiness: "blocked" },
+      {
+        ...ACCEPT_PACKET,
+        options: [
+          {
+            kind: "hold_runtime_debug",
+            t: "Hold for runtime debug",
+            d: "Inspect the provider session first.",
+            rec: false,
+          },
+        ],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: null },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task(store).packet).toBeNull();
+    expect(task(store).frontmatter.stage).toBe("review");
+    expect(task(store).frontmatter.readiness).toBe("blocked");
+  });
+
+  it("a card dropped on the board's FINAL column is refused bare and accepted with the echo", async () => {
+    // The board's own ceremony has fronted this drop since ruling 53 (R18-7),
+    // and the reorder POST carried nothing back from it. CANARY: drop the
+    // `"ack" in input` line from reorderTask.
+    const store = prepared();
+    seedReviewed(store);
+
+    await expect(
+      reorderTask(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          toStageId: "done",
+          beforeKey: null,
+          ack: null,
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "accept_disclosure_missing",
+    });
+    expect(task(store).frontmatter.stage).toBe("review");
+    expect(completions(store)).toHaveLength(0);
+
+    const accepted = await reorderTask(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "done",
+        beforeKey: null,
+        ack: live(store),
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(accepted.acceptedIntoDone).toBe(true);
+    expect(task(store).frontmatter.stage).toBe("done");
+    expect(completions(store)).toHaveLength(1);
+  });
+
+  it("the echo the BOARD builds accepts a task that really delivered", async () => {
+    // The test above proves the door with the SERVER's own echo, which is
+    // exactly what the board could not produce: `AcceptOnBoardConfirm` renders
+    // from a projection summary, the summary carried no delivered revision, and
+    // the ceremony therefore disclosed "No delivered revision recorded." and
+    // echoed `revision: "none"` on every task. Against a task that HAD
+    // delivered, that echo is stale by construction — so ruling 88 turned the
+    // board's terminal column into a door no delivered work could pass, while
+    // ruling 53 requires that same ceremony to disclose what it accepts.
+    //
+    // Built here the way the COMPONENT builds it (accept-confirm.tsx's
+    // `disclosure`, off the fields the board hands it) so the projection and the
+    // door are proved against each other rather than against the file both are
+    // meant to agree with. CANARY: revert `work_revision_sha` in
+    // rebuilder.server.ts or its mapping — `revision` falls back to "none" and
+    // this fails with `accept_disclosure_stale`.
+    const store = prepared();
+    seedReviewed(store);
+    const summary = listProjectTasks(store.db, store.slug).find(
+      (t) => t.key === "VIB-1",
+    )!;
+    const boardEcho: AcceptanceDisclosure = {
+      pr: summary.pr?.state ?? "none",
+      revision: summary.workRevisionSha ?? "none",
+      verdict: summary.validation,
+    };
+    expect(boardEcho).toEqual({
+      pr: "review",
+      revision: "a".repeat(40),
+      verdict: "healthy",
+    });
+
+    const accepted = await reorderTask(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "done",
+        beforeKey: null,
+        ack: boardEcho,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(accepted.acceptedIntoDone).toBe(true);
+    expect(task(store).frontmatter.stage).toBe("done");
+    expect(completions(store)).toHaveLength(1);
+  });
+
+  it("a drop on any OTHER column stays ack-free", async () => {
+    // The board move is only an acceptance when it lands on the final column;
+    // everywhere else it is the plain governed move it always was.
+    const store = prepared();
+    seedReviewed(store);
+    await reorderTask(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "impl",
+        beforeKey: null,
+        ack: null,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task(store).frontmatter.stage).toBe("impl");
+    expect(completions(store)).toHaveLength(0);
+  });
+
+  it("U3: a packet acceptance whose task went Done during the merge no-ops — one completion, one audit row", async () => {
+    // The packet arm writes Done through its OWN mutate, so it never got the
+    // in-lock already-terminal check `applyAcceptanceWrite` gives every other
+    // writer. The merge is an external await: a human acceptance landing inside
+    // it left this resolution recording a SECOND completion trail for one act.
+    // CANARY: delete the `acceptsInto` check from the resolution write.
+    const store = prepared();
+    seedReviewed(store, {}, ACCEPT_PACKET);
+    const echo = live(store);
+
+    // The racing acceptance, performed at the one moment that reproduces the
+    // window: after every gate, inside the irreversible merge.
+    const racingCompletion: TaskFileEvent = {
+      occurredAt: "2026-08-19T10:00:00.000Z",
+      type: "completion",
+      actor: { kind: "human", userId: store.users.murat.id, nameHint: "Murat" },
+      title: "Completion accepted",
+      text: "Human acceptance recorded — the other tab got there first.",
+      toAgent: false,
+      evidence: null,
+    };
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(
+      async () => {
+        writeTask(store.dataRoot, store.slug, {
+          frontmatter: {
+            ...task(store).frontmatter,
+            stage: "done",
+            readiness: "ready",
+            waiting: "none",
+            pr: { number: 7, state: "merged", title: "[VIB-1] work" },
+          },
+          packet: null,
+          timeline: [racingCompletion],
+        });
+        return { status: "merged", prNumber: 7, sha: "b".repeat(40) };
+      },
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: echo },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
+    );
+
+    expect(mergeMock).toHaveBeenCalledTimes(1);
+    expect(task(store).frontmatter.stage).toBe("done");
+    // ONE completion event — the racing acceptance's, not a second one written
+    // over it — and no decision row for a resolution that decided nothing.
+    expect(completions(store)).toHaveLength(1);
+    expect(completions(store)[0]?.text).toContain("the other tab got there first");
+    expect(
+      listAuditEvents(store.db, { action: "task.packet.resolved" }),
+    ).toHaveLength(0);
+  });
+
+  describe("resolvePacket custom directive (P21 — questionnaire packets)", () => {
+  it("resolves with the human's own directive: synthetic custom kind, directive recorded, packet cleared", async () => {
+    const store = prepared();
+    seedReviewed(store, {}, {
+      ...ACCEPT_PACKET,
+      options: [
+        { kind: "request_edit", t: "Request one edit", d: "", rec: false },
+      ],
+    });
+    const { option } = await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: -1,
+        custom: "Rebase onto main first, then re-run the reviewer on the new head.",
+        ack: null,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(option.kind).toBe("custom");
+    const file = task(store);
+    expect(file.packet).toBeNull();
+    // The default arm hands the task back to the agent side.
+    expect(file.frontmatter.waiting).toBe("agent");
+    // The directive rides the decision event as its quoted note.
+    const decision = file.timeline.find((e) =>
+      e.text.includes("custom directive"),
+    );
+    expect(decision?.text).toContain("> Rebase onto main first");
+    const audit = listAuditEvents(store.db, { action: "task.packet.resolved" });
+    expect(audit).toHaveLength(1);
+  });
+
+  it("refuses an over-long directive before anything resolves", async () => {
+    const store = prepared();
+    seedReviewed(store, {}, {
+      ...ACCEPT_PACKET,
+      options: [
+        { kind: "request_edit", t: "Request one edit", d: "", rec: false },
+      ],
+    });
+    await expect(
+      resolvePacket(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          optionIndex: -1,
+          custom: "x".repeat(4001),
+          ack: null,
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(task(store).packet).not.toBeNull();
+  });
+});
+});
+
+describe("recordAgentCompletion attachments (P21 — the producing message names its files)", () => {
+  function withVib1(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+  it("stamps the run's files onto the reply event and the producer map attributes them", async () => {
+    const store = prepared();
+    withVib1(store);
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: REVIEWER_REF,
+        runId: "run_att1",
+        replyText: "Captured the login page for the record.",
+        verdict: null,
+        question: null,
+        attachments: ["login-shot.png", "page-capture.yml"],
+      },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(file.timeline[0]?.type).toBe("comment");
+    expect(file.timeline[0]?.attachments).toEqual([
+      "login-shot.png",
+      "page-capture.yml",
+    ]);
+    // Projection closes the loop: the panel's producer map reads the event.
+    const producers = attachmentProducers(store.db, store.slug, "VIB-1");
+    expect(producers["login-shot.png"]?.occurredAt).toBe(
+      file.timeline[0]?.occurredAt,
+    );
+    expect(producers["login-shot.png"]?.actor).toBeTruthy();
+    expect(producers["page-capture.yml"]?.actor).toBe(
+      producers["login-shot.png"]?.actor,
+    );
+  });
+
+  it("a verdict outcome carries the files on the verdict event, not the reply (evidence rule)", async () => {
+    const store = prepared();
+    withVib1(store);
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: REVIEWER_REF,
+        runId: "run_att2",
+        replyText: "The change renders correctly. Approve.",
+        verdict: "approve",
+        question: null,
+        attachments: ["verdict-proof.png"],
+      },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(file.timeline[0]?.type).toBe("quality");
+    expect(file.timeline[0]?.attachments).toEqual(["verdict-proof.png"]);
+    expect(file.timeline[1]?.type).toBe("comment");
+    expect(file.timeline[1]?.attachments).toBeUndefined();
+  });
+
+  it("files with no usable reply still get a producing note event", async () => {
+    const store = prepared();
+    withVib1(store);
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: REVIEWER_REF,
+        runId: "run_att3",
+        replyText: null,
+        verdict: null,
+        question: null,
+        attachments: ["orphan-shot.png"],
+      },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(file.timeline[0]?.type).toBe("note");
+    expect(file.timeline[0]?.text).toContain("Saved 1 file");
+    expect(file.timeline[0]?.attachments).toEqual(["orphan-shot.png"]);
+  });
+
+  it("unwritable names are dropped before they can corrupt the file format", async () => {
+    const store = prepared();
+    withVib1(store);
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: REVIEWER_REF,
+        runId: "run_att4",
+        replyText: "One good file, two hostile names.",
+        verdict: null,
+        question: null,
+        attachments: ["ok.png", "../escape.png", "forged\nrow.png"],
+      },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(file.timeline[0]?.attachments).toEqual(["ok.png"]);
+    // The file still parses clean — nothing was forged.
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.diagnostics,
+    ).toEqual([]);
   });
 });

@@ -111,7 +111,7 @@ export function engagementVocabulary(
         add: "Engage agent",
         panel: "Engage an agent",
         allEngaged: "All deployed agents are already engaged.",
-        closed: "Task closed — no new engagements.",
+        closed: "Task closed. No new engagements.",
         release: "Release agent",
         releaseOf: (role) => `Release ${role} agent`,
       }
@@ -120,7 +120,7 @@ export function engagementVocabulary(
         add: "Engage reviewer",
         panel: "Engage a reviewer",
         allEngaged: "All deployed agents are already reviewing.",
-        closed: "Task closed — no new reviewer engagements.",
+        closed: "Task closed. No new reviewer engagements.",
         release: "Release reviewer",
         releaseOf: (role) => `Release ${role} reviewer`,
       };
@@ -139,9 +139,9 @@ export function engagementVocabulary(
  */
 const GHOST_NAME = "profile no longer here";
 const GHOST_DELIVERING_NOTE =
-  "Not deployed on this project any more — a run would start and produce no branch, PR, comment or verdict.";
+  "Not deployed on this project any more. A run would start and produce no branch, PR, comment or verdict.";
 const GHOST_REVIEWING_NOTE =
-  "Not deployed on this project any more — a run would start and record no verdict, comment or evidence.";
+  "Not deployed on this project any more. A run would start and record no verdict, comment or evidence.";
 
 /**
  * UX19-18 — the keyboard contract for this panel's three popovers.
@@ -250,7 +250,7 @@ function OwnerControl({
         className="rev-add"
         disabled={busy}
         onClick={() => onOwner("take")}
-        title="Take ownership — review & acceptance, this task only"
+        title="Take ownership: review & acceptance, this task only"
       >
         <Icon name="plus" />
         Assign me
@@ -402,7 +402,7 @@ function SpecialistControl({
   if (closed) {
     return (
       <span className="sub">
-        Task closed — reopen it from Current state to assign a delivering agent.
+        Task closed. Reopen it from Current state to assign a delivering agent.
       </span>
     );
   }
@@ -410,8 +410,8 @@ function SpecialistControl({
   if (specialists.length === 0) {
     return (
       <span className="sub">
-        No agents deployed —{" "}
-        <Link to={`/projects/${projectSlug}/agents`}>deploy one on the Agents page</Link>
+        No agents deployed.{" "}
+        <Link to={`/projects/${projectSlug}/agents`}>Deploy one on the Agents page</Link>
         .
       </span>
     );
@@ -451,7 +451,7 @@ function SpecialistControl({
                 key={s.id}
                 title={
                   cannotDeliver
-                    ? `${s.name} has no repo-write grant — it can analyse and comment, but it can't produce a branch or PR. Grant one on the Agents page.`
+                    ? `${s.name} has no repo-write grant. It can analyse and comment, but it can't produce a branch or PR. Grant one on the Agents page.`
                     : undefined
                 }
                 onClick={() => {
@@ -519,8 +519,8 @@ function ReviewerControl({
   if (!hasAnyDeployed) {
     return (
       <span className="sub">
-        No agents deployed —{" "}
-        <Link to={`/projects/${projectSlug}/agents`}>deploy one on the Agents page</Link>
+        No agents deployed.{" "}
+        <Link to={`/projects/${projectSlug}/agents`}>Deploy one on the Agents page</Link>
         .
       </span>
     );
@@ -563,9 +563,9 @@ function ReviewerControl({
                 key={s.id}
                 title={
                   s.capabilities?.verdict
-                    ? `${s.name} reports validation verdicts — engaging it makes its approval required before acceptance.`
+                    ? `${s.name} reports validation verdicts. Engaging it makes its approval required before acceptance.`
                     : s.capabilities
-                      ? `${s.name} has no verdict grant — it can review and comment, but its opinion does not gate acceptance.`
+                      ? `${s.name} has no verdict grant. It can review and comment, but its opinion does not gate acceptance.`
                       : undefined
                 }
                 onClick={() => {
@@ -649,10 +649,10 @@ function OperatorRunControl({
         disabled={off}
       >
         <option value="claude" disabled={!backendAvailable.claude}>
-          Claude Code{backendAvailable.claude ? "" : " — not configured"}
+          Claude Code{backendAvailable.claude ? "" : " (not configured)"}
         </option>
         <option value="codex" disabled={!backendAvailable.codex}>
-          Codex{backendAvailable.codex ? "" : " — not configured"}
+          Codex{backendAvailable.codex ? "" : " (not configured)"}
         </option>
       </select>
       <select
@@ -671,7 +671,7 @@ function OperatorRunControl({
         // Explain the option that is NOT there. An absent control with no
         // reason reads as a bug; naming the policy makes it a decision.
         <span className="sub xs dim">
-          Project policy: supervised — raise it on the operator profile.
+          Project policy: supervised. Raise it on the operator profile.
         </span>
       )}
       {/* The operator coordinates ongoing work, so it stays runnable even while
@@ -685,7 +685,7 @@ function OperatorRunControl({
         title={
           blockedReason ??
           (disabled
-            ? "Task is closed (terminal stage) — reopen it to run the operator"
+            ? "Task is closed (terminal stage). Reopen it to run the operator"
             : "Run the operator to coordinate this task")
         }
       >
@@ -704,7 +704,7 @@ function OperatorRunControl({
         // handler dispatches on the mention) — say so, or the two run paths read
         // as silently inconsistent (one blocked, one open).
         <span className="sub">
-          Task closed — reopen it to run the operator. Mentioning{" "}
+          Task closed. Reopen it to run the operator. Mentioning{" "}
           <code>@operator</code> in a comment still runs it.
         </span>
       ) : null}
@@ -863,7 +863,9 @@ export function ExecutionProfile({
               <span>
                 <div className="nm">Operator</div>
                 <div className="sub">
-                  coordinator · {task.operator ? task.operator.sinceLabel : "—"}
+                  {task.operator
+                    ? `coordinator · ${task.operator.sinceLabel}`
+                    : "coordinator"}
                 </div>
               </span>
             </div>
@@ -874,7 +876,7 @@ export function ExecutionProfile({
                 {...(packetOpen && !closed
                   ? {
                       blockedReason:
-                        "Open decision — resolve it before running the operator.",
+                        "Open decision. Resolve it before running the operator.",
                     }
                   : {})}
                 defaultBackend={operatorBackend}
@@ -912,7 +914,7 @@ export function ExecutionProfile({
                         spGhost
                           ? GHOST_DELIVERING_NOTE
                           : closed
-                            ? "Task is closed (terminal stage) — no runs needed"
+                            ? "Task is closed (terminal stage). No runs needed"
                             : deliveringActive
                               ? "A delivering run is already streaming for this task"
                               : "Start an agent run for the delivering agent"
@@ -927,7 +929,7 @@ export function ExecutionProfile({
             ) : canRunAgents ? (
               <div className="rev-row">
                 <span className="sub">
-                  None yet — assign a deployed agent to deliver it
+                  None yet. Assign a deployed agent to deliver it
                 </span>
                 <SpecialistControl
                   projectSlug={task.projectSlug}
@@ -939,7 +941,7 @@ export function ExecutionProfile({
               </div>
             ) : (
               <span className="sub">
-                None yet — the operator assigns one when execution starts
+                None yet. The operator assigns one when execution starts
               </span>
             )}
           </div>
@@ -979,7 +981,7 @@ export function ExecutionProfile({
                             ghost
                               ? GHOST_REVIEWING_NOTE
                               : closed
-                                ? "Task is closed (terminal stage) — no runs needed"
+                                ? "Task is closed (terminal stage). No runs needed"
                                 : running
                                   ? "A run for this reviewer is already streaming"
                                   : "Start a run for this reviewer"
@@ -1043,7 +1045,7 @@ export function ExecutionProfile({
                 // OwnerControl had it right, so the two disagreed in one cell.
                 // Ownership eligibility is stated here, once, for every role.
                 <span className="sub">
-                  Unowned — any contributor or above can take it
+                  Unowned. Any contributor or above can take it
                 </span>
               )}
               <OwnerControl

@@ -942,7 +942,7 @@ Viberr should test responsiveness and accessibility as part of product correctne
 **Responsive testing**
 - test board, task, review, and settings flows at each breakpoint
 - verify dense board scanning on desktop and reduced-complexity review on smaller screens
-- test Chromium, Safari, and Firefox on current desktop versions
+- test Chromium, Safari, and Firefox on current desktop versions — *as of 2026-08-19 only Chromium is exercised (one Playwright project, `chromium`; CI installs no other browser), so the Safari and Firefox halves are an open item, not a practice this product follows*
 - validate that layout collapse preserves task truth rather than hiding it
 
 **Accessibility testing**

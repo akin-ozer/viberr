@@ -112,7 +112,7 @@ function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}
 // contributor, viewer excluded (asserted directly below) — so F19-11's
 // invariant (one eligibility line, matching the matrix, no contradicting
 // sibling) holds under B's wording; the test tracks the shipped sentence.
-const OWNERSHIP_COPY = "Unowned — any contributor or above can take it";
+const OWNERSHIP_COPY = "Unowned. Any contributor or above can take it";
 
 describe("ExecutionProfile — unowned copy matches the RBAC matrix (F19-11)", () => {
   it("the matrix this copy claims: own-task excludes viewer", () => {

@@ -856,6 +856,33 @@ describe("app.css breakpoints (P16-F8)", () => {
       /\.board\s*\{/,
     );
   });
+
+  /**
+   * U7 — the task detail's two columns are ordered in the MARKUP
+   * (task-detail-page.tsx: `.detail-side` first, asserted there) and placed by
+   * grid cell here, so the sighted stack and the screen-reader/focus order are
+   * the same order at every width.
+   *
+   * Pass 20 did it with `order: -1` in the 1100px block instead, which fixed the
+   * paint and left a keyboard user tabbing to "Accept completion → Done" LAST,
+   * after every timeline entry (WCAG 2.2 SC 1.3.2 / 2.4.3). Re-adding `order`
+   * to either column would silently reopen that split, so the sheet is pinned
+   * against it: the desktop arrangement must come from placement, and the
+   * stacked one from source order.
+   */
+  it("U7: the detail columns are placed by grid cell — never by `order`", () => {
+    const rules = CODE.match(/\.detail-(main|side)[^{]*\{[^}]*\}/g) ?? [];
+    expect(rules.length, "both columns must still be styled").toBeGreaterThan(1);
+    for (const rule of rules) {
+      expect(rule, `\`order\` is banned on the detail columns:\n${rule}`).not.toMatch(
+        /(^|[\s;{])order\s*:/,
+      );
+    }
+    // The desktop two-column arrangement, stated explicitly so source order
+    // cannot decide which side of the page a column lands on.
+    expect(CODE).toMatch(/\.detail-main\s*\{[^}]*grid-column:\s*1[^}]*grid-row:\s*1/);
+    expect(CODE).toMatch(/\.detail-side\s*\{[^}]*grid-column:\s*2[^}]*grid-row:\s*1/);
+  });
 });
 
 describe("app.css palette reachability on touch (P16-G3)", () => {
@@ -1080,14 +1107,36 @@ describe("app.css draws a task key the same way everywhere (P16-F3 follow-on)", 
     // F3 moved its width out of an inline style and there was nothing else.
     const grid = CODE.match(/\.card-top \.key\s*\{([^}]*)\}/)?.[1] ?? "";
     const list = CODE.match(/\.card\.list-row \.key\s*\{([^}]*)\}/)?.[1] ?? "";
+    // F21-18: the third rule that draws a task key — the drop preview at the top
+    // of a target column. Its color is deliberately its own (`--blue-pressed`,
+    // the preview's accent), so it joins the nowrap assertion below rather than
+    // the value-parity loop.
+    const preview = CODE.match(/\.card-drop-preview \.key\s*\{([^}]*)\}/)?.[1] ?? "";
     expect(grid, ".card-top .key must have a rule").not.toBe("");
     expect(list, ".card.list-row .key must have a rule").not.toBe("");
-    for (const prop of ["font-family", "font-size", "color"]) {
-      const value = (re: string) =>
-        new RegExp(`${prop}\\s*:\\s*([^;]+)`).exec(re)?.[1]?.trim();
-      expect(value(list), `${prop} must match the grid card's key`).toBe(
-        value(grid),
+    expect(preview, ".card-drop-preview .key must have a rule").not.toBe("");
+    // Anchored on a declaration boundary so `color` cannot match inside
+    // `background-color` and `font-family` cannot match `font-size`.
+    const value = (rule: string, prop: string) =>
+      new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(rule)?.[1]?.trim();
+    for (const prop of ["font-family", "font-size", "color", "white-space"]) {
+      expect(value(list, prop), `${prop} must match the grid card's key`).toBe(
+        value(grid, prop),
       );
+    }
+    // F21-18 residual: the nowrap landed on the grid card alone, so the same key
+    // still broke mid-token ("VIB-\n8") in the list row's fixed 64px column and
+    // in the drop preview. A key is ONE identifier on every surface that draws
+    // it — reverting any of the three rules fails here.
+    for (const [where, rule] of [
+      ["grid card", grid],
+      ["list row", list],
+      ["drop preview", preview],
+    ] as const) {
+      expect(
+        value(rule, "white-space"),
+        `the ${where}'s task key must not wrap mid-token`,
+      ).toBe("nowrap");
     }
   });
 });
@@ -2381,5 +2430,74 @@ describe("app/ gates no rendering on the viewport (R19-12)", () => {
     expect(unexpected, "a new viewport read must say what it does with it").toEqual([]);
     const stale = Object.keys(VIEWPORT_READS).filter((f) => !readers.has(f)).sort();
     expect(stale, "an entry for a file that no longer reads the viewport").toEqual([]);
+  });
+});
+
+/* --------------------------------------- field chrome per input type (P21) */
+
+/**
+ * P21 — pass 20 changed the login email input from `type="text"` to
+ * `type="email"` for autofill semantics, and the `.field input[type=…]` rule —
+ * which opts fields in per TYPE so checkboxes and file pickers keep their
+ * native chrome — silently stopped matching it. The email field rendered in UA
+ * default chrome next to a fully styled password field: the browser is happy,
+ * only a human notices, which is this file's exact remit. The owner was the
+ * human who noticed.
+ */
+describe("app.css field chrome covers every text-like input type (P21)", () => {
+  const ruleStart = CODE.indexOf('.field input[type="text"]');
+  const fieldSelector =
+    ruleStart >= 0 ? CODE.slice(ruleStart, CODE.indexOf("{", ruleStart)) : "";
+
+  /** The `type=` vocabulary that means "the user types here" — the values that
+   *  must take the shared field box when they sit inside a `.field`. Picker and
+   *  button types (checkbox, radio, file, submit, …) are excluded by not being
+   *  named: their UA rendering is the point. */
+  const TEXT_LIKE = new Set([
+    "text", "password", "email", "search", "url", "tel", "number",
+    "date", "datetime-local", "month", "week", "time",
+  ]);
+
+  // Harvested as bare `type="…"` literals rather than by matching <input>
+  // elements: JSX attribute lists hold arrow functions, so an element regex
+  // stops at the first `=>` and misses any `type` declared after a handler. No
+  // other element legally carries these attribute values, so the literal alone
+  // identifies a text input.
+  const used = new Map<string, Set<string>>();
+  for (const file of markupFiles()) {
+    const src = readFileSync(file, "utf8");
+    const rel = path.relative(path.dirname(APP_DIR), file);
+    for (const m of src.matchAll(/\btype="([a-z-]+)"/g)) {
+      if (!TEXT_LIKE.has(m[1])) continue;
+      if (!used.has(m[1])) used.set(m[1], new Set());
+      used.get(m[1])!.add(rel);
+    }
+  }
+
+  it("found the rule and the app's real inputs", () => {
+    // A scanner that silently harvests nothing would turn the gate green for
+    // free — the login form alone guarantees these two.
+    expect(fieldSelector, "the `.field input[type=…]` rule must exist").not.toBe("");
+    expect(used.has("text")).toBe(true);
+    expect(used.has("password")).toBe(true);
+  });
+
+  it("lists every text-like type the markup uses", () => {
+    const uncovered = [...used.entries()]
+      .filter(([type]) => !fieldSelector.includes(`input[type="${type}"]`))
+      // Named with their sites: the fix is one selector added to the list at
+      // the named rule, and the reader needs to know which flip caused it.
+      .map(([type, sites]) => `${type} (${[...sites].sort().join(", ")})`)
+      .sort();
+    expect(uncovered).toEqual([]);
+  });
+
+  it("keeps the base rule at the specificity the mono override beats", () => {
+    // `.field input.mono` (0,2,1) wins over the base rule by SOURCE ORDER, not
+    // by weight. Rewriting the type list as `.field input:not([type="…"]…)`
+    // reads as equivalent but scores (0,n+1,1) and would flip every mono field
+    // input in the app back to the body face.
+    expect(fieldSelector).not.toContain(":not(");
+    expect(CODE).toMatch(/\.field input\.mono\s*\{[^}]*font-family:\s*var\(--font-mono\)/);
   });
 });

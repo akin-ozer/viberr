@@ -97,7 +97,7 @@ export function observationValue(key: string, value: string): string {
     value.trim().toLowerCase() === "undefined" ||
     value.trim().toLowerCase() === "none";
   if (!empty) return value;
-  return /owner|assignee/i.test(key) ? "unassigned" : "—";
+  return /owner|assignee/i.test(key) ? "unassigned" : "none";
 }
 
 /**
@@ -214,7 +214,7 @@ function PacketArchiveConfirm({
               the acceptance dialog names its own entry point (F19-7). */}
           <div className="obs">
             <span className="k">Decision</span>
-            <span>“{option.t}” — confirming it archives {subject}.</span>
+            <span>Confirming “{option.t}” archives {subject}.</span>
           </div>
           {deletesBranch && (
             <div className="obs warn">
@@ -229,7 +229,7 @@ function PacketArchiveConfirm({
                   <>This task's remote branch on GitHub,</>
                 )}{" "}
                 and every commit that exists only there.{" "}
-                <strong>Deleting it cannot be undone</strong> — restoring the
+                <strong>Deleting it cannot be undone.</strong> Restoring the
                 task later does not bring the branch back.
               </span>
             </div>
@@ -238,7 +238,7 @@ function PacketArchiveConfirm({
             <span className="k">After</span>
             <span>
               Off the board and out of the review queue. The task file, its
-              timeline and its audit trail are kept exactly as they are — the
+              timeline and its audit trail are kept exactly as they are. The
               archive itself is a disposition, not a delete, and a maintainer
               can restore it.
             </span>
@@ -246,7 +246,7 @@ function PacketArchiveConfirm({
           <div className="obs">
             <span className="k">Withdrawn</span>
             <span>
-              {withdrawn.join(" and ")} — restoring the task reopens the
+              {withdrawn.join(" and ")}. Restoring the task reopens the
               question.
             </span>
           </div>
@@ -333,7 +333,7 @@ function PacketDiscardConfirm({
         <div className="packet-obs flush">
           <div className="obs">
             <span className="k">Decision</span>
-            <span>&ldquo;{option.t}&rdquo; — confirming it discards the branch.</span>
+            <span>Confirming &ldquo;{option.t}&rdquo; discards the branch.</span>
           </div>
           <div className="obs warn">
             <span className="k">Deletes</span>
@@ -351,7 +351,7 @@ function PacketDiscardConfirm({
           <div className="obs">
             <span className="k">GitHub</span>
             <span>
-              Nothing on GitHub changes — this branch was never pushed. (If it
+              Nothing on GitHub changes: this branch was never pushed. (If it
               had been, the discard is refused and the archive option is the
               path.)
             </span>
@@ -391,6 +391,7 @@ export function DecisionPacket({
   canDiscardBranch = false,
   archiveDisclosure,
   onResolve,
+  onResolveCustom,
   onRequestMaintainer,
   onAsk,
 }: {
@@ -424,6 +425,11 @@ export function DecisionPacket({
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
   onResolve: (optionIndex: number, note: string) => void;
+  /** Questionnaire packets (owner request 2026-08-20): resolve with the
+   *  human's OWN directive instead of a canned option. The server runs it as
+   *  the un-gated `custom` kind — sent back to an asking agent, requeued to
+   *  the operator with the text as its note. */
+  onResolveCustom: (text: string) => void;
   /** F20-18: hand this decision UP to a maintainer/admin. Present only for a
    *  contributor-OWNER who may resolve the packet but for whom EVERY option
    *  needs a tier above theirs — the one case `requestPacketMaintainerDecision`
@@ -441,6 +447,16 @@ export function DecisionPacket({
   // for (e.g. "specify the expected behavior") instead of resolving with an
   // unstated reading. Recorded on the decision event.
   const [note, setNote] = useState("");
+  // Questionnaire shape (shadcn base/questionnaire): a free-text input composed
+  // WITH the fixed choices, as its own last choice. Selecting it reveals the
+  // directive input; the note field steps aside (the directive IS the message).
+  // Offered only to viewers who can resolve — the choice would otherwise be a
+  // control that only exists to 403.
+  const customIndex = p.options.length;
+  const customOffered = canResolve;
+  const choiceCount = p.options.length + (customOffered ? 1 : 0);
+  const customSelected = customOffered && sel === customIndex;
+  const [customText, setCustomText] = useState("");
   // UX19-9: the archive_task option index awaiting its confirm (null = none).
   const [pendingArchive, setPendingArchive] = useState<number | null>(null);
   // F20-6: the discard_branch option index awaiting its confirm (null = none).
@@ -501,7 +517,7 @@ export function DecisionPacket({
   // `aria-disabled`, refuses the click itself, and the reason renders as the
   // `.deny-note` the sheet defines for exactly this — visible to a sighted
   // keyboard user and announced via `aria-describedby` to a screen reader.
-  const selected = p.options[sel];
+  const selected = customSelected ? undefined : p.options[sel];
   // accept_completion is maintainer+ OR this task's own owner (R6-2, widened by
   // R14-2); anyone else gets a server 403, so block the button while it's
   // selected rather than let them click into one.
@@ -546,9 +562,9 @@ export function DecisionPacket({
   // screen-reader user got no feedback from the app's highest-stakes control,
   // and Tab walked every option.
   const move = (delta: number) => {
-    if (p.options.length === 0) return;
+    if (choiceCount === 0) return;
     setSel((s) => {
-      const next = (s + delta + p.options.length) % p.options.length;
+      const next = (s + delta + choiceCount) % choiceCount;
       requestAnimationFrame(() => optionRefs.current[next]?.focus());
       return next;
     });
@@ -602,6 +618,16 @@ export function DecisionPacket({
             } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
               e.preventDefault();
               move(-1);
+            } else if (/^[1-9]$/.test(e.key)) {
+              // Questionnaire shortcut: a digit jumps to that choice (the
+              // chips on each row advertise the mapping). Fires only inside
+              // the radiogroup — the directive textarea lives outside it.
+              const target = Number(e.key) - 1;
+              if (target < choiceCount) {
+                e.preventDefault();
+                setSel(target);
+                requestAnimationFrame(() => optionRefs.current[target]?.focus());
+              }
             }
           }}
         >
@@ -638,7 +664,7 @@ export function DecisionPacket({
                 style={blocked ? { opacity: 0.55 } : undefined}
                 title={
                   goalBlocked
-                    ? "Editing the goal is reserved for maintainers and admins — ask one to refine it"
+                    ? "Editing the goal is reserved for maintainers and admins. Ask one to refine it"
                     : archiveBlocked
                       ? "Archiving is reserved for maintainers and admins"
                       : discardBlocked
@@ -656,13 +682,13 @@ export function DecisionPacket({
                   <div className="od">
                     {o.d}
                     {goalBlocked
-                      ? " · your role can't edit the goal — a maintainer or admin must"
+                      ? " · your role can't edit the goal (a maintainer or admin must)"
                       : ""}
                     {archiveBlocked
-                      ? " · your role can't archive — a maintainer or admin must"
+                      ? " · your role can't archive (a maintainer or admin must)"
                       : ""}
                     {discardBlocked
-                      ? " · your role can't discard the branch — a maintainer or admin must"
+                      ? " · your role can't discard the branch (a maintainer or admin must)"
                       : ""}
                   </div>
                 </span>
@@ -687,10 +713,60 @@ export function DecisionPacket({
                     </Pill>
                   </span>
                 )}
+                {i < 9 && <kbd className="kbd opt-kbd">{i + 1}</kbd>}
               </button>
             );
           })}
+          {customOffered && (
+            // The questionnaire's composed free-text choice: an answer in the
+            // human's own words, resolved server-side as the un-gated `custom`
+            // kind. Its input renders below the group when selected.
+            <button
+              type="button"
+              role="radio"
+              ref={(el) => {
+                optionRefs.current[customIndex] = el;
+              }}
+              aria-checked={customSelected}
+              tabIndex={sel === customIndex ? 0 : -1}
+              className={"opt opt-custom" + (customSelected ? " sel" : "")}
+              onClick={() => setSel(customIndex)}
+            >
+              <span className="radio" />
+              <span>
+                <div className="ot">Write your own directive</div>
+                <div className="od">
+                  Answer in your own words. The operator (and the asking agent,
+                  if one raised this) re-engages with exactly what you type.
+                </div>
+              </span>
+              {customIndex < 9 && (
+                <kbd className="kbd opt-kbd">{customIndex + 1}</kbd>
+              )}
+            </button>
+          )}
         </div>
+
+        {customSelected && (
+          <div className="field packet-note-field">
+            <label className="flabel" htmlFor="pkt-custom">
+              Your directive<span className="req">*</span>
+              <span className="fhint">
+                resolves this decision · recorded on the timeline, handed to the
+                operator
+              </span>
+            </label>
+            <textarea
+              id="pkt-custom"
+              className="packet-note"
+              value={customText}
+              onChange={(e) => setCustomText(e.target.value)}
+              placeholder="e.g. Hold the merge, rebase onto main first, and re-run the reviewer on the new head."
+              rows={3}
+              data-autofocus=""
+            />
+          </div>
+        )}
 
         {canResolve && branchDiscardOffered && (
           // Body copy, not a footnote: it is a recovery path the options list
@@ -699,19 +775,21 @@ export function DecisionPacket({
           <p className="packet-lede" style={REDELIVER_NOTE_STYLE}>
             Not in this list: the GitHub panel on this page still offers{" "}
             <strong>{DELIVER_LABEL}</strong>. It pushes this task&rsquo;s branch
-            again and opens a new review pull request — Viberr never reopens a
-            closed one — so a pull request closed by mistake is recovered from
+            again and opens a new review pull request (Viberr never reopens a
+            closed one), so a pull request closed by mistake is recovered from
             here, with no trip to GitHub. Delivering does not resolve this
             packet, and the archive option that deletes the branch ends that
             path.
           </p>
         )}
 
-        {canResolve && (
+        {canResolve && !customSelected && (
           // The one input on the app's highest-stakes card wears the same
           // form language as every other input: `.field` + uppercase label +
           // hint (owner feedback 2026-07-26 — it was a bare textarea outside
           // `.field`, so none of the border/focus/typography tokens applied).
+          // Hidden while the custom choice is selected: the directive IS the
+          // message, and two competing textareas would ask which one counts.
           <div className="field packet-note-field">
             <label className="flabel" htmlFor="pkt-note">
               Note for the operator
@@ -742,7 +820,7 @@ export function DecisionPacket({
         {!canResolve && (
           <p className="deny-note" style={DENY_NOTE_STYLE}>
             <Icon name="lock" />
-            You can&rsquo;t resolve this decision — a maintainer, an admin, or
+            You can&rsquo;t resolve this decision: a maintainer, an admin, or
             this task&rsquo;s owner can. You can still comment or ask the operator
             below.
           </p>
@@ -756,9 +834,10 @@ export function DecisionPacket({
           <div className="deny-note" style={DENY_NOTE_STYLE}>
             <Icon name="lock" />
             <span>
-              Every option here needs maintainer or admin authority — you own{" "}
+              Every listed option needs maintainer or admin authority. You own{" "}
               {archiveDisclosure?.taskKey ?? "this task"} and raised this
-              decision, but settling it is above your role.
+              decision, but settling it with one of them is above your role. You
+              can still answer with your own directive above.
               {onRequestMaintainer && (
                 <>
                   {" "}
@@ -786,7 +865,11 @@ export function DecisionPacket({
               // they need no explanation and `aria-busy` already narrates the
               // first. A ROLE refusal stays focusable so its reason is
               // reachable.
-              disabled={busy || p.options.length === 0}
+              disabled={
+                busy ||
+                choiceCount === 0 ||
+                (customSelected && customText.trim() === "")
+              }
               aria-disabled={blockReason !== null || undefined}
               aria-describedby={blockReason ? BLOCK_REASON_ID : undefined}
               aria-busy={busy}
@@ -795,11 +878,21 @@ export function DecisionPacket({
               // accessible name states WHAT is being confirmed, so a screen-reader
               // user hears the chosen option, not a bare "Confirm decision".
               aria-label={
-                selected ? `Confirm decision: ${selected.t}` : "Confirm decision"
+                selected
+                  ? `Confirm decision: ${selected.t}`
+                  : customSelected
+                    ? "Confirm decision: your custom directive"
+                    : "Confirm decision"
               }
               style={blockReason ? BLOCKED_BTN_STYLE : undefined}
               onClick={() => {
                 if (blockReason) return;
+                // The custom choice resolves with the typed directive — it
+                // never accepts, archives or merges, so no ceremony interposes.
+                if (customSelected) {
+                  if (customText.trim()) onResolveCustom(customText);
+                  return;
+                }
                 // UX19-9: `archive_task` is the packet's one-way half — it
                 // archives the task and, with `deleteBranch`, permanently
                 // deletes the remote branch (ruling 17: the product's only
@@ -838,7 +931,7 @@ export function DecisionPacket({
             type="button"
             className="btn ghost"
             onClick={onAsk}
-            title="Starts a comment mentioning @operator below — send it to pull the operator in"
+            title="Starts a comment mentioning @operator below. Send it to pull the operator in"
           >
             <Icon name="message" />
             Ask operator

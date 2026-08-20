@@ -54,24 +54,34 @@ export function prStatePill(state: string): PillView {
 /**
  * CI health pill (P13-D-28). The check-runs summary had been fetched on every
  * reconcile pass since the PR linker was written and read by nothing — one API
- * call per pass spent for zero output. `failing > pending > passing` matches
- * the sync column's precedence: the worst true statement wins.
+ * call per pass spent for zero output. `failing > pending > unknown > passing`
+ * matches the sync column's precedence: the worst true statement wins.
  *
  * A repo with no CI reports `total: 0`, and the mapper returns null for that
- * rather than a green "0 checks passing" — absence of CI is not a pass.
+ * rather than a green "0 checks passing" — absence of CI is not a pass. Neither
+ * is a check run nobody could read (F21-7): runs GitHub reported and Viberr
+ * could not account for get their own grey pill, so the green one keeps meaning
+ * "every run concluded well".
  */
 export function checksPill(checks: {
   total: number;
   passing: number;
   failing: number;
   pending: number;
-  state: "passing" | "failing" | "pending";
+  unknown?: number;
+  state: "passing" | "failing" | "pending" | "unknown";
 }): PillView {
   if (checks.state === "failing") {
     return { kind: "blocked", label: `${checks.failing}/${checks.total} checks failing` };
   }
   if (checks.state === "pending") {
     return { kind: "input", label: `${checks.pending}/${checks.total} checks running` };
+  }
+  if (checks.state === "unknown") {
+    return {
+      kind: "neutral",
+      label: `${checks.unknown ?? checks.total}/${checks.total} checks unknown`,
+    };
   }
   return { kind: "ready", label: `${checks.total} checks passing` };
 }

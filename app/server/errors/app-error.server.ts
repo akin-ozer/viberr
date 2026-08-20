@@ -90,6 +90,9 @@ export class AppError extends Error {
   }
 }
 
-export function isAppError(value: unknown): value is AppError {
-  return value instanceof AppError;
+/** Narrow a CAUGHT throwable — the only place `unknown` is the honest type for
+ *  it, and the boundary every caller crosses before reading `.userMessage` /
+ *  `.status` off one. */
+export function isAppError(cause: unknown): cause is AppError {
+  return cause instanceof AppError;
 }

@@ -97,7 +97,7 @@ describe("N20-11: the repo field says the owner is fixed by the connection", () 
     });
     const text = container.textContent ?? "";
     expect(text).toContain("Owner is fixed by the");
-    expect(text).toContain("enter just the");
+    expect(text).toContain("Enter just the");
     // The fixed owner is named, so a `owner/name` entry is visibly redundant.
     expect(text).toContain("akin-ozer");
   });

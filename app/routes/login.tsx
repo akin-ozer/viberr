@@ -28,7 +28,7 @@ import { Icon } from "~/ui/icon";
  */
 
 export function meta() {
-  return [{ title: "Viberr — Sign in" }];
+  return [{ title: "Viberr · Sign in" }];
 }
 
 /** A form field that must be text: `FormData.get` also yields a `File` for a
@@ -100,10 +100,10 @@ export async function action({ request }: Route.ActionArgs) {
           : result.reason === "rate_limited"
             ? "Too many sign-in attempts. Wait a few minutes and try again."
             : result.reason === "disabled"
-              ? "This account is disabled — ask an admin to re-enable it."
+              ? "This account is disabled. Ask an admin to re-enable it."
               : // unknown_email + no_password share the mock's copy: don't
                 // reveal whether an (OAuth-only) account exists.
-                "No local account for that email — ask an admin to create one, or sign in with GitHub / Google if you're whitelisted.";
+                "No local account for that email. Ask an admin to create one, or sign in with GitHub / Google if you're whitelisted.";
       return data({ error }, { status: 400 });
     }
 
@@ -177,7 +177,7 @@ function SetNewPassword({
   const err = clientErr ?? (serverErrHidden ? null : actionError);
 
   return (
-    <div className="login-wrap" data-screen-label="Login — set new password">
+    <div className="login-wrap" data-screen-label="Login · set new password">
       <div className="login-card">
         <div className="login-brand">
           <span className="mark">V</span>
@@ -189,7 +189,7 @@ function SetNewPassword({
                   existing one — the old copy asserted "an admin reset your
                   password", false for a brand-new account. Both share one truth:
                   a temporary password was issued and must be replaced. */}
-              You signed in with a temporary password — choose your own to
+              You signed in with a temporary password. Choose your own to
               continue.
             </div>
           </div>
@@ -306,7 +306,7 @@ function ProviderButtons({
           ? "Checking whitelist…"
           : providers.github
             ? "Continue with GitHub"
-            : "GitHub — not configured"}
+            : "GitHub (not configured)"}
       </button>
       <button
         type="button"
@@ -336,7 +336,7 @@ function ProviderButtons({
           ? "Checking whitelist…"
           : providers.google
             ? "Continue with Google"
-            : "Google — not configured"}
+            : "Google (not configured)"}
       </button>
     </div>
   );
@@ -382,7 +382,7 @@ export default function Login({
     if (!providers[which]) {
       setInfo(
         (which === "github" ? "GitHub" : "Google") +
-          " OAuth isn't configured on this deployment — use a local account, or ask an admin to set it up.",
+          " OAuth isn't configured on this deployment. Use a local account, or ask an admin to set it up.",
       );
       return;
     }
@@ -412,7 +412,7 @@ export default function Login({
         setProviderBusy(null);
         setInfo(
           (which === "github" ? "GitHub" : "Google") +
-            " sign-in couldn't start — please try again.",
+            " sign-in couldn't start. Please try again.",
         );
       }
     })();
@@ -442,7 +442,7 @@ export default function Login({
         <h2>Managed AI delivery for small teams</h2>
         <p>
           Humans set the policy and stay accountable. Claude and Codex agents do
-          first-class work on real repository branches — inspectable,
+          first-class work on real repository branches: inspectable,
           recoverable, and reviewed before anything ships.
         </p>
         <ul className="login-aside-points">
@@ -475,8 +475,8 @@ export default function Login({
                 missing — the both-missing deployment renders the local-first
                 layout below instead. */}
                 {!providers.github
-                  ? "GitHub sign-in isn't configured on this deployment — use a local account below."
-                  : "Google sign-in isn't configured on this deployment — use a local account below."}
+                  ? "GitHub sign-in isn't configured on this deployment. Use a local account below."
+                  : "Google sign-in isn't configured on this deployment. Use a local account below."}
               </div>
             )}
             {info && (
@@ -572,7 +572,7 @@ export default function Login({
                 setClientErr(null);
                 setDismissedServerErr(actionError);
                 setInfo(
-                  "Ask an admin to reset your password — you'll be prompted to set a new one at your next sign-in.",
+                  "Ask an admin to reset your password. You'll be prompted to set a new one at your next sign-in.",
                 );
               }}
             >
@@ -593,12 +593,12 @@ export default function Login({
 
         {ssoConfigured ? (
           <div className="login-tag">
-            whitelist-based access — GitHub &amp; Google accounts sign in
+            whitelist-based access: GitHub &amp; Google accounts sign in
             directly once whitelisted
           </div>
         ) : (
           <div className="login-tag providers">
-            GitHub &amp; Google SSO isn't configured on this deployment — sign
+            GitHub &amp; Google SSO isn't configured on this deployment. Sign
             in with a local account. An admin can enable OAuth to let
             whitelisted accounts sign in directly.
           </div>

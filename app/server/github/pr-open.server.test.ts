@@ -85,7 +85,7 @@ describe("composePrBody", () => {
       evidence: ["unit tests pass"],
     });
     expect(body).toContain(
-      "[VIB-201 — Attach workspace](https://viberr.example/projects/core/tasks/VIB-201)",
+      "[VIB-201 · Attach workspace](https://viberr.example/projects/core/tasks/VIB-201)",
     );
     expect(body).toContain("## Goal");
     expect(body).toContain("Wire the workspace.");
@@ -106,7 +106,7 @@ describe("composePrBody", () => {
       goal: "Wire.",
       appOrigin: null,
     });
-    expect(body).toContain("**Viberr task:** VIB-1 — Wire it");
+    expect(body).toContain("**Viberr task:** VIB-1 · Wire it");
     // No markdown link at all, and no relative path a github.com reader could
     // click into a 404.
     expect(body).not.toContain("](");
@@ -122,7 +122,7 @@ describe("composePrBody", () => {
       appOrigin: "https://v.example",
     });
     expect(body).toContain(
-      "[VIB-1 — Wire it](https://v.example/projects/core/tasks/VIB-1)",
+      "[VIB-1 · Wire it](https://v.example/projects/core/tasks/VIB-1)",
     );
   });
 });
@@ -163,6 +163,65 @@ describe("openTaskPr", () => {
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({ number: 42, state: "review" });
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain("github.pr.opened");
+  });
+
+  it("F21-9: a created PR whose response does not decode is still recorded", async () => {
+    // The write already happened on GitHub. Losing the response used to lose the
+    // task's only record of a live PR — the next delivery then tried to open a
+    // second one for the same head (422) while the task claimed none existed.
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        // `html_url` and `state` drifted; the identity survived.
+        body: { number: 77, html_url: null, state: 3, title: "[VIB-201] x" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res).toMatchObject({ status: "ok", created: true, prNumber: 77 });
+    if (res.status !== "ok") throw new Error("expected ok");
+    // A browse link that works, derived from the repo instead of guessed.
+    expect(res.url).toBe("https://github.com/akin-ozer/viberr/pull/77");
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-201",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // A minimal but TRUE record: a PR that was just created is open (→ review).
+    expect(parsed.frontmatter.pr).toMatchObject({ number: 77, state: "review" });
+    expect(
+      parsed.timeline.some((e) => /Opened \*\*PR #77/.test(e.text ?? "")),
+    ).toBe(true);
+    expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
+      "github.pr.opened",
+    );
+  });
+
+  it("F21-9: a created PR with no readable number degrades — it never invents one", async () => {
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: { status: 201, body: { ok: true } },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("network_unavailable");
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-201",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr).toBeNull();
   });
 
   it("F17-1: an operator-authorized delivery writes the OPEN-PR event as the operator, not a guest human", async () => {
@@ -434,6 +493,165 @@ describe("openTaskPr", () => {
     );
     expect(res.status).toBe("nothing_to_review");
     // No fabricated PR, and the reason is honest (was mislabeled network before).
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toBeNull();
+  });
+
+  it("F21-9: an UNREADABLE head probe never falls through to create", async () => {
+    // The probe answered 200 with a payload the reader refused, so whether a PR
+    // already occupies `head` is UNKNOWN. Before this, an unreadable answer was
+    // treated exactly like an empty list: the create ran, GitHub refused it 422
+    // ("a pull request already exists"), and that 422 was recorded as "the
+    // branch produced no change".
+    // Canary: drop the `decode` arm in `prAlreadyOnHead` → a POST goes out.
+    const store = setupWithBranch("VIB-201", { workRevision: deliveredRevision() });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [{ number: "seven", html_url: "https://x", state: "open" }],
+      },
+      [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("network_unavailable");
+    expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toBeNull();
+  });
+
+  it("reads the 422 reason out of GitHub's errors[] rows, not just the envelope", async () => {
+    // The envelope message is the constant "Validation Failed" — the sentence
+    // that says WHICH validation failed rides in `errors[].message`. Sniffing
+    // only the envelope makes every 422 look identical.
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 422,
+        body: {
+          message: "Validation Failed",
+          errors: [
+            { resource: "PullRequest", field: "base", code: "custom",
+              message: "No commits between main and vib-201" },
+          ],
+        },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("nothing_to_review");
+    if (res.status !== "nothing_to_review") throw new Error("expected nothing_to_review");
+    expect(res.message).toContain("No commits between");
+  });
+
+  it("a 422 'a pull request already exists' is a COLLISION, never nothing_to_review", async () => {
+    // Two 422s with opposite meanings shared one mapping. This one says a review
+    // PR IS on the head — reported as `nothing_to_review` it told the human the
+    // branch was empty and flagged the task `noChanges`, on a task whose work is
+    // sitting in an open PR. The PR appeared between the probe and the create,
+    // so the number has to come from a second read of the head.
+    // Canary: map every 422 to nothing_to_review again → status flips.
+    const store = setupWithBranch("VIB-201", { workRevision: deliveredRevision() });
+    const gh = fakeGithubFetch({
+      // Free on the probe, occupied by a STRANGER by the time we create.
+      [`GET ${REPO_PATH}/pulls`]: (call) =>
+        call.attempt === 1
+          ? { body: [] }
+          : {
+              body: [{ number: 91, html_url: "https://github.com/akin-ozer/viberr/pull/91",
+                title: "someone else's work", state: "open", head: { sha: "a-stranger-sha" } }],
+            },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 422,
+        body: {
+          message: "Validation Failed",
+          errors: [{ message: "A pull request already exists for akin-ozer:vib-201-attach-execution-workspace-to." }],
+        },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("branch_collision");
+    if (res.status !== "branch_collision") throw new Error("expected branch_collision");
+    expect(res.prNumber).toBe(91);
+    expect(res.message).toContain("Branch name collision");
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toBeNull();
+  });
+
+  it("a 422 'already exists' whose PR IS this task's delivered revision is adopted", async () => {
+    // The racing PR carries the delivered revision — a concurrent delivery of
+    // this same task. Adoption applies exactly as it does on the first probe:
+    // reuse it, never a failure and never a second PR.
+    const store = setupWithBranch("VIB-201", { workRevision: deliveredRevision() });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: (call) =>
+        call.attempt === 1
+          ? { body: [] }
+          : {
+              body: [{ number: 92, html_url: "https://github.com/akin-ozer/viberr/pull/92",
+                title: "[VIB-201] x", state: "open", head: { sha: DELIVERED_SHA } }],
+            },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 422,
+        body: {
+          message: "Validation Failed",
+          errors: [{ message: "A pull request already exists for akin-ozer:vib-201-attach-execution-workspace-to." }],
+        },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("ok");
+    if (res.status !== "ok") throw new Error("expected ok");
+    expect(res.prNumber).toBe(92);
+    // Reused, not created — a second POST would 422 all over again.
+    expect(res.created).toBe(false);
+    expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(1);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 92, state: "review" });
+  });
+
+  it("an UNRELATED 422 is neither an empty branch nor a collision", async () => {
+    // A validation refusal this module has no reading for keeps the residual
+    // failure — with GitHub's own words — instead of borrowing the empty-branch
+    // meaning and marking the task as having produced no change.
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 422,
+        body: {
+          message: "Validation Failed",
+          errors: [{ message: "base is invalid" }],
+        },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("network_unavailable");
+    if (res.status !== "network_unavailable") throw new Error("expected network_unavailable");
+    expect(res.message).toContain("base is invalid");
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toBeNull();
   });

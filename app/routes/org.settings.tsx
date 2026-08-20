@@ -256,7 +256,7 @@ export async function action({ request }: Route.ActionArgs) {
         // Kills their sessions + blocks sign-in (login.server + require-user
         // already gate on `disabled`); last-admin guard lives in updateUser.
         const user = disableUser(db, field("userId"), actor);
-        return ok(`${user.name} disabled — they can't sign in`);
+        return ok(`${user.name} disabled. They can't sign in`);
       }
       case "user-enable": {
         const user = enableUser(db, field("userId"), actor);
@@ -356,7 +356,7 @@ export async function action({ request }: Route.ActionArgs) {
           actor,
         );
         return ok(
-          `${providerLabel(provider)} credentials saved — test them to switch sign-in on.`,
+          `${providerLabel(provider)} credentials saved. Test them to switch sign-in on.`,
         );
       }
       case "oauth-test": {
@@ -483,8 +483,8 @@ export async function action({ request }: Route.ActionArgs) {
         if (result.added === 0) {
           return ok(
             skipped > 0
-              ? `Nothing uploaded to ${atPath} — ${skipped} hidden file${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`
-              : `Nothing uploaded — that selection had no files.`,
+              ? `Nothing uploaded to ${atPath}. ${skipped} hidden file${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`
+              : `Nothing uploaded: that selection had no files.`,
           );
         }
         const skippedNote =
@@ -493,13 +493,13 @@ export async function action({ request }: Route.ActionArgs) {
             : "";
         const toast =
           (field("mode") === "folder" && result.topLevelDirs.length > 0
-            ? `Folder “${result.topLevelDirs.join(", ")}” uploaded as-is — ${result.added} file${result.added === 1 ? "" : "s"}`
+            ? `Folder “${result.topLevelDirs.join(", ")}” uploaded as-is · ${result.added} file${result.added === 1 ? "" : "s"}`
             : `${result.added} file${result.added === 1 ? "" : "s"} added to ${atPath}`) +
           skippedNote;
         const uploaded: SettingsOkPayload = {};
         if (result.capturedSkillMd)
           uploaded.captureToast =
-            "SKILL.md content captured — fully editable in the skill editor";
+            "SKILL.md content captured, fully editable in the skill editor";
         return ok(toast, uploaded);
       }
       case "store-write-doc": {
@@ -519,7 +519,7 @@ export async function action({ request }: Route.ActionArgs) {
           { overwrite: field("overwrite") === "1" },
         );
         return ok(
-          `${result.path.join("/")} ${result.replaced ? "replaced" : "saved"} — ${result.bytes} bytes`,
+          `${result.path.join("/")} ${result.replaced ? "replaced" : "saved"} · ${result.bytes} bytes`,
         );
       }
       // P14-KM-08/UI-61: `readStoreDoc` shipped in pass 13 with no production

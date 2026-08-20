@@ -7,10 +7,14 @@
  * - Rate-limit info surfaced on every response.
  * - NO retry storms: exactly ONE retry, only on 5xx responses.
  * - Network failures and HTTP failures come back as TYPED RESULTS, never
- *   throws — services build their degraded modes on top. `toAppError`
- *   converts a failure at a route boundary when throwing is wanted.
+ *   throws — services build their degraded modes on top, and a body that dies
+ *   MID-READ (truncated/aborted stream) is a network failure like any other.
+ *   `toAppError` converts a failure at a route boundary when throwing is wanted.
  * - Success bodies are decoded by a caller-supplied zod schema (see
- *   `GithubClient.request`); failure bodies stay unparsed.
+ *   `GithubClient.request`); failure bodies stay unparsed. A success body the
+ *   schema REFUSES is a typed `decode` failure carrying the raw body — the
+ *   "never throws" rule covers payload drift too, and the caller decides
+ *   whether anything in that body is still salvageable.
  * - `fetchImpl` injection is the mock-transport hook for tests; nothing in
  *   this layer ever logs or re-emits the token.
  */
@@ -57,6 +61,24 @@ export type GithubResponse<T> =
       data: unknown;
       rateLimit: RateLimitInfo;
     }
+  /**
+   * The request SUCCEEDED and the body did not decode: GitHub answered 2xx with
+   * a payload the call-site schema refuses. Deliberately shaped like `http`
+   * (status, message, data, rateLimit) so a caller that already narrowed to
+   * "some failure with a message" keeps compiling — and so `data` is there for
+   * the one thing this kind exists for: salvaging identity facts from a body a
+   * strict field voided (e.g. the PR number of a PR that was really created).
+   */
+  | {
+      ok: false;
+      kind: "decode";
+      status: number;
+      /** Why the body was refused (zod's issue text) — never the body itself. */
+      message: string;
+      /** The raw 2xx body, UNPARSED. */
+      data: unknown;
+      rateLimit: RateLimitInfo;
+    }
   | { ok: false; kind: "network"; message: string };
 
 export interface GithubClientOptions {
@@ -86,7 +108,8 @@ export interface GithubClient {
    * tolerance that reader already has (`.catch(undefined)` where the read
    * optional-chains, strict where a drifted value must not flow onward), so
    * payload drift degrades exactly the way the raw reads always did. Failure
-   * results carry the body unparsed.
+   * results carry the body unparsed — including a `decode` failure, which is
+   * what a schema REFUSING a 2xx body produces instead of a throw.
    */
   request<Schema extends z.ZodType>(
     method: GithubMethod,
@@ -126,6 +149,33 @@ function rateLimitFrom(headers: Headers): RateLimitInfo {
  * here rather than probed field by field at the failure site.
  */
 const githubErrorSchema = z.object({ message: z.string() });
+
+/**
+ * Why a 2xx body was refused, in one line: the first issue's message and the
+ * path it failed on. Zod's issue text names the EXPECTED shape, never the
+ * received value, so nothing from the payload rides along.
+ */
+function decodeMessage(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) return "GitHub's response did not match the expected shape";
+  const at = issue.path.length > 0 ? ` at \`${issue.path.join(".")}\`` : "";
+  const more =
+    error.issues.length > 1 ? ` (+${error.issues.length - 1} more)` : "";
+  return `GitHub's response did not match the expected shape${at}: ${issue.message}${more}`;
+}
+
+/**
+ * The human-readable half of ANY non-ok result. Callers' residual branches used
+ * to hardcode `"unknown"` for everything that was not `http`, which now would
+ * swallow the one failure that can actually explain itself — a `decode`.
+ */
+export function githubFailureMessage(
+  result: Extract<GithubResponse<unknown>, { ok: false }>,
+): string {
+  return result.kind === "not_modified"
+    ? "GitHub reported the cached copy is still current"
+    : result.message;
+}
 
 /** A JSON value: everything `JSON.parse` can hand back, and nothing wider. */
 type JsonBody =
@@ -253,13 +303,48 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
       return { ok: false, kind: "not_modified", status: 304, etag, rateLimit };
     }
 
-    const data = await readBody(response);
+    // F21-9 (residual): reading the body is as much a network operation as the
+    // fetch that started it. A truncated, aborted or timed-out response REJECTS
+    // here — past the try/catch above, which only wraps the request — and threw
+    // straight through the "never throws" contract into every caller. The
+    // request happened either way, so it degrades exactly like an unreachable
+    // host: a typed `network` failure carrying the transport's own reason.
+    let data: JsonBody;
+    try {
+      data = await readBody(response);
+    } catch (error) {
+      return {
+        ok: false,
+        kind: "network",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
 
     if (response.ok) {
+      // A schema that REFUSES the body is a typed failure, not a throw: this
+      // layer's whole contract is that services build degraded modes on values
+      // (a thrown ZodError 500s the route that called it, and — worse — an
+      // undecodable POST response threw AFTER the write GitHub had already
+      // performed, leaving the created resource unrecorded).
+      let decoded: unknown = data;
+      if (schema !== undefined) {
+        const parsed = schema.safeParse(data);
+        if (!parsed.success) {
+          return {
+            ok: false,
+            kind: "decode",
+            status: response.status,
+            message: decodeMessage(parsed.error),
+            data,
+            rateLimit,
+          };
+        }
+        decoded = parsed.data;
+      }
       return {
         ok: true,
         status: response.status,
-        data: schema === undefined ? data : schema.parse(data),
+        data: decoded,
         etag,
         rateLimit,
         scopesHeader: response.headers.get("x-oauth-scopes"),

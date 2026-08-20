@@ -128,6 +128,7 @@ function ev(patch: Partial<TimelineEventRender> = {}): TimelineEventRender {
     title: null,
     text: "looking into it",
     toAgent: false,
+    attachments: null,
     evidence: null,
     ...patch,
   };

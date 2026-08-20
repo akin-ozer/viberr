@@ -80,7 +80,7 @@ describe("ReviewQueuePage", () => {
     // so nothing announced it navigates; it is a real button now. And the
     // "Review → Done" wording is no longer hardcoded: the page renders the
     // project's RESOLVED stage names (the default prop keeps this fixture's).
-    const chip = getByTitle("Review → Done is locked to humans — see Policy");
+    const chip = getByTitle("Review → Done is locked to humans. See Policy");
     expect(chip.tagName).toBe("BUTTON");
     expect(chip.classList.contains("btn")).toBe(true);
     expect(chip.textContent).toContain("Review → Done · human only");
@@ -102,7 +102,7 @@ describe("ReviewQueuePage", () => {
     const first = rows[0]!;
     expect(first.querySelector(".rq-key")!.textContent).toBe("VIB-142");
     expect(first.querySelector(".sub")!.textContent).toBe(
-      "Completion report — Accept completion, or send back for one fix?",
+      "Completion report: Accept completion, or send back for one fix?",
     );
     // C4: the viewer-scoped canonical phrase — the same "waiting on you" the
     // board card uses. (The panel HEADING still names the acceptance action;
@@ -121,7 +121,7 @@ describe("ReviewQueuePage", () => {
     // rendering it as the row's current state is how a REOPENED PR kept reading
     // "closed on GitHub without merging".
     expect(second.querySelector(".sub")!.textContent).toBe(
-      "PR #311 is merged on GitHub — accept the completion to close the task.",
+      "PR #311 is merged on GitHub. Accept the completion to close the task.",
     );
     expect(second.querySelector(".wait-tag.agent")!.textContent).toContain(
       "agent working",
@@ -210,7 +210,7 @@ describe("ReviewQueuePage", () => {
     expect(row.textContent).not.toContain("agent working");
     // The row is not silent about itself — the subline says what "none" means.
     expect(row.querySelector(".sub")!.textContent).toBe(
-      "At the review boundary — no agent is running and no decision is pending.",
+      "At the review boundary: no agent is running and no decision is pending.",
     );
     // Still a triage row: it keeps its named action.
     expect(row.querySelector(".rq-go")!.textContent).toContain("Review");
@@ -236,7 +236,7 @@ describe("ReviewQueuePage", () => {
     expect(pill.className).toContain("input"); // amber, same tone as task detail
     expect(pill.textContent).toBe("PR #420 · merge pending");
     expect(row.querySelector(".sub")!.textContent).toBe(
-      "PR #420 is accepted — the merge is still pending; a human completes it on the task.",
+      "PR #420 is accepted. The merge is still pending; a human completes it on the task.",
     );
     // The colour alone must not be the whole signal (F19-14's rule), but the
     // states the subline already spells out stay bare — density is the board's.
@@ -294,7 +294,7 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
     const { container } = renderQueue([], [closedRow]);
     const row = container.querySelector(".rq-row")!;
     expect(row.querySelector(".sub")!.textContent).toBe(
-      "PR #124 was closed on GitHub without merging — rework and reopen it, or archive the task.",
+      "PR #124 was closed on GitHub without merging. Rework and reopen it, or archive the task.",
     );
     expect(row.textContent).not.toContain("force-accept");
     expect(row.textContent).not.toContain("approving verdict");
@@ -328,7 +328,7 @@ describe("P13-D-9: the queue stops promising human-only Done unconditionally", (
       operatorName: "Operator",
     });
     expect(
-      getByTitle("Review → Done is locked to humans — see Policy").textContent,
+      getByTitle("Review → Done is locked to humans. See Policy").textContent,
     ).toContain("Review → Done · human only");
     expect(container.querySelector(".pol-note")!.textContent).toContain(
       "always a human action, always in the audit log",

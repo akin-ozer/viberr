@@ -234,7 +234,7 @@ describe("boardEmptyCopy (P13-D-34)", () => {
 
 describe("boardEmptyCopy — the first empty board teaches (R15-10)", () => {
   const bare = "No tasks";
-  const teach = "No tasks yet — create one to start the flow";
+  const teach = "No tasks yet. Create one to start the flow";
 
   it("teaches ONCE on a project with no tasks: entry column only", () => {
     // The owner's call: five columns each saying "No tasks" is the one empty

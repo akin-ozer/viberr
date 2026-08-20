@@ -1303,7 +1303,7 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
       await expect(boundaryTo(boundary), `→ Done must refuse "${boundary}"`).rejects.toMatchObject({
         status: 403,
         message:
-          "Completion is human-authorized in V1 — this boundary can't be delegated",
+          "Completion is human-authorized in V1, so this boundary can't be delegated",
       });
     }
     // Nothing moved on disk — a refusal is not a partial write.

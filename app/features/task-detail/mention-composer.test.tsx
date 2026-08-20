@@ -388,12 +388,13 @@ describe("Timeline empty state (UI-40)", () => {
     text: "Moved to Review",
     toAgent: false,
     evidence: null,
+    attachments: null,
   };
 
   it("says the task never started only when there are NO events at all", () => {
     const { getByText } = renderTimeline([]);
     expect(
-      getByText(/No activity yet — this task hasn't started its operator loop\./),
+      getByText(/No activity yet\. This task hasn't started its operator loop\./),
     ).toBeTruthy();
   });
 

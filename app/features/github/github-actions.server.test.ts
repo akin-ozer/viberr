@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
@@ -154,8 +155,31 @@ describe("runReconcile on a project with no branched tasks", () => {
     // Fails on wave-1/main: result was "ok" with the generic reconciled toast,
     // and latestProjectReconcileAt stayed null forever.
     expect(outcome.result).toBe("no_branched_tasks");
-    expect(outcome.toast).toContain("no task has a delivery branch");
+    expect(outcome.toast).toContain("No task has a delivery branch");
     expect(latestProjectReconcileAt(store.db, store.slug)).not.toBeNull();
+  });
+
+  it("F21-9: an UNEXPECTED failure answers with a toast instead of 500ing the button", async () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    // Fault injection: a handle whose every read throws — the class of failure
+    // no reader anticipates, which used to escape as a raw 500 and leave the
+    // maintainer with a dead Reconcile button and no explanation.
+    // SAFETY: the proxy target is never read through; the trap answers every
+    // property access on this handle, so no member of the asserted type is
+    // reachable without throwing first.
+    const brokenDb = new Proxy({} as DatabaseSync, {
+      get() {
+        throw new Error("database disk image is malformed");
+      },
+    });
+    const outcome = await runReconcile(brokenDb, store.slug, actor, {
+      dataRoot: store.dataRoot,
+    });
+    expect(outcome.result).toBe("error");
+    expect(outcome.toast).toContain("nothing was changed");
+    expect(outcome.toast).toContain("database disk image is malformed");
   });
 });
 
@@ -259,7 +283,7 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
       getConnection(store.db, "hepapi")!.patId,
     );
     // The toast is honest about WHY it used a differently-labelled connection.
-    expect(outcome.toast).toContain("no akin-ozer PAT");
+    expect(outcome.toast).toContain("No akin-ozer PAT");
     expect(outcome.toast).toContain(REPO);
   });
 

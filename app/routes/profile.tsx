@@ -192,7 +192,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
       push(p.toast);
     } else {
       applyThemePreference(p.rollback);
-      push(result.error ?? "Theme not saved — reload and try again", "error");
+      push(result.error ?? "Theme not saved. Reload and try again", "error");
     }
   });
 

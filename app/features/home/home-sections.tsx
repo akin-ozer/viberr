@@ -73,7 +73,7 @@ export function HomeTopBar({
             title="The live update stream dropped (often an expired session). These cards may be out of date."
             onClick={() => onReconnect?.()}
           >
-            live updates paused — retry
+            live updates paused · retry
           </button>
         )}
         <div
@@ -180,10 +180,10 @@ export function HomeHero({
             three questions, near-identical copy. Each names its scope now. */}
         <p className="sub">
           {projectCount === 0 ? (
-            "No projects yet — create your first project below."
+            "No projects yet. Create your first project below."
           ) : totalRunning === 0 ? (
             <>
-              All quiet — no agent runs right now.{" "}
+              All quiet. No agent runs right now.{" "}
               {totalWaiting > 0 ? (
                 <>
                   <b>{countLabel(totalWaiting, "decision")}</b>{" "}
@@ -195,7 +195,7 @@ export function HomeHero({
             </>
           ) : (
             <>
-              Your agents kept working —{" "}
+              Your agents kept working:{" "}
               <b>
                 <span className="working"></span>
                 {countLabel(totalRunning, "run")} active
@@ -248,7 +248,7 @@ export function EmptyHero({ onNew }: { onNew: () => void }) {
       <h2>Create your first project</h2>
       <p>
         A project is one board, one repo, and a policy that decides what
-        agents may do on their own — and what waits for you.
+        agents may do on their own, and what waits for you.
       </p>
       <div className="empty-steps">
         <span className="st">
@@ -561,7 +561,7 @@ export function StoreStrip({
           styled as such and confirmed before it runs. */}
       <Icon name="memory" />
       <span>
-        <b>Store maintenance</b> · admins only — projects and boards are a
+        <b>Store maintenance</b> · admins only. Projects and boards are a
         projection of the task files on disk. Neither action edits a task file.
         {lockHolder && (
           // F18-5: one writer per data root. Naming the holder makes a
@@ -631,7 +631,7 @@ export function RebuildConfirm({
       </p>
       <p>
         This is a recovery action. Day-to-day drift only needs{" "}
-        <b>Re-scan store</b> — rebuild when the board disagrees with the files.
+        <b>Re-scan store</b>. Use it when the board disagrees with the files.
       </p>
       <div className="confirm-actions">
         <button type="button" className="btn ghost" onClick={close}>

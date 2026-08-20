@@ -140,7 +140,7 @@ export async function setMemberRole(
       if (admins <= 1) {
         // Last-admin guard — exact mock copy, project name parameterized.
         throw AppError.conflict(
-          `${projectName} needs at least one admin — promote someone else first`,
+          `${projectName} needs at least one admin. Promote someone else first`,
         );
       }
     }
@@ -175,7 +175,7 @@ export async function setMemberRole(
 // ------------------------------------------------------------ set boundary
 
 const LOCKED_BOUNDARY_MESSAGE =
-  "Completion is human-authorized in V1 — this boundary can't be delegated";
+  "Completion is human-authorized in V1, so this boundary can't be delegated";
 
 /**
  * updateTransitionBoundary (policy spec §5.2): validates the rule exists,

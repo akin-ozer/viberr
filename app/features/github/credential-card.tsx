@@ -58,7 +58,7 @@ export function CredentialCard({
         <div className="cred-warn">
           <Icon name="alert" />
           <span>
-            No GitHub PAT is connected to this project — branch and PR sync
+            No GitHub PAT is connected to this project. Branch and PR sync
             stays offline until one is added.
           </span>
           {warnActions}
@@ -104,8 +104,8 @@ export function CredentialCard({
         ))}
         {!unverified && unproven.length > 0 && (
           <span className="sub self-center">
-            {unproven.map((s) => s.id).join(", ")} unproven — verified on
-            first use
+            {unproven.map((s) => s.id).join(", ")} unproven (verified on
+            first use)
           </span>
         )}
       </div>
@@ -113,7 +113,7 @@ export function CredentialCard({
         <div className="cred-warn">
           <Icon name="alert" />
           <span>
-            Token {connectionAuth} — re-authenticate this connection to
+            Token {connectionAuth}. Re-authenticate this connection to
             resume branch and PR sync. Its granted scopes don't apply while
             the token is invalid.
           </span>
@@ -123,7 +123,7 @@ export function CredentialCard({
         <div className="cred-warn">
           <Icon name="alert" />
           <span>
-            Missing <code className="mono">{missing.id}</code> — PR status
+            Missing <code className="mono">{missing.id}</code>. PR status
             can't auto-sync after merge.
             {missing.flaggedTaskKey ? " Flagged on" : ""}
           </span>
@@ -142,7 +142,7 @@ export function CredentialCard({
         <div className="cred-warn">
           <Icon name="alert" />
           <span>
-            Credential attached — scopes not yet verified against GitHub
+            Credential attached. Scopes not yet verified against GitHub
             {unproven.length > 0
               ? ` (${unproven.map((s) => s.id).join(", ")})`
               : ""}

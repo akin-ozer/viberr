@@ -196,7 +196,7 @@ function ModalHead({
             ? "A reusable agent the operator can assign to tasks."
             : forksTemplate
               ? `Saving forks this profile for ${projectName}: it keeps its own copy and stops tracking later changes to the global profile.`
-              : "Update this project's copy — changes apply to future assignments."}
+              : "Update this project's copy. Changes apply to future assignments."}
         </div>
       </div>
       <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
@@ -295,7 +295,7 @@ function BackendField({
               title={
                 usable
                   ? undefined
-                  : `${b.label} isn't configured — add its credential to run agents on it`
+                  : `${b.label} isn't configured. Add its credential to run agents on it`
               }
             >
               <AgentGlyph backend={b.id} />
@@ -335,8 +335,14 @@ function AutonomyField({
       <span className="flabel" id={capId}>
         Default autonomy
         <span className="fhint">
-          supervised recommends at approval boundaries · full performs
-          them and may accept completion to Done
+          {/* OBS-12: autonomy is a CEILING, not the whole answer — the
+              capability rows below decide per action, and a row set to direct
+              acts directly under either setting (live: a supervised operator
+              with stage-transitions:direct moved approval boundaries itself).
+              The old sentence read as a guarantee this control cannot make. */}
+          supervised recommends at approval boundaries · full performs them and
+          may accept completion to Done · capability rows may override this per
+          action
         </span>
       </span>
       <div className="pick-chips">
@@ -406,6 +412,16 @@ function ModelEffortFields({
           disabled={!backend || catalogLoading}
         >
           {!backend && <option value="">Pick a backend first</option>}
+          {/* F21-13: a backend is picked and its catalog has not answered yet
+              (open, or a switch that cleared the previous backend's model). The
+              select must carry the empty value it is showing, or the browser
+              silently displays the first real option while `model` is still ""
+              — the shape that made a stale id look picked. */}
+          {backend && model === "" && (
+            <option value="">
+              {catalogLoading ? "loading available models…" : "no model yet"}
+            </option>
+          )}
           {/* Preserve a seeded value that is not in the catalog. */}
           {backend &&
             model &&
@@ -423,7 +439,7 @@ function ModelEffortFields({
               title={m.unavailable ? m.unavailable.reason : m.description}
             >
               {m.displayName}
-              {m.unavailable ? " — unavailable for this account" : ""}
+              {m.unavailable ? " (unavailable for this account)" : ""}
             </option>
           ))}
         </select>
@@ -431,7 +447,7 @@ function ModelEffortFields({
           // A stored profile pinned to a now-refused model: name the provider's
           // own sentence and tell the admin to pick another (a run would 400).
           <span className="fhint flush err">
-            <Icon name="alert" /> Unavailable for this account —{" "}
+            <Icon name="alert" /> Unavailable for this account:{" "}
             {selectedModel.unavailable.reason} Pick another model.
           </span>
         ) : selectedModel?.description ? (
@@ -453,7 +469,7 @@ function ModelEffortFields({
             onChange={(e) => setEffort(e.target.value)}
             disabled={!backend || catalogLoading}
             >
-            {!backend && <option value="">—</option>}
+            {(!backend || effort === "") && <option value="">no effort yet</option>}
             {effort && !effortOptions.includes(effort) && (
               <option value={effort}>{effortLabel(effort)}</option>
             )}
@@ -528,8 +544,8 @@ function DefinitionField({
           Description
           <span className="fhint">
             {isOperator
-              ? "one short paragraph — a human-readable summary of this operator"
-              : "one short paragraph — the OPERATOR reads this to pick the right agent for a task"}
+              ? "one short paragraph: a human-readable summary of this operator"
+              : "one short paragraph: the OPERATOR reads this to pick the right agent for a task"}
           </span>
         </label>
         <textarea
@@ -545,8 +561,8 @@ function DefinitionField({
           Persona / instructions
           <span className="fhint">
             {isOperator
-              ? "extra operator guidance — appended to the built-in operator manual on every run; markdown ok"
-              : "the agent's working instructions — injected as its system prompt on every run; markdown ok"}
+              ? "extra operator guidance, appended to the built-in operator manual on every run; markdown ok"
+              : "the agent's working instructions, injected as its system prompt on every run; markdown ok"}
           </span>
         </label>
         <textarea
@@ -584,7 +600,7 @@ function CapabilityGrants({
       <span className="flabel" id={capId}>
         Capability policy
         <span className="fhint">
-          how each action is enforced — adjust the defaults
+          how each action is enforced · adjust the defaults
         </span>
       </span>
       <div className="cap-matrix">
@@ -646,7 +662,7 @@ function CapabilityGrants({
                       <Icon name="lock" />
                       <span>
                         <strong>The locked rows can&apos;t be granted here.</strong>{" "}
-                        They stay reserved for humans on every profile — saving
+                        They stay reserved for humans on every profile. Saving
                         stores <strong>Human-only</strong> whatever this form
                         sends.
                       </span>
@@ -695,7 +711,7 @@ function CapabilityGrants({
                           role="radiogroup"
                           aria-label={
                             locked
-                              ? `Policy for ${capDef.label} — locked, reserved for humans`
+                              ? `Policy for ${capDef.label} (locked, reserved for humans)`
                               : `Policy for ${capDef.label}`
                           }
                           onKeyDown={rovingRadioKeyDown}
@@ -819,7 +835,7 @@ function ResourcePicker({
                         }
                         title={
                           it.missing
-                            ? "No longer in the store — click to remove this grant"
+                            ? "No longer in the store. Click to remove this grant"
                             : undefined
                         }
                         // F19-5: these grant chips are toggles like the backend,
@@ -836,7 +852,7 @@ function ResourcePicker({
                   </div>
                   {displayItems.length === 0 && (
                     <p className="ctx-empty">
-                      None in the store yet — add {g.group.toLowerCase()} in org
+                      None in the store yet. Add {g.group.toLowerCase()} in org
                       settings.
                     </p>
                   )}
@@ -991,7 +1007,29 @@ export function CreateProfileModal({
         : [...p[key], item],
     }));
 
-  const valid = Boolean(name.trim() && role.trim() && backend && stg.length);
+  /**
+   * F21-13 — switching the backend clears the model and effort ON THE CLICK.
+   *
+   * The catalog fetch below is async, and until it answers, `catalog` still
+   * holds the PREVIOUS backend's payload and `model` its previous id. Live, that
+   * window was long enough to save through: Developer went Codex → Claude Code
+   * while the picker read "loading available models…", Save was enabled, and the
+   * deployment landed with `backends: [claude]` next to `model: gpt-5.6-terra`
+   * — a pair no run can honour (the runtime silently substituted a Claude model,
+   * so the profile said one thing and the run did another). Clearing here makes
+   * the incoherent pair unrepresentable rather than merely unlikely: the model
+   * select has nothing to submit and `valid` below refuses the save until the
+   * new backend's catalog resolves. Re-picking the SAME chip is a no-op (an
+   * edited profile keeps its stored model through an idle click).
+   */
+  const pickBackend = (next: "codex" | "claude") => {
+    if (next === backend) return;
+    setBackend(next);
+    setModel("");
+    setEffort("");
+  };
+
+  const fieldsValid = Boolean(name.trim() && role.trim() && backend && stg.length);
 
   // Model + effort catalog — fetched from /resources/model-catalog whenever a
   // backend is selected (open in edit mode, or the backend radio changes in
@@ -1028,6 +1066,16 @@ export function CreateProfileModal({
       ? selectedModel.efforts
       : (catalog?.efforts ?? []);
 
+  // F21-13: this profile has a backend but no model for it — `pickBackend`
+  // cleared the previous backend's id and the new catalog has not answered yet
+  // (or, in create mode, none has). Save is HELD for that whole window and the
+  // footer hint below says why: a save inside it is exactly how a Codex model id
+  // reached a Claude-pinned profile. Deliberately NOT "the fetch is in flight":
+  // opening the editor also fetches, and a stored model that is already coherent
+  // with its own backend must not lock Save behind a round-trip.
+  const modelPending = Boolean(backend) && model === "";
+  const valid = fieldsValid && !modelPending;
+
   const submit = () => {
     // `valid` already requires a picked backend; naming it in the guard is what
     // rules out the picker's initial "" for the payload below.
@@ -1055,15 +1103,23 @@ export function CreateProfileModal({
   // full definition snapshot that wins over the org template from then on) —
   // the confirm button says so instead of promising an inheritance that stops.
   const forksTemplate = editing && initial.source === "template";
+  const backendLabel = BACKENDS.find((b) => b.id === backend)?.label ?? "";
   const hint = error
     ? error
-    : valid
-      ? editing
-        ? forksTemplate
-          ? `Ready to save — this forks ${initial.name} for ${projectName}.`
-          : "Ready to save changes."
-        : `Ready to add to ${projectName}.`
-      : "Name, role, one execution backend, and at least one stage are required.";
+    : !fieldsValid
+      ? "Name, role, one execution backend, and at least one stage are required."
+      : // F21-13: the reason Save is disabled, in the same place every other
+        // reason is given. Silence here is what made the disabled button read as
+        // a glitch — and, before the hold existed, what let the click through.
+        modelPending
+        ? catalogLoading
+          ? `Loading the models available on ${backendLabel}. Saving is held until this profile has one of them.`
+          : `Pick a model available on ${backendLabel}. Saving is held until this profile has one.`
+        : editing
+          ? forksTemplate
+            ? `Ready to save: this forks ${initial.name} for ${projectName}.`
+            : "Ready to save changes."
+          : `Ready to add to ${projectName}.`;
 
   return (
     // Native <dialog> — Escape, backdrop-click close, focus trap/restore and
@@ -1092,7 +1148,7 @@ export function CreateProfileModal({
 
         <BackendField
           backend={backend}
-          setBackend={setBackend}
+          setBackend={pickBackend}
           available={available}
           {...(initial ? { seededBackends: initial.backends } : {})}
         />

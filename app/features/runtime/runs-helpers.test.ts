@@ -399,7 +399,7 @@ describe("agentMessageProse (N20-18)", () => {
     });
     expect(agentMessageProse(L({ tag: "agent_message", text: envelope }))).toBe(
       "Blocked on a colour choice.\n\n" +
-        "Question: Amber or cobalt? — The mock shows both. — Options: amber · cobalt",
+        "Question: Amber or cobalt? · The mock shows both. · Options: amber · cobalt",
     );
   });
 

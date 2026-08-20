@@ -210,7 +210,7 @@ describe("CredentialCard states", () => {
     );
     expect(chips).toEqual(["repo"]); // the assumed scope is not a chip
     expect(container.querySelector(".scope-chips")!.textContent).toContain(
-      "workflow unproven — verified on first use",
+      "workflow unproven (verified on first use)",
     );
     expect(container.querySelector(".cred-ok")!.textContent).toContain(
       "Every provable scope verified.",
@@ -247,7 +247,7 @@ describe("CredentialCard states", () => {
     );
     expect(container.querySelector(".cred-ok")).toBeNull();
     expect(container.querySelector(".cred-warn")!.textContent).toContain(
-      "scopes not yet verified",
+      "Scopes not yet verified",
     );
   });
 
@@ -274,7 +274,7 @@ describe("CredentialCard states", () => {
     expect(container.querySelector(".cred-ok")).toBeNull();
     expect(container.textContent).not.toContain("Every provable scope verified");
     const warn = container.querySelector(".cred-warn")!;
-    expect(warn.textContent).toContain("scopes not yet verified");
+    expect(warn.textContent).toContain("Scopes not yet verified");
     expect(warn.textContent).toContain("repo, pull_request:write");
     // No pseudo-chips either — nothing here is evidence.
     expect(container.querySelectorAll(".scope-chip")).toHaveLength(0);
@@ -581,7 +581,7 @@ describe("PullRequestsPanel", () => {
     // 30 (R15-11) labels its row "Review" and not "Accept". Naming it as the
     // surface that merges pointed a reader at a page with no such control.
     expect(container.querySelector(".pol-note")!.textContent).toContain(
-      "Merging stays reserved for humans — accepting a completion on its task page merges its PR when GitHub is reachable; otherwise it records accepted (merge pending).",
+      "Merging stays reserved for humans. Accepting a completion on its task page merges its PR when GitHub is reachable; otherwise it records accepted (merge pending).",
     );
     expect(container.querySelector(".pol-note")!.textContent).not.toContain(
       "review queue",
@@ -650,8 +650,8 @@ describe("BranchesPanel", () => {
     // A merged branch row shows no conflict pill.
     expect(rows[2]!.textContent).not.toContain("conflicts");
 
-    // VIB-151: no PR → em-dash placeholder; behind main risk pill.
-    expect(rows[1]!.textContent).toContain("—");
+    // VIB-151: no PR → minus-sign placeholder; behind main risk pill.
+    expect(rows[1]!.textContent).toContain("−");
     expect(rows[1]!.querySelector(".pill.risk")!.textContent).toContain(
       "behind main",
     );

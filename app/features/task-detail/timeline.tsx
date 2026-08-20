@@ -70,7 +70,9 @@ function CollapsibleComment({
     // max-height, so this stays correct in both states.
     const measure = () => setOverflowing(el.scrollHeight > COLLAPSE_MAX + 24);
     measure();
-    if (typeof ResizeObserver === "undefined") return;
+    // The first measure above is the whole contract on a host that provides no
+    // ResizeObserver (jsdom); only the re-measure on resize is lost.
+    if (!("ResizeObserver" in globalThis)) return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
@@ -248,6 +250,26 @@ export function TimelineItem({
             )}
           </>
         )}
+        {/* Files this event's run saved (attachments panel shows the same names
+            with "added by …") — the producing message names its own files.
+            Chips need the serving base; without it (bare renders, withheld
+            lists) the names stay off rather than rendering dead links. */}
+        {ev.attachments && ev.attachments.length > 0 && attachmentsBase && (
+          <div className="tl-attach">
+            {ev.attachments.map((name) => (
+              <a
+                key={name}
+                className="tl-attach-chip"
+                href={`${attachmentsBase}/${encodeURIComponent(name)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Icon name="file" />
+                <span className="nm">{name}</span>
+              </a>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -406,7 +428,7 @@ export function Timeline({
         {/* R7-6: Done tasks stay commentable — one subtle line, no freeze. */}
         {taskClosed && (
           <div className="fine xs">
-            This task is closed — comments are still recorded.
+            This task is closed. Comments are still recorded.
           </div>
         )}
         <div className="composer-box">
@@ -467,12 +489,12 @@ export function Timeline({
         {items.length === 0 ? (
           <div className="empty">
             {events.length === 0
-              ? "No activity yet — this task hasn't started its operator loop."
+              ? "No activity yet. This task hasn't started its operator loop."
               : f === "comment"
-                ? "No comments in the loaded history — switch to All, or load older events."
+                ? "No comments in the loaded history. Switch to All, or load older events."
                 : // F18-14: "governance" is a banned UI word (design/CONVERSATION-SUMMARY
                   // line 22); this is the "Important" filter's empty state, so name that tab.
-                  "No important events in the loaded history — switch to All, or load older events."}
+                  "No important events in the loaded history. Switch to All, or load older events."}
           </div>
         ) : (
           items.map((ev) => (

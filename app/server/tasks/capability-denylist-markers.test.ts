@@ -4,6 +4,10 @@ import {
   webSearchWithheldFromDenylist,
 } from "~/server/runtimes/run-service.server";
 import { resolveSpecialistDisallowedTools } from "./specialist-tool-policy";
+// F21-3: imported from BOTH modules on purpose — the point of the pin below
+// is that the two names resolve to one value.
+import { OPERATOR_READ_ONLY_DENIED_TOOLS as operatorDeniedFromRuntime } from "~/server/runtimes/claude-runtime.server";
+import { OPERATOR_READ_ONLY_DENIED_TOOLS as operatorDeniedFromRun } from "~/server/runtimes/operator-run.server";
 
 /**
  * B-AG6 — the cross-file coupling nothing tied together.
@@ -79,5 +83,41 @@ describe("capability denylist ↔ Codex withheld detectors (B-AG6)", () => {
     );
     expect(denied.length).toBeGreaterThan(0);
     expect(repoWriteWithheldFromDenylist(denied)).toBe(false);
+  });
+});
+
+/**
+ * F21-3 — the OPERATOR's confinement list existed TWICE.
+ *
+ * `claude-runtime.server` denied it per `kind: "operator"` run; `operator-run.
+ * server` stated the same five tool names again as a second unguarded literal,
+ * with nothing tying the two together and no test on either. Two copies of a
+ * confinement list is one copy away from a run that believes it is read-only
+ * and is not — and the F21-21 fix DEPENDS on `Bash` being on it (that is why
+ * the anchored default-branch read had to be a tool rather than `git show`).
+ *
+ * There is one const now. These pin the join, the membership, and the shape of
+ * the list a run actually carries.
+ */
+describe("operator read-only denylist is ONE list (F21-3)", () => {
+  it("the runtime's list and the run-builder's export are the same value", () => {
+    // Canary: re-introduce a second literal in operator-run.server and this
+    // fails the moment the two differ by one entry.
+    expect(operatorDeniedFromRun).toBe(operatorDeniedFromRuntime);
+  });
+
+  it("is COMPLETE — every write/shell built-in, and none of the read tools", () => {
+    const denied = [...operatorDeniedFromRun];
+    // Shell is on it: the operator cannot run git itself, which is why
+    // `read_default_branch_file` exists (F21-21).
+    for (const tool of ["Bash", "Edit", "MultiEdit", "Write", "NotebookEdit"]) {
+      expect(denied).toContain(tool);
+    }
+    // Reading is the whole point of the operator's checkout (R19-1).
+    for (const tool of ["Read", "Grep", "Glob"]) {
+      expect(denied).not.toContain(tool);
+    }
+    // No stray entries: an addition here is a deliberate confinement change.
+    expect(denied.length).toBe(5);
   });
 });

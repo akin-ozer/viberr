@@ -85,11 +85,11 @@ export function CapabilityMatrixModal({
           <div className="mh-sub">
             Every profile's permissions for each action in {projectName}.
             Delivery (push · open/merge PR) is <b>server-owned</b> and gated
-            server-side on the delivering profile's grant — enforced on both
+            server-side on the delivering profile's grant, enforced on both
             backends. Supporting (reviewing) agents run <b>read-only</b>. In-run
             tool limits bind on Claude; on Codex they are advisory, so a Codex
-            run's own commands aren't blocked mid-run — the read-only sandbox and
-            server-side delivery gate are what actually constrain it. Specialist
+            run's own commands aren't blocked mid-run. The read-only sandbox and
+            server-side delivery gate are what actually constrain it. Agent
             processes share the host, not an OS sandbox.
           </div>
         </div>
@@ -163,7 +163,7 @@ export function CapabilityMatrixModal({
                         {claudeOnly && (
                           <span
                             className="mx-scope"
-                            title="Enforced on Claude runs (tool denylist). On Codex it is advisory only — the Codex SDK ignores tool allow/deny lists (S3)."
+                            title="Enforced on Claude runs (tool denylist). On Codex it is advisory only: the Codex SDK ignores tool allow/deny lists (S3)."
                           >
                             Claude-enforced
                           </span>
@@ -196,8 +196,14 @@ export function CapabilityMatrixModal({
             <h3>What differs between the two runtimes</h3>
             <ul>
               <li>
-                A Claude specialist runs with Claude Code's coding harness underneath
-                its persona; a Codex specialist gets the persona alone.
+                {/* U12 residual: "specialist" is retired vocabulary (C11/FR14) —
+                    the rows of this very matrix are agent PROFILES, engaged per
+                    task as the delivering or a supporting agent. The word
+                    survived here because nothing rendered this modal's prose in
+                    a test; `retired-vocabulary.test.tsx` now does. */}
+                An agent profile running on <b>Claude</b> gets Claude Code's coding
+                harness underneath its persona; the same profile on <b>Codex</b>{" "}
+                gets the persona alone.
               </li>
               <li>
                 {/* F19-16 / ruling 51 (R18-5): the asymmetry is meant to be
@@ -213,7 +219,7 @@ export function CapabilityMatrixModal({
                 skills: the model sees each name and summary and loads the full
                 text only when it invokes one, with no length cap. <b>Codex</b> has
                 no such channel, so its skills are pasted into the prompt up front
-                under one shared 24,000-character budget — a long skill can arrive
+                under one shared 24,000-character budget. A long skill can arrive
                 clipped, and one that no longer fits is announced as omitted. A
                 Claude run that cannot install them (no checkout, or another live
                 run already holds this task's workspace) falls back to the same
@@ -221,7 +227,7 @@ export function CapabilityMatrixModal({
                 follow it.
               </li>
               <li>
-                <b>Post mid-run comments</b> has no Codex channel — granting it does
+                <b>Post mid-run comments</b> has no Codex channel: granting it does
                 nothing there; a Codex agent's report always posts when the run ends.
               </li>
               <li>
@@ -229,7 +235,7 @@ export function CapabilityMatrixModal({
                 the question arrives only when the run finishes.
               </li>
               <li>
-                Org MCP credentials are sent on <b>Claude</b> runs only — Codex mounts a
+                Org MCP credentials are sent on <b>Claude</b> runs only. Codex mounts a
                 declared server unauthenticated, because its MCP config travels in argv.
               </li>
               <li>
@@ -239,7 +245,7 @@ export function CapabilityMatrixModal({
                     SERVER segment, so a persona naming a tool still broke on one
                     backend while this text implied it wouldn't. */}
                 <b>MCP tool names differ per backend.</b> Codex renames hyphens to
-                underscores in the whole tool id — server AND tool segment:{" "}
+                underscores in the whole tool id (server AND tool segment):{" "}
                 <code>mcp__everything-http__get-annotated-message</code> on Claude
                 is <code>mcp__everything_http__get_annotated_message</code> on
                 Codex. The two clients can also expose different tool SETS from one
@@ -257,7 +263,7 @@ export function CapabilityMatrixModal({
                 <b>MCP tools are not gated by this matrix.</b> Viberr can't know what a
                 third-party tool does, so nothing here restricts one. A server whose
                 tools write files or run commands gives an agent those powers even
-                when <b>Execute code / write to the repo</b> is withheld — granting a
+                when <b>Execute code / write to the repo</b> is withheld. Granting a
                 server IS the grant. The only rule Viberr can enforce is stated in
                 every run's system prompt: an MCP tool may never merge, close a task,
                 or change policy. Grant MCP servers as deliberately as you grant a

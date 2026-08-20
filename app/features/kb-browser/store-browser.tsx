@@ -476,7 +476,7 @@ function StoreTree({
       })}
       {rows.length === 0 && !newIn && (
         <div className="fm-empty">
-          Empty — drag files or folders here, upload, or import from GitHub.
+          Empty. Drag files or folders here, upload, or import from GitHub.
         </div>
       )}
     </div>
@@ -623,7 +623,7 @@ function useStoreOps(
       // successful upload looks like. Say which of the two nothings happened.
       if (skipped > 0) {
         push(
-          `Nothing uploaded — ${skipped} hidden item${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`,
+          `Nothing uploaded: ${skipped} hidden item${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`,
           "error",
         );
       }
@@ -685,7 +685,7 @@ function useStoreOps(
     if (!gh.url.trim()) {
       dispatchGh({
         type: "err",
-        err: "Paste a GitHub link — a repo, or a folder like github.com/owner/repo/tree/main/docs.",
+        err: "Paste a GitHub link: a repo, or a folder like github.com/owner/repo/tree/main/docs.",
       });
       return;
     }
@@ -874,7 +874,7 @@ function ReplaceConfirm({
       <h3 id="store-replace-title">Replace “{path}”?</h3>
       <p id="store-replace-desc">
         A document with that name is already in the store. Saving overwrites its
-        contents — the old text is gone, and agents load the new text on their
+        contents: the old text is gone, and agents load the new text on their
         next context load.
       </p>
       <div className="confirm-actions">
@@ -1035,8 +1035,8 @@ export function StoreBrowser({
       <dialog
         ref={dialogRef}
         className="modal-card modal-wide"
-        aria-label={"Files — " + title}
-        data-screen-label={"Files — " + title}
+        aria-label={"Files · " + title}
+        data-screen-label={"Files · " + title}
         inert={confirm !== null || editor.confirmReplace}
       >
         <div className="modal-head">
@@ -1099,7 +1099,7 @@ export function StoreBrowser({
                 <div className="cred-warn">
                   <Icon name="alert" />
                   This document is larger than the editor can load, so only the
-                  first part is shown — saving would destroy the rest. Edit it on
+                  first part is shown. Saving would destroy the rest. Edit it on
                   disk instead.
                 </div>
               )}
@@ -1177,7 +1177,7 @@ export function StoreBrowser({
           <div className="def-note">
             <Icon name="file" />
             <span>
-              This is the real folder on disk — files added outside Viberr appear
+              This is the real folder on disk. Files added outside Viberr appear
               after the next re-scan. Deleting here deletes from the store.
             </span>
           </div>

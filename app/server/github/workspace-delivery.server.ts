@@ -238,7 +238,10 @@ export async function reconcileWorkspaceDelivery(
     dataRoot,
     exec = defaultExec,
     backend = "claude",
-    role = "Specialist",
+    // U12: "specialist" is retired display vocabulary — this default flows into
+    // the RENDERED timeline actor role (roleHint → actor-ref). Mirrors
+    // DEFAULT_PROFILE_ROLE_LABEL.specialist in app/features/agents/agent-types.ts.
+    role = "Agent profile",
   } = input;
 
   const noop = (
@@ -592,7 +595,7 @@ export async function reconcileWorkspaceDelivery(
                 type: "note",
                 actor: POLICY_ENGINE_ACTOR,
                 title: null,
-                text: `**Note:** accepted PR #${detected.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
+                text: `**Note:** accepted PR #${detected.number} was closed on GitHub without merging, so the pending merge can no longer be completed from Viberr.`,
                 toAgent: false,
                 evidence: null,
               });

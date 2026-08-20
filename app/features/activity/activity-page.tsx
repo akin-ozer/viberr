@@ -168,7 +168,7 @@ const PEV_META: AuditKindTable = {
 
 /**
  * A `runtime.run.started` row, recognised by the sentence its projection
- * writes: `${actor} opened the ${role} runtime session — recorded per audit
+ * writes: `${actor} opened the ${role} runtime session. Recorded per audit
  * policy on` (`app/server/projections/activity-feed.server.ts`, the
  * `runtime.run.started` case). `AuditLogEntryView` carries no action name —
  * only the display kind and the rendered text — and threading one through
@@ -189,16 +189,16 @@ const PEV_META: AuditKindTable = {
  * fold that hides the row from the reader who never expands it.
  *
  * A display name cannot reach the end of the string: every audit template puts
- * fixed words after `${actor}`, and no other one ends in `runtime session —
- * recorded per audit policy on` (`runtime.run.interrupted` ends `agent run —
- * …`, `github.reconcile.project` `GitHub — …`, `task.ownership.admin_released`
- * `task owner — …`, `task.acceptance.forced` and the overrides elsewhere
+ * fixed words after `${actor}`, and no other one ends in `runtime session.
+ * Recorded per audit policy on` (`runtime.run.interrupted` ends `agent run.
+ * …`, `github.reconcile.project` `GitHub. …`, `task.ownership.admin_released`
+ * `task owner. …`, `task.acceptance.forced` and the overrides elsewhere
  * entirely). The trailing ` on` is the task-chip dangler, which every run row
  * keeps: `startRun` always audits with a `taskKey`, so `finishText` never
  * rewrites it to `.`.
  */
 const RUNTIME_SESSION_OPENED =
-  /\bopened the .+ runtime session — recorded per audit policy on$/;
+  /\bopened the .+ runtime session\. Recorded per audit policy on$/;
 
 export function isRuntimeSessionOpen(entry: AuditLogEntryView): boolean {
   return entry.kind === "audit" && RUNTIME_SESSION_OPENED.test(entry.text);
@@ -291,7 +291,7 @@ function AuditRow({
                     (entry.resolvedAt
                       ? ` · ${timeLabel(entry.resolvedAt)}`
                       : "")
-                  : "Open — grant the missing scope to resolve"
+                  : "Open: grant the missing scope to resolve"
               }
             >
               <Pill kind={resolved ? "done" : "input"} sm>
@@ -333,7 +333,7 @@ function CompactedSessions({
           <Icon name="agents" />
         </span>
         <span className="pev-main">
-          <strong>{entries.length} runtime sessions opened</strong> — each one
+          <strong>{entries.length} runtime sessions opened</strong>, each one
           recorded per audit policy.{" "}
           <button
             type="button"
@@ -366,6 +366,7 @@ function AuditLogs({
   entries,
   total,
   utc,
+  actorOptions,
   onOpen,
   onShowOlder,
 }: {
@@ -373,6 +374,8 @@ function AuditLogs({
   total: number;
   /** Timezone-agnostic first-pass rendering until hydration (see ActivityPage). */
   utc: boolean;
+  /** Everyone who ever wrote an audit row, for the actor filter. */
+  actorOptions: string[];
   onOpen: (key: string) => void;
   onShowOlder: () => void;
 }) {
@@ -390,12 +393,29 @@ function AuditLogs({
         <Icon name="lock" />
         <h2>Audit logs</h2>
         <span className="right sub fine">
-          {/* UI-46: this panel is deliberately UNFILTERED — say so, now that the
-              actor filter sits inside the Stream panel and no longer looks
-              page-level. */}
-          policy &amp; access · all actors
+          {/* UI-46 said "all actors" while this panel had no filter of its own;
+              it has one now (P21), so the honest header is the same count the
+              Stream carries — of the rows MATCHING the panel's filters. */}
+          policy &amp; access · {entries.length} of {total} entries
         </span>
       </div>
+      <FeedFilters
+        legend="audit logs"
+        params={{
+          q: "aq",
+          type: "aky",
+          actor: "aac",
+          task: "atk",
+          from: "afrom",
+          to: "ato",
+        }}
+        typeLabel="kind"
+        typeOptions={AUDIT_KIND_OPTIONS}
+        actorOptions={actorOptions.map((label) => ({
+          value: label,
+          label,
+        }))}
+      />
       <div className="pev-list">
         {compactAuditEntries(entries).map((row) =>
           row.compacted ? (
@@ -444,6 +464,155 @@ const FILTERS: [ActorFilter, string][] = [
   ["system", "System"],
 ];
 
+/* --------------------------------------------- per-panel filters (P21) */
+
+/** The audit panel's four display kinds, as its type filter's vocabulary. */
+const AUDIT_KIND_OPTIONS: { value: string; label: string }[] = [
+  { value: "violation", label: "violations" },
+  { value: "blockedact", label: "blocked actions" },
+  { value: "change", label: "changes" },
+  { value: "audit", label: "audit notes" },
+];
+
+/** The URL params one panel's filter bar owns (stream and audit each get
+ *  their own set, so filtering one never disturbs the other). */
+interface FeedFilterParams {
+  q: string;
+  type: string;
+  actor: string;
+  task: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * One panel's filter bar: search, a type/kind pick, an actor pick, a task id,
+ * and a date range — all URL-driven (the board's own `?q=` pattern: the param
+ * IS the state, so filters survive revalidation and are shareable), applied
+ * server-side by the loader so "X of Y" stays the truth about the store, not
+ * about the loaded slice.
+ */
+function FeedFilters({
+  legend,
+  params,
+  typeLabel,
+  typeOptions,
+  actorOptions,
+}: {
+  legend: string;
+  params: FeedFilterParams;
+  /** "type" for the stream's event types, "kind" for the audit categories. */
+  typeLabel: string;
+  typeOptions: { value: string; label: string }[];
+  actorOptions: { value: string; label: string }[];
+}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const get = (name: string) => searchParams.get(name) ?? "";
+  const setParam = (name: string, value: string) =>
+    setSearchParams(
+      (prev) => {
+        const url = new URLSearchParams(prev);
+        if (value) url.set(name, value);
+        else url.delete(name);
+        return url;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  const names = [
+    params.q,
+    params.type,
+    params.actor,
+    params.task,
+    params.from,
+    params.to,
+  ];
+  const active = names.some((name) => get(name) !== "");
+  return (
+    <div className="feed-filters" role="group" aria-label={legend}>
+      <label className="ff-search">
+        <Icon name="filter" />
+        <input
+          type="search"
+          value={get(params.q)}
+          placeholder="Search…"
+          aria-label={`Search the ${legend}`}
+          onChange={(e) => setParam(params.q, e.target.value)}
+        />
+      </label>
+      <select
+        className="ff-sel"
+        value={get(params.type)}
+        aria-label={`Filter the ${legend} by ${typeLabel}`}
+        onChange={(e) => setParam(params.type, e.target.value)}
+      >
+        <option value="">any {typeLabel}</option>
+        {typeOptions.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <select
+        className="ff-sel"
+        value={get(params.actor)}
+        aria-label={`Filter the ${legend} by actor`}
+        onChange={(e) => setParam(params.actor, e.target.value)}
+      >
+        <option value="">any actor</option>
+        {actorOptions.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <input
+        className="ff-task mono"
+        type="search"
+        value={get(params.task)}
+        placeholder="Task id"
+        aria-label={`Filter the ${legend} by task id`}
+        onChange={(e) => setParam(params.task, e.target.value)}
+      />
+      <input
+        className="ff-date"
+        type="date"
+        value={get(params.from)}
+        aria-label={`From date for the ${legend}`}
+        onChange={(e) => setParam(params.from, e.target.value)}
+      />
+      <span className="ff-dash" aria-hidden="true">
+        to
+      </span>
+      <input
+        className="ff-date"
+        type="date"
+        value={get(params.to)}
+        aria-label={`To date for the ${legend}`}
+        onChange={(e) => setParam(params.to, e.target.value)}
+      />
+      {active && (
+        <button
+          type="button"
+          className="btn ghost sm"
+          onClick={() =>
+            setSearchParams(
+              (prev) => {
+                const url = new URLSearchParams(prev);
+                for (const name of names) url.delete(name);
+                return url;
+              },
+              { replace: true, preventScrollReset: true },
+            )
+          }
+        >
+          <Icon name="x" />
+          Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function ActivityPage({
   projectSlug,
   projectName,
@@ -451,14 +620,20 @@ export function ActivityPage({
   streamTotal,
   audit,
   auditTotal,
+  streamOptions,
+  auditActors,
 }: {
   projectSlug: string;
   projectName: string;
   stream: ActivityStreamRowView[];
-  /** Total rows in the store (drives the "Show older" affordances). */
+  /** Total rows MATCHING the panel's filters (drives "X of Y" + "Show older"). */
   streamTotal: number;
   audit: AuditLogEntryView[];
   auditTotal: number;
+  /** The stream's filter vocabulary (actors by stable ref, event types). */
+  streamOptions: { actors: { ref: string; label: string }[]; types: string[] };
+  /** The audit panel's actor labels. */
+  auditActors: string[];
 }) {
   const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
@@ -548,6 +723,26 @@ export function ActivityPage({
                 </span>
               </span>
             </div>
+            <FeedFilters
+              legend="activity stream"
+              params={{
+                q: "sq",
+                type: "sty",
+                actor: "sac",
+                task: "stk",
+                from: "sfrom",
+                to: "sto",
+              }}
+              typeLabel="type"
+              typeOptions={streamOptions.types.map((type) => ({
+                value: type,
+                label: type,
+              }))}
+              actorOptions={streamOptions.actors.map((a) => ({
+                value: a.ref,
+                label: a.label,
+              }))}
+            />
             {shown.map((g) => (
               <div key={g.day}>
                 <div className="act-day">{g.day}</div>
@@ -558,7 +753,7 @@ export function ActivityPage({
                     </span>
                     <span className="pev-main">
                       <strong className="act-actor">
-                        {r.actor ? r.actor.name : "—"}
+                        {r.actor ? r.actor.name : "−"}
                       </strong>
                       <span className="act-sep">·</span>
                       <ActivityText text={r.text} />{" "}
@@ -601,7 +796,7 @@ export function ActivityPage({
             )}
             {streamCapped && (
               <div className="sub feed-capped">
-                Showing the newest {STREAM_MAX} events — older activity stays in
+                Showing the newest {STREAM_MAX} events. Older activity stays in
                 the task timelines.
               </div>
             )}
@@ -611,6 +806,7 @@ export function ActivityPage({
             entries={audit}
             total={auditTotal}
             utc={!local}
+            actorOptions={auditActors}
             onOpen={onOpen}
             onShowOlder={() =>
               showOlder("audit", Math.min(audit.length + AUDIT_STEP, AUDIT_MAX))

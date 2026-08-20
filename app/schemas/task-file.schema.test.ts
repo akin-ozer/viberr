@@ -8,6 +8,7 @@ import {
   nextWorkRevision,
   parseTaskFrontmatter,
   requiredReviewers,
+  sanitizeEventAttachmentNames,
   type Engagement,
   type ReviewVerdict,
   type WorkRevision,
@@ -725,5 +726,35 @@ describe("packet block parse (tolerant)", () => {
 
   it("null/undefined → no packet, no diagnostics", () => {
     expect(parsePacket(null)).toEqual({ packet: null, diagnostics: [] });
+  });
+});
+
+describe("sanitizeEventAttachmentNames (P21)", () => {
+  it("keeps clean names, drops separators/control chars, dedupes, caps at 20", () => {
+    const names = [
+      "page-2026-08-19T17-38-40-756Z.png",
+      "page-2026-08-19T17-38-40-756Z.png", // duplicate
+      "../traversal.png",
+      "nested/inside.png",
+      "back\\slash.png",
+      "forged\nrow.png",
+      " padded.png", // trims differently — cannot round-trip
+      "",
+      "ok two words.yml",
+    ];
+    expect(sanitizeEventAttachmentNames(names)).toEqual([
+      "page-2026-08-19T17-38-40-756Z.png",
+      "ok two words.yml",
+    ]);
+    const many = Array.from({ length: 30 }, (_, i) => `shot-${i}.png`);
+    expect(sanitizeEventAttachmentNames(many)).toHaveLength(20);
+  });
+
+  it("returns null when nothing usable survives — callers omit the field", () => {
+    expect(sanitizeEventAttachmentNames(null)).toBeNull();
+    expect(sanitizeEventAttachmentNames(undefined)).toBeNull();
+    expect(sanitizeEventAttachmentNames([])).toBeNull();
+    expect(sanitizeEventAttachmentNames(["../x", "a/b"])).toBeNull();
+    expect(sanitizeEventAttachmentNames(["x".repeat(201)])).toBeNull();
   });
 });

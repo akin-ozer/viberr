@@ -162,7 +162,7 @@ export function StageMenu({
       >
         <span className={`sm-current${changed ? " changed" : ""}`}>
           <span className="col-stage-dot" style={{ background: current?.color }} />
-          <span className="sm-name">{current?.name ?? "—"}</span>
+          <span className="sm-name">{current?.name ?? "−"}</span>
         </span>
         <Icon name="chevron" className="sm-caret" />
       </button>

@@ -45,7 +45,10 @@ export interface GitHubAskpassEnv {
  * host credential store. Always `dispose()` after the git process exits.
  */
 export function createGitHubAskpassEnv(input: {
-  token: string;
+  /** Absent ⇒ the invocation runs ANONYMOUSLY: the same prompt-suppressed,
+   *  helper-free environment with no askpass program at all (a public-repo
+   *  fetch must not carry an empty credential). */
+  token?: string;
   baseEnv?: NodeJS.ProcessEnv;
 }): GitHubAskpassEnv {
   const env: NodeJS.ProcessEnv = {
@@ -58,13 +61,16 @@ export function createGitHubAskpassEnv(input: {
   delete env.GIT_ASKPASS;
   delete env.SSH_ASKPASS;
 
-  const askpassDir = mkdtempSync(path.join(tmpdir(), "viberr-git-askpass-"));
-  const askpassPath = path.join(askpassDir, "askpass.sh");
-  writeFileSync(askpassPath, ASKPASS_SCRIPT, { encoding: "utf8", mode: 0o700 });
-  chmodSync(askpassPath, 0o700);
-  env.GIT_ASKPASS = askpassPath;
-  env[ASKPASS_USERNAME_ENV] = "x-access-token";
-  env[ASKPASS_PASSWORD_ENV] = input.token;
+  let askpassDir: string | null = null;
+  if (input.token) {
+    askpassDir = mkdtempSync(path.join(tmpdir(), "viberr-git-askpass-"));
+    const askpassPath = path.join(askpassDir, "askpass.sh");
+    writeFileSync(askpassPath, ASKPASS_SCRIPT, { encoding: "utf8", mode: 0o700 });
+    chmodSync(askpassPath, 0o700);
+    env.GIT_ASKPASS = askpassPath;
+    env[ASKPASS_USERNAME_ENV] = "x-access-token";
+    env[ASKPASS_PASSWORD_ENV] = input.token;
+  }
 
   let disposed = false;
   return {
@@ -75,7 +81,7 @@ export function createGitHubAskpassEnv(input: {
       delete env[ASKPASS_USERNAME_ENV];
       delete env[ASKPASS_PASSWORD_ENV];
       delete env.GIT_ASKPASS;
-      rmSync(askpassDir, { recursive: true, force: true });
+      if (askpassDir) rmSync(askpassDir, { recursive: true, force: true });
     },
   };
 }
@@ -86,14 +92,12 @@ export function githubRepositoryUrl(repo: string): string {
 }
 
 /**
- * Rewrite every stored origin URL to the credential-free GitHub URL. This is
- * used when reusing clones created by older Viberr versions that embedded the
- * project PAT in `remote.origin.url`.
+ * Point a clone's `origin` at `url`, replacing EVERY stored value.
+ *
+ * `--replace-all` is the whole point: a repo can hold several `remote.origin.url`
+ * entries, and leaving one behind leaves whatever it carried behind with it.
  */
-export function githubRemoteSanitizationArgs(
-  repo: string,
-  destination: string,
-): string[] {
+export function setOriginUrlArgs(destination: string, url: string): string[] {
   return [
     "-C",
     destination,
@@ -101,8 +105,21 @@ export function githubRemoteSanitizationArgs(
     "--local",
     "--replace-all",
     "remote.origin.url",
-    githubRepositoryUrl(repo),
+    url,
   ];
+}
+
+/**
+ * Rewrite every stored origin URL to the credential-free GitHub URL. This is
+ * used when reusing clones created by older Viberr versions that embedded the
+ * project PAT in `remote.origin.url`, and when a workspace cut from the project
+ * mirror cache has to stop pointing at that local path (`repo-mirror.server`).
+ */
+export function githubRemoteSanitizationArgs(
+  repo: string,
+  destination: string,
+): string[] {
+  return setOriginUrlArgs(destination, githubRepositoryUrl(repo));
 }
 
 /**
@@ -261,13 +278,13 @@ const killedSchema = z.object({ killed: z.literal(true) });
  * on top of that, so pass the token whenever the caller holds it.
  */
 export function cloneFailureLogDetails(
-  error: unknown,
+  cause: unknown,
   opts: { token?: string | null } = {},
 ): CloneFailureLogDetails {
-  const errno = spawnErrnoSchema.safeParse(error);
-  const exitStatus = exitStatusSchema.safeParse(error);
-  const termination = terminationSchema.safeParse(error);
-  const killed = killedSchema.safeParse(error).success;
+  const errno = spawnErrnoSchema.safeParse(cause);
+  const exitStatus = exitStatusSchema.safeParse(cause);
+  const termination = terminationSchema.safeParse(cause);
+  const killed = killedSchema.safeParse(cause).success;
 
   const details: CloneFailureLogDetails = {
     reason:
@@ -279,7 +296,7 @@ export function cloneFailureLogDetails(
   };
   if (exitStatus.success) details.exitCode = exitStatus.data.code;
   if (termination.success) details.signal = termination.data.signal;
-  const detail = redactGitOutput(gitErrorText(error), opts);
+  const detail = redactGitOutput(gitErrorText(cause), opts);
   if (detail) details.detail = detail;
   return details;
 }

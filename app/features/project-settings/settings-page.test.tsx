@@ -13,43 +13,29 @@ import {
   StagesPanel,
   resolveStageOrder,
   stageMoveOptions,
+  type ProjectActionGate,
 } from "./settings-page";
 import { roleCan, type ProjectRole, type RbacAction } from "~/shared/rbac";
-
-/** The one action id `roleCan` may answer true for; null delegates to the real one. */
-interface GrantOnlyGate {
-  action: RbacAction | null;
-}
 
 /**
  * E3: `edit-policy`, `manage-members` and `grant-github-scope` are three
  * DIFFERENT server guards that happen to overlap in tier today (the first two
  * are both admin-only). A test that asserts "admin sees it, viewer doesn't"
  * therefore passes with the wrong action id wired in — the exact reason the
- * page carried a `myRole === "admin"` literal for so long. `grantOnly` makes
- * `roleCan` answer for exactly ONE action id, so each panel's gate is pinned to
- * the id it actually asks for and no other. Left null it delegates to the real
- * implementation, so every other test in this file sees production behaviour.
+ * page carried a `myRole === "admin"` literal for so long.
+ *
+ * `grantOnly` builds a real `ProjectActionGate` that answers true for exactly
+ * ONE action id, handed to the page through its own `gate` prop. That is the
+ * seam the page ships (default: the shared `roleCan`), so no module is replaced
+ * and every other test in this file still sees production behaviour without
+ * having to reset anything.
  */
-const { grantOnly } = vi.hoisted(() => {
-  const grantOnly: GrantOnlyGate = { action: null };
-  return { grantOnly };
-});
-vi.mock("~/shared/rbac", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("~/shared/rbac")>();
-  return {
-    ...actual,
-    roleCan: (role: ProjectRole | null | undefined, action: RbacAction) =>
-      grantOnly.action === null
-        ? actual.roleCan(role, action)
-        : action === grantOnly.action,
-  };
-});
+const grantOnly =
+  (granted: RbacAction): ProjectActionGate =>
+  (_role, action) =>
+    action === granted;
 
-afterEach(() => {
-  grantOnly.action = null;
-  cleanup();
-});
+afterEach(cleanup);
 
 const PROJECT: SettingsViewData["project"] = {
   slug: "viberr-core",
@@ -316,11 +302,11 @@ describe("StagesPanel", () => {
       expect(queryByLabelText(/^Move Done/)).toBeNull();
       // The label names the current position, like StageMenu's does.
       expect(
-        getByLabelText("Move Ready — currently stage 2 of 5"),
+        getByLabelText("Move Ready, currently stage 2 of 5"),
       ).toBeTruthy();
 
       // First movable row: forward moves only.
-      fireEvent.click(getByLabelText("Move Ready — currently stage 2 of 5"));
+      fireEvent.click(getByLabelText("Move Ready, currently stage 2 of 5"));
       const labels = Array.from(
         document.querySelectorAll('[role="menuitem"]'),
       ).map((n) => n.textContent);
@@ -337,7 +323,7 @@ describe("StagesPanel", () => {
           onRemove={() => {}}
         />,
       );
-      fireEvent.click(getByLabelText("Move Review — currently stage 4 of 5"));
+      fireEvent.click(getByLabelText("Move Review, currently stage 4 of 5"));
       fireEvent.click(getByText("Move to first"));
       // Review hops to the front of the MOVABLE window; triage/done stay pinned.
       expect(onReorder).toHaveBeenCalledWith([
@@ -357,7 +343,7 @@ describe("StagesPanel", () => {
       // the row's `<button>` menu trigger; the test needs the element identity
       // back as a focus target, which RTL hands over as a bare `HTMLElement`.
       const trigger = getByLabelText(
-        "Move In Progress — currently stage 3 of 5",
+        "Move In Progress, currently stage 3 of 5",
       ) as HTMLButtonElement;
       fireEvent.click(trigger);
       const menu = document.querySelector('[role="menu"]')!;
@@ -384,7 +370,7 @@ describe("StagesPanel", () => {
       const { getByLabelText } = render(
         <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
       );
-      fireEvent.click(getByLabelText("Move Ready — currently stage 2 of 5"));
+      fireEvent.click(getByLabelText("Move Ready, currently stage 2 of 5"));
       expect(document.querySelector('[role="menu"]')).not.toBeNull();
       fireEvent.mouseDown(document.body);
       expect(document.querySelector('[role="menu"]')).toBeNull();
@@ -849,35 +835,62 @@ describe("RepoPanel", () => {
     expect(onClear).toHaveBeenCalled();
   });
 
-  it("renders cred-ok when every scope is granted; non-managers get no manage row", () => {
+  /**
+   * F21-5 (live, Selin) — this panel rendered the credential card to EVERY
+   * member: the token's label, its masked tail and its per-scope verdicts, with
+   * only the manage row withheld below `grant-github-scope`. /github closed the
+   * same leak in pass 19 (R19-11, owner ruling Q-V1) by withdrawing the card
+   * outright; the two surfaces render the SAME component from the SAME fact, so
+   * they now answer the same way. The old assertion pinned the leak — it
+   * asserted `.cred-ok` at `canGrant={false}` — which is why 19 passes went by
+   * with the card in a viewer's DOM.
+   */
+  it("F21-5: the credential card renders under the grant and is WITHDRAWN without it", () => {
     const allOk = {
       ...CREDENTIAL,
       scopes: CREDENTIAL.scopes.map((s) => ({ ...s, ok: true })),
     };
-    const { container, getByText } = render(
-      <RepoPanel
-        canRepair
-        branchCleanup
-        onSetBranchCleanup={() => {}}
-        footprintTasks={0}
-        repairBusy={false}
-        repairResult={undefined}
-        onRepair={() => {}}
-        repo="akin-ozer/viberr"
-        credential={allOk}
-        canGrant={false}
-        busy={false}
-        credBusy={false}
-        onGrantScope={() => {}}
-        onSetCredential={() => {}}
-        onClearCredential={() => {}}
-        onOpenTask={() => {}}
-      />,
-    );
-    expect(container.querySelector(".cred-ok")).not.toBeNull();
-    expect(getByText("every task uses this repository")).toBeTruthy();
-    // canGrant=false → no attach/rotate/remove affordances.
-    expect(container.querySelector(".cred-manage")).toBeNull();
+    const panel = (canGrant: boolean) =>
+      render(
+        <RepoPanel
+          canRepair
+          branchCleanup
+          onSetBranchCleanup={() => {}}
+          footprintTasks={0}
+          repairBusy={false}
+          repairResult={undefined}
+          onRepair={() => {}}
+          repo="akin-ozer/viberr"
+          credential={allOk}
+          canGrant={canGrant}
+          busy={false}
+          credBusy={false}
+          onGrantScope={() => {}}
+          onSetCredential={() => {}}
+          onClearCredential={() => {}}
+          onOpenTask={() => {}}
+        />,
+      );
+
+    // With the grant: the card, its all-scopes-proven footer and the manage row.
+    const granted = panel(true);
+    expect(granted.container.querySelector(".cred-ok")).not.toBeNull();
+    expect(granted.container.querySelector(".cred-manage")).not.toBeNull();
+    expect(granted.container.textContent).toContain(CREDENTIAL.masked);
+    cleanup();
+
+    // Without it: no card at all — no tail, no label, no scope chips — and the
+    // gap is explained rather than blank.
+    const withheld = panel(false);
+    expect(withheld.container.querySelector(".cred-card")).toBeNull();
+    expect(withheld.container.querySelector(".cred-manage")).toBeNull();
+    expect(withheld.container.querySelector(".scope-chip")).toBeNull();
+    expect(withheld.container.textContent).not.toContain(CREDENTIAL.masked);
+    expect(withheld.container.textContent).not.toContain(CREDENTIAL.label);
+    expect(withheld.container.textContent).toContain("Grant GitHub scope");
+    // …and the rest of the panel really did render, so the absences above are
+    // the gate rather than a blank component.
+    expect(withheld.getByText("every task uses this repository")).toBeTruthy();
   });
 });
 
@@ -1017,12 +1030,15 @@ describe("SettingsPage — each panel gates on the action its own server guard c
     branchCleanupOnMerge: true,
   };
 
-  function renderPage() {
+  /** Always an admin — the ROLE is held constant on purpose, so what the page
+   *  renders can only be explained by the ACTION id each panel asks the gate
+   *  for. */
+  function renderPage(gate: ProjectActionGate) {
     const Stub = createRoutesStub([
       {
         path: "/",
         Component: () => (
-          <SettingsPage data={DATA} meId="u_arda" myRole="admin" />
+          <SettingsPage data={DATA} meId="u_arda" myRole="admin" gate={gate} />
         ),
       },
     ]);
@@ -1062,22 +1078,19 @@ describe("SettingsPage — each panel gates on the action its own server guard c
    * which showed a stakeholder a destructive surface they can never use and
    * named archive/delete as if they were on the table. The gate is
    * `edit-policy` — the same id the archive/delete server guards check — so
-   * drive it with `grantOnly` like every other panel gate here.
+   * drive it with a `grantOnly` gate like every other panel gate here.
    */
   it("Q-V1: the Danger zone renders only under edit-policy — any other grant hides it entirely", () => {
-    grantOnly.action = "manage-members";
-    const withoutGrant = renderPage();
+    const withoutGrant = renderPage(grantOnly("manage-members"));
     expect(withoutGrant.container.textContent).not.toContain("Danger zone");
     cleanup();
 
-    grantOnly.action = "edit-policy";
-    const withGrant = renderPage();
+    const withGrant = renderPage(grantOnly("edit-policy"));
     expect(withGrant.container.textContent).toContain("Danger zone");
   });
 
   it("grants ONLY edit-policy → identity, stages and repo repair; members and credentials stay shut", () => {
-    grantOnly.action = "edit-policy";
-    const { container } = renderPage();
+    const { container } = renderPage(grantOnly("edit-policy"));
     expect(affordances(container)).toEqual({
       identity: true,
       stages: true,
@@ -1088,8 +1101,7 @@ describe("SettingsPage — each panel gates on the action its own server guard c
   });
 
   it("grants ONLY manage-members → the members panel, and nothing else", () => {
-    grantOnly.action = "manage-members";
-    const { container } = renderPage();
+    const { container } = renderPage(grantOnly("manage-members"));
     expect(affordances(container)).toEqual({
       identity: false,
       stages: false,
@@ -1100,8 +1112,7 @@ describe("SettingsPage — each panel gates on the action its own server guard c
   });
 
   it("grants ONLY grant-github-scope → the credential row, and nothing else", () => {
-    grantOnly.action = "grant-github-scope";
-    const { container } = renderPage();
+    const { container } = renderPage(grantOnly("grant-github-scope"));
     expect(affordances(container)).toEqual({
       identity: false,
       stages: false,
@@ -1116,15 +1127,17 @@ describe("SettingsPage — each panel gates on the action its own server guard c
   // reason to be disabled has to track the same id, not the repair button's
   // mere presence.
   it("the after-merge branch-cleanup toggle follows edit-policy, not manage-members", () => {
-    grantOnly.action = "manage-members";
-    const shut = renderPage().container.querySelector<HTMLInputElement>(
+    const shut = renderPage(
+      grantOnly("manage-members"),
+    ).container.querySelector<HTMLInputElement>(
       '.kv-row input[type="checkbox"]',
     )!;
     expect(shut.disabled).toBe(true);
     cleanup();
 
-    grantOnly.action = "edit-policy";
-    const open = renderPage().container.querySelector<HTMLInputElement>(
+    const open = renderPage(
+      grantOnly("edit-policy"),
+    ).container.querySelector<HTMLInputElement>(
       '.kv-row input[type="checkbox"]',
     )!;
     expect(open.disabled).toBe(false);
@@ -1194,6 +1207,14 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
       "Members",
       "Repository & credentials",
     ]);
+    // F21-5: the Repository panel above is present — and this is the assertion
+    // that used to stop there, which is exactly how the credential card kept
+    // rendering to a Viewer underneath it. The panel stays; the token does not.
+    expect(container.querySelector(".cred-card")).toBeNull();
+    expect(container.textContent).not.toContain(CREDENTIAL.masked);
+    expect(container.textContent).not.toContain(CREDENTIAL.label);
+    expect(container.querySelector(".scope-chip")).toBeNull();
+    expect(container.textContent).toContain("Grant GitHub scope");
   });
 
   it("a contributor — full task authority, no project lifecycle — gets none either", () => {

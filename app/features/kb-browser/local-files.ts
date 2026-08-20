@@ -116,12 +116,11 @@ export async function entriesFromDataTransfer(
   const items = Array.from(dt.items ?? []);
   const entries: FileSystemEntryLike[] = [];
   for (const item of items) {
-    const getEntry = item.webkitGetAsEntry;
     // Feature detection, not a shape check: `webkitGetAsEntry` is non-standard,
-    // so a browser (or jsdom) without it must fall through to the flat list
-    // below rather than throw.
-    if (typeof getEntry !== "function") continue;
-    const entry = getEntry.call(item);
+    // so a browser (or jsdom) that does not provide it must fall through to the
+    // flat list below rather than throw.
+    if (!("webkitGetAsEntry" in item)) continue;
+    const entry = item.webkitGetAsEntry();
     if (entry) entries.push(entry);
   }
   if (entries.length > 0) {

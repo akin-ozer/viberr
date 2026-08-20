@@ -74,7 +74,7 @@ export function telemetryLabel(entry: {
 }): string {
   return (
     `${entry.count} telemetry event${entry.count === 1 ? "" : "s"} ` +
-    `(${entry.tags.join(", ")}) — token and rate-limit accounting, hidden here; ` +
+    `(${entry.tags.join(", ")}): token and rate-limit accounting, hidden here; ` +
     `“{ } raw” shows them`
   );
 }

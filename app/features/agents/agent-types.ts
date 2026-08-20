@@ -60,6 +60,16 @@ export interface AgentProfileView {
   /** Reasoning/effort level ("" when unset) — the picker's stored effort. */
   effort: string;
   scope: string;
+  /**
+   * OBS-7 — this deployment carries its OWN definition snapshot while still
+   * showing the global template's `scope` sentence: the project forked the
+   * global base (AP-07: "keeps its own copy and stops tracking the global") and
+   * the label went on saying "Global base", as if edits here still followed the
+   * org profile. The raw `scope` stays raw on purpose — the edit writer persists
+   * `current.scope` back onto the deployment, so decorating it in this view
+   * would compound the sentence on every save. The card composes the two.
+   */
+  customized: boolean;
   desc: string;
   /** The profile's LONG persona/instructions (template body, D6) — what an
    * agent run receives as its system-prompt persona when no shipped
@@ -99,6 +109,25 @@ export interface LibraryProfileView {
 }
 
 /**
+ * What a profile IS on this board, for the two places a stored role says
+ * nothing: the render fallback below, and the roster's own `role` default when
+ * neither the deployment nor the template declares one
+ * (`effectiveProfileView`). ONE literal, shared, so the label a card shows and
+ * the label the server assembles cannot drift apart.
+ *
+ * U12 residual: the specialist branch read "Specialist" — the retired third
+ * name for the object the Agents page has called an agent PROFILE since C11
+ * (engaged per task as the delivering agent, or as a supporting one). It leaked
+ * onto every role-less card's hero pill, roster row and glyph tooltip, i.e.
+ * exactly the profiles whose stored role is empty and can least afford a name
+ * the rest of the page does not use.
+ */
+export const DEFAULT_PROFILE_ROLE_LABEL = {
+  operator: "Orchestration",
+  specialist: "Agent profile",
+} as const satisfies Record<"operator" | "specialist", string>;
+
+/**
  * The role line a profile renders under (or beside) its name.
  *
  * P14-WL-05: the library deploy writes `role: fm.role || fm.name`, so a
@@ -116,7 +145,7 @@ export function profileRoleLabel(
 ): string {
   const trimmed = role.trim();
   if (!trimmed || trimmed.toLowerCase() === name.trim().toLowerCase()) {
-    return kind === "operator" ? "Orchestration" : "Specialist";
+    return DEFAULT_PROFILE_ROLE_LABEL[kind];
   }
   return trimmed;
 }

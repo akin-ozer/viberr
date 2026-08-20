@@ -106,7 +106,7 @@ function NtfNeedsYou({
         {!items.length && (
           <div className="empty">
             {total > 0
-              ? `${total} decision${total === 1 ? " is" : "s are"} waiting on you — switch to "All" to see ${total === 1 ? "it" : "them"}.`
+              ? `${total} decision${total === 1 ? " is" : "s are"} waiting on you. Switch to "All" to see ${total === 1 ? "it" : "them"}.`
               : "Nothing is waiting on you."}
           </div>
         )}
@@ -167,7 +167,7 @@ function NtfStream({
                 </span>
                 <span className="pev-main">
                   <strong className="act-actor">
-                    {n.from ? n.from.name : "—"}
+                    {n.from ? n.from.name : "−"}
                   </strong>
                   <span className="act-sep">·</span>
                   <RichText text={n.text} mentions={false} />{" "}

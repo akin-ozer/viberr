@@ -136,6 +136,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "128c0e733d181ce93c6b3c15c71e890fc629c592f39b08d03a44b6b77afd0d1c",
     "197eaf0b400f61d690d0ec32198fafbd120fa518ef27f00e13b4b427f8bf5856",
     "2693d1381b637cac935db3b2d95f9fd8f6e4a1eb6228ea3d331e8a890e8e7a32",
+    // pass-21 outgoing (F21-21 / F21-14 / F21-16 rewrite of the workspace,
+    // acceptance and policy-scope paragraphs).
+    "34a6ce3e9601f96ae5f49b403f4eca0cb5d6e356005b6780d8b1ce63a2c9b87d",
     "429216ebbe1d9b413608c34dd83e04794351915d1b9e2cc535f3e97b64c95a1b",
     "5340ad240553d280336600b1f3341931158a8b0926e487ace802d5e00bfa71ae",
     "70501e7100afef430d79e8d63497326b8e6504258a4743002217c920867cf96f",
@@ -147,6 +150,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d0475c39c69c6055ce5bf86e2fb0fd98c1488b473919f8dd205a125f83b55f46",
     "da9cf46677bd3987796585ec45c683d48e1885ad723b190cd612693fffe6ac6f",
     "ef9e653a6bd7e19fa78a34a0dfdc48c26cbc0cdba8c83493ad9789642cb289b4",
+    // pass-21 outgoing (humanizer sweep: em/en dashes rewritten as plain
+    // sentences; instructions unchanged).
+    "9380e0473a0b8a0e2edb5b8175fb5457c595d0a91955b9d3333e09ec50323525",
   ],
   [path.join("agents", "profiles", "operator.md")]: [
     "339ad23dd69f63e57bf52d110b263a2da4ae683bdbf5b020039eaf075115dec4",
@@ -165,10 +171,14 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "aba6b1e161806c63097a88e88d5c48c0cc47613afa3616500111f6ffda298294",
     "c7343d37eb460545861218a9b312d25f8e3884423e92da1329c2169c0acde227",
     "e64e110e43b851b7e8809973a7f060d95e35b4e723648749f1b57bf4528ea07a",
+    // pass-21 outgoing (humanizer sweep).
+    "0ad7af1782e6f525f11daa8b9e8533a555f34baeffc918ca91b51d0aadfcae4f",
   ],
   [path.join("skills", "developer-expertise", "SKILL.md")]: [
     "2cd21e2f0b11a3d35ca0188bf1d42af66f4149b5d7ad3bbb2162cdeb712d91fa",
     "9eed9c7c574b54491362374b8feff9760ab3401b48b60d077b889e60999ebe1f",
+    // pass-21 outgoing (humanizer sweep).
+    "d7c78f20730ef44a8e1d490cc2efbb2a1cf1cd1c5bb21a63bf8343df7ba1b17e",
   ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
     "67b14be125a5f8b213a9ad3de6682c4762bdef703a40dc32ba1c907a267e1c31",

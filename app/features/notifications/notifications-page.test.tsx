@@ -285,7 +285,7 @@ describe("NotificationsPage", () => {
     expect(getByText("3 decisions · 3 hidden by the filter")).toBeTruthy();
     expect(
       getByText(
-        '3 decisions are waiting on you — switch to "All" to see them.',
+        '3 decisions are waiting on you. Switch to "All" to see them.',
       ),
     ).toBeTruthy();
   });

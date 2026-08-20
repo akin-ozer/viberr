@@ -1,8 +1,14 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
+import { VALIDATION_VALUES } from "~/schemas/task-file.schema";
+import { runMigrations } from "./db/migration-runner.server";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
-import { getEnv, type Env } from "./config/env.server";
+import {
+  getEnv,
+  insecureAuthOriginWarning,
+  type Env,
+} from "./config/env.server";
 import {
   acquireDataRootLock,
   DataRootLockedError,
@@ -111,6 +117,10 @@ type BootIntegrityFields = {
   users: number;
   build: BuildInfo;
   disk: { free: string; total: string; status: DiskStatus } | null;
+  /** F21-1: absent on a healthy schema — see `projectionValidationGaps`. */
+  projectionSchemaDrift?: string[];
+  /** Absent on a healthy schema — see `projectionMissingColumns`. */
+  projectionMissingColumns?: string[];
 };
 
 /** One `count(*) AS c` aggregate → its number. */
@@ -120,6 +130,95 @@ function countRows(db: DatabaseSync, sql: string): number {
   // the integer `c`.
   const row = db.prepare(sql).get() as { c: number };
   return row.c;
+}
+
+/**
+ * F21-1 — which `VALIDATION_VALUES` members THIS database's
+ * `task_projections.validation` CHECK will refuse. Empty on a healthy schema.
+ *
+ * The CHECK is a hand-written mirror of `VALIDATION_VALUES` in
+ * `db/migrations/0001_baseline.sql`, and the repository pins the two together
+ * (`app/server/db/projection-validation-check.test.ts`). That pin cannot reach a
+ * database that already exists: migrations are squashed and forward-only, so
+ * widening the baseline's CHECK changes what a FRESH `projection.sqlite` gets and
+ * nothing else. A deployed root carries whatever CHECK shipped the day it was
+ * first opened.
+ *
+ * The drift is silent and expensive. `deriveValidation` returns a value the CHECK
+ * rejects, the INSERT throws `CHECK constraint failed`, and `rebuildPath`'s catch
+ * swallows it as "projection rebuild failed" — so the task stops projecting and
+ * its row goes stale, with nothing on any surface saying why. Reading the DDL
+ * sqlite itself stored is the cheapest honest way to see it coming, and boot is
+ * the one moment an operator is already reading this log.
+ */
+function projectionValidationGaps(db: DatabaseSync): string[] {
+  // SAFETY: `sql` is the only selected column; `sqlite_master.sql` is TEXT and
+  // is non-null for every CREATE TABLE row (it is null only for the indexes
+  // sqlite auto-creates). `.get()` yields undefined when the table is absent.
+  const row = db
+    .prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_projections'`,
+    )
+    .get() as { sql: string | null } | undefined;
+  const ddl = row?.sql;
+  // No table at all is not drift — a database this early has no projections to
+  // lose, and the migration runner is the thing that would have complained.
+  if (!ddl) return [];
+  const check = ddl.match(
+    /validation\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\(\s*validation\s+IN\s*\(([^)]*)\)/i,
+  );
+  // A column with no CHECK at all admits everything — the reverse of drift.
+  if (!check) return [];
+  const admitted = new Set(
+    check[1]!.split(",").map((value) => value.trim().replace(/^'|'$/g, "")),
+  );
+  return VALIDATION_VALUES.filter((value) => !admitted.has(value));
+}
+
+/**
+ * Pass-21 live-validation catch (sibling of `projectionValidationGaps`):
+ * `task_projections` columns THIS database is missing relative to what the
+ * current build's baseline creates. A squashed, forward-only baseline means a
+ * column added to `0001_baseline.sql` (e.g. `work_revision_sha`) reaches only
+ * FRESH data roots — on an existing root the rebuilder's INSERT then fails
+ * with "no such column" for EVERY task, which is strictly worse than the CHECK
+ * drift above (nothing projects at all). The expectation is read from the real
+ * migrations run against a throwaway in-memory database, so this can never
+ * drift from the shipped baseline; the cost is one schema-only migration run
+ * at boot.
+ *
+ * Exported for the drift test beside `logBootIntegrity`.
+ */
+export function projectionMissingColumns(db: DatabaseSync): string[] {
+  // The tables the rebuilder INSERTs into by explicit column list — a column
+  // added to the (squashed, forward-only) baseline never reaches an existing
+  // root, and the first reprojection then fails with 'no such column'.
+  const rebuilderTables = ["task_projections", "task_events"];
+  const expectedDb = new DatabaseSync(":memory:");
+  try {
+    runMigrations(expectedDb);
+    const missing: string[] = [];
+    for (const table of rebuilderTables) {
+      // SAFETY: `PRAGMA table_info` rows always carry a non-null TEXT `name`
+      // column; only `name` is read.
+      const live = db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all() as Array<{ name: string }>;
+      // No table at all is the migration runner's problem, same stance as above.
+      if (live.length === 0) continue;
+      // SAFETY: same `PRAGMA table_info` row shape as the live read above.
+      const expected = expectedDb
+        .prepare(`PRAGMA table_info(${table})`)
+        .all() as Array<{ name: string }>;
+      const liveNames = new Set(live.map((column) => column.name));
+      for (const column of expected) {
+        if (!liveNames.has(column.name)) missing.push(`${table}.${column.name}`);
+      }
+    }
+    return missing;
+  } finally {
+    expectedDb.close();
+  }
 }
 
 /**
@@ -175,7 +274,43 @@ export function logBootIntegrity(db: DatabaseSync): void {
   // Named only when some are actually gone: a healthy boot has nothing to list,
   // and an empty `missingDirs: []` reads like a finding that isn't there.
   if (missingDirs.length > 0) fields.missingDirs = missingDirs;
+  const validationGaps = projectionValidationGaps(db);
+  if (validationGaps.length > 0) fields.projectionSchemaDrift = validationGaps;
+  const missingColumns = projectionMissingColumns(db);
+  if (missingColumns.length > 0) fields.projectionMissingColumns = missingColumns;
   logger.info("boot integrity check", fields);
+  // F21-1: loud and separate. Folded into the info line it would be one more
+  // key on a line nobody greps; a task that silently stops projecting earns its
+  // own WARN, carrying the remedy AND the remedy's cost.
+  if (validationGaps.length > 0 || missingColumns.length > 0) {
+    const drift: Record<string, string | string[]> = {};
+    if (validationGaps.length > 0) drift.refuses = validationGaps;
+    if (missingColumns.length > 0) drift.missingColumns = missingColumns;
+    drift.impact =
+      missingColumns.length > 0
+        ? "the rebuilder INSERT names these columns, so EVERY task fails to " +
+          "project ('no such column') and rows go stale behind " +
+          "'projection rebuild failed'"
+        : "every task whose derived validation lands on one of these fails to " +
+          "project; its row goes stale and the rebuild logs only " +
+          "'projection rebuild failed'";
+    drift.remedy =
+      (missingColumns.length > 0 && validationGaps.length === 0
+        ? "additive drift only — `ALTER TABLE <table> ADD COLUMN <column>` for " +
+          "each table-qualified entry above matches the baseline without " +
+          "touching the non-derived rows. Otherwise (or to be certain): "
+        : "") +
+      "re-baseline the projection database: stop the app, delete " +
+      "<dataRoot>/state/projection.sqlite* , restart — projection tables rebuild " +
+      "from projects/ at boot. This also destroys the NON-derived rows in that file " +
+      "(users, sessions, sealed PATs, audit, notifications), so run `npm run backup` " +
+      "first and expect to re-establish sign-ins. See docs/operations/deployment.md " +
+      "§Re-baselining the projection database";
+    logger.warn(
+      "projection schema drift — this root's rebuilder tables lag the shipped baseline",
+      drift,
+    );
+  }
 }
 
 /** The two maintenance entry points `startStoreMaintenance` wires. */
@@ -373,6 +508,12 @@ export async function bootServer(): Promise<void> {
       "BETTER_AUTH_URL is unset but OAuth is configured — behind a reverse proxy this collapses trustedOrigins to [] and breaks OAuth callback/cookie URLs. Set BETTER_AUTH_URL to the app's public origin.",
     );
   }
+
+  // U8: …and the other half of the same variable. Set to an `http://` origin in
+  // production it silently issues session cookies with no Secure attribute (the
+  // rule and its exact reasoning live with the env schema).
+  const insecureOrigin = insecureAuthOriginWarning(env);
+  if (insecureOrigin) logger.warn(insecureOrigin);
 
   ensureDataRootDirs();
   // B-FD1: BEFORE anything opens the database or writes a file — one app

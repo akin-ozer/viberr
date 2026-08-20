@@ -198,6 +198,20 @@ div.top-search:focus-within,
   letter-spacing: -.01em;
 }
 
+/* Three-line prose clamp for list rows (resource summaries, agent blurbs).
+   Visual only: the full text stays in the DOM for screen readers, and the
+   sites that use it also carry the full text in `title`. The display needs
+   !important: a clamp only works as a -webkit-box, and component rules like
+   `.rsrc-main .sub { display: block }` outweigh a one-class utility — losing
+   the box model silently un-clamps. */
+.clamp {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
 /* P13-D-19: `muted` and `hint` were used as utility classes in TSX but existed
    only as a variable (--muted) and as one scoped rule (`.pj-new .hint`, whose
    own markup had since gone), so both rendered at full weight and full size.
@@ -881,7 +895,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: flex; flex-direction: column; gap: .3rem;
   animation: dropPreviewIn .16s var(--ease-out);
 }
-.card-drop-preview .key { font-family: var(--font-mono); font-size: .72rem; color: var(--blue-pressed); }
+/* F21-18: same key, same rule — one identifier never wraps (see `.card-top .key`).
+   The preview sits in the narrow drop column, which is where a squeeze happens. */
+.card-drop-preview .key { font-family: var(--font-mono); font-size: .72rem; color: var(--blue-pressed); white-space: nowrap; }
 .card-drop-preview .dp-title {
   font-size: .95rem; line-height: 1.18; font-weight: 800;
   color: color-mix(in srgb, var(--fg), transparent 15%);
@@ -959,7 +975,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 
 .card-top { display: flex; align-items: center; gap: .5rem; }
-.card-top .key { font-family: var(--font-mono); font-size: .72rem; color: var(--faint); }
+/* F21-18: `white-space: nowrap` — at 390px the readiness pill sharing this row
+   squeezed the key until it broke mid-token ("VIB-\n8"), which reads as two
+   values and is not a key any more. A task key is one identifier, so it never
+   wraps; the pill beside it is prose and takes the squeeze instead. */
+.card-top .key { font-family: var(--font-mono); font-size: .72rem; color: var(--faint); white-space: nowrap; }
 .card-top .spacer { flex: 1; }
 .card h3 { font-size: .98rem; line-height: 1.18; font-weight: 800; }
 
@@ -1015,8 +1035,21 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    works; it isn't an interactive control, so suppress the focus ring. */
 .detail:focus,
 .detail:focus-visible { outline: none; }
-.detail-main { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; }
-.detail-side { display: flex; flex-direction: column; gap: 1.1rem; }
+/* U7 (D2, second half): `.detail-side` comes FIRST in the markup — current
+   state, the acceptance button and Permissions ahead of the timeline — because
+   the UX spec's stacking rule is a READING order ("preserving reading order:
+   current state, latest packet, next action, then the timeline"), and a screen
+   reader and the keyboard follow the DOM, not the paint. Pass 20 lifted the
+   column visually with `order: -1` and left the source order alone, which fixed
+   the sighted stack and CREATED a visual-vs-focus mismatch below 1100px (WCAG
+   2.2 SC 1.3.2 / 2.4.3) on the app's core workflow.
+   The desktop two-column arrangement is restored by PLACEMENT rather than by
+   `order`: both children name their cell explicitly, so the grid draws
+   main-left / side-right at any source order. `grid-row: 1` is load-bearing —
+   auto-placement is sparse and would otherwise push the main column onto a
+   second row once the side column claims column 2 first. */
+.detail-main { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; grid-column: 1; grid-row: 1; }
+.detail-side { display: flex; flex-direction: column; gap: 1.1rem; grid-column: 2; grid-row: 1; }
 
 .panel {
   border: 1px solid var(--hairline);
@@ -1122,6 +1155,15 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .opt .ot { font-weight: 700; font-family: var(--font-display); font-size: .9rem; }
 .opt .od { font-size: .78rem; color: var(--faint); margin-top: .1rem; }
 .opt .rec-tag { margin-left: auto; }
+/* Questionnaire shortcut chip (digit selects the choice). `margin-left: auto`
+   pushes it right; a rec-tag already claiming the auto margin leaves the chip
+   just trailing it, which is the intended order: pill, then key. */
+.opt .opt-kbd { margin-left: auto; flex: none; opacity: .65; }
+.opt .rec-tag ~ .opt-kbd, .opt .rec-tag + .opt-kbd { margin-left: 0; }
+/* The composed free-text choice reads as "one more way to answer", not one
+   more operator option — a dashed frame separates authored from offered. */
+.opt.opt-custom { border-style: dashed; }
+.opt.opt-custom.sel { border-style: solid; }
 
 /* Optional free-text a human attaches when resolving a packet (P11-71).
    Styling rides the standard `.field textarea` tokens — its wrapper carries
@@ -1857,7 +1899,14 @@ dialog[data-closing]::backdrop {
 .flabel { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .flabel .req { color: var(--coral-dark); margin-left: .15rem; }
 .fhint { font-size: .76rem; color: var(--faint); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: .5rem; }
-.field input[type="text"], .field input[type="password"], .field textarea {
+/* Typing fields opt in per TYPE (checkboxes and file pickers keep native
+   chrome), so this list must name every text-like type the markup uses — pass
+   20 flipped the login email to type="email" and the field silently fell back
+   to UA styling. app.css.test.ts diffs the list against the markup. Specificity
+   must stay (0,2,1): the later `.field input.mono` face override wins by source
+   order, and a :not() chain here would outrank it. */
+.field input[type="text"], .field input[type="password"], .field input[type="email"],
+.field input[type="search"], .field input[type="date"], .field textarea {
   width: 100%; border: 1px solid var(--border); border-radius: var(--radius-button);
   padding: .55rem .7rem; background: var(--surface); color: var(--fg);
   font-family: var(--font-body); font-size: .9rem; outline: 0;
@@ -2108,9 +2157,14 @@ dialog[data-closing]::backdrop {
 .pcap-counts .cs .d { width: .5rem; height: .5rem; border-radius: 50%; flex: none; }
 
 .human-only { display: flex; flex-direction: column; gap: .5rem; margin-top: .95rem; padding-top: .9rem; border-top: 1px solid var(--hairline); }
-.ho-row { display: flex; align-items: center; gap: .5rem; font-size: .83rem; color: var(--fg); }
-.ho-row .ico { width: 13px; height: 13px; color: var(--coral-dark); flex: none; }
-.ho-row .pill { margin-left: auto; }
+/* Anchored to the FIRST text line, not the block center: a row whose exception
+   clause wraps ("Transition a task to Done · except …") used to float its lock
+   and pill midway between the two lines, aligned with neither. The margins
+   re-center each against one 18px line (icon 13px, pill ~17px), so single-line
+   rows render exactly as before. */
+.ho-row { display: flex; align-items: flex-start; gap: .5rem; font-size: .83rem; color: var(--fg); }
+.ho-row .ico { width: 13px; height: 13px; color: var(--coral-dark); flex: none; margin-top: 2.5px; }
+.ho-row .pill { margin-left: auto; flex: none; margin-top: .5px; }
 /* P16-UI-02: the "· except <case>" clause on an always-reserved-for-humans row.
    It had no rule, so it rendered as a UA-italic <em> at full --fg weight and
    competed with the rule it qualifies. It is a footnote: same size, secondary
@@ -3875,6 +3929,41 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .feed-empty { font-size: .85rem; color: var(--faint); padding: .6rem 0; }
 .feed-capped { font-size: .78rem; color: var(--faint); padding: .6rem 0 0; }
 .act-filter-right { display: flex; align-items: center; gap: .5rem; }
+/* Per-panel feed filters (P21): search, type/kind, actor, task id, date range.
+   The search input is a borderless fill inside a framed wrapper, so the ring
+   is drawn by :focus-within (P16-UI-01's rule for exactly this shape); the
+   task and date inputs keep their own borders and take the shared treatment. */
+.feed-filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .45rem;
+  padding: .55rem 0 .7rem; border-bottom: 1px solid var(--hairline);
+  margin-bottom: .4rem;
+}
+.feed-filters .ff-search {
+  flex: 1 1 150px; min-width: 130px; display: flex; align-items: center; gap: .4rem;
+  border: 1px solid var(--border); border-radius: var(--radius-button);
+  background: var(--surface); padding: .32rem .55rem;
+}
+.feed-filters .ff-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.feed-filters .ff-search .ico { width: 13px; height: 13px; color: var(--placeholder); flex: none; }
+.feed-filters .ff-search input {
+  border: 0; outline: 0; background: none; width: 100%;
+  color: var(--fg); font-family: var(--font-body); font-size: .78rem;
+}
+.feed-filters .ff-search input::placeholder { color: var(--placeholder); }
+.feed-filters .ff-sel { font-size: .74rem; padding: .3rem .45rem; max-width: 150px; }
+.feed-filters .ff-task {
+  width: 84px; border: 1px solid var(--border); border-radius: var(--radius-button);
+  background: var(--surface); color: var(--fg); padding: .3rem .5rem; font-size: .74rem;
+}
+.feed-filters .ff-date {
+  border: 1px solid var(--border); border-radius: var(--radius-button);
+  background: var(--surface); color: var(--fg); padding: .24rem .4rem;
+  font-family: var(--font-body); font-size: .72rem;
+}
+.feed-filters .ff-task:focus, .feed-filters .ff-date:focus {
+  border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); outline: 0;
+}
+.feed-filters .ff-dash { font-size: .72rem; color: var(--placeholder); }
 
 /* --- agents --- */
 /* Only the ORCHESTRATION-runtime chip's glyph shrinks: the backend chips
@@ -3906,12 +3995,16 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    because every other `.key` rule is scoped to a container this row is not in
    (`.card-top`, `.task-hero`, `.live-task`, `.pj-name`). It read as a different
    kind of value at a glance. Only the width was ever declared here (P16-F3 moved
-   it out of an inline style, which is how the gap surfaced). */
+   it out of an inline style, which is how the gap surfaced).
+   F21-18: the 64px column is narrower than a long key, so this is in fact the
+   row that breaks a key mid-token first — it wraps inside its own fixed column
+   with nothing else on the row squeezing it. */
 .card.list-row .key {
   width: 64px;
   font-family: var(--font-mono);
   font-size: .72rem;
   color: var(--faint);
+  white-space: nowrap;
 }
 .card.list-row h3 { flex: 1; }
 .avatar.ghost { opacity: .5; }
@@ -4012,15 +4105,19 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .field-row { grid-template-columns: 1fr; }
   /* task detail: side panels move under the main column and go side-by-side */
   .detail { grid-template-columns: 1fr; }
-  /* D2 (pass-20): the side column carries Current state — and with it the primary
-     "Accept completion → Done" button — plus Permissions. In source order it
-     follows `.detail-main`, whose LAST panel is the timeline, so a plain 1-up
-     stack dropped the app's most consequential action below every timeline entry.
-     `order: -1` lifts the current-state/acceptance column ahead of the timeline
-     VISUALLY at this breakpoint while leaving DOM order untouched, so a screen
-     reader still reads main → side (UX spec §Breakpoint Strategy). A CSS `order`
-     swap is deliberately preferred over a DOM reorder here (cheap, no markup). */
-  .detail-side { flex-direction: row; flex-wrap: wrap; order: -1; }
+  /* D2 (pass-20) / U7 (pass-21): the side column carries Current state — and
+     with it the primary "Accept completion → Done" button — plus Permissions,
+     and the UX spec stacks it ABOVE the timeline ("preserving reading order:
+     current state, latest packet, next action, then the timeline").
+     It is first in the DOM now, so the 1-up stack needs no `order` at all: drop
+     the desktop cell placement and both columns fall into the single column in
+     source order. Pass 20's `order: -1` did this visually and left the DOM —
+     hence the screen reader and the keyboard — reading timeline-first, which is
+     the half of D2 U7 reopened. Nothing here may reintroduce `order`: it would
+     re-split what the eye and the focus ring see. */
+  .detail-main,
+  .detail-side { grid-column: 1; grid-row: auto; }
+  .detail-side { flex-direction: row; flex-wrap: wrap; }
   .detail-side > * { flex: 1; min-width: 280px; }
   /* agents: the profile rail becomes a horizontal strip. The group labels ride
      along rather than hide: `.ag-group-label.ag-group-row` is not only a label,
@@ -4255,6 +4352,21 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
 .attach-file svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
 .attach-file .attach-name { flex: 1; }
+/* Who put the file there, from the producing event (attachments panel). */
+.attach-by { font-size: .68rem; color: var(--muted); }
+.attach-thumb .attach-by { padding: 0 .55rem .4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-file .attach-by { flex: none; }
+/* Files an event produced, as chips under the message (timeline). */
+.tl-attach { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .45rem; }
+.tl-attach-chip {
+  display: inline-flex; align-items: center; gap: .4rem; max-width: 100%;
+  padding: .3rem .55rem; border: 1px solid var(--hairline); border-radius: var(--radius-chip);
+  background: var(--surface); text-decoration: none; color: var(--fg);
+  font-family: var(--font-mono); font-size: .72rem;
+}
+.tl-attach-chip:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.tl-attach-chip svg { width: 13px; height: 13px; color: var(--muted); flex: none; }
+.tl-attach-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Evidence label token that names a real attachment (timeline.tsx linkify). */
 /* Same token text-links use (P13-D-18 precedent) — --blue on white is 3.84:1
    and fails AA for normal text; --teal-dark clears it in both themes. */

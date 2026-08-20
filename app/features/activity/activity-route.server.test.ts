@@ -84,7 +84,7 @@ describe("/projects/:slug/activity", () => {
     expect(violation!.status).toBe("open");
     expect(violation!.taskKey).toBe("VIB-142");
     expect(violation!.text).toBe(
-      "Project credential is missing `pull_request:write` — flagged by the policy engine on",
+      "Project credential is missing `pull_request:write`. Flagged by the policy engine on",
     );
   });
 

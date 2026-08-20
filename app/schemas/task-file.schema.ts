@@ -680,7 +680,7 @@ export function acceptanceBlockedReason(fm: ReviewState): string | null {
     // the verified no-change outcome (minting the base revision these reviewers
     // then approve), so the refusal names it.
     return required.length > 0
-      ? "No reviewed revision yet — nothing for the required reviewers to approve. " +
+      ? "No reviewed revision yet, so there is nothing for the required reviewers to approve. " +
           "If this task requires no changes, run delivery once to verify and record that."
       : null;
   }
@@ -688,7 +688,7 @@ export function acceptanceBlockedReason(fm: ReviewState): string | null {
   const verdictOf = (profileId: string) =>
     cur.find((v) => v.profileId === profileId)?.result;
   if (required.some((r) => verdictOf(r.profileId) === "request_changes")) {
-    return "This task's latest review requests changes on the current revision — rework and re-review before accepting.";
+    return "This task's latest review requests changes on the current revision. Rework and re-review before accepting.";
   }
   const missing = required.filter((r) => verdictOf(r.profileId) !== "approve");
   if (missing.length > 0) {
@@ -718,7 +718,7 @@ export function closedPrBlockedReason(
   taskKey: string,
 ): string | null {
   if (fm.pr?.state !== "closed") return null;
-  return `${taskKey}'s review PR was closed on GitHub without merging — it can't be accepted. Rework and reopen the PR, or archive the task.`;
+  return `${taskKey}'s review PR was closed on GitHub without merging, so it can't be accepted. Rework and reopen the PR, or archive the task.`;
 }
 
 /**
@@ -741,7 +741,7 @@ export function conflictingPrBlockedReason(
   const pr = fm.pr;
   if (!pr || pr.mergeable !== "conflicting") return null;
   if (pr.state === "merged" || pr.state === "closed") return null;
-  return `${taskKey}'s review PR #${pr.number} conflicts with the base branch — GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`;
+  return `${taskKey}'s review PR #${pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`;
 }
 
 /**
@@ -758,7 +758,7 @@ export function archivedTaskBlockedReason(
   taskKey: string,
 ): string | null {
   if (!fm.archived) return null;
-  return `${taskKey} is archived — restore it before accepting the completion.`;
+  return `${taskKey} is archived. Restore it before accepting the completion.`;
 }
 
 /**
@@ -777,7 +777,7 @@ export function archivedTaskMoveBlockedReason(
   taskKey: string,
 ): string | null {
   if (!fm.archived) return null;
-  return `${taskKey} is archived — restore it before moving it between stages.`;
+  return `${taskKey} is archived. Restore it before moving it between stages.`;
 }
 
 /** The revision a delivered head lands on, plus whether it is a NEW review
@@ -894,7 +894,7 @@ function tolerant<T>(
       diagnostics.push(
         make(
           "frontmatter.missing_field",
-          `Frontmatter field \`${path}\` is missing — using ${JSON.stringify(fallback)}.`,
+          `Frontmatter field \`${path}\` is missing; using ${JSON.stringify(fallback)}.`,
           path,
         ),
       );
@@ -907,7 +907,7 @@ function tolerant<T>(
   diagnostics.push(
     make(
       "frontmatter.invalid_field",
-      `Frontmatter field \`${path}\` is invalid (${result.error.issues[0]?.message ?? "unparseable"}) — using ${JSON.stringify(fallback)}.`,
+      `Frontmatter field \`${path}\` is invalid (${result.error.issues[0]?.message ?? "unparseable"}); using ${JSON.stringify(fallback)}.`,
       path,
     ),
   );
@@ -982,7 +982,7 @@ function parseEngagements(
       diagnostics.push(
         diagWarning(
           "frontmatter.duplicate_engagement",
-          `Profile \`${engagement.profileId}\` is engaged more than once — only the first engagement is kept.`,
+          `Profile \`${engagement.profileId}\` is engaged more than once; only the first engagement is kept.`,
           "engagements",
         ),
       );
@@ -1001,7 +1001,7 @@ function parseEngagements(
     diagnostics.push(
       diagWarning(
         "frontmatter.multiple_deliverers",
-        `Engagement \`${engagement.profileId}\` also claims delivers — only the first delivering engagement owns the workspace; this one was demoted.`,
+        `Engagement \`${engagement.profileId}\` also claims delivers, but only the first delivering engagement owns the workspace; this one was demoted.`,
         "engagements",
       ),
     );
@@ -1031,7 +1031,7 @@ export function parseTaskFrontmatter(
       diagnostics.push(
         diagError(
           "frontmatter.key_mismatch",
-          `Frontmatter key \`${key}\` does not match the task directory \`${context.fallbackKey}\` — the directory name wins.`,
+          `Frontmatter key \`${key}\` does not match the task directory \`${context.fallbackKey}\`; the directory name wins.`,
           "key",
         ),
       );
@@ -1042,7 +1042,7 @@ export function parseTaskFrontmatter(
     diagnostics.push(
       diagWarning(
         "frontmatter.missing_key",
-        `Frontmatter has no valid \`key\` — inferred \`${key}\` from the task directory.`,
+        `Frontmatter has no valid \`key\`; inferred \`${key}\` from the task directory.`,
         "key",
       ),
     );
@@ -1051,7 +1051,7 @@ export function parseTaskFrontmatter(
     diagnostics.push(
       diagError(
         "frontmatter.missing_key",
-        "Frontmatter has no valid `key` and no directory fallback — the task cannot be identified.",
+        "Frontmatter has no valid `key` and no directory fallback; the task cannot be identified.",
         "key",
         true,
       ),
@@ -1079,8 +1079,8 @@ export function parseTaskFrontmatter(
       diagWarning(
         "frontmatter.unresolved_stage",
         data.stage === undefined
-          ? "Frontmatter field `stage` is missing — the task's stage is unresolved (shown as an unknown stage) until it is set."
-          : `Frontmatter field \`stage\` is invalid (${stageResult.error.issues[0]?.message ?? "unparseable"}) — the task's stage is unresolved (shown as an unknown stage) until it is corrected.`,
+          ? "Frontmatter field `stage` is missing; the task's stage is unresolved (shown as an unknown stage) until it is set."
+          : `Frontmatter field \`stage\` is invalid (${stageResult.error.issues[0]?.message ?? "unparseable"}); the task's stage is unresolved (shown as an unknown stage) until it is corrected.`,
         "stage",
       ),
     );
@@ -1364,6 +1364,45 @@ export function normalizeEvidenceRows(
   return out.length > 0 ? out : null;
 }
 
+/** Name/count caps for an event's `attachments:` list — REFERENCES into the
+ *  task's `attachments/` dir, so they stay small by construction (the files
+ *  themselves live on disk; the panel and the timeline chips resolve names
+ *  against the live directory). */
+export const EVENT_ATTACHMENTS_MAX = 20;
+const ATTACHMENT_NAME_MAX_CHARS = 200;
+
+/**
+ * Sanitize the attachment names a run produced into a list that round-trips
+ * through the task.md serializer (one `- <name>` line each; the parser trims
+ * the line, so a name that trims differently cannot survive) and that the
+ * serving route would accept (a path separator would 404 there anyway).
+ * Returns null when nothing usable survives — callers then omit the field.
+ */
+export function sanitizeEventAttachmentNames(
+  names: readonly string[] | null | undefined,
+): string[] | null {
+  if (!names || names.length === 0) return null;
+  const unwritable = (name: string): boolean => {
+    for (const ch of name) {
+      if (ch === "/" || ch === "\\") return true; // the serving route 404s these
+      const code = ch.codePointAt(0) ?? 0;
+      if (code < 0x20 || code === 0x7f) return true; // a newline would forge a row
+    }
+    return false;
+  };
+  const out: string[] = [];
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name || name !== raw) continue; // must round-trip the parser's trim
+    if (name.length > ATTACHMENT_NAME_MAX_CHARS) continue;
+    if (unwritable(name)) continue;
+    if (out.includes(name)) continue;
+    out.push(name);
+    if (out.length >= EVENT_ATTACHMENTS_MAX) break;
+  }
+  return out.length > 0 ? out : null;
+}
+
 /** One parsed `###` timeline entry. Newest-first in the file and here. */
 export interface TaskFileEvent {
   /** UTC ISO 8601. */
@@ -1379,6 +1418,10 @@ export interface TaskFileEvent {
   toAgent: boolean;
   /** Completion/verdict events only. add/del are signed display strings ("+14"). */
   evidence: EvidenceRow[] | null;
+  /** Files this event's run saved into the task's `attachments/` dir (browser
+   *  captures). Optional: most writers never produce files, and an absent field
+   *  serializes to nothing. Names only — the directory stays the truth. */
+  attachments?: string[];
 }
 
 /** Full parsed task file (see app/server/files/task-file.server.ts). */

@@ -38,6 +38,9 @@ import {
  *                    evidence:            (optional, outcome events — P13-D-26:
  *                    - <label> · <add> · <del>   a completion, a reviewer's
  *                                                verdict, or an agent's report)
+ *                    attachments:         (optional — names of files the
+ *                    - <file name>         event's run saved into the task's
+ *                                          attachments/ dir; the dir is truth)
  *
  * Unknown `## Sections` are preserved verbatim (round-trip safe); malformed
  * timeline entries are skipped with a diagnostic — never a crash, never a
@@ -46,7 +49,7 @@ import {
  * Event-body escaping: free text inside a timeline event may legitimately
  * contain lines that would otherwise read as file STRUCTURE (`## ` section
  * headings, `### ` event headings, `title:`/`to:` metadata lines, the
- * `evidence:` marker). The serializer prefixes such lines with a single
+ * `evidence:` / `attachments:` markers). The serializer prefixes such lines with a single
  * backslash (`\## Notes`); the parser strips exactly one backslash from any
  * line that is one-or-more backslashes followed by a structural pattern —
  * so lines that already start that way gain one more backslash on write and
@@ -64,7 +67,7 @@ const KNOWN_EVENT_TYPES = new Set<string>(TIMELINE_EVENT_TYPES);
 
 /** Line patterns the parser treats as structure inside an event block
  * (mirrors SECTION_RE / EVENT_HEADING_PREFIX / metadata / evidence rules). */
-const STRUCTURAL_LINE_SRC = String.raw`## |### |title:\s|to:\s|\s*evidence:\s*$`;
+const STRUCTURAL_LINE_SRC = String.raw`## |### |title:\s|to:\s|\s*evidence:\s*$|\s*attachments:\s*$`;
 /** Serialize side: line needs a(nother) escape backslash. */
 const NEEDS_ESCAPE_RE = new RegExp(String.raw`^\\*(?:${STRUCTURAL_LINE_SRC})`);
 /** Parse side: line carries at least one escape backslash — strip one. */
@@ -179,12 +182,16 @@ function parseEventBlock(
     }
   }
 
-  // Body: everything up to an `evidence:` marker line. Escaped structural
-  // lines (`\## …`, `\### …`, `\title: …`, `\to: …`, `\evidence:`) lose
-  // exactly one backslash — the reverse of escapeEventText.
+  // Body: everything up to the first `evidence:` / `attachments:` marker line.
+  // Escaped structural lines (`\## …`, `\### …`, `\title: …`, `\to: …`,
+  // `\evidence:`, `\attachments:`) lose exactly one backslash — the reverse of
+  // escapeEventText.
   const rest = bodyLines.slice(i);
   const evidenceIdx = rest.findIndex((l) => l.trim() === "evidence:");
-  const textLines = evidenceIdx === -1 ? rest : rest.slice(0, evidenceIdx);
+  const attachIdx = rest.findIndex((l) => l.trim() === "attachments:");
+  const markerIdxs = [evidenceIdx, attachIdx].filter((idx) => idx !== -1);
+  const textEnd = markerIdxs.length > 0 ? Math.min(...markerIdxs) : -1;
+  const textLines = textEnd === -1 ? rest : rest.slice(0, textEnd);
   const text = textLines.map(unescapeEventTextLine).join("\n").trim();
 
   let evidence: { label: string; add: string; del: string }[] | null = null;
@@ -193,6 +200,8 @@ function parseEventBlock(
     for (const line of rest.slice(evidenceIdx + 1)) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      // A following `attachments:` marker (or any other non-row line) ends the
+      // block — same tolerance the rows always had.
       if (!trimmed.startsWith("- ")) break;
       const parts = trimmed.slice(2).split(SEP);
       if (parts.length < 3) {
@@ -211,7 +220,31 @@ function parseEventBlock(
     }
   }
 
-  return { occurredAt, type, actor, title, text, toAgent, evidence };
+  // `attachments:` — one `- <name>` line per file the event's run saved into
+  // the task's attachments/ dir. Names only; the directory stays the truth.
+  let attachments: string[] | null = null;
+  if (attachIdx !== -1) {
+    attachments = [];
+    for (const line of rest.slice(attachIdx + 1)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (!trimmed.startsWith("- ")) break;
+      const name = trimmed.slice(2).trim();
+      if (name) attachments.push(name);
+    }
+  }
+
+  const event: TaskFileEvent = {
+    occurredAt,
+    type,
+    actor,
+    title,
+    text,
+    toAgent,
+    evidence,
+  };
+  if (attachments && attachments.length > 0) event.attachments = attachments;
+  return event;
 }
 
 function parseTimeline(
@@ -262,6 +295,13 @@ function serializeEvent(event: TaskFileEvent): string {
     lines.push("evidence:");
     for (const row of event.evidence) {
       lines.push(`- ${row.label}${SEP}${row.add}${SEP}${row.del}`);
+    }
+  }
+  if (event.attachments && event.attachments.length > 0) {
+    lines.push("");
+    lines.push("attachments:");
+    for (const name of event.attachments) {
+      lines.push(`- ${name}`);
     }
   }
   return lines.join("\n");

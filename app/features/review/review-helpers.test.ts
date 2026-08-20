@@ -19,7 +19,7 @@ describe("reviewRowSub", () => {
   it("prefers the packet header", () => {
     expect(
       reviewRowSub({ ...base, packet: { kind: "Completion report", title: "Accept?" } }),
-    ).toBe("Completion report — Accept?");
+    ).toBe("Completion report: Accept?");
   });
 
   it("falls back to the newest event text (markdown stripped)", () => {
@@ -31,7 +31,7 @@ describe("reviewRowSub", () => {
   it("does NOT claim 'agent working' on a human-waiting row with no packet/event (R8-3)", () => {
     const sub = reviewRowSub({ ...base, waiting: "human" });
     expect(sub).not.toContain("Agent working");
-    expect(sub).toContain("needs a human decision");
+    expect(sub).toContain("Needs a human decision");
   });
 
   it("keeps the agent-working fallback for a genuinely agent-waiting row", () => {
@@ -136,7 +136,7 @@ describe("reviewRowSub terminal GitHub facts (R16-3)", () => {
     // ranks them the other way (acceptanceRefusalReason).
     const sub = reviewRowSub(closedNoVerdict);
     expect(sub).toBe(
-      "PR #124 was closed on GitHub without merging — rework and reopen it, or archive the task.",
+      "PR #124 was closed on GitHub without merging. Rework and reopen it, or archive the task.",
     );
     expect(sub).not.toContain("force-accept");
     expect(sub).not.toContain("approving verdict");
@@ -163,7 +163,7 @@ describe("reviewRowSub terminal GitHub facts (R16-3)", () => {
 
   it("a closed PR with NO block reason reads the same — one sentence, one source", () => {
     expect(reviewRowSub({ ...closedNoVerdict, blockReason: null })).toBe(
-      "PR #124 was closed on GitHub without merging — rework and reopen it, or archive the task.",
+      "PR #124 was closed on GitHub without merging. Rework and reopen it, or archive the task.",
     );
   });
 

@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { createTestDbContext } from "../../../test-support/test-db";
+import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
 import {
   capabilitiesToActionLabels,
   effectiveProfileView,
@@ -239,5 +241,170 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
     expect(view.actions.direct).not.toContain(
       "Deliver the branch & open the review PR",
     );
+  });
+});
+
+/**
+ * OBS-7 (live) — Developer is deployed from the global base, an admin edits it
+ * in the project (the fork the edit modal warns about: "keeps its own copy and
+ * stops tracking the global"), and the detail header goes on reading
+ * "Global base" — the one line a reader consults to decide whether editing the
+ * ORG profile would reach this project. Web Verifier, created in-project, reads
+ * "Created in viberr" and is not affected, which is what made the flat label
+ * look authoritative.
+ *
+ * The signal is the deployment's own `definition` snapshot: the seeded roster
+ * carries none (agent-catalog.server.ts deploys `profileId` + capabilities), so
+ * a snapshot exists only because this project wrote one. The scope-sentence test
+ * keeps the paths that already name themselves — create ("Created in …") and the
+ * library deploy ("Added from the global library to …") — out of it.
+ *
+ * OBS-7 residual (this pass): the snapshot's EXISTENCE was the whole rule, and
+ * two writers produce one without touching identity — project creation's `auto`
+ * preset (`{ autonomy: "full" }` alone) and the org resource-rename rewriter
+ * (`definition.resources` alone). Both left the card asserting a divergence
+ * that had not happened. The rule is now "at least one non-autonomy,
+ * non-resources field, present AND different from the template", which the last
+ * three cases pin from both sides.
+ */
+describe("OBS-7: a project-forked global profile is labeled as customized", () => {
+  const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
+
+  const developer = (
+    definition?: AgentDeploymentDefinition,
+  ): AgentDeployment => {
+    // An untouched deployment carries NO `definition` key at all — that absence
+    // is the signal under test, so it must be a real absence.
+    const deployment: AgentDeployment = {
+      profileId: "developer",
+      capabilities: [cap("commit-push-branch", "direct")],
+      extras: [],
+    };
+    if (definition) deployment.definition = definition;
+    return deployment;
+  };
+
+  const view = (deployment: AgentDeployment, dataRoot: string) =>
+    effectiveProfileView(deployment, dataRoot, absentDeliverReviewPrMode(false));
+
+  it("an untouched deployment tracks the global base and is NOT customized", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const untouched = view(developer(), dataRoot);
+    // Non-vacuity: the template really was read (this is the template's scope).
+    expect(untouched.scope).toBe("Global base");
+    expect(untouched.customized).toBe(false);
+  });
+
+  it("a definition snapshot wearing the template's own scope IS customized", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    // Exactly what the edit writer persists: a full snapshot, with
+    // `scope: current.scope` — the global base's sentence, carried forward.
+    const forked = view(
+      developer({
+        kind: "specialist",
+        name: "Developer",
+        role: "Implementation",
+        scope: "Global base",
+        model: "sonnet",
+      }),
+      dataRoot,
+    );
+    expect(forked.scope).toBe("Global base");
+    expect(forked.customized).toBe(true);
+  });
+
+  it("a profile that already names its project is not double-labeled", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    for (const scope of [
+      "Created in Viberr Core",
+      "Added from the global library to Viberr Core",
+    ]) {
+      const named = view(
+        // `model` really does differ from the template's (`gpt-5.6-terra`), so
+        // the identity rule below says CUSTOMIZED here and the scope sentence
+        // is the only thing that can turn it off — otherwise this case would
+        // pass for the wrong reason.
+        developer({ kind: "specialist", name: "Developer", scope, model: "sonnet" }),
+        dataRoot,
+      );
+      expect({ scope, customized: named.customized }).toEqual({
+        scope,
+        customized: false,
+      });
+    }
+  });
+
+  /**
+   * OBS-7 residual: "a snapshot exists" is not "the copy diverged".
+   *
+   * `createProject` writes `definition: { ...a.definition, autonomy: "full" }`
+   * onto the operator for the `auto` governance preset — on a base deployment
+   * that spreads `undefined`, so the stored snapshot is `{ autonomy: "full" }`
+   * and nothing else. Every auto-preset project therefore opened with its
+   * operator card reading "Global base · customized for <project>" before
+   * anyone had edited a thing. The org resource-rename rewriter
+   * (resource-references.server.ts) is the same shape one field over.
+   */
+  it("a snapshot carrying ONLY autonomy is not an identity customization", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const autonomyOnly = view(developer({ autonomy: "full" }), dataRoot);
+    expect(autonomyOnly.customized).toBe(false);
+    // Non-vacuity: the snapshot IS there and IS read — the same deployment with
+    // one real identity field flips, so this is the rule and not a dropped read.
+    expect(
+      view(developer({ autonomy: "full", role: "Delivery" }), dataRoot).customized,
+    ).toBe(true);
+  });
+
+  it("a snapshot carrying ONLY resource grants is not an identity customization", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const resourcesOnly = view(
+      developer({ resources: { skills: ["developer-expertise"], mcps: [], kb: [] } }),
+      dataRoot,
+    );
+    expect(resourcesOnly.customized).toBe(false);
+    // Non-vacuity: the grants really did reach the view.
+    expect(resourcesOnly.resources.skills).toEqual(["developer-expertise"]);
+  });
+
+  it("a snapshot that only echoes the template's own identity is not customized", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    // Every field present, every value the template's — a fork that changed
+    // nothing has nothing to disclose.
+    const echo = view(
+      developer({
+        kind: "specialist",
+        name: "Developer",
+        role: "Implementation",
+        icon: "branch",
+        backends: ["codex", "claude"],
+        model: "gpt-5.6-terra",
+        scope: "Global base",
+        stages: ["ready", "impl"],
+      }),
+      dataRoot,
+    );
+    // Non-vacuity: these really are the template's values (a drifted seed would
+    // make the echo an override and this case meaningless).
+    expect({ name: echo.name, role: echo.role, model: echo.model }).toEqual({
+      name: "Developer",
+      role: "Implementation",
+      model: "gpt-5.6-terra",
+    });
+    expect(echo.customized).toBe(false);
+    // One field off the template is the whole difference.
+    expect(
+      view(
+        developer({ name: "Developer", role: "Implementation", icon: "bolt" }),
+        dataRoot,
+      ).customized,
+    ).toBe(true);
   });
 });

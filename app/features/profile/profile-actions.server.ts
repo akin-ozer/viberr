@@ -70,7 +70,7 @@ export function updateProfileIdentity(
   const first = listUserMemberships(db, actor.userId)[0];
   return {
     toast: first
-      ? `Profile saved — visible to ${first.name} members`
+      ? `Profile saved. Visible to ${first.name} members`
       : "Profile saved",
   };
 }
@@ -134,7 +134,7 @@ export async function changeOwnPassword(
   const currentHash = credentialPasswordHash(db, user.id);
   if (!currentHash) {
     throw AppError.validation(
-      "This account has no local password — it signs in through an identity provider.",
+      "This account has no local password. It signs in through an identity provider.",
     );
   }
   if (!(await verifyPassword(input.current, currentHash))) {
@@ -162,7 +162,7 @@ export async function changeOwnPassword(
     subjectKind: "user",
     subjectId: actor.userId,
   });
-  return { toast: "Password updated — other sessions were signed out" };
+  return { toast: "Password updated. Other sessions were signed out" };
 }
 
 /**
@@ -182,7 +182,7 @@ export function disconnectGithubIdentity(
   }
   if (!user.hasPassword) {
     throw AppError.validation(
-      "Set a password first — this account signs in only through GitHub.",
+      "Set a password first: this account signs in only through GitHub.",
     );
   }
   updateUserFields(db, actor.userId, { idp: "local" });
@@ -193,6 +193,6 @@ export function disconnectGithubIdentity(
     subjectId: actor.userId,
   });
   return {
-    toast: "GitHub disconnected — audit falls back to your workspace identity",
+    toast: "GitHub disconnected. Audit falls back to your workspace identity",
   };
 }

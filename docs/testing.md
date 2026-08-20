@@ -18,6 +18,17 @@ the e2e suite, which actually executes the CLI entrypoints. This is not a
 theoretical gap: `scripts/` is the one directory whose lack of coverage let the
 pass-13 `npm run seed` regression through.
 
+## Lint
+
+```sh
+npm run lint
+```
+
+Oxlint with the vendored `anti-slop` plugin (`tools/oxlint/anti-slop`, config
+`.oxlintrc.json`). A required CI gate since 2026-08-19 (ruling 86 / R21-3): it
+must exit 0, and there is no suppression list or accepted-findings allowlist, so
+anything it reports is a new violation to fix.
+
 ## E2E suite
 
 ```sh
@@ -36,6 +47,16 @@ local `./data` store. `VIBERR_E2E_KEEP=1` keeps the stack up for debugging.
 The seed is the **demo fixture** (`npm run seed:demo`), not the product seed —
 the specs are written against the mock dataset, which the product seed no longer
 ships.
+
+**One browser: chromium.** `playwright.config.ts` declares a single BROWSER
+project (`chromium` / `devices["Desktop Chrome"]`) and CI installs that browser
+alone. The config's other project, `setup`, is a login fixture — it signs in
+once through the real `/login` UI and stores the session state the chromium
+project depends on — not a second browser.
+The PRD's browser matrix also names current Safari and current Firefox desktop;
+neither has ever been run here, automated or manual. Recorded 2026-08-19 (pass
+21, U6) so the matrix is read as declared support, not as coverage this suite
+provides.
 
 ## Test data: two sanctioned ways to build state
 

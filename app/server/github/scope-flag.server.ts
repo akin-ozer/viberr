@@ -52,7 +52,7 @@ export function policyUpdateText(scope: string): string {
   // copy shown for unrelated scopes (e.g. a `repo` read refusal).
   return (
     `**Policy update:** \`${scope}\` granted on the project credential. ` +
-    `The earlier violation is resolved — operations needing \`${scope}\` will work now.`
+    `The earlier violation is resolved, and operations needing \`${scope}\` will work now.`
   );
 }
 

@@ -216,8 +216,8 @@ export function ReviewQueuePage({
             onClick={onPolicy}
             title={
               operatorCanAccept
-                ? `${operatorName} runs at full autonomy and separately holds ${ACCEPTANCE_CAP_LABEL} set to Direct, so it can move a task to ${stageNames.terminal} itself — every other actor at this boundary is a human. See Policy.`
-                : `${stageNames.review} → ${stageNames.terminal} is locked to humans — see Policy`
+                ? `${operatorName} runs at full autonomy and separately holds ${ACCEPTANCE_CAP_LABEL} set to Direct, so it can move a task to ${stageNames.terminal} itself. Every other actor at this boundary is a human. See Policy.`
+                : `${stageNames.review} → ${stageNames.terminal} is locked to humans. See Policy`
             }
           >
             <Icon name={operatorCanAccept ? "bolt" : "lock"} />
@@ -259,11 +259,11 @@ export function ReviewQueuePage({
             {operatorCanAccept ? (
               <span>
                 Accepting a completion merges the review PR and moves the task
-                to <strong>{stageNames.terminal}</strong> — always in the audit
+                to <strong>{stageNames.terminal}</strong>, always in the audit
                 log. Normally a human action, with one exception on this
                 project: <strong>{operatorName}</strong> runs at{" "}
                 <strong>full autonomy</strong> and separately holds{" "}
-                <strong>{ACCEPTANCE_CAP_LABEL}</strong> set to <em>Direct</em> —
+                <strong>{ACCEPTANCE_CAP_LABEL}</strong> set to <em>Direct</em>,
                 an explicit grant, never implied by the autonomy setting, that
                 lets it accept a completion itself (it still refuses a
                 failing-validation task).
@@ -271,7 +271,7 @@ export function ReviewQueuePage({
             ) : (
               <span>
                 Accepting a completion merges the review PR and moves the task
-                to <strong>{stageNames.terminal}</strong> — always a human
+                to <strong>{stageNames.terminal}</strong>, always a human
                 action, always in the audit log.
               </span>
             )}

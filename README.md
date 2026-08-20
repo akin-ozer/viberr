@@ -75,6 +75,7 @@ first sign-in).
 |---|---|
 | `npm run dev` | dev server (port `PORT`, default 5173) |
 | `npm run build` / `npm run start` | production build / serve it |
+| `npm run lint` | oxlint with the vendored `anti-slop` plugin (`tools/oxlint/anti-slop`, config `.oxlintrc.json`) — a required CI gate; it must exit 0 |
 | `npm run typecheck` | route typegen + tsc |
 | `npm test` | vitest unit + integration suite (`app/` + `db/`) |
 | `npm run e2e` | playwright end-to-end suite — CI's second job, and the only gate that runs a real CLI entrypoint |

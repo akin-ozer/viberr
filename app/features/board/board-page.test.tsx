@@ -89,8 +89,12 @@ function renderBoard(
     search?: string;
     /** D3: the merge target the shared acceptance ceremony names. */
     defaultBranch?: string;
-    /** Server result for the board's own fetchers (reorder / rescan). */
-    action?: () => { ok: boolean; toast?: string; error?: string };
+    /** Server result for the board's own fetchers (reorder / rescan). The
+     *  request is handed through so a case can read what the board actually
+     *  POSTed (ruling 88's acknowledgment fields). */
+    action?: (args: { request: Request }) =>
+      | { ok: boolean; toast?: string; error?: string }
+      | Promise<{ ok: boolean; toast?: string; error?: string }>;
   } = {},
 ) {
   // The route carries an `action` key only when a case supplies one: leaving it
@@ -383,7 +387,7 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
       { search: "filter=risk&q=zzz" },
     );
     const clear = getByTitle(
-      "Show every task again — clears the board filter and the search",
+      "Show every task again. Clears the board filter and the search",
     );
     fireEvent.click(clear);
     // Both hiding mechanisms are gone: the card is back and the chip retires.
@@ -625,7 +629,7 @@ describe("the new-task dialog does not accuse an untouched form", () => {
   it("offers guidance, not an error, before the title is touched", () => {
     const { container } = openDialog();
     const hint = container.querySelector(".foot-hint")!;
-    expect(hint.textContent).toBe("The task key is assigned on create.");
+    expect(hint.textContent).toBe("The task key is assigned automatically.");
     expect(hint.className).not.toContain("err");
   });
 
@@ -643,7 +647,7 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     fireEvent.blur(input);
     fireEvent.change(input, { target: { value: "A real title" } });
     const hint = container.querySelector(".foot-hint")!;
-    expect(hint.textContent).toBe("The task key is assigned on create.");
+    expect(hint.textContent).toBe("The task key is assigned automatically.");
     expect(hint.className).not.toContain("err");
   });
 });
@@ -1363,7 +1367,7 @@ describe("F19-27: a pending acceptance is never stranded", () => {
     const dialog = r.container.querySelector("dialog");
     expect(dialog).not.toBeNull();
     expect(dialog!.textContent!.replace(/\s+/g, " ")).toContain(
-      "VIB-1 is archived — restore it before accepting the completion.",
+      "VIB-1 is archived. Restore it before accepting the completion.",
     );
   });
 });
@@ -1795,10 +1799,24 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(text).toContain("into trunk");
   });
 
-  it("carries the delivered-revision row the fork omitted (honest absence: a board summary holds no sha)", () => {
+  it("carries the delivered-revision row the fork omitted — honest absence when nothing was delivered", () => {
     expect(
       openConfirm({}).container.querySelector("dialog")!.textContent,
     ).toContain("No delivered revision recorded.");
+  });
+
+  it("discloses the DELIVERED revision the projection now carries (ruling 53)", () => {
+    // The row used to be hardcoded absent (`workRevisionSha={null}`), so the
+    // board's ceremony disclosed "nothing delivered" about every task — and once
+    // ruling 88 made the confirmed click echo that disclosure back, the server
+    // refused the resulting `"none"` against any task that HAD delivered. The
+    // summary carries the sha now (TaskSummary.workRevisionSha).
+    // CANARY: put `workRevisionSha={null}` back in AcceptOnBoardConfirm.
+    const text = openConfirm({ workRevisionSha: "a4c790ce63ef" + "0".repeat(28) })
+      .container.querySelector("dialog")!
+      .textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("a4c790ce63ef");
+    expect(text).not.toContain("No delivered revision recorded.");
   });
 
   it("names the acceptance and the move it performs, in the shared vocabulary", () => {
@@ -1808,6 +1826,90 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(text).toContain("Moving to Done accepts this completion");
     // The `stage-move` ceremony's Moving row names leaving + terminal stage.
     expect(text).toContain("In Progress → Done");
+  });
+
+  it("ruling 88: the confirmed drop POSTs the ceremony's own acknowledgment", async () => {
+    // F21-2: the board's ceremony was client architecture — the reorder POST
+    // behind it carried nothing back from the dialog, so the server accepted
+    // (and merged) a drop whose confirmation was never rendered. CANARY: drop
+    // the disclosure argument from `submitReorder` and the three ack fields
+    // vanish from the body while every other assertion here still passes.
+    const submitted: Record<string, string>[] = [];
+    const r = renderBoard(
+      [
+        task({
+          key: "VIB-1",
+          stage: "impl",
+          validation: "changed",
+          pr: { number: 124, state: "review", title: "t" },
+        }),
+      ],
+      {
+        action: async ({ request }) => {
+          const fd = await request.formData();
+          const row: Record<string, string> = {};
+          for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
+          submitted.push(row);
+          return { ok: true as const, toast: "moved" };
+        },
+      },
+    );
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    expect(submitted).toHaveLength(0); // the ceremony still comes first
+    fireEvent.click(
+      Array.from(r.container.ownerDocument.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Move → Done"),
+      )!,
+    );
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("reorder");
+    expect(submitted[0]!.to).toBe("done");
+    // The three facts the rows above stated, as they were rendered: this task
+    // has delivered nothing, and the dialog's revision row said so.
+    expect(submitted[0]!.ackPr).toBe("review");
+    expect(submitted[0]!.ackRevision).toBe("none");
+    expect(submitted[0]!.ackVerdict).toBe("changed");
+  });
+
+  it("ruling 53/88: a DELIVERED task echoes its revision, not a blanket 'none'", async () => {
+    // The half of the echo the board could not tell the truth about. With the
+    // revision hardcoded absent, this POST carried `ackRevision=none` for a task
+    // whose live head was a real sha — the server compares the echo against the
+    // task and refused it as stale, so a drop onto Done could never accept
+    // delivered work (proved on the door in task-actions.server.test.ts).
+    // CANARY: put `workRevisionSha={null}` back in AcceptOnBoardConfirm.
+    const sha = "a4c790ce63ef" + "0".repeat(28);
+    const submitted: Record<string, string>[] = [];
+    const r = renderBoard(
+      [
+        task({
+          key: "VIB-1",
+          stage: "impl",
+          validation: "healthy",
+          workRevisionSha: sha,
+          pr: { number: 124, state: "review", title: "t" },
+        }),
+      ],
+      {
+        action: async ({ request }) => {
+          const fd = await request.formData();
+          const row: Record<string, string> = {};
+          for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
+          submitted.push(row);
+          return { ok: true as const, toast: "moved" };
+        },
+      },
+    );
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    fireEvent.click(
+      Array.from(r.container.ownerDocument.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Move → Done"),
+      )!,
+    );
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.ackRevision).toBe(sha);
   });
 
   it("still discloses the PR, its drift and the verdict it accepts over", () => {
@@ -1892,7 +1994,7 @@ describe("D9: the board announces moves to a screen reader", () => {
   it("announces the outcome of a confirmed acceptance from the board", async () => {
     const { container, getByLabelText, getByRole } = renderBoard(
       [task({ key: "VIB-1", stage: "impl" })],
-      { action: () => ({ ok: true as const, toast: "Accepted VIB-1 — moved to Done" }) },
+      { action: () => ({ ok: true as const, toast: "Accepted VIB-1, moved to Done" }) },
     );
     fireEvent.click(getByLabelText("Change stage (currently In Progress)"));
     fireEvent.click(getByRole("menuitemradio", { name: "Done" }));
@@ -1901,7 +2003,7 @@ describe("D9: the board announces moves to a screen reader", () => {
     expect(region(container)!.textContent).toBe("Move requested: VIB-1 to Done.");
     await waitFor(() =>
       expect(region(container)!.textContent).toBe(
-        "Accepted VIB-1 — moved to Done",
+        "Accepted VIB-1, moved to Done",
       ),
     );
   });

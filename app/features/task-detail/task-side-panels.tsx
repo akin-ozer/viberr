@@ -230,7 +230,7 @@ export function GithubTrace({
           <span className="k">Checked</span>
           <span
             className="v sub"
-            title="When a reconcile pass for this task last completed. A background poller re-checks branched tasks roughly every 5 minutes, and a pass that finds nothing new is still a check — it just records no change."
+            title="When a reconcile pass for this task last completed. A background poller re-checks branched tasks roughly every 5 minutes, and a pass that finds nothing new is still a check: it just records no change."
           >
             {checkedAt ? (
               <time dateTime={checkedAt}>
@@ -247,7 +247,7 @@ export function GithubTrace({
           <span className="k">Last change</span>
           <span
             className="v sub"
-            title="Branch, diff, commits and PR state below are served from the cached projection. This is when that cache last CHANGED: a background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so an older time here means a quiet branch — the Checked row above says when GitHub was last read."
+            title="Branch, diff, commits and PR state below are served from the cached projection. This is when that cache last CHANGED: a background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so an older time here means a quiet branch. The Checked row above says when GitHub was last read."
           >
             {reconciledAt ? (
               <time dateTime={reconciledAt}>
@@ -257,7 +257,7 @@ export function GithubTrace({
               // F15-02: PR/commit facts on screen came from delivery-time
               // writes, not a reconcile pass — "not yet synced" next to a live
               // PR read as a contradiction. Say what is actually true.
-              "recorded at delivery — nothing has changed since"
+              "recorded at delivery (nothing has changed since)"
             ) : (
               // F19-22: NOT "not yet synced with GitHub". Under DG-3 an absent
               // provenance row is silent about whether a pass ever ran — it only
@@ -389,7 +389,7 @@ export function PolicyPanel({
       // it. Read from the matrix like every other row so it cannot drift again.
       k: "Comments",
       v: roleCan(r, "comment")
-        ? "You can comment — every project member can"
+        ? "You can comment (every project member can)"
         : "Project members only",
       icon: "message",
     },
@@ -399,7 +399,7 @@ export function PolicyPanel({
         ? roleCan(r, "release-any-ownership")
           ? "Take / release · you can release anyone"
           : "Take / release your own seat"
-        : "View only — contributor+ to own",
+        : "View only (contributor+ to own)",
       icon: "plus",
     },
     {
@@ -407,7 +407,7 @@ export function PolicyPanel({
       v: roleCan(r, "accept-completion")
         ? "You can accept → Done"
         : ownsTask
-          ? "You own this task — you can accept it → Done"
+          ? "You own this task, so you can accept it → Done"
           : "Maintainer, admin, or the task's own owner",
       icon: "flag",
     },
@@ -435,7 +435,7 @@ export function PolicyPanel({
           ruling-id citations in this file's CODE COMMENTS (above, and on the
           `ownsTask` prop) are the right place for them and stay. */}
       <p className="fine xs perm-intro">
-        Platform rules as they apply to <b>you on this task</b> — role grants,
+        Platform rules as they apply to <b>you on this task</b>: role grants,
         plus the authority that comes with owning this task. This task's live
         stage, owner and waiting-on are in <b>Current state</b> above.
       </p>
@@ -582,7 +582,7 @@ export function CurrentStatePanel({
               // did); the project phrase is the correct one here.
               <span
                 className="by-human"
-                title="A human decision is needed — see the decision packet, the stage control, or the acceptance action on this page."
+                title="A human decision is needed: see the decision packet, the stage control, or the acceptance action on this page."
               >
                 a human
               </span>
@@ -607,7 +607,7 @@ export function CurrentStatePanel({
           <span className="k">Last activity</span>
           <span
             className="v sub"
-            title="The newest event on this task's timeline. Not the last time the task file changed — a background GitHub sync rewrites that without anything happening."
+            title="The newest event on this task's timeline. Not the last time the task file changed: a background GitHub sync rewrites that without anything happening."
           >
             {task.lastActivityAt ? (
               <time dateTime={task.lastActivityAt}>
@@ -624,7 +624,7 @@ export function CurrentStatePanel({
             {owner ? (
               <span
                 className="rev-stack"
-                title="Human owner — reviews & accepts, this task only"
+                title="Human owner: reviews & accepts, this task only"
               >
                 <Avatar person={owner} />
                 <span className="rs-names">
@@ -677,7 +677,7 @@ export function CurrentStatePanel({
           never reach here: `isQuiet` refuses them outright (R14-3 / UXO-1). */}
       {task.quiet && (
         <p className="hint">
-          No activity — nothing has been recorded on this task since then, and no
+          No activity. Nothing has been recorded on this task since then, and no
           run is in flight. It stays here until someone engages an agent or
           schedules an operator re-run.
         </p>
@@ -702,7 +702,7 @@ export function CurrentStatePanel({
               >
                 <Icon name="check" />
                 {acceptBusy
-                  ? "Accepting — merging the review PR…"
+                  ? "Accepting · merging the review PR…"
                   : `Accept completion → ${terminalName}`}
               </button>
             )}
@@ -759,7 +759,7 @@ export function CurrentStatePanel({
           </button>
           <p className="hint archive-hint">
             {archived
-              ? "Archived — off the board and out of the review queue. Restoring puts it back where it stood, waiting on a human."
+              ? "Archived: off the board and out of the review queue. Restoring puts it back where it stood, waiting on a human."
               : "Keeps the record, takes the task off the board and out of the review queue. Reversible."}
           </p>
         </div>

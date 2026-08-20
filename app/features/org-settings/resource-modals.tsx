@@ -13,19 +13,44 @@ import { useModalAction } from "./resource-helpers";
  * and lives in `agent-template-modal.tsx`.
  */
 
-export function KBModal({ initial, onClose }: { initial: KbView | null; onClose: () => void }) {
+export function KBModal({
+  initial,
+  onClose,
+  onFilesCreated,
+}: {
+  initial: KbView | null;
+  onClose: () => void;
+  /** Files-mode create landed — the parent opens the store browser on the new
+   *  KB folder so upload / GitHub import / New document are one click away
+   *  (owner request 2026-08-20: the same door the skill modal has). */
+  onFilesCreated: (dir: string) => void;
+}) {
   const [name, setName] = useState(initial ? initial.name : "");
   const [refresh, setRefresh] = useState(initial ? initial.refresh : "on change");
-  const { action, err, setErr } = useModalAction(() => onClose());
+  // Mirrors SkillModal's two entry points: create the empty folder, or create
+  // it and land in its file browser to add the starting docs. Server-side the
+  // create is identical — the mode only changes where the human ends up.
+  const [mode, setMode] = useState<"empty" | "files">("empty");
+  const filesMode = !initial && mode === "files";
+  const { action, err, setErr } = useModalAction(() => {
+    onClose();
+    if (filesMode) onFilesCreated(slugify(name));
+  });
   const canSave = !action.busy && name.trim().length > 1;
   return (
     <MiniModal
       icon={<Icon name="memory" />}
       title={initial ? "Edit knowledge base" : "New knowledge base"}
-      sub="A folder in the store — drop docs in, or let agents append"
+      sub="A folder in the store. Drop docs in, or let agents append"
       onClose={onClose}
       canSave={canSave}
-      saveLabel={initial ? "Save changes" : "Create & index"}
+      saveLabel={
+        initial
+          ? "Save changes"
+          : filesMode
+            ? "Create & add files"
+            : "Create & index"
+      }
       footHint={"store://kb/" + (slugify(name) || "name") + "/"}
       onSave={() => {
         if (!canSave) return;
@@ -55,6 +80,47 @@ export function KBModal({ initial, onClose }: { initial: KbView | null; onClose:
           data-autofocus=""
         />
       </div>
+      {!initial && (
+        <div className="field">
+          <span className="flabel">Content</span>
+          <div
+            role="radiogroup"
+            aria-label="How the knowledge base gets its content"
+            className="mode-radios"
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === "empty"}
+              className={"btn sm" + (mode === "empty" ? "" : " ghost")}
+              onClick={() => setMode("empty")}
+            >
+              <Icon name="memory" />
+              Empty for now
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === "files"}
+              className={"btn sm" + (mode === "files" ? "" : " ghost")}
+              onClick={() => setMode("files")}
+            >
+              <FolderIco />
+              Start from files
+            </button>
+          </div>
+          {filesMode && (
+            <div className="def-note">
+              <Icon name="file" />
+              <span>
+                Creates the folder and opens its file browser. Upload files or
+                a folder, import from GitHub, or write documents there. Agents
+                read the live folder from the first run.
+              </span>
+            </div>
+          )}
+        </div>
+      )}
       <div className="field">
         <span className="flabel">Re-index</span>
         <span className="mini-seg self-start" role="group" aria-label="Re-index">
@@ -67,11 +133,11 @@ export function KBModal({ initial, onClose }: { initial: KbView | null; onClose:
         <div className="def-note">
           <Icon name="file" />
           <span>
-            Content is plain files inside the folder — inspectable and editable outside
+            Content is plain files inside the folder, inspectable and editable outside
             Viberr. This setting controls the <strong>doc count and freshness stamp</strong>{" "}
             only: <strong>on change</strong> re-scans automatically whenever a file in the
             folder changes, <strong>manual</strong> only when you click re-scan. It does not
-            pin what an agent reads — every run loads the live folder either way.
+            pin what an agent reads. Every run loads the live folder either way.
           </span>
         </div>
       </div>
@@ -125,7 +191,7 @@ export function McpModal({
       }
       footHint={
         transport === "stdio"
-          ? "spawned per run — it runs with the server's own privileges"
+          ? "spawned per run, with the server's own privileges"
           : "a real MCP handshake runs on save & test"
       }
       onSave={() => {
@@ -153,6 +219,8 @@ export function McpModal({
             className="mono"
             value={name}
             placeholder="e.g. github-mcp"
+            autoComplete="off"
+            spellCheck={false}
             onChange={(e) => {
               setName(e.target.value);
               setErr(null);
@@ -187,6 +255,12 @@ export function McpModal({
           {transport === "stdio" ? "Command" : "Endpoint"}
           <span className="req">*</span>
         </label>
+        {/* Owner report 2026-08-20: browsers read this text-input + the password
+            input below as a LOGIN form and filled a saved email/password pair
+            into an MCP endpoint. `autoComplete="off"` alone is ignored on
+            login-shaped pairs; the password side opting into `new-password`
+            (below) is what breaks the pair heuristic, and the manager opt-outs
+            cover the extensions that scrape anyway. */}
         <input
           id="mcp-target"
           type="text"
@@ -195,6 +269,10 @@ export function McpModal({
           placeholder={
             transport === "stdio" ? "npx -y @mcp/server-postgres" : "https://mcp.internal:7801/sse"
           }
+          autoComplete="off"
+          spellCheck={false}
+          data-1p-ignore
+          data-lpignore="true"
           onChange={(e) => {
             setTarget(e.target.value);
             setErr(null);
@@ -219,7 +297,7 @@ export function McpModal({
           Credential{" "}
           <span className="fhint">
             optional · token / API key
-            {initial?.hasCred ? " · a credential is set — leave blank to keep it" : ""}
+            {initial?.hasCred ? " · a credential is set (leave blank to keep it)" : ""}
           </span>
         </label>
         <input
@@ -228,6 +306,10 @@ export function McpModal({
           className="mono"
           value={cred}
           disabled={clearCred}
+          autoComplete="new-password"
+          spellCheck={false}
+          data-1p-ignore
+          data-lpignore="true"
           placeholder={
             clearCred
               ? "will be removed on save"
@@ -380,8 +462,8 @@ export function SkillModal({
             <div className="def-note">
               <Icon name="shield" />
               <span>
-                Creates the empty skill folder and opens its file browser —
-                upload files or a folder, import from GitHub, or write
+                Creates the empty skill folder and opens its file browser.
+                Upload files or a folder, import from GitHub, or write
                 documents there. The summary comes from your SKILL.md&apos;s
                 frontmatter <span className="mono">description:</span> once it
                 lands (or add one via Edit).

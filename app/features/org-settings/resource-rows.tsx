@@ -83,7 +83,7 @@ export function KbPanel({
                   // read like a healthy empty KB. Plain honest text, mirroring
                   // the credUnreadable precedent below.
                   <>
-                    folder missing — no docs reach a granted agent; re-create it
+                    folder missing: no docs reach a granted agent; re-create it
                     or delete this knowledge base
                   </>
                 )}
@@ -110,7 +110,7 @@ export function KbPanel({
               <button
                 type="button"
                 className="stg-x"
-                title="Re-scan folder — refresh the doc count"
+                title="Re-scan folder to refresh the doc count"
                 aria-label={"Re-scan " + kb.name}
                 onClick={() => onReindex(kb)}
               >
@@ -204,9 +204,9 @@ export function McpPanel({
                   }
                   title={
                     warming
-                      ? "first run of this command — finishing in the background"
+                      ? "first run of this command, finishing in the background"
                       : stale
-                        ? "last check passed but is stale — retest to confirm"
+                        ? "last check passed but is stale. Retest to confirm"
                         : m.up === true
                           ? "connected"
                           : m.up === false
@@ -228,7 +228,7 @@ export function McpPanel({
                     reported install. One copy for both bases: the reader can act
                     on neither distinction. */}
                 {m.warmingSince !== null
-                  ? "first run — installing in the background"
+                  ? "first run, installing in the background"
                   : m.up === true
                   ? (m.tools !== null ? m.tools + " tools · " : "reachable · ") +
                     "checked " + rel(m.lastCheckedAt) +
@@ -246,7 +246,7 @@ export function McpPanel({
                     re-enter it. */}
                 {m.hasCred
                   ? m.credUnreadable
-                    ? " · auth: unreadable — rotate the encryption key or re-enter the credential"
+                    ? " · auth: unreadable (rotate the encryption key or re-enter the credential)"
                     : " · auth: configured"
                   : ""}
                 {/* P14-KM-09: KB and skill rows have counted their templates
@@ -354,7 +354,12 @@ export function SkillPanel({
                   {s.name}
                 </button>
               </b>
-              <span className="sub">{s.summary}</span>
+              {/* Long summaries clamp to three lines to keep the list scannable;
+                  the full text stays in the DOM (screen readers read it all) and
+                  on hover via title. The editor shows it in full. */}
+              <span className="sub clamp" title={s.summary}>
+                {s.summary}
+              </span>
               <span className="sub mono">
                 store://skills/{s.name}/ · {s.fileCount} file
                 {s.fileCount === 1 ? "" : "s"} · {updatedLabel(s.updatedAt)}
@@ -445,8 +450,13 @@ export function AgentPanel({
                 <b>{a.name}</b>
                 {/* P13-AP-09: the row subtitle is the SHORT blurb. It used to
                     render the markdown body — i.e. the agent's entire persona —
-                    so a seeded profile printed a 600-word system prompt here. */}
-                <span className="sub">{a.summary}</span>
+                    so a seeded profile printed a 600-word system prompt here.
+                    Even the blurb runs long on seeded profiles, so it clamps to
+                    three lines (full text in the DOM + title; editor has it
+                    whole). */}
+                <span className="sub clamp" title={a.summary}>
+                  {a.summary}
+                </span>
                 <span className="sub mono">
                   {a.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}
                   {/* P14-WL-06: the row right below already pluralizes
@@ -485,7 +495,7 @@ export function AgentPanel({
           // D8: absent → why it matters → next action (P16).
           <div className="empty">
             No global agent profiles yet. A profile is a reusable agent
-            definition — its backend, model, skills and grants — that you can
+            definition (its backend, model, skills and grants) that you can
             deploy into any project. Create one with <strong>New</strong> above.
           </div>
         )}

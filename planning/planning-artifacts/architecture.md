@@ -404,8 +404,8 @@ This keeps scaffold convenience separate from actual product architecture.
 **CI/CD pipeline approach:**
 
 - GitHub Actions for CI/CD.
-- CI covers typecheck, tests, build integrity, and an end-to-end suite. Migration integrity is covered transitively: the migration-runner test applies the real baseline and asserts idempotency and constraints, and the unit suite runs in CI.
-- **There is no linter or formatter, and adding one is a deliberate non-goal** *(recorded 2026-07-25)*. None has ever existed in this repository. Introducing one now would produce a mechanical diff across the whole tree for no behavioral gain, in a codebase where every such wave has cost more than it returned. The anti-drift rules in this document are enforced by typecheck, tests, and review instead — see Pattern Enforcement.
+- CI covers lint, typecheck, tests, build integrity, and an end-to-end suite. Migration integrity is covered transitively: the migration-runner test applies the real baseline and asserts idempotency and constraints, and the unit suite runs in CI.
+- **There IS a linter, and it is a gate: oxlint with the vendored 15-rule `anti-slop` plugin** (`.oxlintrc.json`, `tools/oxlint/anti-slop/`), run as `npm run lint` and required in the `verify` CI job. There is still no formatter, and adding one remains a non-goal. *(Reversed 2026-08-19, pass 21 — ruling 86 / R21-3. The original entry, recorded 2026-07-25, read "There is no linter or formatter, and adding one is a deliberate non-goal", on the reasoning that a linter would produce a mechanical diff across the whole tree for no behavioral gain. The linter landed anyway in commits `54ffab8`/`ce2bc9e` and this sentence was left standing, which is the drift U1 was filed for. The old reasoning was not baseless: the adopting rewrite touched 387 files and introduced four behavioral regressions — F21-7/8/9/11, all fixed in pass 21 — so a mechanical tree-wide change is now held to the same review bar as behavior.)* The anti-drift rules in this document are enforced by typecheck, tests, lint, and review — see Pattern Enforcement.
 
 **Environment configuration:**
 
@@ -584,7 +584,7 @@ OAuth optional, see §Authentication):
 
 **Pattern Enforcement:**
 
-- Enforce through typechecking, tests, and review against this architecture document. There is no linter (see CI/CD above), so none of the naming, module-boundary or dumping-ground rules is machine-checked — a reviewer is the only gate, and pattern violations must actually be called out
+- Enforce through typechecking, tests, lint, and review against this architecture document. The linter (see CI/CD above) machine-checks the `anti-slop` implementation-pattern rules only — none of the naming, module-boundary or dumping-ground rules in this document is expressible in it, so for those a reviewer is still the only gate and pattern violations must actually be called out *(amended 2026-08-19, pass 21 — ruling 86 / R21-3; the sentence used to read "There is no linter … a reviewer is the only gate", which stopped being true when oxlint landed)*
 - Pattern violations should be called out in task history and code review notes
 - Shared conventions should be updated in one place first, then applied in code
 
@@ -616,8 +616,8 @@ OAuth optional, see §Authentication):
 ### Complete Project Directory Structure
 
 This tree is **descriptive, regenerated from the filesystem** (last resynced 2026-07-25;
-spot-corrected 2026-08-06, pass 19 — the deltas are marked inline and the promise below is
-exactly why they had to be fixed rather than left).
+spot-corrected 2026-08-06, pass 19, and again 2026-08-19, pass 21 — the deltas are marked
+inline and the promise below is exactly why they had to be fixed rather than left).
 It is not a wish list: a directory that is not here does not exist, and a directory here
 that you cannot find is a bug in this document, not a gap to fill. Tests are co-located
 with their modules and elided below except where the file count matters.
@@ -626,14 +626,15 @@ with their modules and elided below except where the file count matters.
 viberr/
 ├── README.md
 ├── CONTRIBUTING.md
-├── FILES.md                    # generated index of Git's tracked files
 ├── package.json
 ├── tsconfig.json
 ├── react-router.config.ts
 ├── vite.config.ts
 ├── vitest.config.ts            # unit suite: app/ + db/ only (scripts/ deliberately excluded)
-├── playwright.config.ts
+├── playwright.config.ts        # ONE browser project: chromium, plus a `setup` login fixture
+│                               # (2026-08-19 — see the browser-matrix note)
 ├── doctor.config.ts            # react-doctor ignore list; manually invoked, not a gate
+├── .oxlintrc.json              # the ONLY lint config; loads the anti-slop plugin (2026-08-19)
 ├── skills-lock.json
 ├── .env.example
 ├── .dockerignore
@@ -643,9 +644,13 @@ viberr/
 ├── compose.yml
 ├── compose.e2e.yml             # production-image e2e stack (2026-08-03 modernization)
 ├── qa/                         # fixtures/notes agents produced during live QA passes
+├── test-artifacts/             # captured command output from live validation passes (2026-08-19)
+├── tools/
+│   └── oxlint/anti-slop/       # the vendored 15-rule lint plugin (2026-08-19, ruling 86);
+│                               # itself excluded from linting by .oxlintrc.json
 ├── .github/
 │   └── workflows/
-│       └── ci.yml              # two jobs: verify (typecheck/test/build) + e2e
+│       └── ci.yml              # two jobs: verify (lint/typecheck/test/build) + e2e
 ├── docs/
 │   ├── architecture/
 │   │   ├── decisions.md        # binding conventions + the numbered orchestrator rulings
@@ -773,7 +778,11 @@ viberr/
   a route loader. There is no user-facing provenance view and none is planned for V1; the
   data backs GitHub freshness and rebuild diagnostics.
 - There is no `eslint.config.js`, `prettier.config.cjs`, `tailwind.config.ts` or
-  `postcss.config.mjs`. None has ever existed here (see the CI/CD decision).
+  `postcss.config.mjs`. None has ever existed here. Lint config is `.oxlintrc.json` alone,
+  and its one plugin is the vendored `tools/oxlint/anti-slop/` — do not add a second lint
+  or formatter toolchain beside it *(amended 2026-08-19, pass 21 — ruling 86 / R21-3; this
+  bullet used to close with "(see the CI/CD decision)", the no-linter decision that ruling
+  reversed)*.
 - `docs/operations/pat-management.md` was prescribed and never written. PAT setup lives in
   the README's GitHub section and PAT triage in the runbook, so it was dropped from this
   tree rather than left as a phantom.
@@ -952,7 +961,8 @@ entirely, which is how they ended up with no named home. They are:
 
 **Build Process Structure:**
 
-- CI runs two jobs: `verify` (typecheck → unit/integration tests → production build) and `e2e` (Playwright against a real dev server). Env validation and migration integrity are exercised inside the test suite; there is no lint step, by decision.
+- CI runs two jobs: `verify` (lint → typecheck → unit/integration tests → production build) and `e2e` (Playwright against the production Docker image in an isolated Compose stack — never a dev server, owner policy 2026-08-02). Env validation and migration integrity are exercised inside the test suite. *(Amended 2026-08-19, pass 21: the lint step is new and required — ruling 86 / R21-3 — replacing "there is no lint step, by decision"; and the e2e job was described as running against "a real dev server", which `playwright.config.ts` and `scripts/e2e.ts` have not done since 2026-08-02.)*
+- **Browser coverage is chromium, and only chromium.** `playwright.config.ts` declares exactly one BROWSER project (`chromium` / `devices["Desktop Chrome"]`) and CI installs that browser alone. Its only sibling project, `setup`, runs no specs of its own — it logs in once through the real `/login` UI and stores the session the chromium project then reuses, so it is a fixture, not a second browser. The PRD's browser matrix also names current Safari and current Firefox desktop; neither has ever been exercised here, automated or manual, in any pass. *(Recorded 2026-08-19, pass 21 — U6. Ruling 63 / R19-9's rule applies: a claim nothing measures is decoration. The matrix stands as declared support intent, but this document does not pretend it is verified — add a Playwright project or record a manual check before anyone says it is.)*
 - Docker image packages the app source; runtime state mounts in externally.
 
 **Deployment Structure:**

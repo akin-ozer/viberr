@@ -270,7 +270,7 @@ describe("knowledge bases", () => {
       ctx,
     );
     expect(toast).toBe(
-      "Architecture notes created — folder ready at store://kb/architecture-notes/",
+      "Architecture notes created. Folder ready at store://kb/architecture-notes/",
     );
     const dir = kbDirPath("architecture-notes", dataRoot);
     expect(existsSync(dir)).toBe(true);
@@ -285,7 +285,7 @@ describe("knowledge bases", () => {
 
     const reindexed = reindexKnowledgeBase(db, kb.id, ACTOR, ctx);
     expect(reindexed.toast).toBe(
-      "Architecture notes re-scanned — 1 doc agents can read",
+      "Architecture notes re-scanned: 1 doc agents can read",
     );
   });
 
@@ -314,7 +314,7 @@ describe("knowledge bases", () => {
     const { db, dataRoot, ctx } = setup();
     const { kb } = await saveKnowledgeBase(db, { name: "Gone Soon", refresh: "manual" }, ACTOR, ctx);
     const { toast } = await deleteKnowledgeBase(db, kb.id, ACTOR, ctx);
-    expect(toast).toBe("Gone Soon deleted — agents lose it on next context load");
+    expect(toast).toBe("Gone Soon deleted. Agents lose it on next context load");
     expect(existsSync(kbDirPath("gone-soon", dataRoot))).toBe(false);
     expect(listKnowledgeBases(db, ctx)).toHaveLength(0);
   });
@@ -345,7 +345,7 @@ describe("skills", () => {
       ACTOR,
       ctx,
     );
-    expect(toast).toBe("Skill terraform-review created — SKILL.md written");
+    expect(toast).toBe("Skill terraform-review created. SKILL.md written");
     const skillMd = path.join(skillDirPath("terraform-review", dataRoot), "SKILL.md");
     expect(existsSync(skillMd)).toBe(true);
     expect(skill.body).toContain("state safety");
@@ -357,7 +357,7 @@ describe("skills", () => {
       ACTOR,
       ctx,
     );
-    expect(updated.toast).toBe("Skill terraform-review updated — SKILL.md rewritten");
+    expect(updated.toast).toBe("Skill terraform-review updated. SKILL.md rewritten");
     expect(getSkill(db, skill.id, ctx)!.body).toBe("## New body");
   });
 
@@ -375,7 +375,7 @@ describe("skills", () => {
       ctx,
     );
     expect(toast).toBe(
-      "Skill conventional-commits created — add SKILL.md and supporting files",
+      "Skill conventional-commits created. Add SKILL.md and supporting files",
     );
     // The folder exists for the store browser; SKILL.md deliberately does NOT —
     // it arrives via upload/GitHub/New document, without an overwrite-confirm
@@ -386,7 +386,7 @@ describe("skills", () => {
     ).toBe(false);
     // The row's empty summary falls back to the derived one: the placeholder
     // now, the uploaded SKILL.md's frontmatter `description:` once it lands.
-    expect(skill.summary).toBe("On-disk skill — add a summary to describe it");
+    expect(skill.summary).toBe("On-disk skill. Add a summary to describe it");
     expect(skill.tree).toHaveLength(0);
 
     // files mode is a CREATE-only affordance: an edit still demands a summary…
@@ -422,7 +422,7 @@ describe("skills", () => {
       ctx,
     );
     expect(updated.toast).toBe(
-      "Skill api-design updated — existing SKILL.md kept",
+      "Skill api-design updated. Existing SKILL.md kept",
     );
     const onDisk = path.join(skillDirPath("api-design", dataRoot), "SKILL.md");
     expect(readFileSync(onDisk, "utf8")).toBe("# precious content");
@@ -441,7 +441,7 @@ describe("skills", () => {
       ACTOR,
       ctx,
     );
-    expect(cleared.toast).toBe("Skill api-design updated — SKILL.md rewritten");
+    expect(cleared.toast).toBe("Skill api-design updated. SKILL.md rewritten");
     expect(readFileSync(onDisk, "utf8")).toBe("");
   });
 
@@ -476,7 +476,7 @@ describe("skills", () => {
       ACTOR,
       ctx,
     );
-    expect(kept.toast).toContain("existing SKILL.md kept");
+    expect(kept.toast).toContain("Existing SKILL.md kept");
     expect(readFileSync(onDisk, "utf8")).toHaveLength(256 * 1024 + 10);
   });
 
@@ -522,7 +522,7 @@ describe("skills", () => {
       ACTOR,
       ctx,
     );
-    expect(kept.toast).toContain("existing SKILL.md kept");
+    expect(kept.toast).toContain("Existing SKILL.md kept");
   });
 
   it("rename moves the skill folder; delete removes it", async () => {
@@ -609,7 +609,7 @@ describe("mcp servers", () => {
     );
     expect(stdio.mcp).toMatchObject({ up: true, tools: 7 });
     expect(stdio.toast).toBe(
-      "postgres-readonly saved — 7 tools discovered · spawned per run",
+      "postgres-readonly saved: 7 tools discovered · spawned per run",
     );
 
     // A command that never answers → honest unreachable, count stays null.
@@ -736,7 +736,7 @@ describe("mcp servers", () => {
     // stale column — Settings said "13 tools" for a server both live runs saw
     // as 15 because the old probe advertised no client capabilities.
     const healthy = await testMcpServer(db, mcp.id, { fetchImpl: mcpHttpFetch(15) });
-    expect(healthy.toast).toMatch(/^github-mcp healthy — 15 tools · \d+ms$/);
+    expect(healthy.toast).toMatch(/^github-mcp healthy: 15 tools · \d+ms$/);
     expect(getMcpServer(db, mcp.id)!.tools).toBe(15);
 
     const dead = await testMcpServer(db, mcp.id, { fetchImpl: unreachableFetch() });
@@ -761,7 +761,7 @@ describe("mcp servers", () => {
       spawnImpl: fakeMcpSpawn(3),
     });
     expect(healthy.mcp).toMatchObject({ up: true, tools: 3 });
-    expect(healthy.toast).toMatch(/^postgres-readonly healthy — 3 tools · \d+ms$/);
+    expect(healthy.toast).toMatch(/^postgres-readonly healthy: 3 tools · \d+ms$/);
 
     const dead = await testMcpServer(db, mcp.id, {
       spawnImpl: failingSpawn,
@@ -770,7 +770,7 @@ describe("mcp servers", () => {
     // R19-17: the reason carries the spawn's own words ("ENOENT"), which is
     // what tells a reader the binary is missing rather than the server broken.
     expect(dead.toast).toBe(
-      "postgres-readonly unreachable — command not found — ENOENT",
+      "postgres-readonly unreachable: command not found (ENOENT)",
     );
   });
 
@@ -786,7 +786,7 @@ describe("mcp servers", () => {
     ).toMatchObject({ kind: "down", reason: "timed out after 0s" });
     expect(
       await discoverStdioMcpTools("mcp-server", { spawnImpl: failingSpawn }),
-    ).toMatchObject({ kind: "down", reason: "command not found — ENOENT" });
+    ).toMatchObject({ kind: "down", reason: "command not found (ENOENT)" });
   });
 });
 
@@ -859,7 +859,7 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
   it("F20-22: a silent exit folds its exit code / signal into the reason", async () => {
     expect(
       await discoverStdioMcpTools("svc", { spawnImpl: exitingSpawn(3) }),
-    ).toMatchObject({ kind: "down", reason: "exited before responding — exit code 3" });
+    ).toMatchObject({ kind: "down", reason: "exited before responding (exit code 3)" });
     expect(
       await discoverStdioMcpTools("svc", { spawnImpl: exitingSpawn(null, "SIGSEGV") }),
     ).toMatchObject({ kind: "down", reason: "killed by SIGSEGV" });
@@ -1038,7 +1038,7 @@ describe("disk is truth (finding #7)", () => {
       ACTOR,
       ctx,
     );
-    expect(toast).toBe("Skill reviewer-expertise updated — SKILL.md rewritten");
+    expect(toast).toBe("Skill reviewer-expertise updated. SKILL.md rewritten");
     expect(skill.id).toMatch(/^sk_/); // now a real row, not synthetic
     expect(skill.summary).toBe("Review verdicts.");
     // Only ONE entry — no duplicate between disk + row.

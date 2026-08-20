@@ -117,8 +117,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     const row = listRef.current?.querySelector('[data-active="true"]');
-    // jsdom has no scrollIntoView; keyboard navigation must not depend on it.
-    if (row instanceof HTMLElement && typeof row.scrollIntoView === "function") {
+    // jsdom's Element carries no `scrollIntoView` at all; keyboard navigation
+    // must not depend on the host providing it.
+    if (row instanceof HTMLElement && "scrollIntoView" in row) {
       row.scrollIntoView({ block: "nearest" });
     }
   }, [active]);
@@ -164,7 +165,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       <div className="cmdk-list" ref={listRef}>
         {!typed ? (
           <p className="cmdk-empty">
-            Type to jump to a task, a branch, an agent or a project — across
+            Type to jump to a task, a branch, an agent or a project, across
             every project you can open.
           </p>
         ) : hits.length === 0 ? (

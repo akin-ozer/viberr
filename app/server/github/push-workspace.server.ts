@@ -141,6 +141,13 @@ type GitLogFields = {
   err?: string;
   timedOut?: true;
   detail?: string;
+  /** Commits the push carried — a REAL count, never a placeholder. */
+  commits?: number;
+  /** F21-22: set instead of `commits` when the history could not be counted
+   *  (a shallow clone whose deepen failed). `commits: null` used to be logged
+   *  there, and a reader parses that as zero — the operator-deliver path looked
+   *  like it had pushed nothing while the agent path showed a count. */
+  commitsUnknown?: true;
 };
 
 /**
@@ -714,9 +721,9 @@ export async function pushWorkspaceBranch(
           // human-facing form is one line; the untouched multi-line excerpt
           // rides the structured field and the log line.
           pushRes.timedOut
-            ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s — it ran past its time limit rather than failing`
+            ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
             : detail
-              ? `git push failed — git said: ${oneLine(detail)}`
+              ? `git push failed (git said: ${oneLine(detail)})`
               : "git push returned non-zero, and git printed nothing to explain it",
           detail,
         );
@@ -725,13 +732,13 @@ export async function pushWorkspaceBranch(
       askpass.dispose();
     }
 
-    logger.info("pushed workspace branch to origin", {
-      taskKey,
-      branch,
-      commits: localAhead,
-    });
-    // `commits: null` (history unreadable) reports 0 — the push happened, the
-    // count is the only thing we don't know.
+    const pushed: GitLogFields = { taskKey, branch };
+    if (localAhead === null) pushed.commitsUnknown = true;
+    else pushed.commits = localAhead;
+    logger.info("pushed workspace branch to origin", pushed);
+    // The RESULT's `commits` is a number by contract, so an unreadable history
+    // reports 0 there — the push happened, the count is the only thing we don't
+    // know, and the log line above is where that difference is stated.
     return { status: "pushed", branch, commits: localAhead ?? 0 };
   } catch (error) {
     // F19-18: "unexpected error" named nothing either. Same redacted channel.
@@ -744,7 +751,7 @@ export async function pushWorkspaceBranch(
     logger.info("workspace branch push errored — skipping", fields);
     return pushFailed(
       detail
-        ? `the push could not run — ${oneLine(detail)}`
+        ? `the push could not run (${oneLine(detail)})`
         : "the push could not run, and the failure carried no message",
       detail,
     );

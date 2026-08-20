@@ -104,6 +104,26 @@ describe("checksPill / reviewPill (P13-D-28)", () => {
     expect(checksPill(checks({ total: 9 })).label).toBe("9 checks passing");
   });
 
+  it("F21-7: unaccounted runs get a grey pill, never the green one", () => {
+    const drifted = {
+      total: 3,
+      passing: 0,
+      failing: 0,
+      pending: 0,
+      unknown: 3,
+      state: "unknown",
+    } as const;
+    expect(checksPill(drifted)).toEqual({
+      kind: "neutral",
+      label: "3/3 checks unknown",
+    });
+    // Partially readable: only the unaccounted share is named.
+    expect(
+      checksPill({ total: 4, passing: 2, failing: 0, pending: 0, unknown: 2, state: "unknown" })
+        .label,
+    ).toBe("2/4 checks unknown");
+  });
+
   it("never claims a green build from GitHub's opinion alone", () => {
     // changes_requested is `risk`, not `blocked`: GitHub's review state is a
     // real signal but it is not this app's acceptance gate — an in-product

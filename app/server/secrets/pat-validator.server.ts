@@ -100,13 +100,22 @@ function writeProbeEnabled(explicit?: boolean): boolean {
 }
 
 /** The legacy permission block GitHub computes for the AUTHENTICATED token on
- *  `GET /repos/{owner}/{repo}` — the read-only proof of repository write. */
+ *  `GET /repos/{owner}/{repo}` — the read-only proof of repository write.
+ *
+ *  Per-FIELD tolerance (F21-11), the same way the project-repair probe reads
+ *  this payload (`settings-actions.server.ts`): one drifted key must not void
+ *  the block. It did — five strict booleans inside a block-level catch meant a
+ *  single non-boolean (`triage: "yes"`) discarded a `push: false` sitting right
+ *  next to it, and a read-only repository then came back `repoWriteOk: null` →
+ *  scope `source: "assumed"` → status `valid`. A silent UPGRADE: the credential
+ *  card claimed write access GitHub had just denied. Each key now degrades on
+ *  its own, so what GitHub DID assert still counts. */
 const repoPermissionsSchema = z.object({
-  admin: z.boolean().optional(),
-  maintain: z.boolean().optional(),
-  push: z.boolean().optional(),
-  triage: z.boolean().optional(),
-  pull: z.boolean().optional(),
+  admin: z.boolean().optional().catch(undefined),
+  maintain: z.boolean().optional().catch(undefined),
+  push: z.boolean().optional().catch(undefined),
+  triage: z.boolean().optional().catch(undefined),
+  pull: z.boolean().optional().catch(undefined),
 });
 
 type RepoPermissions = z.infer<typeof repoPermissionsSchema>;
@@ -119,7 +128,9 @@ const repoResponseSchema = z.object({
 });
 
 /** True/false when GitHub answered, null when it sent no `permissions` block
- *  (an older GHES, or a response shape we should not guess about). */
+ *  (an older GHES, or a response shape we should not guess about). A block that
+ *  arrived with a drifted key is NOT "no block": the keys that did decode are
+ *  answers, and `push === false` among them is the proven read-only repo. */
 function repoWritable(permissions: RepoPermissions | undefined): boolean | null {
   if (!permissions) return null;
   const { admin, maintain, push } = permissions;

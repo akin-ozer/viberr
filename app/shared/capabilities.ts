@@ -412,7 +412,7 @@ export function repairDeliveryGrants<
         scoped: [...scoped],
         message:
           `${labels} stays granted but "Execute code or write to the repo" is ` +
-          `${headline === "human" ? "human-only" : "off"} — this profile cannot ` +
+          `${headline === "human" ? "human-only" : "off"}, so this profile cannot ` +
           `deliver until the headline capability is granted.`,
       },
     };
@@ -431,7 +431,7 @@ export function repairDeliveryGrants<
       kind: "repaired",
       scoped: [...scoped],
       message:
-        `"Execute code or write to the repo" was granted to match ${labels} — ` +
+        `"Execute code or write to the repo" was granted to match ${labels}: ` +
         `the delivery steps above it cannot run without it.`,
     },
   };

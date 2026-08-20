@@ -82,7 +82,7 @@ export function TopBell({
     push(
       data.ok
         ? "All notifications marked read"
-        : (data.error ?? "Marking notifications read failed — try again"),
+        : (data.error ?? "Marking notifications read failed. Try again"),
       data.ok ? "success" : "error",
     );
   });
@@ -145,7 +145,7 @@ export function TopBell({
             </div>
             <div className="ntf-pop-list">
               {notifications.length === 0 && (
-                <div className="empty">Nothing yet — you're caught up.</div>
+                <div className="empty">Nothing yet. You're caught up.</div>
               )}
               {notifications.map((n) => (
                 <NotificationItem key={n.id} notification={n} onOpen={openItem} />
@@ -183,7 +183,7 @@ export function TopBell({
         ref={buttonRef}
         className="icon-btn bell-btn"
         aria-label={
-          "Notifications" + (unread > 0 ? " — " + unread + " unread" : "")
+          "Notifications" + (unread > 0 ? ", " + unread + " unread" : "")
         }
         aria-haspopup="dialog"
         aria-expanded={open}

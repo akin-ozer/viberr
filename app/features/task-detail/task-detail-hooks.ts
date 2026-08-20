@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
 import { useToast } from "~/ui/toast";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
+import {
+  acceptanceDisclosureFields,
+  type AcceptanceDisclosure,
+} from "~/shared/acceptance-disclosure";
 import type { RunView } from "~/features/runtime/runtime-types";
 
 /**
@@ -167,12 +171,21 @@ export function useRunControls({
   const canForceAccept =
     roleCan(myRole as ProjectRole | null, "force-accept-completion") &&
     !acceptanceTerminallyBlocked;
+  // Ruling 88 (F21-2): the force ceremony discloses MORE than the ordinary one
+  // (the skipped stages, the bypassed refusal), so it echoes on the same terms
+  // — the server refuses a force-accept POST that carries no acknowledgment,
+  // and records no `task.acceptance.forced` row for the attempt.
   const onForceAccept = canForceAccept
-    ? () => {
+    ? (disclosure: AcceptanceDisclosure) => {
         if (runBusy) return;
         const fd = new FormData();
         fd.set("_csrf", csrf);
         fd.set("intent", "force-accept");
+        for (const [field, value] of Object.entries(
+          acceptanceDisclosureFields(disclosure),
+        )) {
+          fd.set(field, value);
+        }
         runFetcher.submit(fd, { method: "post" });
       }
     : undefined;

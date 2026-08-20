@@ -414,7 +414,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(task().frontmatter.stage).toBe("done");
     expect(task().frontmatter.pr).toBeNull();
     const completion = completionEvent();
-    expect(completion?.title).toBe("Completed — no changes");
+    expect(completion?.title).toBe("Completed with no changes");
     expect(completion?.text).toContain("completed with no changes");
     expect(completion?.text).toContain(BASE_SHA.slice(0, 12));
     expect(completion?.text).not.toMatch(/merged/i);
@@ -473,7 +473,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     );
     expect(task().frontmatter.stage).toBe("done");
     const completion = completionEvent();
-    expect(completion?.title).toBe("Completed — no changes");
+    expect(completion?.title).toBe("Completed with no changes");
     expect(completion?.text).toContain("WITHOUT a passing remote re-check");
     expect(completion?.text).not.toContain("completed with no changes");
     expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(1);
@@ -509,7 +509,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
       dataCtx(),
     );
     expect(task().frontmatter.stage).toBe("done");
-    expect(completionEvent()?.title).toBe("Completed — no changes");
+    expect(completionEvent()?.title).toBe("Completed with no changes");
     expect(completionEvent()?.text).not.toMatch(/merged/i);
   });
 });
@@ -549,7 +549,7 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
     );
     expect(result.outcome).toBe("done");
     expect(task().frontmatter.stage).toBe("done");
-    expect(completionEvent()?.title).toBe("Completed — no changes");
+    expect(completionEvent()?.title).toBe("Completed with no changes");
     expect(completionEvent()?.text).toContain("full-autonomy");
     expect(completionEvent()?.text).not.toMatch(/merged/i);
   });
@@ -599,5 +599,201 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
     );
     expect(result.outcome).not.toBe("noop");
     expect(result.message).not.toContain("No reviewed revision yet");
+  });
+});
+
+/**
+ * OBS-11 + OBS-13 (pass 21) — what the no-change acceptance does with the
+ * branch it just proved empty.
+ *
+ * OBS-11, live on vib-3: the acceptance verified "carries no commits ahead of
+ * main" and then left the branch on GitHub forever — merged branches are
+ * cleaned up by R15-6's policy, the one outcome that GUARANTEES an empty branch
+ * was not.
+ *
+ * OBS-13, live on vib-5: the same re-check read a branch the task never
+ * created. VIB-5's agent held no repo capability, so nothing branched — but a
+ * `vib-5` left over from a previous data root existed, the probe falls back to
+ * the DERIVED name, and the acceptance record claimed "Branch vib-5 carries no
+ * commits ahead of main" about a stranger. Harmless there (it was behind main);
+ * with anything else on it, the copy is a lie and a deletion would be worse.
+ */
+describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves behind", () => {
+  /** Wraps the standing transport so DELETEs are recorded (and answered)
+   *  instead of falling through to the ref/compare responder. */
+  function captureDeletes() {
+    const inner = fetchImpl;
+    const paths: string[] = [];
+    fetchImpl = async (input, init) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      const path = new URL(
+        input instanceof Request ? input.url : String(input),
+      ).pathname;
+      if (method === "DELETE") {
+        paths.push(path);
+        return new Response(null, { status: 204 });
+      }
+      return inner(input, init);
+    };
+    return { paths };
+  }
+
+  /**
+   * The OTHER no-change shape (R17-2 / F17-L9): a task that DID branch, whose
+   * delivery then found the branch empty (`noChanges`) — so the branch on the
+   * remote is the task's own, which is the only branch a cleanup may remove.
+   * Seeded with its delivered revision and the reviewer's approval on it, since
+   * the verdict-time mint deliberately skips a task that already has a branch.
+   */
+  function seedEmptyBranchTask(): void {
+    const headSha = "d".repeat(40);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [REVIEWER],
+        branch: "vib-1",
+        noChanges: true,
+        workRevision: {
+          id: "rev_empty",
+          headSha,
+          treeSha: "t".repeat(40),
+          branch: "vib-1",
+          createdAt: "2026-08-19T09:00:00.000Z",
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_empty",
+            headSha,
+            result: "approve",
+            reason: "Nothing to change.",
+            at: "2026-08-19T09:30:00.000Z",
+          },
+        ],
+        validation: "healthy",
+      }),
+      goal: "Fix the flake; it turned out to already be fixed.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  /** Flip R15-6's post-merge branch cleanup off for this project. */
+  function branchCleanupOff(): void {
+    const file = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      guardrails: [
+        {
+          id: "delete-branch-after-merge",
+          desc: "Delete the task's branch on GitHub once its review PR is merged.",
+          on: false,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("OBS-11: deletes the task's OWN empty branch once the completion is accepted", async () => {
+    // CANARY: drop the `branchDisposition.kind === "delete"` block from
+    // acceptCompletion — no DELETE is sent and vib-3's branch lives on.
+    deployAgents();
+    seedEmptyBranchTask();
+    remote({ aheadBy: 0 }); // the branch EXISTS and is 0 commits ahead
+    const deletes = captureDeletes();
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      arda(),
+      dataCtx(),
+    );
+
+    expect(task().frontmatter.stage).toBe("done");
+    expect(deletes.paths).toEqual([
+      "/repos/akin-ozer/viberr/git/refs/heads/vib-1",
+    ]);
+    // `deleteTaskRemoteBranch` writes its own honest record of the deletion.
+    expect(
+      task().timeline.some((e) => e.text.includes("Deleted branch `vib-1` from GitHub.")),
+    ).toBe(true);
+  });
+
+  it("OBS-11: leaves the branch when the project switched cleanup off — and says so", async () => {
+    // CANARY: ignore `branchCleanupOnMerge` — the branch is deleted against the
+    // project's own policy, and the completion record says nothing either way.
+    deployAgents();
+    branchCleanupOff();
+    seedEmptyBranchTask();
+    remote({ aheadBy: 0 });
+    const deletes = captureDeletes();
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      arda(),
+      dataCtx(),
+    );
+
+    expect(task().frontmatter.stage).toBe("done");
+    expect(deletes.paths).toEqual([]);
+    expect(completionEvent()?.text).toContain(
+      "The empty branch `vib-1` was left on GitHub",
+    );
+  });
+
+  it("OBS-13: a branch that only matches by NAME is flagged as a collision, never deleted", async () => {
+    // The live vib-5 shape: the task recorded no branch of its own, and a
+    // leftover of the same name sits on the remote. CANARY: drop the
+    // `fm.branch !== branch` arm — the record claims the stranger as this
+    // task's branch and the cleanup deletes it.
+    deployAgents();
+    seedVerificationTask(); // no `branch` on the task
+    await reviewerApproves();
+    remote({ aheadBy: 0 }); // a `vib-1` exists on the remote anyway
+    const deletes = captureDeletes();
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      arda(),
+      dataCtx(),
+    );
+
+    expect(task().frontmatter.stage).toBe("done");
+    expect(deletes.paths).toEqual([]);
+    const text = completionEvent()?.text ?? "";
+    expect(text).toContain("VIB-1 never recorded a branch of its own");
+    expect(text).toContain("It was left untouched");
+  });
+
+  it("OBS-13: a same-name branch carrying commits refuses the acceptance and is not touched", async () => {
+    // The dangerous half of the collision: a leftover that has DIVERGED. The
+    // has-work refusal already stops the close; what must also hold is that
+    // nothing deletes it on the way past.
+    deployAgents();
+    seedVerificationTask();
+    await reviewerApproves();
+    remote({ aheadBy: 3 });
+    const deletes = captureDeletes();
+
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+        arda(),
+        dataCtx(),
+      ),
+    ).rejects.toThrow(/carries 3 commit\(s\) ahead of `main`/);
+
+    expect(task().frontmatter.stage).toBe("review");
+    expect(deletes.paths).toEqual([]);
   });
 });

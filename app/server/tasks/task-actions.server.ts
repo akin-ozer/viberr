@@ -9,6 +9,7 @@ import {
   deliveringEngagement,
   deriveValidation,
   normalizeEvidenceRows,
+  sanitizeEventAttachmentNames,
   EVIDENCE_EMPTY_COLUMN,
   type EvidenceRow,
   type PacketOption,
@@ -68,6 +69,16 @@ import {
 } from "./no-change-completion.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
+// OBS-11: R15-6's post-merge branch-cleanup switch. A leaf module (one
+// projection read + the guardrail schema), so no dynamic import is needed.
+import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
+// Ruling 88 (F21-2): the acceptance disclosure contract — one definition the
+// ceremony writes and the server reads (see the module's docblock).
+import {
+  acceptanceDisclosureDrift,
+  type AcceptanceDisclosure,
+} from "~/shared/acceptance-disclosure";
 import {
   taskRef,
   reprojectTask,
@@ -418,7 +429,7 @@ export async function createTask(
   }
   if (input.stageId !== undefined && input.stageId !== stage.id) {
     throw AppError.validation(
-      `New tasks start at ${stage.name} — the triage gate is where a goal is refined. Move the task through the workflow after it is created.`,
+      `New tasks start at ${stage.name}, the triage gate where a goal is refined. Move the task through the workflow after it is created.`,
     );
   }
   const stageId = stage.id;
@@ -543,7 +554,7 @@ export async function updateTaskGoal(
       type: "note",
       actor: humanActorRef(db, actor),
       title: "Goal updated",
-      text: "The task goal / acceptance criteria were edited — downstream agents re-anchor on the new goal.",
+      text: "The task goal / acceptance criteria were edited. Downstream agents re-anchor on the new goal.",
       toAgent: false,
       evidence: null,
     });
@@ -1498,8 +1509,13 @@ export async function postAgentReplyComment(
     runId: string;
     actorRef: FileActorRef;
     replyText: string | null;
+    /** Files this run saved into the task's attachments/ dir — stamped onto
+     *  the reply so the producing message names its own files (an interrupted
+     *  run may still have captured screenshots). */
+    attachments?: string[] | null;
   },
 ): Promise<void> {
+  const attachments = sanitizeEventAttachmentNames(input.attachments);
   const prepared = await prepareAgentReplyEvent(
     db,
     ctx,
@@ -1507,14 +1523,14 @@ export async function postAgentReplyComment(
     input.actorRef,
     input.replyText,
   );
-  if (prepared.status === "empty") {
+  if (prepared.status === "empty" && !attachments) {
     logger.info("agent reply run produced no text — no comment posted", {
       taskKey: input.taskKey,
       runId: input.runId,
     });
     return;
   }
-  if (prepared.status === "dropped") {
+  if (prepared.status === "dropped" && !attachments) {
     logger.info("agent reply dropped by the meaningful-comment guardrail", {
       taskKey: input.taskKey,
       runId: input.runId,
@@ -1522,6 +1538,24 @@ export async function postAgentReplyComment(
     recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, true);
     return;
   }
+  // The event that carries the files: the reply itself when one survived, else
+  // a minimal note — files with no author would sit unattributed in the panel.
+  const event: TaskFileEvent =
+    prepared.status === "event"
+      ? prepared.event
+      : {
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: input.actorRef,
+          title: null,
+          text:
+            attachments && attachments.length === 1
+              ? "Saved 1 file to this task's attachments during the run."
+              : `Saved ${attachments?.length ?? 0} files to this task's attachments during the run.`,
+          toAgent: false,
+          evidence: null,
+        };
+  if (attachments) event.attachments = attachments;
   // G7/B-FD9: the compression-threshold guardrail must fire on a pure
   // agent-reply flood too — the exact case the anti-noise guardrail was built
   // for. It ran only on operator and human comment writes, so a run of agent
@@ -1536,7 +1570,7 @@ export async function postAgentReplyComment(
   // the reply landing before it re-reads the task. Errors are logged, never
   // propagated — the run finished and the transcript is in the logs.
   return updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(prepared.event);
+    parsed.timeline.unshift(event);
     if (compactOn) {
       parsed.timeline = compactTimelineEvents(
         parsed.timeline,
@@ -1554,18 +1588,26 @@ export async function postAgentReplyComment(
   })
     .then(() => {
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, false);
+      // The dropped flag stays honest on the attachments-only note: the REPLY
+      // was dropped/absent even though a producing event was written.
+      recordAgentRepliedAudit(
+        db,
+        input.projectSlug,
+        input.taskKey,
+        input.runId,
+        prepared.status !== "event",
+      );
       // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
       // inbox — same fan-out as human comments, with the agent as `from`
       // (under its OWN name, not the runtime label — NEW-5).
       notifyMentionedUsers(db, {
-        text: prepared.event.text,
+        text: event.text,
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         from: createActorResolver(db, {
           agentNames: agentNamesByProfile(db, input.projectSlug),
         })(input.actorRef),
-        occurredAt: prepared.event.occurredAt,
+        occurredAt: event.occurredAt,
       });
     })
     .catch((cause: unknown) => {
@@ -1654,7 +1696,7 @@ async function openStuckLoopPacket(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         packetType: "blocked",
-        title: `Work stalled — pick a recovery path`,
+        title: `Work stalled: pick a recovery path`,
         body: `${input.reason} Coordination is paused until a human chooses how to proceed.`,
         observations: [
           { k: "Agent", v: `@${input.agentHandle}` },
@@ -1743,7 +1785,7 @@ async function withdrawSupersededStuckPacket(
         type: "transition",
         actor: { kind: "operator" },
         title: null,
-        text: `**Packet withdrawn:** "${p.title}" is moot — the ${input.role} agent run completed successfully after it was opened.`,
+        text: `**Packet withdrawn:** "${p.title}" is moot. The ${input.role} agent run completed successfully after it was opened.`,
         toAgent: false,
         evidence: null,
       });
@@ -1890,10 +1932,15 @@ export async function recordAgentCompletion(
      *  (report_outcome) plus the derived delivery rows. They land on the
      *  verdict event when there is one, else on the agent's report. */
     evidence?: EvidenceRow[] | null;
+    /** Files this run saved into the task's attachments/ dir (browser
+     *  captures). Stamped onto the same event that carries the evidence, so
+     *  the producing message names its own files. */
+    attachments?: string[] | null;
   },
 ): Promise<void> {
   const { actorRef, runId, replyText, verdict, question } = input;
   const evidence = normalizeEvidenceRows(input.evidence);
+  const attachments = sanitizeEventAttachmentNames(input.attachments);
   const prepared = await prepareAgentReplyEvent(
     db,
     ctx,
@@ -1901,8 +1948,10 @@ export async function recordAgentCompletion(
     actorRef,
     replyText,
   );
-  // Nothing to record at all.
-  if (!verdict && !question && prepared.status !== "event") {
+  // Nothing to record at all. Attachments count as something: a run that saved
+  // files but produced no usable prose still gets a producing event below, or
+  // the files would sit in the panel with no author.
+  if (!verdict && !question && prepared.status !== "event" && !attachments) {
     // Still stamp the recovery-idempotency audit for a guardrail-dropped reply,
     // so boot recovery doesn't reprocess it forever.
     if (prepared.status === "dropped") {
@@ -2029,16 +2078,16 @@ export async function recordAgentCompletion(
           // bases are different facts (no branch at all vs. a branch carrying
           // nothing), so the sentence must not state one for the other.
           summary = noChangeMint
-            ? `${roleDisplay} approved: there is nothing to deliver — ` +
+            ? `${roleDisplay} approved: there is nothing to deliver. ` +
               (noChangeMint.basis === "no_branch"
-                ? `no \`${noChangeMint.branch}\` branch exists on the remote`
+                ? `No \`${noChangeMint.branch}\` branch exists on the remote`
                 : `\`${noChangeMint.branch}\` carries no commits ahead of \`${noChangeMint.baseBranch}\``) +
               `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. Accepting completes this task with no changes.`
             : `${roleDisplay} approved the work.`;
         } else {
           // Approved, but not yet cleared: another required reviewer is
           // outstanding or has requested changes on the current revision.
-          title = "Approval noted — rework still needed";
+          title = "Approval noted, rework still needed";
           summary = `${roleDisplay} approved, but the current revision is not yet cleared by all required reviewers.`;
         }
         // A not-yet-acceptable state makes a pending accept-completion
@@ -2059,14 +2108,31 @@ export async function recordAgentCompletion(
       // P13-D-26: exactly ONE of the two carries the evidence rows — the
       // verdict event when there is a verdict (it IS the outcome), otherwise
       // the agent's report. Duplicating them across both would double the
-      // record for one outcome.
+      // record for one outcome. The run's saved files follow the same rule.
       if (prepared.status === "event") {
-        parsed.timeline.unshift(
-          evidence && !verdict ? { ...prepared.event, evidence } : prepared.event,
-        );
+        let replyEvent = prepared.event;
+        if (evidence && !verdict) replyEvent = { ...replyEvent, evidence };
+        if (attachments && !verdict) replyEvent = { ...replyEvent, attachments };
+        parsed.timeline.unshift(replyEvent);
+      } else if (attachments && !verdict) {
+        // Files with no usable reply to ride on: record the production itself,
+        // so the panel can still name who saved them and from which run.
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: actorRef,
+          title: null,
+          text:
+            attachments.length === 1
+              ? "Saved 1 file to this task's attachments during the run."
+              : `Saved ${attachments.length} files to this task's attachments during the run.`,
+          toAgent: false,
+          evidence: null,
+          attachments,
+        });
       }
       if (verdict) {
-        parsed.timeline.unshift({
+        const verdictEvent: TaskFileEvent = {
           occurredAt: new Date().toISOString(),
           type: "quality",
           // D8: the outcome is the AGENT'S judgment — attribute it honestly.
@@ -2075,7 +2141,9 @@ export async function recordAgentCompletion(
           text: `**Validation:** ${validation}. ${summary}`,
           toAgent: false,
           evidence,
-        });
+        };
+        if (attachments) verdictEvent.attachments = attachments;
+        parsed.timeline.unshift(verdictEvent);
       }
       // Ask-human question from the outcome envelope (Codex transport; the
       // Claude toolkit opens its packet live mid-run). One packet slot per
@@ -2108,7 +2176,7 @@ export async function recordAgentCompletion(
           actor: actorRef,
           title: null,
           text:
-            `**Question held — a decision is already open:** ${questionDeferred}` +
+            `**Question held (a decision is already open):** ${questionDeferred}` +
             (question.body?.trim() ? `\n\n${question.body.trim()}` : "") +
             "\n\nAnswer it alongside the open decision, or re-prompt the agent once that decision is resolved.",
           toAgent: false,
@@ -2299,6 +2367,22 @@ export async function applyAgentCompletionEffects(
   // The prior reply must predate THIS run so a mid-run post_comment from this
   // same run can't be mistaken for it (corrupting no-progress detection).
   const thisRunStartedAt = getRun(db, finished.id)?.started_at ?? null;
+  // Files this run saved into the task's attachments/ dir (browser captures):
+  // everything written at-or-after the run started. Stamped onto the producing
+  // event below so the panel can say who added each file and from which
+  // message; without a recorded start there is no honest window, so nothing is
+  // claimed.
+  const { attachmentNamesSince } = await import(
+    "~/server/files/task-attachments.server"
+  );
+  const runAttachments = thisRunStartedAt
+    ? attachmentNamesSince(
+        input.projectSlug,
+        input.taskKey,
+        thisRunStartedAt,
+        ctx.dataRoot,
+      )
+    : [];
   const prevReply = latestAgentReplyText(
     ctx,
     input.projectSlug,
@@ -2430,6 +2514,7 @@ export async function applyAgentCompletionEffects(
       verdict,
       question,
       evidence,
+      attachments: runAttachments,
     });
   } else {
     await postAgentReplyComment(db, ctx, {
@@ -2438,6 +2523,7 @@ export async function applyAgentCompletionEffects(
       runId: finished.id,
       actorRef,
       replyText,
+      attachments: runAttachments,
     });
   }
   // 1b. A run that ENDED IN ERROR (backend quota/auth/crash) previously left NO
@@ -2466,9 +2552,9 @@ export async function applyAgentCompletionEffects(
         : failure?.kind === "auth"
           ? `${backendLabel} rejected the credentials`
           : failure?.kind === "unavailable"
-            ? `${backendLabel} is unavailable (no usable credential configured — the run was refused, no agent process started)`
+            ? `${backendLabel} is unavailable (no usable credential configured, so the run was refused and no agent process started)`
             : failure?.kind === "max_turns"
-              ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work — not a task failure (its partial report, if any, is above)`
+              ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
               // P13-D-2: a dead provider transcript is its own class. It used to
               // fall through to the generic branch below, which reads like a
               // runtime error and sent people to check a credential that was
@@ -2480,13 +2566,15 @@ export async function applyAgentCompletionEffects(
                 : failText
                   ? `${backendLabel} run failed: ${failText}`
                   : `the ${backendLabel} run ended in an error`;
+    // Files the run saved before it died still get their producer named.
+    const failureAttachments = sanitizeEventAttachmentNames(runAttachments);
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
+      const failureEvent: TaskFileEvent = {
         occurredAt: new Date().toISOString(),
         type: "blocked",
         actor: actorRef,
         title: null,
-        text: `The ${input.role} ${roleLabel} run did not complete — ${reasonText}.${
+        text: `The ${input.role} ${roleLabel} run did not complete: ${reasonText}.${
           failure?.kind === "max_turns" ? "" : " No changes were delivered."
         }${
           failure?.kind === "quota" || failure?.kind === "auth"
@@ -2509,7 +2597,9 @@ export async function applyAgentCompletionEffects(
         }`,
         toAgent: false,
         evidence: null,
-      });
+      };
+      if (failureAttachments) failureEvent.attachments = failureAttachments;
+      parsed.timeline.unshift(failureEvent);
     });
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     // R20-3 (F20-4): a model the provider REFUSED for this account is marked
@@ -2541,7 +2631,7 @@ export async function applyAgentCompletionEffects(
             {
               kind: "retry_other_backend" as const,
               title: `Retry on ${altLabel}`,
-              detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks — later prompts follow it.`,
+              detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks, and later prompts follow it.`,
               recommended: true,
               backend: altBackend,
               profileId: failedProfileId,
@@ -2552,7 +2642,7 @@ export async function applyAgentCompletionEffects(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       agentHandle: input.agentHandle,
-      reason: `The ${input.role} ${roleLabel} run failed — ${reasonText}.`,
+      reason: `The ${input.role} ${roleLabel} run failed: ${reasonText}.`,
     };
     if (retryOption.length) stuck.extraOptions = retryOption;
     if (providerText) stuck.providerText = providerText;
@@ -2563,7 +2653,7 @@ export async function applyAgentCompletionEffects(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         kind: "quality",
-        text: `${input.role} run failed — ${reasonText}.`,
+        text: `${input.role} run failed: ${reasonText}.`,
       },
       ctx,
     );
@@ -2687,7 +2777,7 @@ export async function applyAgentCompletionEffects(
         taskKey: input.taskKey,
         agentHandle: input.agentHandle,
         reason: noProgress
-          ? "The agent repeated its previous report verbatim — no forward progress."
+          ? "The agent repeated its previous report verbatim, with no forward progress."
           : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
       });
     }
@@ -2887,7 +2977,7 @@ export async function operatorPromptAgent(
           type: "note",
           actor: { kind: "system", systemId: "policy-engine" },
           title: null,
-          text: `**Note:** the prompt above did NOT start a run — ${message} @${input.handle} has not been engaged; the directive needs to be re-sent once the blocker is resolved.`,
+          text: `**Note:** the prompt above did NOT start a run: ${message} @${input.handle} has not been engaged; the directive needs to be re-sent once the blocker is resolved.`,
           toAgent: false,
           evidence: null,
         });
@@ -2974,11 +3064,11 @@ export async function setOwner(
   let text: string;
   if (isTake && !currentOwnerId) {
     text =
-      "Took task ownership — owner is the human reviewer and acceptance authority for this task.";
+      "Took task ownership. The owner is the human reviewer and acceptance authority for this task.";
   } else if (isTake) {
-    text = `Took over task ownership from **${userName(db, currentOwnerId!)}** — owner is the human reviewer and acceptance authority.`;
+    text = `Took over task ownership from **${userName(db, currentOwnerId!)}**. The owner is the human reviewer and acceptance authority.`;
   } else {
-    text = `Handed task ownership to **${userName(db, input.targetUserId)}** — they hold review & acceptance for this task now.`;
+    text = `Handed task ownership to **${userName(db, input.targetUserId)}**. They hold review & acceptance for this task now.`;
   }
 
   const event: TaskFileEvent = {
@@ -3062,8 +3152,8 @@ export async function releaseOwner(
   // was corrected to "a contributor or above can take it"; this timeline event
   // is the server half, read by exactly the same humans.
   const text = isSelf
-    ? "Released task ownership — review & acceptance stall until another member takes the seat."
-    : `Released **${userName(db, currentOwnerId)}** from task ownership (admin) — the seat is open to any contributor or above.`;
+    ? "Released task ownership. Review & acceptance stall until another member takes the seat."
+    : `Released **${userName(db, currentOwnerId)}** from task ownership (admin). The seat is open to any contributor or above.`;
 
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
@@ -3121,6 +3211,12 @@ export async function transitionStage(
      *  manual/approval RBAC tier is not re-demanded from them. Never set by a
      *  route; forging it from a request would bypass the board-management tier. */
     recommendationAuthorized?: boolean;
+    /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
+     *  Only consulted when this move lands on the TERMINAL stage — the server
+     *  reads that as accepting the completion (see below) — and threaded
+     *  straight through to `acceptCompletion`, whose docs own the three-state
+     *  contract (echo / explicit `null` / omitted). */
+    ack?: AcceptanceDisclosure | null;
   },
   actor: TaskActor,
   ctx: TaskActionContext = {},
@@ -3195,12 +3291,16 @@ export async function transitionStage(
     input.toStageId === lastStageId &&
     lastStageId !== undefined
   ) {
-    await acceptCompletion(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey },
-      actor,
-      ctx,
-    );
+    const acceptance: Parameters<typeof acceptCompletion>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+    };
+    // Ruling 88: the stage-move ceremony's echo (F19-37's `stage-move` mode)
+    // rides along. The KEY is set only when this caller is a
+    // disclosure-bearing door — see `acceptCompletion` for why the absence of
+    // the key and an explicit `null` mean different things.
+    if ("ack" in input) acceptance.ack = input.ack ?? null;
+    await acceptCompletion(db, acceptance, actor, ctx);
     return summaryOrThrow(db, input.projectSlug, input.taskKey);
   }
 
@@ -3260,7 +3360,38 @@ export async function transitionStage(
     evidence: null,
   };
 
+  // U3 (NFR16) — the idempotency check above is the FAST path, not the
+  // decision. It reads the file OUTSIDE the lock, so two submits of the same
+  // move (a double-clicked dropdown, a retried in-flight POST, the operator
+  // racing a human) both saw `impl` and both wrote: two "**Transition:**"
+  // entries in the canonical task.md and two `task.transition` audit rows for
+  // ONE human act — against NFR16 by name and against NFR18's "reconstruct who
+  // initiated a consequential action". Nothing in SQLite backstops it (there is
+  // no unique constraint on transitions).
+  //
+  // So the check re-runs INSIDE the file lock — the shape `recordDeliveredNextStep`
+  // has used all along (see its docblock: "the suppression re-runs INSIDE the
+  // file lock, so a retry … can never leave two cards"). `moved` carries the
+  // in-lock verdict back out so the event, the audit row, the notification
+  // read and the operator re-trigger all follow the ONE write that happened.
+  let moved = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    const current = parsed.frontmatter.stage;
+    // Already there: the racing submit won. Write nothing — same outcome, one
+    // event, one audit row.
+    if (current === input.toStageId) return;
+    // Moved somewhere ELSE while this move was in flight: every guard above
+    // (the boundary lookup, the rework vetting, the RBAC tier) was evaluated
+    // against `fromStageId`, and the timeline entry already says "from
+    // <fromStageId>". Writing it now would record a transition that never
+    // happened, so refuse rather than land a sentence that is not true.
+    if (current !== fromStageId) {
+      throw AppError.conflict(
+        `${input.taskKey} moved to ${stageName(project, current)} while this change was being ` +
+          `applied. It is no longer at ${stageName(project, fromStageId)}. Refresh the task and try again.`,
+      );
+    }
+    moved = true;
     parsed.frontmatter.stage = input.toStageId;
     if (input.toStageId === lastStageId) {
       parsed.frontmatter.waiting = "none";
@@ -3301,6 +3432,11 @@ export async function transitionStage(
     parsed.timeline.unshift(event);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  // U3: the racing submit already wrote this exact move. Everything below is a
+  // consequence of THE write — the audit row, the approval-notification read,
+  // the operator hand-off, the no-PR review notice — so a second pass through
+  // them would duplicate precisely what the in-lock check just prevented.
+  if (!moved) return summaryOrThrow(db, input.projectSlug, input.taskKey);
 
   const transitionDetails: NonNullable<AuditEventInput["details"]> = {
     from: fromStageId,
@@ -3357,7 +3493,7 @@ export async function transitionStage(
         agentHandle: "operator",
         reason:
           `The operator made ${OPERATOR_TRANSITION_CHAIN_CAP} consecutive stage ` +
-          `transitions with no agent run or human action in between — a coordination loop.`,
+          `transitions with no agent run or human action in between, which is a coordination loop.`,
       });
     } else {
       void autoInvokeOperator(
@@ -3398,7 +3534,7 @@ export async function transitionStage(
         ctx,
         input.projectSlug,
         input.taskKey,
-        "Review reached — no PR yet",
+        "Review reached with no PR yet",
         `${input.taskKey} entered ${stageName(project, input.toStageId)} with no live review pull request. ` +
           `The operator decides delivery (push + review PR); a maintainer or the task owner can also ` +
           `deliver from the task page's GitHub panel.`,
@@ -3620,7 +3756,7 @@ export async function performDelivery(
         taskKey,
         "Delivery push conflicted",
         `${taskKey}'s delivery was not pushed: ${push.reason}. This is a branch-history ` +
-          `conflict, not a credential problem. No review PR was opened — it would review ` +
+          `conflict, not a credential problem. No review PR was opened; it would review ` +
           `the stale remote content instead of the delivery. Resolve the remote branch ` +
           `\`${push.branch}\` (delete or rename it, or force-push deliberately), then deliver again.`,
       );
@@ -3633,7 +3769,7 @@ export async function performDelivery(
     if (push.status === "push_failed" || push.status === "no_pat") {
       const message =
         `${taskKey}'s execution branch could not be pushed (${push.status === "no_pat" ? "no project credential" : push.reason}). ` +
-        `No review PR was opened — a PR over a remote missing the newest commits would ` +
+        `No review PR was opened; a PR over a remote missing the newest commits would ` +
         `review the wrong content. Fix the push, then deliver again.`;
       await surfaceDeliveryEvent(
         db,
@@ -3734,20 +3870,20 @@ export async function performDelivery(
         push.status === "no_commits"
           ? `${taskKey}'s workspace carries no commits ahead of the default branch, so there is ` +
             `nothing to review and no PR was opened. If the agent produced work, it never reached ` +
-            `the task branch — re-run the delivering agent, then deliver again.`
+            `the task branch. Re-run the delivering agent, then deliver again.`
           : verifiedNoChange
             ? `${taskKey} has never produced a branch, a commit or a pull request, and the server ` +
-              `inspected its workspace before recording this: ${push.reason} — recorded as ` +
+              `inspected its workspace before recording this: ${push.reason}. The task is recorded as ` +
               `**completed with no changes**. ` +
               (baseRevision
                 ? `The subject the required reviewers now approve is the repository as it stands, at ` +
                   `\`${baseRevision.headSha.slice(0, 12)}\` on \`${baseRevision.branch}\`. Nothing has ` +
-                  `been accepted — the ordinary verdict path still runs over that revision.`
+                  `been accepted; the ordinary verdict path still runs over that revision.`
                 : `The default-branch head could not be read from GitHub, so no revision was recorded ` +
-                  `for the reviewers to approve — deliver again once GitHub is reachable.`)
+                  `for the reviewers to approve. Deliver again once GitHub is reachable.`)
             : push.status === "no_workspace"
               ? `${taskKey} has no workspace clone to deliver from, so its branch was not pushed and ` +
-                `no review PR was opened — one opened now would review whatever the remote branch ` +
+                `no review PR was opened. One opened now would review whatever the remote branch ` +
                 `already holds, not this task's work. Run the delivering agent, then deliver again.`
               : push.status === "no_repo"
                 ? `${taskKey}'s project has no GitHub repository configured, so nothing could be ` +
@@ -3756,7 +3892,7 @@ export async function performDelivery(
                 : push.status === "no_branch"
                   ? `${taskKey}'s workspace is not on a task branch, so nothing was pushed and no ` +
                     `review PR was opened: ${push.reason}. The delivering run must commit on the ` +
-                    `task branch — re-run it, then deliver again.`
+                    `task branch. Re-run it, then deliver again.`
                   : `${taskKey} has no canonical task file, so nothing could be delivered.`;
       await surfaceDeliveryEvent(
         db,
@@ -3943,7 +4079,7 @@ export async function performDelivery(
     //    push cases returned above with their own precise reason, P11-12/P11-11).
     if (result.status === "nothing_to_review") {
       const message =
-        "No review pull request could be opened — the execution branch has no " +
+        "No review pull request could be opened: the execution branch has no " +
         "commits ahead of the default branch. The delivery may have produced no " +
         "change, or the commits never reached the remote.";
       // R17-2 (F17-L9): the branch is verified empty (zero commits ahead of the
@@ -3988,7 +4124,7 @@ export async function performDelivery(
         projectSlug,
         taskKey,
         "Review PR could not be opened",
-        `No pull request could be opened for ${taskKey} — ${why}. ` +
+        `No pull request could be opened for ${taskKey}: ${why}. ` +
           "Fix the repository/credential settings, then deliver again.",
       );
       return { status: "failed", message: why };
@@ -4175,7 +4311,7 @@ async function recordDeliveredNextStep(
     const reviewName = stageName(project, reviewStageId);
     const label = `Move the task to ${reviewName}`;
     const detail =
-      `Recorded by Viberr when the delivery landed — this is not the operator agent's ` +
+      `Recorded by Viberr when the delivery landed; this is not the operator agent's ` +
       `judgement. Review pull request #${prNumber} is open while ${taskKey} is still on ` +
       `${stageName(project, fm.stage)}, and nothing had proposed a next step. Apply it to ` +
       `move the task to ${reviewName}, or dismiss it if the work is not ready for review.`;
@@ -4273,7 +4409,7 @@ type AcceptanceMergeOutcome =
 
 /** The historical (and still correct) cause for an offline/unconfigured store. */
 const UNREACHABLE_MERGE_CAUSE =
-  "no reachable GitHub merge — merge it manually or reconcile once credentials are set";
+  "no reachable GitHub merge; merge it manually or reconcile once credentials are set";
 
 /**
  * Attempt the REAL GitHub merge of the task's review PR (FR31, human-authorized)
@@ -4318,24 +4454,24 @@ async function attemptAcceptanceMerge(
           kind: "unmergeable",
           reason:
             result.mergeable === "conflicting"
-              ? `${taskKey}'s review PR #${result.prNumber} conflicts with the base branch — GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`
+              ? `${taskKey}'s review PR #${result.prNumber} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`
               : `GitHub refuses to merge ${taskKey}'s review PR #${result.prNumber}: ${result.message}`,
           cause:
             result.mergeable === "conflicting"
-              ? "the PR conflicts with the base branch — rebase it, then merge"
+              ? "the PR conflicts with the base branch; rebase it, then merge"
               : `GitHub refuses the merge: ${result.message}`,
         };
       case "head_changed":
         return {
           kind: "unmergeable",
-          reason: `PR #${result.prNumber}'s head changed on GitHub while it was being accepted — re-review the new head, then accept. (${result.message})`,
-          cause: "the PR head changed on GitHub — re-review the new head, then merge",
+          reason: `PR #${result.prNumber}'s head changed on GitHub while it was being accepted. Re-review the new head, then accept. (${result.message})`,
+          cause: "the PR head changed on GitHub; re-review the new head, then merge",
         };
       case "scope_violation":
         return {
           kind: "pending",
           cause:
-            "the project credential is missing `pull_request:write` — grant the scope, then complete the merge",
+            "the project credential is missing `pull_request:write`; grant the scope, then complete the merge",
         };
       case "auth_failed":
         return { kind: "pending", cause: "GitHub rejected the project credential" };
@@ -4376,6 +4512,14 @@ export async function reorderTask(
     toStageId: string;
     /** Insert immediately before this task; null/absent → append to the end. */
     beforeKey?: string | null;
+    /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
+     *  A drop (or a keyboard move) onto the FINAL column is an acceptance — the
+     *  board's own ceremony has fronted it since ruling 53/R18-7 — so the echo
+     *  rides through to `transitionStage`, which consults it on the terminal
+     *  branch only. A same-stage rank write never reaches a transition at all,
+     *  and an ordinary column move is ack-free. Three states, documented on
+     *  `assertAcceptanceDisclosure`. */
+    ack?: AcceptanceDisclosure | null;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -4409,12 +4553,16 @@ export async function reorderTask(
   // A stage change goes through the governed manual transition (comment +
   // operator hand-off + reproject); the rank is set afterwards.
   if (movedStage) {
-    await transitionStage(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, toStageId: input.toStageId, manual: true },
-      actor,
-      ctx,
-    );
+    const move: Parameters<typeof transitionStage>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      toStageId: input.toStageId,
+      manual: true,
+    };
+    // Ruling 88: see the `ack` field above — the key is set only when the caller
+    // is a disclosure-bearing door, so an in-process reorder stays omitted.
+    if ("ack" in input) move.ack = input.ack ?? null;
+    await transitionStage(db, move, actor, ctx);
   }
 
   // Midpoint of the requested gap in the target column's CURRENT order.
@@ -4527,7 +4675,7 @@ export async function setTaskArchived(
   // what restore actually does instead.
   const withdrawnNote =
     withdrawn.length > 0
-      ? ` ${withdrawn.join(", ")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn — restoring the task brings it back to a human, who can run the operator to reopen the decision.`
+      ? ` ${withdrawn.join(", ")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn. Restoring the task brings it back to a human, who can run the operator to reopen the decision.`
       : "";
 
   const event: TaskFileEvent = {
@@ -4537,10 +4685,10 @@ export async function setTaskArchived(
     actor: humanActorRef(db, actor),
     title: null,
     text: input.archived
-      ? `**Archived:** ${input.taskKey} was archived — it leaves the board and the review queue, and its record is kept.${withdrawnNote}`
+      ? `**Archived:** ${input.taskKey} was archived. It leaves the board and the review queue, and its record is kept.${withdrawnNote}`
       : // F20-25: a restored task waits on a human but carries no decision object
         // — name the next step so it is not stranded on a silent "Human decision".
-        `**Restored:** ${input.taskKey} was restored from the archive and is back on the board, waiting on a human — run the operator to reopen coordination, or move the task on yourself.`,
+        `**Restored:** ${input.taskKey} was restored from the archive and is back on the board, waiting on a human. Run the operator to reopen coordination, or move the task on yourself.`,
     toAgent: false,
     evidence: null,
   };
@@ -4593,7 +4741,7 @@ export async function setTaskArchived(
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
     archived: input.archived,
     toast: input.archived
-      ? `${input.taskKey} archived — find it under Archived on the board.`
+      ? `${input.taskKey} archived. Find it under Archived on the board.`
       : `${input.taskKey} restored to ${stageName(project, existing.parsed.frontmatter.stage)}.`,
   };
 }
@@ -4628,6 +4776,22 @@ export async function resolvePacket(
      *  the decision event so an option that asks for input ("specify the
      *  expected behavior", "which target") actually has a channel to carry it. */
     note?: string;
+    /** Owner request 2026-08-20 (questionnaire packets): the human's OWN answer
+     *  instead of a canned option. Non-empty ⇒ `optionIndex` is ignored and the
+     *  resolution runs the default arm as a synthetic `custom` option — the
+     *  un-gated kind operators already author — with this text as the note the
+     *  asker and the operator receive. */
+    custom?: string;
+    /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
+     *  Consulted ONLY by the `accept_completion` arm below — the one option kind
+     *  that writes Done and merges a pull request; every other kind resolves a
+     *  decision and carries no acceptance to disclose. Three states, documented
+     *  on `assertAcceptanceDisclosure`: an echo to verify, an explicit `null`
+     *  from a door whose request carried none (refused), or omitted by an
+     *  in-process caller. The packet-identity pin this function already keeps is
+     *  NOT a substitute: it proves the decision is the one that was opened, not
+     *  that the human saw what merges. */
+    ack?: AcceptanceDisclosure | null;
   },
   actor: TaskActor,
   ctx: TaskActionContext = {},
@@ -4639,9 +4803,28 @@ export async function resolvePacket(
   if (!packet) {
     throw AppError.conflict("This packet was already resolved.");
   }
-  const option = packet.options[input.optionIndex];
-  if (!option) {
-    throw AppError.validation("Unknown packet option.");
+  const customDirective = input.custom?.trim() ?? "";
+  if (customDirective.length > 4000) {
+    throw AppError.validation(
+      "Custom directive is too long: 4,000 characters max.",
+    );
+  }
+  // A custom answer resolves as a synthetic option of the un-gated `custom`
+  // kind: same default arm, same send-back-to-asker routing, same operator
+  // requeue — the directive itself travels as the decision note below.
+  let option: PacketOption;
+  if (customDirective) {
+    option = {
+      kind: "custom",
+      t: "Answered with a custom directive",
+      d: "",
+      rec: false,
+      ev: "**Decision:** answered with a custom directive. Operator re-engages with it.",
+    };
+  } else {
+    const picked = packet.options[input.optionIndex];
+    if (!picked) throw AppError.validation("Unknown packet option.");
+    option = picked;
   }
   // R20-1 (F20-5): a packet that has already recorded a decision accepts no
   // second one. `edit_goal` is the only kind that KEEPS its packet open (it
@@ -4651,7 +4834,7 @@ export async function resolvePacket(
   // kind that legitimately stays open.
   if (packet.awaiting) {
     throw AppError.conflict(
-      `This decision was already made on ${input.taskKey} — the packet is waiting for the edited goal. ` +
+      `This decision was already made on ${input.taskKey}. The packet is waiting for the edited goal. ` +
         `Save the goal to clear it.`,
     );
   }
@@ -4691,6 +4874,10 @@ export async function resolvePacket(
   let event: TaskFileEvent;
   let mutate: (fm: TaskFrontmatter) => void;
   let clearPacket = false;
+  /** U3 (NFR16): the terminal stage THIS resolution would write, set only by the
+   *  `accept_completion` arm — the shared write below re-reads the stage under
+   *  the lock and skips itself when the task is already there. */
+  let acceptsInto: string | null = null;
 
   switch (option.kind) {
     case "accept_completion": {
@@ -4702,6 +4889,18 @@ export async function resolvePacket(
         actor,
         existing.parsed.frontmatter.ownerUserId,
         "accept completion into Done",
+      );
+      // Ruling 88 (F21-2): this option is an acceptance — it writes Done and
+      // merges the pull request — so it is held to the ceremony exactly like the
+      // Accept button. Checked AFTER the authority gate (a caller who may not
+      // accept hears about their role, not their dialog) and BEFORE the merge,
+      // so a missing or stale acknowledgment is never discovered on the far side
+      // of an irreversible GitHub write. Re-compared under the lock below.
+      assertAcceptanceDisclosure(
+        existing.parsed.frontmatter,
+        input.ack,
+        input.taskKey,
+        "full",
       );
       // The SAME acceptance gates the direct `acceptCompletion` path applies —
       // required reviewers on the current revision (F10-15), the closed-PR
@@ -4723,6 +4922,7 @@ export async function resolvePacket(
         terminalStageIdOf(project) ??
         project.stages[project.stages.length - 1]?.id ??
         "done";
+      acceptsInto = doneStageId;
       // R15-1 gate 2 (F15-15): the packet path is a Done writer like the other
       // two, so the PR head must contain the delivered revision HERE as well —
       // otherwise the operator's own acceptance packet becomes the one door
@@ -4780,7 +4980,7 @@ export async function resolvePacket(
                 packetIdentity(fresh.parsed.packet) !== resolvedPacketIdentity
               ) {
                 throw AppError.conflict(
-                  "This decision was replaced by a newer one — refresh the task and choose again.",
+                  "This decision was replaced by a newer one. Refresh the task and choose again.",
                 );
               }
               const refusal = fresh
@@ -4834,6 +5034,11 @@ export async function resolvePacket(
         // pair itself is re-asserted here too.
         assertVerifiedHeadStillApplies(fm, headCheck, input.taskKey);
         assertVerifiedNoChangeStillApplies(fm, noChange, input.taskKey);
+        // Ruling 88: the disclosure is re-compared against the state actually
+        // being closed, on the same terms `applyAcceptanceWrite` re-compares it
+        // for the other Done writers. Scope `in-lock` skips the PR fact, which
+        // the merge above may already have moved.
+        assertAcceptanceDisclosure(fm, input.ack, input.taskKey, "in-lock");
         const refusal = acceptanceRefusalReason(project, fm, input.taskKey, {
           blockedPacket: false,
           noChange,
@@ -4901,7 +5106,7 @@ export async function resolvePacket(
         text:
           option.ev ??
           `**Decision:** hold for runtime debug. ${key} stays blocked while the provider-native ` +
-            `session is inspected — coordination is paused and no operator run was started. ` +
+            `session is inspected. Coordination is paused and no operator run was started. ` +
             `Use **Run operator** on the task page when the inspection is done.`,
         toAgent: false,
         evidence: null,
@@ -4926,7 +5131,7 @@ export async function resolvePacket(
         title: null,
         text:
           option.ev ??
-          `**Decision:** ${option.t}. Waiting for the edited goal — the packet clears as soon as it lands.`,
+          `**Decision:** ${option.t}. Waiting for the edited goal; the packet clears as soon as it lands.`,
         toAgent: false,
         evidence: null,
       };
@@ -5043,7 +5248,25 @@ export async function resolvePacket(
     }
   }
 
+  // U3 (NFR16): set when the acceptance arm found the task already terminal
+  // under the lock — the write, and the audit row that belongs to it, are the
+  // racing acceptance's, not this call's.
+  let alreadyAccepted = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    // U3 (NFR16) — the acceptance arm's already-Done check, where it is a
+    // decision rather than a guess. `acceptCompletion` re-runs it inside the
+    // write lock (`applyAcceptanceWrite`) precisely because its own outside-lock
+    // read is stale by the time the merge returns; this arm writes Done through
+    // its own mutate and never had that second look, so a task another
+    // acceptance closed during the merge await was met with a 409 about the
+    // packet — a refusal for an outcome that HAD happened. Skip the write whole
+    // instead: the racing acceptance already recorded the completion, the merge
+    // and the audit. Every other option kind keeps the conflicts below (they
+    // resolve a decision rather than assert a state that may already hold).
+    if (acceptsInto !== null && parsed.frontmatter.stage === acceptsInto) {
+      alreadyAccepted = true;
+      return;
+    }
     if (!parsed.packet) {
       // Raced with a concurrent resolve inside the lock window.
       throw AppError.conflict("This packet was already resolved.");
@@ -5053,7 +5276,7 @@ export async function resolvePacket(
     // different identity — reject rather than apply the stale choice to it.
     if (packetIdentity(parsed.packet) !== resolvedPacketIdentity) {
       throw AppError.conflict(
-        "This decision was replaced by a newer one — refresh the task and choose again.",
+        "This decision was replaced by a newer one. Refresh the task and choose again.",
       );
     }
     mutate(parsed.frontmatter);
@@ -5066,7 +5289,8 @@ export async function resolvePacket(
     // P11-71: carry the human's free-text into the recorded decision so an
     // option that asked for input isn't resolved with an unstated reading — the
     // operator (and reviewers reading the timeline) see exactly what was said.
-    const note = input.note?.trim();
+    // A custom answer IS that free-text: the directive rides the same channel.
+    const note = customDirective || input.note?.trim();
     const eventWithNote = note
       ? { ...event, text: `${event.text}\n\n> ${note.replace(/\n/g, "\n> ")}` }
       : event;
@@ -5074,19 +5298,22 @@ export async function resolvePacket(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
-  recordAudit(db, {
-    action: "task.packet.resolved",
-    actor: { userId: actor.userId, label: actor.label },
-    subjectKind: "task",
-    subjectId: input.taskKey,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details: {
-      optionKind: option.kind,
-      optionTitle: option.t,
-      packetKind: packet.kind,
-    },
-  });
+  // U3: one act, one row. A no-op write made no decision to record.
+  if (!alreadyAccepted) {
+    recordAudit(db, {
+      action: "task.packet.resolved",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: {
+        optionKind: option.kind,
+        optionTitle: option.t,
+        packetKind: packet.kind,
+      },
+    });
+  }
 
   // R20-1 (F20-5): every settled decision consumes the packet approval. Holds
   // no longer keep their packet open, so the ONLY kind that leaves it open is
@@ -5108,7 +5335,7 @@ export async function resolvePacket(
   ];
   const requeue = !NO_REQUEUE.includes(option.kind);
   if (requeue) {
-    const decisionNote = input.note?.trim();
+    const decisionNote = customDirective || input.note?.trim();
     const resolvedOption = decisionNote
       ? { kind: option.kind, title: option.t, note: decisionNote }
       : { kind: option.kind, title: option.t };
@@ -5184,12 +5411,12 @@ export async function resolvePacket(
         outcome.status === "deleted"
           ? null
           : outcome.status === "already_gone"
-            ? `Branch \`${outcome.branch}\` was already gone on GitHub — nothing left to delete.`
+            ? `Branch \`${outcome.branch}\` was already gone on GitHub: nothing left to delete.`
             : outcome.status === "no_branch"
-              ? "The task has no delivery branch — nothing to delete."
+              ? "The task has no delivery branch, so there is nothing to delete."
               : outcome.status === "refused"
-                ? `Branch \`${outcome.branch}\` was **not** deleted — ${outcome.message}`
-                : "The branch was **not** deleted — this project has no GitHub repo or credential configured.";
+                ? `Branch \`${outcome.branch}\` was **not** deleted: ${outcome.message}`
+                : "The branch was **not** deleted: this project has no GitHub repo or credential configured.";
       if (outcomeText) {
         await updateTaskFile(
           taskRef(ctx, input.projectSlug, input.taskKey),
@@ -5247,7 +5474,7 @@ export async function resolvePacket(
                 title: null,
                 text:
                   `The local workspace branch \`${local.branch}\` (\`${local.sha.slice(0, 12)}\`) ` +
-                  `was discarded too — "discard work" now leaves no commit to re-deliver.`,
+                  `was discarded too, so "discard work" now leaves no commit to re-deliver.`,
                 toAgent: false,
                 evidence: null,
               });
@@ -5286,7 +5513,7 @@ export async function resolvePacket(
             type: "note",
             actor: { kind: "system", systemId: "policy-engine" },
             title: null,
-            text: "This task has no workspace branch — nothing to discard.",
+            text: "This task has no workspace branch, so there is nothing to discard.",
             toAgent: false,
             evidence: null,
           });
@@ -5311,16 +5538,16 @@ export async function resolvePacket(
       const noteText =
         outcome.status === "deleted"
           ? `Branch \`${outcome.branch}\` (\`${outcome.sha.slice(0, 12)}\`) was deleted from this ` +
-            `task's workspace. It existed only there — nothing was pushed to GitHub, so nothing on ` +
+            `task's workspace. It existed only there: nothing was pushed to GitHub, so nothing on ` +
             `the remote changed.`
           : outcome.status === "not_found"
-            ? `Branch \`${outcome.branch}\` was not in this task's workspace — nothing to discard.`
+            ? `Branch \`${outcome.branch}\` was not in this task's workspace, so there was nothing to discard.`
             : outcome.status === "on_remote"
-              ? `Branch \`${outcome.branch}\` was **not** discarded — it exists on GitHub, so it is ` +
+              ? `Branch \`${outcome.branch}\` was **not** discarded: it exists on GitHub, so it is ` +
                 `no longer a local-only branch. Use archive with branch deletion to remove a pushed branch.`
               : outcome.status === "no_workspace"
-                ? `Branch \`${outcome.branch}\` was **not** discarded — this task has no workspace clone.`
-                : `Branch \`${outcome.branch}\` was **not** discarded — ${outcome.reason}`;
+                ? `Branch \`${outcome.branch}\` was **not** discarded: this task has no workspace clone.`
+                : `Branch \`${outcome.branch}\` was **not** discarded: ${outcome.reason}`;
       await updateTaskFile(
         taskRef(ctx, input.projectSlug, input.taskKey),
         (parsed) => {
@@ -5389,7 +5616,7 @@ export async function resolvePacket(
           type: "blocked",
           actor: { kind: "operator" },
           title: null,
-          text: `The retry could not start — ${message}`,
+          text: `The retry could not start: ${message}`,
           toAgent: false,
           evidence: null,
         });
@@ -5450,7 +5677,7 @@ export async function requestPacketMaintainerDecision(
   );
   if (canResolveDirectly) {
     throw AppError.validation(
-      "You can resolve this decision yourself — no need to route it to a maintainer.",
+      "You can resolve this decision yourself; there is no need to route it to a maintainer.",
     );
   }
   if (!isOwner) {
@@ -5562,7 +5789,7 @@ function acceptanceStageBlockedReason(
   // has not reached the boundary yet is not wedged — it has stages left to
   // cross — so naming an escape hatch that is neither offered nor appropriate
   // just sends the reader looking for a button that is not there.
-  return `${taskKey} is at ${stageName(project, fromStageId)}, not ${reviewName} — a completion can only be accepted from the boundary the workflow puts before ${stageName(project, terminalId)}. Move the task through the workflow first.`;
+  return `${taskKey} is at ${stageName(project, fromStageId)}, not ${reviewName}. A completion can only be accepted from the boundary the workflow puts before ${stageName(project, terminalId)}. Move the task through the workflow first.`;
 }
 
 /**
@@ -5609,7 +5836,7 @@ function acceptanceRefusalReason(
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Resolving the packet clears readiness.
     (opts.blockedPacket
-      ? "This task has an open blocked decision — resolve the operator's packet before accepting it."
+      ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
     // P14-LV-07: a conflicting PR cannot be merged, so it cannot be accepted.
     conflictingPrBlockedReason(fm, taskKey)
@@ -5734,7 +5961,7 @@ function assertVerifiedHeadStillApplies(
   }
   throw AppError.conflict(
     `${taskKey}'s pull request or delivered revision changed while the acceptance was being ` +
-      `verified — the PR head was never checked against what would be closed now. Refresh the ` +
+      `verified. The PR head was never checked against what would be closed now. Refresh the ` +
       `task and accept again.`,
   );
 }
@@ -5793,7 +6020,7 @@ export async function acceptancePrHeadMismatch(
     }
     return (
       `PR #${pr.number}'s head (${headSha.slice(0, 7)}) does not contain the delivered ` +
-      `revision ${rev.headSha.slice(0, 7)} — the PR carries different content than was ` +
+      `revision ${rev.headSha.slice(0, 7)}: the PR carries different content than was ` +
       `delivered. Re-deliver the branch (or fix the remote branch), then re-review.`
     );
   } catch (error) {
@@ -5984,7 +6211,157 @@ export function revisionDriftNote(fm: TaskFrontmatter): string {
   // F19-23: the noun was switched and the VERB was not, so a single-commit drift
   // rendered "1 commit were added to the PR head" — live on VC-4's timeline and
   // in the Activity stream, on the one sentence a Done task's record leans on.
-  return ` ${n === 1 ? "1 commit was" : `${n} commits were`} added to the PR head (\`${drift.headSha.slice(0, 12)}\`) after the review — outside the reviewed revision.`;
+  return ` ${n === 1 ? "1 commit was" : `${n} commits were`} added to the PR head (\`${drift.headSha.slice(0, 12)}\`) after the review, outside the reviewed revision.`;
+}
+
+/**
+ * OBS-11 / OBS-13 — what a no-change acceptance does about the task branch that
+ * the accept-time probe just found EMPTY.
+ *
+ * OBS-11 (live, vib-3): the acceptance verified "carries no commits ahead of
+ * main" and then left the branch sitting on GitHub forever. Merged branches are
+ * cleaned up by R15-6's post-merge policy; a branch that closes WITHOUT a merge
+ * had no such path, so the one outcome that produces a guaranteed-empty branch
+ * was also the one that never removed it.
+ *
+ * OBS-13 (live, vib-5) is why this is not simply "delete it": the probe falls
+ * back to the DERIVED branch name when the task never recorded one, so it can
+ * read — and the completion copy can then claim — a same-name branch from a
+ * previous life that this task never created. Deleting someone else's branch on
+ * a name match is exactly the branch-COLLISION harm rulings 34/35 refuse
+ * elsewhere. So deletion is restricted to the branch the task itself recorded
+ * (`fm.branch`), which is also all `deleteTaskRemoteBranch` will act on, and a
+ * name-only match is disclosed as the collision it is instead.
+ *
+ * The remaining safety fact is supplied by the probe itself: `branch_empty`
+ * means a live `compare(default…branch)` returned `aheadBy: 0`, i.e. the tip is
+ * reachable from the default branch. Nothing unique is lost by deleting it. An
+ * ahead/diverged branch never reaches here at all (it is refused, by name and
+ * commit count, before acceptance).
+ */
+type EmptyBranchDisposition =
+  | { kind: "none" }
+  /** The task's OWN empty branch, and the project keeps branch cleanup on. */
+  | { kind: "delete"; branch: string }
+  /** The task's OWN empty branch, cleanup switched off — left, and said so. */
+  | { kind: "keep"; branch: string }
+  /** A branch that only matches by NAME — not this task's, never deleted. */
+  | { kind: "collision"; branch: string };
+
+function emptyBranchDisposition(
+  db: DatabaseSync,
+  fm: TaskFrontmatter,
+  check: AcceptanceNoChangeCheck,
+  projectSlug: string,
+): EmptyBranchDisposition {
+  const verification = check.verification;
+  if (!check.applies || verification?.basis !== "branch_empty") return { kind: "none" };
+  const branch = verification.branch;
+  if (!branch) return { kind: "none" };
+  // The task never recorded THIS branch — the probe matched a name, not a
+  // delivery. (`fm.branch === null` is the live vib-5 shape; a different value
+  // means the task's own branch is elsewhere and this one is a stranger too.)
+  if (fm.branch !== branch) return { kind: "collision", branch };
+  return branchCleanupOnMerge(db, projectSlug)
+    ? { kind: "delete", branch }
+    : { kind: "keep", branch };
+}
+
+/** The sentence a no-change completion event carries about the branch it left
+ *  behind — "" when there is nothing to disclose (the deletion writes its own
+ *  `github` event, so a promise here would only race it). */
+function emptyBranchNote(
+  disposition: EmptyBranchDisposition,
+  taskKey: string,
+): string {
+  switch (disposition.kind) {
+    case "keep":
+      return (
+        ` The empty branch \`${disposition.branch}\` was left on GitHub because this project's ` +
+        `"delete the branch after merge" setting is off.`
+      );
+    case "collision":
+      return (
+        ` A branch named \`${disposition.branch}\` exists on the remote, but ${taskKey} never ` +
+        `recorded a branch of its own. The name matches, the work does not. It was left ` +
+        `untouched, and nothing here describes what is on it.`
+      );
+    default:
+      return "";
+  }
+}
+
+/**
+ * Ruling 88 (F21-2) — the disclosure the ceremony WOULD state for this task
+ * right now: what merges, what was delivered, what the review said.
+ *
+ * Derived from the canonical file, never from the projection, and `verdict`
+ * runs through `deriveValidation` (validation's ONE writer, F10-15) so the
+ * comparison can never disagree with the pill the dialog rendered.
+ */
+export function acceptanceDisclosureOf(
+  fm: TaskFrontmatter,
+): AcceptanceDisclosure {
+  return {
+    pr: fm.pr?.state ?? "none",
+    revision: fm.workRevision?.headSha ?? "none",
+    verdict: deriveValidation(fm),
+  };
+}
+
+/**
+ * Ruling 88 (F21-2) — the server-side half of the acceptance ceremony.
+ *
+ * `ack` is deliberately three-state, and the distinction is the whole design:
+ *
+ *  - an `AcceptanceDisclosure` — the human confirmed the ceremony, and the echo
+ *    is compared against the live task (below). This is what every HTTP
+ *    acceptance door sends.
+ *  - `null` — the caller IS a disclosure-bearing door and the request carried
+ *    no echo: a bare POST. Refused. This is the case F21-2 found live: the
+ *    ceremony was client architecture only, so anything that skipped the dialog
+ *    merged to the default branch on an unadorned request.
+ *  - omitted — an IN-PROCESS caller whose own path carries the disclosure and
+ *    its own identity re-check (the packet resolution's packet-identity pin,
+ *    `applyRecommendation`, the full-autonomy operator, the tests). Threading a
+ *    server-built echo through those would be the server acknowledging itself,
+ *    which proves nothing; they are gated by their own contracts instead.
+ *
+ * A stale echo is refused as hard as a missing one, and that is the R17-1
+ * hardening: until now the dialog SURFACED head drift while the server enforced
+ * nothing, so a tab left open across a re-delivery accepted a revision the human
+ * never saw.
+ */
+function assertAcceptanceDisclosure(
+  fm: TaskFrontmatter,
+  ack: AcceptanceDisclosure | null | undefined,
+  taskKey: string,
+  scope: "full" | "in-lock",
+): void {
+  if (ack === undefined) return;
+  if (ack === null) {
+    throw new AppError({
+      code: ERROR_CODES.ACCEPT_DISCLOSURE_MISSING,
+      status: 400,
+      message: `acceptance of ${taskKey} carried no disclosure acknowledgment`,
+      userMessage:
+        `Accepting ${taskKey} needs the confirmation dialog: this request carried no record of ` +
+        `what was shown (which pull request merges, which delivered revision, and what the ` +
+        `review said). Open the task and accept from the dialog.`,
+      details: { taskKey },
+    });
+  }
+  const drift = acceptanceDisclosureDrift(acceptanceDisclosureOf(fm), ack, scope);
+  if (drift.length === 0) return;
+  throw new AppError({
+    code: ERROR_CODES.ACCEPT_DISCLOSURE_STALE,
+    status: 409,
+    message: `acceptance of ${taskKey} was confirmed against stale state: ${drift.join("; ")}`,
+    userMessage:
+      `${taskKey} changed after the accept dialog was opened: ${drift.join("; ")}. Nothing was ` +
+      `accepted or merged. Close the dialog, re-open it, and accept what is true now.`,
+    details: { taskKey, scope },
+  });
 }
 
 /**
@@ -6027,8 +6404,11 @@ export async function applyAcceptanceWrite(
      *  Done task. The `task.acceptance.forced` audit row stays; this is the
      *  additional durable field. */
     forced?: boolean;
+    /** Ruling 88 (F21-2): the disclosure the human acknowledged, re-compared
+     *  under the lock. See `assertAcceptanceDisclosure` for the three states. */
+    ack?: AcceptanceDisclosure | null;
   },
-): Promise<void> {
+): Promise<{ accepted: boolean }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   const headCheck =
     input.headCheck ??
@@ -6043,9 +6423,30 @@ export async function applyAcceptanceWrite(
   if (noChange.refusal && !input.skipInLockRecheck) {
     throw AppError.conflict(noChange.refusal);
   }
+  let accepted = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    // U3 (NFR16) — the callers' "already Done → return" check reads the file
+    // OUTSIDE this lock, so two concurrent acceptances of one task both passed
+    // it and both wrote: two `completion` events on the canonical timeline and
+    // two audit rows for one human act, on the single most consequential action
+    // the product has. The check re-runs HERE, where it is a decision rather
+    // than a guess, and the write is skipped whole — the racing acceptance
+    // already recorded the completion, the merge, and the audit.
+    if (parsed.frontmatter.stage === input.doneStageId) return;
     assertVerifiedHeadStillApplies(parsed.frontmatter, headCheck, input.taskKey);
     assertVerifiedNoChangeStillApplies(parsed.frontmatter, noChange, input.taskKey);
+    // Ruling 88: the disclosure is re-compared against the state actually being
+    // closed. `skipInLockRecheck` (force) does NOT relax it — force bypasses
+    // process GATES, and this is not a gate: it is the record of what the human
+    // was shown. Scope `in-lock` skips the PR fact, which this very acceptance
+    // may already have merged; the revision and the verdict are re-compared
+    // because nothing on this path writes them before this point.
+    assertAcceptanceDisclosure(
+      parsed.frontmatter,
+      input.ack,
+      input.taskKey,
+      "in-lock",
+    );
     if (!input.skipInLockRecheck) {
       const refusal = acceptanceRefusalReason(
         project,
@@ -6105,17 +6506,39 @@ export async function applyAcceptanceWrite(
     parsed.frontmatter.recommendations = [];
     parsed.packet = null;
     parsed.timeline.unshift(input.event);
+    accepted = true;
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  // U3: `false` means a concurrent acceptance had already closed this task —
+  // the caller's audit row and follow-up effects belong to THAT write, not to
+  // this one.
+  return { accepted };
 }
 
-/** Apply human acceptance through the shared Done transition and merge path. */
+/**
+ * Apply human acceptance through the shared Done transition and merge path.
+ *
+ * Returns whether THIS call performed the acceptance: `false` means the task
+ * was already Done — either before the call (the idempotent early return) or by
+ * the time the write lock was taken (U3's concurrent double-submit) — so the
+ * caller must not record an audit row for a write it did not make.
+ */
 async function acceptCompletion(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; force?: boolean },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    force?: boolean;
+    /** Ruling 88 (F21-2) — the acceptance disclosure the human acknowledged.
+     *  Three states, documented on `assertAcceptanceDisclosure`: an echo to
+     *  verify, an explicit `null` from a door whose request carried none (a
+     *  bare POST — refused), or omitted by an in-process caller carrying its
+     *  own disclosure contract. */
+    ack?: AcceptanceDisclosure | null;
+  },
   actor: TaskActor,
   ctx: TaskActionContext = {},
-): Promise<void> {
+): Promise<boolean> {
   const project = loadProjectContext(ctx, input.projectSlug);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -6133,7 +6556,19 @@ async function acceptCompletion(
     project.stages[project.stages.length - 1]?.id ??
     "done";
 
-  if (existing.parsed.frontmatter.stage === doneStageId) return; // already Done.
+  if (existing.parsed.frontmatter.stage === doneStageId) return false; // already Done.
+
+  // Ruling 88 (F21-2): the disclosure is checked HERE — after the authority
+  // gate (a caller who may not accept hears about their role, not their
+  // dialog) and BEFORE the merge, so a stale or missing acknowledgment can
+  // never be discovered on the far side of an irreversible GitHub write. It is
+  // re-compared inside the write lock as well (`applyAcceptanceWrite`).
+  assertAcceptanceDisclosure(
+    existing.parsed.frontmatter,
+    input.ack,
+    input.taskKey,
+    "full",
+  );
 
   // Every acceptance gate — graph position, required reviewers, the R15-1
   // verdict gate, blocked packet, closed/conflicting PR, archived task — comes
@@ -6247,6 +6682,15 @@ async function acceptCompletion(
 
   // R17-1: name any reviewed-revision drift on the completion record.
   const driftNote = revisionDriftNote(existing.parsed.frontmatter);
+  // OBS-11 / OBS-13: decided BEFORE the write (it reads the pre-acceptance
+  // frontmatter and the project policy) so the completion event can state the
+  // branch's fate; the deletion itself runs after the task is really Done.
+  const branchDisposition = emptyBranchDisposition(
+    db,
+    existing.parsed.frontmatter,
+    noChange,
+    input.projectSlug,
+  );
   // R19-8: the no-change outcome has its OWN completion event, from the one
   // shared builder — it must never borrow the merge path's title or wording.
   const event: TaskFileEvent = noChange.applies
@@ -6268,7 +6712,7 @@ async function acceptCompletion(
           (!hasPr
             ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
             : alreadyMerged
-              ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
+              ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR had already been merged on GitHub (out of band).`
               : reallyMerged
                 ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
                 : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
@@ -6276,6 +6720,12 @@ async function acceptCompletion(
         toAgent: false,
         evidence: null,
       };
+  // OBS-11 / OBS-13: the branch sentence rides on the no-change event only —
+  // the merge path's copy is about a pull request, and a task WITH a PR never
+  // reaches a `branch_empty` verification.
+  if (noChange.applies) {
+    event.text += emptyBranchNote(branchDisposition, input.taskKey);
+  }
   const acceptance: Parameters<typeof applyAcceptanceWrite>[2] = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -6285,11 +6735,17 @@ async function acceptCompletion(
     headCheck,
     noChangeCheck: noChange,
   };
+  // Ruling 88: the same acknowledgment is re-compared under the write lock.
+  if ("ack" in input) acceptance.ack = input.ack ?? null;
   if (input.force) {
     acceptance.skipInLockRecheck = true;
     acceptance.forced = true;
   }
-  await applyAcceptanceWrite(db, ctx, acceptance);
+  const { accepted } = await applyAcceptanceWrite(db, ctx, acceptance);
+  // U3: a concurrent acceptance closed this task first — its write carries the
+  // completion event and the audit row. Recording a second row here is exactly
+  // the "two audit rows for one human act" NFR18 forbids.
+  if (!accepted) return false;
 
   recordAudit(db, {
     action: "task.transition",
@@ -6300,6 +6756,65 @@ async function acceptCompletion(
     taskKey: input.taskKey,
     details: { to: doneStageId, boundary: "human", via: "accept_completion" },
   });
+
+  // OBS-11: the empty branch goes, once the task is genuinely Done. AFTER the
+  // write on purpose — a deletion in front of a refusal (a verdict that landed
+  // mid-flight, a head that moved) would have removed a branch from a task that
+  // stayed open. Best-effort: a failed cleanup never un-accepts a completion,
+  // and `deleteTaskRemoteBranch` writes its own `github` timeline event and
+  // audit row on success, keeps its own refusals (never the default branch,
+  // never a branch with an open PR), and never throws.
+  if (branchDisposition.kind === "delete" && actor.userId) {
+    try {
+      const { deleteTaskRemoteBranch } = await import(
+        "~/server/github/github-reconciler.server"
+      );
+      // Same optional-key discipline as every other GitHub call on this path:
+      // the transport hook is threaded only when the caller supplied one.
+      const deleteCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
+      if (ctx.fetchImpl) deleteCtx.fetchImpl = ctx.fetchImpl;
+      const outcome = await deleteTaskRemoteBranch(
+        db,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey },
+        { userId: actor.userId, label: actor.label },
+        deleteCtx,
+      );
+      // "deleted" already speaks for itself on the timeline; "already gone" is
+      // the state that was asked for. Only a genuine failure needs a sentence,
+      // so the record never implies a cleanup that did not happen.
+      const refusedText =
+        outcome.status === "refused"
+          ? `The empty branch \`${outcome.branch}\` was **not** deleted: ${outcome.message}`
+          : outcome.status === "deleted" || outcome.status === "already_gone" ||
+              outcome.status === "no_branch"
+            ? null
+            : `The empty branch \`${branchDisposition.branch}\` was **not** deleted: this ` +
+              `project has no reachable GitHub repository or credential.`;
+      if (refusedText) {
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: null,
+              text: refusedText,
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+      }
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    } catch (error) {
+      logger.warn("empty task branch cleanup failed after a no-change acceptance", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  return true;
 }
 
 /**
@@ -6310,7 +6825,15 @@ async function acceptCompletion(
  */
 export async function forceAcceptCompletion(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    /** Ruling 88 (F21-2): force is an override of the GATES, never of the
+     *  disclosure — the `force` ceremony states everything the ordinary one
+     *  does plus the stages and the refusal it bypasses, so its echo is
+     *  demanded on exactly the same terms. See `acceptCompletion`. */
+    ack?: AcceptanceDisclosure | null;
+  },
   actor: TaskActor,
   ctx: TaskActionContext = {},
 ): Promise<{ task: TaskSummary }> {
@@ -6346,6 +6869,15 @@ export async function forceAcceptCompletion(
     input.taskKey,
   );
   if (irreducible) throw AppError.conflict(irreducible);
+  // Ruling 88: and refuse a missing/stale disclosure before the audit row for
+  // the same reason — `acceptCompletion` checks it again, but by then a
+  // "forced" row would already claim a bypass that never happened.
+  assertAcceptanceDisclosure(
+    existing.parsed.frontmatter,
+    input.ack,
+    input.taskKey,
+    "full",
+  );
   // P13-D-4 / P14-LV-02: the audit names the EXACT gate being overridden —
   // including the graph gate and the conflicting-PR gate, both of which a forced
   // accept can now bypass. Same shared helper the gate itself uses, so the audit
@@ -6359,21 +6891,30 @@ export async function forceAcceptCompletion(
     (existing.parsed.frontmatter.readiness === "blocked"
       ? "an open blocked decision packet"
       : "no gate (already acceptable)");
-  recordAudit(db, {
-    action: "task.acceptance.forced",
-    actor: { userId: actor.userId, label: actor.label },
-    subjectKind: "task",
-    subjectId: input.taskKey,
+  const forced: Parameters<typeof acceptCompletion>[1] = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { bypassed },
-  });
-  await acceptCompletion(
-    db,
-    { projectSlug: input.projectSlug, taskKey: input.taskKey, force: true },
-    actor,
-    ctx,
-  );
+    force: true,
+  };
+  if ("ack" in input) forced.ack = input.ack ?? null;
+  const accepted = await acceptCompletion(db, forced, actor, ctx);
+  // U3 (NFR16): the row follows the WRITE. It used to be recorded before the
+  // acceptance, so a double-submitted force left two `task.acceptance.forced`
+  // rows for one click — and any refusal thrown below it (a head that moved, a
+  // verdict that landed) left a row claiming a bypass that never happened. The
+  // one thing the ordering must preserve is that `bypassed` names the gate as
+  // it stood BEFORE the write, which is why it is computed above.
+  if (accepted) {
+    recordAudit(db, {
+      action: "task.acceptance.forced",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: { bypassed },
+    });
+  }
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
 
@@ -6404,11 +6945,33 @@ export async function completeTaskMerge(
   if (!pr) {
     throw AppError.validation("This task has no linked pull request to merge.");
   }
+  // F21-23 (live, UC-15): a human merged the PR on GitHub while the merge-pending
+  // ceremony sat open. The poller adopted `state: merged`, the dialog re-rendered
+  // — correctly — as "Nothing merges … Finish accepting VIB-x", and this door
+  // then threw a 409 at the button it had just relabelled. The dialog promised
+  // what the server refused.
+  //
+  // An already-merged PR is not a conflict, it is the OUTCOME this call exists to
+  // reach: there is nothing left to merge and nothing to undo. So it settles as a
+  // no-op success that reports both facts — merged on GitHub, nothing merged now.
+  // Deliberately WRITES NOTHING: the acceptance that stamped this PR "accepted"
+  // already recorded its completion on the timeline, and minting a second
+  // completion for a click that changed no state would be exactly the invented
+  // record ruling 88 exists to prevent. `merged` answers "is the PR merged when
+  // this returns", not "did this call merge it" — which is why the honest message
+  // rides alongside it and the caller renders that, not a verb of its own.
+  if (pr.state === "merged") {
+    return {
+      task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+      merged: true,
+      message: `PR #${pr.number} was already merged on GitHub; nothing merged now.`,
+    };
+  }
+  // Every other state is still refused, unchanged: a PR in review has not been
+  // accepted yet, and a closed one can never be merged (R16-3).
   if (pr.state !== "accepted") {
     throw AppError.conflict(
-      pr.state === "merged"
-        ? "This PR is already merged."
-        : `This PR is "${pr.state}", not an accepted merge-pending PR.`,
+      `This PR is "${pr.state}", not an accepted merge-pending PR.`,
     );
   }
 
@@ -6464,7 +7027,21 @@ export async function completeTaskMerge(
 
 export async function applyRecommendation(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; recId: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    recId: string;
+    /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
+     *  Consulted ONLY when the card being applied REACHES acceptance — an
+     *  `accept_completion` card, or a `transition` card whose target is the
+     *  terminal stage (F19-3: one Apply click merged an unreviewed head into
+     *  main, whatever the card's `kind` said). Every other card assigns, runs or
+     *  moves within the flow and carries no acceptance to disclose, so it is
+     *  applied ack-free. Three states, documented on
+     *  `assertAcceptanceDisclosure`. The recommendation id is NOT a substitute:
+     *  it identifies the card, not what the human was shown merging. */
+    ack?: AcceptanceDisclosure | null;
+  },
   actor: TaskActor,
   ctx: TaskActionContext = {},
 ): Promise<{ task: TaskSummary; label: string }> {
@@ -6497,7 +7074,7 @@ export async function applyRecommendation(
   // (which mis-describes an unknown/stale id). Hedge to what is actually known.
   if (!rec)
     throw AppError.conflict(
-      "That recommendation is no longer available — it may have been resolved, dismissed, or replaced by a newer one. Refresh to see the current recommendations.",
+      "That recommendation is no longer available. It may have been resolved, dismissed, or replaced by a newer one. Refresh to see the current recommendations.",
     );
 
   // R15-3 (owner ruling 2026-07-28): the task OWNER may apply ANY operator
@@ -6578,6 +7155,12 @@ export async function applyRecommendation(
     };
     if (!declaredEdge) move.manual = true;
     if (asCoordination("approve-transition")) move.recommendationAuthorized = true;
+    // Ruling 88: a recommended move onto the TERMINAL stage is an acceptance
+    // (`transitionStage` routes it to `acceptCompletion` — the real merge), and
+    // that is exactly the F19-3 card whose Apply the ceremony now fronts. The
+    // key rides through for every recommended move; `transitionStage` consults
+    // it on the terminal branch only, so an ordinary re-stage stays ack-free.
+    if ("ack" in input) move.ack = input.ack ?? null;
     await transitionStage(db, move, actor, ctx);
   } else if (rec.kind === "delivery") {
     // R15-2: the operator recommended DELIVERY (push + review PR) — applying it
@@ -6592,18 +7175,19 @@ export async function applyRecommendation(
       actor,
     );
     if (outcome.status !== "delivered") {
-      throw AppError.conflict(`Delivery did not complete — ${outcome.message}`);
+      throw AppError.conflict(`Delivery did not complete: ${outcome.message}`);
     }
   } else if (rec.kind === "accept_completion") {
     // The operator's "accept completion → Done" recommendation. Applying it is
     // the human acceptance of the review→done boundary: same semantics as
-    // resolving an acceptance packet (Done, PR merged, completion event).
-    await acceptCompletion(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey },
-      actor,
-      ctx,
-    );
+    // resolving an acceptance packet (Done, PR merged, completion event) — and,
+    // per ruling 88, the same demand for the ceremony's echo.
+    const acceptance: Parameters<typeof acceptCompletion>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+    };
+    if ("ack" in input) acceptance.ack = input.ack ?? null;
+    await acceptCompletion(db, acceptance, actor, ctx);
   } else {
     throw AppError.validation("This recommendation is malformed.");
   }
@@ -6715,7 +7299,7 @@ export async function dismissRecommendation(
       actor: humanActorRef(db, actor),
       title: RECOMMENDATION_DECLINED_TITLE,
       text:
-        `**Decision:** declined — ${rec.label}. The operator's recommendation was not applied; ` +
+        `**Decision:** "${rec.label}" was declined. The operator's recommendation was not applied; ` +
         `do not re-propose it unless something material about the task changes.`,
       toAgent: false,
       evidence: null,

@@ -167,7 +167,7 @@ export function ArchivedBanner({ canRestore }: { canRestore: boolean }) {
     <div className="archived-banner" role="status">
       <Icon name="lock" />
       <span>
-        This project is <strong>archived</strong> — it’s read-only. Timelines
+        This project is <strong>archived</strong>. It’s read-only. Timelines
         and audit stay visible;{" "}
         {canRestore ? (
           <>

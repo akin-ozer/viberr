@@ -15,6 +15,7 @@ import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import {
+  attachmentProducers,
   getTaskDetail,
   getTaskSummary,
 } from "~/server/projections/task-query.server";
@@ -66,6 +67,7 @@ import {
   operatorBackendFor,
   type OperatorAutonomy,
 } from "~/server/tasks/operator-actions.server";
+import { parseAcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
 import { requireVisibleProject } from "./project-visibility.server";
 import {
@@ -263,6 +265,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return {
     task: { ...detail, timeline: slice.events },
     attachments,
+    // Who saved each attachment and when, from the events that claim names —
+    // same visibility bar as the list itself.
+    attachmentProducers: runsVisible
+      ? attachmentProducers(db, params.slug, params.key)
+      : {},
     recommendations,
     schedules,
     archived,
@@ -329,6 +336,23 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // deployments keep working" claim that used to sit here was not.
     githubHost: githubWebHost(),
   };
+}
+
+/**
+ * Ruling 88 (F21-2) — the acceptance disclosure this POST carries, or `null`
+ * when it carries none.
+ *
+ * `null` is deliberately passed THROUGH to the server rather than swallowed
+ * here: it is the difference between "an HTTP caller sent no acknowledgment"
+ * (refused — the bare POST F21-2 found accepting silently) and "an in-process
+ * caller carries its own disclosure contract" (omitted). This route is the one
+ * HTTP door onto the human acceptance paths, so every one of them passes an
+ * explicit value.
+ */
+function acceptanceAck(formData: FormData) {
+  // Same field read as every other intent in this action: an absent field
+  // becomes "", which the parser reads as "no disclosure" rather than a value.
+  return parseAcceptanceDisclosure((field) => String(formData.get(field) ?? ""));
 }
 
 /** Optional `backend` form field → a run backend override (D4 retry). Ignores
@@ -418,6 +442,10 @@ export async function action({ request, params }: Route.ActionArgs) {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
         const note = String(formData.get("note") ?? "").slice(0, 2000);
+        // Questionnaire packets (owner request 2026-08-20): the human's own
+        // directive instead of a canned option. Non-empty ⇒ the server ignores
+        // the option index and resolves through the synthetic `custom` kind.
+        const custom = String(formData.get("custom") ?? "").slice(0, 4000);
         // UI-43: the "Retrying on X · streaming to agent logs" toast was
         // computed from the option KIND alone. `resolvePacket` catches a failed
         // `startAgentRun` and merely appends a timeline note ("The retry could
@@ -430,8 +458,18 @@ export async function action({ request, params }: Route.ActionArgs) {
           projectSlug,
           taskKey,
           optionIndex,
+          // Ruling 88: an `accept_completion` option runs the full acceptance
+          // contract — Done plus the real, irreversible merge — from a button
+          // labelled "Confirm decision", so it is held to the ceremony like
+          // every other acceptance door. The key rides on EVERY resolution
+          // (this route cannot know the option kind before the server reads the
+          // packet); `resolvePacket` consults it on the accepting arm alone, so
+          // an ordinary decision stays ack-free. Absent fields ⇒ `null` ⇒ an
+          // accepting resolution that skipped the dialog is refused.
+          ack: acceptanceAck(formData),
         };
         if (note.trim()) resolveInput.note = note;
+        if (custom.trim()) resolveInput.custom = custom;
         const { option } = await resolvePacket(db, resolveInput, actor);
         const retryStarted =
           option.kind === "retry_other_backend" &&
@@ -446,13 +484,13 @@ export async function action({ request, params }: Route.ActionArgs) {
                 // (it used to hold the task and deep-nav to settings).
                 "Policy / credential updated · the operator re-runs to re-check"
               : option.kind === "hold_runtime_debug"
-                ? "Held for runtime debug — the session is recorded per audit policy"
+                ? "Held for runtime debug · the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
                   ? retryStarted
                     ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude Code"} · streaming to agent logs`
-                    : "Decision recorded, but the retry could NOT start — the reason is on the timeline"
+                    : "Decision recorded, but the retry could NOT start. The reason is on the timeline"
                   : option.kind === "edit_goal"
-                    ? "Decision recorded — type the new goal; the packet clears when it lands"
+                    ? "Decision recorded · type the new goal; the packet clears when it lands"
                     : `Decision recorded: ${option.t}`;
         const resolved = {
           ok: true as const,
@@ -494,8 +532,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast:
             notified > 0
-              ? `Sent to ${notified} maintainer${notified === 1 ? "" : "s"} — they'll decide`
-              : "Sent — a maintainer will decide",
+              ? `Sent to ${notified} maintainer${notified === 1 ? "" : "s"} · they'll decide`
+              : "Sent · a maintainer will decide",
         };
       }
       case "complete-merge": {
@@ -507,7 +545,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast: result.merged
             ? result.message
-            : `Not merged — ${result.message}`,
+            : `Not merged: ${result.message}`,
         };
       }
       case "accept-completion": {
@@ -529,7 +567,15 @@ export async function action({ request, params }: Route.ActionArgs) {
         }
         const task = await transitionStage(
           db,
-          { projectSlug, taskKey, toStageId: terminal, manual: true },
+          {
+            projectSlug,
+            taskKey,
+            toStageId: terminal,
+            manual: true,
+            // Ruling 88: the ceremony's echo of what it displayed. Absent ⇒
+            // `null` ⇒ the server refuses this accept.
+            ack: acceptanceAck(formData),
+          },
           actor,
         );
         const toName =
@@ -560,7 +606,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           : data(
               {
                 ok: false as const,
-                error: `Delivery did not complete — ${outcome.message}`,
+                error: `Delivery did not complete: ${outcome.message}`,
               },
               { status: 409 },
             );
@@ -580,11 +626,17 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "force-accept": {
         // Admin-only override of the review gate (DG-2): accept a task wedged on
         // an un-recordable required reviewer or a stale blocked packet. Audited.
-        await forceAcceptCompletion(db, { projectSlug, taskKey }, actor);
+        // Ruling 88: force overrides the GATES, never the disclosure — its
+        // ceremony states more, not less, so it echoes on the same terms.
+        await forceAcceptCompletion(
+          db,
+          { projectSlug, taskKey, ack: acceptanceAck(formData) },
+          actor,
+        );
         return {
           ok: true as const,
           intent,
-          toast: `Force-accepted ${taskKey} — moved to Done (review gate overridden)`,
+          toast: `Force-accepted ${taskKey} · moved to Done (review gate overridden)`,
         };
       }
       case "owner-take": {
@@ -637,16 +689,23 @@ export async function action({ request, params }: Route.ActionArgs) {
         // Manual stage change from the Current-state dropdown (admin|maintainer).
         // `manual` lets the move cross any stage, not just a governed boundary;
         // the same server rules still post the **Transition:** timeline comment.
-        const task = await transitionStage(
-          db,
-          {
-            projectSlug,
-            taskKey,
-            toStageId: String(formData.get("to") ?? ""),
-            manual: true,
-          },
-          actor,
-        );
+        const toStageId = String(formData.get("to") ?? "");
+        // F19-37 + ruling 88: a manual move into the LAST stage IS an
+        // acceptance (`transitionStage` routes it to `acceptCompletion` — the
+        // real, irreversible merge), so this door demands the ceremony's echo
+        // exactly like the Accept button does. Every other move is an ordinary
+        // transition and carries no acceptance disclosure at all.
+        const stages = getProject(db, projectSlug)?.stages ?? [];
+        const acceptsCompletion =
+          stages.length > 0 && toStageId === stages[stages.length - 1]!.id;
+        const move: Parameters<typeof transitionStage>[1] = {
+          projectSlug,
+          taskKey,
+          toStageId,
+          manual: true,
+        };
+        if (acceptsCompletion) move.ack = acceptanceAck(formData);
+        const task = await transitionStage(db, move, actor);
         const proj = getProject(db, projectSlug);
         const toName =
           proj?.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
@@ -670,8 +729,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast:
             result.outcome === "interrupted"
-              ? "Run interrupted — the thread stays resumable"
-              : "That run already finished — nothing to interrupt",
+              ? "Run interrupted · the thread stays resumable"
+              : "That run already finished · nothing to interrupt",
         };
       }
       case "assign-specialist": {
@@ -711,12 +770,18 @@ export async function action({ request, params }: Route.ActionArgs) {
           { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
           actor,
         );
+        // F21-6: "reviewer" is a claim about AUTHORITY — acceptance waits for a
+        // reviewer's approval. This toast made that claim for every supporting
+        // engagement, including a profile with verdict=Off that no gate will ever
+        // wait on, while the timeline event (fixed with the tool half) said
+        // "supporting agent" about the very same click. One fact, one word.
+        const capacity = result.verdictCapable ? "a reviewer" : "a supporting agent";
         return {
           ok: true as const,
           intent,
           toast: result.alreadyEngaged
-            ? `${result.name} is already a reviewer`
-            : `Engaged ${result.name} as a reviewer`,
+            ? `${result.name} is already engaged as ${capacity}`
+            : `Engaged ${result.name} as ${capacity}`,
         };
       }
       case "run-reviewer": {
@@ -754,9 +819,20 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "apply-recommendation": {
         // A human accepts an operator recommendation card — executes the
         // recommended assign/reviewer/transition through the governed mutation.
+        // Ruling 88 (F19-3, live-proven: one Apply click merged an unreviewed
+        // head into main): a card that REACHES acceptance — `accept_completion`,
+        // or a transition onto the terminal stage — demands the ceremony's echo.
+        // The key rides on every apply; `applyRecommendation` consults it only
+        // on the arms that accept, so assigning, running and ordinary re-stages
+        // stay ack-free.
         const result = await applyRecommendation(
           db,
-          { projectSlug, taskKey, recId: String(formData.get("recId") ?? "") },
+          {
+            projectSlug,
+            taskKey,
+            recId: String(formData.get("recId") ?? ""),
+            ack: acceptanceAck(formData),
+          },
           actor,
         );
         return {
@@ -928,6 +1004,7 @@ export default function TaskDetailRoute({
       key={loaderData.task.key}
       task={loaderData.task}
       attachments={loaderData.attachments}
+      attachmentProducers={loaderData.attachmentProducers}
       attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
@@ -964,7 +1041,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   const params = useParams();
   const notFound = isRouteErrorResponse(error) && error.status === 404;
   return (
-    <div className="task-preview" data-screen-label="Task detail — not found">
+    <div className="task-preview" data-screen-label="Task detail · not found">
       <section className="panel">
         <div className="panel-head">
           <h2>{notFound ? "Task not found" : "Something went wrong"}</h2>

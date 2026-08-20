@@ -35,7 +35,7 @@ const SNAPSHOT: OperatorTaskSnapshot = {
   branch: null,
   liveRuns: [],
   autonomy: "supervised",
-  policy: {},
+  operatorPolicy: { scope: "operator", note: "", capabilities: {} },
 };
 
 describe("operator turn instruction — @tag the human (NEW-4)", () => {

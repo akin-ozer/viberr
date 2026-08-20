@@ -86,7 +86,7 @@ export function HumanAccess({
       // Client mirror of the server guard (UX sugar — the action re-checks).
       // D5: a refusal must not render the success tick.
       push(
-        `${projectName} needs at least one admin — promote someone else first`,
+        `${projectName} needs at least one admin. Promote someone else first`,
         "error",
       );
       return;
@@ -109,7 +109,7 @@ export function HumanAccess({
       <div className="pol-note">
         <Icon name="board" />
         <span>
-          Roles decide what each member may approve, accept, and configure —
+          Roles decide what each member may approve, accept, and configure,
           enforced on every project and task action.
         </span>
       </div>
@@ -122,7 +122,7 @@ export function HumanAccess({
         <div className="pol-note">
           <Icon name="lock" />
           <span>
-            Read-only — changing a member's role needs the{" "}
+            Read-only: changing a member's role needs the{" "}
             <strong>Manage members &amp; roles</strong> grant (project admin).
           </span>
         </div>
@@ -157,7 +157,7 @@ export function HumanAccess({
                     `u_RT7-QeTWOwP4` string with an empty email, indistinguishable
                     from a real person. */}
                 {m.missing
-                  ? "This account no longer exists — remove it in Settings → Members."
+                  ? "This account no longer exists. Remove it in Settings → Members."
                   : m.email}
               </div>
             </span>
@@ -221,7 +221,7 @@ export function HumanAccess({
                         <Icon name="check" />
                       </span>
                     ) : (
-                      <span className="rbac-no">—</span>
+                      <span className="rbac-no">−</span>
                     )}
                   </td>
                 ))}
@@ -234,14 +234,14 @@ export function HumanAccess({
         <Icon name="message" />
         <span>
           Rules that reach beyond project roles:{" "}
-          <strong>this project is members-only</strong> — the table above says
+          <strong>this project is members-only</strong>. The table above says
           what a member may do, and someone who is not a member is not merely
           refused: every page and every action, comments included, answers as if
-          the project did not exist, so even its existence stays private;{" "}
-          <strong>contributors and above</strong> may{" "}
+          the project did not exist, so even its existence stays private.{" "}
+          <strong>Contributors and above</strong> may{" "}
           <strong>take or release their own task ownership</strong> (viewers are
           read + comment only; the owner is the task's human reviewer and
-          acceptance authority, scoped to that task — a contributor who owns a
+          acceptance authority, scoped to that task: a contributor who owns a
           task <strong>may accept its completion</strong>, and{" "}
           {/* N20-7: the owner exception covered acceptance but not the operator's
               other packet options — task-actions.server.ts lets an owner resolve
@@ -250,10 +250,10 @@ export function HumanAccess({
             may resolve the non-acceptance options on a decision packet the
             operator raises on that task
           </strong>
-          , even though the table reserves those columns for maintainers);{" "}
-          <strong>admins may release any owner</strong> — recorded in the audit
-          trail; and <strong>org admins hold emergency project-admin
-          authority on every project</strong> — even without membership — with
+          , even though the table reserves those columns for maintainers).{" "}
+          <strong>Admins may release any owner</strong> (recorded in the audit
+          trail). And <strong>org admins hold emergency project-admin
+          authority on every project</strong>, even without membership, with
           every override recorded in the audit trail as{" "}
           <em>org-admin override</em>.
         </span>
@@ -288,7 +288,7 @@ export function AgentCapability({
         <Icon name="shield" />
         <span>
           Agents never hold human roles. What an agent may do comes only from
-          its profile's capability policy — act directly, recommend, or stay
+          its profile's capability policy: act directly, recommend, or stay
           out.
         </span>
       </div>
@@ -322,7 +322,7 @@ export function AgentCapability({
               0 ? (
                 <span
                   className="cs pcap-readonly"
-                  title="This profile holds no gated capabilities — it acts read-only (e.g. reviews the diff and reports a verdict)."
+                  title="This profile holds no gated capabilities. It acts read-only (e.g. reviews the diff and reports a verdict)."
                 >
                   read-only · no gated capabilities
                 </span>
@@ -458,7 +458,7 @@ export function WorkflowRules({
             <strong>{offChain.map((id) => S(id).name).join(", ")}</strong>. No
             transition rule reaches{" "}
             {offChain.length === 1 ? "that stage" : "those stages"}, so no agent
-            can move a task in or out — only an admin or maintainer can, by hand.
+            can move a task in or out. Only an admin or maintainer can, by hand.
           </span>
         </div>
       )}
@@ -471,7 +471,7 @@ export function WorkflowRules({
       {!canManage && (
         <p className="deny-note before">
           <Icon name="lock" />
-          Read-only — changing a transition&apos;s boundary needs the{" "}
+          Read-only: changing a transition&apos;s boundary needs the{" "}
           <strong>Edit workflow &amp; policy</strong> grant (project admin).
         </p>
       )}
@@ -498,7 +498,7 @@ export function WorkflowRules({
                 onKeyDown={rovingRadioKeyDown}
                 title={
                   t.locked
-                    ? "Completion is human-authorized in V1 — this boundary can't be delegated"
+                    ? "Completion is human-authorized in V1, so this boundary can't be delegated"
                     : undefined
                 }
               >
@@ -537,7 +537,7 @@ export function WorkflowRules({
           <strong>Review → Done</strong> and a human accepts it. The one
           exception is an operator running at <strong>full autonomy</strong> with{" "}
           <strong>Accept completion into Done</strong> set to{" "}
-          <em>Direct</em> — an explicit, audited opt-in that lets that operator
+          <em>Direct</em>, an explicit, audited opt-in that lets that operator
           close a task itself (it still refuses a failing-validation task).{" "}
           {/* F20-19: state whether that exception is actually live on THIS
               project, so the conditional above reads as configured or not — the
@@ -552,7 +552,7 @@ export function WorkflowRules({
                   {operator.operatorName ? ` (${operator.operatorName})` : ""} runs
                   at <strong>full autonomy</strong> with that grant set to{" "}
                   <em>Direct</em>, so the exception is{" "}
-                  <strong>active</strong> — it can close a passing task itself.{" "}
+                  <strong>active</strong>: it can close a passing task itself.{" "}
                 </>
               ) : operator.present ? (
                 <>
@@ -563,7 +563,7 @@ export function WorkflowRules({
                       ? "at full autonomy without the Direct accept grant"
                       : "supervised"}
                   </strong>
-                  , so the exception is <strong>not active</strong> — every task
+                  , so the exception is <strong>not active</strong>: every task
                   still needs a human to accept completion into Done.{" "}
                 </>
               ) : (
@@ -637,7 +637,7 @@ export function PolicyPage({
         <div>
           <h1>Policy</h1>
           <div className="sub">
-            Human access and agent capability — two surfaces, managed
+            Human access and agent capability: two surfaces, managed
             separately
           </div>
         </div>

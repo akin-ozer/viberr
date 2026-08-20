@@ -11,11 +11,13 @@ import type {
   ThreadOptions,
   TurnOptions,
 } from "@openai/codex-sdk";
-import type {
-  RunCallbacks,
-  RunHandle,
-  RunSpec,
-  RuntimeAdapter,
+import {
+  phaseStepForLine,
+  RUN_PHASE,
+  type RunCallbacks,
+  type RunHandle,
+  type RunSpec,
+  type RuntimeAdapter,
 } from "./adapter.server";
 import { SESSION_MISSING_RE } from "./session-export.server";
 import { projectEnvelope } from "./wire-format.server";
@@ -370,11 +372,11 @@ export function codexIdleTimeoutMs(): number {
  * that a REDACTED provider complaint is loggable (ruling 69), so instead of
  * discarding it we keep the scrubbed sentence. Falls back to the class-only
  * message when the scrub finds nothing usable. */
-function safeCodexError(error: unknown): Error {
+function safeCodexError(cause: unknown): Error {
   const safe = new Error(
-    redactProviderText(error) || "Codex SDK/CLI execution failed.",
+    redactProviderText(cause) || "Codex SDK/CLI execution failed.",
   );
-  safe.name = error instanceof Error ? error.name : "Error";
+  safe.name = cause instanceof Error ? cause.name : "Error";
   return safe;
 }
 
@@ -411,11 +413,11 @@ interface CodexFailure {
  * message is deliberately generic (and does not necessarily re-match the
  * downstream regexes), which is exactly why the class rides the tag instead. */
 function classifyCodexFailure(
-  error: unknown,
+  cause: unknown,
   phase: "start" | "execution",
 ): CodexFailure {
   const parts: string[] = [];
-  let current: unknown = error;
+  let current: unknown = cause;
   for (let depth = 0; depth < 3 && current != null; depth += 1) {
     if (current instanceof Error) {
       parts.push(current.message);
@@ -430,7 +432,7 @@ function classifyCodexFailure(
   // stays generic (and the class rides the tag), but the redacted sentence is
   // now surfaced beside it so a human can act on "model is not supported when
   // using Codex with a ChatGPT account" instead of "review the configuration".
-  const providerText = redactProviderText(error);
+  const providerText = redactProviderText(cause);
   // P13-D-2 before the auth branch: a missing rollout is not a credential
   // problem, and telling a human to "review the configured subscription
   // credential" for it sends them to the one place that is definitely fine.
@@ -494,6 +496,14 @@ export function createCodexAdapter(
       let idleTimedOut = false;
       let emittedAdapterFailure = false;
       const abort = new AbortController();
+
+      // R21-4 / G5 (FR28): the live phase/step the run strip renders — the same
+      // vocabulary the Claude adapter emits, so the strip reads identically on
+      // both backends. `lastStep` sticks through a stretch of reasoning events.
+      let lastStep: string | null = null;
+      const phase = (name: string, step: string | null = lastStep) => {
+        cb.onPhase?.(name, step);
+      };
 
       // IDLE (inactivity) timeout, not a wall-clock cap (owner ruling A8): a
       // codex run may legitimately take much longer than the window overall,
@@ -579,6 +589,10 @@ export function createCodexAdapter(
       };
 
       const run = async () => {
+        // Before anything can be awaited: the SDK import, the `codex` spawn and
+        // the first turn all run with no event at all, and that window is what
+        // the strip used to render blank.
+        phase(RUN_PHASE.starting, null);
         const factory = deps.codexFactory ?? (await realFactory());
         // The Codex SDK REPLACES the child env wholesale, so any per-run env
         // (e.g. the specialist's GIT_CEILING_DIRECTORIES) must be overlaid on a
@@ -676,13 +690,21 @@ export function createCodexAdapter(
             if (type === "turn.failed" || type === "error") {
               sawFatalError = true;
             }
-            cb.onLine({
+            const emitted = {
               raw: JSON.stringify(event),
               display,
               facts,
               occurredAt,
-            });
+            };
+            cb.onLine(emitted);
+            // R21-4: the strip's live row. `turn N` is the honest fallback until
+            // the run invokes its first tool — a number that climbs is what
+            // tells a human the run is alive. The service throttles the writes.
+            const step = phaseStepForLine(emitted);
+            if (step) lastStep = step;
+            phase(RUN_PHASE.working, lastStep ?? `turn ${turnCount + 1}`);
           }
+          phase(RUN_PHASE.finishing, null);
           // Thread id lands after the first turn — capture it as the session.
           if (thread.id) sessionId = thread.id;
         } catch (error) {

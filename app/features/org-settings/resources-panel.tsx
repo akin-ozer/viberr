@@ -82,6 +82,18 @@ export function ResourcesPanel({
       setPendingSkillBrowse(null);
     }
   }, [skills, pendingSkillBrowse]);
+  // The KB twin (owner request 2026-08-20): a files-mode KB create waits for
+  // the revalidated list, then opens the new folder's browser. Matched on the
+  // store DIR — the modal's slugified name — not the display name.
+  const [pendingKbBrowse, setPendingKbBrowse] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingKbBrowse) return;
+    const hit = kbs.find((k) => k.dir === pendingKbBrowse);
+    if (hit) {
+      setBrowsing({ kind: "kb", id: hit.id });
+      setPendingKbBrowse(null);
+    }
+  }, [kbs, pendingKbBrowse]);
   const push = useToast();
   const rowAction = useOrgAction();
   const reindexAction = useOrgAction();
@@ -139,7 +151,7 @@ export function ResourcesPanel({
     browsing?.kind === "skill" ? (skills.find((s) => s.id === browsing.id) ?? null) : null;
 
   return (
-    <div data-screen-label="Settings — Agent resources">
+    <div data-screen-label="Settings · Agent resources">
       <div className="rsrc-grid">
         <KbPanel
           kbs={kbs}
@@ -201,12 +213,17 @@ export function ResourcesPanel({
         <span>
           These are the shared base definitions. Each project's policy decides which
           profiles are eligible, which of their context resources may load, and what they
-          may do — without changing the global.
+          may do, without changing the global.
         </span>
       </div>
 
       {modal && modal.kind === "kb" && (
-        <KBModal key={modal.item?.id ?? "new"} initial={modal.item} onClose={() => setModal(null)} />
+        <KBModal
+          key={modal.item?.id ?? "new"}
+          initial={modal.item}
+          onClose={() => setModal(null)}
+          onFilesCreated={setPendingKbBrowse}
+        />
       )}
       {modal && modal.kind === "mcp" && (
         <McpModal

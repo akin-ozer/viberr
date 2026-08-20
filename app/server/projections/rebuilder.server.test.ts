@@ -92,6 +92,155 @@ describe("rebuilder", () => {
     expect(acceptanceOf("VIB-2")).toBeNull();
   });
 
+  it("ruling 53/88: projects the delivered revision head sha the board ceremony discloses", () => {
+    // A board card is rendered from this table alone, so a fact the board's
+    // acceptance ceremony must DISCLOSE has to be projected. Without the column
+    // the ceremony said "No delivered revision recorded." about every task and
+    // echoed `revision: "none"` back to a server that compares the echo against
+    // the live task — which refused every board acceptance of delivered work.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1-work",
+        workRevision: {
+          id: "rev_1",
+          headSha: "a".repeat(40),
+          treeSha: "t".repeat(40),
+          branch: "vib-1-work",
+          createdAt: "2026-08-19T09:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+      }),
+    });
+    // Nothing delivered — the honest absence the ceremony still renders.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "ready" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const rowSchema = z.object({ work_revision_sha: z.string().nullable() });
+    const shaOf = (key: string) =>
+      rowSchema.parse(
+        store.db
+          .prepare(
+            `SELECT work_revision_sha FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+          )
+          .get(store.slug, key),
+      ).work_revision_sha;
+    expect(shaOf("VIB-1")).toBe("a".repeat(40));
+    expect(shaOf("VIB-2")).toBeNull();
+
+    // And it reaches the summary the board renders from, under the name the
+    // ceremony reads (`workRevisionSha`).
+    const tasks = listProjectTasks(store.db, store.slug);
+    expect(tasks.find((t) => t.key === "VIB-1")?.workRevisionSha).toBe(
+      "a".repeat(40),
+    );
+    expect(tasks.find((t) => t.key === "VIB-2")?.workRevisionSha).toBeNull();
+  });
+
+  /**
+   * F21-1 (pass 21) — the `validation` CHECK must admit every VALIDATION_VALUES
+   * member, `bypassed` included.
+   *
+   * `deriveValidation` returns `"bypassed"` for a force-accepted task, and the
+   * rebuilder binds that return value straight into `task_projections.validation`
+   * (rebuilder.server.ts :410 → :538). The baseline's CHECK still listed only the
+   * four original values, so the INSERT threw `CHECK constraint failed`, the whole
+   * task rebuild aborted inside rebuildPath's catch ("projection rebuild failed")
+   * and the row was never written — a force-accepted task simply stopped
+   * projecting.
+   *
+   * The `workRevision` is load-bearing, which is why the sibling N20-14 test
+   * above never caught this: `deriveValidation` returns `"none"` on its very
+   * first line when there is no revision, so a force-accepted task only reaches
+   * the `bypassed` arm once it has one.
+   *
+   * CANARY: revert the CHECK at db/migrations/0001_baseline.sql to
+   * ('healthy','changed','failing','none') — the row disappears and this fails.
+   */
+  it("F21-1: a force-accepted task WITH a work revision projects validation = 'bypassed'", () => {
+    const store = setupTestStore(ctx);
+    // A real delivered revision (the shape `nextWorkRevision` mints) plus a
+    // required reviewer who never voted — the pending state a force-accept
+    // deliberately overrides.
+    const revision = {
+      id: "rev_f21",
+      headSha: "a".repeat(40),
+      treeSha: "b".repeat(40),
+      branch: "vib-1-work",
+      createdAt: "2026-08-19T09:00:00.000Z",
+      sourceProfileId: "developer",
+      kind: "delivered" as const,
+    };
+    const engagements = [
+      {
+        profileId: "developer",
+        backend: "claude" as const,
+        role: "developer",
+        delivers: true,
+        verdictCapable: false,
+      },
+      {
+        profileId: "reviewer",
+        backend: "claude" as const,
+        role: "Review & validation",
+        delivers: false,
+        verdictCapable: true,
+      },
+    ];
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "done",
+        waiting: "none",
+        readiness: "ready",
+        acceptance: "forced",
+        branch: revision.branch,
+        workRevision: revision,
+        engagements,
+        verdicts: [],
+        pr: { number: 421, state: "merged", title: "Delivered work" },
+      }),
+    });
+    // The control: same task, same revision, no force-accept — still `changed`.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "review",
+        waiting: "human",
+        readiness: "ready",
+        branch: revision.branch,
+        workRevision: { ...revision, id: "rev_f21b" },
+        engagements,
+        verdicts: [],
+        pr: { number: 422, state: "review", title: "Delivered work" },
+      }),
+    });
+
+    const summary = rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // The CHECK failure surfaced as a swallowed per-file error, never a throw.
+    expect(summary.errors).toBe(0);
+
+    const rowSchema = z.object({ validation: z.string() });
+    const validationOf = (key: string) => {
+      const row = store.db
+        .prepare(
+          `SELECT validation FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+        )
+        .get(store.slug, key);
+      // A rejected INSERT leaves NO row at all — say so instead of failing on a
+      // zod parse of `undefined`.
+      expect(row, `VIB task ${key} was not projected at all`).toBeDefined();
+      return rowSchema.parse(row).validation;
+    };
+    expect(validationOf("VIB-1")).toBe("bypassed");
+    expect(validationOf("VIB-2")).toBe("changed");
+
+    // …and it reaches the read model the board/queue/hero consume.
+    const summaries = listProjectTasks(store.db, store.slug);
+    expect(summaries.find((t) => t.key === "VIB-1")?.validation).toBe("bypassed");
+  });
+
   it("D4: projects `continuity: 'degraded'` when the timeline carries a continuity event", () => {
     const store = setupTestStore(ctx);
     // VIB-1 lost its provider session — a `continuity` event is on the timeline,
@@ -491,7 +640,7 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
     const store = setupTestStore(ctx);
     const task = seedDelivered(store, "closed");
     expect(task.blockReason).toBe(
-      "VIB-3's review PR was closed on GitHub without merging — it can't be accepted. Rework and reopen the PR, or archive the task.",
+      "VIB-3's review PR was closed on GitHub without merging, so it can't be accepted. Rework and reopen the PR, or archive the task.",
     );
     expect(task.blockReason).not.toContain("force-accept");
     expect(task.blockReason).not.toContain("approving verdict");
@@ -502,7 +651,7 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
     expect(seedDelivered(store, "review").blockReason).toBe(
       // R19-B: a project member's GitHub approval is now a third way to satisfy
       // the gate, and the sentence names it.
-      "VIB-3's delivered revision has no approving verdict yet — run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.",
+      "VIB-3's delivered revision has no approving verdict yet. Run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept.",
     );
   });
 
@@ -724,7 +873,7 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     // which used to be left to each reader to re-derive (and one of them didn't).
     expect(task.validation).toBe("healthy");
     expect(task.blockReason).toBe(
-      "VIB-9's review PR #900 conflicts with the base branch — GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
+      "VIB-9's review PR #900 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
     );
   });
 
@@ -744,7 +893,7 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
       },
     );
     expect(task.blockReason).toBe(
-      "This task has an open blocked decision — resolve the operator's packet before accepting it.",
+      "This task has an open blocked decision. Resolve the operator's packet before accepting it.",
     );
   });
 

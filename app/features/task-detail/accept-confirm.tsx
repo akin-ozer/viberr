@@ -1,4 +1,5 @@
 import type { PrRef, Validation } from "~/schemas/task-file.schema";
+import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import { prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
@@ -33,6 +34,17 @@ import { useDialog } from "~/ui/use-dialog";
  *   task INTO the final stage IS accepting completion" → acceptCompletion). The
  *   sixth writer, and the last surface where a card reaching Done merged
  *   silently — the board's identical menu has confirmed since R18-7.
+ *
+ * Pass 21 (F21-2 / ruling 88): all of that was CLIENT architecture. A POST that
+ * skipped this dialog accepted and merged with no disclosure at all, so the
+ * whole ceremony held only for callers who chose to run it. The confirmed click
+ * now hands its caller an `AcceptanceDisclosure` — the three facts THIS RENDER
+ * put on screen, read off the same values the rows below display — and the
+ * server refuses an acceptance that arrives without one, or with one that no
+ * longer matches the live task (a head that moved, a PR merged out of band, a
+ * verdict that landed while the dialog sat open). The echo is deliberately
+ * taken from the rendered props rather than re-derived at submit time: a
+ * disclosure the human did not see would prove nothing.
  */
 
 export type AcceptCeremonyMode =
@@ -158,7 +170,11 @@ export function AcceptConfirm({
   blockedReason: string | null;
   busy: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
+  /** Ruling 88: receives the disclosure this dialog just made, for the submit
+   *  to echo back to the server. Callers that reach a path with no server-side
+   *  disclosure contract (the packet resolution, an applied recommendation)
+   *  simply ignore the argument. */
+  onConfirm: (disclosure: AcceptanceDisclosure) => void;
 }) {
   const { ref: panelRef, close } = useDialog(onCancel);
   const mode = ceremony.mode;
@@ -214,6 +230,32 @@ export function AcceptConfirm({
   // PR-state map (ruling 12). "PR #12 accepted" and "PR #12 merge pending" are
   // the same fact under two vocabularies, on the screen that decides the merge.
   const prPill = pr ? prStatePill(pr.state) : null;
+  // F21-23 (live, UC-15): a human merged PR #172 on GitHub, the poller adopted
+  // `state: merged`, the reviewer verdict still ran and the ceremony correctly
+  // showed "PR #172 · merged into main" — while the button underneath still read
+  // "Apply → Done & merge" and the footer "Merging is one-way". The dialog KNEW
+  // the merge had already happened and promised to perform it anyway. Nothing
+  // merges on this path. Every disclosure row stays; only the two lines that
+  // predict a merge change.
+  //
+  // F21-23 residual: relabelling the button was half a fix — `completeTaskMerge`
+  // still threw a 409 ("This PR is already merged.") at the click "Finish
+  // accepting VIB-x" invites, so the dialog promised what the server refused.
+  // That door now settles an already-merged PR as a no-op success, and the
+  // footer here says what the click really does: nothing merges, and nothing is
+  // written either — the acceptance that stamped this PR "accepted" put the
+  // completion on the timeline already (applyAcceptanceWrite), and the only
+  // ceremony that reaches `complete-merge` opens from that state.
+  const alreadyMerged = pr?.state === "merged";
+  // Ruling 88 (F21-2): exactly what the three rows below state — the PR behind
+  // the "Merges" pill, the sha on the "Revision" row, the value the "Verdict"
+  // pill renders. Built here, from the rendered props, so the acknowledgment
+  // the server verifies is the disclosure the human actually read.
+  const disclosure: AcceptanceDisclosure = {
+    pr: pr?.state ?? "none",
+    revision: workRevisionSha ?? "none",
+    verdict: task.validation,
+  };
   return (
     <dialog
       className="modal-card release-card"
@@ -275,7 +317,7 @@ export function AcceptConfirm({
                 // true of the task in hand — the branch when there is one, its
                 // absence when there is not.
                 <>
-                  Nothing — <strong>completed with no changes</strong>.{" "}
+                  Nothing: <strong>completed with no changes</strong>.{" "}
                   {task.branch ? (
                     <>
                       <span className="mono">{task.branch}</span> carries no
@@ -283,8 +325,8 @@ export function AcceptConfirm({
                     </>
                   ) : (
                     <>
-                      {task.key} never opened a branch or a pull request —
-                      nothing merges.
+                      {task.key} never opened a branch or a pull request.
+                      Nothing merges.
                     </>
                   )}
                 </>
@@ -310,7 +352,7 @@ export function AcceptConfirm({
                   the acceptance is refused and says how many commits.
                 </>
               ) : (
-                <>No linked pull request — the task closes without a merge.</>
+                <>No linked pull request. The task closes without a merge.</>
               )}
             </span>
           </div>
@@ -341,7 +383,7 @@ export function AcceptConfirm({
                     was not — `aheadBy: 1` rendered "1 commit added since
                     review; THEY MERGE unreviewed", on the row whose whole job
                     is disclosing what ships unreviewed. */}
-                — {pr.revisionDrift.aheadBy} commit
+                · {pr.revisionDrift.aheadBy} commit
                 {pr.revisionDrift.aheadBy === 1 ? "" : "s"} added since review;{" "}
                 {pr.revisionDrift.aheadBy === 1 ? "it merges" : "they merge"}{" "}
                 unreviewed.
@@ -358,7 +400,7 @@ export function AcceptConfirm({
                   approved — a gate a human satisfied cannot pass silently
                   (ruling 19). */}
               {verdictSatisfiedBy && (
-                <span className="fine xs"> — {verdictSatisfiedBy}</span>
+                <span className="fine xs"> · {verdictSatisfiedBy}</span>
               )}
             </span>
           </div>
@@ -377,7 +419,7 @@ export function AcceptConfirm({
                     <strong>{skippedStages.join(" → ")}</strong>, and{" "}
                   </>
                 )}
-                {skippedStages.length > 0 ? "the" : "The"} review gate —{" "}
+                {skippedStages.length > 0 ? "the" : "The"} review gate:{" "}
                 {task.key} goes straight to {terminalName}
                 {pr ? " and the pull request merges" : ""}.
               </span>
@@ -397,12 +439,25 @@ export function AcceptConfirm({
       <div className="modal-foot">
         <span className="foot-hint">
           {force
-            ? "Admin override — the bypassed gate is recorded to the audit log."
-            : mergeOnly
-              ? "Merging is one-way. The merge and its result are recorded on the timeline."
-              : pr
-                ? "Merging is one-way. The completion event and the merge are recorded on the timeline."
-                : "The completion event is recorded on the timeline. Nothing is merged — this task has no pull request."}
+            ? "Admin override. The bypassed gate is recorded to the audit log."
+            : // F21-23: before the one-way warning, because a PR GitHub already
+              // merged is not one-way from HERE — there is nothing left to do
+              // that could be undone, and warning about it invents a decision.
+              alreadyMerged
+              ? // The `complete-merge` arm is the one where nothing at all is
+                // left: its task was already accepted (that is what stamped the
+                // PR "accepted"), so the completion is already on the timeline
+                // and the server settles this click as a no-op. Every OTHER mode
+                // still performs the acceptance itself — it just performs it
+                // without a merge — so only this arm may say nothing is written.
+                mergeOnly
+                ? "Nothing merges: the pull request was already merged on GitHub. Nothing is written either, because this task's completion is already on the timeline."
+                : "Nothing merges: the pull request was already merged on GitHub. The completion event is recorded on the timeline."
+              : mergeOnly
+                ? "Merging is one-way. The merge and its result are recorded on the timeline."
+                : pr
+                  ? "Merging is one-way. The completion event and the merge are recorded on the timeline."
+                  : "The completion event is recorded on the timeline. Nothing is merged: this task has no pull request."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>
@@ -412,22 +467,27 @@ export function AcceptConfirm({
             type="button"
             className={"btn " + (force ? "danger" : "primary")}
             disabled={busy}
-            onClick={onConfirm}
+            onClick={() => onConfirm(disclosure)}
           >
             <Icon name={force ? "shield" : mergeOnly ? "github" : "check"} />
             {force
               ? `Force-accept ${task.key}`
               : mergeOnly
-                ? pr
-                  ? `Merge PR #${pr.number} into ${defaultBranch}`
-                  : "Run the merge"
+                ? // F21-23: the merge-pending path can find the PR merged out of
+                  // band between the recommendation and this click. "Merge PR
+                  // #172 into main" would name work GitHub has already done.
+                  alreadyMerged
+                  ? `Finish accepting ${task.key}`
+                  : pr
+                    ? `Merge PR #${pr.number} into ${defaultBranch}`
+                    : "Run the merge"
                 : `${
                     mode === "apply-recommendation"
                       ? "Apply"
                       : mode === "stage-move"
                         ? "Move"
                         : "Accept"
-                  } → ${terminalName}${pr ? " & merge" : ""}`}
+                  } → ${terminalName}${pr && !alreadyMerged ? " & merge" : ""}`}
           </button>
         </div>
       </div>

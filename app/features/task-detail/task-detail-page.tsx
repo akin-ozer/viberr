@@ -29,6 +29,10 @@ import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import {
+  acceptanceDisclosureFields,
+  type AcceptanceDisclosure,
+} from "~/shared/acceptance-disclosure";
+import {
   useActionFeedback,
   useLogSelection,
   useRunControls,
@@ -95,6 +99,7 @@ function recReachesAcceptance(
 export function TaskDetailPage({
   task,
   attachments = [],
+  attachmentProducers = {},
   attachmentsBase = null,
   runtime,
   deployedSpecialists,
@@ -129,6 +134,9 @@ export function TaskDetailPage({
   /** R19-19: browser-produced files (loader; `[]` for non-members — the same
    *  visibility bar as the run console). */
   attachments?: TaskAttachmentEntry[];
+  /** Attachment name → who saved it and when (from the events that claim
+   *  names). Names no event claims are absent — the panel omits the line. */
+  attachmentProducers?: Record<string, { actor: string; occurredAt: string }>;
   /** `/projects/<slug>/tasks/<KEY>/attachments` — the serving route's base,
    *  built by the route component (the one place that knows the params).
    *  Null hides the panel and the evidence links (e.g. bare test renders). */
@@ -311,11 +319,19 @@ export function TaskDetailPage({
   const acceptFetcher = useFetcher<ActionResult>();
   useActionFeedback(acceptFetcher);
   const acceptBusy = acceptFetcher.state !== "idle";
-  const submitAccept = () => {
+  // Ruling 88 (F21-2): the acceptance intents carry the ceremony's own echo of
+  // what it displayed. The server refuses this POST without it — that refusal
+  // is the invariant; this is just the honest client half of it.
+  const submitAccept = (disclosure: AcceptanceDisclosure) => {
     if (acceptBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "accept-completion");
+    for (const [field, value] of Object.entries(
+      acceptanceDisclosureFields(disclosure),
+    )) {
+      fd.set(field, value);
+    }
     acceptFetcher.submit(fd, { method: "post" });
   };
 
@@ -398,13 +414,39 @@ export function TaskDetailPage({
     archiveFetcher.submit(fd, { method: "post" });
   };
 
-  const submitResolve = (optionIndex: number, note: string) => {
+  const submitResolve = (
+    optionIndex: number,
+    note: string,
+    // Ruling 88: set ONLY for the `accept_completion` option, the one kind that
+    // writes Done and merges — the server gates that arm on the echo and leaves
+    // every other decision ack-free.
+    disclosure?: AcceptanceDisclosure,
+  ) => {
     if (resolveBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "resolve-packet");
     fd.set("option", String(optionIndex));
     if (note.trim()) fd.set("note", note);
+    if (disclosure) {
+      for (const [field, value] of Object.entries(
+        acceptanceDisclosureFields(disclosure),
+      )) {
+        fd.set(field, value);
+      }
+    }
+    resolveFetcher.submit(fd, { method: "post" });
+  };
+  // Questionnaire packets (owner request 2026-08-20): resolve with the human's
+  // OWN directive. No option index — the server runs the synthetic `custom`
+  // arm, which never accepts/archives/merges, so no ceremony interposes.
+  const submitResolveCustom = (custom: string) => {
+    if (resolveBusy || !custom.trim()) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "resolve-packet");
+    fd.set("option", "-1");
+    fd.set("custom", custom.trim());
     resolveFetcher.submit(fd, { method: "post" });
   };
   // F19-7: an `accept_completion` packet option runs the full acceptance
@@ -455,12 +497,25 @@ export function TaskDetailPage({
   const recBusy = recFetcher.state !== "idle";
   const terminalStageId =
     task.stages.length > 0 ? task.stages[task.stages.length - 1]!.id : null;
-  const submitApplyRec = (recId: string) => {
+  const submitApplyRec = (
+    recId: string,
+    // Ruling 88: set ONLY when the card REACHES acceptance
+    // (`recReachesAcceptance` — kind or terminal target), which is the same
+    // predicate the server consults its own copy of before demanding the echo.
+    disclosure?: AcceptanceDisclosure,
+  ) => {
     if (recBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "apply-recommendation");
     fd.set("recId", recId);
+    if (disclosure) {
+      for (const [field, value] of Object.entries(
+        acceptanceDisclosureFields(disclosure),
+      )) {
+        fd.set(field, value);
+      }
+    }
     recFetcher.submit(fd, { method: "post" });
   };
   // F19-3 (live-proven: one Apply click merged an unreviewed head into main).
@@ -498,12 +553,24 @@ export function TaskDetailPage({
   const transitionFetcher = useFetcher<ActionResult>();
   useActionFeedback(transitionFetcher);
   const transitionBusy = transitionFetcher.state !== "idle";
-  const submitTransition = (toStageId: string) => {
+  const submitTransition = (
+    toStageId: string,
+    // Ruling 88: set ONLY for the stage-move-into-Done case, which the server
+    // reads as an acceptance and gates on the disclosure like any other accept.
+    disclosure?: AcceptanceDisclosure,
+  ) => {
     if (transitionBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "transition");
     fd.set("to", toStageId);
+    if (disclosure) {
+      for (const [field, value] of Object.entries(
+        acceptanceDisclosureFields(disclosure),
+      )) {
+        fd.set(field, value);
+      }
+    }
     transitionFetcher.submit(fd, { method: "post" });
   };
   // F19-37 — the SIXTH acceptance writer. The server treats a human move into
@@ -536,6 +603,60 @@ export function TaskDetailPage({
       tabIndex={-1}
       data-screen-label={"Task " + task.key}
     >
+      {/* U7 (D2's other half): the side column is FIRST in the DOM.
+          UX spec §Breakpoint Strategy asks for a reading order — "the task
+          detail's side-by-side regions stack, preserving reading order: current
+          state, latest packet, next action, then the timeline" — and reading
+          order is source order, which is what a screen reader announces and
+          what Tab walks. Pass 20 fixed only the paint (`order: -1` at 1100px)
+          and recorded the departure in a CSS comment that cited this very
+          sentence; below that width a sighted keyboard user then SAW "Accept
+          completion → Done" at the top and reached it LAST, after every
+          timeline entry (WCAG 2.2 SC 1.3.2 / 2.4.3). The desktop layout is
+          unchanged: `.detail` is a grid and both columns name their cell in
+          app.css, so main still paints left of side at any source order. */}
+      <div className="detail-side">
+        <GithubTrace
+          task={task}
+          githubHost={githubHost}
+          acceptance={acceptance}
+          reconciledAt={githubReconciledAt}
+          checkedAt={githubCheckedAt}
+          {...(onCompleteMerge
+            ? { onCompleteMerge: () => setConfirmAccept({ mode: "complete-merge" }) }
+            : {})}
+          {...(onForceAccept
+            ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
+            : {})}
+          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
+          delivering={deliverBusy}
+          merging={runBusy}
+        />
+        <CurrentStatePanel
+          task={task}
+          stage={stage}
+          meId={me.id}
+          myRole={myRole}
+          archived={archived}
+          acceptance={acceptance}
+          ownerBusy={ownerBusy}
+          onOwner={onOwner}
+          onRelease={() => setReleasing(true)}
+          onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
+          onAccept={() => setConfirmAccept({ mode: "accept" })}
+          onTransition={onTransition}
+          transitionBusy={transitionBusy}
+          acceptBusy={acceptBusy}
+          dispositionBusy={archiveBusy}
+        />
+        <PolicyPanel
+          projectSlug={task.projectSlug}
+          myRole={myRole}
+          stages={task.stages}
+          ownsTask={isOwner}
+        />
+      </div>
+
       <div className="detail-main">
         <TaskHero
           task={task}
@@ -598,6 +719,7 @@ export function TaskDetailPage({
             pendingRecommendations: recommendations.length,
           }}
             onResolve={onResolve}
+            onResolveCustom={submitResolveCustom}
             // F20-18: only the contributor-owner-who-cannot-resolve-directly
             // gets the escalation affordance (the card shows it only when EVERY
             // option is above their tier).
@@ -696,6 +818,7 @@ export function TaskDetailPage({
           <AttachmentsPanel
             base={attachmentsBase}
             attachments={attachments}
+            producers={attachmentProducers}
             // D8: show an empty state (not nothing) when a browser-capable agent
             // is deployed — its runs are what fill this panel.
             browserExpected={deployedSpecialists.some(
@@ -720,48 +843,6 @@ export function TaskDetailPage({
                 attachmentsBase,
               }
             : {})}
-        />
-      </div>
-
-      <div className="detail-side">
-        <GithubTrace
-          task={task}
-          githubHost={githubHost}
-          acceptance={acceptance}
-          reconciledAt={githubReconciledAt}
-          checkedAt={githubCheckedAt}
-          {...(onCompleteMerge
-            ? { onCompleteMerge: () => setConfirmAccept({ mode: "complete-merge" }) }
-            : {})}
-          {...(onForceAccept
-            ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
-            : {})}
-          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
-          delivering={deliverBusy}
-          merging={runBusy}
-        />
-        <CurrentStatePanel
-          task={task}
-          stage={stage}
-          meId={me.id}
-          myRole={myRole}
-          archived={archived}
-          acceptance={acceptance}
-          ownerBusy={ownerBusy}
-          onOwner={onOwner}
-          onRelease={() => setReleasing(true)}
-          onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
-          onAccept={() => setConfirmAccept({ mode: "accept" })}
-          onTransition={onTransition}
-          transitionBusy={transitionBusy}
-          acceptBusy={acceptBusy}
-          dispositionBusy={archiveBusy}
-        />
-        <PolicyPanel
-          projectSlug={task.projectSlug}
-          myRole={myRole}
-          stages={task.stages}
-          ownsTask={isOwner}
         />
       </div>
 
@@ -811,18 +892,27 @@ export function TaskDetailPage({
           }
           busy={acceptBusy || runBusy || recBusy || resolveBusy || transitionBusy}
           onCancel={() => setConfirmAccept(null)}
-          onConfirm={() => {
+          onConfirm={(disclosure) => {
             const pending = confirmAccept;
             setConfirmAccept(null);
-            if (pending.mode === "force") onForceAccept?.();
+            // Ruling 88: EVERY acceptance intent carries this dialog's own echo
+            // of what it displayed. `apply-recommendation` and `resolve-packet`
+            // included: their server-side pins (the recommendation id, the
+            // packet identity) prove WHICH decision is being settled, never that
+            // the human saw what merges — so they are held to the ceremony on
+            // the same terms as the direct Accept. `complete-merge` is the one
+            // exception: the acceptance already happened (R16-6) and its own
+            // path re-verifies the PR head, so there is no acceptance state left
+            // to echo.
+            if (pending.mode === "force") onForceAccept?.(disclosure);
             else if (pending.mode === "complete-merge") onCompleteMerge?.();
             else if (pending.mode === "apply-recommendation")
-              submitApplyRec(pending.recId);
+              submitApplyRec(pending.recId, disclosure);
             else if (pending.mode === "packet")
-              submitResolve(pending.option, pending.note);
+              submitResolve(pending.option, pending.note, disclosure);
             else if (pending.mode === "stage-move")
-              submitTransition(pending.toStageId);
-            else submitAccept();
+              submitTransition(pending.toStageId, disclosure);
+            else submitAccept(disclosure);
           }}
         />
       )}
@@ -859,7 +949,7 @@ export function TaskDetailPage({
       {confirmInterrupt && (
         <ConfirmDialog
           title="Interrupt this run?"
-          body="The agent stops where it is. Anything it has not already committed or delivered is lost — you can start a new run afterward."
+          body="The agent stops where it is. Anything it has not already committed or delivered is lost. You can start a new run afterward."
           confirmLabel="Interrupt run"
           busy={runBusy}
           onCancel={() => setConfirmInterrupt(null)}

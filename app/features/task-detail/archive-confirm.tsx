@@ -98,7 +98,7 @@ export function ArchiveConfirm({
             <span className="k">After</span>
             <span>
               Off the board and out of the review queue. The task file, its
-              timeline and its audit trail are kept exactly as they are — this is
+              timeline and its audit trail are kept exactly as they are. This is
               a disposition, not a delete.
             </span>
           </div>
@@ -106,7 +106,7 @@ export function ArchiveConfirm({
             <span className="k">Withdrawn</span>
             <span>
               {withdrawn.length > 0
-                ? `${withdrawn.join(" and ")} — restoring the task reopens the question.`
+                ? `${withdrawn.join(" and ")}. Restoring the task reopens the question.`
                 : // C14: this row surveys the open packet + pending
                   // recommendations only — it said "Nothing is pending on this
                   // task right now" while a live run streamed behind the dialog.

@@ -23,7 +23,7 @@ import type { TestDbContext } from "./test-db";
  * Test fixture for file-store/projection tests: a temp data root + migrated
  * DB + users with distinct project roles on a `viberr-core` project.
  *
- * Roles: arda → project admin, murat → maintainer, selin → reviewer,
+ * Roles: arda → project admin, murat → maintainer, selin → contributor,
  * elif → viewer, deniz → registered NON-member (guest).
  */
 

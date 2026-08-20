@@ -976,6 +976,136 @@ it is regenerated from the filesystem rather than restated here.
     words and marked unavailable, honest rather than generic — so this changes the default, not the
     honesty machinery behind it. (`app/server/seed/agent-catalog.server.ts`)
 
+84. **R20-9 (2026-08-15, F20-31): the operator MAY gather a delegated ask itself, and the packet must
+    SAY it is standing in for the delivering agent.** A goal can delegate a clarifying question to the
+    agent that will do the work ("first ask the human, via your ask-human capability, whether…"), and
+    holding scope hostage until that agent spins up stalls the task for no gain. So the operator may
+    collect the answer at triage with its own `open_decision_packet` (type `"input"`) — but the packet
+    body must state that it is gathering the answer **on the delivering agent's behalf**, or the
+    timeline reads as though the agent never held the ask and the delegation disappears without a
+    trace. Enforcement is MECHANICAL, not advisory: the run remembers which agents it prompted this
+    turn, and the packet-open path APPENDS the disclosure to the body it writes — so a packet raised
+    after a consultation cannot reach a human without saying so, even when the model wrote no body at
+    all. Omission is impossible on packet-open rather than discouraged. The prompt clause stays (it is
+    the closing clause of the triage quality gate both operator backends share, and it asks the model
+    to say WHY in its own words), but it is now guidance layered over a guarantee instead of being the
+    only thing standing between the timeline and a lie. Sits beside the standing rule that the
+    operator may not WITHDRAW an agent's ask (`operatorResolvePacket` refuses a packet carrying
+    `askedBy`). *(Ruled 2026-08-15 in pass 20's own ledger —
+    `planning/discovery-2026-08-14-pass20/FINDINGS.md:754-757` — and promoted here 2026-08-19, pass 21
+    (U4). The id `R20-9` was cited by name in a shipped prompt and its test while no canon file
+    recorded it: exactly the failure ruling 44 (R17-3) exists to stop, reproducing one pass later.
+    Pass 21's other id, `R21-1` — re-authenticating Codex on the host mid-pass and copying the fresh
+    `auth.json` into the container so the Codex parity legs could run — is deliberately NOT promoted:
+    it is an operational step taken during the pass, not a rule that binds the product, and canon that
+    absorbs run-log entries stops being readable as law.)*
+    (`consultationDisclosure` + the `open_decision_packet` handler in
+    `app/server/tasks/operator-toolkit.server.ts`, pinned by
+    `app/server/tasks/operator-actions.server.test.ts`; the prompt clause is `triageQualityGate` in
+    `app/server/runtimes/operator-run.server.ts`, pinned by
+    `app/server/runtimes/operator-prompt-mention.server.test.ts`)
+
+85. **R21-2 (2026-08-19, OBS-1): a capability-gap packet names the product's OWN remedy — grant the
+    capability on an agent profile — and the operator still changes no configuration itself.** Live
+    (VIB-1, "take a screenshot of the login page"): the operator correctly found that every deployed
+    specialist has `use-browser` withheld and opened an input packet offering three scopes — write a
+    Playwright script, capture it by hand, or narrow the goal. All three are workarounds for a
+    capability this product SHIPS as a grant (ruling 75 / R19-19), and a packet that lists only
+    workarounds teaches the human the product cannot do a thing it can do. The ruling: when the
+    blocker is a withheld capability, the packet names the capability, says where a human grants it
+    (the project's Agents surface, where a profile's capability grants are edited) and keeps that
+    option beside the workarounds. The division of labour is untouched — capability and policy edits
+    are a human action (`change-project-policy` sits on the always-human list, ruling 2), so the
+    operator points at the remedy and never applies it. Extends ruling 75 (R19-19).
+    (packet construction in `app/server/runtimes/operator-run.server.ts`; `app/shared/capabilities.ts`;
+    the surface is `app/features/agents/agents-page.tsx`)
+
+86. **R21-3 (2026-08-19, U1): the anti-slop lint plugin is ADOPTED — `npm run lint` becomes a required
+    CI gate, and "there is no linter, by decision" is retired.** Commits `54ffab8` and `ce2bc9e`
+    (2026-08-19) installed oxlint with a vendored 15-rule `anti-slop` plugin (`.oxlintrc.json`,
+    `tools/oxlint/anti-slop/`, `npm run lint`) and rewrote 387 files to satisfy it — while
+    `architecture.md`, the document this file names as winning on conflict, still said TWICE that
+    there is no linter *by decision*; no ruling recorded the reversal; the script exited 1 on a clean
+    tree with 26 findings whose acceptance lived only in a commit message; and no gate ran it. The
+    owner ruled adoption, not reversal. The plugin stays; the 26 remaining findings are FIXED rather
+    than suppressed — a red script whose redness is "accepted" somewhere unreadable is not a gate,
+    because nobody running it can tell an accepted finding from a new one; `npm run lint` becomes a
+    required step of the `verify` job; and architecture.md's two "no linter" sentences plus its CI/CD
+    note carry dated amendments pointing here. **Landing state:** the ruling is the decision, and the
+    two mechanical halves it requires — the CI step in `.github/workflows/ci.yml` and a zero-finding
+    `npm run lint` on a clean tree — land in this same pass, in the band that owns them. Read this as
+    what the gate IS once pass 21 closes, not as a claim that the workflow file already carried the
+    step the moment this ruling was written; a canon entry that describes its own in-flight work has
+    to say which half is which (ruling 63 / R19-9 — an unmeasured claim is decoration).
+    The rewrite's own cost is paid in the same pass: four
+    regressions it introduced — F21-7 (a drifted check-runs payload persisting a false green "N checks
+    passing"), F21-8 (one malformed commit emptying the whole commit list), F21-9 (the github client's
+    "never throws" contract broken) and F21-11 (drifted PAT permissions silently upgrading to "valid")
+    — are fixed here. That is the standing lesson: a mechanical tree-wide rewrite carries the same
+    review bar as behavior, because it changes behavior. (`.oxlintrc.json`, `tools/oxlint/anti-slop/`,
+    `package.json`, `.github/workflows/ci.yml`; amended in `planning/planning-artifacts/architecture.md`
+    §Infrastructure & Deployment, §Enforcement Guidelines, §Development Workflow Integration)
+
+87. **R21-4 (2026-08-19, OBS-8 / OBS-9 / G5): task workspaces clone through a per-project mirror
+    cache, and the pre-run workspace phase is VISIBLE on the task page.** Live (VIB-3): a
+    create-triggered operator run spent 3+ minutes inside `git clone --depth 1` of a 113MB repository
+    before "operator run started" ever appeared, and for that whole window the task showed an empty
+    timeline, "hasn't started its operator loop" and no live-run panel — a healthy run was
+    indistinguishable from a wedged one. Every task also paid the cost again: VIB-1/2/3 each held
+    their own ~113MB clone under `tasks/<KEY>/workspace`. The owner ruled BOTH halves. **(a)** A
+    per-project git mirror/reference cache backs task clones, so the second and later clones of a
+    repository are local work rather than a fresh network fetch. **(b)** The pre-run phase is
+    surfaced live: `onPhase` — declared on the adapter interface and wired into the run sink, and
+    never once invoked by any adapter, so FR28's two live-progress rows rendered blank the whole
+    time a run was working — is actually driven, with a "preparing workspace" phase covering the
+    clone. Closes G5 (FR28:
+    current progress without opening the raw provider console) together with OBS-8/OBS-9.
+    (the mirror cache is `cloneWorkspaceRepo` + `projectRepoMirrorDir` in
+    `app/server/tasks/repo-mirror.server.ts`, called by the private `cloneRepo` in
+    `app/server/tasks/specialist-run.server.ts`; `onPhase` in `app/server/runtimes/adapter.server.ts`
+    → `app/server/runtimes/run-service.server.ts`; rendered by `app/features/runtime/runs-panels.tsx`)
+
+88. **R21-5 (2026-08-19, F21-2): an acceptance is valid only WITH the disclosure the human was shown —
+    a bare POST is refused.** Ruling 20 (R15-1) requires every acceptance, force included, to pass a
+    confirm dialog stating what merges and which signals are missing. Pass 21 found that requirement
+    held CLIENT-architecturally only — one dialog component, one pending state, every acceptance
+    fetcher hoisted to the page so a child cannot submit around it — while the server accepted the
+    request on its own, so a direct POST (a double-submit, a script, a future surface that forgets the
+    ceremony) completed the acceptance with no disclosure at all. The ruling makes the ceremony a
+    SERVER invariant: an acceptance — normal or forced — carries an explicit acknowledgment echoing
+    the facts the client displayed (the merge state, the revision being accepted, the verdict that
+    stands), the server refuses an acceptance that arrives without one, and an echo that no longer
+    matches the task's state is a refusal rather than a silent write. Deliberately
+    implementation-neutral: what binds is that the disclosure the human saw reaches the server with
+    the acceptance, not any particular payload shape. Extends ruling 20 (R15-1) and puts ruling 59's
+    (R19-5) honesty burden behind a check instead of a convention.
+    Scope is the HUMAN acceptance paths — the ones the ceremony fronts; an operator acceptance
+    carries its own disclosure contract (ruling 40 — an operator acceptance records **merge pending**
+    and the difference must be visible where the task lives; ruling 77 — the accept path re-verifies
+    the real branch state and routes an empty branch into the no-change path *with disclosure*) and is
+    unchanged here. *(Citation corrected 2026-08-19: this read "rulings 40, 77, 82". Ruling 82 (R20-7)
+    is the Agents-card display gate — it keeps the operator honest about whether it holds the
+    `completion-for-acceptance` grant at all, which is a neighbouring guarantee, not a disclosure
+    carried with an acceptance.)*
+    (the ceremony is `app/features/task-detail/accept-confirm.tsx`, hoisted at
+    `app/features/task-detail/task-detail-page.tsx` and `app/features/board/board-page.tsx`; the
+    server entries it must now reach are in `app/server/tasks/task-actions.server.ts`)
+
+89. **R21-6 (2026-08-20, U5/G4): the triage quality gate stays BEHAVIORAL — no mechanical
+    transition block on open packets.** The operator flags underspecified goals at triage (its
+    prompt's gate section) and a manual operator run refuses while a packet is open; that is the
+    gate. The owner declined hard-enforcing "no stage transition while an input-required packet is
+    open" — a human moving a task past an open packet is a deliberate act, not an accident to
+    prevent. The New-task placeholder was reworded to promise only what exists ("Underspecified
+    goals get flagged by the operator at triage" — `app/features/board/board-page.tsx`), closing
+    the U5 copy-vs-behavior gap from the honest side.
+
+90. **R21-7 (2026-08-20): `FILES.md` is DELETED, not regenerated.** It claimed to be "generated
+    from Git's tracked-file index" while trailing reality by ~1,000 files across ten passes — a
+    completeness promise nothing enforced. The tracked-file index is `git ls-files`; the annotated
+    tree lives in `planning/planning-artifacts/architecture.md`. A doc whose only job a command
+    does better earns deletion over another unenforced regeneration.
+
 ## Route map
 
 ```

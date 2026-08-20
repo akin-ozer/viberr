@@ -4,10 +4,14 @@ import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import {
+  auditFilterActors,
   countActivityStream,
   countAuditLog,
   listActivityStream,
   listAuditLog,
+  streamFilterOptions,
+  type AuditFilters,
+  type StreamFilters,
 } from "~/server/projections/activity-feed.server";
 import { ActivityPage } from "~/features/activity/activity-page";
 import {
@@ -55,19 +59,81 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     AUDIT_STEP,
     AUDIT_MAX,
   );
+  // Per-panel filters (owner request 2026-08-20), URL-driven like the limits so
+  // they survive revalidation and are shareable. A param is a filter only when
+  // non-blank; bounds keep a pasted novel out of a LIKE clause.
+  const param = (name: string, max = 200): string | undefined => {
+    const value = url.searchParams.get(name)?.trim().slice(0, max);
+    return value ? value : undefined;
+  };
+  const streamFilters: StreamFilters = {};
+  {
+    const q = param("sq");
+    const actorRef = param("sac");
+    const type = param("sty", 40);
+    const task = param("stk", 40);
+    const from = param("sfrom", 10);
+    const to = param("sto", 10);
+    if (q) streamFilters.q = q;
+    if (actorRef) streamFilters.actorRef = actorRef;
+    if (type) streamFilters.type = type;
+    if (task) streamFilters.task = task;
+    if (from) streamFilters.from = from;
+    if (to) streamFilters.to = to;
+  }
+  const auditFilters: AuditFilters = {};
+  {
+    const q = param("aq");
+    const kind = param("aky", 20);
+    const actor = param("aac");
+    const task = param("atk", 40);
+    const from = param("afrom", 10);
+    const to = param("ato", 10);
+    if (q) auditFilters.q = q;
+    if (
+      kind === "violation" ||
+      kind === "blockedact" ||
+      kind === "change" ||
+      kind === "audit"
+    ) {
+      auditFilters.kind = kind;
+    }
+    if (actor) auditFilters.actor = actor;
+    if (task) auditFilters.task = task;
+    if (from) auditFilters.from = from;
+    if (to) auditFilters.to = to;
+  }
   return {
     slug: params.slug,
     projectName: project.name,
-    stream: listActivityStream(db, params.slug, { limit: streamLimit }),
-    streamTotal: countActivityStream(db, params.slug),
-    audit: listAuditLog(db, params.slug, { limit: auditLimit }),
-    auditTotal: countAuditLog(db, params.slug),
+    stream: listActivityStream(db, params.slug, {
+      limit: streamLimit,
+      filters: streamFilters,
+    }),
+    streamTotal: countActivityStream(db, params.slug, streamFilters),
+    audit: listAuditLog(db, params.slug, {
+      limit: auditLimit,
+      filters: auditFilters,
+    }),
+    auditTotal: countAuditLog(db, params.slug, auditFilters),
+    // The dropdown vocabularies — refs/labels/types that actually occur, so a
+    // filter is a pick, never a guess.
+    streamOptions: streamFilterOptions(db, params.slug),
+    auditActors: auditFilterActors(db, params.slug),
   };
 }
 
 export default function ActivityView({ loaderData }: Route.ComponentProps) {
-  const { slug, projectName, stream, streamTotal, audit, auditTotal } =
-    loaderData;
+  const {
+    slug,
+    projectName,
+    stream,
+    streamTotal,
+    audit,
+    auditTotal,
+    streamOptions,
+    auditActors,
+  } = loaderData;
   return (
     <ActivityPage
       projectSlug={slug}
@@ -76,6 +142,8 @@ export default function ActivityView({ loaderData }: Route.ComponentProps) {
       streamTotal={streamTotal}
       audit={audit}
       auditTotal={auditTotal}
+      streamOptions={streamOptions}
+      auditActors={auditActors}
     />
   );
 }

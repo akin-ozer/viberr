@@ -15,6 +15,10 @@ import {
   runSetCredential,
 } from "~/features/github/github-actions.server";
 import {
+  credentialGrantHolder,
+  withoutCredentialDetail,
+} from "~/features/github/credential-visibility.server";
+import {
   addStage,
   deleteProject,
   setProjectArchived,
@@ -50,13 +54,29 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // this loader ALONE and the layout's membership refusal never executes. The
   // guard answers a non-member with the byte-identical unknown-slug 404 — a 403
   // here would confirm the project exists (WI-13).
-  await requireProjectMember(request, params.slug, "view this project's settings");
+  const { user } = await requireProjectMember(
+    request,
+    params.slug,
+    "view this project's settings",
+  );
   const db = getDb();
   const view = getSettingsViewData(db, params.slug);
   if (!view) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  return { view };
+  // R19-11 / F21-5: the same credential redaction /github has applied since
+  // pass 19 — this page renders the SAME `CredentialCard` from the SAME
+  // `getProjectCredentialHealth` fact, and shipped a project Viewer the token's
+  // label, masked tail and per-scope verdicts. The rule is shared rather than
+  // repeated (features/github/credential-visibility.server), so the two routes
+  // cannot answer differently; the render gate in `SettingsPage` asks
+  // `roleCan(myRole, "grant-github-scope")`, which is this same ACTION_ROLES
+  // entry, and the credential mutations below enforce it server-side.
+  return {
+    view: credentialGrantHolder(db, params.slug, user.id)
+      ? view
+      : { ...view, credential: withoutCredentialDetail(view.credential) },
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
