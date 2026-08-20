@@ -3189,7 +3189,13 @@ dialog[data-closing]::backdrop {
 
 body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; height: auto; min-height: 100vh; }
 
-.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; }
+.login-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+  color: var(--coral-dark);
+}
 
 /* Desktop two-column composition (brand aside + sign-in card). The
    aside is hidden on narrow viewports, preserving the simple centered card on
@@ -3215,14 +3221,15 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
     width: 44px; height: 44px; border-radius: 12px;
     /* P13-D-18: was var(--accent, …) — --accent is defined nowhere, so only the
        fallback ever painted. Resolved to that token. */
-    background: var(--teal-dark); color: #fff;
+    background: var(--surface); color: var(--coral-dark);
+    border: 1px solid var(--coral-dark);
     font-weight: 800; font-size: 1.3rem; font-family: var(--font-mono);
   }
-  .login-aside h2 { font-size: 1.5rem; line-height: 1.2; color: var(--fg); margin: 0; }
-  .login-aside p { font-size: .92rem; line-height: 1.6; color: var(--muted); margin: 0; }
+  .login-aside h2 { font-size: 1.5rem; line-height: 1.2; color: var(--coral-dark); margin: 0; }
+  .login-aside p { font-size: .92rem; line-height: 1.6; color: var(--coral-dark); margin: 0; }
   .login-aside-points { list-style: none; margin: .3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
-  .login-aside-points li { position: relative; padding-left: 1.4rem; font-size: .86rem; color: var(--muted); line-height: 1.4; }
-  .login-aside-points li::before { content: "→"; position: absolute; left: 0; color: var(--teal-dark); font-weight: 700; }
+  .login-aside-points li { position: relative; padding-left: 1.4rem; font-size: .86rem; color: var(--coral-dark); line-height: 1.4; }
+  .login-aside-points li::before { content: "→"; position: absolute; left: 0; color: var(--coral-dark); font-weight: 700; }
 }
 .login-card {
   width: min(430px, 100%);
@@ -3235,16 +3242,20 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   display: flex; flex-direction: column; gap: 1.1rem;
 }
 .login-brand { display: flex; flex-direction: column; align-items: center; gap: .9rem; text-align: center; }
-.login-brand .mark { width: 46px; height: 46px; font-size: 1.5rem; border-radius: 13px; box-shadow: inset 0 -9px 0 color-mix(in srgb, var(--blue), transparent 55%); }
-.login-brand h1 { font-size: 1.42rem; }
-.login-brand .sub { color: var(--faint); font-size: .84rem; margin-top: .35rem; }
+.login-brand .mark { width: 46px; height: 46px; font-size: 1.5rem; border: 1px solid var(--coral-dark); border-radius: 13px; background: var(--surface); box-shadow: inset 0 -9px 0 color-mix(in srgb, var(--blue), transparent 55%); color: var(--coral-dark); }
+.login-brand h1 { font-size: 1.42rem; color: var(--coral-dark); }
+.login-brand .sub { color: var(--coral-dark); font-size: .84rem; margin-top: .35rem; }
 .login-providers { display: flex; flex-direction: column; gap: .55rem; }
 .btn.provider { width: 100%; min-height: 44px; justify-content: center; gap: .6rem; font-size: .92rem; }
-.btn.provider.github { background: var(--fg); border-color: var(--fg); color: var(--surface); }
+.login-wrap .btn { color: var(--coral-dark); }
+.login-wrap .btn.primary { background: var(--surface); border-color: var(--coral-dark); color: var(--coral-dark); }
+.login-wrap .btn.primary:hover:not(:disabled) { background: var(--surface); border-color: var(--coral-dark); color: var(--coral-dark); }
 .btn.provider .gmark.lg { font-size: 1.05rem; }
-.login-div { display: flex; align-items: center; gap: .8rem; color: var(--placeholder); font-size: .74rem; white-space: nowrap; }
+.login-div { display: flex; align-items: center; gap: .8rem; color: var(--coral-dark); font-size: .74rem; white-space: nowrap; }
 .login-div::before, .login-div::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
 .login-form { display: flex; flex-direction: column; gap: .9rem; }
+.login-form .flabel, .login-form input, .login-form input::placeholder { color: var(--coral-dark); }
+.login-wrap .cred-warn { color: var(--coral-dark); }
 .login-foot { display: flex; justify-content: flex-end; }
 /* .form-err shares the login error's framed red treatment — the ONE way an
    inline form/server error looks anywhere (login, New-project modal, …). */
@@ -3256,7 +3267,8 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   font-size: .8rem; color: var(--coral-dark); line-height: 1.45;
 }
 .login-err .ico, .form-err .ico { width: 14px; height: 14px; flex: none; margin-top: .1rem; }
-.login-tag { text-align: center; font-family: var(--font-mono); font-size: .68rem; color: var(--placeholder); line-height: 1.6; }
+.login-err { color: var(--coral-dark); }
+.login-tag { text-align: center; font-family: var(--font-mono); font-size: .68rem; color: var(--coral-dark); line-height: 1.6; }
 
 .gmark { font-family: var(--font-display); font-weight: 800; font-size: .72rem; line-height: 1; color: var(--muted); }
 .gmark.lg { font-size: .95rem; }

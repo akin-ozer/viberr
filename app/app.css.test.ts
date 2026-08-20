@@ -1655,10 +1655,6 @@ const UNFIXED_BELOW_AA = {
     themes: ["light", "dark"],
     why: "the RBAC matrix writes `—` in --ring for every action a role may NOT take: 1.30:1 light, 1.24:1 dark. The absence marker is invisible, so a denied cell reads as an empty cell — on the two surfaces (policy, profile) whose whole job is saying what you may and may not do.",
   },
-  ".login-aside-mark": {
-    themes: ["dark"],
-    why: "the login brand mark is `#fff` on --teal-dark, which dark flips from #187574 to the LIGHT cyan #6ce4dc: white-on-cyan at 1.53:1. WCAG 1.4.3 exempts logotypes, so this is not an AA failure — it is a legibility one the token flip introduced, and exempting the element outright would teach the gate to ignore a whole element.",
-  },
   ".log-line .lt": {
     themes: ["light", "dark"],
     why: "the run console's per-line timestamp, #4d566b on the console's fixed #0e1117 — 2.57:1, the worst text pair in the sheet. The console ladder was drawn to look like a terminal and never measured; its dim end is below AA in both themes because the surface does not change with the theme.",
