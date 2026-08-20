@@ -239,6 +239,9 @@ export interface StartRunInput {
   /** Override the run working directory (defaults to the task dir). Used by
    *  the specialist-run flow to point a run at a freshly-cloned repo. */
   workdir?: string;
+  /** See RunSpec.attachmentsWritableDir — set by specialist-run when the
+   *  profile holds `attach-evidence-references`. */
+  attachmentsWritableDir?: string | null;
   /** Override the data root (tests). */
   dataRoot?: string;
   /** Who caused the run (audit). Defaults to the operator system actor. */
@@ -708,6 +711,9 @@ export async function startRun(
     spec.effort = resolveRunEffort(input.backend, input.effort);
   }
   if (input.systemPrompt) spec.systemPrompt = input.systemPrompt;
+  if (input.attachmentsWritableDir) {
+    spec.attachmentsWritableDir = input.attachmentsWritableDir;
+  }
   if (input.mcpServers) spec.mcpServers = input.mcpServers;
   if (allowedTools) spec.allowedTools = allowedTools;
   if (input.disallowedTools && input.disallowedTools.length) {

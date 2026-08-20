@@ -118,6 +118,7 @@ import {
 } from "./specialist-mcp.server";
 import {
   BROWSER_MCP_NAME,
+  attachmentsDropSection,
   browserPersonaSection,
   resolveBrowserMcp,
 } from "./specialist-browser-mcp.server";
@@ -1366,6 +1367,12 @@ async function dispatchAgentRun(
         backend,
       })
     : { server: null, refused: null };
+  // Evidence-granted runs get the attachments drop (owner ask 2026-08-20):
+  // the dir must exist BEFORE the run so a plain `cp` into it cannot fail on
+  // a missing path (the browser mount creates it too — idempotent).
+  if (collab.evidence && realBackend) {
+    mkdirSync(attachmentsDir, { recursive: true });
+  }
 
   // The agent's run persona: its detailed definition + granted skills + KB docs.
   // Claude takes it as a system prompt; Codex receives the same persona through
@@ -1390,6 +1397,10 @@ async function dispatchAgentRun(
       ? { attachmentsRel: storeRelativePath(attachmentsDir, ctx.dataRoot) }
       : browser.refused
         ? { refusedReason: browser.refused.reason }
+        : null,
+    attachmentsDrop:
+      collab.evidence && realBackend
+        ? { attachmentsRel: storeRelativePath(attachmentsDir, ctx.dataRoot) }
         : null,
     dataRoot: ctx.dataRoot,
     unresolvedOut: unresolvedResources,
@@ -1440,6 +1451,12 @@ async function dispatchAgentRun(
     delivers,
   };
   if (anchor) promptInput.anchor = anchor;
+  if (collab.evidence && realBackend) {
+    promptInput.attachmentsDropRel = storeRelativePath(
+      attachmentsDir,
+      ctx.dataRoot,
+    );
+  }
   if (cloneFailure) {
     const promptFailure: PromptCloneFailure = {
       sentence: cloneFailure.sentence,
@@ -1629,6 +1646,11 @@ async function dispatchAgentRun(
   if (useEnvelopeSchema) runInput.outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
   if (runWorkdir) runInput.workdir = runWorkdir;
   if (realBackend) runInput.env = baseRunEnv;
+  // The sandbox widening that backs the drop section above (Codex
+  // workspace-write adds this as an additional writable directory).
+  if (collab.evidence && realBackend) {
+    runInput.attachmentsWritableDir = attachmentsDir;
+  }
   // R21-4: hand the reserved row over — `startRun` adopts it rather than
   // minting a second one.
   if (pending.reservation) runInput.reservation = pending.reservation;
@@ -1803,6 +1825,10 @@ export interface SpecialistPersonaInput {
    *  section renders only when the server actually mounted, so prompt and tool
    *  surface tell the same story (XS-4). */
   browser?: { attachmentsRel: string } | { refusedReason: string } | null;
+  /** Owner ask 2026-08-20: the "posting files on the task thread" section —
+   *  set when the profile holds `attach-evidence-references` (any backend;
+   *  the drop is a plain directory, not a tool). */
+  attachmentsDrop?: { attachmentsRel: string } | null;
   /** The profile's own persona body (D6) — used when the store ships no
    *  agents/definitions/<id>.md override. Custom profiles finally run AS
    *  themselves instead of persona-less on the generic analyze prompt. */
@@ -1980,6 +2006,12 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   }
   // R19-19: the browser guardrails ride the prompt ONLY when the server
   // mounted; a granted-but-refused browser is named with its reason instead.
+  // The drop section rides with the EVIDENCE grant, before the browser text:
+  // it is the general mechanic (copy a file, it lands on your reply) that the
+  // browser's default-named-screenshot behavior is a special case of.
+  if (input.attachmentsDrop) {
+    parts.push(attachmentsDropSection(input.attachmentsDrop.attachmentsRel));
+  }
   if (input.browser && "attachmentsRel" in input.browser) {
     parts.push(browserPersonaSection(input.browser.attachmentsRel));
   } else if (input.browser && "refusedReason" in input.browser) {
@@ -2055,6 +2087,13 @@ export interface AnalyzePromptInput {
    *  work regardless of the profile's capabilities, or it re-creates the
    *  prompt-vs-enforcement contradiction (XS-4). */
   delivers: boolean;
+  /** Owner ask 2026-08-20: the task's attachments folder (store-relative),
+   *  when the profile holds `attach-evidence-references`. Rendered as the ONE
+   *  named exception inside the workspace contract — without it the contract's
+   *  "never touch anything outside the working directory" outranks the
+   *  persona's posting-files section, and a live agent (VIB-2) correctly
+   *  refused the copy twice. */
+  attachmentsDropRel?: string;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
   /** The human who wrote `directive`, when it is a person's comment rather than
@@ -2091,6 +2130,13 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       `- Work ONLY inside the current working directory — it is the dedicated ` +
       `workspace for this task. Never \`cd\` to a parent directory or touch any ` +
       `repository outside it.\n` +
+      (input.attachmentsDropRel
+        ? `- One deliberate exception: you may COPY files INTO the task's ` +
+          `attachments folder, \`${input.attachmentsDropRel}\` — that is how a ` +
+          `file is posted on the task thread (see "Posting files on the task ` +
+          `thread"). Everything else outside the working directory stays ` +
+          `off-limits.\n`
+        : ``) +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.\n`
         : input.cloneFailure

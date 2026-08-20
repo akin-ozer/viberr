@@ -90,6 +90,12 @@ export interface RunSpec {
    *  specialist without push rights cannot run `git push`). Deny rules bind
    *  even under bypassPermissions. Claude only. */
   disallowedTools?: string[];
+  /** The task's attachments directory, when this run's profile holds
+   *  `attach-evidence-references` — Codex `workspace-write` sandboxes add it as
+   *  an additional writable directory so the agent can copy files there ("post
+   *  a file on the task thread"). Claude runs at bypassPermissions and need no
+   *  widening; read-only sandboxes never get it. */
+  attachmentsWritableDir?: string | null;
   /** The GRANTED skills Viberr mounted into this run's workspace
    *  (`mountGrantedSkills`), by exact name. Claude only: the adapter turns these
    *  into the SDK's native skills context filter, so the model gets each skill's

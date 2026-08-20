@@ -643,6 +643,13 @@ export function createCodexAdapter(
         if (reasoningEffort) {
           threadOptions.modelReasoningEffort = reasoningEffort;
         }
+        // The task's attachments dir joins the writable sandbox ONLY at
+        // workspace-write: danger-full-access can already write it, and adding
+        // it to a read-only run would widen a sandbox the capability matrix
+        // promised was closed (P13-RT-02's honesty rule, applied forward).
+        if (sandboxMode === "workspace-write" && spec.attachmentsWritableDir) {
+          threadOptions.additionalDirectories = [spec.attachmentsWritableDir];
+        }
         if (spec.kind === "operator") {
           threadOptions.networkAccessEnabled = false;
           threadOptions.webSearchMode = "disabled";
