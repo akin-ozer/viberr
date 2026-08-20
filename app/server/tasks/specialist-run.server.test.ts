@@ -1541,6 +1541,37 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(persona).toContain("NOT mounted on this run");
   });
 
+  it("the workspace contract names the attachments-drop exception when granted", () => {
+    // VIB-2, live, twice: the contract's "never touch anything outside the
+    // working directory" outranked the persona's posting-files section, and
+    // the agent correctly refused the copy. The exception must live INSIDE
+    // the rule that would otherwise forbid it.
+    const base = {
+      role: "Implementation",
+      taskKey: "VIB-2",
+      title: "t",
+      goal: "g",
+      repo: "akin-ozer/viberr",
+      branch: "vib-2",
+      cloned: true,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivers: true,
+    };
+    const withDrop = buildAnalyzePrompt({
+      ...base,
+      attachmentsDropRel: "projects/p/tasks/VIB-2/attachments",
+    });
+    expect(withDrop).toContain("One deliberate exception");
+    expect(withDrop).toContain("projects/p/tasks/VIB-2/attachments");
+    // The exception sits INSIDE the contract, after the confinement rule.
+    expect(withDrop.indexOf("One deliberate exception")).toBeGreaterThan(
+      withDrop.indexOf("Work ONLY inside the current working directory"),
+    );
+    const without = buildAnalyzePrompt(base);
+    expect(without).not.toContain("One deliberate exception");
+    expect(without).toContain("Work ONLY inside the current working directory");
+  });
+
   it("the posting-files drop section rides the evidence grant (owner ask 2026-08-20)", () => {
     // The live gap: an agent committed its screenshot into the PR because
     // nothing told it the task thread could carry files. The section names the

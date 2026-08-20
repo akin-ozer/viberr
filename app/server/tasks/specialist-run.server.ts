@@ -1451,6 +1451,12 @@ async function dispatchAgentRun(
     delivers,
   };
   if (anchor) promptInput.anchor = anchor;
+  if (collab.evidence && realBackend) {
+    promptInput.attachmentsDropRel = storeRelativePath(
+      attachmentsDir,
+      ctx.dataRoot,
+    );
+  }
   if (cloneFailure) {
     const promptFailure: PromptCloneFailure = {
       sentence: cloneFailure.sentence,
@@ -2081,6 +2087,13 @@ export interface AnalyzePromptInput {
    *  work regardless of the profile's capabilities, or it re-creates the
    *  prompt-vs-enforcement contradiction (XS-4). */
   delivers: boolean;
+  /** Owner ask 2026-08-20: the task's attachments folder (store-relative),
+   *  when the profile holds `attach-evidence-references`. Rendered as the ONE
+   *  named exception inside the workspace contract — without it the contract's
+   *  "never touch anything outside the working directory" outranks the
+   *  persona's posting-files section, and a live agent (VIB-2) correctly
+   *  refused the copy twice. */
+  attachmentsDropRel?: string;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
   /** The human who wrote `directive`, when it is a person's comment rather than
@@ -2117,6 +2130,13 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       `- Work ONLY inside the current working directory — it is the dedicated ` +
       `workspace for this task. Never \`cd\` to a parent directory or touch any ` +
       `repository outside it.\n` +
+      (input.attachmentsDropRel
+        ? `- One deliberate exception: you may COPY files INTO the task's ` +
+          `attachments folder, \`${input.attachmentsDropRel}\` — that is how a ` +
+          `file is posted on the task thread (see "Posting files on the task ` +
+          `thread"). Everything else outside the working directory stays ` +
+          `off-limits.\n`
+        : ``) +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.\n`
         : input.cloneFailure
