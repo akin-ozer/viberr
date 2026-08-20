@@ -932,6 +932,47 @@ describe("codex sandbox enforces the withheld repo-write grant (P13-RT-02)", () 
     await drain();
     expect(run.startOptions()?.sandboxMode).toBe("read-only");
   });
+
+  /** Owner ask 2026-08-20 — the attachments drop. The task's attachments dir
+   * joins the sandbox as an additional writable directory ONLY at
+   * workspace-write: full access can already write it, and widening a
+   * read-only run would break the P13-RT-02 honesty rule this describe pins
+   * (the matrix said closed, the sandbox stayed closed). */
+  it("widens only the workspace-write sandbox with the attachments dir", async () => {
+    const DIR = "/data/projects/p/tasks/T-1/attachments";
+    const done = [
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ];
+
+    const ws = fakeCodex(done);
+    createCodexAdapter({ codexFactory: ws.factory }).start(
+      { ...SPEC, autonomous: false, attachmentsWritableDir: DIR },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(ws.startOptions()).toMatchObject({
+      sandboxMode: "workspace-write",
+      additionalDirectories: [DIR],
+    });
+
+    const ro = fakeCodex(done);
+    createCodexAdapter({ codexFactory: ro.factory }).start(
+      { ...SPEC, repoWriteWithheld: true, attachmentsWritableDir: DIR },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(ro.startOptions()?.sandboxMode).toBe("read-only");
+    expect(ro.startOptions()?.additionalDirectories).toBeUndefined();
+
+    const full = fakeCodex(done);
+    createCodexAdapter({ codexFactory: full.factory }).start(
+      { ...SPEC, attachmentsWritableDir: DIR },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(full.startOptions()?.sandboxMode).toBe("danger-full-access");
+    expect(full.startOptions()?.additionalDirectories).toBeUndefined();
+  });
 });
 
 describe("git identity reaches the model's shell (P13-RT-10)", () => {

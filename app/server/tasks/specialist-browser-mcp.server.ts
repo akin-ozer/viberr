@@ -154,6 +154,29 @@ export function resolveBrowserMcp(input: {
  * `buildSpecialistPersona` when — and only when — the server actually mounted,
  * so prompt and tool surface tell the same story (XS-4).
  */
+/**
+ * The run-prompt section for POSTING FILES to the humans on the task (owner
+ * ask 2026-08-20, from a live task where the agent committed its screenshot
+ * into the PR because nothing told it the thread could carry files). Emitted
+ * for any profile granted `attach-evidence-references`, browser or not: the
+ * attachments folder is a plain directory next to the run workspace, every
+ * backend that can write files can use it, and the completion pipeline stamps
+ * whatever lands there during the run onto the agent's reply — where images
+ * render inline (timeline thumbnails).
+ */
+export function attachmentsDropSection(attachmentsRel: string): string {
+  return (
+    "\n\n---\n# Posting files on the task thread\n\n" +
+    `To put a file in front of the humans on this task, copy it into \`${attachmentsRel}\` ` +
+    "(a real directory reachable from your working directory) during your run. " +
+    "Every file that appears there is posted on your reply on the task page, " +
+    "and images render inline. Cite the exact filename in your reply and " +
+    "evidence references. Use it for things humans need to SEE — screenshots, " +
+    "captures, small reports; code and large artifacts belong in the " +
+    "repository and the pull request, not here."
+  );
+}
+
 export function browserPersonaSection(attachmentsRel: string): string {
   return (
     "\n\n---\n# Browser (viberr_browser)\n\n" +
