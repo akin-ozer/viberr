@@ -4776,6 +4776,12 @@ export async function resolvePacket(
      *  the decision event so an option that asks for input ("specify the
      *  expected behavior", "which target") actually has a channel to carry it. */
     note?: string;
+    /** Owner request 2026-08-20 (questionnaire packets): the human's OWN answer
+     *  instead of a canned option. Non-empty ⇒ `optionIndex` is ignored and the
+     *  resolution runs the default arm as a synthetic `custom` option — the
+     *  un-gated kind operators already author — with this text as the note the
+     *  asker and the operator receive. */
+    custom?: string;
     /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
      *  Consulted ONLY by the `accept_completion` arm below — the one option kind
      *  that writes Done and merges a pull request; every other kind resolves a
@@ -4797,9 +4803,28 @@ export async function resolvePacket(
   if (!packet) {
     throw AppError.conflict("This packet was already resolved.");
   }
-  const option = packet.options[input.optionIndex];
-  if (!option) {
-    throw AppError.validation("Unknown packet option.");
+  const customDirective = input.custom?.trim() ?? "";
+  if (customDirective.length > 4000) {
+    throw AppError.validation(
+      "Custom directive is too long — 4,000 characters max.",
+    );
+  }
+  // A custom answer resolves as a synthetic option of the un-gated `custom`
+  // kind: same default arm, same send-back-to-asker routing, same operator
+  // requeue — the directive itself travels as the decision note below.
+  let option: PacketOption;
+  if (customDirective) {
+    option = {
+      kind: "custom",
+      t: "Answered with a custom directive",
+      d: "",
+      rec: false,
+      ev: "**Decision:** answered with a custom directive. Operator re-engages with it.",
+    };
+  } else {
+    const picked = packet.options[input.optionIndex];
+    if (!picked) throw AppError.validation("Unknown packet option.");
+    option = picked;
   }
   // R20-1 (F20-5): a packet that has already recorded a decision accepts no
   // second one. `edit_goal` is the only kind that KEEPS its packet open (it
@@ -5264,7 +5289,8 @@ export async function resolvePacket(
     // P11-71: carry the human's free-text into the recorded decision so an
     // option that asked for input isn't resolved with an unstated reading — the
     // operator (and reviewers reading the timeline) see exactly what was said.
-    const note = input.note?.trim();
+    // A custom answer IS that free-text: the directive rides the same channel.
+    const note = customDirective || input.note?.trim();
     const eventWithNote = note
       ? { ...event, text: `${event.text}\n\n> ${note.replace(/\n/g, "\n> ")}` }
       : event;
@@ -5309,7 +5335,7 @@ export async function resolvePacket(
   ];
   const requeue = !NO_REQUEUE.includes(option.kind);
   if (requeue) {
-    const decisionNote = input.note?.trim();
+    const decisionNote = customDirective || input.note?.trim();
     const resolvedOption = decisionNote
       ? { kind: option.kind, title: option.t, note: decisionNote }
       : { kind: option.kind, title: option.t };

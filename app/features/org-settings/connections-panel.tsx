@@ -109,6 +109,12 @@ function ConnectionModal({
             value={owner}
             disabled={!!initial}
             placeholder="owner"
+            // Owner report 2026-08-20: a text input followed by a password input
+            // reads as a LOGIN form, and browsers filled a saved email here.
+            autoComplete="off"
+            spellCheck={false}
+            data-1p-ignore
+            data-lpignore="true"
             onChange={(e) => {
               setOwner(e.target.value);
               setErr(null);
@@ -145,9 +151,13 @@ function ConnectionModal({
           type="password"
           className="mono"
           value={token}
-          autoComplete="off"
+          // `off` is ignored by browsers on login-shaped pairs (owner report
+          // 2026-08-20: a saved password landed in this field) — `new-password`
+          // is the value password managers actually honor for "never fill".
+          autoComplete="new-password"
           spellCheck={false}
           data-1p-ignore
+          data-lpignore="true"
           placeholder="ghp_…"
           onChange={(e) => {
             setToken(e.target.value);

@@ -442,6 +442,10 @@ export async function action({ request, params }: Route.ActionArgs) {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
         const note = String(formData.get("note") ?? "").slice(0, 2000);
+        // Questionnaire packets (owner request 2026-08-20): the human's own
+        // directive instead of a canned option. Non-empty ⇒ the server ignores
+        // the option index and resolves through the synthetic `custom` kind.
+        const custom = String(formData.get("custom") ?? "").slice(0, 4000);
         // UI-43: the "Retrying on X · streaming to agent logs" toast was
         // computed from the option KIND alone. `resolvePacket` catches a failed
         // `startAgentRun` and merely appends a timeline note ("The retry could
@@ -465,6 +469,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           ack: acceptanceAck(formData),
         };
         if (note.trim()) resolveInput.note = note;
+        if (custom.trim()) resolveInput.custom = custom;
         const { option } = await resolvePacket(db, resolveInput, actor);
         const retryStarted =
           option.kind === "retry_other_backend" &&

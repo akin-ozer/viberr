@@ -97,6 +97,8 @@ function renderActivity(
           streamTotal={totals.streamTotal ?? stream.length}
           audit={audit}
           auditTotal={totals.auditTotal ?? audit.length}
+      streamOptions={{ actors: [], types: [] }}
+      auditActors={[]}
         />
       ),
     },
@@ -681,6 +683,8 @@ describe("hydration first pass (SSR)", () => {
             streamTotal={stream.length}
             audit={audit}
             auditTotal={audit.length}
+      streamOptions={{ actors: [], types: [] }}
+      auditActors={[]}
           />
         ),
       },
@@ -693,5 +697,43 @@ describe("hydration first pass (SSR)", () => {
     expect(html).toContain(">09:41<");
     expect(html).toContain(">16:04<");
     expect(html).not.toMatch(/Today|Yesterday|today |yesterday /);
+  });
+});
+
+describe("per-panel feed filters (P21)", () => {
+  it("renders one filter bar per panel, with the panel's own vocabulary", () => {
+    const { getByLabelText } = renderActivity();
+    // Stream bar.
+    expect(getByLabelText("Search — activity stream")).not.toBeNull();
+    expect(getByLabelText("Filter by type — activity stream")).not.toBeNull();
+    expect(getByLabelText("Filter by task id — activity stream")).not.toBeNull();
+    expect(getByLabelText("From date — activity stream")).not.toBeNull();
+    // Audit bar — its type filter speaks in the panel's four display kinds.
+    // SAFETY: the aria-label belongs to the audit bar's kind <select>
+    // (FeedFilters); the bound query cannot state the element type.
+    const kindSelect = getByLabelText(
+      "Filter by kind — audit logs",
+    ) as HTMLSelectElement;
+    const kinds = [...kindSelect.options].map((o) => o.value);
+    expect(kinds).toEqual(["", "violation", "blockedact", "change", "audit"]);
+  });
+
+  it("typing a search writes the panel's own URL param and Clear removes it", () => {
+    const { getByLabelText, getByText, queryByText } = renderActivity();
+    expect(queryByText("Clear")).toBeNull();
+    fireEvent.change(getByLabelText("Search — activity stream"), {
+      target: { value: "merge" },
+    });
+    // The param IS the state (the board's ?q= pattern): the bar re-reads it.
+    // SAFETY: the aria-label belongs to the stream bar's search <input>
+    // (FeedFilters); the bound query cannot state the element type.
+    expect(
+      (getByLabelText("Search — activity stream") as HTMLInputElement).value,
+    ).toBe("merge");
+    fireEvent.click(getByText("Clear"));
+    // SAFETY: same search <input> as above.
+    expect(
+      (getByLabelText("Search — activity stream") as HTMLInputElement).value,
+    ).toBe("");
   });
 });

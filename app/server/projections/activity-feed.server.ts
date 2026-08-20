@@ -41,35 +41,139 @@ export interface ActivityStreamRow {
 
 export const ACTIVITY_STREAM_LIMIT = 200;
 
-/** Total stream rows for the project (drives the "show older" button). */
+/* ------------------------------------------------------- feed filters (P21)
+ * Owner request 2026-08-20: both panels get their own search + filters. The
+ * stream filters compile to SQL (the table can be large); the audit panel's
+ * free-text search matches the RENDERED sentences instead (see listAuditLog),
+ * because the reader searches what they see, not `details_json` internals. */
+
+export interface StreamFilters {
+  /** Substring over the event text, title and task key (case-insensitive). */
+  q?: string;
+  /** Exact `actor_ref` — the stable identity behind a display name. */
+  actorRef?: string;
+  /** Exact event type (one of the timeline vocabulary, tolerated unknown). */
+  type?: string;
+  /** Task key, case-insensitive exact match. */
+  task?: string;
+  /** Inclusive ISO day (YYYY-MM-DD) lower bound on occurred_at. */
+  from?: string;
+  /** Inclusive ISO day (YYYY-MM-DD) upper bound on occurred_at. */
+  to?: string;
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** LIKE-escape so a user typing `%` or `_` searches those characters. */
+function escapeLike(text: string): string {
+  return text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/** The exclusive upper bound for an inclusive ISO day: the following day. */
+function dayAfter(day: string): string {
+  const next = new Date(`${day}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
+/** WHERE clause + args shared by the stream list and its count, so "X of Y"
+ *  can never disagree with the rows it stands over. */
+function streamWhere(slug: string, f: StreamFilters) {
+  const parts = ["project_slug = ?"];
+  const args: string[] = [slug];
+  const q = f.q?.trim();
+  if (q) {
+    const like = `%${escapeLike(q)}%`;
+    parts.push(
+      "(text LIKE ? ESCAPE '\\' OR COALESCE(title, '') LIKE ? ESCAPE '\\' OR task_key LIKE ? ESCAPE '\\')",
+    );
+    args.push(like, like, like);
+  }
+  if (f.actorRef?.trim()) {
+    parts.push("actor_ref = ?");
+    args.push(f.actorRef.trim());
+  }
+  if (f.type?.trim()) {
+    parts.push("type = ?");
+    args.push(f.type.trim());
+  }
+  if (f.task?.trim()) {
+    parts.push("task_key = ? COLLATE NOCASE");
+    args.push(f.task.trim());
+  }
+  if (f.from && ISO_DAY.test(f.from)) {
+    parts.push("occurred_at >= ?");
+    args.push(f.from);
+  }
+  if (f.to && ISO_DAY.test(f.to)) {
+    parts.push("occurred_at < ?");
+    args.push(dayAfter(f.to));
+  }
+  return { sql: parts.join(" AND "), args };
+}
+
+/** The stream's filter vocabulary: every actor that ever wrote an event (by
+ *  stable ref, labelled with the current display name) and every event type
+ *  present. Options, not free text — a filter you can only mistype is noise. */
+export function streamFilterOptions(db: DatabaseSync, slug: string) {
+  // SAFETY: `actor_ref` is NOT NULL; GROUP BY yields one representative
+  // `actor_json` per ref, and that column's single writer stringifies an
+  // ActorRender (rebuilder.server.ts).
+  const actorRows = db
+    .prepare(
+      `SELECT actor_ref AS ref, actor_json FROM task_events
+       WHERE project_slug = ? GROUP BY actor_ref`,
+    )
+    .all(slug) as Array<{ ref: string; actor_json: string }>;
+  const overlay = createActorRenderOverlay(db);
+  const actors = actorRows
+    .map((row) => ({
+      ref: row.ref,
+      // SAFETY: same single-writer ActorRender invariant as listActivityStream.
+      label: overlay(JSON.parse(row.actor_json) as ActorRender).name,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  // SAFETY: `type` is a NOT NULL text column.
+  const typeRows = db
+    .prepare(
+      `SELECT DISTINCT type FROM task_events WHERE project_slug = ? ORDER BY type`,
+    )
+    .all(slug) as Array<{ type: string }>;
+  return { actors, types: typeRows.map((row) => row.type) };
+}
+
+/** Total stream rows matching the filters (drives "X of Y" + "show older"). */
 export function countActivityStream(
   db: DatabaseSync,
   slug: string,
+  filters: StreamFilters = {},
 ): number {
+  const where = streamWhere(slug, filters);
   // SAFETY: a bare `count(*)` aggregate always yields exactly one row — zero on
   // an empty match, never no row — and `c` is the integer SQLite counted.
   return (
     db
-      .prepare(`SELECT count(*) AS c FROM task_events WHERE project_slug = ?`)
-      .get(slug) as { c: number }
+      .prepare(`SELECT count(*) AS c FROM task_events WHERE ${where.sql}`)
+      .get(...where.args) as { c: number }
   ).c;
 }
 
 export function listActivityStream(
   db: DatabaseSync,
   slug: string,
-  options: { limit?: number } = {},
+  options: { limit?: number; filters?: StreamFilters } = {},
 ): ActivityStreamRow[] {
+  const where = streamWhere(slug, options.filters ?? {});
   // SAFETY: the SELECT names exactly the seven `task_events` columns the Pick
   // lists, and 0001_baseline declares all of them NOT NULL except `title` —
   // which is why TaskEventRow types that one, and only that one, nullable.
   const rows = db
     .prepare(
       `SELECT id, task_key, type, actor_json, occurred_at, title, text
-       FROM task_events WHERE project_slug = ?
+       FROM task_events WHERE ${where.sql}
        ORDER BY occurred_at DESC, id DESC LIMIT ?`,
     )
-    .all(slug, options.limit ?? ACTIVITY_STREAM_LIMIT) as Pick<
+    .all(...where.args, options.limit ?? ACTIVITY_STREAM_LIMIT) as Pick<
     TaskEventRow,
     "id" | "task_key" | "type" | "actor_json" | "occurred_at" | "title" | "text"
   >[];
@@ -387,8 +491,186 @@ function finishText(text: string, taskKey: string | null): string {
   return text.slice(0, -3) + ".";
 }
 
-/** Total audit-panel rows for the project (drives "show older"). */
-export function countAuditLog(db: DatabaseSync, slug: string): number {
+/** Filters for the audit panel (owner request 2026-08-20). `q` matches the
+ *  RENDERED sentence — the reader searches what they see — so a searched
+ *  collection is bounded by AUDIT_SCAN_CAP rows per leg rather than compiled
+ *  to SQL. The other filters compile to SQL / cheap predicates. */
+export interface AuditFilters {
+  q?: string;
+  kind?: AuditLogKind;
+  /** Actor display label, exactly as the panel prints it. Violations are
+   *  raised by the policy engine, not a person — an actor filter drops them. */
+  actor?: string;
+  task?: string;
+  /** Inclusive ISO days (YYYY-MM-DD), same contract as StreamFilters. */
+  from?: string;
+  to?: string;
+}
+
+/** How many governance rows a rendered-text search will scan per leg. Audit
+ *  tables hold project-scoped governance events (not the task stream), so this
+ *  is a generous ceiling, stated rather than silent. */
+export const AUDIT_SCAN_CAP = 1000;
+
+function auditFiltersActive(f: AuditFilters): boolean {
+  return Boolean(
+    f.q?.trim() ||
+      f.kind ||
+      f.actor?.trim() ||
+      f.task?.trim() ||
+      (f.from && ISO_DAY.test(f.from)) ||
+      (f.to && ISO_DAY.test(f.to)),
+  );
+}
+
+/** The audit panel's actor vocabulary: everyone who ever wrote an audit row,
+ *  by current display name (label fallback). */
+export function auditFilterActors(db: DatabaseSync, slug: string): string[] {
+  // SAFETY: `actor_label` is NOT NULL; `name` is NOT NULL on users, null only
+  // when the LEFT JOIN finds no row.
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT COALESCE(u.name, a.actor_label) AS label
+       FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+       WHERE a.project_slug = ? ORDER BY label`,
+    )
+    .all(slug) as Array<{ label: string }>;
+  return rows.map((row) => row.label);
+}
+
+/** Every audit-panel entry matching the filters, newest first, both legs
+ *  merged — the single source `listAuditLog` and `countAuditLog` slice and
+ *  measure, so the count can never disagree with the rows. */
+function collectAuditEntries(
+  db: DatabaseSync,
+  slug: string,
+  filters: AuditFilters,
+  cap: number,
+): AuditLogEntry[] {
+  const nameStmt = db.prepare(`SELECT name FROM users WHERE id = ?`);
+  const nameCache = new Map<string, string | null>();
+  const resolveUserName = (userId: string | null | undefined): string | null => {
+    if (!userId) return null;
+    if (!nameCache.has(userId)) {
+      // SAFETY: the statement selects the single `name` column, which
+      // 0001_baseline declares NOT NULL on `users`; a missing id gives no row.
+      const hit = nameStmt.get(userId) as { name: string } | undefined;
+      nameCache.set(userId, hit?.name ?? null);
+    }
+    return nameCache.get(userId) ?? null;
+  };
+
+  const q = filters.q?.trim().toLowerCase() ?? "";
+  const task = filters.task?.trim().toUpperCase() ?? "";
+  const fromDay = filters.from && ISO_DAY.test(filters.from) ? filters.from : "";
+  const toBound =
+    filters.to && ISO_DAY.test(filters.to) ? dayAfter(filters.to) : "";
+  const inDateRange = (iso: string) =>
+    (!fromDay || iso >= fromDay) && (!toBound || iso < toBound);
+
+  // Violations leg — small (one row per missing scope), filtered in TS. They
+  // are raised by the policy engine, so an actor filter excludes them all.
+  const violations: AuditLogEntry[] =
+    (filters.kind && filters.kind !== "violation") || filters.actor?.trim()
+      ? []
+      : listScopeViolations(db, slug)
+          .map(
+            (v): AuditLogEntry => ({
+              id: v.id,
+              kind: "violation",
+              text: v.taskKey
+                ? `Project credential is missing \`${v.scope}\` — flagged by the policy engine on`
+                : `Project credential is missing \`${v.scope}\` — flagged by the policy engine.`,
+              taskKey: v.taskKey,
+              occurredAt: v.createdAt,
+              status: v.status,
+              resolvedAt: v.resolvedAt,
+              // resolved_by stores a user id when known, else the actor label.
+              resolvedBy: v.resolvedBy
+                ? (resolveUserName(v.resolvedBy) ?? v.resolvedBy)
+                : null,
+            }),
+          )
+          .filter((entry) => !task || entry.taskKey?.toUpperCase() === task)
+          .filter((entry) => inDateRange(entry.occurredAt));
+
+  // Audit-events leg — SQL for everything except the rendered-text search.
+  const actions = filters.kind
+    ? Object.entries(AUDIT_ACTION_KINDS)
+        .filter(([, kind]) => kind === filters.kind)
+        .map(([action]) => action)
+    : Object.keys(AUDIT_ACTION_KINDS);
+  let auditEntries: AuditLogEntry[] = [];
+  if (actions.length > 0) {
+    const placeholders = actions.map(() => "?").join(", ");
+    const parts = [`a.project_slug = ?`, `a.action IN (${placeholders})`];
+    const args: string[] = [slug, ...actions];
+    if (filters.actor?.trim()) {
+      parts.push("COALESCE(u.name, a.actor_label) = ?");
+      args.push(filters.actor.trim());
+    }
+    if (task) {
+      parts.push("a.task_key = ? COLLATE NOCASE");
+      args.push(task);
+    }
+    if (fromDay) {
+      parts.push("a.occurred_at >= ?");
+      args.push(fromDay);
+    }
+    if (toBound) {
+      parts.push("a.occurred_at < ?");
+      args.push(toBound);
+    }
+    // SAFETY: the SELECT names exactly AuditRow's nine members. 0001_baseline
+    // declares `id`, `occurred_at`, `actor_label` and `action` NOT NULL on
+    // `audit_events`; the rest are nullable there, and `actor_name` is null
+    // whenever the LEFT JOIN finds no user — which is how AuditRow types them.
+    const rows = db
+      .prepare(
+        `SELECT a.id, a.occurred_at, a.actor_user_id, a.actor_label, a.action,
+                a.subject_id, a.task_key, a.details_json, u.name AS actor_name
+         FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+         WHERE ${parts.join(" AND ")}
+         ORDER BY a.occurred_at DESC, a.id DESC LIMIT ?`,
+      )
+      .all(...args, cap) as AuditRow[];
+    auditEntries = rows.map((row) => ({
+      id: row.id,
+      kind: AUDIT_KIND_BY_ACTION.get(row.action) ?? "change",
+      text: finishText(auditText(row, resolveUserName), row.task_key),
+      taskKey: row.task_key,
+      occurredAt: row.occurred_at,
+      status: null,
+      resolvedAt: null,
+      resolvedBy: null,
+    }));
+  }
+
+  const matchesQ = (entry: AuditLogEntry) =>
+    !q ||
+    entry.text.toLowerCase().includes(q) ||
+    (entry.taskKey ?? "").toLowerCase().includes(q);
+
+  return [...violations, ...auditEntries]
+    .filter(matchesQ)
+    .sort((a, b) =>
+      a.occurredAt === b.occurredAt
+        ? b.id.localeCompare(a.id)
+        : b.occurredAt.localeCompare(a.occurredAt),
+    );
+}
+
+/** Total audit-panel rows matching the filters (drives "X of Y" and "show
+ *  older"). Unfiltered it stays the cheap aggregate; filtered it measures the
+ *  same collection the list slices, bounded by AUDIT_SCAN_CAP. */
+export function countAuditLog(
+  db: DatabaseSync,
+  slug: string,
+  filters: AuditFilters = {},
+): number {
+  if (auditFiltersActive(filters)) {
+    return collectAuditEntries(db, slug, filters, AUDIT_SCAN_CAP).length;
+  }
   // SAFETY: a `count(*)` aggregate yields exactly one row whose `c` is the
   // integer SQLite counted — 0 when nothing matched, never no row.
   const violations = (
@@ -415,73 +697,13 @@ export function countAuditLog(db: DatabaseSync, slug: string): number {
 export function listAuditLog(
   db: DatabaseSync,
   slug: string,
-  options: { limit?: number } = {},
+  options: { limit?: number; filters?: AuditFilters } = {},
 ): AuditLogEntry[] {
   const limit = options.limit ?? AUDIT_LOG_LIMIT;
-
-  const nameStmt = db.prepare(`SELECT name FROM users WHERE id = ?`);
-  const nameCache = new Map<string, string | null>();
-  const resolveUserName = (userId: string | null | undefined): string | null => {
-    if (!userId) return null;
-    if (!nameCache.has(userId)) {
-      // SAFETY: the statement selects the single `name` column, which
-      // 0001_baseline declares NOT NULL on `users`; a missing id gives no row.
-      const hit = nameStmt.get(userId) as { name: string } | undefined;
-      nameCache.set(userId, hit?.name ?? null);
-    }
-    return nameCache.get(userId) ?? null;
-  };
-
-  const violations: AuditLogEntry[] = listScopeViolations(db, slug).map(
-    (v) => ({
-      id: v.id,
-      kind: "violation",
-      text: v.taskKey
-        ? `Project credential is missing \`${v.scope}\` — flagged by the policy engine on`
-        : `Project credential is missing \`${v.scope}\` — flagged by the policy engine.`,
-      taskKey: v.taskKey,
-      occurredAt: v.createdAt,
-      status: v.status,
-      resolvedAt: v.resolvedAt,
-      // resolved_by stores a user id when known, else the actor label.
-      resolvedBy: v.resolvedBy
-        ? (resolveUserName(v.resolvedBy) ?? v.resolvedBy)
-        : null,
-    }),
-  );
-
-  const actions = Object.keys(AUDIT_ACTION_KINDS);
-  const placeholders = actions.map(() => "?").join(", ");
-  // SAFETY: the SELECT names exactly AuditRow's nine members. 0001_baseline
-  // declares `id`, `occurred_at`, `actor_label` and `action` NOT NULL on
-  // `audit_events`; the rest are nullable there, and `actor_name` is null
-  // whenever the LEFT JOIN finds no user — which is how AuditRow types them.
-  const rows = db
-    .prepare(
-      `SELECT a.id, a.occurred_at, a.actor_user_id, a.actor_label, a.action,
-              a.subject_id, a.task_key, a.details_json, u.name AS actor_name
-       FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
-       WHERE a.project_slug = ? AND a.action IN (${placeholders})
-       ORDER BY a.occurred_at DESC, a.id DESC LIMIT ?`,
-    )
-    .all(slug, ...actions, limit) as AuditRow[];
-
-  const auditEntries: AuditLogEntry[] = rows.map((row) => ({
-    id: row.id,
-    kind: AUDIT_KIND_BY_ACTION.get(row.action) ?? "change",
-    text: finishText(auditText(row, resolveUserName), row.task_key),
-    taskKey: row.task_key,
-    occurredAt: row.occurred_at,
-    status: null,
-    resolvedAt: null,
-    resolvedBy: null,
-  }));
-
-  return [...violations, ...auditEntries]
-    .sort((a, b) =>
-      a.occurredAt === b.occurredAt
-        ? b.id.localeCompare(a.id)
-        : b.occurredAt.localeCompare(a.occurredAt),
-    )
-    .slice(0, limit);
+  const filters = options.filters ?? {};
+  // A rendered-text search must render before it can match, so it scans up to
+  // the cap; otherwise fetching `limit` audit rows is enough (violations are
+  // always all collected — one row per missing scope).
+  const cap = filters.q?.trim() ? AUDIT_SCAN_CAP : limit;
+  return collectAuditEntries(db, slug, filters, cap).slice(0, limit);
 }

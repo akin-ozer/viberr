@@ -83,7 +83,7 @@ function ev(partial: Partial<TimelineEventRender>): TimelineEventRender {
 describe("DecisionPacket", () => {
   it("renders the packet card: tint, kind pill, observations, options, rec tag", () => {
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolve={() => {}} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolveCustom={() => {}} onResolve={() => {}} onAsk={() => {}} />,
     );
     const card = container.querySelector(".packet")!;
     expect(card.classList.contains("input")).toBe(true);
@@ -100,7 +100,9 @@ describe("DecisionPacket", () => {
         .textContent,
     ).toBe("9 files · +412 / −87");
     const opts = container.querySelectorAll('.options [role="radio"]');
-    expect(opts).toHaveLength(3);
+    // Three authored options plus the composed custom-directive choice (P21).
+    expect(opts).toHaveLength(4);
+    expect(opts[3]!.classList.contains("opt-custom")).toBe(true);
     // Recommended option: default selection + recommend class + operator pick.
     expect(opts[0]!.getAttribute("aria-checked")).toBe("true");
     expect(opts[0]!.classList.contains("recommend")).toBe(true);
@@ -112,7 +114,7 @@ describe("DecisionPacket", () => {
   it("primary button confirms the selected option by index (concise stable label)", () => {
     const onResolve = vi.fn();
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolve={onResolve} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolveCustom={() => {}} onResolve={onResolve} onAsk={() => {}} />,
     );
     const primary = container.querySelector(".packet-actions .btn.primary")!;
     // F-UI1: the button no longer echoes the (often long, multi-line) option
@@ -141,7 +143,7 @@ describe("DecisionPacket", () => {
         canResolveCompletion
         canEditGoal
         canArchive
-        onResolve={onResolve}
+        onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
     );
@@ -163,7 +165,7 @@ describe("DecisionPacket", () => {
       options: packet142.options.map((o) => ({ ...o, rec: false })),
     };
     const { container } = render(
-      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolve={() => {}} onAsk={onAsk} />,
+      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolveCustom={() => {}} onResolve={() => {}} onAsk={onAsk} />,
     );
     expect(container.querySelector(".packet")!.classList.contains("blocked")).toBe(true);
     expect(
@@ -1518,7 +1520,7 @@ describe("LV-09: pluralization + null-ish packet observations", () => {
         canResolveCompletion
         canEditGoal
         canArchive
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
     );
@@ -1548,7 +1550,7 @@ describe("UI-42/UI-44: the decision packet", () => {
         canResolveCompletion={false}
         canEditGoal={false}
         canArchive
-        onResolve={onResolve}
+        onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
     );
@@ -1576,7 +1578,7 @@ describe("UI-42/UI-44: the decision packet", () => {
         canResolveCompletion
         canEditGoal
         canArchive
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
     );
@@ -1608,7 +1610,7 @@ describe("UI-42/UI-44: the decision packet", () => {
         canResolveCompletion
         canEditGoal
         canArchive={false}
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
     );
@@ -1630,7 +1632,7 @@ describe("UI-42/UI-44: the decision packet", () => {
         canResolveCompletion
         canEditGoal
         canArchive
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
     );
@@ -1649,7 +1651,7 @@ describe("UI-42/UI-44: the decision packet", () => {
         canResolveCompletion
         canEditGoal
         canArchive
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
     );
@@ -1704,7 +1706,7 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
         canResolveCompletion
         canEditGoal
         canArchive
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
     );
@@ -1757,7 +1759,7 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
         canResolveCompletion
         canEditGoal
         canArchive
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
     );
@@ -1776,7 +1778,7 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
         canResolveCompletion={false}
         canEditGoal={false}
         canArchive={false}
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
     );
@@ -1806,7 +1808,7 @@ describe("E4: the blocked Confirm button gives its reason to everybody", () => {
         canResolveCompletion={false}
         canEditGoal
         canArchive
-        onResolve={onResolve}
+        onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
     );
@@ -1941,7 +1943,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canArchive
         canDiscardBranch
         archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0 }}
-        onResolve={onResolve}
+        onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
     );
@@ -1974,7 +1976,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal
         canArchive
         canDiscardBranch={false}
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
     );
@@ -1993,7 +1995,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canResolveCompletion={false}
         canEditGoal={false}
         canArchive={false}
-        onResolve={onResolve}
+        onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
     );
@@ -2029,7 +2031,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canArchive={false}
         canDiscardBranch={false}
         archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0 }}
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onRequestMaintainer={onRequestMaintainer}
         onAsk={() => {}}
       />,
@@ -2055,7 +2057,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canResolveCompletion={false}
         canEditGoal={false}
         canArchive={false}
-        onResolve={() => {}}
+        onResolveCustom={() => {}} onResolve={() => {}}
         onRequestMaintainer={vi.fn()}
         onAsk={() => {}}
       />,
@@ -2069,7 +2071,7 @@ describe("DecisionPacket — pass-20 governance", () => {
 
   it("N20-16: the rec pill credits whoever RAISED the packet", () => {
     const op = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolve={() => {}} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolveCustom={() => {}} onResolve={() => {}} onAsk={() => {}} />,
     );
     expect(op.container.querySelector(".rec-tag")!.textContent).toContain(
       "operator pick",
@@ -2078,7 +2080,7 @@ describe("DecisionPacket — pass-20 governance", () => {
     // A developer's own ask_human packet is authored by the agent, not the
     // operator — crediting "operator pick" there was the mislabel.
     const dev = render(
-      <DecisionPacket packet={{ ...packet142, from: "Developer" }} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolve={() => {}} onAsk={() => {}} />,
+      <DecisionPacket packet={{ ...packet142, from: "Developer" }} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolveCustom={() => {}} onResolve={() => {}} onAsk={() => {}} />,
     );
     const tag = dev.container.querySelector(".rec-tag")!;
     expect(tag.textContent).toContain("recommended");
@@ -2094,7 +2096,7 @@ describe("DecisionPacket — pass-20 governance", () => {
       ],
     });
     const { container } = render(
-      <DecisionPacket packet={dupe} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolve={() => {}} onAsk={() => {}} />,
+      <DecisionPacket packet={dupe} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolveCustom={() => {}} onResolve={() => {}} onAsk={() => {}} />,
     );
     const obs = container.querySelectorAll(".packet-obs .obs");
     // The Signal row (byte-identical to the body) is gone; Stage remains.
@@ -2408,5 +2410,97 @@ describe("failure toasts use the error kind (P13-D-10)", () => {
     // `alert` is the triangle path; `check` is the tick. `push` defaults to
     // "success", so this failure used to render under a green tick.
     expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
+  });
+});
+
+describe("DecisionPacket questionnaire custom answer (P21)", () => {
+  it("offers 'Write your own directive', reveals the input, and resolves through onResolveCustom", () => {
+    const onResolveCustom = vi.fn();
+    const { getByText, getByLabelText } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve={true}
+        canResolveCompletion={true}
+        canEditGoal={true}
+        canArchive={true}
+        onResolveCustom={onResolveCustom}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    // The composed choice renders after the authored options.
+    const custom = getByText("Write your own directive").closest("button")!;
+    expect(custom.getAttribute("role")).toBe("radio");
+    // No input until the choice is selected; the note field shows instead.
+    expect(document.querySelector("#pkt-custom")).toBeNull();
+    expect(document.querySelector("#pkt-note")).not.toBeNull();
+
+    fireEvent.click(custom);
+    expect(custom.getAttribute("aria-checked")).toBe("true");
+    // The directive input replaces the note field (one message, one box).
+    expect(document.querySelector("#pkt-note")).toBeNull();
+    const input = document.querySelector<HTMLTextAreaElement>("#pkt-custom")!;
+    expect(input).not.toBeNull();
+
+    // Confirm stays disabled until a directive exists.
+    // SAFETY: the aria-label belongs to the packet's Confirm <button>
+    // (decision-packet.tsx); the bound query cannot state the element type.
+    const confirm = getByLabelText(
+      "Confirm decision: your custom directive",
+    ) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(input, {
+      target: { value: "Rebase onto main, then re-run the reviewer." },
+    });
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(onResolveCustom).toHaveBeenCalledWith(
+      "Rebase onto main, then re-run the reviewer.",
+    );
+  });
+
+  it("digit shortcuts select choices, and the chips advertise them", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve={true}
+        canResolveCompletion={true}
+        canEditGoal={true}
+        canArchive={true}
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const group = container.querySelector('[role="radiogroup"]')!;
+    const chips = [...container.querySelectorAll(".opt-kbd")].map(
+      (k) => k.textContent,
+    );
+    // Three authored options + the custom choice.
+    expect(chips).toEqual(["1", "2", "3", "4"]);
+    fireEvent.keyDown(group, { key: "2" });
+    const options = [...container.querySelectorAll('[role="radio"]')];
+    expect(options[1]?.getAttribute("aria-checked")).toBe("true");
+    fireEvent.keyDown(group, { key: "4" });
+    expect(options[3]?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("hides the custom choice from viewers who cannot resolve", () => {
+    const { queryByText } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve={false}
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive={false}
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    expect(queryByText("Write your own directive")).toBeNull();
   });
 });

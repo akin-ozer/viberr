@@ -1155,6 +1155,15 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .opt .ot { font-weight: 700; font-family: var(--font-display); font-size: .9rem; }
 .opt .od { font-size: .78rem; color: var(--faint); margin-top: .1rem; }
 .opt .rec-tag { margin-left: auto; }
+/* Questionnaire shortcut chip (digit selects the choice). `margin-left: auto`
+   pushes it right; a rec-tag already claiming the auto margin leaves the chip
+   just trailing it, which is the intended order: pill, then key. */
+.opt .opt-kbd { margin-left: auto; flex: none; opacity: .65; }
+.opt .rec-tag ~ .opt-kbd, .opt .rec-tag + .opt-kbd { margin-left: 0; }
+/* The composed free-text choice reads as "one more way to answer", not one
+   more operator option — a dashed frame separates authored from offered. */
+.opt.opt-custom { border-style: dashed; }
+.opt.opt-custom.sel { border-style: solid; }
 
 /* Optional free-text a human attaches when resolving a packet (P11-71).
    Styling rides the standard `.field textarea` tokens — its wrapper carries
@@ -1897,7 +1906,7 @@ dialog[data-closing]::backdrop {
    must stay (0,2,1): the later `.field input.mono` face override wins by source
    order, and a :not() chain here would outrank it. */
 .field input[type="text"], .field input[type="password"], .field input[type="email"],
-.field input[type="search"], .field textarea {
+.field input[type="search"], .field input[type="date"], .field textarea {
   width: 100%; border: 1px solid var(--border); border-radius: var(--radius-button);
   padding: .55rem .7rem; background: var(--surface); color: var(--fg);
   font-family: var(--font-body); font-size: .9rem; outline: 0;
@@ -3920,6 +3929,41 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .feed-empty { font-size: .85rem; color: var(--faint); padding: .6rem 0; }
 .feed-capped { font-size: .78rem; color: var(--faint); padding: .6rem 0 0; }
 .act-filter-right { display: flex; align-items: center; gap: .5rem; }
+/* Per-panel feed filters (P21): search, type/kind, actor, task id, date range.
+   The search input is a borderless fill inside a framed wrapper, so the ring
+   is drawn by :focus-within (P16-UI-01's rule for exactly this shape); the
+   task and date inputs keep their own borders and take the shared treatment. */
+.feed-filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .45rem;
+  padding: .55rem 0 .7rem; border-bottom: 1px solid var(--hairline);
+  margin-bottom: .4rem;
+}
+.feed-filters .ff-search {
+  flex: 1 1 150px; min-width: 130px; display: flex; align-items: center; gap: .4rem;
+  border: 1px solid var(--border); border-radius: var(--radius-button);
+  background: var(--surface); padding: .32rem .55rem;
+}
+.feed-filters .ff-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.feed-filters .ff-search .ico { width: 13px; height: 13px; color: var(--placeholder); flex: none; }
+.feed-filters .ff-search input {
+  border: 0; outline: 0; background: none; width: 100%;
+  color: var(--fg); font-family: var(--font-body); font-size: .78rem;
+}
+.feed-filters .ff-search input::placeholder { color: var(--placeholder); }
+.feed-filters .ff-sel { font-size: .74rem; padding: .3rem .45rem; max-width: 150px; }
+.feed-filters .ff-task {
+  width: 84px; border: 1px solid var(--border); border-radius: var(--radius-button);
+  background: var(--surface); color: var(--fg); padding: .3rem .5rem; font-size: .74rem;
+}
+.feed-filters .ff-date {
+  border: 1px solid var(--border); border-radius: var(--radius-button);
+  background: var(--surface); color: var(--fg); padding: .24rem .4rem;
+  font-family: var(--font-body); font-size: .72rem;
+}
+.feed-filters .ff-task:focus, .feed-filters .ff-date:focus {
+  border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); outline: 0;
+}
+.feed-filters .ff-dash { font-size: .72rem; color: var(--placeholder); }
 
 /* --- agents --- */
 /* Only the ORCHESTRATION-runtime chip's glyph shrinks: the backend chips

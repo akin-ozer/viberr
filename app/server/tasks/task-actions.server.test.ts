@@ -2897,6 +2897,67 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
       listAuditEvents(store.db, { action: "task.packet.resolved" }),
     ).toHaveLength(0);
   });
+
+  describe("resolvePacket custom directive (P21 — questionnaire packets)", () => {
+  it("resolves with the human's own directive: synthetic custom kind, directive recorded, packet cleared", async () => {
+    const store = prepared();
+    seedReviewed(store, {}, {
+      ...ACCEPT_PACKET,
+      options: [
+        { kind: "request_edit", t: "Request one edit", d: "", rec: false },
+      ],
+    });
+    const { option } = await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: -1,
+        custom: "Rebase onto main first, then re-run the reviewer on the new head.",
+        ack: null,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(option.kind).toBe("custom");
+    const file = task(store);
+    expect(file.packet).toBeNull();
+    // The default arm hands the task back to the agent side.
+    expect(file.frontmatter.waiting).toBe("agent");
+    // The directive rides the decision event as its quoted note.
+    const decision = file.timeline.find((e) =>
+      e.text.includes("custom directive"),
+    );
+    expect(decision?.text).toContain("> Rebase onto main first");
+    const audit = listAuditEvents(store.db, { action: "task.packet.resolved" });
+    expect(audit).toHaveLength(1);
+  });
+
+  it("refuses an over-long directive before anything resolves", async () => {
+    const store = prepared();
+    seedReviewed(store, {}, {
+      ...ACCEPT_PACKET,
+      options: [
+        { kind: "request_edit", t: "Request one edit", d: "", rec: false },
+      ],
+    });
+    await expect(
+      resolvePacket(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          optionIndex: -1,
+          custom: "x".repeat(4001),
+          ack: null,
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(task(store).packet).not.toBeNull();
+  });
+});
 });
 
 describe("recordAgentCompletion attachments (P21 — the producing message names its files)", () => {

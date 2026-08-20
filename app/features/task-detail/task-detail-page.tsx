@@ -437,6 +437,18 @@ export function TaskDetailPage({
     }
     resolveFetcher.submit(fd, { method: "post" });
   };
+  // Questionnaire packets (owner request 2026-08-20): resolve with the human's
+  // OWN directive. No option index — the server runs the synthetic `custom`
+  // arm, which never accepts/archives/merges, so no ceremony interposes.
+  const submitResolveCustom = (custom: string) => {
+    if (resolveBusy || !custom.trim()) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "resolve-packet");
+    fd.set("option", "-1");
+    fd.set("custom", custom.trim());
+    resolveFetcher.submit(fd, { method: "post" });
+  };
   // F19-7: an `accept_completion` packet option runs the full acceptance
   // contract — including the real, irreversible PR merge — from a button
   // labelled "Confirm decision", whose only disclosure is whatever freeform
@@ -707,6 +719,7 @@ export function TaskDetailPage({
             pendingRecommendations: recommendations.length,
           }}
             onResolve={onResolve}
+            onResolveCustom={submitResolveCustom}
             // F20-18: only the contributor-owner-who-cannot-resolve-directly
             // gets the escalation affordance (the card shows it only when EVERY
             // option is above their tier).

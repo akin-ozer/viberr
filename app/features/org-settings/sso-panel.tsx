@@ -130,8 +130,10 @@ function ProviderModal({
           type="password"
           className="mono"
           value={secret}
-          autoComplete="off"
+          autoComplete="new-password"
           spellCheck={false}
+          data-1p-ignore
+          data-lpignore="true"
           placeholder={
             existing.configuredInApp ? "leave blank to keep the stored secret" : "paste the secret"
           }

@@ -82,6 +82,18 @@ export function ResourcesPanel({
       setPendingSkillBrowse(null);
     }
   }, [skills, pendingSkillBrowse]);
+  // The KB twin (owner request 2026-08-20): a files-mode KB create waits for
+  // the revalidated list, then opens the new folder's browser. Matched on the
+  // store DIR — the modal's slugified name — not the display name.
+  const [pendingKbBrowse, setPendingKbBrowse] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingKbBrowse) return;
+    const hit = kbs.find((k) => k.dir === pendingKbBrowse);
+    if (hit) {
+      setBrowsing({ kind: "kb", id: hit.id });
+      setPendingKbBrowse(null);
+    }
+  }, [kbs, pendingKbBrowse]);
   const push = useToast();
   const rowAction = useOrgAction();
   const reindexAction = useOrgAction();
@@ -206,7 +218,12 @@ export function ResourcesPanel({
       </div>
 
       {modal && modal.kind === "kb" && (
-        <KBModal key={modal.item?.id ?? "new"} initial={modal.item} onClose={() => setModal(null)} />
+        <KBModal
+          key={modal.item?.id ?? "new"}
+          initial={modal.item}
+          onClose={() => setModal(null)}
+          onFilesCreated={setPendingKbBrowse}
+        />
       )}
       {modal && modal.kind === "mcp" && (
         <McpModal

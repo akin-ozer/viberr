@@ -1400,7 +1400,7 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
               canEditGoal
               canArchive
               {...(disclosure ? { archiveDisclosure: disclosure } : {})}
-              onResolve={onResolve}
+              onResolveCustom={() => {}} onResolve={onResolve}
               onAsk={() => {}}
             />
           </ToastProvider>

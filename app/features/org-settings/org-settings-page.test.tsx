@@ -140,7 +140,9 @@ describe("ConnectionsPanel", () => {
     // type, so it is stated here.
     const token = getByPlaceholderText("ghp_…") as HTMLInputElement;
     expect(token.type).toBe("password");
-    expect(token.getAttribute("autocomplete")).toBe("off");
+    // P21 (owner report): `off` is ignored on login-shaped pairs — browsers
+    // filled a saved password here. `new-password` is what they honor.
+    expect(token.getAttribute("autocomplete")).toBe("new-password");
     expect(token.getAttribute("spellcheck")).toBe("false");
     // The owner field beside it is NOT a secret and stays readable.
     // SAFETY: same form, the owner `<input>` beside the token field.
@@ -974,5 +976,49 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
     expect(h1s[0]!.textContent).not.toContain("Viberr");
     // The subtitle already carried the scope; it must keep doing so.
     expect(container.textContent).toContain("Instance level — shared by every project");
+  });
+});
+
+describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
+  function openNewKb() {
+    const utils = renderPanel(
+      <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
+    );
+    const kbPanel = [...document.querySelectorAll(".panel")].find(
+      (p) => p.querySelector("h2")?.textContent === "Knowledge bases",
+    )!;
+    fireEvent.click(kbPanel.querySelector(".panel-head .btn")!);
+    const nameInput = document.querySelector<HTMLInputElement>("#kb-name")!;
+    return { ...utils, nameInput };
+  }
+
+  it("'Start from files' relabels the save and submits the same kb-save", async () => {
+    const { nameInput, getByText } = openNewKb();
+    fireEvent.change(nameInput, { target: { value: "Design notes" } });
+    expect(getByText("Create & index")).not.toBeNull();
+
+    fireEvent.click(getByText("Start from files"));
+    // The create is identical server-side — only the handoff differs, and the
+    // label says where the human lands.
+    fireEvent.click(getByText("Create & add files"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "kb-save",
+        name: "Design notes",
+        refresh: "on change",
+      }),
+    );
+  });
+
+  it("edit mode never offers the mode radios (content already exists)", () => {
+    const utils = renderPanel(
+      <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
+    );
+    const kbPanel = [...document.querySelectorAll(".panel")].find(
+      (p) => p.querySelector("h2")?.textContent === "Knowledge bases",
+    )!;
+    fireEvent.click(kbPanel.querySelector('[title="Edit"]')!);
+    expect(document.querySelector("#kb-name")).not.toBeNull();
+    expect(utils.queryByText("Start from files")).toBeNull();
   });
 });
