@@ -349,24 +349,33 @@ export const SCOPED_DELIVERY_CAPABILITY_IDS: readonly string[] = [
   "open-review-pr",
 ];
 
-/** What the save layer did — or deliberately did NOT do — with a delivery
- * headline that disagrees with the scoped delivery grants below it. */
-export interface DeliveryGrantNotice {
-  /** `repaired` = the absent headline was materialized `direct`;
-   *  `withheld` = an explicit headline withholding was respected, so the scoped
-   *  grants below it cannot run. */
+/** What the save layer did — or deliberately did NOT do — with a pair of
+ * grants that must agree (the delivery headline over its scoped steps, or web
+ * egress under the browser). */
+export interface GrantCouplingNotice {
+  /** Which coupling rule decided. */
+  rule: "delivery-headline" | "browser-egress";
+  /** `repaired` = the missing half was materialized `direct`;
+   *  `withheld` = an explicit withholding was respected, so the dependent
+   *  grants cannot run. */
   kind: "repaired" | "withheld";
-  /** The scoped delivery grants that are actionable. */
+  /** The grants whose presence forced the decision. */
   scoped: string[];
   /** Human copy: what was written and why. */
   message: string;
 }
 
-/** The grants to persist, plus what the headline decision was — `notice` is
+/** The grants to persist, plus what one coupling rule decided — `notice` is
  *  null when the stored grants already agreed and nothing was decided. */
-export interface RepairedDeliveryGrants<G> {
+export interface RepairedGrants<G> {
   grants: G[];
-  notice: DeliveryGrantNotice | null;
+  notice: GrantCouplingNotice | null;
+}
+
+/** The grants to persist after EVERY coupling rule ran, with each decision. */
+export interface CoupledGrants<G> {
+  grants: G[];
+  notices: GrantCouplingNotice[];
 }
 
 /**
@@ -389,7 +398,7 @@ export interface RepairedDeliveryGrants<G> {
  */
 export function repairDeliveryGrants<
   G extends { capabilityId: string; mode: string },
->(grants: readonly G[]): RepairedDeliveryGrants<G> {
+>(grants: readonly G[]): RepairedGrants<G> {
   const actionable = (m: string | undefined) =>
     m === "direct" || m === "recommend";
   const byCapId = new Map(grants.map((g) => [g.capabilityId, g.mode]));
@@ -408,6 +417,7 @@ export function repairDeliveryGrants<
     return {
       grants: grants.map((g) => ({ ...g })),
       notice: {
+        rule: "delivery-headline",
         kind: "withheld",
         scoped: [...scoped],
         message:
@@ -428,12 +438,85 @@ export function repairDeliveryGrants<
   return {
     grants: out,
     notice: {
+      rule: "delivery-headline",
       kind: "repaired",
       scoped: [...scoped],
       message:
         `"Execute code or write to the repo" was granted to match ${labels}: ` +
         `the delivery steps above it cannot run without it.`,
     },
+  };
+}
+
+/** The pair `resolveBrowserMcp` (specialist-browser-mcp.server.ts) enforces at
+ *  mount time: the browser is network egress, so these two must agree. */
+export const BROWSER_CAP_ID = "use-browser";
+export const WEB_EGRESS_CAP_ID = "use-web-search-fetch";
+
+/**
+ * Owner ruling (2026-08-20): granting the browser IMPLIES granting web egress.
+ *
+ * `resolveBrowserMcp` refuses to mount a browser whose profile withholds
+ * `use-web-search-fetch`. Before this rule the two rows were independently
+ * editable, and the live failure shape was an admin granting "Drive a live web
+ * browser", leaving "Search & fetch from the web" off, and getting run after
+ * run that honestly reported "browser not mounted" against a matrix that said
+ * Allowed.
+ *
+ * This deliberately diverges from B-AG1 (the delivery repair above respects an
+ * explicit `off`): there the contradictory state is a real, enforceable
+ * withholding — the scoped steps stay dead until the admin resolves it. Here
+ * the contradiction expresses no policy at all: the mount fails closed either
+ * way, so respecting the `off` preserves nothing but the trap. The capability
+ * editor pins the egress row to Allowed while the browser is Allowed; this
+ * repair is the save-layer guarantee for writes that never rendered that
+ * editor. The runtime gate stays as the backstop for hand-edited files.
+ */
+export function repairBrowserEgressGrants<
+  G extends { capabilityId: string; mode: string },
+>(grants: readonly G[]): RepairedGrants<G> {
+  const byCapId = new Map(grants.map((g) => [g.capabilityId, g.mode]));
+  const egress = byCapId.get(WEB_EGRESS_CAP_ID);
+  if (byCapId.get(BROWSER_CAP_ID) !== "direct" || egress === "direct") {
+    return { grants: grants.map((g) => ({ ...g })), notice: null };
+  }
+  // SAFETY: same contract as the delivery repair above — every caller's G is
+  // the persisted `{ capabilityId, mode }` pair, so a copy with `mode`
+  // overridden (and the pushed literal) is a complete G whose `mode` the
+  // `string` bound admits.
+  const out = grants.map((g) =>
+    g.capabilityId === WEB_EGRESS_CAP_ID
+      ? ({ ...g, mode: "direct" } as G)
+      : { ...g },
+  );
+  if (egress === undefined) {
+    // SAFETY: same `{ capabilityId, mode }` contract as the comment above.
+    out.push({ capabilityId: WEB_EGRESS_CAP_ID, mode: "direct" } as G);
+  }
+  return {
+    grants: out,
+    notice: {
+      rule: "browser-egress",
+      kind: "repaired",
+      scoped: [BROWSER_CAP_ID],
+      message:
+        '"Search & fetch from the web" was granted to match "Drive a live web browser": the browser is web egress and cannot mount without it.',
+    },
+  };
+}
+
+/** Every cross-grant coupling the save layer maintains, in one pass: the
+ *  delivery headline first (B-AG1 semantics), then browser→egress. */
+export function applyGrantCouplings<
+  G extends { capabilityId: string; mode: string },
+>(grants: readonly G[]): CoupledGrants<G> {
+  const delivery = repairDeliveryGrants(grants);
+  const browser = repairBrowserEgressGrants(delivery.grants);
+  return {
+    grants: browser.grants,
+    notices: [delivery.notice, browser.notice].filter(
+      (n): n is GrantCouplingNotice => n !== null,
+    ),
   };
 }
 

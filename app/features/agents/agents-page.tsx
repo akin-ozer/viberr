@@ -1191,7 +1191,7 @@ type ProfileActionResult =
        *  = the profile was saved as asked and cannot deliver until the headline
        *  capability is granted — shown as its own failure-toned toast, because
        *  the green "updated" tick alone reads as "nothing to see here". */
-      notice?: { kind: "repaired" | "withheld"; message: string };
+      notices?: { kind: "repaired" | "withheld"; message: string }[];
       /** F20-20: an operator autonomy elevation / direct-accept grant, named so
        *  the admin sees what the save just enabled (the generic "updated" tick
        *  hid that the operator can now close tasks without a human). */
@@ -1328,8 +1328,8 @@ export function AgentsPage({
     const d = fetcher.data;
     if (d.ok) {
       push(d.toast);
-      if (d.notice) {
-        push(d.notice.message, d.notice.kind === "withheld" ? "error" : "success");
+      for (const notice of d.notices ?? []) {
+        push(notice.message, notice.kind === "withheld" ? "error" : "success");
       }
       // F20-20: a governance elevation (full autonomy / direct-accept) gets its
       // own toast naming the consequence — the save succeeded, so it is not

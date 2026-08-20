@@ -6,7 +6,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import type { DeliveryGrantNotice } from "~/shared/capabilities";
+import type { GrantCouplingNotice } from "~/shared/capabilities";
 import type {
   AgentProfileView,
   AgentDeploymentView,
@@ -136,7 +136,7 @@ interface ProfileMutationReply {
   ok: true;
   toast: string;
   profileId: string;
-  notice?: DeliveryGrantNotice;
+  notices?: GrantCouplingNotice[];
   governanceNotice?: { message: string };
 }
 
@@ -581,8 +581,8 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       payload: JSON.stringify(contradictory("Silent Dev")),
     }));
     expect(created.ok).toBe(true);
-    expect(created.notice?.kind).toBe("withheld");
-    expect(created.notice?.message).toContain("cannot deliver");
+    expect(created.notices?.[0]?.kind).toBe("withheld");
+    expect(created.notices?.[0]?.message).toContain("cannot deliver");
 
     // Editing it (the real path an admin walks into a legacy VIB-1 profile on)
     // reports the same thing rather than a bare "updated" tick.
@@ -592,8 +592,8 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       payload: JSON.stringify(contradictory("Silent Dev")),
     }));
     expect(updated.ok).toBe(true);
-    expect(updated.notice?.kind).toBe("withheld");
-    expect(updated.notice?.message).toContain("Commit");
+    expect(updated.notices?.[0]?.kind).toBe("withheld");
+    expect(updated.notices?.[0]?.message).toContain("Commit");
 
     // A profile with nothing to decide carries no notice at all.
     const clean = saved(await postAction(ids.arda, {
@@ -603,11 +603,81 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         caps: { "execute-code-or-write-repo": "direct" },
       }),
     }));
-    expect(clean.notice).toBeUndefined();
+    expect(clean.notices).toBeUndefined();
 
     for (const profileId of ["silent-dev", "plain-dev"]) {
       await postAction(ids.arda, { intent: "delete-profile", profileId });
     }
+  });
+
+  /**
+   * Owner ruling 2026-08-20 — browser→egress coupling, end to end. The live
+   * failure shape: an admin grants "Drive a live web browser", leaves "Search &
+   * fetch from the web" off, and every run honestly reports "browser not
+   * mounted" against a matrix that says Allowed (`resolveBrowserMcp` refuses
+   * the pair in disagreement). The save layer now repairs the pair — the
+   * browser grant carries egress with it — and the decision is disclosed on
+   * the result AND the audit row, never silent.
+   */
+  it("a granted browser carries web egress with it, disclosed as a notice", async () => {
+    const payload = (name: string) => ({
+      name,
+      role: "Screenshots",
+      backend: "claude",
+      stages: ["impl"],
+      definition: "Browser granted; egress explicitly off.",
+      caps: {
+        "use-browser": "direct",
+        "use-web-search-fetch": "off",
+      },
+      resources: { skills: [], mcps: [], kb: [] },
+    });
+    const created = saved(await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify(payload("Browser Dev")),
+    }));
+    expect(created.ok).toBe(true);
+    const notice = created.notices?.find((n) => n.rule === "browser-egress");
+    expect(notice?.kind).toBe("repaired");
+    expect(notice?.message).toContain("web egress");
+
+    // The STORED grant is the repaired one — the runtime mount gate and the
+    // matrix now agree (canonical file truth, same idiom as the create test
+    // above: each capability row's mode is the line after its id).
+    const file = readFileSync(
+      path.join(app.dataRoot, "projects/viberr-core/project.md"),
+      "utf8",
+    );
+    const deployment = file.slice(file.indexOf("profileId: browser-dev"));
+    for (const id of ["use-browser", "use-web-search-fetch"]) {
+      const row = deployment.indexOf(id);
+      expect(row, `${id} row must be stored`).toBeGreaterThan(0);
+      expect(deployment.slice(row, row + id.length + 30)).toContain(
+        "mode: direct",
+      );
+    }
+
+    // The audit row carries the decision under its own keys.
+    const audit = listAuditEvents(app.db, {
+      action: "project.agent_profile.created",
+    }).find((e) => e.subjectId === "browser-dev")!;
+    expect(audit.details).toMatchObject({ browserEgress: "repaired" });
+
+    // Editing the profile back into the contradiction repairs it again.
+    const updated = saved(await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "browser-dev",
+      payload: JSON.stringify(payload("Browser Dev")),
+    }));
+    expect(updated.ok).toBe(true);
+    expect(
+      updated.notices?.find((n) => n.rule === "browser-egress")?.kind,
+    ).toBe("repaired");
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: "browser-dev",
+    });
   });
 
   it("R20-6/F20-21 — a stray specialist `recommend` normalizes to `off` (withheld) on create", async () => {
@@ -978,8 +1048,8 @@ describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
       profileId: templateId,
     }));
     expect(result.ok).toBe(true);
-    expect(result.notice?.kind).toBe("withheld");
-    expect(result.notice?.message).toContain("cannot deliver");
+    expect(result.notices?.[0]?.kind).toBe("withheld");
+    expect(result.notices?.[0]?.message).toContain("cannot deliver");
 
     const audit = listAuditEvents(app.db, {
       action: "project.agent_profile.deployed",

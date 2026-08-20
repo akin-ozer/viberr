@@ -121,12 +121,12 @@ interface ProfileMutationSuccess {
   ok: true;
   toast: string;
   profileId: string;
-  /** B-AG1: a delivery-headline decision the save had to make is NOT a detail
-   *  for the audit log alone. A `withheld` notice means the profile was saved
-   *  exactly as asked and therefore cannot deliver — the admin sees that next to
-   *  the success toast instead of discovering it when a run silently refuses to
-   *  push. */
-  notice?: ProfileSaveResult["notice"];
+  /** B-AG1: a coupling decision the save had to make (delivery headline, or
+   *  web egress under the browser) is NOT a detail for the audit log alone. A
+   *  `withheld` notice means the profile was saved exactly as asked and
+   *  therefore cannot deliver — the admin sees each decision next to the
+   *  success toast instead of discovering it when a run silently refuses. */
+  notices?: ProfileSaveResult["notices"];
   /** F20-20: an operator autonomy elevation / direct-accept grant rides its own
    *  governance notice so the toast names what the admin just enabled. */
   governanceNotice?: ProfileSaveResult["governanceNotice"];
@@ -161,7 +161,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         toast: `Profile "${result.name}" created · available for future assignments`,
         profileId: result.profileId,
       };
-      if (result.notice) created.notice = result.notice;
+      if (result.notices) created.notices = result.notices;
       return created;
     }
     if (intent === "deploy-profile") {
@@ -178,7 +178,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         toast: `"${result.name}" added from the global library · the operator can assign it now`,
         profileId: result.profileId,
       };
-      if (result.notice) deployed.notice = result.notice;
+      if (result.notices) deployed.notices = result.notices;
       return deployed;
     }
     if (intent === "update-profile") {
@@ -196,7 +196,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         toast: `Profile "${result.name}" updated · changes apply to future assignments`,
         profileId: result.profileId,
       };
-      if (result.notice) updated.notice = result.notice;
+      if (result.notices) updated.notices = result.notices;
       if (result.governanceNotice)
         updated.governanceNotice = result.governanceNotice;
       return updated;

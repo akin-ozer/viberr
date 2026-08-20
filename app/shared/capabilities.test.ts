@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
+  applyGrantCouplings,
+  repairBrowserEgressGrants,
   CAP_CATALOG,
   CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS,
   ENFORCED_CAPABILITY_IDS,
@@ -252,5 +254,88 @@ describe("conservativeGrantsFor (surfaces with no capability UI)", () => {
       expect(byId.get(id), id).toBe("off");
     }
     expect(byId.get("report-validation-verdict")).toBe("off");
+  });
+});
+
+describe("browser→egress coupling (owner ruling 2026-08-20)", () => {
+  const g = (capabilityId: string, mode: string) => ({ capabilityId, mode });
+
+  it("flips an explicit egress `off` to `direct` when the browser is `direct`", () => {
+    const { grants, notice } = repairBrowserEgressGrants([
+      g("use-browser", "direct"),
+      g("use-web-search-fetch", "off"),
+    ]);
+    const byId = new Map(grants.map((x) => [x.capabilityId, x.mode]));
+    expect(byId.get("use-web-search-fetch")).toBe("direct");
+    expect(notice?.rule).toBe("browser-egress");
+    expect(notice?.kind).toBe("repaired");
+    // The message names both rows and the reason — it becomes the audit note
+    // and the save toast verbatim.
+    expect(notice?.message).toContain("Search & fetch from the web");
+    expect(notice?.message).toContain("Drive a live web browser");
+    expect(notice?.message).toContain("web egress");
+  });
+
+  it("flips an explicit `human` and materializes an absent row the same way", () => {
+    for (const stored of [
+      [g("use-browser", "direct"), g("use-web-search-fetch", "human")],
+      [g("use-browser", "direct")],
+    ]) {
+      const { grants, notice } = repairBrowserEgressGrants(stored);
+      const byId = new Map(grants.map((x) => [x.capabilityId, x.mode]));
+      expect(byId.get("use-web-search-fetch")).toBe("direct");
+      expect(notice?.kind).toBe("repaired");
+    }
+  });
+
+  it("touches nothing when the pair already agrees, or the browser is not direct", () => {
+    for (const stored of [
+      [g("use-browser", "direct"), g("use-web-search-fetch", "direct")],
+      [g("use-browser", "off"), g("use-web-search-fetch", "off")],
+      [g("use-browser", "human"), g("use-web-search-fetch", "off")],
+      [g("use-web-search-fetch", "off")],
+    ]) {
+      const { grants, notice } = repairBrowserEgressGrants(stored);
+      expect(notice).toBeNull();
+      expect(grants).toEqual(stored);
+    }
+  });
+
+  it("applyGrantCouplings runs delivery THEN browser and reports both", () => {
+    // A profile that trips both rules in one save: scoped delivery submitted
+    // with the headline absent, and a browser grant over withheld egress.
+    const { grants, notices } = applyGrantCouplings([
+      g("commit-push-branch", "direct"),
+      g("use-browser", "direct"),
+      g("use-web-search-fetch", "off"),
+    ]);
+    const byId = new Map(grants.map((x) => [x.capabilityId, x.mode]));
+    expect(byId.get("execute-code-or-write-repo")).toBe("direct");
+    expect(byId.get("use-web-search-fetch")).toBe("direct");
+    expect(notices.map((n) => n.rule)).toEqual([
+      "delivery-headline",
+      "browser-egress",
+    ]);
+    expect(notices.map((n) => n.kind)).toEqual(["repaired", "repaired"]);
+  });
+
+  it("B-AG1 divergence is scoped: an explicit delivery `off` still stands", () => {
+    // The browser rule overrides an explicit egress `off` (the contradiction
+    // expresses no policy — the mount fails closed either way). The delivery
+    // rule keeps its own semantics: an explicit headline `off` is reported,
+    // never overturned.
+    const { grants, notices } = applyGrantCouplings([
+      g("commit-push-branch", "direct"),
+      g("execute-code-or-write-repo", "off"),
+      g("use-browser", "direct"),
+      g("use-web-search-fetch", "off"),
+    ]);
+    const byId = new Map(grants.map((x) => [x.capabilityId, x.mode]));
+    expect(byId.get("execute-code-or-write-repo")).toBe("off");
+    expect(byId.get("use-web-search-fetch")).toBe("direct");
+    expect(notices.map((n) => `${n.rule}:${n.kind}`)).toEqual([
+      "delivery-headline:withheld",
+      "browser-egress:repaired",
+    ]);
   });
 });
