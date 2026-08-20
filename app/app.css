@@ -4367,6 +4367,20 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .tl-attach-chip:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
 .tl-attach-chip svg { width: 13px; height: 13px; color: var(--muted); flex: none; }
 .tl-attach-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* An image the run captured renders as the picture on the producing message
+   (owner ask 2026-08-20) — the panel's .attach-thumb treatment at timeline
+   scale. Capped small: the timeline is a feed, the panel is the gallery. */
+.tl-attach-thumb {
+  display: inline-flex; flex-direction: column; max-width: 240px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-button);
+  background: var(--surface); overflow: hidden; text-decoration: none; color: var(--fg);
+}
+.tl-attach-thumb:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.tl-attach-thumb img { display: block; width: 100%; max-height: 150px; object-fit: cover; object-position: top; }
+.tl-attach-thumb .nm {
+  padding: .3rem .55rem; font-family: var(--font-mono); font-size: .68rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 /* Evidence label token that names a real attachment (timeline.tsx linkify). */
 /* Same token text-links use (P13-D-18 precedent) — --blue on white is 3.84:1
    and fails AA for normal text; --teal-dark clears it in both themes. */

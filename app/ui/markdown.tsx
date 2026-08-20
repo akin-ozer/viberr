@@ -129,41 +129,108 @@ function rehypeMentions(names: string[] = []) {
   }
 }
 
-const COMPONENTS = {
-  a({ children, href }: ComponentPropsWithoutRef<"a">) {
-    return (
-      <a href={href} target="_blank" rel="noopener noreferrer">
-        {children}
-      </a>
-    );
-  },
-  code({ children, className }: ComponentPropsWithoutRef<"code">) {
-    // Inline code and fenced-block code both flow through here; the block case
-    // is wrapped in <pre> by react-markdown, so a single mono class covers both.
-    return <code className={"mono" + (className ? " " + className : "")}>{children}</code>;
-  },
-  table({ children }: ComponentPropsWithoutRef<"table">) {
-    return (
-      <div className="md-table-wrap">
-        <table>{children}</table>
-      </div>
-    );
-  },
-} as const;
+/**
+ * Repair an agent-written attachment reference to the serving route.
+ *
+ * Agents cite the files they saved from inside their WORKSPACE, so the link
+ * that reaches the timeline is workspace-relative — the live shape was
+ * `[page-….png](../../attachments/page-….png)`, which the browser resolves
+ * against the task URL and 404s. The filename is real; only the path is from
+ * the wrong world. When the href's last segment names a file this task
+ * actually has AND the path is attachment-shaped (`attachments/<name>`, any
+ * relative prefix, or the bare filename), it is rewritten to the member-only
+ * serving route. Anything else — absolute URLs, other paths, names the task
+ * does not have — passes through untouched: no guessing, same contract as the
+ * evidence linkify (timeline.tsx `EvidenceLabel`).
+ */
+function repairAttachmentHref(
+  href: string | undefined,
+  attachments: ReadonlySet<string> | undefined,
+  base: string | undefined,
+): string | undefined {
+  if (!href || !attachments || attachments.size === 0 || !base) return href;
+  if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(href)) return href; // absolute / protocol
+  const segments = href.split("/");
+  const name = decodeURIComponent(segments[segments.length - 1] ?? "");
+  if (!name || !attachments.has(name)) return href;
+  const dir = segments[segments.length - 2];
+  const citesTaskAttachment = segments.length === 1 || dir === "attachments";
+  return citesTaskAttachment ? `${base}/${encodeURIComponent(name)}` : href;
+}
+
+function componentsFor(
+  attachments: ReadonlySet<string> | undefined,
+  base: string | undefined,
+) {
+  return {
+    a({ children, href }: ComponentPropsWithoutRef<"a">) {
+      return (
+        <a
+          href={repairAttachmentHref(href, attachments, base)}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {children}
+        </a>
+      );
+    },
+    img({ src, alt }: ComponentPropsWithoutRef<"img">) {
+      // `![…](attachments/x.png)` embeds the capture itself; the same repair
+      // applies.
+      // SAFETY: react-markdown builds `src` from the markdown AST's url
+      // STRING — the Blob/MediaSource arms of the DOM prop type can never
+      // reach a components override, so the value is a string (or absent).
+      const url = src as string | undefined;
+      return (
+        <img
+          src={repairAttachmentHref(url, attachments, base)}
+          alt={alt ?? ""}
+          loading="lazy"
+        />
+      );
+    },
+    code({ children, className }: ComponentPropsWithoutRef<"code">) {
+      // Inline code and fenced-block code both flow through here; the block case
+      // is wrapped in <pre> by react-markdown, so a single mono class covers both.
+      return <code className={"mono" + (className ? " " + className : "")}>{children}</code>;
+    },
+    table({ children }: ComponentPropsWithoutRef<"table">) {
+      return (
+        <div className="md-table-wrap">
+          <table>{children}</table>
+        </div>
+      );
+    },
+  } as const;
+}
+
+const DEFAULT_COMPONENTS = componentsFor(undefined, undefined);
 
 export function Markdown({
   text,
   mentionNames,
+  attachmentNames,
+  attachmentsBase,
 }: {
   text: string;
   /** Known mentionable names, so a multi-word "@Arda Kaya" chips as one span. */
   mentionNames?: string[];
+  /** The surrounding task's REAL attachment filenames — enables rewriting
+   *  agent-written workspace-relative attachment links to the serving route.
+   *  Absent (every non-task surface) ⇒ links render exactly as written. */
+  attachmentNames?: ReadonlySet<string>;
+  /** The task's attachment route base (`…/tasks/<KEY>/attachments`). */
+  attachmentsBase?: string;
 }): ReactNode {
+  const components =
+    attachmentNames && attachmentNames.size > 0 && attachmentsBase
+      ? componentsFor(attachmentNames, attachmentsBase)
+      : DEFAULT_COMPONENTS;
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[[rehypeMentions, mentionNames ?? []]]}
-      components={COMPONENTS}
+      components={components}
     >
       {text}
     </ReactMarkdown>

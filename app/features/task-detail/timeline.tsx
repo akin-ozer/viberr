@@ -5,6 +5,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
+import { IMAGE_RE } from "./attachments-panel";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
@@ -55,9 +56,16 @@ const COLLAPSE_MAX = 340;
 function CollapsibleComment({
   text,
   mentionNames,
+  attachmentNames,
+  attachmentsBase,
 }: {
   text: string;
   mentionNames?: string[];
+  /** The task's real attachment filenames + serving base, so an agent-written
+   *  workspace-relative attachment link in the body resolves (markdown.tsx
+   *  `repairAttachmentHref`). */
+  attachmentNames?: ReadonlySet<string>;
+  attachmentsBase?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
@@ -86,7 +94,12 @@ function CollapsibleComment({
         className={"tl-text md-body" + (clamped ? " clamped" : "")}
         style={clamped ? { maxHeight: COLLAPSE_MAX } : undefined}
       >
-        <Markdown text={text} mentionNames={mentionNames} />
+        <Markdown
+          text={text}
+          mentionNames={mentionNames}
+          {...(attachmentNames ? { attachmentNames } : {})}
+          {...(attachmentsBase ? { attachmentsBase } : {})}
+        />
       </div>
       {overflowing && (
         <button
@@ -216,7 +229,12 @@ export function TimelineItem({
                 markdown — render with the GFM renderer, not the inline-only
                 RichText. Long replies clamp behind a Show more toggle so one
                 answer can't swallow the timeline. Typed events stay on RichText. */}
-            <CollapsibleComment text={ev.text} mentionNames={mentionNames} />
+            <CollapsibleComment
+              text={ev.text}
+              mentionNames={mentionNames}
+              {...(attachmentNames ? { attachmentNames } : {})}
+              {...(attachmentsBase ? { attachmentsBase } : {})}
+            />
           </div>
         ) : (
           <>
@@ -256,7 +274,30 @@ export function TimelineItem({
             lists) the names stay off rather than rendering dead links. */}
         {ev.attachments && ev.attachments.length > 0 && attachmentsBase && (
           <div className="tl-attach">
-            {ev.attachments.map((name) => (
+            {/* An image the run captured IS the deliverable on a screenshot
+                task — it renders as the picture, right on the producing
+                message (the owner's ask, 2026-08-20: chips alone made the
+                human open the side panel to see what the agent "posted").
+                Non-image files keep the chip; the route serves whitelisted
+                image types inline, sandboxed, member-only. */}
+            {ev.attachments.filter((name) => IMAGE_RE.test(name)).map((name) => (
+              <a
+                key={name}
+                className="tl-attach-thumb"
+                href={`${attachmentsBase}/${encodeURIComponent(name)}`}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`Open attachment ${name}`}
+              >
+                <img
+                  src={`${attachmentsBase}/${encodeURIComponent(name)}`}
+                  alt={name}
+                  loading="lazy"
+                />
+                <span className="nm">{name}</span>
+              </a>
+            ))}
+            {ev.attachments.filter((name) => !IMAGE_RE.test(name)).map((name) => (
               <a
                 key={name}
                 className="tl-attach-chip"

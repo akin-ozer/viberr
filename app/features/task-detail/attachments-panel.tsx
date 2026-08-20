@@ -18,7 +18,9 @@ import { LocalDayDotTime } from "~/ui/local-time";
  * run console), and the serving route re-checks membership on every fetch.
  */
 
-const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
+/** Image-typed attachment names — these render as previews (the panel's
+ * thumbnail grid, and the timeline's producing-comment strip). */
+export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
 
 export function AttachmentsPanel({
   base,

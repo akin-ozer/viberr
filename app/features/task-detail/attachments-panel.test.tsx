@@ -169,18 +169,52 @@ describe("TimelineItem attachment chips (P21 — the producing message shows its
     attachments,
   });
 
-  it("renders one chip per saved file, linking to the serving route", () => {
+  it("renders an image as a thumbnail and other files as chips, linking to the serving route", () => {
+    // Owner ask (2026-08-20): a screenshot task's deliverable IS the picture —
+    // chips alone sent the human to the side panel to see what was "posted".
     const { container } = render(
       <TimelineItem
         ev={withFiles(["home page.png", "capture.yml"])}
         attachmentsBase={BASE}
       />,
     );
+    const thumbs = container.querySelectorAll<HTMLAnchorElement>(".tl-attach-thumb");
+    expect(thumbs).toHaveLength(1);
+    expect(thumbs[0]!.getAttribute("href")).toBe(`${BASE}/home%20page.png`);
+    expect(thumbs[0]!.querySelector("img")!.getAttribute("src")).toBe(
+      `${BASE}/home%20page.png`,
+    );
+    expect(thumbs[0]!.textContent).toContain("home page.png");
     const chips = container.querySelectorAll<HTMLAnchorElement>(".tl-attach-chip");
-    expect(chips).toHaveLength(2);
-    expect(chips[0]!.getAttribute("href")).toBe(`${BASE}/home%20page.png`);
-    expect(chips[0]!.textContent).toContain("home page.png");
-    expect(chips[1]!.getAttribute("href")).toBe(`${BASE}/capture.yml`);
+    expect(chips).toHaveLength(1);
+    expect(chips[0]!.getAttribute("href")).toBe(`${BASE}/capture.yml`);
+  });
+
+  it("repairs an agent-written workspace-relative attachment link in the body", () => {
+    // The live shape (VIB-1, 2026-08-20): Codex cited its capture as
+    // `[….png](../../attachments/….png)` — a path from its WORKSPACE, which
+    // the browser resolves against the task URL and 404s. The filename names
+    // a real attachment, so the href is rewritten to the serving route; a
+    // name the task does not have stays exactly as written (no guessing).
+    const { container } = render(
+      <TimelineItem
+        ev={{
+          ...withFiles(["shot.png"]),
+          text:
+            "Done: captured [shot.png](../../attachments/shot.png) and " +
+            "see [other](../../attachments/missing.png).",
+        }}
+        attachmentNames={new Set(["shot.png"])}
+        attachmentsBase={BASE}
+      />,
+    );
+    const links = Array.from(
+      container.querySelectorAll<HTMLAnchorElement>(".comment-card a"),
+    );
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([
+      `${BASE}/shot.png`,
+      "../../attachments/missing.png",
+    ]);
   });
 
   it("renders no chips without the serving base (withheld lists, bare renders)", () => {
