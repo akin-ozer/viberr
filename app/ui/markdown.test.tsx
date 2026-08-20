@@ -160,3 +160,71 @@ describe("Markdown", () => {
     expect(container.textContent).toContain("@host");
   });
 });
+
+describe("attachment link repair (owner ask 2026-08-20)", () => {
+  const BASE = "/projects/p/tasks/T-1/attachments";
+  const props = {
+    attachmentNames: new Set(["shot.png", "notes.yml"]),
+    attachmentsBase: BASE,
+  };
+
+  it("rewrites attachment-shaped relative hrefs whose filename is real", () => {
+    const { container } = render(
+      <Markdown
+        text={
+          "[a](../../attachments/shot.png) [b](attachments/notes.yml) [c](shot.png)"
+        }
+        {...props}
+      />,
+    );
+    const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toEqual([
+      `${BASE}/shot.png`,
+      `${BASE}/notes.yml`,
+      `${BASE}/shot.png`,
+    ]);
+  });
+
+  it("never touches absolute URLs, foreign paths, or unknown names", () => {
+    const { container } = render(
+      <Markdown
+        text={
+          "[a](https://example.com/attachments/shot.png) " +
+          "[b](../../src/shot.png) [c](attachments/missing.png)"
+        }
+        {...props}
+      />,
+    );
+    const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toEqual([
+      "https://example.com/attachments/shot.png",
+      "../../src/shot.png",
+      "attachments/missing.png",
+    ]);
+  });
+
+  it("repairs an embedded image the same way", () => {
+    const { container } = render(
+      <Markdown text={"![the capture](../../attachments/shot.png)"} {...props} />,
+    );
+    expect(container.querySelector("img")!.getAttribute("src")).toBe(
+      `${BASE}/shot.png`,
+    );
+    expect(container.querySelector("img")!.getAttribute("alt")).toBe(
+      "the capture",
+    );
+  });
+
+  it("renders links exactly as written when the surface passes no attachments", () => {
+    const { container } = render(
+      <Markdown text={"[a](../../attachments/shot.png)"} />,
+    );
+    expect(container.querySelector("a")!.getAttribute("href")).toBe(
+      "../../attachments/shot.png",
+    );
+  });
+});
