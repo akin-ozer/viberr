@@ -1090,70 +1090,73 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .hero-file, .hero-file * { white-space: nowrap; }
 
 /* decision packet — the loud one */
+/* Decision packet — the questionnaire card (shadcn base/questionnaire shape,
+   owner ruling 2026-08-20: minimalist and modern, not a billboard). The card is
+   a QUIET surface: the semantic tone (question amber / blocked coral) lives in
+   one thin left accent and the kind pill, never in a full-card wash — the
+   options are the content, the chrome stays out of their way. */
 .packet {
-  border: 1px solid color-mix(in srgb, var(--yellow-dark), transparent 62%);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid color-mix(in srgb, var(--yellow-dark), transparent 30%);
   border-radius: var(--radius-panel);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--orange-light), var(--surface) 28%), color-mix(in srgb, var(--orange-light), var(--surface) 64%));
-  box-shadow: var(--shadow-card);
+  background: var(--surface);
   overflow: hidden;
 }
-.packet.input { border-color: color-mix(in srgb, var(--yellow-dark), transparent 62%); }
 .packet.blocked {
-  border-color: color-mix(in srgb, var(--coral-dark), transparent 64%);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--red-light), var(--surface) 30%), color-mix(in srgb, var(--coral-light), var(--surface) 60%));
+  border-left-color: color-mix(in srgb, var(--coral-dark), transparent 30%);
 }
 .packet-top {
   display: flex; align-items: center; gap: .6rem;
-  padding: .85rem 1.1rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--yellow-dark), transparent 78%);
+  padding: .6rem .95rem 0;
 }
-.packet.blocked .packet-top { border-bottom-color: color-mix(in srgb, var(--coral-dark), transparent 80%); }
 .packet-top .from {
-  display: inline-flex; align-items: center; gap: .45rem;
-  font-size: .78rem; color: var(--muted); margin-left: auto;
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .74rem; color: var(--muted); margin-left: auto;
 }
-.packet-body { padding: 1rem 1.1rem 1.15rem; }
-.packet-body h2 { font-size: 1.25rem; line-height: 1.12; margin-bottom: .5rem; }
-.packet-obs { display: grid; gap: .5rem; margin: .85rem 0; }
+.packet-body { padding: .65rem .95rem .85rem; }
+.packet-body h2 { font-size: 1rem; line-height: 1.3; margin-bottom: .3rem; }
+.packet-obs { display: grid; gap: .35rem; margin: .7rem 0; }
 /* The label column holds a fixed 92px so every row's value starts on the same
    line — until a label is wider than that and its text spills across the gap
    into the value (live: "RECOMMENDATION" in the acceptance dialog, added with
    F19-3). `minmax` keeps the shared alignment and lets the widest label decide
    the column, which is what the fixed value was approximating. */
 .obs {
-  display: grid; grid-template-columns: minmax(92px, max-content) 1fr; gap: .7rem;
+  display: grid; grid-template-columns: minmax(92px, max-content) 1fr; gap: .65rem;
   align-items: start;
-  font-size: .86rem; color: var(--fg); line-height: 1.4;
-  padding: .55rem .7rem;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface), transparent 18%);
-  border: 1px solid color-mix(in srgb, var(--border), transparent 50%);
+  font-size: .8rem; color: var(--fg); line-height: 1.45;
+  padding: .4rem .6rem;
+  border-radius: var(--radius-button);
+  background: color-mix(in srgb, var(--fg), transparent 97%);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 60%);
 }
-.obs .k { font-size: .7rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); padding-top: .12rem; }
+.obs .k { font-size: .66rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); padding-top: .14rem; }
 .obs code { font-family: var(--font-mono); font-size: .78rem; }
 /* R17-1: a divergence warning row inside an acceptance dialog — the reviewed
    revision moved on, so the value reads in the warning tone. */
 .obs.warn { border-color: color-mix(in srgb, var(--coral-dark), transparent 55%); background: var(--rose-light); }
 .obs.warn > span:last-child { color: var(--coral-dark); }
 
-.options { display: grid; gap: .5rem; margin-top: .9rem; }
+.options { display: grid; gap: .4rem; margin-top: .7rem; }
+/* A choice row is dense and quiet (the questionnaire's whole card fits in one
+   glance); selection is the soft accent fill + dot — no lift, no shadow. */
 .opt {
-  display: flex; align-items: center; gap: .7rem;
-  padding: .7rem .8rem;
-  border-radius: 13px;
+  display: flex; align-items: center; gap: .6rem;
+  padding: .5rem .65rem;
+  border-radius: var(--radius-button);
   border: 1px solid var(--hairline);
   background: var(--surface);
   text-align: left; width: 100%;
-  transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
+  transition: border-color .14s ease, background .14s ease;
 }
-.opt:hover { border-color: var(--blue); transform: translateY(-1px); box-shadow: 0 6px 16px color-mix(in srgb, var(--blue), transparent 88%); }
-.opt.recommend { border-color: color-mix(in srgb, var(--blue), transparent 45%); }
-.opt .radio { width: 17px; height: 17px; border-radius: 50%; border: 2px solid var(--border); flex: none; display: grid; place-items: center; }
+.opt:hover { border-color: var(--border); }
+.opt.recommend { border-color: color-mix(in srgb, var(--blue), transparent 55%); }
+.opt.sel { border-color: var(--blue); background: var(--blue-soft); }
+.opt .radio { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--border); flex: none; display: grid; place-items: center; }
 .opt.sel .radio { border-color: var(--blue); }
-.opt.sel .radio::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); }
-.opt .ot { font-weight: 700; font-family: var(--font-display); font-size: .9rem; }
-.opt .od { font-size: .78rem; color: var(--faint); margin-top: .1rem; }
+.opt.sel .radio::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+.opt .ot { font-weight: 650; font-family: var(--font-display); font-size: .84rem; }
+.opt .od { font-size: .74rem; color: var(--faint); margin-top: .06rem; line-height: 1.4; }
 .opt .rec-tag { margin-left: auto; }
 /* Questionnaire shortcut chip (digit selects the choice). `margin-left: auto`
    pushes it right; a rec-tag already claiming the auto margin leaves the chip
@@ -1168,10 +1171,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Optional free-text a human attaches when resolving a packet (P11-71).
    Styling rides the standard `.field textarea` tokens — its wrapper carries
    the spacing (owner feedback 2026-07-26). */
-.packet-note { width: 100%; }
+.packet-note { width: 100%; min-height: 0; }
 
-.packet-actions { display: flex; gap: .55rem; margin-top: 1rem; flex-wrap: wrap; }
-.packet-actions .btn { flex: 1; min-width: 130px; }
+/* Actions: natural-width, right-aligned, primary LAST (reading order ends on
+   the commit) — the stretched full-width pair read as a modal, not a card. */
+.packet-actions { display: flex; gap: .5rem; margin-top: .8rem; flex-wrap: wrap; justify-content: flex-end; }
 
 /* D18 continuity recovery panel — the fifth custom component. Warning tone, NOT
    failure tone: the SAME amber pair the `continuity` timeline event already
@@ -3921,8 +3925,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .packet-obs.flush { margin: 0; }
 .modal-body.tight { gap: 1.05rem; }
 .from-name { font-family: var(--font-display); }
-.packet-lede { color: var(--muted); font-size: .92rem; line-height: 1.55; margin: 0; }
-.field.packet-note-field { margin-top: .75rem; }
+.packet-lede { color: var(--muted); font-size: .84rem; line-height: 1.5; margin: 0; }
+.field.packet-note-field { margin-top: .6rem; }
 .composer-err { font-size: .75rem; color: var(--coral-dark); }
 
 /* --- activity / review / notifications feeds --- */

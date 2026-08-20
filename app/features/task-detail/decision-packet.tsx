@@ -857,6 +857,21 @@ export function DecisionPacket({
         )}
 
         <div className="packet-actions">
+          {/* N20-15: not inert — drops `@operator` into the comment composer
+              below and focuses it; sending that comment starts a real operator
+              run (the mention path). The title says so, because a click that
+              only scrolls to an already-focused composer looked like a no-op.
+              Open to everyone, resolver or not (commenting is app-wide).
+              FIRST in the row: actions end on the primary commit (flex-end). */}
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={onAsk}
+            title="Starts a comment mentioning @operator below. Send it to pull the operator in"
+          >
+            <Icon name="message" />
+            Ask operator
+          </button>
           {canResolve && (
             <button
               type="button"
@@ -922,20 +937,6 @@ export function DecisionPacket({
               Confirm decision
             </button>
           )}
-          {/* N20-15: this is not inert — it drops `@operator` into the comment
-              composer below and focuses it; sending that comment starts a real
-              operator run (the mention path). The title says so, because a click
-              that only scrolls to an already-focused composer looked like a
-              no-op. Open to everyone, resolver or not (commenting is app-wide). */}
-          <button
-            type="button"
-            className="btn ghost"
-            onClick={onAsk}
-            title="Starts a comment mentioning @operator below. Send it to pull the operator in"
-          >
-            <Icon name="message" />
-            Ask operator
-          </button>
         </div>
       </div>
 
