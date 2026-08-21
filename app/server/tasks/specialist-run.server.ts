@@ -71,6 +71,7 @@ import {
 } from "~/server/secrets/pat-store.server";
 import {
   effectiveProfileView,
+  type ModelMarks,
   VIEW_WITHOUT_POLICY,
 } from "~/features/agents/agents-query.server";
 import { primaryRunBackend } from "~/server/agents/deployment-view.server";
@@ -2913,6 +2914,13 @@ export interface DeployedSpecialistView {
   stages: string[];
   /** When true the profile is eligible across every stage. */
   spanAll: boolean;
+  /** Owner ruling 2026-08-21: the provider's redacted refusal sentence when a
+   *  REAL run showed this agent's resolved model is not runnable on the account
+   *  (model_availability / F20-4). Surfaced at the run control so a human sees
+   *  "unavailable" BEFORE spending a run — not only after it fails. Absent when
+   *  the model is available (or was never tried). Quota/auth are transient and
+   *  deliberately NOT marked here (model-availability.server.ts). */
+  modelUnavailable?: string;
 }
 
 /**
@@ -2976,6 +2984,10 @@ function assertStageEligible(
 export function listDeployedSpecialists(
   projectSlug: string,
   ctx: TaskMutationContext = {},
+  /** Provider model-availability marks (from `unavailableModels`), so the run
+   *  control can flag an unavailable delivering agent before a run is spent.
+   *  Omitted by callers that don't render availability (mentions, operator). */
+  modelMarks?: ModelMarks,
 ): DeployedSpecialistView[] {
   const file = readProjectFile({
     projectSlug,
@@ -2984,7 +2996,12 @@ export function listDeployedSpecialists(
   if (!file) return [];
   const out: DeployedSpecialistView[] = [];
   for (const deployment of file.parsed.frontmatter.agents) {
-    const view = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
+    const view = effectiveProfileView(
+      deployment,
+      ctx.dataRoot,
+      VIEW_WITHOUT_POLICY,
+      modelMarks,
+    );
     if (view.kind !== "specialist") continue;
     const resolved = toResolved(view);
     // Same empty-grant resolution the run path uses (AP-06), so what the
@@ -3030,6 +3047,11 @@ export function listDeployedSpecialists(
       },
       stages: resolved.stages,
       spanAll: resolved.spanAll,
+      // Present only when a real run marked this agent's resolved model
+      // unavailable on the account (F20-4); the run control renders the warning.
+      ...(view.modelUnavailable
+        ? { modelUnavailable: view.modelUnavailable.reason }
+        : {}),
     });
   }
   return out;

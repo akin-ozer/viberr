@@ -116,9 +116,19 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
       id: "developer", kind: "specialist", name: "Developer", role: "Implementation",
-      // R20-8: this deployment's ChatGPT-account Codex cannot run `gpt-5.6-sol`;
-      // `gpt-5.6-terra` is the CLI default that works, so the seed ships it.
-      icon: "branch", backends: ["codex", "claude"], model: "gpt-5.6-terra",
+      // Owner ruling 2026-08-21: the seed defaults the Developer to CLAUDE so a
+      // fresh install is demoable/testable end-to-end without a Codex quota (the
+      // ChatGPT-account Codex here is over quota until Sep 18). Codex stays a
+      // secondary backend the profile still OFFERS — an admin flips it in the
+      // editor, where switching to Codex reselects its own catalog default
+      // (gpt-5.6-terra; this account can't run gpt-5.6-sol, per R20-8).
+      // TRADEOFF (accepted): this inverts the prior default, so a fresh install
+      // with ONLY Codex credentials now needs the admin to flip the profile
+      // before the Developer runs (its runs fail-fast on the unavailable claude
+      // backend, with the backend-health chips saying why). A Claude-first
+      // default is the right call given Claude is this project's primary runtime
+      // and the one a demo/CI reviewer can reach.
+      icon: "branch", backends: ["claude", "codex"], model: "sonnet",
       scope: "Global base",
       stages: ["ready", "impl"],
       resources: {

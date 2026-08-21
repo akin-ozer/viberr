@@ -151,12 +151,22 @@ export async function runDemoSeed(
 
   // 2. Org-level agent profile templates (two-layer model, layer 1).
   for (const profile of SEED_AGENT_PROFILES) {
+    // The product seed now defaults the Developer to CLAUDE (owner ruling
+    // 2026-08-21). The DEMO fixture keeps it CODEX-backed so the mock dataset
+    // still exercises BOTH backends — the codex delivery path, the "Codex" actor
+    // glyphs, and the live-backend-overlay drift scenarios all depend on it.
+    // Test-only: production deploys straight from `agent-catalog`.
+    const frontmatter =
+      profile.frontmatter.id === "developer"
+        ? {
+            ...profile.frontmatter,
+            backends: ["codex", "claude"] as ("codex" | "claude")[],
+            model: "gpt-5.6-terra",
+          }
+        : profile.frontmatter;
     writeFileAtomic(
       agentProfileFilePath(profile.frontmatter.id, dataRoot),
-      serializeAgentProfile({
-        frontmatter: profile.frontmatter,
-        description: profile.description,
-      }),
+      serializeAgentProfile({ frontmatter, description: profile.description }),
     );
   }
 

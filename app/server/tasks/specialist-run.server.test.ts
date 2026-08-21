@@ -164,6 +164,28 @@ describe("listDeployedSpecialists", () => {
       backend: "claude",
     });
   });
+
+  it("surfaces a model-availability mark so the run control can warn (F3)", () => {
+    const base = listDeployedSpecialists(store.slug, { dataRoot: store.dataRoot });
+    // No marks ⇒ no warning (the common case).
+    expect(base[0]!.modelUnavailable).toBeUndefined();
+    // Mark THIS agent's resolved model unavailable, as a real refused run would.
+    const marks = {
+      claude: new Map([
+        [
+          base[0]!.model,
+          { reason: "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.", markedAt: "2026-08-21T00:00:00.000Z" },
+        ],
+      ]),
+      codex: new Map(),
+    };
+    const marked = listDeployedSpecialists(
+      store.slug,
+      { dataRoot: store.dataRoot },
+      marks,
+    );
+    expect(marked[0]!.modelUnavailable).toBe("The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.");
+  });
 });
 
 describe("resolveDeployedSpecialist", () => {

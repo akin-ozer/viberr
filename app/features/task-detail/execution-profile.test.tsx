@@ -186,3 +186,88 @@ describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => 
     expect(calls).toEqual(["日本語"]);
   });
 });
+
+/**
+ * F3 (owner ruling 2026-08-21): a real run can show the delivering agent's model
+ * is not runnable on the account (model_availability). Surface it at the run
+ * control — BEFORE another run is spent — not only as a run failure.
+ */
+describe("run control warns when the delivering agent's model is unavailable", () => {
+  const withDeveloper = (): TaskSummary => ({
+    ...unownedTask(),
+    specialist: {
+      kind: "agent",
+      profileId: "developer",
+      backend: "codex",
+      name: "Codex",
+      role: "Implementation",
+    },
+  });
+  const unavailNote = (container: HTMLElement) =>
+    [...container.querySelectorAll(".deny-note")].find((n) =>
+      /reported this model unavailable/.test(n.textContent ?? ""),
+    );
+
+  it("renders the provider's reason on the delivering-agent card", () => {
+    const { container } = renderExec({
+      task: withDeveloper(),
+      deployedSpecialists: [
+        {
+          ...deployedFixture[0]!,
+          id: "developer",
+          backend: "codex",
+          modelUnavailable: "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+        },
+      ],
+    });
+    const note = unavailNote(container);
+    expect(note).toBeTruthy();
+    expect(note!.textContent).toContain("Codex reported this model unavailable");
+    expect(note!.textContent).toContain("not supported when using Codex");
+  });
+
+  it("shows NO warning when the model is available (the common case)", () => {
+    const { container } = renderExec({
+      task: withDeveloper(),
+      deployedSpecialists: [
+        { ...deployedFixture[0]!, id: "developer", backend: "codex" },
+      ],
+    });
+    expect(unavailNote(container)).toBeUndefined();
+  });
+
+  it("warns on a REVIEWER row too, not only the delivering agent", () => {
+    const task: TaskSummary = {
+      ...withDeveloper(),
+      reviewers: [
+        {
+          kind: "agent",
+          profileId: "reviewer",
+          backend: "claude",
+          name: "Claude",
+          role: "Review & validation",
+        },
+      ],
+    };
+    const { container } = renderExec({
+      task,
+      deployedSpecialists: [
+        { ...deployedFixture[0]!, id: "developer", backend: "codex" },
+        {
+          ...deployedFixture[0]!,
+          id: "reviewer",
+          backend: "claude",
+          role: "Review & validation",
+          modelUnavailable:
+            "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+        },
+      ],
+    });
+    // The reviewer's own run-spending control carries the same pre-spend warning.
+    const revNote = [...container.querySelectorAll(".rev-agent .deny-note")].find(
+      (n) => /reported this model unavailable/.test(n.textContent ?? ""),
+    );
+    expect(revNote).toBeTruthy();
+    expect(revNote!.textContent).toContain("not supported when using Codex");
+  });
+});

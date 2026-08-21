@@ -302,13 +302,16 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
     seedDefaultAgentAssets(dataRoot);
     // Exactly what the edit writer persists: a full snapshot, with
     // `scope: current.scope` — the global base's sentence, carried forward.
+    // The customization here is a Codex fork (the template now defaults to
+    // Claude/sonnet), so backend+model differ while the scope sentence matches.
     const forked = view(
       developer({
         kind: "specialist",
         name: "Developer",
         role: "Implementation",
         scope: "Global base",
-        model: "sonnet",
+        backends: ["codex", "claude"],
+        model: "gpt-5.6-terra",
       }),
       dataRoot,
     );
@@ -384,8 +387,8 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
         name: "Developer",
         role: "Implementation",
         icon: "branch",
-        backends: ["codex", "claude"],
-        model: "gpt-5.6-terra",
+        backends: ["claude", "codex"],
+        model: "sonnet",
         scope: "Global base",
         stages: ["ready", "impl"],
       }),
@@ -396,7 +399,7 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
     expect({ name: echo.name, role: echo.role, model: echo.model }).toEqual({
       name: "Developer",
       role: "Implementation",
-      model: "gpt-5.6-terra",
+      model: "sonnet",
     });
     expect(echo.customized).toBe(false);
     // One field off the template is the whole difference.
