@@ -1541,6 +1541,57 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(persona).toContain("NOT mounted on this run");
   });
 
+  it("the workspace contract names the attachments-drop exception when granted", () => {
+    // VIB-2, live, twice: the contract's "never touch anything outside the
+    // working directory" outranked the persona's posting-files section, and
+    // the agent correctly refused the copy. The exception must live INSIDE
+    // the rule that would otherwise forbid it.
+    const base = {
+      role: "Implementation",
+      taskKey: "VIB-2",
+      title: "t",
+      goal: "g",
+      repo: "akin-ozer/viberr",
+      branch: "vib-2",
+      cloned: true,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivers: true,
+    };
+    const withDrop = buildAnalyzePrompt({
+      ...base,
+      attachmentsDropRel: "projects/p/tasks/VIB-2/attachments",
+    });
+    expect(withDrop).toContain("One deliberate exception");
+    expect(withDrop).toContain("projects/p/tasks/VIB-2/attachments");
+    // The exception sits INSIDE the contract, after the confinement rule.
+    expect(withDrop.indexOf("One deliberate exception")).toBeGreaterThan(
+      withDrop.indexOf("Work ONLY inside the current working directory"),
+    );
+    const without = buildAnalyzePrompt(base);
+    expect(without).not.toContain("One deliberate exception");
+    expect(without).toContain("Work ONLY inside the current working directory");
+  });
+
+  it("the posting-files drop section rides the evidence grant (owner ask 2026-08-20)", () => {
+    // The live gap: an agent committed its screenshot into the PR because
+    // nothing told it the task thread could carry files. The section names the
+    // real directory and the contract (files landing there during the run are
+    // posted on the reply, images inline).
+    const withDrop = buildSpecialistPersona({
+      profileId: "dev",
+      skills: [],
+      attachmentsDrop: { attachmentsRel: "projects/p/tasks/T-1/attachments" },
+    });
+    expect(withDrop).toContain("Posting files on the task thread");
+    expect(withDrop).toContain("projects/p/tasks/T-1/attachments");
+    expect(withDrop).toContain("posted on your reply");
+    // Without the evidence grant the section must not appear — the completion
+    // pipeline would still stamp the files, but the prompt must not invite a
+    // mechanic the capability matrix withholds.
+    const without = buildSpecialistPersona({ profileId: "dev", skills: [] });
+    expect(without).not.toContain("Posting files on the task thread");
+  });
+
   it("P14-LV-09b: a MOUNTED but known-down server is flagged as possibly unavailable", () => {
     // Live: `broken-mcp` IS in the registry, so it resolved to a config and was
     // announced as attached — and exposed no callable tools. Mounting stays
