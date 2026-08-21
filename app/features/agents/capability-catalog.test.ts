@@ -32,12 +32,13 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
     // and attach-evidence-references, promoted the same way by P13-D-26 when
     // the `evidence:` block was wired) + 1 web-egress gate
     // (use-web-search-fetch, P13-LV-18) + 1 browser gate (use-browser, R19-19
-    // — the mode decides whether the browser MCP server mounts at all) + 3
-    // always-human.
+    // — the mode decides whether the browser MCP server mounts at all) + 1
+    // GitHub-read gate (read-github-api, F4 — the mode decides whether the
+    // in-process github_read tool mounts) + 3 always-human.
     // The remaining advisory ids (read-task-repo, run-validation-suites,
     // approve-review, request-changes, …) still have no runtime effect and stay
     // matrix-only.
-    expect(MODAL_CAP_IDS.size).toBe(13);
+    expect(MODAL_CAP_IDS.size).toBe(14);
     expect([...MODAL_CAP_IDS].sort()).toEqual(
       [
         "ask-human",
@@ -49,6 +50,7 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
         "execute-code-or-write-repo",
         "merge-pull-request",
         "open-review-pr",
+        "read-github-api",
         "use-browser",
         "use-web-search-fetch",
         "report-validation-verdict",
@@ -72,6 +74,9 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
     // G2/R2: verdict power is never seeded onto a casually-created profile —
     // the grant defaults OFF (the seed grants it to the reviewer explicitly).
     expect(CAP_MODAL_DEFAULTS["report-validation-verdict"]).toBe("off");
+    // F4: authenticated GitHub reads are OFF by default — a casually created
+    // profile must not silently acquire authenticated reach to a private repo.
+    expect(CAP_MODAL_DEFAULTS["read-github-api"]).toBe("off");
     expect(CAP_MODAL_DEFAULTS["comment-on-task"]).toBe("direct");
     expect(CAP_MODAL_DEFAULTS["ask-human"]).toBe("direct");
     // XS-8: the enforced "write to the repo" capability is now expressible.

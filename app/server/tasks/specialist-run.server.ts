@@ -124,6 +124,7 @@ import {
   browserPersonaSection,
   resolveBrowserMcp,
 } from "./specialist-browser-mcp.server";
+import { githubReadPersonaSection } from "~/server/github/agent-github-read.server";
 import {
   CLONE_TIMEOUT_MS,
   cloneFailureLogDetails,
@@ -1405,6 +1406,13 @@ async function dispatchAgentRun(
       collab.evidence && realBackend
         ? { attachmentsRel: storeRelativePath(attachmentsDir, ctx.dataRoot) }
         : null,
+    // F4: the persona section rides the same predicate the tool mount does.
+    githubRead: githubReadForRun({
+      githubRead: collab.githubRead,
+      backend,
+      realBackend,
+      repo,
+    }),
     dataRoot: ctx.dataRoot,
     unresolvedOut: unresolvedResources,
   };
@@ -1806,6 +1814,28 @@ async function dispatchAgentRun(
 // ----------------------------------------------------------------- persona
 
 /** Everything a run's persona is assembled from. */
+/**
+ * F4: whether the `github_read` tool AND its persona section should be present
+ * for this run — the ONE predicate both the fresh and resume paths use, so the
+ * persona can never promise a reader the run did not mount (the contract the
+ * mount comments state). Claude only, a real backend, the grant held, and a repo
+ * configured (the tool returns "[unavailable]" without one, so the persona must
+ * not describe it). Returns the repo for the persona copy, or null when withheld.
+ */
+export function githubReadForRun(input: {
+  githubRead: boolean;
+  backend: string | null | undefined;
+  realBackend: boolean;
+  repo: string | null;
+}): { repo: string } | null {
+  return input.githubRead &&
+    input.backend === "claude" &&
+    input.realBackend &&
+    input.repo
+    ? { repo: input.repo }
+    : null;
+}
+
 export interface SpecialistPersonaInput {
   profileId: string;
   skills: string[];
@@ -1832,6 +1862,10 @@ export interface SpecialistPersonaInput {
    *  set when the profile holds `attach-evidence-references` (any backend;
    *  the drop is a plain directory, not a tool). */
   attachmentsDrop?: { attachmentsRel: string } | null;
+  /** F4: the `github_read` guardrail section — set (with the "owner/name" repo
+   *  for the copy) only when the tool actually mounted: Claude, real backend,
+   *  `read-github-api` granted, and a repo configured. */
+  githubRead?: { repo: string } | null;
   /** The profile's own persona body (D6) — used when the store ships no
    *  agents/definitions/<id>.md override. Custom profiles finally run AS
    *  themselves instead of persona-less on the generic analyze prompt. */
@@ -2014,6 +2048,9 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // browser's default-named-screenshot behavior is a special case of.
   if (input.attachmentsDrop) {
     parts.push(attachmentsDropSection(input.attachmentsDrop.attachmentsRel));
+  }
+  if (input.githubRead) {
+    parts.push(githubReadPersonaSection(input.githubRead.repo));
   }
   if (input.browser && "attachmentsRel" in input.browser) {
     parts.push(browserPersonaSection(input.browser.attachmentsRel));
@@ -2472,6 +2509,11 @@ export async function resolveResumeConfinement(
         })
       : { server: null, refused: null };
     const resumeUnresolved: { name: string; reason: string }[] = [];
+    // Resolve the collaboration gates up-front: the persona's github_read
+    // section (F4) needs `collab.githubRead`, and the toolkit below reuses the
+    // same value. Same both-paths parity the browser mount keeps (line ~2476).
+    const collab = resolveAgentCollab(resolved.capabilities);
+    const resumeRepo = projectRepo(ctx, input.projectSlug);
     const personaInput: SpecialistPersonaInput = {
       profileId: input.profileId,
       skills: resolved.skills,
@@ -2493,6 +2535,15 @@ export async function resolveResumeConfinement(
         : resumeBrowser.refused
           ? { refusedReason: resumeBrowser.refused.reason }
           : null,
+      // Same predicate as the fresh path. A resume is always a REAL backend
+      // (an unavailable one fail-fasts before it ever mounts a toolkit), so the
+      // realBackend term is `true` here — stated, not silently omitted.
+      githubRead: githubReadForRun({
+        githubRead: collab.githubRead,
+        backend: input.backend,
+        realBackend: true,
+        repo: resumeRepo,
+      }),
       dataRoot: ctx.dataRoot,
       unresolvedOut: resumeUnresolved,
     };
@@ -2503,8 +2554,8 @@ export async function resolveResumeConfinement(
     if (resumeBrowser.refused) resumeUnresolved.push(resumeBrowser.refused);
     // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
     // the in-process toolkit on Claude, the outcome-envelope outputSchema on
-    // Codex. Both key off the SAME collaboration grants the fresh run resolves.
-    const collab = resolveAgentCollab(resolved.capabilities);
+    // Codex. Both key off the SAME collaboration grants the fresh run resolves
+    // (`collab`, resolved above so the persona could read `githubRead`).
     let outcomeKey: string | undefined;
     let toolkit: AgentToolkit | null = null;
     let outputSchema: unknown;

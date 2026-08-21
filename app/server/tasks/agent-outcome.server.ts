@@ -357,6 +357,10 @@ export interface AgentCollab {
    *  (attach-evidence-references). Was a matrix-only capability with no runtime
    *  consumer; it now declares the `evidence` field on `report_outcome`. */
   evidence: boolean;
+  /** F4: may read the task's own repo/PR data from the GitHub API through the
+   *  in-process `github_read` tool (read-github-api). Claude-only — the tool is
+   *  never mounted on Codex, so this gate is always false for a Codex run. */
+  githubRead: boolean;
 }
 
 /**
@@ -410,6 +414,8 @@ export function resolveAgentCollab(
       effectiveCollabMode(grants, "report-validation-verdict") === "direct",
     evidence:
       effectiveCollabMode(grants, "attach-evidence-references") === "direct",
+    githubRead:
+      effectiveCollabMode(grants, "read-github-api") === "direct",
   };
 }
 

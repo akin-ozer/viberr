@@ -1,12 +1,14 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { fakeGithubFetch } from "../../../test-support/fake-github";
 import {
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
@@ -168,6 +170,9 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     verdict?: string;
     summary?: string;
     evidence?: { label: string; add?: string; del?: string }[];
+    /** F4: the only field `github_read`'s handler reads — the report_outcome
+     *  handlers ignore it, so one shared arg type serves both tools here. */
+    path?: string;
   }
 
   /** The per-call MCP context the SDK passes second. Every toolkit handler
@@ -214,7 +219,13 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     .transform((mounted) => mounted.instance._registeredTools);
 
   function toolkitTools(
-    collab: { comment: boolean; ask: boolean; verdict: boolean; evidence: boolean },
+    collab: {
+      comment: boolean;
+      ask: boolean;
+      verdict: boolean;
+      evidence: boolean;
+      githubRead?: boolean;
+    },
     outcomeKey: string,
   ): Record<string, RegisteredTool> {
     const store = setupTestStore(ctx);
@@ -229,7 +240,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       taskKey: "VIB-3",
       actorRef: AGENT_REF,
       outcomeKey,
-      collab,
+      collab: { ...collab, githubRead: collab.githubRead ?? false },
     })!;
     lastStore = store;
     return mountedTools.parse(built.mcpServers.viberr_agent);
@@ -355,9 +366,144 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
           taskKey: "VIB-3",
           actorRef: AGENT_REF,
           outcomeKey: "oc_u11d",
-          collab: { comment: false, ask: false, verdict: false, evidence: false },
+          collab: {
+            comment: false,
+            ask: false,
+            verdict: false,
+            evidence: false,
+            githubRead: false,
+          },
         }),
       ).toBeNull();
+    });
+  });
+
+  /**
+   * F4 — the authenticated GitHub reader. The full request/scope/token behavior
+   * lives in agent-github-read.server.test.ts; here we prove the TOOLKIT wiring:
+   * the tool mounts on its own grant, and a call is audited (the path is not a
+   * secret, the token never appears — it lives in the server-side client).
+   */
+  describe("github_read (F4)", () => {
+    const textOf = z.object({
+      content: z.array(z.object({ text: z.string() })).min(1),
+    });
+
+    it("mounts only when read-github-api is granted", () => {
+      const off = toolkitTools(
+        { comment: false, ask: false, verdict: true, evidence: false, githubRead: false },
+        "oc_gr_off",
+      );
+      const on = toolkitTools(
+        { comment: false, ask: false, verdict: true, evidence: false, githubRead: true },
+        "oc_gr_on",
+      );
+      expect(off.github_read).toBeUndefined();
+      expect(on.github_read).toBeDefined();
+    });
+
+    it("returns [unavailable] and audits the read when no credential is configured", async () => {
+      // The harness store has a repo but no PAT — the reader must degrade with a
+      // clear reason rather than throw, and the attempt is still audited.
+      const tools = toolkitTools(
+        { comment: false, ask: false, verdict: false, evidence: false, githubRead: true },
+        "oc_gr_unavail",
+      );
+      const result = textOf.parse(
+        await tools.github_read!.handler({ path: "pulls/1" }, {}),
+      );
+      expect(result.content[0]!.text).toContain("[unavailable]");
+      const audits = listAuditEvents(lastStore.db, {
+        action: "task.agent.github_read",
+      });
+      expect(audits).toHaveLength(1);
+    });
+
+    /** A toolkit whose project has a repo AND a sealed PAT, so the mounted
+     *  github_read tool can make a (faked) authenticated call. */
+    function configuredToolkit() {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+      const pat = createPat(
+        store.db,
+        { userId: store.users.arda.id, label: "bot", token: "ghp_toolkitread01" },
+        actor,
+      );
+      setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+      const built = buildAgentToolkit({
+        db: store.db,
+        ctx: { dataRoot: store.dataRoot },
+        projectSlug: store.slug,
+        taskKey: "VIB-3",
+        actorRef: AGENT_REF,
+        outcomeKey: "oc_gr_ok",
+        collab: { comment: false, ask: false, verdict: false, evidence: false, githubRead: true },
+      })!;
+      return { store, tools: mountedTools.parse(built.mcpServers.viberr_agent) };
+    }
+
+    it("on success: formats [done] with the rate-limit line, returns the JSON, audits the NORMALIZED path, and leaks no token", async () => {
+      const { store, tools } = configuredToolkit();
+      // The handler calls runAgentGithubRead with no fetchImpl → it uses the
+      // global fetch, so stub it. createGithubClient reads global fetch at call
+      // time (inside runAgentGithubRead), so the stub is in effect.
+      const gh = fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/7": {
+          body: { number: 7, title: "Add F4" },
+          headers: { "x-ratelimit-remaining": "58" },
+        },
+      });
+      vi.stubGlobal("fetch", gh.fetchImpl);
+      let text: string;
+      try {
+        text = textOf.parse(
+          await tools.github_read!.handler({ path: "pulls/7" }, {}),
+        ).content[0]!.text;
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      expect(text).toContain("[done] GET /repos/akin-ozer/viberr/pulls/7");
+      expect(text).toContain("GitHub rate limit remaining: 58");
+      expect(text).toContain('"number": 7');
+      expect(text).not.toContain("ghp_toolkitread01");
+      // The Bearer token WAS sent server-side, proving it was a real auth call…
+      const call = gh.callsTo("GET /repos/akin-ozer/viberr/pulls/7")[0]!;
+      expect(call.headers["authorization"]).toBe("Bearer ghp_toolkitread01");
+      // …and the audit records the resolved path + ok, never the token.
+      const audit = listAuditEvents(store.db, { action: "task.agent.github_read" })[0]!;
+      expect(audit.details).toMatchObject({
+        path: "/repos/akin-ozer/viberr/pulls/7",
+        ok: true,
+      });
+      expect(JSON.stringify(audit)).not.toContain("ghp_toolkitread01");
+    });
+
+    it("caps a large body and marks the truncation", async () => {
+      const { tools } = configuredToolkit();
+      const big = {
+        items: Array.from({ length: 4000 }, (_, i) => ({ i, pad: "x".repeat(40) })),
+      };
+      const gh = fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/7/files": { body: big },
+      });
+      vi.stubGlobal("fetch", gh.fetchImpl);
+      let text: string;
+      try {
+        text = textOf.parse(
+          await tools.github_read!.handler({ path: "pulls/7/files" }, {}),
+        ).content[0]!.text;
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      expect(text).toContain("[truncated");
+      expect(text).toContain("narrow the path or paginate");
+      // The cap holds: the whole message stays near MAX_GITHUB_READ_CHARS
+      // (48_000) plus the short prefix/marker, not the ~220 KB raw body.
+      expect(text.length).toBeLessThan(49_000);
     });
   });
 });
