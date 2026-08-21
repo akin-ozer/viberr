@@ -6,6 +6,7 @@ import {
   mapPrChecks,
   mapPrReview,
   mapTaskProjectionRow,
+  withLiveAgentBackends,
   type TaskProjectionRow,
 } from "./task.server";
 
@@ -316,5 +317,61 @@ describe("mapOperatorRef sinceLabel (F7-UI2)", () => {
 
   it("null ref maps to null", () => {
     expect(mapOperatorRef(null, STAGES)).toBeNull();
+  });
+});
+
+/**
+ * Owner report 2026-08-21: the Developer profile was switched to Claude but
+ * the task page's Delivering-agent card still said "Codex". The engagement
+ * rows snapshot the backend at engage time and the run start heals them only
+ * when the next run happens — so display must overlay the LIVE deployment's
+ * backend (the one Run actually launches), keeping the snapshot solely for
+ * profiles no longer deployed.
+ */
+describe("withLiveAgentBackends (live deployment wins over the engage-time snapshot)", () => {
+  const engaged = (profileId: string, backend: "codex" | "claude") =>
+    ({ profileId, backend, role: "Implementation" });
+  const base = () =>
+    summarize(
+      row({
+        specialist_json: JSON.stringify(engaged("developer", "codex")),
+        reviewers_json: JSON.stringify([engaged("reviewer", "codex")]),
+      }),
+      false,
+    );
+
+  it("patches specialist AND reviewers to the deployed backend — name included", () => {
+    const live = new Map<string, "codex" | "claude">([
+      ["developer", "claude"],
+      ["reviewer", "claude"],
+    ]);
+    const out = withLiveAgentBackends(base(), live);
+    expect(out.specialist).toMatchObject({ backend: "claude", name: "Claude Code" });
+    expect(out.reviewers[0]).toMatchObject({ backend: "claude", name: "Claude Code" });
+  });
+
+  it("a profile absent from the map (undeployed since engagement) keeps its snapshot", () => {
+    const out = withLiveAgentBackends(
+      base(),
+      new Map<string, "codex" | "claude">([["someone-else", "claude"]]),
+    );
+    expect(out.specialist).toMatchObject({ backend: "codex", name: "Codex" });
+    expect(out.reviewers[0]).toMatchObject({ backend: "codex", name: "Codex" });
+  });
+
+  it("agreeing backends return the summary UNCHANGED (same reference)", () => {
+    const summary = base();
+    const agreeing = new Map<string, "codex" | "claude">([
+      ["developer", "codex"],
+      ["reviewer", "codex"],
+    ]);
+    expect(withLiveAgentBackends(summary, agreeing)).toBe(summary);
+    expect(withLiveAgentBackends(summary, new Map())).toBe(summary);
+  });
+
+  it("an unengaged task passes through", () => {
+    const summary = summarize(row(), false);
+    const live = new Map<string, "codex" | "claude">([["developer", "claude"]]);
+    expect(withLiveAgentBackends(summary, live)).toBe(summary);
   });
 });
