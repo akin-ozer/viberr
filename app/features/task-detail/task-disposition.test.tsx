@@ -1574,11 +1574,6 @@ describe("UX19-10: the schedule picker honours backend availability", () => {
  * the page-level fixture above can express (it carries no engagements).
  */
 
-const EXEC_MEMBERS = [
-  { userId: "u-arda", role: "admin", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
-  { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "" } },
-];
-
 /** An engagement as the task file stores it — profileId, backend, role. */
 const engagement = (
   profileId: string,
@@ -1635,10 +1630,8 @@ function renderExec(opts: {
         task={detail(opts.task ?? {})}
         meId="u-arda"
         myRole="admin"
-        members={EXEC_MEMBERS}
         busy={false}
         onOwner={(action) => calls.owner.push(action)}
-        onRelease={() => calls.owner.push("release")}
         deployedSpecialists={opts.deployedSpecialists ?? []}
         operatorBackend="claude"
           operatorAutonomy="supervised"
@@ -1892,8 +1885,9 @@ describe("UX19-18: the three popovers keep the keyboard promises they make", () 
   // Owner is Selin, viewer is Arda (admin) → all three popovers render.
   const openAll = () => renderExec({ deployedSpecialists: DEPLOYED });
 
+  // The ownership "Manage" popover left this list when the owned cell became a
+  // plain chip (owner request 2026-08-21) — two popovers remain on the panel.
   const menus: [name: string, trigger: string, panel: string, item: string][] = [
-    ["ownership", "Manage", "Manage task ownership", "Take over ownership"],
     [
       "delivering agent",
       "Assign delivering agent",

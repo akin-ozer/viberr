@@ -8,7 +8,6 @@ import { rolesForAction } from "~/shared/rbac";
 import {
   ExecutionProfile,
   type DeployedSpecialistView,
-  type TaskMemberView,
 } from "./execution-profile";
 
 afterEach(cleanup);
@@ -20,11 +19,6 @@ afterEach(cleanup);
  * (app/shared/rbac.ts) and a viewer IS a project member, so the first line
  * misdescribed the matrix — and a viewer saw both sentences at once.
  */
-
-const membersFixture: TaskMemberView[] = [
-  { userId: "u-elif", role: "admin", user: { name: "Elif Demir", initials: "ED", tone: "rose" } },
-  { userId: "u-arda", role: "viewer", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
-];
 
 const deployedFixture: DeployedSpecialistView[] = [
   { id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large" },
@@ -78,10 +72,8 @@ function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}
         task={unownedTask()}
         meId="u-arda"
         myRole="admin"
-        members={membersFixture}
         busy={false}
         onOwner={() => {}}
-        onRelease={() => {}}
         deployedSpecialists={deployedFixture}
         operatorBackend="claude"
         operatorAutonomy="supervised"

@@ -603,10 +603,8 @@ function renderExec(
         task={task}
         meId="u-arda"
         myRole="admin"
-        members={membersFixture}
         busy={false}
         onOwner={() => {}}
-        onRelease={() => {}}
         deployedSpecialists={deployedFixture}
         operatorBackend="claude"
           operatorAutonomy="supervised"
@@ -919,26 +917,34 @@ describe("ExecutionProfile — a closed task offers no new engagements (P14-WL-0
   });
 });
 
-describe("ExecutionProfile — owner hand-off candidates", () => {
-  it("hand-off list offers only members who can own a task (F10-13)", () => {
-    // F10-13: viewers are read + comment only — the server rejects a hand-off to
-    // one ("own-task"), so the picker must not offer a candidate that 403s.
-    const withViewer: TaskMemberView[] = [
-      ...membersFixture,
-      { userId: "u-baris", role: "viewer", user: { name: "Barış Koç", initials: "BK", tone: "amber" } },
-    ];
-    // Owner is me (u-arda) → candidates are every OTHER member who can own.
-    const { container } = renderExec(execTask(), { members: withViewer });
-    const manageBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn")).find((b) =>
-      b.textContent?.includes("Manage"),
-    )!;
-    expect(manageBtn).toBeDefined();
-    fireEvent.click(manageBtn);
-    const menu = container.querySelector('[aria-label="Manage task ownership"]')!;
-    const names = [...menu.querySelectorAll(".menu-item")].map((i) => i.textContent);
-    expect(names.join(" ")).not.toContain("Barış Koç"); // viewer — cannot own
-    expect(names.join(" ")).toContain("Murat Yıldız"); // maintainer — can own
-    expect(names.join(" ")).toContain("Selin Aksoy"); // contributor — can own
+describe("ExecutionProfile — owner cell (owner request 2026-08-21)", () => {
+  it("an OWNED task shows the owner chip alone — no Manage popover", () => {
+    // Release stays one panel away on the Current-state Owner row (own-x); a
+    // hand-off is release + take. This cell only states who owns the task.
+    const { container } = renderExec(execTask());
+    expect(container.querySelector(".rev-chip")!.textContent).toContain(
+      "Arda Kaya · you",
+    );
+    expect(
+      Array.from(container.querySelectorAll(".own-btn")).some((b) =>
+        b.textContent?.includes("Manage"),
+      ),
+    ).toBe(false);
+    expect(
+      container.querySelector('[aria-label="Manage task ownership"]'),
+    ).toBeNull();
+  });
+
+  it("an UNOWNED task keeps the Assign-me affordance (unchanged half)", () => {
+    const { container } = renderExec(execTask({ owner: null }));
+    expect(container.textContent).toContain(
+      "Unowned. Any contributor or above can take it",
+    );
+    expect(
+      Array.from(container.querySelectorAll(".rev-add")).some((b) =>
+        b.textContent?.includes("Assign me"),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -953,8 +959,9 @@ describe("ExecutionProfile — owner hand-off candidates", () => {
  * once so a future divergence is a test failure.
  */
 describe("ExecutionProfile — every menu dismisses the same way", () => {
+  // The owner "Manage" popover left this list when the owned cell became a
+  // plain chip (owner request 2026-08-21) — two popovers remain on the panel.
   const menus: [label: string, trigger: string, panel: string][] = [
-    ["owner", "Manage", "Manage task ownership"],
     ["delivering agent", "Assign delivering agent", "Assign a delivering agent"],
     ["reviewer", "Engage reviewer", "Engage a reviewer"],
   ];
