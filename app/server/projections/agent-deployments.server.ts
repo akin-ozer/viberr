@@ -6,6 +6,7 @@ import type {
   Engagement,
 } from "~/features/agents/agent-types";
 import { getProject } from "./board-query.server";
+import { deployedSpecialistBackends } from "~/features/agents/agents-query.server";
 
 /**
  * Live agent-deployment projection (agents spec §3.3, orchestrator ruling 7):
@@ -87,10 +88,22 @@ function reviewerIndex(threadId: string): number {
 export function listAgentDeployments(
   db: DatabaseSync,
   projectSlug: string,
+  /** Data root for the live-backend overlay — tests only (production defaults
+   *  to the env root, same as every file accessor). */
+  opts: { dataRoot?: string } = {},
 ): AgentDeploymentView[] {
   const project = getProject(db, projectSlug);
   const lastStageId =
     project?.stages[project.stages.length - 1]?.id ?? "done";
+  // The engagement rows chip a backend RIGHT under the profile card where a
+  // human edits it — showing the engage-time snapshot there meant switching a
+  // profile to Claude left its own roster row chipping Codex until the next
+  // run healed the snapshot. Same live overlay as the task queries: the
+  // deployment's current backend wins, an undeployed profile keeps the
+  // snapshot (the run path's own fallback).
+  const liveBackends = deployedSpecialistBackends(projectSlug, opts.dataRoot);
+  const liveBackend = (ref: AgentRef): "codex" | "claude" =>
+    liveBackends.get(ref.profileId) ?? ref.backend;
 
   // SAFETY: the SELECT names exactly DeploymentTaskRow's members, and
   // 0001_baseline declares every one of them NOT NULL on `task_projections`
@@ -170,7 +183,7 @@ export function listAgentDeployments(
       instances.push({
         profileId: specialist.profileId,
         role: specialist.role,
-        backend: specialist.backend,
+        backend: liveBackend(specialist),
         engagement: "primary",
         taskKey: task.task_key,
         taskTitle: task.title,
@@ -187,7 +200,7 @@ export function listAgentDeployments(
       instances.push({
         profileId: reviewer.profileId,
         role: reviewer.role,
-        backend: reviewer.backend,
+        backend: liveBackend(reviewer),
         engagement: "reviewer",
         taskKey: task.task_key,
         taskTitle: task.title,

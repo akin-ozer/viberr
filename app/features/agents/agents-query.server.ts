@@ -11,6 +11,7 @@ import {
   agentProfileFilePath,
   agentProfilesDir,
 } from "~/server/files/file-store-root.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { getProject } from "~/server/projections/board-query.server";
 import {
   isKnownModel,
@@ -372,6 +373,60 @@ function identityOverride(
 }
 
 /**
+ * THE primary-backend rule: the backend a run of this profile actually starts
+ * on is the FIRST real backend in its `backends` list (else claude). It was
+ * written twice — here for the view's model resolution and in
+ * specialist-run.server.ts `pickBackend` for the run itself — and any surface
+ * that DISPLAYS an engaged agent's backend must agree with the run, so the
+ * rule lives once and everyone delegates.
+ */
+export function primaryRunBackend(
+  backends: readonly string[],
+): "codex" | "claude" {
+  return backends.find((b) => b === "codex" || b === "claude") === "codex"
+    ? "codex"
+    : "claude";
+}
+
+/**
+ * Live `profileId → backend` for a project's DEPLOYED specialist profiles —
+ * the backend a run started right now would use (owner report 2026-08-21).
+ *
+ * The task file's engagement rows snapshot the backend at engage time, and the
+ * run start heals that snapshot only when the next run actually happens
+ * (specialist-run.server.ts: "the run follows the live profile, not the
+ * engage-time snapshot"). Between a profile edit and that next run, every
+ * surface mapping the snapshot (task exec profile, board card glyphs, review
+ * queue) said the OLD backend while Run would launch the new one. The query
+ * layer overlays THIS map so display always matches what Run does; a profile
+ * that is no longer deployed contributes nothing, which leaves the snapshot
+ * standing — exactly the run path's own fallback.
+ *
+ * Tolerant by design: any read/parse failure yields an empty map (display
+ * falls back to the snapshot, never 500s a board over a profile file).
+ */
+export function deployedSpecialistBackends(
+  projectSlug: string,
+  dataRoot?: string,
+): ReadonlyMap<string, "codex" | "claude"> {
+  const map = new Map<string, "codex" | "claude">();
+  try {
+    const file = readProjectFile(
+      dataRoot === undefined ? { projectSlug } : { projectSlug, dataRoot },
+    );
+    if (!file?.parsed) return map;
+    for (const deployment of file.parsed.frontmatter.agents) {
+      const view = effectiveProfileView(deployment, dataRoot, VIEW_WITHOUT_POLICY);
+      if (view.kind === "operator") continue;
+      map.set(deployment.profileId, primaryRunBackend(view.backends));
+    }
+  } catch {
+    return map;
+  }
+  return map;
+}
+
+/**
  * Effective profile for ONE deployment entry (exported for actions/tests).
  *
  * `absentDeliverMode` (R15-9) is the mode the RUNTIME applies when the
@@ -431,10 +486,7 @@ export function effectiveProfileView(
   // to a valid catalog id. `modelKnown` is false for a legacy display-label
   // placeholder — the UI then flags the substitution instead of showing a value
   // that would fail at the SDK.
-  const primaryBackend: RealBackend =
-    backends.find((b) => b === "codex" || b === "claude") === "codex"
-      ? "codex"
-      : "claude";
+  const primaryBackend: RealBackend = primaryRunBackend(backends);
   const runModel = resolveRunModel(primaryBackend, model);
   const modelKnown = isKnownModel(primaryBackend, model);
   const modelLabel = modelDisplayName(primaryBackend, runModel);

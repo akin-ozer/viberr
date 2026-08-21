@@ -14,9 +14,11 @@ import {
 } from "~/shared/mapping/task-event.server";
 import {
   mapTaskProjectionRow,
+  withLiveAgentBackends,
   type TaskProjectionRow,
   type TaskSummary,
 } from "~/shared/mapping/task.server";
+import { deployedSpecialistBackends } from "~/features/agents/agents-query.server";
 import {
   getProject,
   listProjectMembers,
@@ -78,6 +80,9 @@ export function getTaskSummary(
   db: DatabaseSync,
   slug: string,
   key: string,
+  /** Data root for the live-backend overlay below — tests only (production
+   *  reads the env root by default, same as every file accessor). */
+  opts: { dataRoot?: string } = {},
 ): TaskSummary | null {
   // SAFETY: every TaskProjectionRow field is a `task_projections` column with
   // the same nullability, and each of its string-union fields (readiness,
@@ -94,7 +99,7 @@ export function getTaskSummary(
     ? project.stages.map((s) => ({ id: s.id, name: s.name }))
     : [];
   const memberIds = new Set(listProjectMembers(db, slug).map((m) => m.userId));
-  return mapTaskProjectionRow(row, {
+  const summary = mapTaskProjectionRow(row, {
     stages,
     // F19-27: same graph the acceptance writers gate on.
     workflow: project?.workflow ?? [],
@@ -104,6 +109,13 @@ export function getTaskSummary(
       stageIds: stages.map((s) => s.id),
     }),
   });
+  // The engaged agents' backend follows the LIVE deployment, not the
+  // engage-time snapshot — the run already does (specialist-run.server.ts), so
+  // the exec profile's "Run" button must be labeled with what it launches.
+  return withLiveAgentBackends(
+    summary,
+    deployedSpecialistBackends(slug, opts.dataRoot),
+  );
 }
 
 export function listTaskEvents(
@@ -212,10 +224,17 @@ export function getTaskDetail(
   db: DatabaseSync,
   slug: string,
   key: string,
-  /** Gap-10: the instant "has this gone quiet?" is asked against (tests only). */
-  opts: { now?: Date } = {},
+  /** Gap-10: the instant "has this gone quiet?" is asked against (tests only).
+   *  `dataRoot` feeds the live-backend overlay (tests only — production
+   *  defaults to the env root). */
+  opts: { now?: Date; dataRoot?: string } = {},
 ): TaskDetail | null {
-  const summary = getTaskSummary(db, slug, key);
+  const summary = getTaskSummary(
+    db,
+    slug,
+    key,
+    opts.dataRoot === undefined ? {} : { dataRoot: opts.dataRoot },
+  );
   if (!summary) return null;
   const project = getProject(db, slug);
   const stageIds = project ? project.stages.map((s) => s.id) : [];

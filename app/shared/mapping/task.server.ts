@@ -350,6 +350,43 @@ export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
   };
 }
 
+/**
+ * Overlay the LIVE deployment backend onto a summary's engaged agents (owner
+ * report 2026-08-21: the exec profile said "Codex" after the Developer profile
+ * was switched to Claude — Run would have started a Claude run under a card
+ * labeled Codex).
+ *
+ * The engagement rows in task.md snapshot the backend at engage time and the
+ * run start heals them only when the next run actually happens
+ * (specialist-run.server.ts), so between a profile edit and that run the
+ * snapshot lies about what Run does. This patches specialist + reviewers from
+ * the live `profileId → backend` map (agents-query `deployedSpecialistBackends`
+ * — the same primary-backend rule the run resolves with); a profile absent
+ * from the map (undeployed since engagement) keeps its snapshot, exactly the
+ * run path's own fallback. Pure — the map is built by the server query layer,
+ * so board, review queue and task detail all inherit one answer.
+ */
+export function withLiveAgentBackends(
+  summary: TaskSummary,
+  live: ReadonlyMap<string, "codex" | "claude">,
+): TaskSummary {
+  if (live.size === 0) return summary;
+  const patch = (agent: AgentRender): AgentRender => {
+    const backend = live.get(agent.profileId);
+    if (!backend || backend === agent.backend) return agent;
+    return { ...agent, backend, name: agentBackendName(backend) };
+  };
+  const specialist = summary.specialist ? patch(summary.specialist) : null;
+  const reviewers = summary.reviewers.map(patch);
+  if (
+    specialist === summary.specialist &&
+    reviewers.every((r, i) => r === summary.reviewers[i])
+  ) {
+    return summary;
+  }
+  return { ...summary, specialist, reviewers };
+}
+
 export function mapOperatorRef(
   ref: OperatorRef | null,
   stages: { id: string; name: string }[],

@@ -71,6 +71,7 @@ import {
 } from "~/server/secrets/pat-store.server";
 import {
   effectiveProfileView,
+  primaryRunBackend,
   VIEW_WITHOUT_POLICY,
 } from "~/features/agents/agents-query.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
@@ -195,8 +196,9 @@ export interface ResolvedSpecialist {
 /** First runnable backend for a profile (codex|claude), defaulting to claude
  * when the definition/template names neither. */
 function pickBackend(view: AgentProfileView): RealBackend {
-  const first = view.backends.find((b) => b === "codex" || b === "claude");
-  return first === "codex" ? "codex" : "claude";
+  // Delegates to THE primary-backend rule (agents-query) so the run and every
+  // surface displaying an engaged agent's backend cannot drift apart.
+  return primaryRunBackend(view.backends);
 }
 
 function toResolved(view: AgentProfileView): ResolvedSpecialist {

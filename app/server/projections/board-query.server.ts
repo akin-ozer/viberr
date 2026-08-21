@@ -11,9 +11,14 @@ import {
 } from "~/shared/mapping/project.server";
 import {
   mapTaskProjectionRow,
+  withLiveAgentBackends,
   type TaskProjectionRow,
   type TaskSummary,
 } from "~/shared/mapping/task.server";
+// Call-time-only circular edge (agents-query imports getProject from here):
+// both directions are function calls inside function bodies, and function
+// declarations hoist across a cycle, so module init is safe either way round.
+import { deployedSpecialistBackends } from "~/features/agents/agents-query.server";
 import {
   activityFactsFor,
   isQuiet,
@@ -179,6 +184,9 @@ export function listProjectTasks(
     /** Gap-10: the instant "has this gone quiet?" is asked against. Injectable
      *  for tests only; every caller in the app takes the default. */
     now?: Date;
+    /** Data root for the live-backend overlay — tests only (production
+     *  defaults to the env root, same as every file accessor). */
+    dataRoot?: string;
   } = {},
 ): TaskActivitySummary[] {
   const project = getProject(db, slug);
@@ -208,10 +216,16 @@ export function listProjectTasks(
   // same shape as the shared actor resolver above, and for the same reason
   // (this is the hottest loader path in the app).
   const activity = readProjectActivity(db, slug);
+  // ONE live-backend map for the whole query (a project-file read + one small
+  // template read per deployed profile): an engaged agent's displayed backend
+  // follows the LIVE deployment, exactly as the run does — the engage-time
+  // snapshot in task.md stays only for profiles no longer deployed.
+  const liveBackends = deployedSpecialistBackends(slug, opts.dataRoot);
   return rows.map((row) => {
     const accepted = isAcceptedDisplayState({ stage: row.stage, stageIds });
     const facts = activityFactsFor(activity, row.task_key);
-    const summary = mapTaskProjectionRow(row, {
+    const summary = withLiveAgentBackends(
+      mapTaskProjectionRow(row, {
       stages,
       // F19-27: the acceptance-boundary fact is derived from the graph, not the
       // column order — a project whose workflow really allows the edge must not
@@ -228,7 +242,9 @@ export function listProjectTasks(
           )
         : null,
       accepted,
-    });
+      }),
+      liveBackends,
+    );
     const quietAt: Parameters<typeof isQuiet>[0] = {
       lastActivityAt: facts.lastActivityAt,
       waiting: summary.waiting,
