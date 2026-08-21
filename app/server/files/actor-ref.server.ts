@@ -118,7 +118,7 @@ export function decodeActorRef(raw: string): FileActorRef {
   return { kind: "unknown", raw: text };
 }
 
-/** Backend → display name (mock contract: Codex / Claude Code). */
+/** Backend → display name (owner 2026-08-21: the label is "Claude", not "Claude Code"). */
 export function agentBackendName(backend: "codex" | "claude"): string {
-  return backend === "codex" ? "Codex" : "Claude Code";
+  return backend === "codex" ? "Codex" : "Claude";
 }

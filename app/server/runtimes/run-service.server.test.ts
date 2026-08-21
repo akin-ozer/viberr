@@ -1344,7 +1344,7 @@ describe("startRun — foreign model substitution is disclosed (F21-13)", () => 
     expect(first.display.tag).toBe(MODEL_SUBSTITUTED_TAG);
     expect(first.display.text).toContain("gpt-5.6-terra");
     expect(first.display.text).toContain("Codex");
-    expect(first.display.text).toContain("Claude Code");
+    expect(first.display.text).toContain("Claude");
     // And the spec the adapter received carries the substituted model, so the
     // provider and the row can never disagree.
     expect(lastRunSpec()!.model).toBe(defaultModelFor("claude"));

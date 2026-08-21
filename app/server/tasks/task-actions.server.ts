@@ -347,7 +347,11 @@ function requireDecisionAuthority(
 const userNameRowSchema = z.object({ name: z.string() });
 const avatarToneRowSchema = z.object({ avatar_tone: z.string() });
 
-function userName(db: DatabaseSync, userId: string): string {
+/** The user's DISPLAY name — what the `@operator` mention path passes as
+ *  `humanCommentBy`, so the operator's reply tags a name the mention matcher
+ *  knows (NEW-4: an email tag chips nothing and notifies nobody). Exported for
+ *  the steered manual run, which must speak the same name. */
+export function userName(db: DatabaseSync, userId: string): string {
   const row = userNameRowSchema.safeParse(
     db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId),
   );
@@ -2535,7 +2539,7 @@ export async function applyAgentCompletionEffects(
   if (finished.state === "error") {
     const { runFailureReason } = await import("./agent-reply.server");
     const failure = runFailureReason(db, finished.id);
-    const backendLabel = input.backend === "claude" ? "Claude Code" : "Codex";
+    const backendLabel = input.backend === "claude" ? "Claude" : "Codex";
     const roleLabel = "agent";
     // R20-3: 240 (PROVIDER_TEXT_CHARS), not 180 — the provider's own sentence
     // is now split off onto its own line/observation, and the clamp used to cut
@@ -2623,7 +2627,7 @@ export async function applyAgentCompletionEffects(
       failure?.kind === "auth" ||
       failure?.kind === "unavailable";
     const altBackend: RealBackend = input.backend === "codex" ? "claude" : "codex";
-    const altLabel = altBackend === "claude" ? "Claude Code" : "Codex";
+    const altLabel = altBackend === "claude" ? "Claude" : "Codex";
     const failedProfileId = input.profileId;
     const retryOption =
       backendFailure
@@ -5145,7 +5149,7 @@ export async function resolvePacket(
       // target backend; startSpecialistRun/startReviewerRun persist the switch
       // to the assignment snapshot so later prompts follow it.
       const targetLabel =
-        (option.backend ?? "claude") === "claude" ? "Claude Code" : "Codex";
+        (option.backend ?? "claude") === "claude" ? "Claude" : "Codex";
       event = {
         occurredAt: now,
         type: "transition",

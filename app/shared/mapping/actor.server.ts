@@ -95,7 +95,7 @@ export function createActorRenderOverlay(
  *
  * `agentNames` (profile id → display name, from run rows — see
  * `agentNamesByProfile`) makes an agent actor render under the agent's OWN name
- * (e.g. "Reviewer"), not its runtime/backend label ("Claude Code"). Without it,
+ * (e.g. "Reviewer"), not its runtime/backend label ("Claude"). Without it,
  * agents fall back to the backend label — historical behaviour, kept so a
  * caller with no project context never crashes. */
 export function createActorResolver(

@@ -6,7 +6,7 @@ import type { FileActorRef } from "~/schemas/task-file.schema";
 
 /**
  * NEW-5: an agent actor renders under the AGENT'S OWN name (e.g. "Reviewer"),
- * resolved from its run rows — never the runtime/backend label ("Claude Code").
+ * resolved from its run rows — never the runtime/backend label ("Claude").
  * The operator keeps its fixed "Operator" identity; a nameless/unknown agent
  * falls back to the backend label so no context ever crashes.
  */
@@ -59,15 +59,15 @@ describe("createActorResolver — agent name (NEW-5)", () => {
     const rendered = resolve(reviewerRef);
     expect(rendered).toMatchObject({ kind: "agent", name: "Reviewer", backend: "claude" });
     // NOT the runtime label.
-    expect(rendered.name).not.toBe("Claude Code");
+    expect(rendered.name).not.toBe("Claude");
   });
 
   it("falls back to the backend label when the profile has no known name", () => {
     const db = ctx.makeDb();
     const resolve = createActorResolver(db, { agentNames: new Map() });
-    expect(resolve(reviewerRef)).toMatchObject({ name: "Claude Code" });
+    expect(resolve(reviewerRef)).toMatchObject({ name: "Claude" });
     // And with no map at all (no project context) — same safe fallback.
-    expect(createActorResolver(db)(reviewerRef)).toMatchObject({ name: "Claude Code" });
+    expect(createActorResolver(db)(reviewerRef)).toMatchObject({ name: "Claude" });
   });
 
   it("the operator keeps its fixed identity, never a backend label", () => {

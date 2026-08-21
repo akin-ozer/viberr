@@ -346,8 +346,8 @@ describe("withLiveAgentBackends (live deployment wins over the engage-time snaps
       ["reviewer", "claude"],
     ]);
     const out = withLiveAgentBackends(base(), live);
-    expect(out.specialist).toMatchObject({ backend: "claude", name: "Claude Code" });
-    expect(out.reviewers[0]).toMatchObject({ backend: "claude", name: "Claude Code" });
+    expect(out.specialist).toMatchObject({ backend: "claude", name: "Claude" });
+    expect(out.reviewers[0]).toMatchObject({ backend: "claude", name: "Claude" });
   });
 
   it("a profile absent from the map (undeployed since engagement) keeps its snapshot", () => {

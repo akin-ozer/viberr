@@ -26,6 +26,7 @@ import {
 import { logger } from "~/server/logging/logger.server";
 import {
   applyRecommendation,
+  appendComment,
   commentToAgent,
   completeTaskMerge,
   dismissRecommendation,
@@ -39,6 +40,7 @@ import {
   setTaskArchived,
   transitionStage,
   updateTaskGoal,
+  userName,
 } from "~/server/tasks/task-actions.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listTaskAttachments } from "~/server/files/task-attachments.server";
@@ -487,7 +489,7 @@ export async function action({ request, params }: Route.ActionArgs) {
                 ? "Held for runtime debug · the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
                   ? retryStarted
-                    ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude Code"} · streaming to agent logs`
+                    ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude"} · streaming to agent logs`
                     : "Decision recorded, but the retry could NOT start. The reason is on the timeline"
                   : option.kind === "edit_goal"
                     ? "Decision recorded · type the new goal; the packet clears when it lands"
@@ -760,7 +762,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `${result.backend === "claude" ? "Claude Code" : "Codex"} run started · streaming to agent logs`,
+          toast: `${result.backend === "claude" ? "Claude" : "Codex"} run started · streaming to agent logs`,
         };
       }
       case "assign-reviewer": {
@@ -800,7 +802,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `${result.backend === "claude" ? "Claude Code" : "Codex"} reviewer run started · streaming to agent logs`,
+          toast: `${result.backend === "claude" ? "Claude" : "Codex"} reviewer run started · streaming to agent logs`,
         };
       }
       case "remove-reviewer": {
@@ -896,9 +898,31 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
         if (backend) operatorInput.backend = backend;
         if (autonomy) operatorInput.autonomy = autonomy;
+        // Owner request 2026-08-21: an optional steer typed on the Run control.
+        // It rides the SAME machinery as an `@operator` comment (the N20-15
+        // mention path): recorded on the timeline as the human's own comment —
+        // a directive that reaches an agent off the record would be invisible
+        // to supervision — and passed as the run's `humanComment`, so the turn
+        // doctrine addresses exactly what they asked. The comment is written
+        // with the low-level writer, not `commentToAgent`, because THIS call
+        // already starts the run — the mention path would start a second one.
+        const steer = String(formData.get("steer") ?? "").trim().slice(0, 2000);
+        if (steer) {
+          await appendComment(
+            db,
+            { projectSlug, taskKey, text: `@operator ${steer}`, forceToAgent: true },
+            actor,
+          );
+          operatorInput.trigger = "manual";
+          operatorInput.humanComment = steer;
+          // The DISPLAY name, exactly as the @operator mention path passes it —
+          // the operator tags "@<name>" in its reply, and only a known display
+          // name chips and notifies (NEW-4; live-caught: `actor.label` is the
+          // email, and "@arda@viberr.dev" notified nobody).
+          operatorInput.humanCommentBy = userName(db, actor.userId);
+        }
         const started = await runOperator(db, operatorInput);
-        const backendLabel =
-          started.backend === "claude" ? "Claude Code" : "Codex";
+        const backendLabel = started.backend === "claude" ? "Claude" : "Codex";
         return {
           ok: true as const,
           intent,

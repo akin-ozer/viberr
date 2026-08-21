@@ -170,7 +170,7 @@ export async function scheduleTaskAction(
     parsed.timeline.unshift(
       scheduleEvent(
         { kind: "human", userId: actor.userId ?? "system", nameHint: actor.label },
-        `**Scheduled:** an operator re-run for **${input.taskKey}** at ${schedule.dueAt} (${input.autonomy} · ${input.backend === "claude" ? "Claude Code" : "Codex"})${schedule.note ? ` — ${schedule.note}` : ""}.`,
+        `**Scheduled:** an operator re-run for **${input.taskKey}** at ${schedule.dueAt} (${input.autonomy} · ${input.backend === "claude" ? "Claude" : "Codex"})${schedule.note ? ` — ${schedule.note}` : ""}.`,
       ),
     );
   });

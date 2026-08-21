@@ -233,7 +233,7 @@ function reprojectProject(
 }
 
 /** The product's name for each backend, as the picker spells it. */
-const BACKEND_LABEL = { claude: "Claude Code", codex: "Codex" } as const;
+const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 function parseForm(raw: SubmittedProfileForm): ProfileFormInput {
   const parsed = profileFormSchema.safeParse(raw);
@@ -244,7 +244,7 @@ function parseForm(raw: SubmittedProfileForm): ProfileFormInput {
     );
   }
   // F21-13: the backend and the model must agree. Live repro: editing a Codex
-  // profile, clicking "Claude Code", and saving WHILE the model select still
+  // profile, clicking "Claude", and saving WHILE the model select still
   // read "loading available models…" persisted `backends: [claude]` next to
   // `model: gpt-5.6-terra`. Nothing rejected it, and the run then silently ran
   // on Claude's default — the agents page named one model, the provider ran

@@ -465,7 +465,7 @@ describe("ProfileDetail", () => {
     expect(getByText("Edit profile")).toBeTruthy();
     expect(getByText("active across the whole lifecycle")).toBeTruthy();
     // The operator now shows its real backends + autonomy (not a placeholder).
-    expect(getByText("Claude Code")).toBeTruthy();
+    expect(getByText("Claude")).toBeTruthy();
     expect(getByText("Supervised")).toBeTruthy();
     expect(container.querySelector(".agent-glyph.op")).not.toBeNull();
     expect(getByText("idle · available")).toBeTruthy();
@@ -685,7 +685,7 @@ describe("LiveRoster", () => {
     expect(rendered[0]!.querySelector(".live-name")!.textContent).toBe("Operator");
     expect(rendered[0]!.querySelector(".live-be")!.textContent).toBe("orchestration");
     expect(rendered[1]!.querySelector(".live-be")!.textContent).toBe("Codex");
-    expect(rendered[2]!.querySelector(".live-be")!.textContent).toBe("Claude Code");
+    expect(rendered[2]!.querySelector(".live-be")!.textContent).toBe("Claude");
     // Engagement is human-facing, not the internal primary/reviewer literals.
     expect(rendered[1]!.textContent).toContain("delivering");
     expect(rendered[2]!.textContent).toContain("supporting");
@@ -968,7 +968,7 @@ describe("CreateProfileModal", () => {
       container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!;
     expect(modelSel().disabled).toBe(true);
 
-    fireEvent.click(getByText("Claude Code"));
+    fireEvent.click(getByText("Claude"));
     // The claude catalog loads → sonnet/opus options + high default effort.
     await waitFor(() => expect(modelSel().value).toBe("sonnet"));
     const modelValues = Array.from(modelSel().options).map((o) => o.value);
@@ -1013,11 +1013,11 @@ describe("CreateProfileModal", () => {
     await waitFor(() => expect(modelSel().value).toBe("gpt-5-codex"));
     expect(save().disabled).toBe(false);
 
-    fireEvent.click(getByText("Claude Code"));
+    fireEvent.click(getByText("Claude"));
     // The Codex id is gone on the click — not "still shown but about to change".
     expect(modelSel().value).toBe("");
     expect(save().disabled).toBe(true);
-    expect(getByText(/Loading the models available on Claude Code/)).toBeTruthy();
+    expect(getByText(/Loading the models available on Claude/)).toBeTruthy();
     // The exact race: a save inside the window submits nothing at all.
     fireEvent.click(save());
     expect(onSubmit).not.toHaveBeenCalled();
@@ -1546,7 +1546,7 @@ describe("P13-UI-52 — the editor states the backend narrowing before the save"
     // mkProfile's Developer declares both backends; the form seeds the first.
     const { getByText } = renderModal({ initial: mkProfile({}) });
     expect(getByText(/Saving pins this profile to one backend/)).toBeTruthy();
-    expect(getByText(/Claude Code will be dropped/)).toBeTruthy();
+    expect(getByText(/Claude will be dropped/)).toBeTruthy();
   });
 
   it("says nothing when the profile already declares exactly one", () => {

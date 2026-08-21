@@ -1306,14 +1306,21 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .op-id { display: flex; align-items: center; gap: .6rem; }
 /* operator run control — backend + autonomy selects and the Run-operator
    button; wraps within the Operator cell */
-.op-run { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; justify-content: flex-start; }
-/* P16-UI-05: a size/weight variant of the base `select` rule, not a fourth
-   re-invention of it — border, radius, surface, focus ring and disabled state
-   all come from there now. */
-.op-sel {
-  font-size: .72rem; font-family: var(--font-display); font-weight: 600;
-  padding: .26rem .4rem;
+.op-run { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; justify-content: flex-start; }
+/* Owner request 2026-08-21: the run control SHOWS the operator's backend and
+   takes an optional steer — the per-run backend/autonomy selects (`.op-sel`)
+   are gone; both are configured on the operator profile and the run resolves
+   the live deployment. */
+.op-backend { font-size: .78rem; font-weight: 650; font-family: var(--font-display); color: var(--muted); }
+.op-steer {
+  flex: 1 1 180px; min-width: 0;
+  font: inherit; font-size: .78rem; color: var(--fg);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-button); padding: .3rem .55rem;
 }
+.op-steer::placeholder { color: var(--placeholder); }
+.op-steer:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); outline: 0; }
+.op-steer:disabled { opacity: .55; }
 
 /* timeline */
 .tl-filter { display: flex; gap: .35rem; flex-wrap: wrap; }

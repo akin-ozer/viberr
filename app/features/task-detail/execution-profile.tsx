@@ -589,10 +589,15 @@ function ReviewerControl({
 }
 
 /**
- * Operator run control — pick a backend (Claude Code / Codex) and an autonomy
- * level (supervised / full), then run the operator to coordinate the task.
- * Full autonomy lets the operator drive stages and accept completion itself;
- * supervised has it recommend at governed boundaries. Server re-checks RBAC.
+ * Operator run control (owner request 2026-08-21): SHOWS the operator's
+ * current backend and runs it — no per-run backend/autonomy pickers. Both are
+ * configured on the deployed operator profile, and the run resolves the LIVE
+ * profile (the same law the delivering-agent card follows), so a picker here
+ * was a second place for the same decision. An optional steer rides along as
+ * the human's directive: it is recorded on the timeline as an `@operator`
+ * comment and becomes the run's instruction. Full autonomy — the state that
+ * lets the run drive to Done — still announces itself (F20-9's mirror);
+ * supervised is the quiet default. Server re-checks RBAC.
  */
 function OperatorRunControl({
   busy,
@@ -612,68 +617,45 @@ function OperatorRunControl({
    *  paid no-op. The reason is rendered copy (a `title` never opens on a
    *  disabled control — the same P14 reason the closed state renders text). */
   blockedReason?: string;
-  /** The operator profile's configured backend — the picker's default (P11-76). */
+  /** The operator profile's configured backend — displayed, not picked; the
+   *  run resolves the live profile (P11-76 fall-through). */
   defaultBackend: "claude" | "codex";
-  /** R19-A: the project's configured operator autonomy — the CEILING a run may
-   *  not exceed. The selector offers only what will actually run: a dropdown
-   *  that lists an option the server silently clamps is the dishonest
-   *  affordance this ruling exists to remove. */
+  /** R19-A: the project's configured operator autonomy — what this run WILL
+   *  use. Full announces itself below; supervised is the quiet default. */
   configuredAutonomy: "supervised" | "full";
-  /** Which backends are configured — unavailable ones are disabled (P11-41). */
+  /** Which backends are configured (P11-41) — an unconfigured operator backend
+   *  disables Run and says so, instead of failing fast after the click. */
   backendAvailable: { claude: boolean; codex: boolean };
-  onRun: (backend: string, autonomy: string) => void;
+  onRun: (steer: string) => void;
 }) {
-  // P11-41: default to the configured backend, but if it isn't actually
-  // available fall back to one that is, so the picker never starts on an option
-  // that would fail fast.
-  const initialBackend =
-    backendAvailable[defaultBackend]
-      ? defaultBackend
-      : backendAvailable.claude
-        ? "claude"
-        : backendAvailable.codex
-          ? "codex"
-          : defaultBackend;
-  const [backend, setBackend] = useState<string>(initialBackend);
-  const [autonomy, setAutonomy] = useState<string>(configuredAutonomy);
+  const [steer, setSteer] = useState("");
+  const backendLabel = defaultBackend === "claude" ? "Claude" : "Codex";
+  const backendMissing = !backendAvailable[defaultBackend];
   // F20-5: an open decision packet is refused server-side just like a closed
   // task is, so it joins `disabled` in switching the control off.
-  const off = busy || disabled || !!blockedReason;
+  const off = busy || disabled || !!blockedReason || backendMissing;
+  const run = () => {
+    if (off) return;
+    onRun(steer.trim());
+    setSteer("");
+  };
   return (
     <span className="op-run">
-      <select
-        className="op-sel"
-        aria-label="Operator backend"
-        value={backend}
-        onChange={(e) => setBackend(e.target.value)}
+      {/* The backend this run resolves to — the profile's, stated not picked. */}
+      <span className="op-backend">{backendLabel}</span>
+      <input
+        type="text"
+        className="op-steer"
+        aria-label="Steer this operator run (optional)"
+        placeholder="Optional: tell the operator what this run should focus on"
+        value={steer}
+        maxLength={2000}
+        onChange={(e) => setSteer(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") run();
+        }}
         disabled={off}
-      >
-        <option value="claude" disabled={!backendAvailable.claude}>
-          Claude Code{backendAvailable.claude ? "" : " (not configured)"}
-        </option>
-        <option value="codex" disabled={!backendAvailable.codex}>
-          Codex{backendAvailable.codex ? "" : " (not configured)"}
-        </option>
-      </select>
-      <select
-        className="op-sel"
-        aria-label="Operator autonomy"
-        value={autonomy}
-        onChange={(e) => setAutonomy(e.target.value)}
-        disabled={off}
-      >
-        <option value="supervised">Supervised</option>
-        {configuredAutonomy === "full" && (
-          <option value="full">Full autonomy</option>
-        )}
-      </select>
-      {configuredAutonomy === "supervised" && (
-        // Explain the option that is NOT there. An absent control with no
-        // reason reads as a bug; naming the policy makes it a decision.
-        <span className="sub xs dim">
-          Project policy: supervised. Raise it on the operator profile.
-        </span>
-      )}
+      />
       {/* The operator coordinates ongoing work, so it stays runnable even while
           a specialist run streams — only its own in-flight run disables it.
           A closed (terminal-stage) task disables it too (G9). */}
@@ -681,7 +663,7 @@ function OperatorRunControl({
         type="button"
         className="btn primary sm"
         disabled={off}
-        onClick={() => onRun(backend, autonomy)}
+        onClick={run}
         title={
           blockedReason ??
           (disabled
@@ -692,6 +674,26 @@ function OperatorRunControl({
         <Icon name="shield" />
         {busy ? "Running…" : "Run operator"}
       </button>
+      {backendMissing && (
+        // P11-41's honesty without a picker: the profile's backend is not
+        // configured on this instance, so the run would fail fast — say it
+        // here, where the fix (the operator profile, or instance credentials)
+        // is one hop away.
+        <span className="sub">
+          {backendLabel} isn&rsquo;t configured on this instance, so the
+          operator can&rsquo;t run. Configure it, or switch the operator
+          profile&rsquo;s backend.
+        </span>
+      )}
+      {configuredAutonomy === "full" && !disabled && (
+        // F20-9's mirror, kept: full autonomy is the state that lets this run
+        // transition stages and accept completion itself — it must be visible
+        // on the surface that launches it. Supervised needs no caption.
+        <span className="sub xs dim">
+          Full autonomy: this run can move the task and accept completion
+          itself.
+        </span>
+      )}
       {/* P14 ruling: a `title` is unreachable on a DISABLED control (no hover
           target for keyboard or touch), so the reason a control is dead has to
           be rendered copy — the reviewer panel already says this for its own
@@ -775,8 +777,9 @@ export function ExecutionProfile({
   onRemoveReviewer: (profileId: string) => void;
   /** The operator-run fetcher is in flight. */
   operatorBusy: boolean;
-  /** Run the operator agent with a chosen backend + autonomy. */
-  onRunOperator: (backend: string, autonomy: string) => void;
+  /** Run the operator agent (profile-configured backend + autonomy); the
+   *  optional steer becomes the run's human directive. */
+  onRunOperator: (steer: string) => void;
 }) {
   // Deployed specialists not already engaged as reviewers — what "Add reviewer"
   // offers. F10-13: also exclude the current DELIVERING profile. Engaging it as
@@ -898,7 +901,7 @@ export function ExecutionProfile({
                     {spGhost ? GHOST_NAME : agentNameOf(sp.profileId)}
                   </div>
                   <div className="sub">
-                    {sp.role} · {sp.backend === "claude" ? "Claude Code" : "Codex"}
+                    {sp.role} · {sp.backend === "claude" ? "Claude" : "Codex"}
                   </div>
                   {/* UX19-12: the row that offers the action names the state. */}
                   {spGhost && <div className="sub">{GHOST_DELIVERING_NOTE}</div>}
@@ -963,7 +966,7 @@ export function ExecutionProfile({
                         {ghost ? GHOST_NAME : agentNameOf(c.profileId)}
                       </div>
                       <div className="sub">
-                        {c.role} · {c.backend === "claude" ? "Claude Code" : "Codex"}
+                        {c.role} · {c.backend === "claude" ? "Claude" : "Codex"}
                       </div>
                       {/* UX19-12: same disclosure as the delivering row — and
                           the release (×) beside it stays live, because letting

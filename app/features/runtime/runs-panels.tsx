@@ -551,7 +551,7 @@ export function AgentLogsPanel({
     !!cur!.failedBackendUnavailable &&
     !!cur!.altBackend;
   const canRetryBackend = backendUnavailable && !!onRetryBackend;
-  const altLabel = cur!.altBackend === "codex" ? "Codex" : "Claude Code";
+  const altLabel = cur!.altBackend === "codex" ? "Codex" : "Claude";
   const footer =
     cur!.state === "running"
       ? "streaming: raw output stays here as evidence, never in the task record"
@@ -568,7 +568,7 @@ export function AgentLogsPanel({
               "; thread can be re-engaged"
             : cur!.state === "error"
               ? backendUnavailable
-                ? `${cur!.backend === "codex" ? "Codex" : "Claude Code"} was unavailable (quota / rate limit)${canRetryBackend ? `. Retry on ${altLabel}` : ". A maintainer can retry it on the other backend"}`
+                ? `${cur!.backend === "codex" ? "Codex" : "Claude"} was unavailable (quota / rate limit)${canRetryBackend ? `. Retry on ${altLabel}` : ". A maintainer can retry it on the other backend"}`
                 : "stream ended on a continuity error; see the blocked packet"
               : "thread alive, no run executing";
 

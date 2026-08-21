@@ -131,7 +131,7 @@ const POLICY_ENGINE_RENDER: ActorRender = { kind: "system", name: "Policy engine
 const CLAUDE_REVIEWER_RENDER: ActorRender = {
   kind: "agent",
   backend: "claude",
-  name: "Claude Code",
+  name: "Claude",
   role: "Review & validation",
 };
 
@@ -397,7 +397,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         { occurredAt: todayAt(9, 2), type: "transition", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Transition request:** move VIB-142 from In Progress to Review. Branch healthy, evidence attached." },
         { occurredAt: todayAt(8, 30), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
-          text: "Re-engaged **Claude Code (Reviewer)** as reviewer; re-anchored on `task.md` before review." },
+          text: "Re-engaged **Claude (Reviewer)** as reviewer; re-anchored on `task.md` before review." },
         { occurredAt: todayAt(8, 12), type: "comment", actor: codexRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Branch work complete. Handing back to operator for the review boundary." },
         { occurredAt: yesterdayAt(15, 12), type: "assign", actor: humanRef(ids, "arda"), title: null, toAgent: false, evidence: null,
@@ -463,7 +463,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         { occurredAt: yesterdayAt(14, 20), type: "assign", actor: humanRef(ids, "selin"), title: null, toAgent: false, evidence: null,
           text: "Took task ownership ahead of the review boundary." },
         { occurredAt: yesterdayAt(14, 5), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
-          text: "Assigned **Claude Code (Developer)** as primary specialist — branch `vib-151-timeline-compression` created." },
+          text: "Assigned **Claude (Developer)** as primary specialist — branch `vib-151-timeline-compression` created." },
       ],
     },
     // ------------------------------------------------------------ VIB-153
@@ -529,7 +529,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
           { k: "Branch", v: "vib-160-rehydrate · 2 commits behind main", code: true },
         ],
         options: [
-          { kind: "redirect", t: "Resume rehydrated thread", d: "Continue from canonical state; re-run the failing checks before any new commits.", rec: true, ev: "**Decision:** resume the rehydrated thread. Operator re-anchors Claude Code (Developer) on `task.md` and re-runs the failing checks before new commits." },
+          { kind: "redirect", t: "Resume rehydrated thread", d: "Continue from canonical state; re-run the failing checks before any new commits.", rec: true, ev: "**Decision:** resume the rehydrated thread. Operator re-anchors Claude (Developer) on `task.md` and re-runs the failing checks before new commits." },
           { kind: "redirect", t: "Start a fresh specialist", d: "Retire the degraded thread; a new Developer anchors on task.md.", rec: false, ev: "**Decision:** start a fresh specialist. The degraded thread is retired and a new Developer thread anchors on the canonical file." },
           { kind: "hold_runtime_debug", t: "Hold for runtime debug", d: "Keep the task blocked while the provider-native session is inspected.", rec: false },
         ],
@@ -540,7 +540,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         { occurredAt: todayAt(10, 18), type: "quality", actor: codexRef("reviewer"), title: null, toAgent: false, evidence: null,
           text: "**Quality flag:** the rehydrate path drops evidence references recorded before the continuity break." },
         { occurredAt: todayAt(10, 5), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
-          text: "**Continuity warning:** runtime history unavailable — re-anchored **Claude Code (Developer)** on the canonical task file." },
+          text: "**Continuity warning:** runtime history unavailable — re-anchored **Claude (Developer)** on the canonical task file." },
         { occurredAt: todayAt(9, 52), type: "github", actor: claudeRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Pushed `vib-160-rehydrate` — recovery shim and continuity marker." },
         { occurredAt: yesterdayAt(12, 10), type: "quality", actor: codexRef("reviewer"), title: null, toAgent: false, evidence: null,
