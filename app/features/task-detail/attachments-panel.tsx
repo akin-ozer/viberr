@@ -2,6 +2,7 @@ import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server
 import { prettySize } from "~/features/kb-browser/tree";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
+import { useAttachmentLightbox } from "./attachment-lightbox";
 
 /**
  * R19-19 — the task's attachments: files an agent's browser saved
@@ -40,6 +41,10 @@ export function AttachmentsPanel({
    *  for this task even before the first file lands. */
   browserExpected?: boolean;
 }) {
+  // Image previews open the in-app lightbox on a plain click (owner request
+  // 2026-08-21); the anchors stay real links for modified clicks. Called
+  // before the empty-state return — hooks run unconditionally.
+  const lightbox = useAttachmentLightbox();
   if (attachments.length === 0) {
     if (!browserExpected) return null;
     return (
@@ -78,6 +83,7 @@ export function AttachmentsPanel({
               target="_blank"
               rel="noreferrer"
               aria-label={`Open attachment ${a.name} (${prettySize(a.size)})`}
+              onClick={lightbox({ name: a.name, url: href(a.name) })}
             >
               {/* The route serves whitelisted image types inline, sandboxed. */}
               <img src={href(a.name)} alt={a.name} loading="lazy" />

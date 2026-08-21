@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { AttachmentsPanel } from "./attachments-panel";
+import { AttachmentLightboxProvider } from "./attachment-lightbox";
 import { TimelineItem } from "./timeline";
 
 afterEach(cleanup);
@@ -229,5 +230,109 @@ describe("TimelineItem attachment chips (P21 — the producing message shows its
       <TimelineItem ev={withFiles(null)} attachmentsBase={BASE} />,
     );
     expect(container.querySelector(".tl-attach")).toBeNull();
+  });
+});
+
+/**
+ * Owner request 2026-08-21: clicking image evidence opened the raw file in a
+ * new tab — it now opens the in-app lightbox. The anchors stay real links:
+ * a MODIFIED click (the browser's own new-tab/save intents) passes through,
+ * and with no provider mounted (bare renders, other surfaces) the click
+ * handler is inert and the link behaves exactly as before.
+ */
+describe("attachment lightbox (image evidence opens a popup, not a tab)", () => {
+  const ev = (text = "Captured the page."): TimelineEventRender => ({
+    id: 9,
+    type: "comment",
+    occurredAt: "2026-08-14T10:00:00.000Z",
+    actor: { kind: "agent", backend: "claude", name: "Web Verifier", role: "verification" },
+    title: null,
+    text,
+    toAgent: false,
+    evidence: null,
+    attachments: ["shot.png", "capture.yml"],
+  });
+  const DIALOG = 'dialog[data-screen-label="Attachment lightbox"]';
+
+  it("a plain click on a timeline thumbnail opens the lightbox on the image", () => {
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <TimelineItem ev={ev()} attachmentsBase={BASE} />
+      </AttachmentLightboxProvider>,
+    );
+    fireEvent.click(container.querySelector(".tl-attach-thumb")!);
+    const dialog = baseElement.querySelector(DIALOG)!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.querySelector("img")!.getAttribute("src")).toBe(`${BASE}/shot.png`);
+    // The raw file stays one click away.
+    const original = dialog.querySelector<HTMLAnchorElement>("a[target='_blank']")!;
+    expect(original.getAttribute("href")).toBe(`${BASE}/shot.png`);
+  });
+
+  it("a modified click (new-tab intent) does NOT intercept", () => {
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <TimelineItem ev={ev()} attachmentsBase={BASE} />
+      </AttachmentLightboxProvider>,
+    );
+    fireEvent.click(container.querySelector(".tl-attach-thumb")!, { ctrlKey: true });
+    expect(baseElement.querySelector(DIALOG)).toBeNull();
+  });
+
+  it("with no provider, the click is inert and the anchor stays a plain link", () => {
+    const { container, baseElement } = render(
+      <TimelineItem ev={ev()} attachmentsBase={BASE} />,
+    );
+    fireEvent.click(container.querySelector(".tl-attach-thumb")!);
+    expect(baseElement.querySelector(DIALOG)).toBeNull();
+  });
+
+  it("the Close control dismisses the popup", () => {
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <TimelineItem ev={ev()} attachmentsBase={BASE} />
+      </AttachmentLightboxProvider>,
+    );
+    fireEvent.click(container.querySelector(".tl-attach-thumb")!);
+    fireEvent.click(baseElement.querySelector(`${DIALOG} button[aria-label="Close"]`)!);
+    expect(baseElement.querySelector(DIALOG)).toBeNull();
+  });
+
+  it("an inline markdown embed of a task attachment opens the same lightbox", () => {
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <TimelineItem
+          ev={ev("Proof: ![the capture](attachments/shot.png)")}
+          attachmentNames={new Set(["shot.png"])}
+          attachmentsBase={BASE}
+        />
+      </AttachmentLightboxProvider>,
+    );
+    const btn = container.querySelector(".md-img-btn")!;
+    expect(btn.querySelector("img")!.getAttribute("src")).toBe(`${BASE}/shot.png`);
+    fireEvent.click(btn);
+    expect(baseElement.querySelector(DIALOG)).toBeTruthy();
+  });
+
+  it("a non-image chip keeps its plain-link behavior (no popup can render a yml)", () => {
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <TimelineItem ev={ev()} attachmentsBase={BASE} />
+      </AttachmentLightboxProvider>,
+    );
+    fireEvent.click(container.querySelector(".tl-attach-chip")!);
+    expect(baseElement.querySelector(DIALOG)).toBeNull();
+  });
+
+  it("the Attachments panel's image preview opens the lightbox too", () => {
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <AttachmentsPanel base={BASE} attachments={[entry("shot.png")]} />
+      </AttachmentLightboxProvider>,
+    );
+    fireEvent.click(container.querySelector(".attach-thumb")!);
+    const dialog = baseElement.querySelector(DIALOG)!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.querySelector("img")!.getAttribute("src")).toBe(`${BASE}/shot.png`);
   });
 });

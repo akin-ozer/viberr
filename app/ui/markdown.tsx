@@ -1,4 +1,8 @@
-import type { ComponentPropsWithoutRef, ReactNode } from "react";
+import type {
+  ComponentPropsWithoutRef,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { findMentionSpans } from "./mention-spans";
@@ -158,9 +162,17 @@ function repairAttachmentHref(
   return citesTaskAttachment ? `${base}/${encodeURIComponent(name)}` : href;
 }
 
+/** Click-handler factory for an attachment image (the task page passes the
+ *  lightbox's own factory — attachment-lightbox.tsx — whose shape this is). */
+type AttachmentImageClickFactory = (img: {
+  name: string;
+  url: string;
+}) => (e: ReactMouseEvent<HTMLElement>) => void;
+
 function componentsFor(
   attachments: ReadonlySet<string> | undefined,
   base: string | undefined,
+  onAttachmentImageClick?: AttachmentImageClickFactory,
 ) {
   return {
     a({ children, href }: ComponentPropsWithoutRef<"a">) {
@@ -180,13 +192,26 @@ function componentsFor(
       // SAFETY: react-markdown builds `src` from the markdown AST's url
       // STRING — the Blob/MediaSource arms of the DOM prop type can never
       // reach a components override, so the value is a string (or absent).
-      const url = src as string | undefined;
+      const raw = src as string | undefined;
+      const url = repairAttachmentHref(raw, attachments, base);
+      const image = <img src={url} alt={alt ?? ""} loading="lazy" />;
+      // An embedded TASK attachment opens the in-app lightbox on click (owner
+      // request 2026-08-21) — recognized by serving-route prefix, so it also
+      // catches a body that wrote the route URL directly. Other images (rare;
+      // external URLs render as whatever the browser loads) stay plain.
+      const isTaskAttachment =
+        onAttachmentImageClick && url && base && url.startsWith(base + "/");
+      if (!isTaskAttachment) return image;
+      const name = decodeURIComponent(url.slice(base.length + 1));
       return (
-        <img
-          src={repairAttachmentHref(url, attachments, base)}
-          alt={alt ?? ""}
-          loading="lazy"
-        />
+        <button
+          type="button"
+          className="md-img-btn"
+          aria-label={`Open attachment ${name}`}
+          onClick={onAttachmentImageClick({ name, url })}
+        >
+          {image}
+        </button>
       );
     },
     code({ children, className }: ComponentPropsWithoutRef<"code">) {
@@ -211,6 +236,7 @@ export function Markdown({
   mentionNames,
   attachmentNames,
   attachmentsBase,
+  onAttachmentImageClick,
 }: {
   text: string;
   /** Known mentionable names, so a multi-word "@Arda Kaya" chips as one span. */
@@ -221,10 +247,13 @@ export function Markdown({
   attachmentNames?: ReadonlySet<string>;
   /** The task's attachment route base (`…/tasks/<KEY>/attachments`). */
   attachmentsBase?: string;
+  /** Opens an embedded attachment image in the task page's lightbox — pass
+   *  `useAttachmentLightbox()`'s factory. Absent ⇒ embeds are plain images. */
+  onAttachmentImageClick?: AttachmentImageClickFactory;
 }): ReactNode {
   const components =
     attachmentNames && attachmentNames.size > 0 && attachmentsBase
-      ? componentsFor(attachmentNames, attachmentsBase)
+      ? componentsFor(attachmentNames, attachmentsBase, onAttachmentImageClick)
       : DEFAULT_COMPONENTS;
   return (
     <ReactMarkdown
