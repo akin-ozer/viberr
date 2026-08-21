@@ -528,7 +528,19 @@ function OperatorRunControl({
         maxLength={2000}
         onChange={(e) => setSteer(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") run();
+          // Single-line input: Enter submits (the search/chat convention; the
+          // multi-line composer needs ⌘/Ctrl+Enter only because Enter is a
+          // newline there). Guard IME composition — an Enter that merely
+          // confirms a multibyte candidate must not launch the billable run.
+          // `keyCode === 229` covers WebKit/Safari, which fires compositionend
+          // BEFORE the confirming keydown, so `isComposing` is already false.
+          if (
+            e.key === "Enter" &&
+            !e.nativeEvent.isComposing &&
+            e.nativeEvent.keyCode !== 229
+          ) {
+            run();
+          }
         }}
         disabled={off}
       />

@@ -3,7 +3,19 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from "react";
+import { createContext, useContext, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { Icon } from "./icon";
+
+/**
+ * Set while rendering a link's content so the `img` override can skip its
+ * lightbox <button> for an image WRAPPED IN A LINK (`[![alt](x)](url)`) —
+ * a <button> inside an <a> is a nested-interactive a11y violation. react-markdown
+ * applies the `img` override at RENDER time, inside the `a` override's subtree,
+ * so this context reaches it (detecting the rendered button from `a`'s children
+ * cannot: at that point the child is still a bare <img>).
+ */
+const MarkdownInsideLink = createContext(false);
 import remarkGfm from "remark-gfm";
 import { findMentionSpans } from "./mention-spans";
 
@@ -169,6 +181,71 @@ type AttachmentImageClickFactory = (img: {
   url: string;
 }) => (e: ReactMouseEvent<HTMLElement>) => void;
 
+/** The `img` override, as a real component so it can read the inside-link
+ *  context. A task attachment opens the in-app lightbox on click (owner request
+ *  2026-08-21) — recognized by serving-route prefix, so it also catches a body
+ *  that wrote the route URL directly. Other images (rare; external URLs render
+ *  as whatever the browser loads) stay plain, AND so does an attachment WRAPPED
+ *  IN A LINK: the lightbox <button> would nest in the <a> (nested-interactive),
+ *  so there the image stays plain and the link owns the click. */
+function MarkdownImg({
+  src,
+  alt,
+  attachments,
+  base,
+  onAttachmentImageClick,
+}: {
+  src?: string;
+  alt?: string;
+  attachments: ReadonlySet<string> | undefined;
+  base: string | undefined;
+  onAttachmentImageClick?: AttachmentImageClickFactory;
+}) {
+  const insideLink = useContext(MarkdownInsideLink);
+  const [failed, setFailed] = useState(false);
+  const url = repairAttachmentHref(src, attachments, base);
+  const isTaskAttachment =
+    onAttachmentImageClick && url && base && url.startsWith(base + "/");
+  // A task attachment can fail to serve — rotated/removed off disk (404), over
+  // the route's 50 MB inline cap (413), or an unsupported type — so it degrades
+  // to the same labeled placeholder the timeline/panel tiles use instead of a
+  // broken-image glyph. An external image stays as the browser renders it (the
+  // author's own link, out of scope).
+  if (isTaskAttachment && failed) {
+    const name = decodeURIComponent(url.slice(base.length + 1));
+    return (
+      <span
+        className="attach-broken md-img-broken"
+        role="img"
+        aria-label={`${alt || name} (preview unavailable)`}
+      >
+        <Icon name="file" />
+        <span className="attach-broken-note">preview unavailable</span>
+      </span>
+    );
+  }
+  const image = (
+    <img
+      src={url}
+      alt={alt ?? ""}
+      loading="lazy"
+      {...(isTaskAttachment ? { onError: () => setFailed(true) } : {})}
+    />
+  );
+  if (!isTaskAttachment || insideLink) return image;
+  const name = decodeURIComponent(url.slice(base.length + 1));
+  return (
+    <button
+      type="button"
+      className="md-img-btn"
+      aria-label={`Open attachment ${name}`}
+      onClick={onAttachmentImageClick({ name, url })}
+    >
+      {image}
+    </button>
+  );
+}
+
 function componentsFor(
   attachments: ReadonlySet<string> | undefined,
   base: string | undefined,
@@ -176,42 +253,33 @@ function componentsFor(
 ) {
   return {
     a({ children, href }: ComponentPropsWithoutRef<"a">) {
+      // Mark the subtree so a nested attachment image renders WITHOUT its
+      // lightbox <button> (a <button> inside this <a> is nested-interactive).
+      // The link is the interactive element; clicking follows the href, which is
+      // the correct behavior for an image wrapped in a link.
       return (
         <a
           href={repairAttachmentHref(href, attachments, base)}
           target="_blank"
           rel="noopener noreferrer"
         >
-          {children}
+          <MarkdownInsideLink.Provider value={true}>
+            {children}
+          </MarkdownInsideLink.Provider>
         </a>
       );
     },
     img({ src, alt }: ComponentPropsWithoutRef<"img">) {
-      // `![…](attachments/x.png)` embeds the capture itself; the same repair
-      // applies.
-      // SAFETY: react-markdown builds `src` from the markdown AST's url
-      // STRING — the Blob/MediaSource arms of the DOM prop type can never
-      // reach a components override, so the value is a string (or absent).
-      const raw = src as string | undefined;
-      const url = repairAttachmentHref(raw, attachments, base);
-      const image = <img src={url} alt={alt ?? ""} loading="lazy" />;
-      // An embedded TASK attachment opens the in-app lightbox on click (owner
-      // request 2026-08-21) — recognized by serving-route prefix, so it also
-      // catches a body that wrote the route URL directly. Other images (rare;
-      // external URLs render as whatever the browser loads) stay plain.
-      const isTaskAttachment =
-        onAttachmentImageClick && url && base && url.startsWith(base + "/");
-      if (!isTaskAttachment) return image;
-      const name = decodeURIComponent(url.slice(base.length + 1));
+      // Delegate to a real (PascalCase) component so the `useContext` hook that
+      // detects the enclosing-link case lives where hooks belong.
       return (
-        <button
-          type="button"
-          className="md-img-btn"
-          aria-label={`Open attachment ${name}`}
-          onClick={onAttachmentImageClick({ name, url })}
-        >
-          {image}
-        </button>
+        <MarkdownImg
+          src={src}
+          alt={alt}
+          attachments={attachments}
+          base={base}
+          onAttachmentImageClick={onAttachmentImageClick}
+        />
       );
     },
     code({ children, className }: ComponentPropsWithoutRef<"code">) {

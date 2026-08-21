@@ -2,6 +2,7 @@ import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server
 import { prettySize } from "~/features/kb-browser/tree";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
+import { AttachmentThumb } from "./attachment-image";
 import { useAttachmentLightbox } from "./attachment-lightbox";
 
 /**
@@ -76,17 +77,18 @@ export function AttachmentsPanel({
       {images.length > 0 && (
         <div className="attach-grid">
           {images.map((a) => (
-            <a
-              key={a.name}
-              className="attach-thumb"
+            // Keyed by name+size so a re-saved file (new size) remounts and
+            // clears a stale "preview unavailable" (broken-tile recovery). The
+            // route serves whitelisted image types inline, sandboxed; a
+            // rotated/oversized/unsupported file degrades to a placeholder.
+            <AttachmentThumb
+              key={`${a.name}:${a.size}`}
+              variant="panel"
               href={href(a.name)}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`Open attachment ${a.name} (${prettySize(a.size)})`}
-              onClick={lightbox({ name: a.name, url: href(a.name) })}
+              name={a.name}
+              openLabel={`Open attachment ${a.name} (${prettySize(a.size)})`}
+              onOpen={lightbox({ name: a.name, url: href(a.name) })}
             >
-              {/* The route serves whitelisted image types inline, sandboxed. */}
-              <img src={href(a.name)} alt={a.name} loading="lazy" />
               <span className="attach-meta">
                 <span className="attach-name">{a.name}</span>
                 <span className="attach-size">{prettySize(a.size)}</span>
@@ -99,7 +101,7 @@ export function AttachmentsPanel({
                   <LocalDayDotTime iso={producers[a.name].occurredAt} />
                 </span>
               )}
-            </a>
+            </AttachmentThumb>
           ))}
         </div>
       )}

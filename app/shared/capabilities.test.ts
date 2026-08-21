@@ -44,14 +44,17 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     }
   });
 
-  it("classifies the headline repo-write cap as BOTH — the Codex sandbox enforces it (P14-RT-03)", () => {
-    // Since P13-RT-02 a Codex run with repo-write withheld gets the read-only
-    // sandbox, which is OS-level enforcement. Leaving it labeled claude-only
-    // made the capability matrix understate the product's own guarantee.
-    expect(capabilityEnforcement("execute-code-or-write-repo")).toBe("both");
+  it("R22: classifies the headline repo-write cap as claude-only — the Codex read-only sandbox is gone", () => {
+    // P14-RT-03 labeled this BOTH because P13-RT-02 gave a withheld Codex run the
+    // read-only sandbox. R22 removed that sandbox ("viberr itself is the
+    // sandbox"), so repo-write withholding is advisory on Codex again — the
+    // server-owned delivery gate is the boundary. The whole repo-write family is
+    // claude-only now. Canary: restore a read-only arm to resolveCodexSandboxMode
+    // and move this cap back to ENFORCED-only, and this reads back "both".
+    expect(capabilityEnforcement("execute-code-or-write-repo")).toBe("claude-only");
     expect(
       CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("execute-code-or-write-repo"),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("classifies structural ALWAYS_HUMAN caps as BOTH — never advisory-on-Codex", () => {
@@ -101,19 +104,23 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(entry.kinds).toEqual(["agent"]);
   });
 
-  it("the matrix badge (capabilityByLabel → enforcement) is claude-only ONLY for the 3 fine-grained delivery rows", () => {
+  it("R22: the matrix badge is claude-only for the repo-write family (incl. the headline), not merge", () => {
     // What the CapabilityMatrixModal actually does: label → id → enforcement.
-    const claudeOnlyLabels = ["Create the task-key branch", "Commit & push to the branch", "Open the review pull request"];
+    // R22 added the headline "Execute code or write to the repo" to the
+    // claude-only family (the Codex read-only sandbox is gone → advisory there).
+    const claudeOnlyLabels = [
+      "Create the task-key branch",
+      "Commit & push to the branch",
+      "Open the review pull request",
+      "Execute code or write to the repo",
+    ];
     for (const label of claudeOnlyLabels) {
       const id = capabilityByLabel(label)?.id;
       expect(id, label).toBeTruthy();
       expect(capabilityEnforcement(id!), label).toBe("claude-only");
     }
-    // Merge a pull request and the headline repo-write must NOT get the badge.
+    // Merge a pull request is ALWAYS_HUMAN → both backends, never claude-only.
     expect(capabilityEnforcement(capabilityByLabel("Merge a pull request")!.id)).toBe("both");
-    expect(
-      capabilityEnforcement(capabilityByLabel("Execute code or write to the repo")!.id),
-    ).toBe("both");
   });
 });
 

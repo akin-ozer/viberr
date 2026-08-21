@@ -744,11 +744,6 @@ function CapabilityGrants({
                                 ? `Policy for ${capDef.label} (required by Drive a live web browser: the browser is web egress)`
                                 : `Policy for ${capDef.label}`
                           }
-                          title={
-                            pinned
-                              ? "Required by Drive a live web browser: the browser is web egress. Set the browser to Human-only or Off to change this."
-                              : undefined
-                          }
                           onKeyDown={rovingRadioKeyDown}
                         >
                           {rowModes.map((m, mi) => (
@@ -772,6 +767,17 @@ function CapabilityGrants({
                             </button>
                           ))}
                         </div>
+                        {pinned && (
+                          // P14: a disabled control's reason must be RENDERED,
+                          // not parked in a title that never opens on it (nor
+                          // in an aria-label a sighted admin can't see). Says
+                          // why the row is locked and how to unlock it.
+                          <p className="cap-mnote">
+                            Required by Drive a live web browser: the browser is
+                            web egress. Set the browser to Human-only or Off to
+                            change this.
+                          </p>
+                        )}
                       </div>
                     );
                   })}

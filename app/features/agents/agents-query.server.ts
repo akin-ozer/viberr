@@ -1,17 +1,17 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { z } from "zod";
 import type {
   AgentDeployment,
   AgentDeploymentDefinition,
   CapabilityMode,
 } from "~/schemas/project-file.schema";
-import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import {
-  agentProfileFilePath,
-  agentProfilesDir,
-} from "~/server/files/file-store-root.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
+  deploymentRuntimeIdentity,
+  primaryRunBackend,
+  readTemplate,
+  type TemplateProfile,
+} from "~/server/agents/deployment-view.server";
+import { agentProfilesDir } from "~/server/files/file-store-root.server";
 import { getProject } from "~/server/projections/board-query.server";
 import {
   isKnownModel,
@@ -50,71 +50,6 @@ import type { AgentProfileView, LibraryProfileView } from "./agent-types";
  * here for the roster/CRUD callers that assemble it. */
 export type { AgentDeploymentDefinition };
 
-/** One YAML list of names: non-string members drop out (never the whole list),
- * and a value that is not a list at all reads as ABSENT so the org template's
- * value still wins downstream. */
-const looseNameList = z
-  .array(z.string().nullable().catch(null))
-  .transform((items) => items.filter((item) => item !== null))
-  .optional()
-  .catch(undefined);
-
-/**
- * The tolerant decode of the loose `definition` override. Every field catches
- * independently: a hand-edited project.md with one junk value must lose only
- * that field, never the whole override (the profile's name and persona live
- * here too). `name`/`role`/`icon`/`effort` treat an empty string as ABSENT —
- * the readers below fall back with `??`, so a stored `name: ""` would otherwise
- * beat the template and render a nameless profile. `resources` fills all three
- * lists, so a partial override cannot silently inherit the template's grants
- * for the lists it omitted.
- *
- * Field order matches `agentDeploymentDefinitionSchema` (project-file.schema),
- * the single source of truth for which fields exist at all.
- */
-const deploymentDefinitionOverrideSchema = z.object({
-  kind: z.enum(["operator", "specialist"]).optional().catch(undefined),
-  name: z.string().min(1).optional().catch(undefined),
-  role: z.string().min(1).optional().catch(undefined),
-  icon: z.string().min(1).optional().catch(undefined),
-  backends: z
-    .array(z.string().nullable().catch(null))
-    .transform((items) =>
-      items.filter((item): item is RealBackend => item === "codex" || item === "claude"),
-    )
-    .optional()
-    .catch(undefined),
-  model: z.string().optional().catch(undefined),
-  effort: z.string().min(1).optional().catch(undefined),
-  scope: z.string().optional().catch(undefined),
-  desc: z.string().optional().catch(undefined),
-  persona: z.string().optional().catch(undefined),
-  stages: looseNameList,
-  spanAll: z.boolean().optional().catch(undefined),
-  autonomy: z.enum(["supervised", "full"]).optional().catch(undefined),
-  resources: z
-    .object({ skills: looseNameList, mcps: looseNameList, kb: looseNameList })
-    .transform((r) => ({
-      skills: r.skills ?? [],
-      mcps: r.mcps ?? [],
-      kb: r.kb ?? [],
-    }))
-    .optional()
-    .catch(undefined),
-});
-
-/** Tolerant read of the loose `definition` field — junk fields ignored.
- *
- * The roster reads deployments out of the `agent_policy_json` projection
- * column, which `mapProjectRow` re-hydrates with an unchecked
- * `JSON.parse(...) as AgentDeployment[]` — so this is the one place on the read
- * path that actually validates the override against a schema. */
-export function parseDeploymentDefinition(
-  raw: AgentDeploymentDefinition | undefined,
-): AgentDeploymentDefinition | null {
-  const parsed = deploymentDefinitionOverrideSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
-}
 
 /** The one capability whose "acts directly" is ceilinged by operator autonomy —
  * `completion-for-acceptance` (label "Accept completion into Done"). */
@@ -210,54 +145,6 @@ export function capabilitiesToActionLabels(
     bucketOf(extra.mode).push(extra.label);
   }
   return buckets;
-}
-
-interface TemplateProfile {
-  kind: "operator" | "specialist";
-  name: string;
-  role: string;
-  icon: string;
-  backends: ("codex" | "claude")[];
-  model: string;
-  scope: string;
-  stages: string[];
-  spanAll: boolean;
-  resources: { skills: string[]; mcps: string[]; kb: string[] };
-  /** Short scannable frontmatter `desc` (empty on older templates). */
-  desc: string;
-  description: string;
-}
-
-function readTemplate(
-  profileId: string,
-  dataRoot?: string,
-): TemplateProfile | null {
-  const absPath = agentProfileFilePath(profileId, dataRoot);
-  if (!existsSync(absPath)) return null;
-  const { parsed } = parseAgentProfileContent(readFileSync(absPath, "utf8"), {
-    fallbackId: profileId,
-  });
-  if (!parsed) return null;
-  const fm = parsed.frontmatter;
-  return {
-    kind: fm.kind,
-    name: fm.name,
-    role: fm.role,
-    icon: fm.icon,
-    backends: fm.backends,
-    model: fm.model,
-    scope: fm.scope,
-    stages: fm.stages,
-    spanAll: fm.spanAll,
-    resources: {
-      skills: fm.resources.skills,
-      mcps: fm.resources.mcps,
-      kb: fm.resources.kb,
-    },
-    /** Short scannable frontmatter desc (may be empty on older templates). */
-    desc: fm.desc,
-    description: parsed.description,
-  };
 }
 
 /** Scannable one-liner for the library picker: the first paragraph, clamped.
@@ -372,59 +259,6 @@ function identityOverride(
   return fields.some(([mine, base]) => mine !== undefined && mine !== base);
 }
 
-/**
- * THE primary-backend rule: the backend a run of this profile actually starts
- * on is the FIRST real backend in its `backends` list (else claude). It was
- * written twice — here for the view's model resolution and in
- * specialist-run.server.ts `pickBackend` for the run itself — and any surface
- * that DISPLAYS an engaged agent's backend must agree with the run, so the
- * rule lives once and everyone delegates.
- */
-export function primaryRunBackend(
-  backends: readonly string[],
-): "codex" | "claude" {
-  return backends.find((b) => b === "codex" || b === "claude") === "codex"
-    ? "codex"
-    : "claude";
-}
-
-/**
- * Live `profileId → backend` for a project's DEPLOYED specialist profiles —
- * the backend a run started right now would use (owner report 2026-08-21).
- *
- * The task file's engagement rows snapshot the backend at engage time, and the
- * run start heals that snapshot only when the next run actually happens
- * (specialist-run.server.ts: "the run follows the live profile, not the
- * engage-time snapshot"). Between a profile edit and that next run, every
- * surface mapping the snapshot (task exec profile, board card glyphs, review
- * queue) said the OLD backend while Run would launch the new one. The query
- * layer overlays THIS map so display always matches what Run does; a profile
- * that is no longer deployed contributes nothing, which leaves the snapshot
- * standing — exactly the run path's own fallback.
- *
- * Tolerant by design: any read/parse failure yields an empty map (display
- * falls back to the snapshot, never 500s a board over a profile file).
- */
-export function deployedSpecialistBackends(
-  projectSlug: string,
-  dataRoot?: string,
-): ReadonlyMap<string, "codex" | "claude"> {
-  const map = new Map<string, "codex" | "claude">();
-  try {
-    const file = readProjectFile(
-      dataRoot === undefined ? { projectSlug } : { projectSlug, dataRoot },
-    );
-    if (!file?.parsed) return map;
-    for (const deployment of file.parsed.frontmatter.agents) {
-      const view = effectiveProfileView(deployment, dataRoot, VIEW_WITHOUT_POLICY);
-      if (view.kind === "operator") continue;
-      map.set(deployment.profileId, primaryRunBackend(view.backends));
-    }
-  } catch {
-    return map;
-  }
-  return map;
-}
 
 /**
  * Effective profile for ONE deployment entry (exported for actions/tests).
@@ -443,9 +277,13 @@ export function effectiveProfileView(
   absentDeliverMode: CapabilityMode,
   modelMarks?: ModelMarks,
 ): AgentProfileView {
-  const template = readTemplate(deployment.profileId, dataRoot);
-  const def = parseDeploymentDefinition(deployment.definition);
-  const kind = def?.kind ?? template?.kind ?? "specialist";
+  // The template ⊕ override resolution and the effective kind/backends come
+  // from the shared server resolver, so the value this view DISPLAYS and the
+  // value `deployedSpecialistBackends` overlays are one computation (never drift).
+  const { template, def, kind, backends } = deploymentRuntimeIdentity(
+    deployment,
+    dataRoot,
+  );
   // R7-5: on a specialist profile, a stored `recommend` grant is runtime-
   // identical to `direct` and the picker no longer offers it — coerce it to
   // `direct` ('Allowed') on read so the roster, matrix, policy counts and the
@@ -480,7 +318,6 @@ export function effectiveProfileView(
     mode: c.mode,
   }));
   const extras = deployment.extras.map((e) => ({ label: e.label, mode: e.mode }));
-  const backends = def?.backends ?? template?.backends ?? [];
   const model = def?.model ?? template?.model ?? "";
   // The model that would actually RUN: the primary (first) backend's, resolved
   // to a valid catalog id. `modelKnown` is false for a legacy display-label

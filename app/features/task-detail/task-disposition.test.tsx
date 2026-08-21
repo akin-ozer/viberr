@@ -1510,23 +1510,14 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
  * would issue at run time arrives hours later as a blocked packet a human has
  * to clear.
  */
-describe("UX19-10: the schedule picker honours backend availability", () => {
-  const renderSchedule = (backendAvailable: {
-    claude: boolean;
-    codex: boolean;
-  }) => {
+describe("R22: the schedule form has no backend/autonomy pickers", () => {
+  const renderSchedule = () => {
     const Stub = createRoutesStub([
       {
         path: "/",
         Component: () => (
           <ToastProvider>
-            <ScheduledActions
-              schedules={[]}
-              canRunAgents
-              taskClosed={false}
-              configuredAutonomy="supervised"
-              backendAvailable={backendAvailable}
-            />
+            <ScheduledActions schedules={[]} canRunAgents taskClosed={false} />
           </ToastProvider>
         ),
         action: async () => ({ ok: true }),
@@ -1535,34 +1526,21 @@ describe("UX19-10: the schedule picker honours backend availability", () => {
     return render(<Stub initialEntries={["/"]} />);
   };
 
-  const backendSelect = (container: HTMLElement) =>
-    container.querySelector<HTMLSelectElement>(
-      '[data-testid="scheduled-actions"] select[name="backend"]',
-    )!;
-
-  it("disables the unconfigured backend and says why", () => {
-    const { container } = renderSchedule({ claude: true, codex: false });
-    const options = [...backendSelect(container).options];
-    const codex = options.find((o) => o.value === "codex")!;
-    // Canary: drop `disabled`/the suffix and this fails — the picker offers a
-    // backend the deployment has no credential for.
-    expect(codex.disabled).toBe(true);
-    expect(codex.textContent).toContain("not configured");
-    expect(options.find((o) => o.value === "claude")!.disabled).toBe(false);
+  it("offers no backend or autonomy select — only delay + note", () => {
+    const { container } = renderSchedule();
+    const scope = container.querySelector('[data-testid="scheduled-actions"]')!;
+    // Canary: re-add either picker and these go red.
+    expect(scope.querySelector('select[name="backend"]')).toBeNull();
+    expect(scope.querySelector('select[name="autonomy"]')).toBeNull();
+    expect(scope.querySelector('select[name="delayMinutes"]')).toBeTruthy();
   });
 
-  it("defaults to a configured backend instead of a hardcoded Claude Code", () => {
-    const { container } = renderSchedule({ claude: false, codex: true });
-    // The exact fallback `OperatorRunControl` applies (P11-41), so the two
-    // pickers on one screen no longer disagree about what will run.
-    expect(backendSelect(container).value).toBe("codex");
-  });
-
-  it("leaves both live when both are configured", () => {
-    const { container } = renderSchedule({ claude: true, codex: true });
-    const options = [...backendSelect(container).options];
-    expect(options.every((o) => !o.disabled)).toBe(true);
-    expect(backendSelect(container).value).toBe("claude");
+  it("says the run follows the deployed operator profile", () => {
+    const { container } = renderSchedule();
+    const scope = container.querySelector('[data-testid="scheduled-actions"]')!;
+    expect(scope.textContent).toContain(
+      "Runs on the operator profile deployed when it fires.",
+    );
   });
 });
 
@@ -1999,8 +1977,6 @@ describe("D6: consequential actions confirm before they act", () => {
                   id: "s-1",
                   action: "run-operator",
                   dueAt: new Date(Date.now() + 3_600_000).toISOString(),
-                  backend: "claude",
-                  autonomy: "supervised",
                   note: "",
                   createdBy: "u-selin",
                   createdByLabel: "Selin",
@@ -2013,8 +1989,6 @@ describe("D6: consequential actions confirm before they act", () => {
               ]}
               canRunAgents
               taskClosed={false}
-              configuredAutonomy="supervised"
-              backendAvailable={{ claude: true, codex: true }}
             />
           </ToastProvider>
         ),

@@ -19,10 +19,11 @@ import {
  * Scope (deliberate + honest): only the high-consequence, cleanly command-
  * mappable capabilities are enforced at the tool layer (branch, push, open PR,
  * merge PR). Finer-grained delivery capabilities remain advisory in the run
- * persona. Codex has no denylist channel of its own, so the two headline rules
- * are DERIVED from this list and enforced through its sandbox instead —
- * `repoWriteWithheldFromDenylist` → read-only sandbox (P13-RT-02) and
- * `webSearchWithheldFromDenylist` → `webSearchMode: "disabled"` (P14-RT-06).
+ * persona. Codex has no denylist channel of its own: the derived
+ * `webSearchWithheldFromDenylist` → `webSearchMode: "disabled"` still binds
+ * there (P14-RT-06), but since R22 removed the read-only sandbox the repo-write
+ * rules are ADVISORY on Codex — the server-owned delivery gate is the real
+ * boundary (see CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS).
  *
  * Polarity (P14-LV-01, safe-by-default and now actually safe): a delivery or
  * verdict capability is granted ONLY when a grant says so. Withheld means mode

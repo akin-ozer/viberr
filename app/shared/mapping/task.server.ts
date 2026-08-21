@@ -360,7 +360,8 @@ export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
  * run start heals them only when the next run actually happens
  * (specialist-run.server.ts), so between a profile edit and that run the
  * snapshot lies about what Run does. This patches specialist + reviewers from
- * the live `profileId → backend` map (agents-query `deployedSpecialistBackends`
+ * the live `profileId → backend` map (`deployedSpecialistBackends` in
+ * server/agents/deployment-view
  * — the same primary-backend rule the run resolves with); a profile absent
  * from the map (undeployed since engagement) keeps its snapshot, exactly the
  * run path's own fallback. Pure — the map is built by the server query layer,

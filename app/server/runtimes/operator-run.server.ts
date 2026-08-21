@@ -1573,8 +1573,9 @@ async function startCodexOperatorRun(
   // was real on one backend and decorative on the other — a Codex operator could
   // not call the read tools that would inform its plan. The CLI translation
   // drops credentials and stamps approve-mode (codex-runtime); the operator's
-  // own sandbox stays read-only with no shell network egress, which does not
-  // affect MCP servers — the CLI, not the sandboxed shell, connects to them.
+  // own sandbox is workspace-write with the network off (R22 removed
+  // read-only), which does not affect MCP servers — the CLI, not the sandboxed
+  // shell, connects to them.
   // Resolved BEFORE the persona (B8) so the prompt describes what MOUNTS.
   // F21-3: that resolve now pre-flights the stdio mounts, so "what mounts" is
   // what actually starts, not what the registry row remembers.
@@ -1610,8 +1611,9 @@ async function startCodexOperatorRun(
     prompt,
     systemPrompt,
     // R19-1: the same read-only policy the Claude operator carries. Codex has no
-    // denylist channel — it enforces this with a read-only sandbox and no
-    // network egress (codex-runtime) — but the spec must still STATE the run's
+    // denylist channel — since R22 removed the read-only sandbox the policy is
+    // advisory there (workspace-write, network off; the server-owned delivery
+    // gate is the boundary) — but the spec must still STATE the run's
     // confinement rather than leaving it implicit in the runtime's kind lookup.
     disallowedTools: operatorDisallowedTools(authority),
     // P13-RT-03: advertise only the actions this operator's policy permits.
@@ -2443,7 +2445,8 @@ const NO_OPERATOR_MCPS: OperatorMcpResolution = {
  * description of the run's actual denylist, not a request: `Bash`/`Edit`/
  * `Write`/`MultiEdit`/`NotebookEdit` are removed from its context
  * (`operatorDisallowedTools`), so it cannot write there even if a task tells it
- * to.
+ * to. (That binding is Claude's; on Codex the denylist has no channel and,
+ * since R22 removed the read-only sandbox, the statement is advisory there.)
  *
  * The delivery carve-out is deliberate. "You cannot push" would be the third
  * channel in this run's context to make a claim about the repository, and it

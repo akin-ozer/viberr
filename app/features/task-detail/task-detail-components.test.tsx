@@ -2215,8 +2215,6 @@ function schedule(patch: Partial<TaskSchedule> = {}): TaskSchedule {
     id: "sch-1",
     action: "run-operator",
     dueAt: new Date(Date.now() + 3_600_000).toISOString(),
-    backend: "claude",
-    autonomy: "supervised",
     note: "",
     createdBy: "u-arda",
     createdByLabel: "Arda Kaya",
@@ -2239,7 +2237,6 @@ describe("ScheduledActions panel head (P13-D-38)", () => {
         schedules={[schedule()]}
         canRunAgents
         taskClosed={false}
-        configuredAutonomy="supervised"
       />,
     );
     const head = container.querySelector(
@@ -2258,7 +2255,6 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
         schedules={[schedule()]}
         canRunAgents
         taskClosed={false}
-        configuredAutonomy="supervised"
       />,
     );
     const buttons = [...container.querySelectorAll("button")];

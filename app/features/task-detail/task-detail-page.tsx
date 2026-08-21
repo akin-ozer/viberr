@@ -770,11 +770,6 @@ export function TaskDetailPage({
             schedules={schedules}
             canRunAgents={canRunAgents}
             taskClosed={taskClosed}
-            // UX19-10: the same availability the operator run picker above uses,
-            // so the two operator pickers on one screen cannot offer different
-            // backends.
-            backendAvailable={backendAvailable}
-            configuredAutonomy={operatorAutonomy}
           />
         ) : canRunAgents && !taskClosed ? (
           <button

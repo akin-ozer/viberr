@@ -5,10 +5,6 @@ import {
   SYSTEM_ACTOR,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
-import {
-  clampAutonomy,
-  operatorAutonomyFor,
-} from "~/server/tasks/operator-actions.server";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -116,8 +112,6 @@ export interface ScheduleInput {
   taskKey: string;
   /** ISO timestamp the action becomes due (must be in the future). */
   dueAt: string;
-  backend: "claude" | "codex";
-  autonomy: "supervised" | "full";
   note?: string;
 }
 
@@ -144,17 +138,14 @@ export async function scheduleTaskAction(
     throw AppError.validation("That task is already Done — nothing to schedule.");
   }
 
+  // R22: the entry pins no backend/autonomy — the fired run resolves the LIVE
+  // deployed operator profile (`runOperator` fills both from the deployment when
+  // omitted). No SCHEDULE-time clamp is needed because nothing is stored to
+  // clamp; the run resolves and clamps against whatever is deployed at fire time.
   const schedule: TaskSchedule = {
     id: newId("sch"),
     action: "run-operator",
     dueAt: new Date(dueMs).toISOString(),
-    backend: input.backend,
-    // R19-A: clamp at SCHEDULE time too. The entry is canonical in the task
-    // file and its timeline event quotes the level, so storing an unclamped
-    // value would advertise autonomy the run will not actually have — and a
-    // scheduled run fires with nobody watching to notice the difference.
-    autonomy: clampAutonomy(input.autonomy, operatorAutonomyFor(ctx, input.projectSlug))
-      .autonomy,
     note: input.note?.trim() ? input.note.trim() : "",
     createdBy: actor.userId ?? "system",
     createdByLabel: actor.label,
@@ -170,7 +161,7 @@ export async function scheduleTaskAction(
     parsed.timeline.unshift(
       scheduleEvent(
         { kind: "human", userId: actor.userId ?? "system", nameHint: actor.label },
-        `**Scheduled:** an operator re-run for **${input.taskKey}** at ${schedule.dueAt} (${input.autonomy} · ${input.backend === "claude" ? "Claude" : "Codex"})${schedule.note ? ` — ${schedule.note}` : ""}.`,
+        `**Scheduled:** an operator re-run for **${input.taskKey}** at ${schedule.dueAt}${schedule.note ? ` — ${schedule.note}` : ""}. It runs on the operator profile deployed when it fires.`,
       ),
     );
   });
@@ -182,7 +173,7 @@ export async function scheduleTaskAction(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { scheduleId: schedule.id, dueAt: schedule.dueAt, backend: schedule.backend, autonomy: schedule.autonomy },
+    details: { scheduleId: schedule.id, dueAt: schedule.dueAt },
   });
   return schedule;
 }
@@ -327,8 +318,6 @@ export async function fireDueSchedules(
   const toRun: {
     projectSlug: string;
     taskKey: string;
-    backend: "claude" | "codex";
-    autonomy: "supervised" | "full";
     scheduleId: string;
     /** The scheduler's stated reason — the operator's turn instruction quotes
      *  it, so a scheduled re-run knows WHY it exists (B-WF3). */
@@ -448,8 +437,6 @@ export async function fireDueSchedules(
           toRun.push({
             projectSlug: row.project_slug,
             taskKey: row.task_key,
-            backend: s.backend,
-            autonomy: s.autonomy,
             scheduleId: s.id,
             note: s.note ?? "",
           });
@@ -479,8 +466,8 @@ export async function fireDueSchedules(
           const runInput: RunOperatorInput = {
             projectSlug: t.projectSlug,
             taskKey: t.taskKey,
-            backend: t.backend,
-            autonomy: t.autonomy,
+            // R22: no pinned backend/autonomy — `runOperator` resolves the LIVE
+            // deployed operator profile at fire time (see resolveOperatorAuthority).
             // B-WF3: a scheduled re-run is not a human pressing "Run operator".
             // It used to arrive as a bare `manual` trigger, so the reason the
             // human scheduled it never reached the turn — the operator re-read

@@ -71,9 +71,9 @@ import {
 } from "~/server/secrets/pat-store.server";
 import {
   effectiveProfileView,
-  primaryRunBackend,
   VIEW_WITHOUT_POLICY,
 } from "~/features/agents/agents-query.server";
+import { primaryRunBackend } from "~/server/agents/deployment-view.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
 import {
   isBackendAvailable,
@@ -196,8 +196,8 @@ export interface ResolvedSpecialist {
 /** First runnable backend for a profile (codex|claude), defaulting to claude
  * when the definition/template names neither. */
 function pickBackend(view: AgentProfileView): RealBackend {
-  // Delegates to THE primary-backend rule (agents-query) so the run and every
-  // surface displaying an engaged agent's backend cannot drift apart.
+  // Delegates to THE primary-backend rule (server/agents/deployment-view) so the
+  // run and every surface displaying an engaged agent's backend cannot drift.
   return primaryRunBackend(view.backends);
 }
 
@@ -1101,8 +1101,8 @@ async function dispatchAgentRun(
   // dispatches used to start two runs in the SAME tasks/<KEY>/workspace clone —
   // two agent processes fighting over one git index/branch, risking a double
   // push. One live delivering run per task: refuse a second until the first
-  // finishes or is interrupted. Supporting agents have their own read-only
-  // relationship to the workspace and run concurrently.
+  // finishes or is interrupted. Supporting agents are read-only for the repo by
+  // policy (Claude-enforced, advisory on Codex since R22) and run concurrently.
   if (delivers) {
     const liveDelivering = listRunsForTaskRows(
       db,
@@ -2085,8 +2085,9 @@ export interface AnalyzePromptInput {
   /** Which delivery steps the profile's capabilities permit (XS-4). */
   delivery: DeliveryPermissions;
   /** Whether this engagement DELIVERS. A supporting (non-delivering) run is
-   *  physically read-only (F10-12) — its prompt must NOT instruct branch/commit
-   *  work regardless of the profile's capabilities, or it re-creates the
+   *  read-only for the repo (F10-12; Claude-enforced denylist, advisory on
+   *  Codex since R22) — its prompt must NOT instruct branch/commit work
+   *  regardless of the profile's capabilities, or it re-creates the
    *  prompt-vs-enforcement contradiction (XS-4). */
   delivers: boolean;
   /** Owner ask 2026-08-20: the task's attachments folder (store-relative),
@@ -2166,11 +2167,12 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
               : "")
           : `- Clone \`https://github.com/${input.repo}\` INTO the current directory (\`git clone https://github.com/${input.repo}.git .\`) before making changes.\n`);
     if (!input.delivers) {
-      // F10-12: a SUPPORTING (reviewing) run is physically read-only (Codex
-      // read-only sandbox / Claude write+git denylist). The prompt MUST match:
-      // never tell it to branch, edit, commit, or push — regardless of the
-      // profile's capabilities — or it obeys the contract into denied tool calls
-      // and wastes the run (the XS-4 failure). It reads and reports only.
+      // F10-12: a SUPPORTING (reviewing) run is read-only for the repo (Claude
+      // write+git denylist; advisory on Codex since R22 removed the read-only
+      // sandbox). The prompt MUST match: never tell it to branch, edit, commit,
+      // or push — regardless of the profile's capabilities — or it obeys the
+      // contract into denied tool calls and wastes the run (the XS-4 failure).
+      // It reads and reports only.
       prompt +=
         `- You are a SUPPORTING agent: this workspace is READ-ONLY for you. Do NOT create a branch, edit files, run \`git commit\`/\`git push\`, or open a PR — even if a directive says to. The tool layer blocks these. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n` +
         (input.reviewSubject

@@ -15,10 +15,10 @@ import {
   type TaskProjectionRow,
   type TaskSummary,
 } from "~/shared/mapping/task.server";
-// Call-time-only circular edge (agents-query imports getProject from here):
-// both directions are function calls inside function bodies, and function
-// declarations hoist across a cycle, so module init is safe either way round.
-import { deployedSpecialistBackends } from "~/features/agents/agents-query.server";
+// #183: the live-backend overlay is a server module now, so this hot loader no
+// longer reaches up into features/agents for it (deployment-view imports only
+// node:fs, zod, and ~/server/files/*, with no edge back into projections).
+import { deployedSpecialistBackends } from "~/server/agents/deployment-view.server";
 import {
   activityFactsFor,
   isQuiet,

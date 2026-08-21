@@ -33,7 +33,7 @@ afterAll(() => app.cleanup());
 describe("deployedSpecialistBackends", () => {
   it("maps each deployed specialist to the backend a run would start on; operators excluded", async () => {
     const { deployedSpecialistBackends } = await import(
-      "~/features/agents/agents-query.server"
+      "~/server/agents/deployment-view.server"
     );
     const map = deployedSpecialistBackends("viberr-core", app.dataRoot);
     expect(map.get("developer")).toBe("codex"); // backends ["codex","claude"] → first real one
@@ -43,7 +43,7 @@ describe("deployedSpecialistBackends", () => {
 
   it("an unknown project yields an empty map (display falls back to the snapshot, never throws)", async () => {
     const { deployedSpecialistBackends } = await import(
-      "~/features/agents/agents-query.server"
+      "~/server/agents/deployment-view.server"
     );
     expect(deployedSpecialistBackends("no-such-project", app.dataRoot).size).toBe(0);
   });

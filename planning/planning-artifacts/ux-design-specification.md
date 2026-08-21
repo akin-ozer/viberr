@@ -459,6 +459,8 @@ The board should be implemented using compact, high-signal cards with strong sem
 
 The task-detail view should be implemented as an operator-first workspace. Current state, execution truth, latest blocking or decision packet, and immediate human steering actions should appear above timeline depth and secondary evidence. Logs, validation detail, and deep technical context should remain accessible, but progressively disclosed.
 
+> **The run controls SHOW configuration; they do not pick it.** *(Recorded 2026-08-21, pass 22 — owner rulings R21-9 and R22-schedule, `docs/architecture/decisions.md` rulings 92 and 94.)* The operator run control on the task page carries no per-run backend or autonomy dropdowns: both are configured on the deployed operator profile, the card states the backend the run will actually use, keeps Run, and offers an optional steer that is recorded as the human's own timeline comment. The schedule-a-re-run form follows the same rule and offers no pickers either — a scheduled run resolves the live deployed profile at fire time. Full autonomy announces itself on the run surface as a caption; supervised is the quiet default; an unconfigured profile backend disables Run with the reason rendered. Design any future run-adjacent surface the same way: configuration lives on the profile, the surface discloses it.
+
 Split-view behavior should be treated as a secondary pattern rather than a primary product structure. It may be used in lightweight preview panes, queue-to-task transitions, or continuity-supporting task-switching flows, but the main product model should remain clear: board for scan and triage, task for clarity and steering.
 
 ## User Journey Flows
@@ -676,6 +678,8 @@ The number of truly first-party workflow components should remain small. Most of
 **Accessibility:** Clear heading/order semantics, readable time labels, expandable content controls.  
 **Content Guidelines:** Emphasize meaning and outcome over verbosity.  
 **Interaction Behavior:** Expand in place; support jumping from timeline item to related packet or evidence.
+
+> **File attachments render on the producing comment, as thumbnails, opening an in-app lightbox.** *(Recorded 2026-08-21, pass 22 — #177/#184; the underlying mechanic is the attachments drop, `docs/architecture/decisions.md` rulings 75 and 96.)* A file an agent posts through the task's `attachments/` directory appears on the timeline item of the reply that produced it: images as inline thumbnails, opening an in-app lightbox rather than a raw-file tab, other files as named links (member-only serving). The "linked evidence if present" clause in the anatomy above includes these files; they follow the same anti-noise posture as the rest of the timeline — evidence humans need to SEE, not artifact dumps.
 
 ### Continuity Recovery Panel
 

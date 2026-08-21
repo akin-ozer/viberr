@@ -336,3 +336,77 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     expect(dialog.querySelector("img")!.getAttribute("src")).toBe(`${BASE}/shot.png`);
   });
 });
+
+/**
+ * Broken-tile fix (pass 22): an attachment image can fail to load even for a
+ * member — the file was rotated/removed on disk (route 404s), is over the
+ * route's 50 MB inline cap (413), or is a type it refuses to render inline.
+ * Before this, that painted the browser's broken-image glyph inside the tile.
+ * NOTE: this is not a membership fix — the loader ships `[]` to non-members and
+ * the serving route shares the task page's `any-member` gate, so no viewer sees
+ * a tile it can't fetch. The failure covered here hits members too.
+ */
+describe("attachment images degrade gracefully when the picture cannot load", () => {
+  const DIALOG = 'dialog[data-screen-label="Attachment lightbox"]';
+  const withFiles = (attachments: string[]): TimelineEventRender => ({
+    id: 9,
+    type: "comment",
+    occurredAt: "2026-08-14T10:00:00.000Z",
+    actor: { kind: "agent", backend: "claude", name: "Web Verifier", role: "verification" },
+    title: null,
+    text: "Captured the page.",
+    toAgent: false,
+    evidence: null,
+    attachments,
+  });
+
+  it("the side-panel thumbnail swaps a failed image for a placeholder and flags it to AT", () => {
+    const { container } = render(
+      <AttachmentsPanel base={BASE} attachments={[entry("gone.png")]} />,
+    );
+    fireEvent.error(container.querySelector<HTMLImageElement>(".attach-thumb img")!);
+    // The broken <img> is gone; a visible placeholder stands in its slot.
+    expect(container.querySelector(".attach-thumb img")).toBeNull();
+    const anchor = container.querySelector<HTMLAnchorElement>(".attach-thumb")!;
+    expect(anchor.querySelector(".attach-broken")!.textContent).toContain(
+      "preview unavailable",
+    );
+    // The failure reaches a screen reader through the ANCHOR's accessible name
+    // (the placeholder's own label is otherwise swallowed by aria-label), so a
+    // broken tile no longer announces identically to a working one.
+    expect(anchor.getAttribute("aria-label")).toContain("preview unavailable");
+    // The tile's link is intact so a member can still retry or download.
+    expect(anchor.getAttribute("href")).toBe(`${BASE}/gone.png`);
+  });
+
+  it("the timeline producing-message thumbnail does the same, keeping its caption", () => {
+    const { container } = render(
+      <TimelineItem ev={withFiles(["gone.png"])} attachmentsBase={BASE} />,
+    );
+    fireEvent.error(container.querySelector<HTMLImageElement>(".tl-attach-thumb img")!);
+    const anchor = container.querySelector<HTMLAnchorElement>(".tl-attach-thumb")!;
+    expect(anchor.querySelector("img")).toBeNull();
+    expect(anchor.querySelector(".attach-broken")).toBeTruthy();
+    expect(anchor.getAttribute("aria-label")).toContain("preview unavailable");
+    expect(anchor.textContent).toContain("gone.png");
+  });
+
+  it("the lightbox shows a message (not a broken image) and keeps Open original", () => {
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <AttachmentsPanel base={BASE} attachments={[entry("gone.png")]} />
+      </AttachmentLightboxProvider>,
+    );
+    fireEvent.click(container.querySelector(".attach-thumb")!);
+    const dialog = baseElement.querySelector(DIALOG)!;
+    fireEvent.error(dialog.querySelector<HTMLImageElement>(".lightbox-img")!);
+    expect(dialog.querySelector(".lightbox-img")).toBeNull();
+    expect(dialog.querySelector(".lightbox-broken")!.textContent).toContain(
+      "could not be loaded",
+    );
+    const original = [...dialog.querySelectorAll("a")].find(
+      (a) => a.textContent === "Open original",
+    )!;
+    expect(original.getAttribute("href")).toBe(`${BASE}/gone.png`);
+  });
+});

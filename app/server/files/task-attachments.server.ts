@@ -8,8 +8,10 @@ import {
 /**
  * R19-19 — the task attachments store (read side).
  *
- * Files land here through exactly one writer today: the browser MCP server's
- * `--output-dir` (screenshots, PDFs the agent saves). The read side is
+ * Files land here through two writers: the browser MCP server's `--output-dir`
+ * (screenshots, PDFs the agent saves) and, since PR #179, the agent evidence
+ * drop — any run granted `attach-evidence-references` may copy files in
+ * directly ("post a file on the task thread"). The read side is
  * deliberately dumb — the DIRECTORY is the truth, no projection table, no
  * upload path, no retention machinery: attachments live inside the task dir so
  * archive/delete flows move them with the task.
@@ -25,7 +27,7 @@ import {
 export interface TaskAttachmentEntry {
   name: string;
   size: number;
-  /** ISO mtime — "when the browser saved it", newest first. */
+  /** ISO mtime — "when the file was saved", newest first. */
   modifiedAt: string;
 }
 

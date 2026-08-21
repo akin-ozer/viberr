@@ -258,9 +258,10 @@ export interface StartRunInput {
   /** Granted skills mounted into the run workspace (`mountGrantedSkills`).
    *  Claude only — the SDK's native skills filter. See RunSpec.skills. */
   skills?: string[];
-  /** The run's `execute-code-or-write-repo` grant is withheld — Codex enforces
-   *  it with a read-only sandbox (P13-RT-02). Omit to let `startRun` derive it
-   *  from `disallowedTools` (see `repoWriteWithheldFromDenylist`). */
+  /** The run's `execute-code-or-write-repo` grant is withheld — Claude-enforced
+   *  via the denylist, advisory on Codex since R22 removed the read-only
+   *  sandbox. Omit to let `startRun` derive it from `disallowedTools` (see
+   *  `repoWriteWithheldFromDenylist`). */
   repoWriteWithheld?: boolean;
   /** The run's `use-web-search-fetch` grant is withheld — Codex enforces it by
    *  disabling its web search (P14-RT-06). Omit to let `startRun` derive it from
@@ -453,8 +454,9 @@ const DEFAULT_THREAD = {
  * The file-write built-ins `resolveSpecialistDisallowedTools` emits for a
  * WITHHELD `execute-code-or-write-repo` grant (specialist-tool-policy). They
  * are the one deny rule whose presence means "this profile may not write the
- * repo" — the other rules gate branch/push/PR, which a read-only sandbox would
- * over-block.
+ * repo" — the other rules gate branch/push/PR, narrower withholdings the flag
+ * must not conflate with "may not write" (the read-only sandbox this once
+ * drove, removed by R22, would have over-blocked them).
  */
 const REPO_WRITE_DENY_MARKERS = ["Edit", "Write", "NotebookEdit"] as const;
 
@@ -464,9 +466,11 @@ const REPO_WRITE_DENY_MARKERS = ["Edit", "Write", "NotebookEdit"] as const;
  * P13-RT-02: `disallowedTools` is computed for EVERY run from the same
  * `resolveSpecialistDisallowedTools` policy, backend-agnostically — it just had
  * no effect on Codex, which has no denylist channel. Deriving the flag from it
- * means the Codex read-only sandbox binds for exactly the profiles the matrix
- * already shows as withheld, with no second source of truth to drift. Callers
- * that know the grant directly may still pass `repoWriteWithheld` explicitly.
+ * means the spec records the withholding for exactly the profiles the matrix
+ * already shows as withheld, with no second source of truth to drift. (It used
+ * to drive the Codex read-only sandbox; R22 removed that sandbox, so on Codex
+ * the withholding is advisory now.) Callers that know the grant directly may
+ * still pass `repoWriteWithheld` explicitly.
  */
 export function repoWriteWithheldFromDenylist(
   disallowedTools?: readonly string[],
@@ -720,8 +724,9 @@ export async function startRun(
     spec.disallowedTools = input.disallowedTools;
   }
   if (input.skills && input.skills.length) spec.skills = input.skills;
-  // Codex has no denylist channel; the withheld repo-write grant becomes a
-  // read-only sandbox instead (P13-RT-02). Explicit caller value wins.
+  // Records the withheld repo-write grant on the spec. It used to drive the
+  // Codex read-only sandbox (P13-RT-02); R22 removed that sandbox, so on Codex
+  // it is advisory (Claude's denylist binds). Explicit caller value wins.
   if (
     input.repoWriteWithheld ??
     repoWriteWithheldFromDenylist(input.disallowedTools)

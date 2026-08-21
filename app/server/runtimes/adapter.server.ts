@@ -94,7 +94,8 @@ export interface RunSpec {
    *  `attach-evidence-references` — Codex `workspace-write` sandboxes add it as
    *  an additional writable directory so the agent can copy files there ("post
    *  a file on the task thread"). Claude runs at bypassPermissions and need no
-   *  widening; read-only sandboxes never get it. */
+   *  widening; `danger-full-access` can already write it (R22: no run is
+   *  read-only anymore). */
   attachmentsWritableDir?: string | null;
   /** The GRANTED skills Viberr mounted into this run's workspace
    *  (`mountGrantedSkills`), by exact name. Claude only: the adapter turns these
@@ -106,10 +107,13 @@ export interface RunSpec {
    *  prompt as text and this stays empty. */
   skills?: string[];
   /** The run's `execute-code-or-write-repo` grant is WITHHELD (mode `off` or
-   *  `human`). Codex enforces it with a read-only sandbox — a physical block,
-   *  strictly stronger than Claude's tool denylist (P13-RT-02). Deliberately
-   *  NOT folded into `autonomous`, which also drives Claude's `permissionMode`
-   *  (flipping that would hang a server run on an unanswerable approval). */
+   *  `human`). Claude enforces it via the tool denylist; on Codex it is
+   *  ADVISORY since R22 removed the read-only sandbox (the server-owned
+   *  delivery gate is the real boundary) — no runtime consumes this flag for
+   *  enforcement anymore; it rides the spec as the run's stated confinement.
+   *  Deliberately NOT folded into `autonomous`, which also drives Claude's
+   *  `permissionMode` (flipping that would hang a server run on an
+   *  unanswerable approval). */
   repoWriteWithheld?: boolean;
   /** The run's `use-web-search-fetch` grant is WITHHELD. Claude removes the
    *  WebFetch/WebSearch tools via `disallowedTools`; Codex, which has no

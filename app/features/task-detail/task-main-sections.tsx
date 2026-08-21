@@ -285,10 +285,6 @@ export function TaskHero({
   );
 }
 
-/** UX19-10: the honest default when the page has not wired `backendAvailable`
- *  — the pre-fix behaviour (both options live), never a silent narrowing. */
-const BOTH_BACKENDS = { claude: true, codex: true } as const;
-
 /** O-3: pending scheduled operator re-runs + a form to schedule one. Scheduling
  *  and cancelling are `run-agents` (maintainer+); the server re-checks. Hidden
  *  entirely for viewers/contributors with nothing scheduled. */
@@ -296,21 +292,12 @@ export function ScheduledActions({
   schedules,
   canRunAgents,
   taskClosed,
-  backendAvailable = BOTH_BACKENDS,
-  configuredAutonomy,
 }: {
   schedules: TaskSchedule[];
   canRunAgents: boolean;
   taskClosed: boolean;
-  /** R19-A: the project's configured operator autonomy — the CEILING. A
-   *  schedule fires UNATTENDED, so offering a level the server will clamp is
-   *  worse here than on the run picker: nobody is watching to notice. */
-  configuredAutonomy: "supervised" | "full";
-  /** UX19-10: which backends this deployment actually has a credential for —
-   *  the SAME loader fact `OperatorRunControl` reads one panel down. A schedule
-   *  fires unattended, so an option that `selectAdapter` will refuse must not be
-   *  offered here either. */
-  backendAvailable?: { claude: boolean; codex: boolean };
+  // R22: no backend/autonomy props — the scheduled run resolves the LIVE
+  // deployed operator profile at fire time, so this form shows no picker.
 }) {
   const csrf = useCsrfToken();
   const fetcher = useFetcher<ActionResult>();
@@ -320,17 +307,6 @@ export function ScheduledActions({
   // D6: cancelling a queued re-run (possibly one another member scheduled)
   // removes a pending action — confirm it, naming when it was due.
   const [confirmCancel, setConfirmCancel] = useState<TaskSchedule | null>(null);
-  // UX19-10: same fallback formula as `OperatorRunControl` (P11-41) — the
-  // picker never starts on an option that would fail fast. It used to be a flat
-  // `defaultValue="claude"`, so on a Codex-only instance the two operator
-  // pickers on one screen defaulted to DIFFERENT backends and this one defaulted
-  // to the backend that cannot run.
-  const defaultBackend = backendAvailable.claude
-    ? "claude"
-    : backendAvailable.codex
-      ? "codex"
-      : "claude";
-
   // Nothing to show: no pending schedules AND the viewer can't create one.
   if (schedules.length === 0 && !canSchedule) return null;
 
@@ -374,7 +350,9 @@ export function ScheduledActions({
                 </span>
               </div>
               <div className="sched-meta">
-                operator · {s.autonomy} · {s.backend === "claude" ? "Claude" : "Codex"}
+                {/* R22: no fixed backend/autonomy — the run resolves the
+                    deployed operator profile when it fires. */}
+                operator re-run
                 {s.note ? ` · ${s.note}` : ""}
                 {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
               </div>
@@ -405,12 +383,15 @@ export function ScheduledActions({
             submit({
               intent: "schedule-action",
               delayMinutes: String(f.get("delayMinutes") ?? "60"),
-              backend: String(f.get("backend") ?? defaultBackend),
-              autonomy: String(f.get("autonomy") ?? "supervised"),
               note: String(f.get("note") ?? ""),
             });
           }}
         >
+          {/* R22 (owner ruling 2026-08-21): no per-run backend / autonomy
+              pickers. Like the manual run control (R21-9), a scheduled re-run
+              resolves the operator profile that is DEPLOYED when it fires —
+              which, for an unattended run set hours ahead, is the level that
+              actually matters. */}
           <div className="sched-controls">
             <label className="flabel">
               In
@@ -421,34 +402,9 @@ export function ScheduledActions({
                 <option value="1440">24 hours</option>
               </select>
             </label>
-            <label className="flabel">
-              Backend
-              {/* UX19-10: the same option treatment `OperatorRunControl` gives
-                  the immediate run (execution-profile.tsx) — an unconfigured
-                  backend is disabled and says so. This picker offered both
-                  unconditionally, so a maintainer could schedule a re-run onto
-                  a backend `selectAdapter` refuses; hours later, with nobody
-                  watching, the run failed and escalated into a blocked packet
-                  the human then had to clear. A refusal knowable at click time
-                  is stated at click time. */}
-              <select name="backend" defaultValue={defaultBackend}>
-                <option value="claude" disabled={!backendAvailable.claude}>
-                  Claude{backendAvailable.claude ? "" : " (not configured)"}
-                </option>
-                <option value="codex" disabled={!backendAvailable.codex}>
-                  Codex{backendAvailable.codex ? "" : " (not configured)"}
-                </option>
-              </select>
-            </label>
-            <label className="flabel">
-              Autonomy
-              <select name="autonomy" defaultValue={configuredAutonomy}>
-                <option value="supervised">Supervised</option>
-                {configuredAutonomy === "full" && (
-                  <option value="full">Full</option>
-                )}
-              </select>
-            </label>
+            <p className="sched-note-inline">
+              Runs on the operator profile deployed when it fires.
+            </p>
           </div>
           <input
             className="sched-note"

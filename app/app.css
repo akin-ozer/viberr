@@ -1459,8 +1459,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .sched-meta { grid-column: 1 / -1; font-size: .76rem; color: var(--placeholder); }
 .sched-cancel { grid-row: 1; grid-column: 3; }
 .sched-form { display: flex; flex-direction: column; gap: .5rem; border-top: 1px solid var(--hairline); padding-top: .6rem; }
-.sched-controls { display: flex; flex-wrap: wrap; gap: .6rem; }
+.sched-controls { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
 .sched-controls .flabel { display: inline-flex; flex-direction: column; gap: .2rem; }
+/* R22: the scheduled run follows the deployed operator profile — a quiet note
+   in place of the removed backend/autonomy pickers. */
+.sched-note-inline { margin: 0; color: var(--muted); font-size: .85rem; }
 /* P16-UI-05: the three selects in this panel are the base `select` rule now —
    the border/surface pair D-18 restored here is declared once, at the top. */
 .sched-note { padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: inherit; }
@@ -1999,6 +2002,11 @@ dialog[data-closing]::backdrop {
 .cap-mrow { display: flex; align-items: center; gap: .8rem; padding: .42rem 0; border-bottom: 1px solid var(--hairline); flex-wrap: wrap; }
 .cap-mbody .cap-mrow:last-child { border-bottom: 0; }
 .cap-mname { flex: 1; min-width: 160px; font-size: .85rem; color: var(--fg); }
+/* P14: the visible reason a capability row is pinned/disabled (the egress row
+   pinned by the browser grant). Wraps to its own full-width line under the seg
+   so a sighted admin sees why the control won't move — not only a screen
+   reader via the aria-label. */
+.cap-mnote { flex-basis: 100%; margin: .1rem 0 0; font-size: .75rem; color: var(--muted); }
 .cap-seg { display: inline-flex; padding: .15rem; gap: .1rem; flex: none; border: 1px solid var(--hairline); border-radius: var(--radius-button); background: color-mix(in srgb, var(--fg), transparent 97%); }
 .cap-seg button { border: 0; background: none; padding: .3rem .55rem; border-radius: 6px; font-family: var(--font-display); font-weight: 700; font-size: .74rem; color: var(--faint); transition: background .12s ease, color .12s ease, transform .1s var(--ease-out); }
 .cap-seg button:hover:not(:disabled) { color: var(--fg); }
@@ -4428,10 +4436,49 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    screenshot); the foot keeps the raw file one click away. `zoom-in` on the
    triggers is the promise of the popup. */
 .tl-attach-thumb, .attach-thumb, .md-img-btn { cursor: zoom-in; }
+/* A thumbnail whose image failed to load (rotated/removed on disk → 404,
+   over the serving route's 50 MB cap → 413, or an unsupported type) shows this
+   labeled placeholder in the image slot instead of the browser's broken-image
+   glyph. Fills the slot in both the timeline thumb and the side-panel grid. */
+.attach-broken {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .3rem;
+  width: 100%;
+  min-height: 120px;
+  background: color-mix(in srgb, var(--fg), transparent 96%);
+  color: var(--muted);
+}
+.attach-broken svg { width: 20px; height: 20px; color: var(--muted); }
+.attach-broken-note { font-size: .68rem; }
+/* The lightbox counterpart: a full-size "could not load" panel in place of the
+   image, keeping the foot's name + "Open original" + Close. */
+.lightbox-card .lightbox-broken {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  min-height: 40vh;
+  padding: 2rem;
+  color: var(--muted);
+  text-align: center;
+}
+.lightbox-card .lightbox-broken svg { width: 28px; height: 28px; }
 /* The markdown-embed trigger: a real button (keyboard-reachable) that adds NO
    box of its own — the embedded image is the whole face. */
 .md-img-btn { display: block; padding: 0; border: 0; max-width: 100%; text-align: left; }
 .md-img-btn > img { display: block; }
+/* Inline markdown embed of a task attachment that failed to load: the same
+   labeled placeholder as the tiles, constrained + boxed for inline prose. */
+.md-img-broken {
+  max-width: 260px;
+  min-height: 96px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
 .modal-card.lightbox-card {
   width: auto; max-width: min(1200px, calc(100vw - 2rem));
   padding: .5rem;
