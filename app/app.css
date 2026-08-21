@@ -4413,6 +4413,34 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   padding: .3rem .55rem; font-family: var(--font-mono); font-size: .68rem; color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* Attachment lightbox (owner request 2026-08-21): image evidence opens in an
+   in-app popup — a plain click on any of the three trigger surfaces below
+   intercepts into it, while modified clicks keep the raw-file tab. The card
+   sizes to the picture (the base .modal-card width would letterbox a tall
+   screenshot); the foot keeps the raw file one click away. `zoom-in` on the
+   triggers is the promise of the popup. */
+.tl-attach-thumb, .attach-thumb, .md-img-btn { cursor: zoom-in; }
+/* The markdown-embed trigger: a real button (keyboard-reachable) that adds NO
+   box of its own — the embedded image is the whole face. */
+.md-img-btn { display: block; padding: 0; border: 0; max-width: 100%; text-align: left; }
+.md-img-btn > img { display: block; }
+.modal-card.lightbox-card {
+  width: auto; max-width: min(1200px, calc(100vw - 2rem));
+  padding: .5rem;
+}
+.lightbox-card .lightbox-img {
+  display: block; max-width: 100%; max-height: 76vh; object-fit: contain;
+  border-radius: var(--radius-button); background: var(--bg);
+}
+.lightbox-card .lightbox-foot {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .5rem .15rem .1rem;
+}
+.lightbox-card .lightbox-foot .nm {
+  font-family: var(--font-mono); font-size: .72rem; color: var(--muted);
+  margin-right: auto; overflow-wrap: anywhere;
+}
 /* Evidence label token that names a real attachment (timeline.tsx linkify). */
 /* Same token text-links use (P13-D-18 precedent) — --blue on white is 3.84:1
    and fails AA for normal text; --teal-dark clears it in both themes. */

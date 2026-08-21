@@ -6,6 +6,7 @@ import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
 import { IMAGE_RE } from "./attachments-panel";
+import { useAttachmentLightbox } from "./attachment-lightbox";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
@@ -70,6 +71,10 @@ function CollapsibleComment({
   const ref = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // Embedded attachment images in the body open the same lightbox the
+  // thumbnail strip uses (no provider ⇒ the factory is inert, embeds stay
+  // plain images).
+  const lightbox = useAttachmentLightbox();
 
   useEffect(() => {
     const el = ref.current;
@@ -99,6 +104,7 @@ function CollapsibleComment({
           mentionNames={mentionNames}
           {...(attachmentNames ? { attachmentNames } : {})}
           {...(attachmentsBase ? { attachmentsBase } : {})}
+          onAttachmentImageClick={lightbox}
         />
       </div>
       {overflowing && (
@@ -132,6 +138,9 @@ function EvidenceLabel({
   attachments?: ReadonlySet<string>;
   base?: string;
 }) {
+  // A cited image opens the in-app lightbox on a plain click (owner request
+  // 2026-08-21); modified clicks and non-image files keep the raw-file tab.
+  const lightbox = useAttachmentLightbox();
   if (!attachments || attachments.size === 0 || !base) return <span>{label}</span>;
   const parts = label.split(/(\s+)/);
   return (
@@ -140,14 +149,18 @@ function EvidenceLabel({
         const clean = part.replace(/^[`"'([]+|[`"'),.;:\]]+$/g, "");
         if (!clean || !attachments.has(clean)) return part;
         const at = part.indexOf(clean);
+        const url = `${base}/${encodeURIComponent(clean)}`;
         return (
           <span key={i}>
             {part.slice(0, at)}
             <a
               className="ev-file"
-              href={`${base}/${encodeURIComponent(clean)}`}
+              href={url}
               target="_blank"
               rel="noreferrer"
+              {...(IMAGE_RE.test(clean)
+                ? { onClick: lightbox({ name: clean, url }) }
+                : {})}
             >
               {clean}
             </a>
@@ -178,6 +191,9 @@ export function TimelineItem({
   const actor = ev.actor;
   const isTyped = ev.type !== "comment";
   const guest = actor.kind === "human" && "guest" in actor && actor.guest;
+  // Image evidence pops the in-app lightbox on a plain click; the anchors stay
+  // real links so modified clicks and no-provider renders keep the raw tab.
+  const lightbox = useAttachmentLightbox();
   return (
     <div className="tl-item">
       <div className="tl-rail">
@@ -288,6 +304,10 @@ export function TimelineItem({
                 target="_blank"
                 rel="noreferrer"
                 aria-label={`Open attachment ${name}`}
+                onClick={lightbox({
+                  name,
+                  url: `${attachmentsBase}/${encodeURIComponent(name)}`,
+                })}
               >
                 <img
                   src={`${attachmentsBase}/${encodeURIComponent(name)}`}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
+import { AttachmentLightboxProvider } from "./attachment-lightbox";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
@@ -597,6 +598,11 @@ export function TaskDetailPage({
   };
 
   return (
+    // Image evidence anywhere on this page — timeline thumbnails, inline
+    // markdown embeds, the Attachments panel, cited evidence filenames —
+    // opens in the in-app lightbox this provider renders (owner request
+    // 2026-08-21) instead of a raw-file tab.
+    <AttachmentLightboxProvider>
     <div
       className="detail"
       ref={detailRef}
@@ -981,5 +987,6 @@ export function TaskDetailPage({
         />
       )}
     </div>
+    </AttachmentLightboxProvider>
   );
 }
