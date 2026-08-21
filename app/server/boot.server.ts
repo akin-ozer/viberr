@@ -16,7 +16,8 @@ import {
   startDataRootLockGuard,
   type AcquireDataRootLockOptions,
 } from "./db/data-root-lock.server";
-import { getDb } from "./db/sqlite.server";
+import { getDb, getProjectionDbPath } from "./db/sqlite.server";
+import { selfHealProjectionDbIfCorrupt } from "./db/self-heal.server";
 import { startEventPublisher } from "./events/event-publisher.server";
 import { armProcessShutdown } from "./events/sse-broker.server";
 import {
@@ -538,6 +539,25 @@ export async function bootServer(): Promise<void> {
   // them — before anything reads them. Idempotent and best-effort (never blocks
   // boot).
   seedDefaultAgentAssets();
+  // Before the first handle opens: if the projection database is corrupt (a WAL
+  // clobbered over a bind mount, a torn page after a hard kill), salvage its
+  // non-reconstructable rows and rebuild a fresh, valid file instead of
+  // FATAL-crash-looping the boot. Projections rebuild from the .md files on the
+  // rescan below; the corrupt file is preserved for forensics. A healthy file
+  // (the common path) is left untouched.
+  const heal = selfHealProjectionDbIfCorrupt(getProjectionDbPath());
+  if (heal.healed) {
+    logger.warn(
+      "recovered a corrupt projection database at boot — projections rebuild from the .md files on the rescan below; the corrupt file is preserved",
+      {
+        movedTo: heal.movedTo,
+        salvaged: heal.salvaged,
+        // Non-empty ⇒ some readable rows could not be reinserted (constraint /
+        // bind) and are only in the preserved file — a cue to look there.
+        ...(Object.keys(heal.skipped).length > 0 ? { skipped: heal.skipped } : {}),
+      },
+    );
+  }
   const db = getDb();
 
   await seedInitialAdmin(db, {

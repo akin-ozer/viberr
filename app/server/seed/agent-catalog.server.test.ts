@@ -97,9 +97,13 @@ describe("seeded specialist capability modes (F20-21 / R20-6 — direct or withh
   });
 });
 
-describe("seeded Developer model (R20-8)", () => {
-  it("defaults to gpt-5.6-terra — the model this account's Codex actually runs", () => {
+describe("seeded Developer backend (owner ruling 2026-08-21)", () => {
+  it("defaults to CLAUDE so a fresh install runs without a Codex quota; Codex stays available", () => {
     const dev = SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === "developer")!;
-    expect(dev.frontmatter.model).toBe("gpt-5.6-terra");
+    // Claude is the PRIMARY (first) backend, so a run/display resolves Claude…
+    expect(dev.frontmatter.backends[0]).toBe("claude");
+    expect(dev.frontmatter.model).toBe("sonnet");
+    // …and Codex is still OFFERED, so an admin can flip the profile to it.
+    expect(dev.frontmatter.backends).toContain("codex");
   });
 });

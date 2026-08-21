@@ -37,6 +37,28 @@ async function seed() {
 }
 
 describe("demo fixture", () => {
+  it("keeps the demo Developer template Codex-backed — BOTH backend and model", async () => {
+    // The product seed defaults the Developer to Claude/sonnet (owner ruling
+    // 2026-08-21); the demo fixture overrides it back to Codex/gpt-5.6-terra so
+    // the mock dataset exercises both backends. The backend half is pinned via
+    // the overlay elsewhere; this pins the MODEL half too, so dropping it can't
+    // silently leave the demo Developer showing the unknown-model badge.
+    const { dataRoot } = await seed();
+    const { parseAgentProfileContent } = await import(
+      "~/server/files/agent-profile-file.server"
+    );
+    const { agentProfileFilePath } = await import(
+      "~/server/files/file-store-root.server"
+    );
+    const { readFileSync } = await import("node:fs");
+    const { parsed } = parseAgentProfileContent(
+      readFileSync(agentProfileFilePath("developer", dataRoot), "utf8"),
+      { fallbackId: "developer" },
+    );
+    expect(parsed!.frontmatter.backends).toEqual(["codex", "claude"]);
+    expect(parsed!.frontmatter.model).toBe("gpt-5.6-terra");
+  });
+
   it("produces the expected counts", async () => {
     const { db, summary } = await seed();
     expect(summary).toMatchObject({

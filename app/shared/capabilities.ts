@@ -109,6 +109,23 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // and a profile whose egress was revoked must not re-acquire it one row down
   // (`resolveBrowserMcp` in specialist-browser-mcp.server.ts enforces the pair).
   cap("use-browser", "Drive a live web browser", ["agent"], "Collaboration", "off"),
+  // F4 (owner ruling 2026-08-21): a read-only, authenticated GitHub API tool —
+  // GET the task's OWN repo (PRs, reviews, checks, commits, contents, issues) as
+  // JSON, using the project's sealed PAT. Default OFF (same rationale as the
+  // browser: a casually created profile must not silently acquire authenticated
+  // reach to a private repository).
+  //
+  // Enforcement is CLAUDE-ONLY, and that is a SECURITY decision, not a gap: the
+  // tool is an in-process Claude Agent SDK tool (`viberr_agent`), so the PAT is
+  // decrypted in the viberr server and the raw token NEVER crosses to the agent
+  // — only the response JSON does. A Codex mount would have to hand the child the
+  // credential, which the codex `--config` argv serialization leaks (the same
+  // F7-MCP1 reason the browser MCP carries no env). So on Codex the tool is never
+  // mounted — advisory there, exactly like `comment-on-task`. The scope is the
+  // boundary: `scopeAgentGithubReadPath` forces every request under
+  // `/repos/{owner}/{name}` of the task's project and rejects `..`, other repos,
+  // and non-GET writes (agent-github-read.server.ts).
+  cap("read-github-api", "Read GitHub repository & PR data", ["agent"], "Collaboration", "off", false),
   // Verdicts gate acceptance (G2) — default OFF so a casually-created profile
   // never acquires acceptance-veto power; the seed grants it to the reviewer.
   cap("report-validation-verdict", "Report a validation verdict", ["agent"], "Collaboration", "off"),
@@ -259,6 +276,10 @@ export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set(
   // in-process comment channel at all — its final reply always posts), so
   // withholding comment-on-task binds on Claude and is advisory on Codex.
   "comment-on-task",
+  // F4: the authenticated GitHub-read tool is an in-process Claude SDK tool, so
+  // the credential never leaves the server and the mount is Claude-only. On
+  // Codex the tool never exists — advisory there, same shape as comment-on-task.
+  "read-github-api",
 ]);
 
 export type EnforcementScope = "both" | "claude-only" | "advisory";

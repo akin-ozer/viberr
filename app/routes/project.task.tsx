@@ -61,6 +61,7 @@ import {
   type RunOperatorInput,
 } from "~/server/runtimes/operator-run.server";
 import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
+import { unavailableModels } from "~/server/runtimes/model-availability.server";
 import {
   operatorAutonomyFor,
   operatorBackendFor,
@@ -198,8 +199,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         },
       }));
 
-  // Deployed specialists the "Assign specialist" menu offers.
-  const deployedSpecialists = listDeployedSpecialists(params.slug);
+  // Deployed specialists the "Assign specialist" menu offers. Model-availability
+  // marks are threaded so the run control can flag an agent whose model a real
+  // run showed is not runnable on the account, BEFORE another run is spent.
+  const deployedSpecialists = listDeployedSpecialists(params.slug, undefined, {
+    codex: unavailableModels(db, "codex"),
+    claude: unavailableModels(db, "claude"),
+  });
   // F10-04: per-engagement run gating. The server single-flights only the
   // DELIVERING run; supporting/reviewing runs are read-only and may run
   // concurrently. So the delivering Run button disables only on an active

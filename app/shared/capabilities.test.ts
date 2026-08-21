@@ -104,6 +104,21 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(entry.kinds).toEqual(["agent"]);
   });
 
+  it("F4: classifies read-github-api as CLAUDE-ONLY — the in-process tool never mounts on Codex", () => {
+    // The reader is an in-process Claude SDK tool (the PAT is decrypted in the
+    // server, never handed to the agent); a Codex mount would leak the
+    // credential into `--config`, so the tool simply is not built on Codex —
+    // advisory there, same shape as comment-on-task.
+    expect(capabilityEnforcement("read-github-api")).toBe("claude-only");
+    expect(CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("read-github-api")).toBe(true);
+    // Default OFF, agent-only, and NOT promotable — raising a project's autonomy
+    // never silently grants a private-repo reader.
+    const entry = UNIFIED_CAP_CATALOG.find((c) => c.id === "read-github-api")!;
+    expect(entry.defaultMode).toBe("off");
+    expect(entry.kinds).toEqual(["agent"]);
+    expect(entry.promotable).toBe(false);
+  });
+
   it("R22: the matrix badge is claude-only for the repo-write family (incl. the headline), not merge", () => {
     // What the CapabilityMatrixModal actually does: label → id → enforcement.
     // R22 added the headline "Execute code or write to the repo" to the

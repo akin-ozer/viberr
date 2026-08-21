@@ -16,6 +16,10 @@ export interface DeployedSpecialistView {
   role: string;
   backend: "codex" | "claude";
   model: string;
+  /** The provider's redacted refusal sentence when a real run showed this
+   *  agent's model is not runnable on the account (F20-4). Present ⇒ the run
+   *  control warns BEFORE a run is spent. */
+  modelUnavailable?: string;
   /**
    * UI-39: the loader has always shipped these (specialist-run.server.ts builds
    * them from the deployment's real capability grants) and the client type
@@ -701,6 +705,11 @@ export function ExecutionProfile({
   const vocab = engagementVocabulary(task.reviewers, deployedSpecialists);
   const sp = task.specialist;
   const spGhost = !!sp && !deployedById.has(sp.profileId);
+  // Owner ruling 2026-08-21: the delivering agent's model was shown unavailable
+  // on the account by a real run — surface it HERE, before a run is spent.
+  const spUnavailable = sp
+    ? deployedById.get(sp.profileId)?.modelUnavailable
+    : undefined;
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
   // G9: a task at the terminal (Done) stage is closed — its runtime action
@@ -789,6 +798,22 @@ export function ExecutionProfile({
                   </div>
                   {/* UX19-12: the row that offers the action names the state. */}
                   {spGhost && <div className="sub">{GHOST_DELIVERING_NOTE}</div>}
+                  {spUnavailable && (
+                    // Availability warning BEFORE a run is spent: a real run
+                    // showed this model is not runnable on the account. Informs,
+                    // does not block (the mark may be stale; the human decides).
+                    <p className="deny-note">
+                      <Icon name="alert" />
+                      <span>
+                        <strong>
+                          {sp.backend === "claude" ? "Claude" : "Codex"} reported
+                          this model unavailable.
+                        </strong>{" "}
+                        Switch this profile's backend, or expect the run to fail.
+                        Provider said: {spUnavailable}
+                      </span>
+                    </p>
+                  )}
                 </span>
                 {canRunAgents && (
                   <span className="right">
@@ -842,6 +867,7 @@ export function ExecutionProfile({
               task.reviewers.map((c) => {
                 const running = activeReviewerIds.includes(c.profileId);
                 const ghost = !deployedById.has(c.profileId);
+                const cUnavailable = deployedById.get(c.profileId)?.modelUnavailable;
                 return (
                   <div className="rev-agent" key={c.profileId}>
                     <AgentGlyph backend={c.backend} />
@@ -856,6 +882,21 @@ export function ExecutionProfile({
                           the release (×) beside it stays live, because letting
                           go of a dead engagement is the recovery. */}
                       {ghost && <div className="sub">{GHOST_REVIEWING_NOTE}</div>}
+                      {cUnavailable && (
+                        // Same pre-spend availability warning as the delivering
+                        // card: this reviewer's Run would fail on the recorded
+                        // provider refusal.
+                        <p className="deny-note">
+                          <Icon name="alert" />
+                          <span>
+                            <strong>
+                              {c.backend === "claude" ? "Claude" : "Codex"}{" "}
+                              reported this model unavailable.
+                            </strong>{" "}
+                            Provider said: {cUnavailable}
+                          </span>
+                        </p>
+                      )}
                     </span>
                     {canRunAgents && (
                       <span className="right">
