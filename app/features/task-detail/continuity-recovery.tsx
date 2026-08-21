@@ -121,7 +121,7 @@ export interface ContinuityLoss {
 }
 
 function backendLabel(backend: "claude" | "codex"): string {
-  return backend === "claude" ? "Claude Code" : "Codex";
+  return backend === "claude" ? "Claude" : "Codex";
 }
 
 function roleLabelOf(run: RunView): string {

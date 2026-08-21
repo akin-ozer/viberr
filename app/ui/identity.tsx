@@ -30,7 +30,7 @@ export function AgentGlyph({
   return (
     <span
       className={"agent-glyph " + cls + (lg ? " lg" : "")}
-      title={backend === "claude" ? "Claude Code" : "Codex"}
+      title={backend === "claude" ? "Claude" : "Codex"}
     >
       <Icon name={backend === "claude" ? "sparkle" : "cpu"} />
     </span>

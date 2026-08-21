@@ -748,22 +748,65 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(container.textContent).not.toContain("operator active");
   });
 
-  it("P11-41: the operator backend picker disables an unconfigured backend and defaults to an available one", () => {
+  // Owner request 2026-08-21: the run control SHOWS the profile's backend and
+  // takes an optional steer — no per-run backend/autonomy pickers.
+  it("shows the operator's backend as text and runs with the optional steer", () => {
+    const onRunOperator = vi.fn();
+    const { container } = renderExec(execTask({ operator: attachedOperator }), {
+      operatorBackend: "claude",
+      operatorAutonomy: "supervised" as const,
+      backendAvailable: { claude: true, codex: true },
+      onRunOperator,
+    });
+    // No pickers — the backend is stated, not chosen.
+    expect(
+      container.querySelector('select[aria-label="Operator backend"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('select[aria-label="Operator autonomy"]'),
+    ).toBeNull();
+    expect(container.querySelector(".op-backend")!.textContent).toBe("Claude");
+    const steer = container.querySelector<HTMLInputElement>(".op-steer")!;
+    fireEvent.change(steer, { target: { value: "  focus on the login page  " } });
+    const run = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent!.includes("Run operator"),
+    )!;
+    fireEvent.click(run);
+    // Trimmed steer reaches the submit; the input clears for the next run.
+    expect(onRunOperator).toHaveBeenCalledWith("focus on the login page");
+    expect(steer.value).toBe("");
+  });
+
+  it("P11-41 without a picker: an unconfigured operator backend disables Run and says so", () => {
+    const onRunOperator = vi.fn();
     const { container } = renderExec(execTask({ operator: attachedOperator }), {
       operatorBackend: "codex",
-    operatorAutonomy: "supervised" as const, // configured backend...
+      operatorAutonomy: "supervised" as const, // configured backend...
       backendAvailable: { claude: true, codex: false }, // ...but NOT available
+      onRunOperator,
     });
-    const sel = container.querySelector<HTMLSelectElement>(
-      'select[aria-label="Operator backend"]',
+    expect(container.querySelector(".op-backend")!.textContent).toBe("Codex");
+    const run = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent!.includes("Run operator"),
     )!;
-    const codexOpt = Array.from(sel.options).find((o) => o.value === "codex")!;
-    const claudeOpt = Array.from(sel.options).find((o) => o.value === "claude")!;
-    expect(codexOpt.disabled).toBe(true);
-    expect(codexOpt.textContent).toContain("not configured");
-    expect(claudeOpt.disabled).toBe(false);
-    // Defaults to the available backend, not the unconfigured configured one.
-    expect(sel.value).toBe("claude");
+    expect(run.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(run);
+    expect(onRunOperator).not.toHaveBeenCalled();
+    // The reason is rendered copy, not a title on a dead control (P14).
+    expect(container.textContent).toContain(
+      "Codex isn’t configured on this instance",
+    );
+  });
+
+  it("F20-9 mirror: full autonomy announces itself on the run surface", () => {
+    const { container } = renderExec(execTask({ operator: attachedOperator }), {
+      operatorBackend: "claude",
+      operatorAutonomy: "full" as const,
+      backendAvailable: { claude: true, codex: true },
+    });
+    expect(container.textContent).toContain(
+      "Full autonomy: this run can move the task and accept completion",
+    );
   });
 });
 
@@ -771,7 +814,7 @@ describe("ExecutionProfile — reviewers", () => {
   const reviewerTask = () =>
     execTask({
       reviewers: [
-        { kind: "agent", profileId: "reviewer", backend: "claude", name: "Claude Code", role: "Code review" },
+        { kind: "agent", profileId: "reviewer", backend: "claude", name: "Claude", role: "Code review" },
       ],
     });
 

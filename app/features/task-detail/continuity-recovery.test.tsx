@@ -53,7 +53,7 @@ function missingRaw(sessionId: string | null = DEAD_SESSION): string {
     type: "error",
     source: "viberr",
     reason: "session_missing",
-    message: "The Claude Code session no longer exists on this machine.",
+    message: "The Claude session no longer exists on this machine.",
   };
   if (sessionId) envelope.session_id = sessionId;
   return JSON.stringify(envelope);
@@ -64,7 +64,7 @@ const missingLine: LogLine = {
   t: "09:41:02",
   ev: "err",
   tag: "run·session_missing",
-  text: "The Claude Code session no longer exists on this machine.",
+  text: "The Claude session no longer exists on this machine.",
 };
 
 const plainLine: LogLine = {
@@ -139,7 +139,7 @@ const continuityEvent = ev({
   type: CONTINUITY_EVENT_TYPE,
   occurredAt: "2026-08-06T09:41:05.000Z",
   actor: { kind: "system", name: "Viberr" },
-  text: "Runtime continuity was lost: the Claude Code session behind Dana's thread no longer has a provider transcript.",
+  text: "Runtime continuity was lost: the Claude session behind Dana's thread no longer has a provider transcript.",
 });
 
 /* -------------------------------------------------- deriveContinuityLoss */
@@ -164,7 +164,7 @@ describe("deriveContinuityLoss", () => {
       threadId: "primary",
       name: "Dana",
       roleLabel: "Delivering agent",
-      backendLabel: "Claude Code",
+      backendLabel: "Claude",
       sessionId: DEAD_SESSION,
     });
   });
@@ -274,7 +274,7 @@ describe("ContinuityRecoveryPanel", () => {
     // What was lost is named concretely: engagement, agent, backend, session.
     expect(rows[1]!.textContent).toContain("Delivering agent");
     expect(rows[1]!.textContent).toContain("Dana");
-    expect(rows[1]!.textContent).toContain("Claude Code");
+    expect(rows[1]!.textContent).toContain("Claude");
     expect(rows[1]!.querySelector("code")!.textContent).toBe(DEAD_SESSION);
     // …and the panel is honest that the run log it already produced survives.
     expect(rows[1]!.textContent).toContain("run log it already produced is unchanged");

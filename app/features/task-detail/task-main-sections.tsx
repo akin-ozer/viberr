@@ -374,7 +374,7 @@ export function ScheduledActions({
                 </span>
               </div>
               <div className="sched-meta">
-                operator · {s.autonomy} · {s.backend === "claude" ? "Claude Code" : "Codex"}
+                operator · {s.autonomy} · {s.backend === "claude" ? "Claude" : "Codex"}
                 {s.note ? ` · ${s.note}` : ""}
                 {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
               </div>
@@ -433,7 +433,7 @@ export function ScheduledActions({
                   is stated at click time. */}
               <select name="backend" defaultValue={defaultBackend}>
                 <option value="claude" disabled={!backendAvailable.claude}>
-                  Claude Code{backendAvailable.claude ? "" : " (not configured)"}
+                  Claude{backendAvailable.claude ? "" : " (not configured)"}
                 </option>
                 <option value="codex" disabled={!backendAvailable.codex}>
                   Codex{backendAvailable.codex ? "" : " (not configured)"}
@@ -590,16 +590,16 @@ export function ExecutionSection({
     reviewerFetcher.submit(fd, { method: "post" });
   };
 
-  // Run the operator agent (admin|maintainer; server re-checks). The operator
-  // coordinates the task under its capability policy; backend + autonomy are
-  // chosen for this run (full autonomy lets it drive to Done).
-  const onRunOperator = (backend: string, autonomy: string) => {
+  // Run the operator agent (admin|maintainer; server re-checks). The run
+  // follows the deployed operator profile — backend and autonomy alike (owner
+  // request 2026-08-21: the card shows, it does not pick). An optional steer
+  // rides along as the human's directive, recorded as an @operator comment.
+  const onRunOperator = (steer: string) => {
     if (operatorBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "run-operator");
-    fd.set("backend", backend);
-    fd.set("autonomy", autonomy);
+    if (steer) fd.set("steer", steer);
     operatorFetcher.submit(fd, { method: "post" });
   };
 

@@ -1120,6 +1120,22 @@ it is regenerated from the filesystem rather than restated here.
     a run does not answer those. Stored readiness is untouched; the triage gate itself still
     clears only on leaving the entry stage (task-actions.server.ts).
 
+92. **R21-9 (2026-08-21): the claude backend's display label is "Claude" (not "Claude Code"),
+    and the operator run control SHOWS, it does not pick.** Two owner instructions, one surface.
+    The label: every backend label site (mapping `agentBackendName`, actor-ref display names,
+    run/toast/timeline copy, pickers, roster chips) says "Claude"; references to the actual
+    Claude Code product (the CLI login, transcript retention, the coding harness) keep their
+    name. Stored records are not rewritten. The card: the per-run backend/autonomy dropdowns are
+    gone — both are configured on the deployed operator profile and the run resolves the LIVE
+    profile (the R21-8/#183 law), so the card states the backend, keeps Run, and adds an optional
+    steer. The steer rides the `@operator` mention machinery: recorded as the human's own timeline
+    comment (a directive that reaches an agent off the record is invisible to supervision) and
+    passed as the run's `humanComment`, with `humanCommentBy` the DISPLAY name (live-caught: the
+    email label tagged "@arda@viberr.dev", which chips and notifies nobody). F20-9's mirror
+    survives as a caption: full autonomy announces itself on the run surface; supervised is the
+    quiet default. P11-41 survives without a picker: an unconfigured profile backend disables Run
+    with the reason rendered.
+
 ## Route map
 
 ```

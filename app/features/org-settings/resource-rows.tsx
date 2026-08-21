@@ -458,7 +458,7 @@ export function AgentPanel({
                   {a.summary}
                 </span>
                 <span className="sub mono">
-                  {a.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}
+                  {a.backend === "claude" ? "Claude" : "Codex"} ·{" "}
                   {/* P14-WL-06: the row right below already pluralizes
                       ("project"/"projects"); this one always said "resources". */}
                   {stageNames || "no stages"} · {res} context resource

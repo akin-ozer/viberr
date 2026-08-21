@@ -78,7 +78,7 @@ export interface AgentRender {
   kind: "agent";
   profileId: string;
   backend: "codex" | "claude";
-  /** "Codex" | "Claude Code". */
+  /** "Codex" | "Claude". */
   name: string;
   role: string;
 }
@@ -336,7 +336,7 @@ export function isAtAcceptanceBoundary(
 }
 
 function agentBackendName(backend: "codex" | "claude"): string {
-  return backend === "codex" ? "Codex" : "Claude Code";
+  return backend === "codex" ? "Codex" : "Claude";
 }
 
 export function mapAgentRef(ref: AgentRef | null): AgentRender | null {

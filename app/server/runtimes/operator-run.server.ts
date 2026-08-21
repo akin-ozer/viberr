@@ -2620,7 +2620,7 @@ export function buildOperatorSystemPrompt(
   // servers: X" while zero servers mounted, and then reported X as available.
   parts.push(
     "\n\n---\n# Your runtime\n\n" +
-      `You are running on the **${authority.backend === "claude" ? "Claude Code" : "Codex"}** backend` +
+      `You are running on the **${authority.backend === "claude" ? "Claude" : "Codex"}** backend` +
       (authority.model ? `, model \`${authority.model}\`` : "") +
       (authority.effort ? `, reasoning effort \`${authority.effort}\`` : "") +
       ".\n" +

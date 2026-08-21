@@ -32,7 +32,7 @@ const SDK_LABEL = {
 } satisfies Record<RunBackend, string>;
 
 const WHO_NAME = {
-  claude: "Claude Code",
+  claude: "Claude",
   codex: "Codex",
 } satisfies Record<RunBackend, string>;
 

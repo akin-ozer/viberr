@@ -63,7 +63,7 @@ describe("task queries overlay the live backend over the engage-time snapshot", 
     expect(summary.reviewers[0]).toMatchObject({
       profileId: "reviewer",
       backend: "claude",
-      name: "Claude Code",
+      name: "Claude",
     });
   });
 
@@ -114,7 +114,7 @@ describe("the owner's flow: a profile edit propagates with NO run in between", (
     });
     expect(
       getTaskSummary(app.db, "viberr-core", "VIB-151")!.specialist,
-    ).toMatchObject({ backend: "claude", name: "Claude Code" });
+    ).toMatchObject({ backend: "claude", name: "Claude" });
 
     // Undeployed since engagement → the engage-time snapshot stands (VIB-151
     // snapshots the developer as claude), same fallback the run start applies.

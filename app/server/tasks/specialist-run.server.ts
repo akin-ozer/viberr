@@ -713,7 +713,7 @@ export async function assignSpecialist(
     }
   }
 
-  const backendLabel = specialist.backend === "claude" ? "Claude Code" : "Codex";
+  const backendLabel = specialist.backend === "claude" ? "Claude" : "Codex";
   const ref: AgentRef = {
     profileId: specialist.profileId,
     backend: specialist.backend,
@@ -869,7 +869,7 @@ export async function assignReviewer(
     };
   }
 
-  const backendLabel = reviewer.backend === "claude" ? "Claude Code" : "Codex";
+  const backendLabel = reviewer.backend === "claude" ? "Claude" : "Codex";
   const ref: AgentRef = {
     profileId: reviewer.profileId,
     backend: reviewer.backend,
@@ -1699,7 +1699,7 @@ async function dispatchAgentRun(
     },
   });
 
-  const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
+  const backendLabel = backend === "claude" ? "Claude" : "Codex";
   const switched = engagement.backend !== backend;
   // F10-31: surface (in run evidence) when the operator directive tried to make
   // this specialist perform a server-owned delivery action (push / open / merge
@@ -1724,7 +1724,7 @@ async function dispatchAgentRun(
       parsed.timeline.unshift(
         agentEvent(
           switched
-            ? `Started a ${backendLabel} run for the ${engagement.role} agent (switched from ${engagement.backend === "claude" ? "Claude Code" : "Codex"}) — streaming to the agent logs.`
+            ? `Started a ${backendLabel} run for the ${engagement.role} agent (switched from ${engagement.backend === "claude" ? "Claude" : "Codex"}) — streaming to the agent logs.`
             : `Started a ${backendLabel} run for the ${engagement.role} agent — streaming to the agent logs.`,
         ),
       );

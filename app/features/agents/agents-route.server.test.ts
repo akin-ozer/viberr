@@ -1356,7 +1356,7 @@ describe("F20-20 — an operator autonomy elevation is audited + surfaced, not g
 /**
  * F21-13 — the backend and the model must agree AT SAVE TIME.
  *
- * Live repro: editing a Codex profile, clicking "Claude Code", and hitting Save
+ * Live repro: editing a Codex profile, clicking "Claude", and hitting Save
  * WHILE the model select still read "loading available models…". The dialog let
  * the save race the reload, and project.md ended up with `backends: [claude]`
  * next to `model: gpt-5.6-terra`. Nothing rejected the pair, and the next run
@@ -1382,7 +1382,7 @@ describe("F21-13 — a model foreign to the chosen backend is refused", () => {
     const error = refusalError(reply)!;
     expect(error).toContain("GPT-5.6 Terra");
     expect(error).toContain("Codex");
-    expect(error).toContain("Claude Code");
+    expect(error).toContain("Claude");
 
     // …and nothing was written: the incoherent pair never reaches project.md.
     const file = readFileSync(
@@ -1403,7 +1403,7 @@ describe("F21-13 — a model foreign to the chosen backend is refused", () => {
       }),
     });
     expect(refusalStatus(reply)).toBe(400);
-    expect(refusalError(reply)).toContain("Claude Code");
+    expect(refusalError(reply)).toContain("Claude");
   });
 
   it("refuses the same pair on UPDATE, not only on create", async () => {

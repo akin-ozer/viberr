@@ -533,7 +533,7 @@ describe("startSpecialistRun", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.timeline[0]!.text).toContain("Started a Claude Code run");
+    expect(file.parsed.timeline[0]!.text).toContain("Started a Claude run");
     const audit = listAuditEvents(store.db, { action: "task.agent.run_started" });
     expect(audit[0]?.taskKey).toBe("VIB-1");
     const startAudit = listAuditEvents(store.db, { action: "runtime.run.started" });
@@ -568,7 +568,7 @@ describe("startSpecialistRun", () => {
       dataRoot: store.dataRoot,
     })!;
     expect(deliveringEngagement(file.parsed.frontmatter)?.backend).toBe("codex");
-    expect(file.parsed.timeline[0]!.text).toContain("switched from Claude Code");
+    expect(file.parsed.timeline[0]!.text).toContain("switched from Claude");
   });
 
   it("persists a D4 backendOverride to the snapshot so later prompts follow it", async () => {

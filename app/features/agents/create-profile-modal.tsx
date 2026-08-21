@@ -62,7 +62,7 @@ export interface ProfileFormPayload {
 
 const BACKENDS: { id: "codex" | "claude"; label: string }[] = [
   { id: "codex", label: "Codex" },
-  { id: "claude", label: "Claude Code" },
+  { id: "claude", label: "Claude" },
 ];
 
 /** Client mirror of the /resources/model-catalog payload shape. */
@@ -329,9 +329,9 @@ function BackendField({
             <strong>Saving pins this profile to one backend.</strong> It
             currently declares{" "}
             {(seededBackends ?? [])
-              .map((b) => (b === "claude" ? "Claude Code" : "Codex"))
+              .map((b) => (b === "claude" ? "Claude" : "Codex"))
               .join(" and ")}
-            ; {dropping.map((b) => (b === "claude" ? "Claude Code" : "Codex")).join(" and ")}{" "}
+            ; {dropping.map((b) => (b === "claude" ? "Claude" : "Codex")).join(" and ")}{" "}
             will be dropped.
           </span>
         </p>
@@ -1049,7 +1049,7 @@ export function CreateProfileModal({
    *
    * The catalog fetch below is async, and until it answers, `catalog` still
    * holds the PREVIOUS backend's payload and `model` its previous id. Live, that
-   * window was long enough to save through: Developer went Codex → Claude Code
+   * window was long enough to save through: Developer went Codex → Claude
    * while the picker read "loading available models…", Save was enabled, and the
    * deployment landed with `backends: [claude]` next to `model: gpt-5.6-terra`
    * — a pair no run can honour (the runtime silently substituted a Claude model,

@@ -118,7 +118,7 @@ function BackendChip({
   return (
     <span className="be-chip">
       <AgentGlyph backend={b} />
-      {b === "claude" ? "Claude Code" : "Codex"}
+      {b === "claude" ? "Claude" : "Codex"}
       {missing && (
         <span
           className="model-sub"
@@ -188,7 +188,7 @@ function ProfileItem({
   const unusable =
     backendHealth && !backendHealth.available
       ? (backendHealth.detail ??
-        `${backendHealth.backend === "claude" ? "Claude Code" : "Codex"} is not configured on this instance, so runs for this profile would fail.`)
+        `${backendHealth.backend === "claude" ? "Claude" : "Codex"} is not configured on this instance, so runs for this profile would fail.`)
       : undefined;
   return (
     <button type="button" className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
@@ -637,7 +637,7 @@ export function ProfileDetail({
   // second is the backend's to answer.
   const runHealth = primaryBackendHealth(a, backendHealth);
   const backendMissing = runHealth !== null && !runHealth.available;
-  const backendLabel = runHealth?.backend === "claude" ? "Claude Code" : "Codex";
+  const backendLabel = runHealth?.backend === "claude" ? "Claude" : "Codex";
   // F15-05/F15-06: the capability columns show GOVERNED policy only — the same
   // partition the matrix draws between its curated groups and "Other actions".
   // A grant with no runtime consumer (advisory catalog id, bespoke extra) is
@@ -1142,7 +1142,7 @@ export function LiveRoster({
                 {isOp
                   ? "orchestration"
                   : d.backend === "claude"
-                    ? "Claude Code"
+                    ? "Claude"
                     : "Codex"}
               </span>
               <span className="live-task">

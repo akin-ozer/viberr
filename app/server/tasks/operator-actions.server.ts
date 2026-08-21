@@ -1920,7 +1920,7 @@ export async function operatorRunSpecialist(
   const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
     outcome: "done",
-    message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} agent.`,
+    message: `Started a ${result.backend === "claude" ? "Claude" : "Codex"} run for the ${result.role} agent.`,
   };
 }
 
@@ -2017,7 +2017,7 @@ export async function operatorRunReviewer(
   const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
     outcome: "done",
-    message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} reviewer.`,
+    message: `Started a ${result.backend === "claude" ? "Claude" : "Codex"} run for the ${result.role} reviewer.`,
   };
 }
 

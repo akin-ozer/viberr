@@ -240,7 +240,7 @@ export function AgentModal({
           >
             <AgentGlyph backend="claude" />
             <span>
-              <span className="bnm">Claude Code</span>
+              <span className="bnm">Claude</span>
             </span>
             <span className="bcheck">
               <Icon name="check" />

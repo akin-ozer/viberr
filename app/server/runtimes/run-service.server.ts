@@ -209,9 +209,9 @@ const SDK_LABEL = {
 } satisfies Record<RealBackend, string>;
 
 /** The product's name for each backend, as every other human-facing string
- *  spells it ("Claude Code" / "Codex"). */
+ *  spells it ("Claude" / "Codex"). */
 const BACKEND_LABEL = {
-  claude: "Claude Code",
+  claude: "Claude",
   codex: "Codex",
 } satisfies Record<RealBackend, string>;
 
@@ -831,7 +831,7 @@ const SESSION_MISSING_TAG = "run·session_missing";
 /** What the user is told when provider-side history is gone. Never "review your
  *  authentication" — the credential is fine; the transcript is not. */
 function sessionMissingMessage(backend: RealBackend, sessionId: string): string {
-  const label = backend === "claude" ? "Claude Code" : "Codex";
+  const label = backend === "claude" ? "Claude" : "Codex";
   return `The ${label} session ${sessionId} no longer exists on this machine. Its provider transcript is gone (retention sweep or a wiped runtime volume), so the conversation could not be resumed. The agent re-anchored on task.md and continued with a fresh session.`;
 }
 
@@ -877,7 +877,7 @@ function recordSessionMissing(db: DatabaseSync, run: AgentRunRow): void {
  * it is prefixed with what happened and where the truth lives.
  */
 function continuityResetPreamble(backend: RealBackend): string {
-  const label = backend === "claude" ? "Claude Code" : "Codex";
+  const label = backend === "claude" ? "Claude" : "Codex";
   return [
     `[continuity notice] Your previous ${label} session for this task is gone — the provider transcript no longer exists, so none of that conversation is in your context.`,
     `Re-anchor on the canonical task file (\`task.md\` in your working directory) and the repository state before you act. Treat the request below as a fresh instruction, and say so if it depends on context you can no longer see.`,
@@ -903,7 +903,7 @@ async function noteContinuityReset(
     taskKey: run.task_key,
   };
   if (dataRoot) ref.dataRoot = dataRoot;
-  const label = run.backend === "claude" ? "Claude Code" : "Codex";
+  const label = run.backend === "claude" ? "Claude" : "Codex";
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({

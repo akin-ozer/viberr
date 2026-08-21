@@ -129,7 +129,7 @@ export interface SearchableTask {
  * the identities on the card.
  *
  * F15-16: an agent's own NAME never matched. `AgentRender.name` is the BACKEND
- * label ("Codex" / "Claude Code") — the profile's name is not projected onto a
+ * label ("Codex" / "Claude") — the profile's name is not projected onto a
  * task summary at all — so typing "reviewer" or "docs writer" hit nothing while
  * the placeholder promised agents. The profile ID is the identity the board
  * does carry, so it joins the haystack, hyphen-normalized on both sides:

@@ -506,7 +506,7 @@ function classifyClaudeError(cause: unknown): ClaudeFailure {
     return {
       kind: "session_missing",
       message:
-        "The Claude Code session could not be resumed — its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+        "The Claude session could not be resumed — its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
       providerText: "",
     };
   }
