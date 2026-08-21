@@ -573,14 +573,15 @@ export function DecisionPacket({
   return (
     <div className={"packet " + (isBlocked ? "blocked" : "input")}>
       <div className="packet-top">
-        <Pill kind={isBlocked ? "blocked" : "input"} dot>
+        <Pill kind={isBlocked ? "blocked" : "input"} dot sm>
           {p.kind}
         </Pill>
         <span className="from">
-          from{" "}
-          <span className="agent-glyph op">
-            <Icon name="shield" />
-          </span>{" "}
+          {/* Attribution is a whisper, not a badge: the boxed `.agent-glyph.op`
+              (a filled 26px square) was the brightest object on a card whose
+              content is the options (owner 2026-08-21). The bare shield at text
+              size carries the same identity in the header's own voice. */}
+          from <Icon name="shield" />{" "}
           <strong className="from-name">{p.from}</strong>
         </span>
       </div>
@@ -751,10 +752,7 @@ export function DecisionPacket({
           <div className="field packet-note-field">
             <label className="flabel" htmlFor="pkt-custom">
               Your directive<span className="req">*</span>
-              <span className="fhint">
-                resolves this decision · recorded on the timeline, handed to the
-                operator
-              </span>
+              <span className="fhint">resolves this decision · handed to the operator</span>
             </label>
             <textarea
               id="pkt-custom"
@@ -762,7 +760,7 @@ export function DecisionPacket({
               value={customText}
               onChange={(e) => setCustomText(e.target.value)}
               placeholder="e.g. Hold the merge, rebase onto main first, and re-run the reviewer on the new head."
-              rows={3}
+              rows={2}
               data-autofocus=""
             />
           </div>
@@ -793,9 +791,7 @@ export function DecisionPacket({
           <div className="field packet-note-field">
             <label className="flabel" htmlFor="pkt-note">
               Note for the operator
-              <span className="fhint">
-                optional · recorded on the decision, steers the follow-up
-              </span>
+              <span className="fhint">optional · recorded on the decision</span>
             </label>
             <textarea
               id="pkt-note"
@@ -803,7 +799,7 @@ export function DecisionPacket({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="e.g. what to change before reopening"
-              rows={2}
+              rows={1}
             />
           </div>
         )}
