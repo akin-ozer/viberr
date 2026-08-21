@@ -76,7 +76,15 @@ export function matchesBoardFilter(
       // cannot proceed, and it was the one state the predicate omitted. The chip
       // is named "Blocked or waiting" for the same reason: the filter is about
       // work that is STUCK, not about danger.
-      task.readiness === "input_required" ||
+      //
+      // R21-8: …and an input-required task with an agent actively carrying it
+      // (`waiting === "agent"`) is NOT stuck — its card no longer draws the
+      // amber chip (the top slot yields to the foot's "agent working"), so
+      // matching it here would be R16-2's bug mirrored: the filter selecting a
+      // card that shows no stuck signal. Those tasks are the "Agent working"
+      // chip's members. The moment a packet flips `waiting` to "human" the
+      // task is holding again and re-enters this filter.
+      (task.readiness === "input_required" && task.waiting !== "agent") ||
       task.validation === "failing" ||
       task.urgent ||
       // P14-WL-03: a PR closed without merging is a DIVERGENCE the review queue

@@ -521,15 +521,16 @@ function TaskCard({
         <div className="card-top">
           <span className="key">{task.key}</span>
           <span className="spacer" />
-          {/* F15-09 / C3: this slot used to swap in a second "agent working"
-              pill whenever the card's foot was ALREADY drawing one via WaitTag —
-              the same claim twice, at the cost of the readiness the slot
-              exists for. Readiness here, wait state in the foot, once each — so
-              a live run on an `input_required` task shows BOTH "input required"
-              (this slot) and "agent working" (the foot), never one hiding the
-              other. C3 gave the task hero this same split (task-main-sections.tsx
-              agent-working pill beside the readiness one); the card is the surface
-              it was matched to.
+          {/* R21-8 (supersedes C3's both-pills arrangement): "input required"
+              claims a human is needed RIGHT NOW — false while an agent is
+              actively carrying the work (`waiting === "agent"`), so the pill
+              yields for that state and the foot's WaitTag ("agent working")
+              speaks alone. F15-09's rule still holds: the claim is made ONCE —
+              this slot never duplicates the wait tag. The moment a packet
+              flips `waiting` to "human", input-required reasserts here. The
+              task hero makes the identical yield (task-main-sections.tsx), so
+              the two surfaces keep agreeing mid-run — C3's actual complaint.
+              Blocked / inconsistency-risk never yield.
 
               F19-8: an archived card says "archived" here instead — the same
               swap UXO-1 made in the task hero, for the same reason. Readiness
@@ -538,7 +539,8 @@ function TaskCard({
               claim directly under a banner calling the work abandoned. */}
           {archived ? (
             <ArchivedPill />
-          ) : (
+          ) : task.waiting === "agent" &&
+            task.displayReadiness === "input_required" ? null : (
             <ReadinessPill value={task.displayReadiness} sm />
           )}
         </div>
@@ -788,10 +790,13 @@ function ListRow({
       <ReviewerStack task={task} label />
       {/* F15-09: same duplicate as the card — the row's own WaitTag
           below already says "agent working". F19-8: and the same
-          readiness → "archived" swap the card makes. */}
+          readiness → "archived" swap the card makes. R21-8: and the same
+          input-required-yields-while-an-agent-works rule — the card top's
+          comment carries the reasoning. */}
       {archived ? (
         <ArchivedPill />
-      ) : (
+      ) : task.waiting === "agent" &&
+        task.displayReadiness === "input_required" ? null : (
         <ReadinessPill value={task.displayReadiness} sm />
       )}
       {/* F19-13: the card's state block verbatim — the row used to draw

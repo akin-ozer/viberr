@@ -536,19 +536,40 @@ describe("B1: accepting from the board asks first", () => {
   });
 });
 
-describe("F15-09: the 'agent working' badge renders once per card", () => {
-  it("keeps the readiness pill in the card top and the wait tag in the foot", () => {
+describe("F15-09/R21-8: 'agent working' renders once, and input-required yields to it", () => {
+  it("the card top goes quiet while an agent carries an input-required task", () => {
     const { container } = renderBoard([
       task({ waiting: "agent", readiness: "input_required", displayReadiness: "input_required" }),
     ]);
-    // Before the fix the card top swapped in a SECOND "agent working" pill for
-    // exactly this state, so the card said it twice and dropped the readiness.
+    // F15-09's half: the claim is made ONCE — the foot's WaitTag, never a
+    // duplicate pill in the top slot.
     const working = [...container.querySelectorAll(".card .pill, .card .wait-tag")]
       .filter((el) => el.textContent!.trim() === "agent working");
     expect(working).toHaveLength(1);
+    // R21-8's half: "input required" claims a human is needed right now —
+    // false while the agent works, so the top slot draws nothing at all.
+    expect(container.querySelector(".card-top .pill")).toBeNull();
+    expect(container.textContent).not.toContain("input required");
+  });
+
+  it("'input required' reasserts in the card top the moment waiting flips to human", () => {
+    const { container } = renderBoard([
+      task({
+        waiting: "human",
+        readiness: "input_required",
+        displayReadiness: "input_required",
+      }),
+    ]);
     expect(container.querySelector(".card-top .pill")!.textContent).toBe(
       "input required",
     );
+  });
+
+  it("'blocked' never yields — it stays in the card top beside a working agent", () => {
+    const { container } = renderBoard([
+      task({ waiting: "agent", readiness: "blocked", displayReadiness: "blocked" }),
+    ]);
+    expect(container.querySelector(".card-top .pill")!.textContent).toBe("blocked");
   });
 
   it("does the same in the list view", () => {
@@ -560,6 +581,7 @@ describe("F15-09: the 'agent working' badge renders once per card", () => {
       (el) => el.textContent!.trim() === "agent working",
     );
     expect(working).toHaveLength(1);
+    expect(container.textContent).not.toContain("input required");
   });
 });
 

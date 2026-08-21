@@ -68,6 +68,43 @@ describe("matchesBoardFilter", () => {
     ).toBe(false);
   });
 
+  // R21-8 (owner ruling, live 2026-08-21): an input-required task with an agent
+  // actively carrying it is NOT stuck — the card no longer draws the amber chip
+  // for that state, so the filter matching it would be R16-2's incoherence
+  // mirrored (a filter selecting a card that shows no stuck signal).
+  it('"risk" skips input_required while an agent carries the task (R21-8)', () => {
+    expect(
+      matchesBoardFilter(
+        { ...base, readiness: "input_required", waiting: "agent" },
+        "risk",
+      ),
+    ).toBe(false);
+    // Those tasks belong to the "Agent working" chip instead.
+    expect(
+      matchesBoardFilter(
+        { ...base, readiness: "input_required", waiting: "agent" },
+        "agent",
+      ),
+    ).toBe(true);
+    // A packet flips waiting to "human" — holding again, back in this filter.
+    expect(
+      matchesBoardFilter(
+        { ...base, readiness: "input_required", waiting: "human" },
+        "risk",
+      ),
+    ).toBe(true);
+    // blocked / risk never yield to a live run.
+    expect(
+      matchesBoardFilter({ ...base, readiness: "blocked", waiting: "agent" }, "risk"),
+    ).toBe(true);
+    expect(
+      matchesBoardFilter(
+        { ...base, readiness: "inconsistency_risk_detected", waiting: "agent" },
+        "risk",
+      ),
+    ).toBe(true);
+  });
+
   // P14-WL-03: live, PST-5's PR was closed without merging — the review queue
   // filed it under "Decision required" and the board's own "Blocked or waiting"
   // filter hid it, because a rejected PR leaves readiness `in_review`,

@@ -99,7 +99,7 @@ export function TaskHero({
   archived?: boolean;
   /** A live run is in flight — the triage "input required" pill would read as
    *  "waiting on you RIGHT NOW", which is false mid-run, so it yields to an
-   *  agent-working pill. Real states (blocked / risk) still show. */
+   *  agent-working pill (R21-8). Real states (blocked / risk) still show. */
   agentWorking?: boolean;
   /** Increments when a packet's `edit_goal` decision is confirmed — opens the
    *  goal editor so the human can start typing immediately. */
@@ -183,20 +183,28 @@ export function TaskHero({
             asserting a live obligation ("ready" = someone will act) that is
             false on abandoned work, so it drops and the `archived` pill above
             stands in its place. A terminal (accepted/merged) task keeps its
-            readiness pill: that value IS the terminal status, not a live claim. */}
-        {!archived && <ReadinessPill value={task.displayReadiness} />}
-        {/* C3: "agent working" gets its OWN slot instead of replacing the
-            readiness pill during a live run. The old swap hid the one readiness
-            value that most needs a human — `input_required` — so the same task
-            read "input required" on the board card and "agent working" on the
-            hero at the same instant. The readiness pill above now always shows
-            (matching the card); this pill sits beside it to note that a run is
-            in flight on that input-required state. */}
-        {!archived && agentWorking && task.displayReadiness === "input_required" && (
-          <Pill kind="agent" dot>
-            agent working
-          </Pill>
-        )}
+            readiness pill: that value IS the terminal status, not a live claim.
+
+            R21-8 (supersedes C3's both-pills arrangement): "input required"
+            claims a human is needed RIGHT NOW — false while an agent is
+            actively carrying the work, so during a live run it yields and the
+            agent-working pill takes the slot. C3's real complaint — the hero
+            and the board card disagreeing mid-run — stands: the card top makes
+            the identical yield (board-page.tsx). The `waiting !== "human"`
+            guard is the reassertion path: an open packet flips `waiting` to
+            "human", and the human's turn outranks any still-live run. Blocked /
+            inconsistency-risk never yield — those are standing states a run
+            does not answer. */}
+        {!archived &&
+          (agentWorking &&
+          task.displayReadiness === "input_required" &&
+          task.waiting !== "human" ? (
+            <Pill kind="agent" dot>
+              agent working
+            </Pill>
+          ) : (
+            <ReadinessPill value={task.displayReadiness} />
+          ))}
         {/* C2 (⇄ N20-14/UXO-1): the validation pill is a live obligation and is
             withdrawn on every terminal task, not just archived ones — see the
             `terminal` note above. */}
