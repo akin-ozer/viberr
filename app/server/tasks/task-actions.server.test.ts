@@ -53,6 +53,8 @@ import {
   resolvePacket,
 } from "./task-actions.server";
 import type { TaskActionDeps } from "./task-actions.server";
+import { postAgentComment } from "./agent-toolkit.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 
@@ -809,6 +811,226 @@ describe("appendComment", () => {
       runId: "run_chatter",
       droppedByGuardrail: "meaningful-comment",
     });
+  });
+
+  /**
+   * F22-12: an agent's automatic final report sometimes repeats a mid-run
+   * `post_comment` verbatim. The finding must land on the timeline ONCE — the
+   * duplicate reply's TEXT is suppressed, recorded as a dedup (not a guardrail
+   * drop) so boot recovery does not reprocess it — but the dedup is bounded to
+   * THIS run's own comments (a byte-identical PRIOR-run reply still posts) and
+   * never eats the run's evidence or saved files.
+   */
+  // Minimal agent_runs row so the dedup can read the run's started_at; only
+  // that field matters. `startedAt` far in the PAST ⇒ this run's mid-run
+  // comment (posted "now") counts as in-window; far in the FUTURE ⇒ it does not.
+  const seedRun = (
+    store: TestStore,
+    runId: string,
+    startedAt: string,
+    ref: FileActorRef = REVIEWER_REF,
+  ) =>
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: `thread_${runId}`,
+      role: "review",
+      kind: "reviewer",
+      backend: "claude",
+      model: "claude",
+      sdk: "test",
+      agentProfileId: ref.kind === "agent" ? ref.profileId : "reviewer",
+      state: "finished",
+      startedAt,
+    });
+  const agentComments = (store: TestStore) =>
+    readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.filter(
+      (e) => e.type === "comment" && e.actor.kind === "agent",
+    );
+
+  it("dedupes a final report that duplicates this run's own mid-run comment (interrupted path)", async () => {
+    const store = prepared();
+    withTask(store);
+    const ctx = { dataRoot: store.dataRoot };
+    const finding = "Found it: the loader reads the stale engage-time snapshot.";
+    seedRun(store, "run_dup", "2000-01-01T00:00:00.000Z");
+
+    await postAgentComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      actorRef: REVIEWER_REF,
+      text: finding,
+    });
+    await postAgentReplyComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      runId: "run_dup",
+      actorRef: REVIEWER_REF,
+      replyText: finding,
+    });
+
+    expect(agentComments(store)).toHaveLength(1);
+    expect(agentComments(store)[0]!.text).toContain("Found it");
+    const audit = listAuditEvents(store.db, { action: "task.agent.replied" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({
+      runId: "run_dup",
+      deduped: "duplicate-of-own-comment",
+    });
+    expect(audit[0]!.details).not.toHaveProperty("droppedByGuardrail");
+  });
+
+  it("dedupes on the FINISHED-run path too (recordAgentCompletion, the production case)", async () => {
+    const store = prepared();
+    withTask(store);
+    const ctx = { dataRoot: store.dataRoot };
+    const finding = "Root cause: the projection overlay never runs for this row.";
+    seedRun(store, "run_fin", "2000-01-01T00:00:00.000Z");
+
+    await postAgentComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      actorRef: REVIEWER_REF,
+      text: finding,
+    });
+    await recordAgentCompletion(store.db, ctx, store.slug, "VIB-1", {
+      actorRef: REVIEWER_REF,
+      runId: "run_fin",
+      replyText: finding,
+      verdict: null,
+      question: null,
+    });
+
+    expect(agentComments(store)).toHaveLength(1);
+    const audit = listAuditEvents(store.db, { action: "task.agent.replied" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({
+      runId: "run_fin",
+      deduped: "duplicate-of-own-comment",
+    });
+  });
+
+  it("does NOT dedup a byte-identical reply from a PRIOR run (run-start scoped)", async () => {
+    const store = prepared();
+    withTask(store);
+    const ctx = { dataRoot: store.dataRoot };
+    const text = "Handing back — the API contract question is unresolved.";
+    // The agent's earlier comment exists on the timeline; THIS run started AFTER
+    // it, so it is not this run's mid-run copy and the reply must still post.
+    await postAgentComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      actorRef: REVIEWER_REF,
+      text,
+    });
+    seedRun(store, "run_b", "2999-01-01T00:00:00.000Z");
+    await recordAgentCompletion(store.db, ctx, store.slug, "VIB-1", {
+      actorRef: REVIEWER_REF,
+      runId: "run_b",
+      replyText: text,
+      verdict: null,
+      question: null,
+    });
+    // Both the prior comment and this run's reply are on the timeline.
+    expect(agentComments(store)).toHaveLength(2);
+  });
+
+  it("a deduped completion still records the run's EVIDENCE on a producing note", async () => {
+    const store = prepared();
+    withTask(store);
+    const ctx = { dataRoot: store.dataRoot };
+    const finding = "The regression is in the compare, not the loader.";
+    seedRun(store, "run_ev", "2000-01-01T00:00:00.000Z");
+
+    await postAgentComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      actorRef: REVIEWER_REF,
+      text: finding,
+    });
+    await recordAgentCompletion(store.db, ctx, store.slug, "VIB-1", {
+      actorRef: REVIEWER_REF,
+      runId: "run_ev",
+      replyText: finding,
+      verdict: null,
+      question: null,
+      evidence: [{ label: "compare fix", add: "5", del: "1" }],
+    });
+
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    // The finding is on the timeline once (the mid-run comment)…
+    expect(agentComments(store)).toHaveLength(1);
+    // …and the evidence rows are NOT lost — they ride a producing note.
+    const withEvidence = timeline.filter(
+      (e) => e.evidence && e.evidence.length > 0,
+    );
+    expect(withEvidence).toHaveLength(1);
+    expect(withEvidence[0]!.evidence![0]!.label).toBe("compare fix");
+  });
+
+  it("a duplicate reply WITH attachments posts a files note (not the duplicate text)", async () => {
+    const store = prepared();
+    withTask(store);
+    const ctx = { dataRoot: store.dataRoot };
+    const finding = "Captured the failing screen.";
+    seedRun(store, "run_att", "2000-01-01T00:00:00.000Z");
+
+    await postAgentComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      actorRef: REVIEWER_REF,
+      text: finding,
+    });
+    await postAgentReplyComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      runId: "run_att",
+      actorRef: REVIEWER_REF,
+      replyText: finding,
+      attachments: ["fail.png"],
+    });
+
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    // The finding comment is NOT re-posted; a files note carries the attachment.
+    expect(agentComments(store)).toHaveLength(1);
+    const note = timeline.find((e) => e.type === "note");
+    expect(note?.attachments).toEqual(["fail.png"]);
+    const audit = listAuditEvents(store.db, { action: "task.agent.replied" });
+    expect(audit[0]!.details).toMatchObject({ deduped: "duplicate-of-own-comment" });
+  });
+
+  it("a final report that ADDS to the mid-run comment still posts (exact-match only)", async () => {
+    const store = prepared();
+    withTask(store);
+    const ctx = { dataRoot: store.dataRoot };
+    seedRun(store, "run_more", "2000-01-01T00:00:00.000Z");
+    await postAgentComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      actorRef: REVIEWER_REF,
+      text: "Investigating the flaky test.",
+    });
+    await postAgentReplyComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      runId: "run_more",
+      actorRef: REVIEWER_REF,
+      replyText: "Investigating the flaky test. Fixed: it raced the catalog fetch.",
+    });
+    expect(agentComments(store)).toHaveLength(2);
   });
 });
 

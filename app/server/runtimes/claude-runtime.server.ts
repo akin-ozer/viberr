@@ -216,8 +216,8 @@ export const OPERATOR_READ_ONLY_DENIED_TOOLS = [
  * delivers. Deny wins under bypassPermissions, so this removes the file-write
  * built-ins and every git/gh mutation command while keeping Read/Grep/Glob and
  * Bash-for-read-only-validation. (`sed -i`/shell redirection stay reachable —
- * the same honest Bash limitation the deliverer has; the Codex side gets a true
- * read-only sandbox, which is strictly stronger.) Closes the VIB-30 class where
+ * the same honest Bash limitation the deliverer has; on Codex this list is
+ * advisory since R22 removed the read-only sandbox.) Closes the VIB-30 class where
  * a review agent committed, pushed, and opened a PR with no delivery linkage.
  */
 const SUPPORTING_DENIED_BUILTINS = [

@@ -1433,17 +1433,56 @@ function projectRepoFor(
 }
 
 /** The outcome of building an agent-reply comment: a ready-to-unshift timeline
- *  event, an empty reply (no comment), or a guardrail drop. */
+ *  event (flagged `duplicate` when its text repeats a comment THIS run already
+ *  posted — F22-12), an empty reply (no comment), or a guardrail drop. */
 type PreparedReply =
   | { status: "empty" }
   | { status: "dropped" }
-  | { status: "event"; event: TaskFileEvent };
+  | { status: "event"; event: TaskFileEvent; duplicate: boolean };
+
+/** True when one of `candidates` (trimmed) matches a comment THIS agent posted
+ *  DURING this run — the mid-run `post_comment` its final report is repeating.
+ *
+ *  Bounded to `occurredAt >= the run's start`: a byte-identical reply from a
+ *  PRIOR run (or any older own comment) is NOT this run's duplicate and must
+ *  still post — the same boundary the no-progress detector uses so a mid-run
+ *  comment is never mistaken for a prior reply. Compares against more than one
+ *  form because the mid-run tool text skipped the evidence-separation guardrail
+ *  the final reply went through, so a long fenced block reads differently on the
+ *  two sides; passing both the separated and un-separated reply forms catches
+ *  that. (A workspace-absolute path normalized only on the reply side is a
+ *  residual gap — that repeat still posts, which is safe.) */
+function duplicatesOwnCommentThisRun(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  runId: string,
+  actorRef: FileActorRef,
+  candidates: readonly string[],
+): boolean {
+  const startedAt = getRun(db, runId)?.started_at ?? null;
+  if (!startedAt) return false;
+  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  if (!file?.parsed) return false;
+  const mine = encodeActorRef(actorRef);
+  const wanted = new Set(candidates.map((c) => c.trim()));
+  for (const ev of file.parsed.timeline) {
+    if (ev.type !== "comment") continue;
+    if (ev.occurredAt < startedAt) continue; // only THIS run's own comments
+    if (encodeActorRef(ev.actor) !== mine) continue;
+    if (wanted.has(ev.text.trim())) return true;
+  }
+  return false;
+}
 
 /** Build the reply event without writing so completion effects can land atomically. */
 async function prepareAgentReplyEvent(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
+  taskKey: string,
+  runId: string,
   actorRef: FileActorRef,
   replyText: string | null,
 ): Promise<PreparedReply> {
@@ -1463,6 +1502,29 @@ async function prepareAgentReplyEvent(
   const separated = guardrailOn(ctx, projectSlug, "evidence-separation")
     ? separateEvidence(replyText)
     : replyText;
+  // The reply directive tells the agent to tag the human it answers, so an
+  // ambiguous name is a NEW-4 failure with no other surface: the agent cannot
+  // retag itself and the fan-out below would drop the handle in silence
+  // (B-FD2 / S5-G3).
+  const text = withAmbiguityDisclosure(db, separated);
+  // F22-12: an agent's automatic final report sometimes REPEATS a mid-run
+  // `post_comment` verbatim — the tool asks it not to, but that is advisory.
+  // Flag (do NOT drop here) when the text repeats a comment THIS run posted; the
+  // caller decides whether to suppress it, since the reply event may be the only
+  // carrier for the run's evidence or saved files. Compare both the separated
+  // `text` and the un-separated form (`separated === replyText` when the
+  // evidence-separation guardrail is off, so no second disclosure pass).
+  const candidates =
+    separated === replyText ? [text] : [text, withAmbiguityDisclosure(db, replyText)];
+  const duplicate = duplicatesOwnCommentThisRun(
+    db,
+    ctx,
+    projectSlug,
+    taskKey,
+    runId,
+    actorRef,
+    candidates,
+  );
   return {
     status: "event",
     event: {
@@ -1470,26 +1532,29 @@ async function prepareAgentReplyEvent(
       type: "comment",
       actor: actorRef,
       title: null,
-      // The reply directive tells the agent to tag the human it answers, so an
-      // ambiguous name is a NEW-4 failure with no other surface: the agent
-      // cannot retag itself and the fan-out below would drop the handle in
-      // silence (B-FD2 / S5-G3).
-      text: withAmbiguityDisclosure(db, separated),
+      text,
       toAgent: false,
       evidence: null,
     },
+    duplicate,
   };
 }
 
+/** Why the reply was not posted as its own comment — a `meaningful-comment`
+ *  guardrail drop, or an F22-12 duplicate of the agent's own recent comment.
+ *  `null` means the reply WAS posted (or rode an attachments note). */
+type ReplyDropReason = "meaningful-comment" | "duplicate-of-own-comment";
+
 /** Records the boot-recovery idempotency audit for a processed reply (keyed on
- *  `task.agent.replied`), noting a guardrail drop so a dropped reply isn't
- *  reprocessed on every restart (adversarial-review #11). */
+ *  `task.agent.replied`), noting a drop so a dropped reply isn't reprocessed on
+ *  every restart (adversarial-review #11). The reason is recorded honestly: a
+ *  guardrail drop and a duplicate-drop are different facts. */
 function recordAgentRepliedAudit(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
   runId: string,
-  dropped: boolean,
+  dropReason: ReplyDropReason | null,
 ): void {
   recordAudit(db, {
     action: "task.agent.replied",
@@ -1498,10 +1563,24 @@ function recordAgentRepliedAudit(
     subjectId: taskKey,
     projectSlug,
     taskKey,
-    details: dropped
-      ? { runId, droppedByGuardrail: "meaningful-comment" }
-      : { runId },
+    details:
+      dropReason === "meaningful-comment"
+        ? { runId, droppedByGuardrail: "meaningful-comment" }
+        : dropReason === "duplicate-of-own-comment"
+          ? { runId, deduped: "duplicate-of-own-comment" }
+          : { runId },
   });
+}
+
+/** Why a prepared reply's TEXT was not posted as its own comment (or `null` when
+ *  it was, or when the run simply produced no reply text). A guardrail drop and
+ *  an F22-12 duplicate are different facts; an empty reply is neither. */
+function suppressedReplyReason(prepared: PreparedReply): ReplyDropReason | null {
+  if (prepared.status === "dropped") return "meaningful-comment";
+  if (prepared.status === "event" && prepared.duplicate) {
+    return "duplicate-of-own-comment";
+  }
+  return null;
 }
 
 export async function postAgentReplyComment(
@@ -1524,41 +1603,57 @@ export async function postAgentReplyComment(
     db,
     ctx,
     input.projectSlug,
+    input.taskKey,
+    input.runId,
     input.actorRef,
     input.replyText,
   );
-  if (prepared.status === "empty" && !attachments) {
-    logger.info("agent reply run produced no text — no comment posted", {
-      taskKey: input.taskKey,
-      runId: input.runId,
-    });
+  // The reply posts as its own comment unless its text is SUPPRESSED — a
+  // meaningful-comment guardrail drop, or an F22-12 duplicate of a comment this
+  // run already posted. A suppressed reply still lets the run's saved files ride
+  // a producing note; only when there are none is there nothing to write.
+  const postsReplyEvent = prepared.status === "event" && !prepared.duplicate;
+  const suppressedReason = suppressedReplyReason(prepared);
+  if (!postsReplyEvent && !attachments) {
+    if (prepared.status === "empty") {
+      logger.info("agent reply run produced no text — no comment posted", {
+        taskKey: input.taskKey,
+        runId: input.runId,
+      });
+      return;
+    }
+    logger.info(
+      suppressedReason === "duplicate-of-own-comment"
+        ? "agent reply deduped — duplicate of the agent's own mid-run comment"
+        : "agent reply dropped by the meaningful-comment guardrail",
+      { taskKey: input.taskKey, runId: input.runId },
+    );
+    recordAgentRepliedAudit(
+      db,
+      input.projectSlug,
+      input.taskKey,
+      input.runId,
+      suppressedReason,
+    );
     return;
   }
-  if (prepared.status === "dropped" && !attachments) {
-    logger.info("agent reply dropped by the meaningful-comment guardrail", {
-      taskKey: input.taskKey,
-      runId: input.runId,
-    });
-    recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, true);
-    return;
-  }
-  // The event that carries the files: the reply itself when one survived, else
-  // a minimal note — files with no author would sit unattributed in the panel.
-  const event: TaskFileEvent =
-    prepared.status === "event"
-      ? prepared.event
-      : {
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: input.actorRef,
-          title: null,
-          text:
-            attachments && attachments.length === 1
-              ? "Saved 1 file to this task's attachments during the run."
-              : `Saved ${attachments?.length ?? 0} files to this task's attachments during the run.`,
-          toAgent: false,
-          evidence: null,
-        };
+  // The event that carries the files: the reply itself when it posts, else a
+  // minimal note — files with no author would sit unattributed in the panel,
+  // and a suppressed reply must not re-post its text.
+  const event: TaskFileEvent = postsReplyEvent
+    ? prepared.event
+    : {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: input.actorRef,
+        title: null,
+        text:
+          attachments && attachments.length === 1
+            ? "Saved 1 file to this task's attachments during the run."
+            : `Saved ${attachments?.length ?? 0} files to this task's attachments during the run.`,
+        toAgent: false,
+        evidence: null,
+      };
   if (attachments) event.attachments = attachments;
   // G7/B-FD9: the compression-threshold guardrail must fire on a pure
   // agent-reply flood too — the exact case the anti-noise guardrail was built
@@ -1592,14 +1687,15 @@ export async function postAgentReplyComment(
   })
     .then(() => {
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      // The dropped flag stays honest on the attachments-only note: the REPLY
-      // was dropped/absent even though a producing event was written.
+      // When a producing note stood in for a suppressed reply, the reason stays
+      // honest (the REPLY was dropped/deduped even though a files note landed);
+      // when the reply itself posted, it is simply a processed-reply mark.
       recordAgentRepliedAudit(
         db,
         input.projectSlug,
         input.taskKey,
         input.runId,
-        prepared.status !== "event",
+        postsReplyEvent ? null : suppressedReason,
       );
       // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
       // inbox — same fan-out as human comments, with the agent as `from`
@@ -1949,17 +2045,25 @@ export async function recordAgentCompletion(
     db,
     ctx,
     projectSlug,
+    taskKey,
+    runId,
     actorRef,
     replyText,
   );
-  // Nothing to record at all. Attachments count as something: a run that saved
-  // files but produced no usable prose still gets a producing event below, or
-  // the files would sit in the panel with no author.
-  if (!verdict && !question && prepared.status !== "event" && !attachments) {
-    // Still stamp the recovery-idempotency audit for a guardrail-dropped reply,
-    // so boot recovery doesn't reprocess it forever.
-    if (prepared.status === "dropped") {
-      recordAgentRepliedAudit(db, projectSlug, taskKey, runId, true);
+  // The reply posts as its own comment unless SUPPRESSED — a meaningful-comment
+  // guardrail drop, or an F22-12 duplicate of a comment this run already posted.
+  const postsReplyEvent = prepared.status === "event" && !prepared.duplicate;
+  const suppressedReason = suppressedReplyReason(prepared);
+  const hasEvidence = !!(evidence && evidence.length);
+  // Nothing to record at all. Evidence rows and attachments each count as
+  // something: a run whose prose was suppressed but that still produced evidence
+  // or saved files gets a producing event below, so neither is lost with the
+  // text (the F22-12 duplicate path must not orphan the outcome's evidence).
+  if (!verdict && !question && !postsReplyEvent && !attachments && !hasEvidence) {
+    // Still stamp the recovery-idempotency audit for a suppressed reply, so boot
+    // recovery doesn't reprocess it forever.
+    if (suppressedReason) {
+      recordAgentRepliedAudit(db, projectSlug, taskKey, runId, suppressedReason);
     }
     return;
   }
@@ -2113,27 +2217,31 @@ export async function recordAgentCompletion(
       // verdict event when there is a verdict (it IS the outcome), otherwise
       // the agent's report. Duplicating them across both would double the
       // record for one outcome. The run's saved files follow the same rule.
-      if (prepared.status === "event") {
+      if (postsReplyEvent) {
         let replyEvent = prepared.event;
         if (evidence && !verdict) replyEvent = { ...replyEvent, evidence };
         if (attachments && !verdict) replyEvent = { ...replyEvent, attachments };
         parsed.timeline.unshift(replyEvent);
-      } else if (attachments && !verdict) {
-        // Files with no usable reply to ride on: record the production itself,
-        // so the panel can still name who saved them and from which run.
-        parsed.timeline.unshift({
+      } else if (!verdict && (attachments || hasEvidence)) {
+        // The prose was suppressed (guardrail-dropped, or an F22-12 duplicate of
+        // this run's own mid-run comment), but the run still produced evidence
+        // and/or saved files. Record a producing note so the outcome's evidence
+        // rows and attributed files are not lost with the text.
+        const producing: TaskFileEvent = {
           occurredAt: new Date().toISOString(),
           type: "note",
           actor: actorRef,
           title: null,
-          text:
-            attachments.length === 1
+          text: attachments
+            ? attachments.length === 1
               ? "Saved 1 file to this task's attachments during the run."
-              : `Saved ${attachments.length} files to this task's attachments during the run.`,
+              : `Saved ${attachments.length} files to this task's attachments during the run.`
+            : "Recorded this run's evidence.",
           toAgent: false,
-          evidence: null,
-          attachments,
-        });
+          evidence: hasEvidence ? evidence : null,
+        };
+        if (attachments) producing.attachments = attachments;
+        parsed.timeline.unshift(producing);
       }
       if (verdict) {
         const verdictEvent: TaskFileEvent = {
@@ -2196,7 +2304,9 @@ export async function recordAgentCompletion(
     // the run completes — notified nobody, on either backend. The reply
     // directive explicitly instructs the agent to tag the commenter, so this
     // was the majority of agent @tags. Same helper/`from` shape as :1169.
-    if (prepared.status === "event") {
+    // Only when the reply actually POSTED: a suppressed F22-12 duplicate's
+    // mentions were already fanned out by the mid-run comment it repeats.
+    if (postsReplyEvent) {
       notifyMentionedUsers(db, {
         text: prepared.event.text,
         projectSlug,
@@ -2207,14 +2317,15 @@ export async function recordAgentCompletion(
         occurredAt: prepared.event.occurredAt,
       });
     }
-    // Recovery-idempotency audit for the reply (posted or guardrail-dropped).
+    // Recovery-idempotency audit for the reply (posted, guardrail-dropped, or
+    // deduped as an F22-12 duplicate). Skip only a genuinely empty reply.
     if (prepared.status !== "empty") {
       recordAgentRepliedAudit(
         db,
         projectSlug,
         taskKey,
         runId,
-        prepared.status === "dropped",
+        postsReplyEvent ? null : suppressedReason,
       );
     }
     if (questionOpened) {

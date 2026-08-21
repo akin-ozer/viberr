@@ -242,15 +242,19 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
 
 /** Specialist tool-denial capabilities enforced by Claude but advisory on Codex.
  *
- * P14-RT-03: `execute-code-or-write-repo` LEFT this set. Since P13-RT-02 a Codex
- * run whose repo-write grant is withheld gets the read-only sandbox, which is
- * real OS-level enforcement — the metadata was still calling it "advisory on
- * Codex" right next to the fix that made it bite, understating the product's own
- * guarantees in the capability matrix. */
+ * R22 (owner ruling 2026-08-21): `execute-code-or-write-repo` REJOINED this set.
+ * P14-RT-03 had moved it out because P13-RT-02 gave a write-withheld Codex run
+ * the read-only sandbox (real OS-level enforcement). R22 removed that sandbox
+ * ("viberr itself is the sandbox"), so on Codex the repo-write withholding is
+ * once again advisory — the server-owned delivery gate is the real boundary.
+ * Claude keeps its tool-denylist enforcement, so the whole repo-write family is
+ * claude-only now. (Web egress stays in the both-backend set: withholding it
+ * still binds on Codex by forcing workspace-write + `webSearchMode: disabled`.) */
 export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "create-task-branch",
   "commit-push-branch",
   "open-review-pr",
+  "execute-code-or-write-repo",
   // The mid-run post_comment tool is mounted only on Claude (Codex has no
   // in-process comment channel at all — its final reply always posts), so
   // withholding comment-on-task binds on Claude and is advisory on Codex.

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { Markdown } from "./markdown";
 
 /**
@@ -217,6 +217,58 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
     expect(container.querySelector("img")!.getAttribute("alt")).toBe(
       "the capture",
     );
+  });
+
+  it("does NOT nest an image-button inside a link (axe nested-interactive)", () => {
+    // `[![alt](attachments/x)](url)` would otherwise render the `.md-img-btn`
+    // <button> (added for the lightbox) inside the <a> — a nested-interactive
+    // a11y violation. The link is the interactive element; the image renders
+    // plain inside it. Canary: drop the `a`-override unwrap and this goes red.
+    const { container } = render(
+      <Markdown
+        text={"[![shot](attachments/shot.png)](https://example.com/full)"}
+        {...props}
+        onAttachmentImageClick={() => () => {}}
+      />,
+    );
+    const anchor = container.querySelector("a")!;
+    expect(anchor.getAttribute("href")).toBe("https://example.com/full");
+    // No <button> anywhere (neither inside the anchor nor in the tree).
+    expect(container.querySelector("button")).toBeNull();
+    // The image still renders inside the anchor, src repaired.
+    expect(anchor.querySelector("img")!.getAttribute("src")).toBe(
+      `${BASE}/shot.png`,
+    );
+  });
+
+  it("still makes a standalone attachment image a lightbox button", () => {
+    const { container } = render(
+      <Markdown
+        text={"![shot](attachments/shot.png)"}
+        {...props}
+        onAttachmentImageClick={() => () => {}}
+      />,
+    );
+    // A bare embedded attachment (not inside a link) keeps its lightbox button.
+    const btn = container.querySelector("button.md-img-btn");
+    expect(btn).toBeTruthy();
+    expect(btn!.querySelector("img")!.getAttribute("src")).toBe(`${BASE}/shot.png`);
+  });
+
+  it("degrades a failed embedded attachment image to a placeholder (broken-tile fix, 3rd surface)", () => {
+    const { container } = render(
+      <Markdown
+        text={"![shot](attachments/shot.png)"}
+        {...props}
+        onAttachmentImageClick={() => () => {}}
+      />,
+    );
+    fireEvent.error(container.querySelector<HTMLImageElement>("img")!);
+    // The broken <img>/button is replaced by the same labeled placeholder the
+    // timeline and side-panel tiles use, instead of a browser broken glyph.
+    expect(container.querySelector("img")).toBeNull();
+    const broken = container.querySelector(".attach-broken.md-img-broken")!;
+    expect(broken.getAttribute("aria-label")).toContain("preview unavailable");
   });
 
   it("renders links exactly as written when the surface passes no attachments", () => {

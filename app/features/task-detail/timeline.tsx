@@ -6,6 +6,7 @@ import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
 import { IMAGE_RE } from "./attachments-panel";
+import { AttachmentThumb } from "./attachment-image";
 import { useAttachmentLightbox } from "./attachment-lightbox";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
@@ -297,25 +298,19 @@ export function TimelineItem({
                 Non-image files keep the chip; the route serves whitelisted
                 image types inline, sandboxed, member-only. */}
             {ev.attachments.filter((name) => IMAGE_RE.test(name)).map((name) => (
-              <a
+              <AttachmentThumb
                 key={name}
-                className="tl-attach-thumb"
+                variant="timeline"
                 href={`${attachmentsBase}/${encodeURIComponent(name)}`}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`Open attachment ${name}`}
-                onClick={lightbox({
+                name={name}
+                openLabel={`Open attachment ${name}`}
+                onOpen={lightbox({
                   name,
                   url: `${attachmentsBase}/${encodeURIComponent(name)}`,
                 })}
               >
-                <img
-                  src={`${attachmentsBase}/${encodeURIComponent(name)}`}
-                  alt={name}
-                  loading="lazy"
-                />
                 <span className="nm">{name}</span>
-              </a>
+              </AttachmentThumb>
             ))}
             {ev.attachments.filter((name) => !IMAGE_RE.test(name)).map((name) => (
               <a

@@ -624,29 +624,34 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     return spec;
   }
 
-  it("the same withheld repo-write grant confines BOTH backends (headline capability)", async () => {
+  it("R22: withheld repo-write binds on Claude (tool deny); on Codex it is advisory + the delivery gate", async () => {
     const withheld = await startOnBoth(
       specForGrants(withMode(DELIVERY_GRANTS, "execute-code-or-write-repo", "off")),
     );
     // Claude: the write tools are removed from the model's context (deny binds
-    // even under bypassPermissions).
+    // even under bypassPermissions) — the capability is ENFORCED.
     expect(withheld.claude.disallowedTools).toEqual(
       expect.arrayContaining(REPO_WRITE_TOOLS),
     );
-    // Codex: no denylist channel exists, so the SAME grant becomes a read-only
-    // sandbox — a different mechanism, the same effect (P13-RT-02).
-    expect(withheld.codex.thread.sandboxMode).toBe("read-only");
-
     const granted = await startOnBoth(specForGrants(DELIVERY_GRANTS));
     for (const tool of REPO_WRITE_TOOLS) {
       expect(granted.claude.disallowedTools ?? []).not.toContain(tool);
     }
+    // Codex (R22, "viberr itself is the sandbox"): no read-only sandbox anymore.
+    // Withholding repo-write does NOT change the Codex posture — the withheld run
+    // and the granted run get the SAME sandbox (this autonomous deliverer keeps
+    // egress, so both are danger-full-access). The withholding is ADVISORY; the
+    // real boundary is the server-owned delivery gate (push/PR/merge are server
+    // actions no agent tool reaches). This asymmetry is deliberate and disclosed.
+    expect(withheld.codex.thread.sandboxMode).toBe(
+      granted.codex.thread.sandboxMode,
+    );
     expect(granted.codex.thread.sandboxMode).toBe("danger-full-access");
 
-    // The HONEST limit, pinned so no disclosure can overstate it: Claude keeps
-    // Bash (the specialist must still run its validation), so shell-level writes
-    // (`sed -i`, redirection) stay reachable there while the Codex sandbox
-    // blocks them physically. Same posture, strictly stronger on Codex.
+    // Claude keeps Bash (the specialist must run its validation), so shell-level
+    // writes stay reachable there too — the physical repo-write enforcement was
+    // never total on either backend; the server-owned delivery gate is what
+    // actually decides what ships.
     expect(withheld.claude.disallowedTools).not.toContain("Bash");
   });
 
@@ -658,10 +663,13 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
       expect.arrayContaining(["WebFetch", "WebSearch"]),
     );
     expect(withheld.codex.thread.webSearchMode).toBe("disabled");
-    // Only the web SEARCH tool goes on either side: declared MCP servers and the
-    // workspace's own tooling still need the network, and the run still writes.
     expect(withheld.codex.thread.networkAccessEnabled).toBeUndefined();
-    expect(withheld.codex.thread.sandboxMode).toBe("danger-full-access");
+    // R22: an egress-withheld Codex run is workspace-write, NOT
+    // danger-full-access — full access would turn the network on and defeat the
+    // withheld egress. The workspace-write default (network off) is what gates
+    // it. So egress remains an ENFORCED capability on both backends (owner
+    // ruling: sandbox removed, egress kept).
+    expect(withheld.codex.thread.sandboxMode).toBe("workspace-write");
 
     const granted = await startOnBoth(specForGrants(DELIVERY_GRANTS));
     expect(granted.claude.disallowedTools ?? []).not.toContain("WebFetch");
@@ -716,10 +724,11 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     ]);
   });
 
-  it("the operator is read-only on BOTH backends, now that R19-1 puts a real checkout under it", async () => {
-    // R19-1 made this load-bearing: the operator's cwd used to hold task.md and
-    // nothing else, so "read-only" cost nothing. It now stands beside a full
-    // clone of the project repo it must never write.
+  it("R22: the operator is read-only on Claude (deny) and workspace-write + no-egress on Codex", async () => {
+    // R19-1 made this load-bearing: the operator stands beside a full clone of
+    // the project repo it must never write. R22 removed the Codex read-only
+    // sandbox, so on Codex the "never write" is advisory (the delivery gate is
+    // the boundary) — but its EGRESS stays gated (no network, no web search).
     const operator = await startOnBoth({
       ...PARITY_TASK,
       kind: "operator",
@@ -735,8 +744,10 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     );
     // …while the tool-loading path it needs to reach its mcp__viberr__* tools stays.
     expect(operator.claude.disallowedTools).not.toContain("ToolSearch");
-    // Codex: the same posture as a sandbox, plus no egress at all.
-    expect(operator.codex.thread.sandboxMode).toBe("read-only");
+    // Codex (R22): workspace-write, but egress fully gated — an operator that
+    // set autonomous:true must NOT reach danger-full-access (that turns the
+    // network on).
+    expect(operator.codex.thread.sandboxMode).toBe("workspace-write");
     expect(operator.codex.thread.networkAccessEnabled).toBe(false);
     // Autonomy does NOT buy the operator write access on either backend.
     expect(operator.claude.permissionMode).toBe("bypassPermissions");

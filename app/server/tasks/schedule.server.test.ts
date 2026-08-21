@@ -127,8 +127,6 @@ function rawSchedule(over: Partial<TaskSchedule> = {}): TaskSchedule {
     id: "sch_test1",
     action: "run-operator",
     dueAt: new Date(Date.now() - 60_000).toISOString(), // already due
-    backend: "claude",
-    autonomy: "supervised",
     note: "re-check",
     createdBy: "u_elif",
     createdByLabel: "Elif",
@@ -200,12 +198,15 @@ describe("scheduleTaskAction", () => {
 
     const s = await scheduleTaskAction(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() + 3_600_000).toISOString(), backend: "codex", autonomy: "full", note: "check overnight" },
+      { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() + 3_600_000).toISOString(), note: "check overnight" },
       actor(),
       dctx(),
     );
     expect(s.status).toBe("pending");
-    expect(s.backend).toBe("codex");
+    // R22: no backend/autonomy pinned on the entry — the run resolves the live
+    // deployed operator profile at fire time.
+    expect(s).not.toHaveProperty("backend");
+    expect(s).not.toHaveProperty("autonomy");
     expect(schedules("VIB-1")).toHaveLength(1);
     // Projected to schedules_json so the runner can find it.
     // SAFETY: the SELECT names one column, 0001_baseline declares
@@ -217,30 +218,31 @@ describe("scheduleTaskAction", () => {
     expect(listAuditEvents(store.db).some((e) => e.action === "task.schedule.created")).toBe(true);
   });
 
-  it("clamps the scheduled autonomy to the project's operator ceiling (R19-A)", async () => {
-    // The fixture project runs its operator at the default `supervised`
-    // (operatorAutonomyFor), so a schedule requesting `full` must persist as
-    // `supervised` — a schedule cannot outrank the project's configured autonomy
-    // (ruling 67 / R19-A: the per-run level is a CEILING, not a pin).
-    // Canary: swap `clampAutonomy(...)` → `input.autonomy` at
-    // schedule.server.ts and this assertion reads back `full`.
+  it("R22: pins no autonomy or backend — the run resolves the live profile at fire time", async () => {
+    // R22 supersedes R19-A's schedule-time clamp: the entry stores nothing to
+    // clamp, so the fired run resolves AND clamps against whatever operator
+    // profile is deployed when it fires (see runOperator → resolveOperatorAuthority).
+    // Canary: re-add `autonomy`/`backend` to the stored entry in
+    // schedule.server.ts and these read back a value instead of undefined.
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await scheduleTaskAction(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() + 3_600_000).toISOString(), backend: "codex", autonomy: "full" },
+      { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() + 3_600_000).toISOString() },
       actor(),
       dctx(),
     );
-    expect(schedules("VIB-1")[0]!.autonomy).toBe("supervised");
+    const stored = schedules("VIB-1")[0]!;
+    expect(stored).not.toHaveProperty("autonomy");
+    expect(stored).not.toHaveProperty("backend");
   });
 
   it("rejects a past due time", async () => {
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await expect(
-      scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() - 1000).toISOString(), backend: "claude", autonomy: "supervised" }, actor(), dctx()),
+      scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() - 1000).toISOString() }, actor(), dctx()),
     ).rejects.toThrow(/future/i);
   });
 
@@ -248,7 +250,7 @@ describe("scheduleTaskAction", () => {
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: terminalStage() }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await expect(
-      scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-2", dueAt: new Date(Date.now() + 3_600_000).toISOString(), backend: "claude", autonomy: "supervised" }, actor(), dctx()),
+      scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-2", dueAt: new Date(Date.now() + 3_600_000).toISOString() }, actor(), dctx()),
     ).rejects.toThrow(/Done/i);
   });
 });

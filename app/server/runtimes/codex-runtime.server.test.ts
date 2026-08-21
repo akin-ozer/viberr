@@ -235,15 +235,17 @@ describe("codex adapter (SDK, injected fake client)", () => {
     );
     await drain();
     expect(operator.startOptions()).toMatchObject({
-      sandboxMode: "read-only",
+      // R22: no read-only sandbox. The operator is workspace-write, but its
+      // EGRESS stays gated — no network, no web search.
+      sandboxMode: "workspace-write",
       approvalPolicy: "never",
       networkAccessEnabled: false,
       webSearchMode: "disabled",
     });
 
-    // F10-12/F10-04: a supporting/reviewing run is read-only for the workspace
-    // (only the delivering engagement mutates), but — unlike the operator — it
-    // keeps network access for declared MCP resources.
+    // R22: a supporting/reviewing run is workspace-write now (the read-only
+    // sandbox is gone); its capability limits are advisory on Codex + the
+    // server-owned delivery gate. It keeps network for declared MCP resources.
     const reviewer = fakeCodex(events);
     createCodexAdapter({ codexFactory: reviewer.factory }).start(
       { ...SPEC, kind: "reviewer" },
@@ -251,7 +253,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
     );
     await drain();
     const revOpts = reviewer.startOptions()!;
-    expect(revOpts.sandboxMode).toBe("read-only");
+    expect(revOpts.sandboxMode).toBe("workspace-write");
     expect(revOpts.networkAccessEnabled).toBeUndefined();
   });
 
@@ -271,10 +273,11 @@ describe("codex adapter (SDK, injected fake client)", () => {
     await drain();
     const withheldOpts = withheld.startOptions()!;
     expect(withheldOpts.webSearchMode).toBe("disabled");
-    // Only the WEB SEARCH tool goes: declared MCP servers and the workspace's
-    // own tooling still need the network, and a delivering run still writes.
     expect(withheldOpts.networkAccessEnabled).toBeUndefined();
-    expect(withheldOpts.sandboxMode).toBe("danger-full-access");
+    // R22: an egress-withheld run is workspace-write, NOT danger-full-access —
+    // full access would force the network on and defeat the withheld egress.
+    // The workspace-write default (network off) is what actually gates it.
+    expect(withheldOpts.sandboxMode).toBe("workspace-write");
 
     const granted = fakeCodex(events);
     createCodexAdapter({ codexFactory: granted.factory }).start(SPEC, {
@@ -609,6 +612,98 @@ describe("codex adapter (SDK, injected fake client)", () => {
     expect(lines.at(-1)?.raw).not.toContain("sk-secretsentinel0123456789");
   });
 
+  it("F22-08: classifies a usage-limit reported ONLY in a turn.failed event, not the exit banner", async () => {
+    // The real Codex quota failure: the SDK streams the actionable reason as a
+    // `turn.failed` event, THEN the iterator throws a bare exit banner that
+    // carries none of it. Classifying on the thrown banner alone (the old
+    // behavior) routed this to the generic auth/config branch and dropped the
+    // retry date. The adapter must read the reason from the event.
+    const usageLimit =
+      "You've hit your usage limit. To continue using Codex, start a free trial of Plus today, or try again at Sep 18th, 2026 5:20 PM.";
+    const exitBanner = new Error(
+      "Codex Exec exited with code 1: Reading prompt from stdin...",
+    );
+    const thread: CodexThread = {
+      id: "thread-quota",
+      async runStreamed() {
+        return {
+          events: asSdkEvents({
+            async *[Symbol.asyncIterator]() {
+              yield { type: "thread.started", thread_id: "thread-quota" };
+              yield { type: "turn.failed", error: { message: usageLimit } };
+              throw exitBanner;
+            },
+          }),
+        };
+      },
+    };
+    const client: CodexClient = {
+      startThread: () => thread,
+      resumeThread: () => thread,
+    };
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    createCodexAdapter({ codexFactory: () => client }).start(SPEC, {
+      onLine: (line) => lines.push(line),
+      onExit: (value) => (exit = value),
+    });
+    await drain();
+
+    expect(exit).toMatchObject({ outcome: "error" });
+    const err = lines.at(-1);
+    // Quota class + its canonical sentence, NOT the generic "review its
+    // authentication and runtime configuration".
+    expect(err?.display).toMatchObject({ ev: "err", tag: "error·quota" });
+    const errText = err?.display?.text ?? "";
+    expect(errText).toContain(
+      "Codex usage limit was reached. Retry after the subscription limit resets.",
+    );
+    expect(errText).not.toContain("runtime configuration");
+    // The provider's own actionable words (incl. the retry date) ride behind
+    // the marker — sourced from the event, not the exit banner.
+    expect(errText).toContain("Sep 18th, 2026");
+    expect(errText).not.toContain("Reading prompt from stdin");
+  });
+
+  it("F22-08: surfaces a fatal turn.failed even when the iterator does NOT throw", async () => {
+    // A `turn.failed` can arrive and the stream then end cleanly. The old code
+    // settled `error` silently (no message) in that path.
+    const reason = "Model gpt-5.6-terra is not available for this account.";
+    const thread: CodexThread = {
+      id: "thread-clean",
+      async runStreamed() {
+        return {
+          events: asSdkEvents({
+            async *[Symbol.asyncIterator]() {
+              yield { type: "thread.started", thread_id: "thread-clean" };
+              yield { type: "turn.failed", error: { message: reason } };
+              // stream ends without throwing
+            },
+          }),
+        };
+      },
+    };
+    const client: CodexClient = {
+      startThread: () => thread,
+      resumeThread: () => thread,
+    };
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    createCodexAdapter({ codexFactory: () => client }).start(SPEC, {
+      onLine: (line) => lines.push(line),
+      onExit: (value) => (exit = value),
+    });
+    await drain();
+
+    expect(exit).toMatchObject({ outcome: "error" });
+    const errText = lines.at(-1)?.display?.text ?? "";
+    // Not the "ended before reporting turn completion" fallback — the real
+    // reason is surfaced.
+    expect(errText).not.toContain("ended before reporting turn completion");
+    expect(errText).toContain("The provider reported:");
+    expect(errText).toContain("not available for this account");
+  });
+
   it("interrupt() aborts the signal and ends interrupted", async () => {
     const many = Array.from({ length: 30 }, (_, i) => ({
       type: "item.completed",
@@ -888,10 +983,14 @@ describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
   });
 });
 
-describe("codex sandbox enforces the withheld repo-write grant (P13-RT-02)", () => {
-  it("a delivering run whose repo-write grant is withheld is read-only", () => {
-    // `autonomous` stays TRUE — it also drives Claude's permissionMode, and
-    // flipping it would hang a server run on an unanswerable approval.
+describe("R22: codex has no read-only sandbox; egress-gated runs stay workspace-write", () => {
+  it("no run is read-only — a withheld repo-write is advisory on Codex now", () => {
+    // R22 (owner ruling): "viberr itself is the sandbox". The Codex read-only
+    // mode is gone; withheld repo-write is advisory (the server-owned delivery
+    // gate is the boundary). This autonomous delivering run has egress, so it
+    // reaches full access even with repo-write withheld — the write-withholding
+    // is no longer PHYSICALLY enforced by the sandbox.
+    // Canary: restore a `read-only` arm to resolveCodexSandboxMode and this reads back "read-only".
     expect(
       resolveCodexSandboxMode({
         ...SPEC,
@@ -899,46 +998,60 @@ describe("codex sandbox enforces the withheld repo-write grant (P13-RT-02)", () 
         autonomous: true,
         repoWriteWithheld: true,
       }),
-    ).toBe("read-only");
+    ).toBe("danger-full-access");
   });
 
-  it("a fully-granted delivering run still gets full access", () => {
+  it("only an autonomous delivering run with egress gets danger-full-access", () => {
     expect(
       resolveCodexSandboxMode({ ...SPEC, kind: "primary", autonomous: true }),
     ).toBe("danger-full-access");
+    // Supervised (non-autonomous) → workspace-write.
+    expect(
+      resolveCodexSandboxMode({ ...SPEC, kind: "primary", autonomous: false }),
+    ).toBe("workspace-write");
+  });
+
+  it("operators and reviewers are workspace-write, never read-only or full-access", () => {
+    // Operators set autonomous:true but must NOT get danger-full-access — that
+    // would turn the network on and bypass their egress gate.
+    expect(resolveCodexSandboxMode({ ...SPEC, kind: "operator", autonomous: true })).toBe(
+      "workspace-write",
+    );
+    expect(resolveCodexSandboxMode({ ...SPEC, kind: "reviewer", autonomous: true })).toBe(
+      "workspace-write",
+    );
+  });
+
+  it("an egress-withheld run stays workspace-write so the network toggle binds", () => {
+    // Even an autonomous deliverer: danger-full-access forces the network on,
+    // which would defeat the withheld egress. Egress wins → workspace-write.
     expect(
       resolveCodexSandboxMode({
         ...SPEC,
         kind: "primary",
         autonomous: true,
-        repoWriteWithheld: false,
+        webSearchWithheld: true,
       }),
-    ).toBe("danger-full-access");
+    ).toBe("workspace-write");
   });
 
-  it("operators and supporting runs stay read-only regardless", () => {
-    expect(resolveCodexSandboxMode({ ...SPEC, kind: "operator" })).toBe("read-only");
-    expect(resolveCodexSandboxMode({ ...SPEC, kind: "reviewer" })).toBe("read-only");
-  });
-
-  it("reaches the SDK thread options", async () => {
+  it("reaches the SDK thread options as workspace-write for a withheld run", async () => {
     const run = fakeCodex([
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
     ]);
     createCodexAdapter({ codexFactory: run.factory }).start(
-      { ...SPEC, repoWriteWithheld: true },
+      { ...SPEC, autonomous: false, repoWriteWithheld: true },
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    expect(run.startOptions()?.sandboxMode).toBe("read-only");
+    expect(run.startOptions()?.sandboxMode).toBe("workspace-write");
   });
 
-  /** Owner ask 2026-08-20 — the attachments drop. The task's attachments dir
-   * joins the sandbox as an additional writable directory ONLY at
-   * workspace-write: full access can already write it, and widening a
-   * read-only run would break the P13-RT-02 honesty rule this describe pins
-   * (the matrix said closed, the sandbox stayed closed). */
-  it("widens only the workspace-write sandbox with the attachments dir", async () => {
+  /** R22 / F22-03 — the attachments dir is added at workspace-write (full access
+   * can already write it). Since no run is read-only anymore, an evidence-granted
+   * reviewer is workspace-write and CAN copy screenshots into attachments/, so
+   * the "Posting files" persona no longer promises a blocked write. */
+  it("widens the workspace-write sandbox with the attachments dir", async () => {
     const DIR = "/data/projects/p/tasks/T-1/attachments";
     const done = [
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
@@ -955,15 +1068,19 @@ describe("codex sandbox enforces the withheld repo-write grant (P13-RT-02)", () 
       additionalDirectories: [DIR],
     });
 
-    const ro = fakeCodex(done);
-    createCodexAdapter({ codexFactory: ro.factory }).start(
-      { ...SPEC, repoWriteWithheld: true, attachmentsWritableDir: DIR },
+    // An evidence-granted reviewer (F22-03): now workspace-write, attachments writable.
+    const rev = fakeCodex(done);
+    createCodexAdapter({ codexFactory: rev.factory }).start(
+      { ...SPEC, kind: "reviewer", attachmentsWritableDir: DIR },
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    expect(ro.startOptions()?.sandboxMode).toBe("read-only");
-    expect(ro.startOptions()?.additionalDirectories).toBeUndefined();
+    expect(rev.startOptions()).toMatchObject({
+      sandboxMode: "workspace-write",
+      additionalDirectories: [DIR],
+    });
 
+    // A fully-autonomous delivering run: danger-full-access, no widening needed.
     const full = fakeCodex(done);
     createCodexAdapter({ codexFactory: full.factory }).start(
       { ...SPEC, attachmentsWritableDir: DIR },

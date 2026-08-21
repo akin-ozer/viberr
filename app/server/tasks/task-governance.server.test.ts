@@ -1059,8 +1059,6 @@ describe("resolvePacket kind matrix", () => {
             id: "sch_arch1",
             action: "run-operator",
             dueAt: new Date(Date.now() + 3_600_000).toISOString(),
-            backend: "claude",
-            autonomy: "supervised",
             note: "re-check",
             createdBy: store.users.arda.id,
             createdByLabel: "Arda",

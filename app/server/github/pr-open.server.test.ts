@@ -165,6 +165,71 @@ describe("openTaskPr", () => {
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain("github.pr.opened");
   });
 
+  it("F22-10: the PR body's change-summary + evidence come from the LIVE compare, not stale fm.github", async () => {
+    // Reproduce the PR #187 hazard: the reconciled frontmatter carries a
+    // colliding branch's stats (3 files / +214 / 3 commits) while the actual
+    // delivered diff is 1 file / +5. The compare of main...<branch> is the truth.
+    const store = setupWithBranch("VIB-201", {
+      github: {
+        changed: { files: 3, add: 214, del: 16 },
+        commits: [
+          { sha: "aaaaaaa", msg: "stale one" },
+          { sha: "bbbbbbb", msg: "stale two" },
+          { sha: "ccccccc", msg: "stale three" },
+        ],
+      },
+    });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/compare/main...${BRANCH}`]: {
+        body: { total_commits: 1, files: [{ additions: 5, deletions: 0 }] },
+      },
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] x", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, appOrigin: "https://viberr.example" },
+    );
+    expect(res.status).toBe("ok");
+    const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
+    // The live compare wins: 1 file / +5, 1 commit.
+    expect(sent.body).toContain("1 file(s) changed (+5/-0).");
+    expect(sent.body).toContain("1 file(s) changed on `" + BRANCH + "` · +5 · −0");
+    expect(sent.body).toContain("1 commit(s) delivered");
+    // The stale reconciled numbers must NOT appear.
+    expect(sent.body).not.toContain("3 file(s) changed");
+    expect(sent.body).not.toContain("+214");
+    expect(sent.body).not.toContain("3 commit(s) delivered");
+  });
+
+  it("F22-10: falls back to fm.github stats when the compare is unreachable", async () => {
+    const store = setupWithBranch("VIB-201", {
+      github: { changed: { files: 2, add: 10, del: 3 }, commits: [] },
+    });
+    // No compare route registered → the fake 404s it → deliveredDiffStats null.
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 44, html_url: "https://github.com/akin-ozer/viberr/pull/44", title: "[VIB-201] x", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, appOrigin: "https://viberr.example" },
+    );
+    expect(res.status).toBe("ok");
+    const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
+    expect(sent.body).toContain("2 file(s) changed (+10/-3).");
+  });
+
   it("F21-9: a created PR whose response does not decode is still recorded", async () => {
     // The write already happened on GitHub. Losing the response used to lose the
     // task's only record of a live PR — the next delivery then tried to open a

@@ -875,6 +875,16 @@ it is regenerated from the filesystem rather than restated here.
     into the review PR body. (`app/shared/capabilities.ts`,
     `app/server/tasks/specialist-browser-mcp.server.ts`, `Dockerfile`,
     `app/server/files/file-store-root.server.ts`, `app/routes/task-attachment.ts`)
+    *(Amended 2026-08-21, pass 22 — two of the four decisions moved. **(a) egress**: the
+    posture is reversed by ruling 95 (#176) — granting the browser now FORCES
+    `use-web-search-fetch` to `direct` at every profile save path, because the browser IS
+    egress; the mount-refusal this clause describes survives only as the runtime backstop
+    for hand-edited files, and the "cannot re-acquire egress" polarity hole is closed from
+    the grant side rather than the refusal side. **(d) output**: the attachments drop
+    generalized — ruling 96 (#179) lets ANY `attach-evidence-references` run post files
+    into `attachments/`, browser screenshots now being the special case, and attachments
+    render as timeline thumbnails with an in-app lightbox (#177/#184). (b) the injection
+    stance and (c) chromium-in-image stand unchanged.)*
 
 76. **R20-1 (2026-08-14, F20-5): confirming a recovery option on a failure packet RESOLVES it and
     RE-QUEUES the operator — no repeat confirms, and the label says exactly what happens.** Live: the
@@ -1135,6 +1145,124 @@ it is regenerated from the filesystem rather than restated here.
     survives as a caption: full autonomy announces itself on the run surface; supervised is the
     quiet default. P11-41 survives without a picker: an unconfigured profile backend disables Run
     with the reason rendered.
+
+93. **R22 (2026-08-21, pass 22): the Codex OS process sandbox is REMOVED — "viberr itself
+    is the sandbox."** `resolveCodexSandboxMode` returns `read-only` for NO run anymore:
+    only a fully-autonomous DELIVERING run that also holds web egress gets
+    `danger-full-access`; every other run — operators, reviewers, supervised runs, and any
+    run whose `use-web-search-fetch` is withheld — is `workspace-write`, writable and
+    shell-capable with the network gated by the egress capability (`networkAccessEnabled` /
+    `webSearchMode`). The owner's scope is precise, confirmed on the boundary question:
+    remove ONLY the OS process sandbox — the container plus the server-owned delivery gate
+    (push / open-PR / merge / close / Done are server actions no agent tool reaches) are
+    the real boundary, and read-only mode only crippled agents doing legitimate local
+    work. KEPT unchanged: Claude's capability tool-denylist enforcement (operators and
+    reviewers stay read-only on Claude via denylist; a withheld `execute-code-or-write-repo`
+    still removes the write tools on Claude), and EGRESS as an enforced capability on both
+    backends. The two directives conflict at the extreme — `danger-full-access` turns the
+    network on unconditionally, defeating egress gating — so egress-gated runs use
+    `workspace-write`, the least-confining mode whose network toggle Codex respects.
+    Consequences recorded in code: `execute-code-or-write-repo` REJOINED
+    `CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS` (on Codex it is advisory plus the delivery
+    gate), while `use-web-search-fetch` stays in the both-backend enforced set; the
+    capability-matrix copy now says the Codex file/command limits are advisory, the
+    server-side delivery gate is the real constraint, and egress is gated on both.
+    Supersedes P13-RT-02 (write-withheld Codex ⇒ read-only sandbox) and P14-RT-03 (which
+    moved `execute-code-or-write-repo` into the both-backend set on the strength of that
+    sandbox). Also resolves AD-1/F22-03: a workspace-write reviewer with
+    `attach-evidence-references` granted can actually write `attachments/`, so the
+    "Posting files" persona no longer promises a write the sandbox blocked.
+    (`resolveCodexSandboxMode` in `app/server/runtimes/codex-runtime.server.ts:368`;
+    `CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS` in `app/shared/capabilities.ts:253`; the modal
+    copy in `app/features/agents/capability-matrix-modal.tsx:85-93`)
+
+94. **R22-schedule (2026-08-21, F22-02): a scheduled operator re-run resolves the LIVE
+    deployed profile at fire time — FR39's per-schedule backend/autonomy pin is
+    superseded.** The schedule form offers no backend/autonomy pickers, the stored entry
+    pins neither, and `runOperator` fills both from the deployed operator profile when
+    omitted (`resolveOperatorAuthority`: `overrides.backend ?? declaredBackend`). This is
+    ruling 92's (R21-9) "the card shows, doesn't pick" applied to the unattended case,
+    where it matters more: for a run set hours ahead, following the profile actually
+    deployed at fire time beats freezing what was configured earlier — the frozen pin was
+    the temporal twin of the #183 stale-backend-display bug (ruling 97). No schedule-time
+    clamp is needed because nothing is stored to clamp; the fired run resolves and clamps
+    (ruling 67 / R19-A) against whatever is deployed when it fires. FR39 is amended in the
+    PRD accordingly. (`app/server/tasks/schedule.server.ts:141-149,468-471`;
+    `resolveOperatorAuthority` in `app/server/tasks/operator-actions.server.ts`; the
+    pickerless form in `app/features/task-detail/task-main-sections.tsx:299,353,390`)
+
+95. **Browser implies egress (#176; owner ruling 2026-08-20, promoted 2026-08-21).**
+    Granting `use-browser` (`direct`) forces `use-web-search-fetch` to `direct` at every
+    profile save path — `repairBrowserEgressGrants`, folded with the delivery repair by
+    `applyGrantCouplings`, with the capability editor pinning the egress row to Allowed
+    while the browser is Allowed. The browser IS network egress, so a browser-granted /
+    egress-withheld profile expresses no policy at all: `resolveBrowserMcp` fails the
+    mount closed either way, and the live failure shape was an admin granting "Drive a
+    live web browser", leaving "Search & fetch from the web" off, and getting run after
+    run that honestly reported "browser not mounted" against a matrix that said Allowed.
+    This deliberately diverges from B-AG1's respect-the-explicit-off posture — the
+    browser rule has NO "withheld" arm. There the contradictory state is a real,
+    enforceable withholding (the scoped delivery steps stay dead until the admin resolves
+    it); here respecting the `off` preserves nothing but the trap. The runtime
+    mount-refusal stays as the backstop for hand-edited files. Amends ruling 75(a).
+    (`repairBrowserEgressGrants` / `applyGrantCouplings` in
+    `app/shared/capabilities.ts:479,514`; the editor pin in
+    `app/features/agents/create-profile-modal.tsx:697-749`)
+
+96. **The attachments drop (#179; owner ask 2026-08-20, promoted 2026-08-21): any run
+    granted `attach-evidence-references` may POST FILES on the task thread.** Files the
+    run copies into the task's canonical `attachments/` directory are posted on the
+    agent's reply, images rendering inline as timeline thumbnails. The persona section
+    ("Posting files on the task thread") is emitted for ANY evidence-granted profile,
+    browser or not — every backend that can write files can use a plain directory — so
+    the browser's default-named screenshots (ruling 75(d)) become a special case of this
+    general mechanic rather than the mechanic itself. Live provenance, both directions:
+    an agent committed its screenshot into the review PR because nothing told it the
+    thread could carry files; and once told, a run (VIB-2) correctly REFUSED the copy
+    twice because the workspace contract's "never touch anything outside the working
+    directory" outranked the persona — so the contract now names the drop as its one
+    exception (`attachmentsDropRel`), and on Codex the attachments dir joins the
+    writable set (ruling 93's `attachmentsWritableDir`). Extends ruling 75(d).
+    (`attachmentsDropSection` in `app/server/tasks/specialist-browser-mcp.server.ts:167`;
+    the persona gate, workspace-contract exception and sandbox widening in
+    `app/server/tasks/specialist-run.server.ts:1403,1653,2014`)
+
+97. **The live-backend display law (#183; promoted 2026-08-21): every surface displays
+    the backend a run would ACTUALLY use.** Engagement rows in `task.md` snapshot the
+    backend at engage time, and the run start heals them only when the next run actually
+    happens — so between a profile edit and that run the snapshot lies about what Run
+    does (owner-reported live: the exec profile said "Codex" after the Developer profile
+    was switched to Claude; Run would have started a Claude run under a card labeled
+    Codex). The rule: the server query layer overlays the live deployed
+    `profileId → backend` map onto the task snapshot — `withLiveAgentBackends`, fed by
+    `deployedSpecialistBackends` / `primaryRunBackend`, the same primary-backend rule the
+    run resolves with — so board, review queue, task detail and the Agents page all
+    inherit one answer. A profile absent from the map (undeployed since engagement) keeps
+    its snapshot, exactly the run path's own fallback; stored records are not rewritten.
+    Rulings 92 (R21-9) and 94 are this law's other two faces: the run control and the
+    schedule both SHOW what the live profile resolves; neither pins.
+    Layering (#183, 2026-08-21): the overlay rule is a SERVER concern the hottest read
+    loaders need on every render, so it lives in the server layer —
+    `app/server/agents/deployment-view.server.ts` owns `primaryRunBackend`,
+    `deploymentRuntimeIdentity` (the single `override ?? template ?? default` resolution)
+    and `deployedSpecialistBackends`. The `features/agents` display code imports them back
+    (features → server, the allowed direction); `effectiveProfileView` delegates the
+    kind/backends resolution to the same `deploymentRuntimeIdentity`, so the map that
+    DISPLAYS a backend and the value a run RESOLVES are one computation. The prior form
+    had `server/projections/*` importing the rule up from `features/agents` — the inversion
+    this removes.
+    (`withLiveAgentBackends` in `app/shared/mapping/task.server.ts:369`;
+    `primaryRunBackend` / `deployedSpecialistBackends` / `deploymentRuntimeIdentity` in
+    `app/server/agents/deployment-view.server.ts`; overlay call sites
+    `app/server/projections/board-query.server.ts`,
+    `app/server/projections/task-query.server.ts`)
+
+*(UI-preference notes, 2026-08-21, pass 22 — owner decisions on presentation, recorded as
+preferences rather than law: **#180** the decision packet takes the questionnaire's
+density; **#182** the packet's minimal redesign — it reads as one quiet column; **#186**
+an owned task's owner cell is just the owner, with no manage affordance. Styling-only —
+no capability, gate or copy contract changed — noted here so a later pass does not read
+the quieter packet or the bare owner cell as drift.)*
 
 ## Route map
 

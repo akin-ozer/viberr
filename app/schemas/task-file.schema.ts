@@ -42,7 +42,7 @@ export type Waiting = (typeof WAITING_VALUES)[number];
 export const VALIDATION_VALUES = ["healthy", "changed", "failing", "none", "bypassed"] as const;
 export type Validation = (typeof VALIDATION_VALUES)[number];
 
-/** The 10 timeline event types (cross-cutting contracts §1.3). Parsers keep
+/** The 11 timeline event types (cross-cutting contracts §1.3). Parsers keep
  * unknown strings as-is (renderer falls back to comment meta).
  *
  * P13-LV-03: `policy` used to be a grab-bag — a real PAT-scope violation, a
@@ -232,9 +232,14 @@ export const scheduleSchema = z
     action: z.enum(SCHEDULE_ACTION_TYPES),
     /** ISO timestamp; the runner fires the entry once now >= dueAt. */
     dueAt: z.string().min(1),
-    /** The backend + autonomy the scheduled operator run uses. */
-    backend: z.enum(["claude", "codex"]).default("claude"),
-    autonomy: z.enum(["supervised", "full"]).default("supervised"),
+    // R22 (owner ruling 2026-08-21, supersedes FR39's per-schedule pin): a
+    // scheduled re-run no longer pins a backend or autonomy. It resolves the
+    // LIVE deployed operator profile at fire time — the same rule R21-9 gave the
+    // manual run control ("the card shows, doesn't pick"). A schedule fires
+    // unattended, so following the profile that is actually deployed then
+    // matters MORE than freezing whatever was configured hours earlier (it was
+    // also the temporal twin of the #183 stale-backend-display bug). `.loose()`
+    // ignores the `backend`/`autonomy` keys any pre-ruling entry still carries.
     /** Human note shown on the scheduled-actions card. */
     note: z.string().default(""),
     /** Who scheduled it (userId) + a display label. */

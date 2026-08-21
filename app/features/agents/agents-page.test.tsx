@@ -1144,12 +1144,20 @@ describe("CreateProfileModal", () => {
     for (const b of egress.querySelectorAll<HTMLButtonElement>("button")) {
       expect(b.disabled).toBe(true);
     }
+    // P14: the reason a disabled row won't move is RENDERED, visible copy —
+    // not only the aria-label (which a sighted admin never sees) or a title
+    // (which never opens on a disabled control).
+    expect(
+      egress.closest(".cap-mrow")!.querySelector(".cap-mnote")!.textContent,
+    ).toContain("the browser is web egress");
 
     // Releasing the browser releases the row (the value stays Allowed — the
     // admin can then withhold egress explicitly).
     fireEvent.click(modeBtn(rowFor("Drive a live web browser"), "Off"));
     const released = rowFor("Search & fetch from the web");
     expect(released.getAttribute("aria-label")).not.toContain("required by");
+    // …and the pinned-reason copy is gone with it.
+    expect(released.closest(".cap-mrow")!.querySelector(".cap-mnote")).toBeNull();
     expect(modeBtn(released, "Allowed").getAttribute("aria-checked")).toBe(
       "true",
     );

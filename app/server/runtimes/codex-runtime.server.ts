@@ -340,22 +340,46 @@ function codexConfigForRun(
 }
 
 /**
- * The sandbox a run gets. `spec.autonomous` deliberately does NOT decide repo
- * write access: it also drives Claude's `permissionMode`, and flipping it to
- * `"default"` would hang a server run on an approval nobody can answer.
+ * The sandbox a run gets.
  *
- * P13-RT-02: a delivering Codex agent whose `execute-code-or-write-repo` grant
- * is withheld used to run at `danger-full-access` — exactly as unconstrained as
- * a fully-granted one, while the capability matrix showed the withholding as
- * enforced. The read-only sandbox PHYSICALLY blocks writes (strictly stronger
- * than Claude's tool denylist), and Viberr already relies on it for supporting
- * runs, so the headline gate maps straight onto it.
+ * R22 (owner ruling 2026-08-21) — "viberr itself is the sandbox": the Codex OS
+ * read-only sandbox is gone. It used to run operators, reviewers and
+ * write-withheld agents `read-only`, PHYSICALLY blocking every write; the owner
+ * removed it because the container plus Viberr's server-owned delivery gate
+ * (push / open-PR / merge / close / Done are all server actions no agent tool
+ * can reach) are the real boundary, and the read-only mode only crippled agents
+ * doing legitimate local work. What survives, by the same ruling, is EGRESS: a
+ * separate capability the owner keeps enforced (`networkAccessEnabled` /
+ * `webSearchMode`, set below). `danger-full-access` cannot honor that — it turns
+ * the network on unconditionally — so egress-gated runs use `workspace-write`,
+ * the least-confining mode whose network toggle Codex still respects. No run is
+ * `read-only` anymore. (Claude keeps its capability tool-denylists unchanged,
+ * per the same ruling — the enforcement asymmetry is deliberate: on Claude the
+ * withheld capability binds, on Codex it is advisory + the delivery gate, which
+ * is exactly what the capability matrix has always disclosed.)
+ *
+ * `spec.autonomous` deliberately does NOT decide repo write access on its own:
+ * it also drives Claude's `permissionMode`, and flipping it to `"default"` would
+ * hang a server run on an approval nobody can answer. Only a fully-autonomous
+ * delivering run — which by definition holds egress too — reaches
+ * `danger-full-access`; everything else is `workspace-write`, writable but with
+ * the network gated by the egress capability.
  */
 export function resolveCodexSandboxMode(spec: RunSpec): SandboxMode {
-  // Operators coordinate and reviewers advise — neither mutates the workspace.
-  if (spec.kind === "operator" || spec.kind === "reviewer") return "read-only";
-  if (spec.repoWriteWithheld) return "read-only";
-  return spec.autonomous ? "danger-full-access" : "workspace-write";
+  // Only a fully-autonomous DELIVERING run with egress reaches
+  // `danger-full-access` (full filesystem + network). Everything else —
+  // operators, reviewers, supervised runs, and any run whose web egress is
+  // withheld — is `workspace-write`: writable and shell-capable, but with the
+  // network gated by the egress capability the owner keeps enforced
+  // (`networkAccessEnabled` / `webSearchMode`, set below). `danger-full-access`
+  // cannot honor that gate (it turns the network on unconditionally), which is
+  // why egress-gated runs must NOT use it. Note operator runs set
+  // `autonomous: true`, so they are excluded explicitly.
+  const isDeliverer = spec.kind !== "operator" && spec.kind !== "reviewer";
+  if (spec.autonomous && isDeliverer && !spec.webSearchWithheld) {
+    return "danger-full-access";
+  }
+  return "workspace-write";
 }
 
 /** The idle (inactivity) timeout for a codex run in ms — the window a single
@@ -415,8 +439,15 @@ interface CodexFailure {
 function classifyCodexFailure(
   cause: unknown,
   phase: "start" | "execution",
+  // F22-08: the reason the SDK streamed as a `turn.failed` / `error` event,
+  // when one was seen. The thrown `cause` is only the exit banner ("exited with
+  // code 1: Reading prompt from stdin..."), so classifying on it alone routes a
+  // usage-limit run to the generic auth/config branch and drops the retry date.
+  // When present, this text drives BOTH the class regexes and the provider text.
+  streamText?: string | null,
 ): CodexFailure {
   const parts: string[] = [];
+  if (streamText) parts.push(streamText);
   let current: unknown = cause;
   for (let depth = 0; depth < 3 && current != null; depth += 1) {
     if (current instanceof Error) {
@@ -432,7 +463,8 @@ function classifyCodexFailure(
   // stays generic (and the class rides the tag), but the redacted sentence is
   // now surfaced beside it so a human can act on "model is not supported when
   // using Codex with a ChatGPT account" instead of "review the configuration".
-  const providerText = redactProviderText(cause);
+  // Prefer the streamed reason (F22-08) — it is the sentence a human can act on.
+  const providerText = redactProviderText(streamText ?? cause);
   // P13-D-2 before the auth branch: a missing rollout is not a credential
   // problem, and telling a human to "review the configured subscription
   // credential" for it sends them to the one place that is definitely fine.
@@ -474,6 +506,21 @@ function classifyCodexFailure(
   };
 }
 
+/** F22-08: the reason on a fatal stream event, decoded at the I/O boundary. An
+ *  `error` event carries `.message`; a `turn.failed` event carries
+ *  `.error.message`. Both are optional and best-effort — a shape the reader does
+ *  not recognize simply yields no message and the run falls back to the thrown
+ *  error's text. */
+const fatalEventMessageSchema = z
+  .object({
+    message: z.string().optional().catch(undefined),
+    error: z
+      .object({ message: z.string().optional().catch(undefined) })
+      .optional()
+      .catch(undefined),
+  })
+  .catch({});
+
 let cachedFactory: CodexFactory | null = null;
 async function realFactory(): Promise<CodexFactory> {
   if (cachedFactory) return cachedFactory;
@@ -491,6 +538,12 @@ export function createCodexAdapter(
       let sessionId: string | null = spec.resumeSessionId ?? null;
       let sawTurnCompleted = false;
       let sawFatalError = false;
+      // F22-08: the SDK streams the real failure reason as a `turn.failed` /
+      // `error` event (e.g. "You've hit your usage limit — try again Sep 18"),
+      // then throws a bare `"Codex Exec exited with code 1: Reading prompt from
+      // stdin..."` with no useful text. Keep the last fatal event's message so
+      // the classifier reads the reason the human needs, not the exit banner.
+      let lastFatalMessage: string | null = null;
       let interrupted = false;
       let settled = false;
       let idleTimedOut = false;
@@ -618,15 +671,17 @@ export function createCodexAdapter(
         if (deps.apiKey) codexOptions.apiKey = deps.apiKey;
         if (mergedEnv) codexOptions.env = mergedEnv;
         const codex = factory(codexOptions);
-        // Fully autonomous: no approval gating. `danger-full-access` mirrors
-        // Claude's bypassPermissions so a server-spawned run never blocks on
-        // an approval it can't answer. Operators are coordinators rather than
-        // coding agents, so they get the closest direct-SDK equivalent to
-        // Claude's denied mutation tools: read-only files, no network, no web
-        // search. Supporting/reviewing runs are read-only too (F10-12 /
-        // F10-04), as are delivering runs whose repo-write grant is withheld
-        // (P13-RT-02). Network stays enabled so declared MCP resources still
-        // work (only the operator disables egress).
+        // R22 — the Codex OS read-only sandbox is gone (owner ruling: "viberr
+        // itself is the sandbox"). A fully-autonomous delivering run gets
+        // `danger-full-access`, mirroring Claude's bypassPermissions so a
+        // server-spawned run never blocks on an approval it can't answer; every
+        // other run is `workspace-write` (writable + shell-capable). What
+        // survives is EGRESS: operators never reach the network on Codex, and a
+        // specialist whose web egress is withheld loses web search — both set
+        // below, and both need `workspace-write` for the toggle to bind (see
+        // resolveCodexSandboxMode). Repo-write withholding is now advisory on
+        // Codex (the server-owned delivery gate is the real boundary); Claude
+        // keeps its tool-denylist enforcement.
         const sandboxMode: SandboxMode = resolveCodexSandboxMode(spec);
         const reasoningEffort = resolveCodexReasoningEffort(spec.effort);
         const threadOptions: ThreadOptions = {
@@ -643,10 +698,11 @@ export function createCodexAdapter(
         if (reasoningEffort) {
           threadOptions.modelReasoningEffort = reasoningEffort;
         }
-        // The task's attachments dir joins the writable sandbox ONLY at
-        // workspace-write: danger-full-access can already write it, and adding
-        // it to a read-only run would widen a sandbox the capability matrix
-        // promised was closed (P13-RT-02's honesty rule, applied forward).
+        // The task's attachments dir joins the writable set at workspace-write;
+        // danger-full-access can already write it. R22 removed the read-only
+        // sandbox, so an evidence-granted reviewer now runs workspace-write and
+        // CAN copy screenshots into attachments/ — the "Posting files" persona
+        // no longer promises a write the sandbox blocked (F22-03/AD-1 resolved).
         if (sandboxMode === "workspace-write" && spec.attachmentsWritableDir) {
           threadOptions.additionalDirectories = [spec.attachmentsWritableDir];
         }
@@ -696,6 +752,11 @@ export function createCodexAdapter(
             // two top-level failure events poison the terminal outcome.
             if (type === "turn.failed" || type === "error") {
               sawFatalError = true;
+              // Decode the reason at this boundary (F22-08) — never narrow the
+              // raw event shape with typeof.
+              const parsed = fatalEventMessageSchema.parse(event);
+              const msg = parsed.error?.message ?? parsed.message ?? null;
+              if (msg) lastFatalMessage = msg;
             }
             const emitted = {
               raw: JSON.stringify(event),
@@ -733,14 +794,31 @@ export function createCodexAdapter(
             runId: spec.runId,
             err: safeCodexError(error),
           });
-          const failure = classifyCodexFailure(error, "execution");
+          // F22-08: classify on the streamed reason when the SDK captured one
+          // (the thrown error is only the exit banner); the raw event message is
+          // the fallback cause.
+          const failure = classifyCodexFailure(
+            error,
+            "execution",
+            lastFatalMessage,
+          );
           emitAdapterFailure(failure.message, failure.kind, failure.providerText);
           return settle("error");
         }
 
         if (interrupted) return settle("interrupted");
         if (sawTurnCompleted && !sawFatalError) return settle("finished");
-        if (!sawFatalError) {
+        // A fatal `turn.failed` / `error` event can arrive WITHOUT the iterator
+        // throwing (F22-08): classify it from the event message so the failure
+        // is surfaced instead of settling error silently.
+        if (sawFatalError && lastFatalMessage) {
+          const failure = classifyCodexFailure(
+            lastFatalMessage,
+            "execution",
+            lastFatalMessage,
+          );
+          emitAdapterFailure(failure.message, failure.kind, failure.providerText);
+        } else if (!sawFatalError) {
           emitAdapterFailure("Codex ended before reporting turn completion.");
         }
         return settle("error");

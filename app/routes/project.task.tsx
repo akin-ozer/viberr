@@ -60,14 +60,10 @@ import {
   runOperator,
   type RunOperatorInput,
 } from "~/server/runtimes/operator-run.server";
-import {
-  isBackendAvailable,
-  type RealBackend,
-} from "~/server/runtimes/runtime-registry.server";
+import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
 import {
   operatorAutonomyFor,
   operatorBackendFor,
-  type OperatorAutonomy,
 } from "~/server/tasks/operator-actions.server";
 import { parseAcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
@@ -860,34 +856,20 @@ export async function action({ request, params }: Route.ActionArgs) {
         // work is the `run-agents` action (single ACTION_ROLES source, pass-4
         // XS-10) resolved through the ONE authority path — org admins pass as
         // the audited D2 override. The operator's OWN capability policy governs
-        // what it may then do to the task. The backend (claude|codex) and
-        // autonomy (supervised|full) are chosen for this run; full autonomy
-        // lets the operator drive to Done.
+        // what it may then do to the task.
         requireRunAgents(
           db,
           runAgentsAuthority(db, projectSlug),
           actor,
           "run the operator",
         );
-        // P11-76: only OVERRIDE the backend/autonomy when the form explicitly
-        // asks for one. An absent field must fall through to the operator
-        // profile's configured backend (resolveOperatorAuthority applies the
-        // deployment default) — a hardcoded "claude" default silently ran a
-        // Codex-configured operator on Claude.
-        const backendField = String(formData.get("backend") ?? "");
-        const backend: RealBackend | undefined =
-          backendField === "codex"
-            ? "codex"
-            : backendField === "claude"
-              ? "claude"
-              : undefined;
-        const autonomyField = String(formData.get("autonomy") ?? "");
-        const autonomy: OperatorAutonomy | undefined =
-          autonomyField === "full"
-            ? "full"
-            : autonomyField === "supervised"
-              ? "supervised"
-              : undefined;
+        // R21-9 / R22 / F22-01: this run takes NO per-request backend or
+        // autonomy — both are resolved from the DEPLOYED operator profile inside
+        // `runOperator` (`resolveOperatorAuthority`). The manual run control
+        // (R21-9) and the schedule form (R22) both stopped sending them, so the
+        // route no longer reads them either: a crafted POST could otherwise run
+        // a Codex-configured operator on Claude (autonomy is clamped by ruling
+        // 67, but backend was not). The run always follows the live profile.
         const operatorInput: RunOperatorInput = {
           projectSlug,
           taskKey,
@@ -896,8 +878,6 @@ export async function action({ request, params }: Route.ActionArgs) {
           // "started a run" audit row names the maintainer who launched it.
           actor: { userId: actor.userId, label: actor.label },
         };
-        if (backend) operatorInput.backend = backend;
-        if (autonomy) operatorInput.autonomy = autonomy;
         // Owner request 2026-08-21: an optional steer typed on the Run control.
         // It rides the SAME machinery as an `@operator` comment (the N20-15
         // mention path): recorded on the timeline as the human's own comment —
@@ -908,11 +888,6 @@ export async function action({ request, params }: Route.ActionArgs) {
         // already starts the run — the mention path would start a second one.
         const steer = String(formData.get("steer") ?? "").trim().slice(0, 2000);
         if (steer) {
-          await appendComment(
-            db,
-            { projectSlug, taskKey, text: `@operator ${steer}`, forceToAgent: true },
-            actor,
-          );
           operatorInput.trigger = "manual";
           operatorInput.humanComment = steer;
           // The DISPLAY name, exactly as the @operator mention path passes it —
@@ -922,6 +897,20 @@ export async function action({ request, params }: Route.ActionArgs) {
           operatorInput.humanCommentBy = userName(db, actor.userId);
         }
         const started = await runOperator(db, operatorInput);
+        // Record the steer as an @operator timeline comment ONLY once the run is
+        // not refused — a directive that reaches an agent off the record would be
+        // invisible to supervision, but a refused run (open packet / terminal
+        // stage) would otherwise strand the comment with no run to address it.
+        // The UI disables the steer input in exactly those states, so this guards
+        // the crafted-POST path. `humanComment` still rides the run's input, so a
+        // started/queued run addresses the directive.
+        if (steer && !started.refused) {
+          await appendComment(
+            db,
+            { projectSlug, taskKey, text: `@operator ${steer}`, forceToAgent: true },
+            actor,
+          );
+        }
         const backendLabel = started.backend === "claude" ? "Claude" : "Codex";
         return {
           ok: true as const,
@@ -946,14 +935,14 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         const minutes = Math.max(1, Math.round(Number(formData.get("delayMinutes")) || 0));
         const dueAt = new Date(Date.now() + minutes * 60_000).toISOString();
+        // R22: no backend/autonomy — the fired run resolves the LIVE deployed
+        // operator profile (parity with R21-9's manual run control).
         const sched = await scheduleTaskAction(
           db,
           {
             projectSlug,
             taskKey,
             dueAt,
-            backend: String(formData.get("backend") ?? "claude") === "codex" ? "codex" : "claude",
-            autonomy: String(formData.get("autonomy") ?? "supervised") === "full" ? "full" : "supervised",
             note: String(formData.get("note") ?? ""),
           },
           actor,

@@ -20,6 +20,7 @@ import { taskBranchName } from "./branch-sync.server";
 import { githubWebHost } from "./github-client.server";
 import {
   getProjectGithubContext,
+  type GithubContext,
   type GithubContextFailure,
   type GithubContextOptions,
 } from "./github-context.server";
@@ -101,6 +102,97 @@ export function latestEvidenceLines(
       .filter((part) => part.trim() !== "" && part.trim() !== EVIDENCE_EMPTY_COLUMN)
       .join(" · "),
   );
+}
+
+/**
+ * F22-10 — the ACTUAL delivered diff, from GitHub's compare of `base...head`
+ * AFTER the push. The PR body's change-summary and evidence used to come from
+ * `fm.github.changed` / `fm.github.commits`, which are RECONCILED values: when a
+ * stale remote branch (or a prior PR) occupied the head, the reconciler wrote
+ * that branch's stats onto the task, and the freshly-opened PR body inherited
+ * them (live: PR #187 claimed "3 file(s) changed (+214/-16), 3 commit(s)" while
+ * the real diff was 1 file / +5). Computing from the live compare makes the PR
+ * body an authoritative record of what THIS PR changes, independent of any
+ * reconcile snapshot. `null` on any network/decode failure — the caller then
+ * falls back to the frontmatter (best-effort, the prior behavior).
+ *
+ * `files` is capped by GitHub at 300 per page; a truncated compare undercounts,
+ * so `truncated` marks it and the label reads "300+". Sufficient for a summary.
+ */
+export interface DeliveredDiffStats {
+  files: number;
+  add: number;
+  del: number;
+  commits: number;
+  truncated: boolean;
+}
+
+const ghCompareStatsSchema = z
+  .object({
+    total_commits: z.number().optional().catch(undefined),
+    files: z
+      .array(
+        z
+          .object({
+            additions: z.number().optional().catch(undefined),
+            deletions: z.number().optional().catch(undefined),
+          })
+          .catch({}),
+      )
+      .optional()
+      .catch(undefined),
+  })
+  .catch({});
+
+export async function deliveredDiffStats(
+  gh: Pick<GithubContext, "client" | "repo">,
+  base: string,
+  head: string,
+): Promise<DeliveredDiffStats | null> {
+  const res = await gh.client.request(
+    "GET",
+    `/repos/${gh.repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
+    ghCompareStatsSchema,
+    { searchParams: { per_page: "300" } },
+  );
+  if (!res.ok) return null;
+  const files = res.data.files ?? [];
+  let add = 0;
+  let del = 0;
+  for (const f of files) {
+    add += f.additions ?? 0;
+    del += f.deletions ?? 0;
+  }
+  return {
+    files: files.length,
+    add,
+    del,
+    commits: res.data.total_commits ?? 0,
+    // 300 files back means GitHub likely paginated/truncated the file list.
+    truncated: files.length >= 300,
+  };
+}
+
+/** The PR-body change-summary + delivery evidence rows, from live compare stats. */
+export function deliveredStatsToPrParts(
+  stats: DeliveredDiffStats,
+  branch: string,
+  revisionHeadSha: string | null,
+): { changeSummary: string; evidence: string[] } {
+  const fileLabel = stats.truncated ? "300+" : String(stats.files);
+  const evidence: string[] = [
+    `${fileLabel} file(s) changed on \`${branch}\` · +${stats.add} · −${stats.del}`,
+  ];
+  if (stats.commits > 0) {
+    evidence.push(
+      `${stats.commits} commit(s) delivered` +
+        (revisionHeadSha ? `, revision ${revisionHeadSha.slice(0, 7)}` : ""),
+    );
+  }
+  return {
+    changeSummary: `${fileLabel} file(s) changed (+${stats.add}/-${stats.del}).`,
+    evidence,
+  };
 }
 
 export interface OpenTaskPrContext {
@@ -378,21 +470,33 @@ export async function openTaskPr(
       { taskKey: input.taskKey, projectSlug: input.projectSlug },
     );
   }
+  // F22-10: prefer the LIVE compare of the base against the freshly-pushed head
+  // for the change-summary + evidence. `fm.github.changed`/`commits` are
+  // reconciled values that can carry a colliding branch's stats at open time
+  // (PR #187 shipped "3 file(s) changed (+214/-16)" over a 1-file diff). Fall
+  // back to the frontmatter only when the compare is unreachable.
+  const liveStats = await deliveredDiffStats(gh, gh.defaultBranch, branch);
+  const liveParts = liveStats
+    ? deliveredStatsToPrParts(liveStats, branch, fm.workRevision?.headSha ?? null)
+    : null;
   const body = composePrBody({
     taskKey: input.taskKey,
     projectSlug: input.projectSlug,
     title: fm.title,
     goal: file.parsed.goal,
     appOrigin: origin,
-    changeSummary: fm.github?.changed
-      ? `${fm.github.changed.files} file(s) changed (+${fm.github.changed.add}/-${fm.github.changed.del}).`
-      : null,
+    changeSummary:
+      liveParts?.changeSummary ??
+      (fm.github?.changed
+        ? `${fm.github.changed.files} file(s) changed (+${fm.github.changed.add}/-${fm.github.changed.del}).`
+        : null),
     // P13-D-26: `composePrBody` has always taken `evidence` and its one caller
     // never passed it, so the "## Evidence" section was unreachable. The task
     // record now carries real evidence rows on outcome events — hand the newest
     // set to the PR body so the governed hand-off (FR31/FR32) actually carries
-    // the evidence the PRD promises a GitHub reviewer.
-    evidence: latestEvidenceLines(file.parsed.timeline),
+    // the evidence the PRD promises a GitHub reviewer. F22-10: the live compare
+    // wins when available so the numbers match the actual PR diff.
+    evidence: liveParts?.evidence ?? latestEvidenceLines(file.parsed.timeline),
   });
   const created = await gh.client.request(
     "POST",

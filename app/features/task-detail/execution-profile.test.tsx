@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import { rolesForAction } from "~/shared/rbac";
@@ -147,5 +147,42 @@ describe("ExecutionProfile — unowned copy matches the RBAC matrix (F19-11)", (
         b.textContent?.includes("Assign me"),
       ),
     ).toBe(false);
+  });
+});
+
+/**
+ * The operator run's steer input (pass 22). It is a SINGLE-LINE input, so Enter
+ * submits (the search/chat convention) — deliberately NOT ⌘/Ctrl+Enter, which
+ * the multi-line composer needs only because Enter is a newline there. The one
+ * hazard is IME composition: an Enter that merely confirms a multibyte
+ * candidate must not launch the billable operator run.
+ */
+describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => {
+  function renderWithRunSpy() {
+    const calls: string[] = [];
+    const utils = renderExec({ onRunOperator: (s) => calls.push(s) });
+    const input = utils.container.querySelector<HTMLInputElement>(".op-steer")!;
+    return { calls, input };
+  }
+
+  it("a bare Enter runs the operator with the trimmed steer text", () => {
+    const { calls, input } = renderWithRunSpy();
+    fireEvent.change(input, { target: { value: "  focus on the flaky test  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(calls).toEqual(["focus on the flaky test"]);
+  });
+
+  it("an Enter that only confirms an IME candidate does NOT launch the run (Chrome + Safari)", () => {
+    const { calls, input } = renderWithRunSpy();
+    fireEvent.change(input, { target: { value: "日本語" } });
+    // Chrome/Firefox: the committing keydown carries isComposing = true.
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    // Safari/WebKit: compositionend fires FIRST, so isComposing is already
+    // false and only the legacy keyCode 229 marks the composition commit.
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(calls).toEqual([]);
+    // A real Enter after composition ends still submits.
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(calls).toEqual(["日本語"]);
   });
 });

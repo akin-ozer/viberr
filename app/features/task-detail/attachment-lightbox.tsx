@@ -66,6 +66,10 @@ function Lightbox({
   onClose: () => void;
 }) {
   const { ref, close } = useDialog(onClose);
+  // The picture may not load — rotated/removed on disk (404), over the serving
+  // route's 50 MB inline cap (413), or an unsupported type. Show a message
+  // instead of a broken image; "Open original" below still reaches the route.
+  const [failed, setFailed] = useState(false);
   return (
     <dialog
       className="modal-card lightbox-card"
@@ -73,7 +77,19 @@ function Lightbox({
       data-screen-label="Attachment lightbox"
       ref={ref}
     >
-      <img className="lightbox-img" src={img.url} alt={img.name} />
+      {failed ? (
+        <div className="lightbox-broken">
+          <Icon name="file" />
+          <p>This attachment could not be loaded.</p>
+        </div>
+      ) : (
+        <img
+          className="lightbox-img"
+          src={img.url}
+          alt={img.name}
+          onError={() => setFailed(true)}
+        />
+      )}
       <div className="lightbox-foot">
         <span className="nm">{img.name}</span>
         {/* The raw file, exactly what the click used to open — for zooming
@@ -81,11 +97,16 @@ function Lightbox({
         <a className="btn ghost sm" href={img.url} target="_blank" rel="noreferrer">
           Open original
         </a>
+        {/* F22-11: focus the Close control on open, not "Open original" (the
+            first focusable) — that link navigates AWAY, so a reflex Enter on a
+            freshly-opened lightbox would open the raw file in a new tab. A
+            dialog opened with showModal() honors `autofocus`. */}
         <button
           type="button"
           className="icon-btn"
           onClick={close}
           aria-label="Close"
+          autoFocus
         >
           <Icon name="x" />
         </button>

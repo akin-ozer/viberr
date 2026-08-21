@@ -18,7 +18,7 @@ import {
   type TaskProjectionRow,
   type TaskSummary,
 } from "~/shared/mapping/task.server";
-import { deployedSpecialistBackends } from "~/features/agents/agents-query.server";
+import { deployedSpecialistBackends } from "~/server/agents/deployment-view.server";
 import {
   getProject,
   listProjectMembers,

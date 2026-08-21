@@ -6,7 +6,7 @@ import type {
   Engagement,
 } from "~/features/agents/agent-types";
 import { getProject } from "./board-query.server";
-import { deployedSpecialistBackends } from "~/features/agents/agents-query.server";
+import { deployedSpecialistBackends } from "~/server/agents/deployment-view.server";
 
 /**
  * Live agent-deployment projection (agents spec §3.3, orchestrator ruling 7):
