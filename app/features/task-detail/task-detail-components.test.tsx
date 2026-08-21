@@ -2354,10 +2354,13 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
     expect(meta).not.toContain("gate bypassed");
   });
 
-  // C3: a live run gives "agent working" its OWN slot instead of replacing the
-  // readiness pill — the old swap hid `input_required`, the value that most needs
-  // a human, so the board and the hero disagreed mid-run.
-  it("C3: a live run shows 'agent working' BESIDE the input-required readiness, not in its place", () => {
+  // R21-8 (supersedes C3, owner-ruled 2026-08-21): "input required" claims a
+  // human is needed RIGHT NOW, which is false while an agent actively carries
+  // the work — so during a live run it yields and the agent pill takes the
+  // slot. The board card makes the identical yield, so the two surfaces still
+  // agree mid-run (C3's actual complaint).
+  it("R21-8: during a live run, 'agent working' REPLACES the input-required pill", () => {
+    // heroTask's fixture defaults `waiting: "agent"` — the live-carry state.
     const { container } = renderWithRouter(
       <TaskHero
         task={heroTask({ displayReadiness: "input_required", validation: "none" })}
@@ -2367,8 +2370,41 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
       />,
     );
     const meta = container.querySelector(".hero-meta")!.textContent!;
-    expect(meta).toContain("input required"); // no longer suppressed by the run
-    expect(meta).toContain("agent working"); // the live-run cue, in its own slot
+    expect(meta).toContain("agent working"); // the run carries the work…
+    expect(meta).not.toContain("input required"); // …so nobody is "needed now"
+  });
+
+  it("R21-8: an open packet (`waiting: human`) reasserts 'input required' even while a run is live", () => {
+    // Raising a packet flips `waiting` to "human"; the human's turn outranks
+    // any still-winding-down run, so the readiness pill comes straight back.
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({
+          displayReadiness: "input_required",
+          validation: "none",
+          waiting: "human",
+        })}
+        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        canEditGoal
+        agentWorking
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("input required");
+    expect(meta).not.toContain("agent working");
+  });
+
+  it("R21-8: 'blocked' never yields to a live run", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "blocked", validation: "none" })}
+        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        canEditGoal
+        agentWorking
+      />,
+    );
+    const meta = container.querySelector(".hero-meta")!.textContent!;
+    expect(meta).toContain("blocked"); // a run does not answer a blocked state
   });
 
   // C12: an unrecognised readiness value must not greenwash. The lookup used to

@@ -1106,6 +1106,20 @@ it is regenerated from the filesystem rather than restated here.
     tree lives in `planning/planning-artifacts/architecture.md`. A doc whose only job a command
     does better earns deletion over another unenforced regeneration.
 
+91. **R21-8 (2026-08-21): while an agent actively carries a task, `input_required` YIELDS to
+    "agent working" — on every surface.** Owner-reported live: a fresh triage task with a live run
+    read "input required · agent working" side by side, and "there is no human action needed."
+    The pill claims a human is needed RIGHT NOW; an active run makes that false. Supersedes the
+    C3/F15-09 both-pills arrangement while keeping its actual requirement (the hero and the board
+    card must agree mid-run): the hero swaps the readiness pill for the agent pill, the board
+    card/list-row top slot goes quiet (the foot's WaitTag already says "agent working"), and the
+    "Blocked or waiting" filter stops matching — an actively-worked task is not stuck (R16-2's
+    name-the-chip rule, mirrored). The gate is `waiting === "agent"`: raising a packet flips
+    `waiting` to `"human"`, so the human's turn instantly reasserts "input required" everywhere,
+    even if a run is still winding down. `blocked` / `inconsistency_risk_detected` never yield —
+    a run does not answer those. Stored readiness is untouched; the triage gate itself still
+    clears only on leaving the entry stage (task-actions.server.ts).
+
 ## Route map
 
 ```
