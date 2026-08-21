@@ -199,26 +199,19 @@ export interface TaskMemberView {
 
 function OwnerControl({
   task,
-  meId,
   myRole,
-  members,
   busy,
   onOwner,
-  onRelease,
 }: {
   task: TaskSummary;
-  meId: string;
   myRole: string | null;
-  members: TaskMemberView[];
   busy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
-  onRelease: () => void;
 }) {
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
-  const mine = !!(o && o.userId === meId);
-  // Q5 tiering (XS-12): only contributor+ may take/hold ownership — a viewer is
-  // read + comment only, so its take/hand-off buttons would just 403. Gate the
-  // controls the same way the server does rather than render a button that fails.
+  // Q5 tiering (XS-12): only contributor+ may take ownership — a viewer is
+  // read + comment only, so its take button would just 403. Gate the control
+  // the same way the server does rather than render a button that fails.
   //
   // SAFETY: `myRole` is the project layout loader's own value (routes/project.tsx
   // — `project_members.role`, which 0001_baseline CHECK-constrains to exactly the
@@ -226,18 +219,6 @@ function OwnerControl({
   // chain down to here is what widens it to `string`. `roleCan` denies any value
   // outside the four regardless, so the widening can only ever under-grant.
   const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
-  // E3: managing SOMEONE ELSE's owner seat is `release-any-ownership` — what
-  // `setOwner`/`releaseOwner` actually check. `myRole === "admin"` was a copy of
-  // one row of the matrix that would drift the moment the row moved.
-  //
-  // SAFETY: same loader-sourced `myRole` as `canOwn` above.
-  const canManageOthersOwnership = roleCan(
-    myRole as ProjectRole | null,
-    "release-any-ownership",
-  );
-  const [open, setOpen] = useState(false);
-  const { wrapRef, triggerRef, panelRef, closeAndReturnFocus, onKeyDown } =
-    usePopoverFocus(open, setOpen);
 
   if (!o) {
     // Only contributor+ may take ownership (Q5) — hide from viewers/non-members.
@@ -258,117 +239,12 @@ function OwnerControl({
     ) : null;
   }
 
-  // Hand-off requires being the current owner or holding the manage-others tier
-  // (setOwner's own test); only those two see the candidate list.
-  const canHandOff = mine || canManageOthersOwnership;
-  // Hand-off candidates: active members minus the current owner and me, and —
-  // F10-13 — only members who can actually OWN a task (contributor or above).
-  // The server rejects a hand-off to a viewer ("own-task"), so the picker must
-  // not offer one.
-  //
-  // SAFETY: `members` is built in routes/project.task.tsx from the layout's
-  // `board.members`, whose `role` is the CHECK-constrained `project_members.role`
-  // — the same four values, widened to `string` by `TaskMemberView`.
-  const candidates = canHandOff
-    ? members.filter(
-        (m) =>
-          m.userId !== o.userId &&
-          m.userId !== meId &&
-          roleCan(m.role as ProjectRole, "own-task"),
-      )
-    : [];
-
-  // Nothing this user can do to ownership → no Manage control (Q5, XS-12): a
-  // viewer can't take over, hand off, or release.
-  if (!canOwn && !canManageOthersOwnership) {
-    return null;
-  }
-
-  return (
-    <div className="own-wrap" ref={wrapRef} onKeyDown={onKeyDown}>
-      <button
-        type="button"
-        ref={triggerRef}
-        className={"own-btn" + (open ? " open" : "")}
-        onClick={() => setOpen(!open)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-      >
-        Manage
-        <Icon name="chevron" />
-      </button>
-      {open && (
-        <div
-          className="own-menu"
-          ref={panelRef}
-          tabIndex={-1}
-          aria-label="Manage task ownership"
-        >
-          {!mine && canOwn && (
-            <button
-              type="button"
-              className="menu-item"
-              onClick={() => {
-                closeAndReturnFocus();
-                onOwner("take");
-              }}
-            >
-              <Icon name="user" />
-              Take over ownership
-            </button>
-          )}
-          {candidates.length > 0 && <div className="own-lbl">Hand off to</div>}
-          {candidates.map((m) => (
-            <button
-              type="button"
-              className="menu-item"
-              key={m.userId}
-              onClick={() => {
-                closeAndReturnFocus();
-                onOwner("assign", m);
-              }}
-            >
-              <Avatar person={m.user} />
-              {m.user.name}
-              <span className="own-role">{m.role}</span>
-            </button>
-          ))}
-          {mine && (
-            <>
-              <div className="menu-sep" />
-              <button
-                type="button"
-                className="menu-item danger"
-                onClick={() => {
-                  closeAndReturnFocus();
-                  onRelease();
-                }}
-              >
-                <Icon name="x" />
-                Release ownership…
-              </button>
-            </>
-          )}
-          {!mine && canManageOthersOwnership && (
-            <>
-              <div className="menu-sep" />
-              <button
-                type="button"
-                className="menu-item danger"
-                onClick={() => {
-                  closeAndReturnFocus();
-                  onRelease();
-                }}
-              >
-                <Icon name="x" />
-                Release {o.name.split(" ")[0]}…<span className="own-role">admin</span>
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
+  // OWNED: the cell shows the owner chip alone (owner request 2026-08-21) —
+  // the Manage popover (take-over / hand-off / release) is gone. Release stays
+  // one panel away on the Current-state Owner row (`own-x`, self or the
+  // release-any-ownership tier), and a hand-off is release + take. The chip
+  // itself is rendered by the cell beside this control.
+  return null;
 }
 
 /**
@@ -718,10 +594,8 @@ export function ExecutionProfile({
   task,
   meId,
   myRole,
-  members,
   busy,
   onOwner,
-  onRelease,
   deployedSpecialists,
   operatorBackend,
   operatorAutonomy,
@@ -743,10 +617,8 @@ export function ExecutionProfile({
   task: TaskSummary;
   meId: string;
   myRole: string | null;
-  members: TaskMemberView[];
   busy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
-  onRelease: () => void;
   /** Deployed specialists the assign menu offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
   /** The operator's configured backend — the run picker's default (P11-76). */
@@ -1053,12 +925,9 @@ export function ExecutionProfile({
               )}
               <OwnerControl
                 task={task}
-                meId={meId}
                 myRole={myRole}
-                members={members}
                 busy={busy}
                 onOwner={onOwner}
-                onRelease={onRelease}
               />
             </div>
           </div>

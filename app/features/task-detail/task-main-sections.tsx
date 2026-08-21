@@ -498,10 +498,8 @@ export function ExecutionSection({
   task,
   meId,
   myRole,
-  members,
   ownerBusy,
   onOwner,
-  onRelease,
   deployedSpecialists,
   operatorBackend,
   operatorAutonomy,
@@ -514,10 +512,8 @@ export function ExecutionSection({
   task: TaskDetail;
   meId: string;
   myRole: string | null;
-  members: TaskMemberView[];
   ownerBusy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
-  onRelease: () => void;
   deployedSpecialists: DeployedSpecialistView[];
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
@@ -608,10 +604,8 @@ export function ExecutionSection({
       task={task}
       meId={meId}
       myRole={myRole}
-      members={members}
       busy={ownerBusy}
       onOwner={onOwner}
-      onRelease={onRelease}
       deployedSpecialists={deployedSpecialists}
       operatorBackend={operatorBackend}
       operatorAutonomy={operatorAutonomy}

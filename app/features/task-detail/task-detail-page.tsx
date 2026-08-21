@@ -746,10 +746,8 @@ export function TaskDetailPage({
           task={task}
           meId={me.id}
           myRole={myRole}
-          members={members}
           ownerBusy={ownerBusy}
           onOwner={onOwner}
-          onRelease={() => setReleasing(true)}
           deployedSpecialists={deployedSpecialists}
           operatorBackend={operatorBackend}
           operatorAutonomy={operatorAutonomy}
