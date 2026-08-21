@@ -2497,3 +2497,107 @@ describe("app.css field chrome covers every text-like input type (P21)", () => {
     expect(CODE).toMatch(/\.field input\.mono\s*\{[^}]*font-family:\s*var\(--font-mono\)/);
   });
 });
+
+
+describe("app.css paints every login text node red (VIB-1)", () => {
+  /** Every `selector { declarations }` pair in the sheet, @media blocks
+   *  included: the inner `{` stops the selector group from swallowing the
+   *  wrapper, so a nested rule is harvested with its own selector alone. */
+  const RULES = [...CODE.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    selectors: m[1].split(",").map((s) => s.trim()).filter(Boolean),
+    decls: m[2],
+    at: m.index ?? 0,
+  }));
+
+  const rulesFor = (selector: string) =>
+    RULES.filter((r) => r.selectors.includes(selector));
+
+  const isRed = (selector: string) =>
+    rulesFor(selector).some((r) => /color:\s*var\(--coral-dark\)/.test(r.decls));
+
+  /** Every selector that must carry the red, paired with the text it owns on
+   *  `/login`. Both server-driven modes of `app/routes/login.tsx` are here:
+   *  the sign-in screen and the forced `SetNewPassword` ("reset") screen, whose
+   *  classes are a subset of the first's. */
+  const RED_SITES: [selector: string, owns: string][] = [
+    [".login-wrap", "the surface every uncoloured child inherits from"],
+    [".login-aside h2", "the desktop panel's heading"],
+    [".login-aside p", "the desktop panel's prose"],
+    [".login-aside-points li", "the three product claims"],
+    [".login-aside-mark", "the panel's V glyph"],
+    [".login-brand .mark", "the card's V glyph (both screens)"],
+    [".login-brand h1", "'Sign in to Viberr' / 'Set a new password'"],
+    [".login-brand .sub", "the strapline under each h1"],
+    [".login-div", "'or a local account'"],
+    [".login-tag", "the whitelist / not-configured footnote"],
+    [".login-err", "the inline alert on BOTH screens"],
+    [".login-wrap .btn", "every button label in the card"],
+    [".btn.provider.github", "the GitHub label, off its old --fg fill"],
+    [".login-wrap .gmark", "the Google 'G' — its base colour is --muted"],
+    [".login-wrap .cred-warn", "the 'forgot password?' info box"],
+    [".login-wrap .linkish:hover", "'Forgot password?' under the pointer"],
+    [".login-form .flabel", "both field labels on both screens"],
+  ];
+
+  it("found a real rule behind every selector it checks", () => {
+    // A parser that silently harvests nothing would turn the assertions below
+    // green for free — P13-D-19's lesson restated for this block.
+    const missing = RED_SITES.filter(([sel]) => rulesFor(sel).length === 0).map(
+      ([sel]) => sel,
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("colours every login text site with --coral-dark", () => {
+    const notRed = RED_SITES.filter(([sel]) => !isRed(sel)).map(
+      ([sel, owns]) => `${sel} — ${owns}`,
+    );
+    expect(notRed).toEqual([]);
+  });
+
+  it("reaches the typed value, not just its label", () => {
+    // The trap: the shared base at `.field input[type="email"]` is (0,2,1), so
+    // a login override written as `.login-form input` (0,1,1) LOSES and the
+    // value a user types stays --fg while its label goes red. Matching (0,2,1)
+    // plus later source order is what carries it — keep the `.field` step in.
+    expect(isRed(".login-form .field input")).toBe(true);
+    expect(isRed(".login-form .field input::placeholder")).toBe(true);
+    const override = rulesFor(".login-form .field input")[0]!;
+    const base = RULES.find((r) =>
+      r.selectors.includes('.field input[type="email"]'),
+    )!;
+    expect(override.at).toBeGreaterThan(base.at);
+  });
+
+  it("scopes the red to the login surface and nothing else", () => {
+    // `.gmark`, `.linkish` and `.cred-warn` are shared with Org settings and
+    // the store browser; `.btn` is every button there is. An override that
+    // forgets its login ancestor ships a red app, which no test would catch
+    // from the login page alone.
+    const SHARED = ["gmark", "linkish", "cred-warn", "btn"];
+    const unscoped: string[] = [];
+    for (const rule of RULES) {
+      if (!/color:\s*var\(--coral-dark\)/.test(rule.decls)) continue;
+      for (const sel of rule.selectors) {
+        if (!SHARED.some((c) => new RegExp(`\\.${c}\\b`).test(sel))) continue;
+        if (/\.login-/.test(sel)) continue;
+        unscoped.push(sel);
+      }
+    }
+    // `.btn.danger` is the app's PRE-EXISTING destructive vocabulary — red long
+    // before this task and unrelated to it. `.btn.provider.github` carries a
+    // class combination that exists only on the login card (asserted below).
+    expect(unscoped.sort()).toEqual([
+      ".btn.danger",
+      ".btn.danger:hover:not(:disabled)",
+      ".btn.provider.github",
+    ]);
+  });
+
+  it("the one un-prefixed selector it recoloured is login-only markup", () => {
+    const sites = markupFiles().filter((file) =>
+      /className="btn provider github"/.test(readFileSync(file, "utf8")),
+    );
+    expect(sites.map((f) => path.basename(f))).toEqual(["login.tsx"]);
+  });
+});

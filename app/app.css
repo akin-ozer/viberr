@@ -3250,11 +3250,23 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .login-wrap .btn { color: var(--coral-dark); }
 .login-wrap .btn.primary { background: var(--surface); border-color: var(--coral-dark); color: var(--coral-dark); }
 .login-wrap .btn.primary:hover:not(:disabled) { background: var(--surface); border-color: var(--coral-dark); color: var(--coral-dark); }
+/* The GitHub button's --fg fill cannot carry red text at AA, so on the red
+   login surface it flattens to the card face and keeps the red label. */
+.btn.provider.github { background: var(--surface); border-color: var(--coral-dark); color: var(--coral-dark); }
 .btn.provider .gmark.lg { font-size: 1.05rem; }
+/* The Google "G" is a `.gmark`, whose base colour is --muted — an explicit
+   declaration, so it does NOT inherit the card's red. */
+.login-wrap .gmark { color: var(--coral-dark); }
 .login-div { display: flex; align-items: center; gap: .8rem; color: var(--coral-dark); font-size: .74rem; white-space: nowrap; }
 .login-div::before, .login-div::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
 .login-form { display: flex; flex-direction: column; gap: .9rem; }
-.login-form .flabel, .login-form input, .login-form input::placeholder { color: var(--coral-dark); }
+/* The typed value needs `.login-form .field input` (0,2,1), not `.login-form
+   input` (0,1,1): the shared `.field input[type="email"]` base above is (0,2,1)
+   and would otherwise keep the value at --fg while its label went red. Matching
+   specificity + later source order is what carries it. */
+.login-form .flabel,
+.login-form .field input,
+.login-form .field input::placeholder { color: var(--coral-dark); }
 .login-wrap .cred-warn { color: var(--coral-dark); }
 .login-foot { display: flex; justify-content: flex-end; }
 /* .form-err shares the login error's framed red treatment — the ONE way an
@@ -3276,6 +3288,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .idp-chip .ico { width: 11px; height: 11px; }
 .linkish { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .linkish:hover { color: var(--blue-pressed); text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+/* "Forgot password?" inherits the card's red at rest (`.linkish` is
+   `color: inherit`); this keeps it red through hover too, where the shared
+   rule above would otherwise repaint it --blue-pressed. */
+.login-wrap .linkish:hover { color: var(--coral-dark); }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Shared busy-state spinner. */
