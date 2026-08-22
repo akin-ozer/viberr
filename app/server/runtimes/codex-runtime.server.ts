@@ -706,17 +706,24 @@ export function createCodexAdapter(
         if (sandboxMode === "workspace-write" && spec.attachmentsWritableDir) {
           threadOptions.additionalDirectories = [spec.attachmentsWritableDir];
         }
+        // The operator's OS-sandbox network stays off on Codex — declared MCP
+        // servers and workspace tooling do not need it, and it is not the egress
+        // `use-web-search-fetch` governs. Web SEARCH, though, follows the grant on
+        // the operator exactly as on a specialist (pass-24 B-2, owner ruling): a
+        // Codex operator that HOLDS `use-web-search-fetch` gets web search,
+        // matching the Claude operator (which keeps WebFetch/WebSearch unless the
+        // grant is withheld); a withheld grant disables it. The unconditional
+        // `webSearchMode:"disabled"` here used to dishonour the grant on Codex
+        // operators while the matrix rendered the cell green.
         if (spec.kind === "operator") {
           threadOptions.networkAccessEnabled = false;
-          threadOptions.webSearchMode = "disabled";
-        } else if (spec.webSearchWithheld) {
-          // P14-RT-06: a specialist whose `use-web-search-fetch` grant is
-          // withheld loses Codex's web search too. Claude removes WebFetch/
-          // WebSearch from the run; Codex has no denylist channel, so the grant
-          // used to bind on one backend only — while this exact option was
-          // already being set for the operator. Network access stays ON:
-          // declared MCP servers and the workspace's own tooling are not the
-          // egress this capability governs.
+        }
+        if (spec.webSearchWithheld) {
+          // P14-RT-06: a run whose `use-web-search-fetch` grant is withheld loses
+          // Codex's web search too. Claude removes WebFetch/WebSearch from the
+          // run; Codex has no denylist channel. Network access stays ON for
+          // specialists: declared MCP servers and the workspace's own tooling are
+          // not the egress this capability governs.
           threadOptions.webSearchMode = "disabled";
         }
         const thread = spec.resumeSessionId

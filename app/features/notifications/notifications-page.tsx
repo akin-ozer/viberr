@@ -39,27 +39,39 @@ function keybtnLabel(n: NotificationPageItem): string {
 function NtfNeedsYou({
   items,
   total,
+  decisionCount,
   onRead,
   onOpen,
 }: {
   items: NotificationPageItem[];
-  /** UI-54: pending decisions regardless of the All/Unread filter. */
+  /** UI-54: pending-decision NOTIFICATION ROWS regardless of the All/Unread
+   *  filter — drives the filter-hidden math and the "switch to All" hint. */
   total: number;
+  /** D-3 (pass 24): the AUTHORITATIVE count of decisions this viewer must act on
+   *  (same source as the home hero). The header states THIS; it is >= `total`
+   *  when a decision has no notification row for the viewer. */
+  decisionCount: number;
   onRead: (id: string) => void;
   onOpen: (n: NotificationPageItem) => void;
 }) {
-  const hidden = total - items.length;
+  const hiddenByFilter = total - items.length;
+  const onTaskPages = Math.max(0, decisionCount - total);
+  const subParts = [
+    hiddenByFilter > 0 ? `${hiddenByFilter} hidden by the filter` : null,
+    onTaskPages > 0 ? `${onTaskPages} on their task pages` : null,
+  ].filter(Boolean);
   return (
     <div className="panel">
       <div className="panel-head">
         <Icon name="hand" />
         <h2>Waiting on you</h2>
         <span className="right sub fine">
-          {/* UI-54: the count is the TRUE number of pending decisions. It used
-              to be computed after the All/Unread filter, so three already-read
-              decisions under "Unread" reported "0 decisions". */}
-          {total} decision{total === 1 ? "" : "s"}
-          {hidden > 0 ? ` · ${hidden} hidden by the filter` : ""}
+          {/* D-3: the count is the authoritative number of pending decisions for
+              this viewer — the same source home uses — not the notification-row
+              tally, which misses decisions whose watcher set predates a later
+              promotion or fall past the row window. */}
+          {decisionCount} decision{decisionCount === 1 ? "" : "s"}
+          {subParts.length > 0 ? ` · ${subParts.join(" · ")}` : ""}
         </span>
       </div>
       <div className="rq-list">
@@ -105,9 +117,11 @@ function NtfNeedsYou({
         })}
         {!items.length && (
           <div className="empty">
-            {total > 0
-              ? `${total} decision${total === 1 ? " is" : "s are"} waiting on you. Switch to "All" to see ${total === 1 ? "it" : "them"}.`
-              : "Nothing is waiting on you."}
+            {decisionCount === 0
+              ? "Nothing is waiting on you."
+              : hiddenByFilter > 0
+                ? `${decisionCount} decision${decisionCount === 1 ? " is" : "s are"} waiting on you. Switch to "All" to see ${decisionCount === 1 ? "it" : "them"}.`
+                : `${decisionCount} decision${decisionCount === 1 ? " is" : "s are"} waiting on you. Open ${decisionCount === 1 ? "it" : "them"} from the board or the task page.`}
           </div>
         )}
       </div>
@@ -220,6 +234,7 @@ const FILTERS: [NotificationFilter, string][] = [
 export function NotificationsPage({
   items,
   unread,
+  decisionCount,
   truncated = false,
   limit,
   onRead,
@@ -228,6 +243,9 @@ export function NotificationsPage({
 }: {
   items: NotificationPageItem[];
   unread: number;
+  /** D-3 (pass 24): authoritative count of decisions this viewer must act on,
+   *  from the loader (same source as home). Drives the "Waiting on you" header. */
+  decisionCount: number;
   /** The loader capped the list — true once the most-recent window is full,
    *  so the page says so instead of silently dropping older rows (RU-4). */
   truncated?: boolean;
@@ -299,6 +317,7 @@ export function NotificationsPage({
         <NtfNeedsYou
           items={needs}
           total={needsTotal}
+          decisionCount={decisionCount}
           onRead={onRead}
           onOpen={onOpen}
         />

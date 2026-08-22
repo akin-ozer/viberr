@@ -93,7 +93,7 @@ export interface BoardColumn {
 
 export interface BoardData {
   project: ProjectRecord;
-  members: (ProjectMemberRecord & { user: ActorRender })[];
+  members: (ProjectMemberRecord & { user: ActorRender; missing: boolean })[];
   columns: BoardColumn[];
   /** Tasks whose stage id matches no project stage (still listed, flagged
    * by their diagnostics — never silently dropped). */
@@ -271,14 +271,16 @@ export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
   const memberRecords = listProjectMembers(db, slug);
   const memberIds = new Set(memberRecords.map((m) => m.userId));
   const resolve = createActorResolver(db, { projectMemberIds: memberIds });
-  const members = memberRecords.map((m) => ({
-    ...m,
-    // LV-04: a membership left behind by a deleted org account renders as
-    // "Removed account · u_RT7…", never as the raw id.
-    user: labelUnresolvedHuman(
-      resolve({ kind: "human", userId: m.userId, nameHint: null }),
-    ),
-  }));
+  const members = memberRecords.map((m) => {
+    const resolved = resolve({ kind: "human", userId: m.userId, nameHint: null });
+    // LV-04: a membership left behind by a deleted org account resolves to an
+    // unresolved id (`name === userId`) — it renders as "Removed account · u_RT7…",
+    // never as the raw id. D-4 (pass 24): carry the flag so the rail's member
+    // count can drop these ghosts, the way Policy ("N members · M removed") and
+    // Settings ("N active") already do — the rail counted the raw rows.
+    const missing = resolved.kind === "human" && resolved.name === resolved.userId;
+    return { ...m, missing, user: labelUnresolvedHuman(resolved) };
+  });
 
   // R14-3: the BOARD loads archived tasks and hides them client-side, because
   // its "Archived" chip is the only way back to them (`matchesBoardFilter`

@@ -341,39 +341,51 @@ export async function pruneUserFromProjects(
     const ref = { projectSlug: project.slug, dataRoot: ctx.dataRoot };
     const file = readProjectFile(ref);
     if (!file) continue;
-    if (!file.parsed.frontmatter.members.some((m) => m.userId === userId)) {
-      continue;
+    const isMember = file.parsed.frontmatter.members.some(
+      (m) => m.userId === userId,
+    );
+    if (isMember) {
+      await updateProjectFile(ref, (parsed) => {
+        parsed.frontmatter.members = parsed.frontmatter.members.filter(
+          (m) => m.userId !== userId,
+        );
+      });
+      rebuildPath(db, projectFilePath(project.slug, ctx.dataRoot), {
+        dataRoot: ctx.dataRoot,
+      });
     }
-    await updateProjectFile(ref, (parsed) => {
-      parsed.frontmatter.members = parsed.frontmatter.members.filter(
-        (m) => m.userId !== userId,
-      );
-    });
-    rebuildPath(db, projectFilePath(project.slug, ctx.dataRoot), {
-      dataRoot: ctx.dataRoot,
-    });
-    // A3: release the tasks this user OWNED in the project before their account
-    // disappears, so no task strands on a ghost owner. Mirrors the project-level
-    // removeMember path — the org dialog's "Task assignments return … for
-    // reassignment" promise, made real across every project at once.
+    // A3: release the tasks this user OWNED before their account disappears, so no
+    // task strands on a ghost owner. Mirrors the project-level removeMember path —
+    // the org dialog's "Task assignments return … for reassignment" promise.
+    //
+    // E-1 (pass 24): release in EVERY project, not only member ones. An org admin
+    // can take ownership of a task in a project they are NOT a member of (the
+    // audited D2 override), so gating the release on membership left those tasks
+    // on a deleted `ownerUserId` (a board ghost, acceptance stalled) while the
+    // dialog said they were released. `releaseTasksOwnedBy` is a no-op where the
+    // user owns nothing and audits each release itself.
     const released = await releaseTasksOwnedBy(
       db,
       { projectSlug: project.slug, userId, removedName },
       actor,
       { dataRoot: ctx.dataRoot },
     );
-    recordAudit(db, {
-      action: "project.member.removed",
-      actor,
-      subjectKind: "user",
-      subjectId: userId,
-      projectSlug: project.slug,
-      details: {
-        reason: "org account removed",
-        targetUserId: userId,
-        tasksReleased: released,
-      },
-    });
+    // A project the user neither belonged to nor owned a task in is untouched.
+    if (!isMember && released === 0) continue;
+    if (isMember) {
+      recordAudit(db, {
+        action: "project.member.removed",
+        actor,
+        subjectKind: "user",
+        subjectId: userId,
+        projectSlug: project.slug,
+        details: {
+          reason: "org account removed",
+          targetUserId: userId,
+          tasksReleased: released,
+        },
+      });
+    }
     changed.push(project.slug);
   }
   return changed;

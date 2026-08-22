@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   discoverStdioMcpTools,
   getMcpCredentialState,
@@ -247,7 +248,7 @@ export function resolveSpecialistMcpServersDetailed(
 export async function verifyStdioMcpMountsForRun(
   db: DatabaseSync,
   resolution: SpecialistMcpResolution,
-  options: { spawnImpl?: McpSpawn; timeoutMs?: number } = {},
+  options: { spawnImpl?: McpSpawn; timeoutMs?: number; backend?: RealBackend } = {},
 ): Promise<SpecialistMcpResolution> {
   const names = Object.keys(resolution.servers);
   if (names.length === 0) return resolution;
@@ -265,7 +266,18 @@ export async function verifyStdioMcpMountsForRun(
     const row = byName.get(name);
     if (!row || row.transport !== "stdio") continue; // HTTP is not spawned here
     const credential = getMcpCredentialState(db, name);
-    const token = credential.state === "ok" ? credential.token : null;
+    // B-4 (pass 24): pre-flight under the SAME credential the run will actually
+    // spawn with. Codex drops `MCP_CREDENTIAL` (it would leak into `--config`
+    // argv), so verifying a Codex mount WITH the credential passes a server that
+    // then dies credential-less inside the run — announced healthy, silently
+    // absent. Pre-flighting WITHOUT it on Codex makes a credential-requiring
+    // server fail here and be disclosed as unresolved, matching the run.
+    const token =
+      options.backend === "codex"
+        ? null
+        : credential.state === "ok"
+          ? credential.token
+          : null;
     const disc = await discoverStdioMcpTools(row.target, {
       spawnImpl: options.spawnImpl,
       timeoutMs: options.timeoutMs,

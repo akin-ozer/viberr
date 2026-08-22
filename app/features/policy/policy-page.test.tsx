@@ -30,14 +30,48 @@ const TRANSITIONS: TransitionView[] = [
   { from: "review", to: "done", by: "Human acceptance of the completion report", boundary: "human", locked: true },
 ];
 
+// D-2 (pass 24): the policy counts now sum only GOVERNED capability labels (the
+// same partition the profile detail uses), so these fixtures carry REAL governed
+// labels — an advisory/group-null label would (correctly) not be counted.
 const PROFILES: PcapProfile[] = [
   {
     id: "operator", kind: "operator", name: "Operator", icon: "shield", role: "Task coordinator",
-    actions: { direct: ["a", "b", "c", "d", "e"], recommend: ["f", "g", "h"], forbidden: ["i", "j", "k"] },
+    actions: {
+      direct: [
+        "Assign the delivering agent",
+        "Summon reviewer specialists",
+        "Generate decision & blocking packets",
+        "Append typed important events",
+        "Deliver the branch & open the review PR",
+      ],
+      recommend: [
+        "Stage transitions",
+        "Accept completion into Done",
+        "Bring the task branch up to date",
+      ],
+      forbidden: [
+        "Merge a pull request",
+        "Transition a task to Done",
+        "Change project policy",
+      ],
+    },
   },
   {
     id: "developer", kind: "specialist", name: "Developer", icon: "branch", role: "Implementation",
-    actions: { direct: ["a", "b", "c", "d"], recommend: ["e", "f"], forbidden: ["g", "h", "i"] },
+    actions: {
+      direct: [
+        "Post mid-run comments",
+        "Ask the human a question",
+        "Search & fetch from the web",
+        "Attach evidence references",
+      ],
+      recommend: ["Read GitHub repository & PR data", "Drive a live web browser"],
+      forbidden: [
+        "Merge a pull request",
+        "Transition a task to Done",
+        "Report a validation verdict",
+      ],
+    },
   },
 ];
 

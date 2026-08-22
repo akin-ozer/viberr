@@ -153,6 +153,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // pass-21 outgoing (humanizer sweep: em/en dashes rewritten as plain
     // sentences; instructions unchanged).
     "9380e0473a0b8a0e2edb5b8175fb5457c595d0a91955b9d3333e09ec50323525",
+    // pass-24 outgoing (B-3): the default-branch guidance no longer names a
+    // Claude-only tool or claims "you have no shell" — it defers to the
+    // per-backend anchored read the workspace section now describes.
+    "51a2ebfd35bf4b2c49428732357514b364e2dc55a46fb0afc707517023de03ae",
   ],
   [path.join("agents", "profiles", "operator.md")]: [
     "339ad23dd69f63e57bf52d110b263a2da4ae683bdbf5b020039eaf075115dec4",

@@ -273,6 +273,7 @@ interface RunMcpMounts {
 async function mcpServersFor(
   db: DatabaseSync,
   names: string[],
+  backend: RealBackend,
 ): Promise<RunMcpMounts> {
   // F20-10: a declared stdio server that fails to START (a half-installed npx
   // tree crashing in <1s) used to be mounted anyway — the run was told it had
@@ -282,6 +283,7 @@ async function mcpServersFor(
   const resolution = await verifyStdioMcpMountsForRun(
     db,
     resolveSpecialistMcpServersDetailed(db, names),
+    { backend },
   );
   const { servers, unresolved } = resolution;
   const mounts: RunMcpMounts = {
@@ -1226,7 +1228,7 @@ async function dispatchAgentRun(
   // prompt announced a server the run had no tools for). The persona itself is
   // built AFTER the clone below, because the same rule now applies to skills:
   // which ones mount natively is only knowable once the workspace exists.
-  const resolvedMcps = await mcpServersFor(db, mcpNames);
+  const resolvedMcps = await mcpServersFor(db, mcpNames, backend);
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
@@ -2468,6 +2470,7 @@ export async function resolveResumeConfinement(
     const resumeMcps = await verifyStdioMcpMountsForRun(
       db,
       resolveSpecialistMcpServersDetailed(db, resolved.mcps),
+      { backend: input.backend },
     );
     const mcpServers = resumeMcps.servers;
     // R18-1 parity: a resumed/@mention reviewer must keep the deliverer's KBs it

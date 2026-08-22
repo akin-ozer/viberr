@@ -272,7 +272,7 @@ export async function runSetCredential(
   if (!connection) {
     return {
       ok: true,
-      toast: "No GitHub connection to attach. Add one in org settings first",
+      toast: "No GitHub connection to attach. Add one in Instance settings first",
       result: "no_connection",
     };
   }
@@ -287,7 +287,7 @@ export async function runSetCredential(
   if (fresh && fresh.validationState === "failed") {
     return {
       ok: true,
-      toast: `GitHub rejected ${connection.owner}'s token. Replace it in org settings, then attach it here`,
+      toast: `GitHub rejected ${connection.owner}'s token. Replace it in Instance settings, then attach it here`,
       result: "connection_invalid",
     };
   }
@@ -305,7 +305,7 @@ export async function runSetCredential(
     if (probe.status === "access_miss") {
       return {
         ok: true,
-        toast: `${connection.owner}'s token cannot reach ${repo}: ${probe.detail}. Add a PAT for ${repoOwner} in org settings, or fix the repository here.`,
+        toast: `${connection.owner}'s token cannot reach ${repo}: ${probe.detail}. Add a PAT for ${repoOwner} in Instance settings, or fix the repository here.`,
         result: "no_repo_access",
       };
     }

@@ -200,14 +200,19 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
     )
     .all() as HomeAggRow[];
 
-  // `running` = "agents running" — count projects' tasks with a run actually
-  // in flight, not the task's waiting=agent governance state.
+  // `running` = "agents running" — count the RUNS actually in flight, not the
+  // task's waiting=agent governance state. D-5 (pass 24): this was
+  // COUNT(DISTINCT task_key), so a task with a live operator AND specialist run
+  // (both are `agent_runs` rows) counted as 1 while the card said "1 agent
+  // running" and the Agents Live tab showed 2 threads. Count runs so the label,
+  // the hero's "N runs active", and the Live tab all agree. `activeIn` (projects
+  // with running > 0) is unaffected.
   const runningBySlug = new Map<string, number>();
   // SAFETY: same SELECT-list correspondence — `agent_runs.project_slug` is NOT
   // NULL and COUNT is an integer per group.
   const runningRows = db
     .prepare(
-      `SELECT project_slug, COUNT(DISTINCT task_key) AS running
+      `SELECT project_slug, COUNT(*) AS running
          FROM agent_runs
         WHERE state = 'running'
         GROUP BY project_slug`,

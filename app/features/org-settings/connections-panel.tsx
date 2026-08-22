@@ -257,7 +257,14 @@ export function ConnectionsPanel({
                 </b>
                 <span className="sub mono">
                   PAT {c.masked}
-                  {c.repos !== null ? ` · ${c.repos} repos` : ""} ·{" "}
+                  {/* A-3 (pass 24): `c.repos` is the account's GitHub public-repo
+                      count (`/user` → public_repos), not a count of repos bound in
+                      Viberr — say so, and pluralize (the old `${c.repos} repos`
+                      rendered "1 repos"). */}
+                  {c.repos !== null
+                    ? ` · ${countLabel(c.repos, "public repo")}`
+                    : ""}{" "}
+                  ·{" "}
                   {expiry ? `expires ${expiry}` : "no expiry date"}
                 </span>
                 <span className="scope-chips">

@@ -116,9 +116,19 @@ export function getReviewQueue(
   },
 ): ReviewQueueData {
   const project = getProject(db, slug);
-  const reviewId = project
-    ? resolveStageRoles(project.stages, project.workflow).reviewId
-    : null;
+  // D-1 (pass 24): an ARCHIVED project is read-only (R6-3) — the server refuses
+  // acceptance from any role, and `decisionsRequiring` (which feeds the home
+  // dashboard, the notifications inbox and the board's "waiting on me" chip)
+  // drops archived projects entirely. The review queue counted only archived
+  // TASKS (via `listProjectTasks`' `archived = 0`), never archived PROJECTS, so an
+  // acceptance-ready task on an archived project showed "waiting on your
+  // acceptance" here (and on the board chip) while every other surface said
+  // nothing waited and the accept click was refused. Treat the whole project as
+  // having no review boundary — one predicate, all surfaces agree (F19-9).
+  const reviewId =
+    project && !project.archived
+      ? resolveStageRoles(project.stages, project.workflow).reviewId
+      : null;
   const inReview = reviewId
     ? listProjectTasks(db, slug, opts.now ? { now: opts.now } : {}).filter(
         (t) => t.stage === reviewId,

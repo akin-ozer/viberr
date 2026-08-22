@@ -17,11 +17,64 @@ import {
   noteReconcileFailure,
   noteReconcileSuccess,
   pollGithubReconcile,
+  reconcileSummaryFailed,
   RECONCILE_FAILURE_ALERT_THRESHOLD,
   startGithubReconcilePoller,
   stopGithubReconcilePoller,
 } from "./reconcile-poller.server";
 import * as reconciler from "./github-reconciler.server";
+import type { ProjectReconcileSummary } from "./github-reconciler.server";
+
+/**
+ * C7 (pass-24 fix): the alert fires from a returned SUMMARY, not only a thrown
+ * error — because `reconcileProject` NEVER throws for a revoked/expired/removed
+ * credential or a network drop (those come back as `status !== "ok"` or per-task
+ * `auth_failed`/`network_unavailable` results). Before the fix `noteReconcileSuccess`
+ * ran every tick and cleared the streak, so the "GitHub sync failing" alert was
+ * dead for the exact class its own copy names.
+ */
+describe("reconcileSummaryFailed (C7)", () => {
+  const summary = (
+    patch: Partial<ProjectReconcileSummary>,
+  ): ProjectReconcileSummary => ({
+    status: "ok",
+    results: [],
+    reconciled: 0,
+    changed: 0,
+    failed: 0,
+    skipped: 0,
+    ...patch,
+  });
+
+  it("a clean pass is NOT a failure", () => {
+    expect(reconcileSummaryFailed(summary({ results: [] }))).toBe(false);
+    expect(
+      reconcileSummaryFailed(
+        summary({ results: [{ status: "no_branch", taskKey: "T-1" }] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("a credential/repo problem at context resolution (status !== ok) is a failure", () => {
+    expect(reconcileSummaryFailed(summary({ status: "no_pat_configured" }))).toBe(true);
+    expect(reconcileSummaryFailed(summary({ status: "no_repo_configured" }))).toBe(true);
+  });
+
+  it("a per-task auth or network failure (a revoked PAT / a dropped network) is a failure", () => {
+    expect(
+      reconcileSummaryFailed(
+        summary({ results: [{ status: "auth_failed", message: "401" }] }),
+      ),
+    ).toBe(true);
+    expect(
+      reconcileSummaryFailed(
+        summary({
+          results: [{ status: "network_unavailable", message: "ENOTFOUND" }],
+        }),
+      ),
+    ).toBe(true);
+  });
+});
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");

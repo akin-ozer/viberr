@@ -96,6 +96,10 @@ const ITEMS: NotificationPageItem[] = [
 function renderPage(
   items: NotificationPageItem[] = ITEMS,
   unread = items.filter((n) => n.unread).length,
+  // D-3 (pass 24): the authoritative decision count (from the loader). Default to
+  // the needs-you row count so the header states the same number these tests have
+  // always asserted; a divergence between the two is exercised explicitly below.
+  decisionCount = splitNotifications(items, "all").needsTotal,
 ) {
   const onRead = vi.fn();
   const onReadAll = vi.fn();
@@ -104,6 +108,7 @@ function renderPage(
     <NotificationsPage
       items={items}
       unread={unread}
+      decisionCount={decisionCount}
       onRead={onRead}
       onReadAll={onReadAll}
       onOpen={onOpen}

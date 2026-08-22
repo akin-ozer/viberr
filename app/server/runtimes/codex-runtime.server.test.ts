@@ -234,14 +234,32 @@ describe("codex adapter (SDK, injected fake client)", () => {
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    expect(operator.startOptions()).toMatchObject({
-      // R22: no read-only sandbox. The operator is workspace-write, but its
-      // EGRESS stays gated — no network, no web search.
+    const opOpts = operator.startOptions()!;
+    expect(opOpts).toMatchObject({
+      // R22: no read-only sandbox. The operator is workspace-write, and its
+      // OS-sandbox network stays off.
       sandboxMode: "workspace-write",
       approvalPolicy: "never",
       networkAccessEnabled: false,
-      webSearchMode: "disabled",
     });
+    // B-2 (pass 24, owner ruling): web SEARCH now follows the grant on the
+    // operator exactly as on a specialist. This SPEC does not withhold it, so web
+    // search is ENABLED (option unset) — the operator honors `use-web-search-fetch`
+    // on Codex, matching Claude. (The unconditional `webSearchMode:"disabled"`
+    // here used to dishonour a granted operator while the matrix showed it green.)
+    expect(opOpts.webSearchMode).toBeUndefined();
+
+    // …and an operator whose web grant IS withheld disables web search, like a
+    // specialist — the OS-sandbox network stays off either way.
+    const opWithheld = fakeCodex(events);
+    createCodexAdapter({ codexFactory: opWithheld.factory }).start(
+      { ...SPEC, kind: "operator", webSearchWithheld: true },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const opWithheldOpts = opWithheld.startOptions()!;
+    expect(opWithheldOpts.webSearchMode).toBe("disabled");
+    expect(opWithheldOpts.networkAccessEnabled).toBe(false);
 
     // R22: a supporting/reviewing run is workspace-write now (the read-only
     // sandbox is gone); its capability limits are advisory on Codex + the

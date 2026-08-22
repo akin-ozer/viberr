@@ -2621,8 +2621,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
 
   it("the CODEX operator carries the same read-only confinement", async () => {
     // Codex has no denylist channel: the denied write set is what makes
-    // `startRun` mark the run repo-write-withheld, which is the flag its
-    // adapter turns into a read-only sandbox.
+    // `startRun` mark the run repo-write-withheld.
     deploy("acme/widgets", { backends: ["codex"], model: defaultModelFor("codex") });
     await makeOrigin();
 
@@ -2632,7 +2631,17 @@ describe("R19-1 — the operator's read-only repository view", () => {
     expect(spec.backend).toBe("codex");
     expect(spec.disallowedTools).toContain("Write");
     expect(spec.repoWriteWithheld).toBe(true);
-    expect(spec.systemPrompt ?? "").toContain("`./workspace/widgets/`");
+    // B-1 (pass 24, owner ruling): the Codex operator's writable cwd is a
+    // dedicated scratch folder — NOT the task dir (the default) — so `task.md` and
+    // the shared checkout below it are read-only (workspace-write confines writes
+    // to the cwd). Its prompt therefore describes the isolated scratch root and
+    // names the checkout by ABSOLUTE path, not the cwd-relative `./workspace/…/`.
+    expect(spec.workdir ?? "").toContain(".operator-scratch");
+    expect(spec.workdir ?? "").not.toContain(path.join("workspace", "widgets"));
+    const p = spec.systemPrompt ?? "";
+    expect(p).toContain("separate, empty scratch folder");
+    expect(p).toContain(checkoutDir());
+    expect(p).not.toContain("`./workspace/widgets/`");
   });
 
   it("a FAILED clone degrades honestly — the drive still runs, and the prompt says it is blind", async () => {
