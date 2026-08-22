@@ -4,6 +4,7 @@ import { useFetcher } from "react-router";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   BROWSER_CAP_ID,
+  capabilityEnforcement,
   WEB_EGRESS_CAP_ID,
 } from "~/shared/capabilities";
 import { Icon } from "~/ui/icon";
@@ -602,6 +603,7 @@ function CapabilityGrants({
   setCaps,
   openGroups,
   setOpenGroups,
+  backend,
 }: {
   capCatalog: readonly ModalCapGroup[];
   /** The mode buttons offered per row: 4 for the operator, 3 honest ones
@@ -611,6 +613,9 @@ function CapabilityGrants({
   setCaps: Dispatch<SetStateAction<CapSelection>>;
   openGroups: Record<string, boolean>;
   setOpenGroups: Dispatch<SetStateAction<Record<string, boolean>>>;
+  /** B1 (pass 23): the profile's pinned backend, so a claude-only withholding
+   *  can be tagged advisory/inert on a Codex profile at the point it is set. */
+  backend: "codex" | "claude" | "";
 }) {
   const capId = useId();
   return (
@@ -715,9 +720,37 @@ function CapabilityGrants({
                       (m) => m.id === caps[capDef.id],
                     );
                     const tabIdx = checkedIdx < 0 ? 0 : checkedIdx;
+                    // B1 (pass 23): on a Codex-pinned profile, a claude-only
+                    // withholding is advisory (the Codex SDK ignores tool
+                    // allow/deny lists; the server-owned delivery gate is the real
+                    // boundary), and `read-github-api` is never mounted on Codex
+                    // at all — the grant is inert. The editor is where the grant
+                    // is MADE, so tag the row so an admin does not trust a toggle
+                    // that cannot bind on the chosen backend. (The matrix tags the
+                    // same rows via capabilityEnforcement; this is its editor
+                    // twin, backend-aware because the editor is pinned to one.)
+                    const codexAdvisory =
+                      backend === "codex" &&
+                      !locked &&
+                      capabilityEnforcement(capDef.id) === "claude-only";
+                    const codexInert = codexAdvisory && capDef.id === "read-github-api";
                     return (
                       <div className="cap-mrow" key={capDef.id}>
-                        <span className="cap-mname">{capDef.label}</span>
+                        <span className="cap-mname">
+                          {capDef.label}
+                          {codexAdvisory && (
+                            <span
+                              className="mx-scope"
+                              title={
+                                codexInert
+                                  ? "This tool is Claude-only and is never mounted on Codex, so on this Codex profile the grant is inert."
+                                  : "Enforced on Claude runs (tool denylist). On this Codex profile it is advisory only: the Codex SDK ignores tool allow/deny lists, so the server-owned delivery gate is the real boundary."
+                              }
+                            >
+                              {codexInert ? "inert on Codex" : "advisory on Codex"}
+                            </span>
+                          )}
+                        </span>
                         {/* UXA-4: the Direct/Recommend/Human/Off control is a
                             single-select whose state was carried by CSS alone.
                             The SAME control on the Policy sheet (the workflow
@@ -1232,6 +1265,7 @@ export function CreateProfileModal({
           setCaps={setCaps}
           openGroups={openGroups}
           setOpenGroups={setOpenGroups}
+          backend={backend}
         />
 
         <ResourcePicker

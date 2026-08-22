@@ -854,6 +854,42 @@ describe("CapabilityMatrixModal", () => {
 });
 
 describe("CreateProfileModal", () => {
+  it("B1: a Codex-pinned profile tags claude-only grants as advisory on Codex", () => {
+    const { container, queryAllByText } = renderModal({
+      initial: mkProfile({
+        backends: ["codex"],
+        model: "gpt-5-codex",
+        capabilities: [
+          // create-task-branch + commit-push-branch are CLAUDE-ONLY enforced.
+          { capabilityId: "create-task-branch", mode: "direct" },
+          { capabilityId: "commit-push-branch", mode: "direct" },
+        ],
+      }),
+    });
+    // Expand every capability group so the collapsed rows render.
+    for (const head of container.querySelectorAll("button.cap-mghead")) {
+      fireEvent.click(head);
+    }
+    // The withholding is advisory on Codex — the editor says so at the point the
+    // grant is made, mirroring the matrix's Claude-enforced tag.
+    expect(queryAllByText("advisory on Codex").length).toBeGreaterThan(0);
+  });
+
+  it("B1: a Claude-pinned profile shows no advisory-on-Codex tag (it IS enforced)", () => {
+    const { container, queryAllByText } = renderModal({
+      initial: mkProfile({
+        backends: ["claude"],
+        model: "claude-sonnet",
+        capabilities: [{ capabilityId: "create-task-branch", mode: "direct" }],
+      }),
+    });
+    for (const head of container.querySelectorAll("button.cap-mghead")) {
+      fireEvent.click(head);
+    }
+    expect(queryAllByText("advisory on Codex")).toHaveLength(0);
+    expect(queryAllByText("inert on Codex")).toHaveLength(0);
+  });
+
   it("create mode: validation hint until required fields are set, then submits the payload", async () => {
     const onSubmit = vi.fn();
     const { container, getByText, getByPlaceholderText } = renderModal({
