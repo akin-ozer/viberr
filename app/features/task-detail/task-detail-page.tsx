@@ -7,6 +7,7 @@ import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import type { AcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { AcceptConfirm, type AcceptCeremonyMode } from "./accept-confirm";
 import { ArchiveConfirm } from "./archive-confirm";
 import { ContinuityRecoveryPanel } from "./continuity-recovery";
@@ -122,6 +123,7 @@ export function TaskDetailPage({
   schedules,
   archived = false,
   acceptance,
+  acceptanceAuthority = { operatorCanAccept: false, operatorName: "the operator" },
   githubHost,
   githubReconciledAt = null,
   githubCheckedAt = null,
@@ -179,6 +181,12 @@ export function TaskDetailPage({
   /** P14-LV-06: the viewer's acceptance authority + the exact refusal, resolved
    *  server-side by the predicate the review queue also counts with. */
   acceptance: AcceptanceAffordance;
+  /** A6 (pass 23): whether THIS project's operator holds the one exception to
+   *  the human-only Done boundary. The Permissions panel's boundary row reads it
+   *  so it can never state the rule flatly on a full-autonomy project. Defaults
+   *  to the strict boundary for bare test renders (the loader always supplies
+   *  the real value). */
+  acceptanceAuthority?: AcceptanceAuthority;
   /** GitHub web host for browse links — the loader's `githubWebHost()`. */
   githubHost: string;
   /** UI-57: newest `github.reconcile` for this task (freshness cue) — the last
@@ -660,6 +668,7 @@ export function TaskDetailPage({
           myRole={myRole}
           stages={task.stages}
           ownsTask={isOwner}
+          acceptanceAuthority={acceptanceAuthority}
         />
       </div>
 

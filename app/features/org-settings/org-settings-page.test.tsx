@@ -54,7 +54,7 @@ const CONNECTIONS: ConnectionRecord[] = [
     id: "akin-ozer", owner: "akin-ozer", method: "PAT", patId: "pat_1",
     masked: "····0000", def: true, repos: null, expiresAt: null, daysLeft: null,
     validationState: "unvalidated", scopes: [], lastValidatedAt: null,
-    createdAt: "2026-07-01T09:00:00.000Z",
+    createdAt: "2026-07-01T09:00:00.000Z", boundProjects: 0,
   },
   {
     id: "hepapi", owner: "hepapi", method: "PAT", patId: "pat_2",
@@ -65,7 +65,7 @@ const CONNECTIONS: ConnectionRecord[] = [
       { id: "workflow", ok: true, source: "header" },
       { id: "pull_request:write", ok: true, source: "header" },
     ], lastValidatedAt: "2026-07-01T09:00:00.000Z",
-    createdAt: "2026-07-01T09:05:00.000Z",
+    createdAt: "2026-07-01T09:05:00.000Z", boundProjects: 2,
   },
 ];
 
@@ -94,8 +94,11 @@ describe("ConnectionsPanel", () => {
 
     fireEvent.click(getByLabelText("Remove hepapi"));
     expect(getByText("Remove hepapi?")).toBeTruthy();
+    // A4 (pass 23): hepapi has 2 bound projects (fixture), so the confirm
+    // discloses the sync loss the PAT-delete cascade causes, not just the
+    // harmless half the old copy named.
     expect(
-      getByText(/Projects already created from hepapi keep their repos/),
+      getByText(/2 projects bound to it lose branch and PR sync/),
     ).toBeTruthy();
     // C6: the confirm button now names the outcome instead of a bare "Remove".
     fireEvent.click(getByText("Remove connection", { selector: "button.btn.danger" }));
@@ -105,6 +108,20 @@ describe("ConnectionsPanel", () => {
         connectionId: "hepapi",
       }),
     );
+  });
+
+  it("A4: with no bound projects, the confirm keeps the harmless copy (no false sync-loss claim)", async () => {
+    const unbound: ConnectionRecord[] = [
+      { ...CONNECTIONS[1]!, id: "solo", owner: "solo", def: false, boundProjects: 0 },
+    ];
+    const { getByLabelText, getByText, queryByText } = renderPanel(
+      <ConnectionsPanel connections={unbound} />,
+    );
+    fireEvent.click(getByLabelText("Remove solo"));
+    expect(
+      getByText(/Projects already created from solo keep their repos/),
+    ).toBeTruthy();
+    expect(queryByText(/lose branch and PR sync/)).toBeNull();
   });
 
   it("add-connection modal: duplicate guard fires client-side", async () => {

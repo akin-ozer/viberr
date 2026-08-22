@@ -42,6 +42,7 @@ import {
   updateTaskGoal,
   userName,
 } from "~/server/tasks/task-actions.server";
+import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listTaskAttachments } from "~/server/files/task-attachments.server";
 import {
@@ -298,6 +299,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     operatorBackend: operatorBackendFor({}, params.slug),
     // R19-A: the ceiling, so the run picker offers only what will actually run.
     operatorAutonomy: operatorAutonomyFor({}, params.slug),
+    // A6 (pass 23): does THIS project's operator hold the one exception to the
+    // human-only Done boundary (full autonomy + completion-for-acceptance:
+    // direct)? The Permissions panel's boundary row stated the rule flatly on
+    // every project, contradicting the Review queue one click away. Same read
+    // model the queue uses, so the two surfaces cannot disagree.
+    acceptanceAuthority: resolveAcceptanceAuthority(params.slug),
     // P11-41: which backends are actually configured, so the run picker can
     // disable an option that would fail fast rather than offering it blindly.
     backendAvailable: {
@@ -1045,6 +1052,7 @@ export default function TaskDetailRoute({
       schedules={loaderData.schedules}
       archived={loaderData.archived}
       acceptance={loaderData.acceptance}
+      acceptanceAuthority={loaderData.acceptanceAuthority}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
       githubCheckedAt={loaderData.githubCheckedAt}

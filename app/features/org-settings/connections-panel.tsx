@@ -360,9 +360,12 @@ export function ConnectionsPanel({
           // C6: the outcome, not a bare "Remove".
           confirmLabel="Remove connection"
           detail={
-            "Projects already created from " +
-            confirm.owner +
-            " keep their repos; new projects can no longer select it."
+            // A4 (pass 23): removing the connection deletes its PAT, and the
+            // binding cascade takes branch/PR sync offline for every project
+            // bound to it. The old copy named only the harmless half.
+            confirm.boundProjects > 0
+              ? `This deletes the credential. ${confirm.boundProjects} project${confirm.boundProjects === 1 ? "" : "s"} bound to it lose branch and PR sync until a new credential is bound. Projects keep their repo setting; new projects can no longer select ${confirm.owner}.`
+              : `Projects already created from ${confirm.owner} keep their repos; new projects can no longer select it.`
           }
           onCancel={() => setConfirm(null)}
           onConfirm={() => {

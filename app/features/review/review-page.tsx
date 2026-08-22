@@ -258,11 +258,14 @@ export function ReviewQueuePage({
                 catalog's, so "tracks the Policy note" stays true. */}
             {operatorCanAccept ? (
               <span>
-                Accepting a completion merges the review PR and moves the task
-                to <strong>{stageNames.terminal}</strong>, always in the audit
-                log. Normally a human action, with one exception on this
-                project: <strong>{operatorName}</strong> runs at{" "}
-                <strong>full autonomy</strong> and separately holds{" "}
+                {/* A10 (pass 23): "merges the review PR" was absolute; a
+                    verified no-change completion (no PR) and a no-PR
+                    auto-detect accept to the terminal stage without a merge. */}
+                Accepting a completion merges its review PR, when there is one,
+                and moves the task to <strong>{stageNames.terminal}</strong>,
+                always in the audit log. Normally a human action, with one
+                exception on this project: <strong>{operatorName}</strong> runs
+                at <strong>full autonomy</strong> and separately holds{" "}
                 <strong>{ACCEPTANCE_CAP_LABEL}</strong> set to <em>Direct</em>,
                 an explicit grant, never implied by the autonomy setting, that
                 lets it accept a completion itself (it still refuses a
@@ -270,9 +273,9 @@ export function ReviewQueuePage({
               </span>
             ) : (
               <span>
-                Accepting a completion merges the review PR and moves the task
-                to <strong>{stageNames.terminal}</strong>, always a human
-                action, always in the audit log.
+                Accepting a completion merges its review PR, when there is one,
+                and moves the task to <strong>{stageNames.terminal}</strong>,
+                always a human action, always in the audit log.
               </span>
             )}
           </div>

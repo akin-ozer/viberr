@@ -7,6 +7,7 @@ import { StageMenu } from "~/ui/stage-menu";
 import { LocalRelative } from "~/ui/local-time";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import type { AcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 
@@ -358,6 +359,10 @@ export function PolicyPanel({
   myRole,
   stages,
   ownsTask,
+  // Defaults to the strict human-only boundary — the same fallback
+  // `resolveAcceptanceAuthority` returns when a project file can't be read, so a
+  // bare test render or a missing value never OVER-states the exception.
+  acceptanceAuthority = { operatorCanAccept: false, operatorName: "the operator" },
 }: {
   projectSlug: string;
   myRole: string | null;
@@ -370,6 +375,11 @@ export function PolicyPanel({
    *  told a contributor-owner "Maintainer or admin only" while the server let
    *  them accept and the review queue counted them as the one who must. */
   ownsTask: boolean;
+  /** A6 (pass 23): whether THIS project's operator holds the one exception to
+   *  the human-only Done boundary (full autonomy + completion-for-acceptance:
+   *  direct). The boundary row read it so it never states the rule flatly on a
+   *  full-autonomy project, contradicting the Review queue one click away. */
+  acceptanceAuthority?: AcceptanceAuthority;
 }) {
   const reviewName =
     stages.length >= 2 ? stages[stages.length - 2]!.name : "the review stage";
@@ -418,8 +428,13 @@ export function PolicyPanel({
     },
     {
       k: `${reviewName} → ${terminalName}`,
-      v: "Human decision, locked at the review boundary",
-      icon: "lock",
+      // A6: flat on every project before — false one click from the Review queue
+      // on a full-autonomy project whose operator holds the accept-into-Done
+      // grant. Same read model the queue uses, so the two cannot disagree.
+      v: acceptanceAuthority.operatorCanAccept
+        ? `Human decision, or ${acceptanceAuthority.operatorName} at full autonomy with the accept-into-Done grant`
+        : "Human decision, locked at the review boundary",
+      icon: acceptanceAuthority.operatorCanAccept ? "flag" : "lock",
     },
   ];
   return (

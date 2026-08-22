@@ -1423,8 +1423,10 @@ function DeleteProjectDialog({
       </div>
       <h3>Delete {projectName}?</h3>
       <p>
-        Removes tasks, timelines, and audit logs. This cannot be undone.
-        Type <strong>{projectName}</strong> to confirm.
+        {/* A5 (pass 23): the server KEEPS the audit trail (it writes a fresh
+            project.deleted row); the old copy claimed the logs went too. */}
+        Removes tasks and timelines. The audit trail is kept. This cannot be
+        undone. Type <strong>{projectName}</strong> to confirm.
       </p>
       <div className="field spaced">
         <input
@@ -1531,7 +1533,8 @@ export function DangerZone({
         <span className="dz-main">
           <div className="dn">Delete project</div>
           <div className="dd">
-            Removes tasks, timelines, and audit logs. This cannot be undone.
+            Removes tasks and timelines. The audit trail is kept. This cannot be
+            undone.
           </div>
         </span>
         <button
