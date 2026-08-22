@@ -177,3 +177,23 @@ server + agent run — not run this pass; validated in prior passes.)
 - Notifications: correctly typed (packet/policy/approval/quality), targeted to Arda,
   accurate to events.
 - Bora's account menu omits "Org settings" (admin-only) — coherent role-scoped nav.
+
+### ✅ UC-21 comments / @mention — validated live (VIB-3), + BUG-2 found
+Created VIB-3 "Recommend a minimal onboarding doc" (discussion-only goal). Observed:
+- **Agent→agent @mention works**: the Developer replied "@operator Read README.md,
+  CONTRIBUTING.md…" (tag recognized + highlighted) — NEW-4 convention holds.
+- **Operator judgment**: it recognized the "I'll review before implementing" nature and
+  opened an HONEST decision packet (approve→Implementation / revise / decline), framed
+  "a genuine human call, not something I should push through on my own authority" — no
+  unilateral delivery. Excellent.
+- **BUG-2 found**: I then commented "@operator …" while that packet was open. Server
+  logged `manual operator run refused — a decision packet is open` (correct: don't spin
+  while awaiting the human), but `commentToAgent` returned `triggered:"started"`
+  unconditionally → the toast would claim "@Operator is picking it up" for a run that
+  never happened. **Fixed → PR #195** (`operatorRefused` surfaced; route toasts
+  "resolve the open decision to continue"). See FINDINGS.md BUG-2.
+
+## Pass-23 final scorecard
+LIVE PASS: F1, F2, F3, F4/UC-04, UC-05, UC-07..15, UC-18, UC-19(create+handshake),
+UC-20, UC-21, UC-22, UC-23, UC-25. FOUND+FIXED: **BUG-1 → PR #194**, **BUG-2 → PR #195**.
+Test PRs: **#192 MERGED, #193 REJECTED**. All fixes tsc-clean + full suite green.
