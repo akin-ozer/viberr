@@ -494,9 +494,13 @@ export function AgentPanel({
         {gagents.length === 0 && (
           // D8: absent → why it matters → next action (P16).
           <div className="empty">
+            {/* D4 (pass 23): this listed "model" among the fields, but the org
+                editor has no model picker — the model (and effort) are chosen
+                per project when the profile is deployed. */}
             No global agent profiles yet. A profile is a reusable agent
-            definition (its backend, model, skills and grants) that you can
-            deploy into any project. Create one with <strong>New</strong> above.
+            definition (its backend, skills and grants) that you can deploy into
+            any project, picking its model when you do. Create one with{" "}
+            <strong>New</strong> above.
           </div>
         )}
       </div>

@@ -890,6 +890,34 @@ describe("CreateProfileModal", () => {
     expect(queryAllByText("inert on Codex")).toHaveLength(0);
   });
 
+  it("D5: a failed model-catalog load offers a retry instead of deadlocking Save", async () => {
+    // The model-catalog loader settles with NO data (a 500/transport failure the
+    // curated-fallback endpoint normally prevents). Save must not sit held with
+    // an empty picker and no way out.
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <CreateProfileModal
+            initial={mkProfile({ backends: ["codex"], model: "" })}
+            stages={STAGES}
+            projectName="Viberr Core"
+            busy={false}
+            error={null}
+            onClose={() => {}}
+            onSubmit={() => {}}
+          />
+        ),
+      },
+      { path: "/resources/model-catalog", loader: () => ({ data: null }) },
+    ]);
+    const { findByText, getByText } = render(<Stub initialEntries={["/"]} />);
+    // The retry affordance appears, and the footer says the load failed rather
+    // than telling the user to "pick a model" over an empty picker.
+    await findByText("Retry");
+    expect(getByText(/Couldn't load the models available on/)).toBeTruthy();
+  });
+
   it("create mode: validation hint until required fields are set, then submits the payload", async () => {
     const onSubmit = vi.fn();
     const { container, getByText, getByPlaceholderText } = renderModal({

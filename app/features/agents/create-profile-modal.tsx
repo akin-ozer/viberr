@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
@@ -396,6 +396,8 @@ function ModelEffortFields({
   setEffort,
   catalog,
   catalogLoading,
+  catalogFailed,
+  onRetryCatalog,
   selectedModel,
   showEffort,
   effortOptions,
@@ -408,6 +410,10 @@ function ModelEffortFields({
   setEffort: (v: string) => void;
   catalog: ModelCatalog | null;
   catalogLoading: boolean;
+  /** D5: the model-catalog load settled with no data — a real fetch failure. */
+  catalogFailed: boolean;
+  /** D5: re-fire the model-catalog load. */
+  onRetryCatalog: () => void;
   selectedModel: CatalogModel | null;
   showEffort: boolean;
   effortOptions: string[];
@@ -420,8 +426,22 @@ function ModelEffortFields({
           <span className="fhint">
             {catalogLoading
               ? "loading available models…"
-              : "the model this profile runs on"}
+              : catalogFailed
+                ? "couldn't load the models"
+                : "the model this profile runs on"}
           </span>
+          {/* D5 (pass 23): a fetch that failed used to strand Save forever with
+              no error and no way out — the picker sat empty and the footer said
+              "Saving is held until a model loads". Offer the retry. */}
+          {catalogFailed && (
+            <button
+              type="button"
+              className="btn ghost xs"
+              onClick={onRetryCatalog}
+            >
+              Retry
+            </button>
+          )}
         </label>
         <select
           id={`${uid}-model`}
@@ -1112,13 +1132,33 @@ export function CreateProfileModal({
   // create mode). The endpoint returns the curated fallback even with no
   // credential, so the pickers always populate.
   const catalogFetcher = useFetcher<{ data: ModelCatalog }>();
+  // D5 (pass 23): so a fetch that SETTLED with no data reads as a failure, not as
+  // the pre-load window. Flipped true once a load has actually fired for the
+  // current backend; a backend switch resets it.
+  const catalogLoadFired = useRef(false);
+  const loadCatalog = () => {
+    if (!backend) return;
+    catalogLoadFired.current = true;
+    catalogFetcher.load(`/resources/model-catalog?backend=${backend}`);
+  };
   useEffect(() => {
     if (!backend) return;
-    catalogFetcher.load(`/resources/model-catalog?backend=${backend}`);
+    catalogLoadFired.current = false;
+    loadCatalog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backend]);
   const catalog = catalogFetcher.data?.data ?? null;
   const catalogLoading = catalogFetcher.state === "loading";
+  // D5: a load fired and SETTLED (idle) with no catalog → the fetch failed. The
+  // endpoint returns a curated fallback even without a credential, so this is a
+  // real transport/500 failure. Without a signal, `modelPending` stays true
+  // forever and the footer says "Saving is held" over an empty picker with no
+  // way out. This offers the retry.
+  const catalogFailed =
+    Boolean(backend) &&
+    catalogLoadFired.current &&
+    catalogFetcher.state === "idle" &&
+    !catalog;
 
   // Default the picks to the catalog defaults once it loads and no pick is set
   // (create mode, or a backend switch that invalidated the prior model).
@@ -1190,7 +1230,10 @@ export function CreateProfileModal({
         modelPending
         ? catalogLoading
           ? `Loading the models available on ${backendLabel}. Saving is held until this profile has one of them.`
-          : `Pick a model available on ${backendLabel}. Saving is held until this profile has one.`
+          : catalogFailed
+            ? // D5: don't say "pick a model" over an empty picker — the fetch failed.
+              `Couldn't load the models available on ${backendLabel}. Retry above, then pick one. Saving is held until this profile has a model.`
+            : `Pick a model available on ${backendLabel}. Saving is held until this profile has one.`
         : editing
           ? forksTemplate
             ? `Ready to save: this forks ${initial.name} for ${projectName}.`
@@ -1242,6 +1285,8 @@ export function CreateProfileModal({
           setEffort={setEffort}
           catalog={catalog}
           catalogLoading={catalogLoading}
+          catalogFailed={catalogFailed}
+          onRetryCatalog={loadCatalog}
           selectedModel={selectedModel}
           showEffort={showEffort}
           effortOptions={effortOptions}
