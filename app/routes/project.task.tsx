@@ -420,15 +420,20 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         // Toast copy: name the agent when one is picking the comment up;
         // note when a mention was recorded but the run was not triggered (RBAC);
+        // A8 (pass 23): a run that FAILED to start after the comment posted says
+        // so with its reason, so the commenter knows the comment landed and only
+        // the run didn't (was a bare error toast that read as total failure);
         // else the original routed/plain copy (verbatim spec contract).
         const toast =
           result.triggered && result.agent
             ? `Comment posted · @${result.agent.name} is picking it up`
-            : result.runtimeDenied && result.agent
-              ? "Comment posted · your role can't trigger agent runs"
-              : result.toAgent
-                ? "Comment posted · routed to mentioned agent"
-                : "Comment posted";
+            : result.runNotStarted && result.agent
+              ? `Comment posted · @${result.agent.name}'s run did not start: ${result.runNotStarted}`
+              : result.runtimeDenied && result.agent
+                ? "Comment posted · your role can't trigger agent runs"
+                : result.toAgent
+                  ? "Comment posted · routed to mentioned agent"
+                  : "Comment posted";
         return {
           ok: true as const,
           intent,
@@ -928,13 +933,23 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
+          // A7 (pass 23), BUG-2's sibling on the manual "Run operator" control:
+          // runOperator REFUSES with `refused: "open-packet" | "terminal-stage"`
+          // (an open decision blocks it; a terminal-stage task is scheduled-only),
+          // and this toast branched on `queued` alone — so a refused start toasted
+          // "Operator running" for a run that never began. The UI disables the
+          // control in those states, so this is the crafted-POST / SSE-race path;
+          // it now tells the truth, exactly as commentToAgent does (PR #195).
           // B10 (pass 16): a trigger that lands while a run already holds the
           // lease is QUEUED, not started — it drains when the current run ends.
-          // "Operator running" for both left the human watching for a run that
-          // had not begun; `queued` now distinguishes them.
-          toast: started.queued
-            ? `Operator queued · runs when the current run finishes · ${backendLabel} · ${started.autonomy} autonomy`
-            : `Operator running · ${backendLabel} · ${started.autonomy} autonomy`,
+          toast:
+            started.refused === "open-packet"
+              ? "Operator not started · resolve the open decision to continue"
+              : started.refused === "terminal-stage"
+                ? "Operator not started · reopen the task to run the operator"
+                : started.queued
+                  ? `Operator queued · runs when the current run finishes · ${backendLabel} · ${started.autonomy} autonomy`
+                  : `Operator running · ${backendLabel} · ${started.autonomy} autonomy`,
         };
       }
       case "schedule-action": {

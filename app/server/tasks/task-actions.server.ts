@@ -883,6 +883,17 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * The route can toast about this; we never throw for a well-formed comment.
    */
   runtimeDenied: boolean;
+  /**
+   * A8 (pass 23): the comment is recorded BEFORE any run starts, so a run-start
+   * failure (single-flight conflict, backend not configured, stage ineligibility)
+   * used to throw out of here — the commenter saw a bare error and could not tell
+   * their comment HAD posted. This carries the reason the run did not start (the
+   * comment did), so the route toasts "comment posted, run not started: <reason>"
+   * instead of an error that reads as total failure. Null on the happy path and
+   * on the runtime-denied path (which has its own signal). BUG-2's operator
+   * refusal is a separate, governed signal on the operator branch.
+   */
+  runNotStarted: string | null;
 }
 
 // ------------------------------------------------- canonical re-anchor (D-3)
@@ -1102,7 +1113,14 @@ export async function commentToAgent(
         },
       });
     }
-    return { ...base, agent: null, triggered: null, logThreadId: null, runtimeDenied: false };
+    return {
+      ...base,
+      agent: null,
+      triggered: null,
+      logThreadId: null,
+      runtimeDenied: false,
+      runNotStarted: null,
+    };
   }
 
   const agentIdentity = {
@@ -1120,6 +1138,7 @@ export async function commentToAgent(
       triggered: null,
       logThreadId: null,
       runtimeDenied: true,
+      runNotStarted: null,
     };
   }
 
@@ -1146,7 +1165,14 @@ export async function commentToAgent(
       input.taskKey,
       result.runId,
     );
-    return { ...base, agent: agentIdentity, triggered: "started", logThreadId, runtimeDenied: false };
+    return {
+      ...base,
+      agent: agentIdentity,
+      triggered: "started",
+      logThreadId,
+      runtimeDenied: false,
+      runNotStarted: null,
+    };
   }
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
@@ -1196,7 +1222,14 @@ export async function commentToAgent(
   let triggered: "resumed" | "started";
   let resumeOutcomeKey: string | undefined;
 
-  if (target.session) {
+  // A8 (pass 23): the comment is ALREADY on the timeline. A run-start failure
+  // (single-flight conflict, backend not configured, stage ineligibility) below
+  // used to throw straight out of here, so the commenter saw only an error and
+  // could not tell their comment HAD posted. Catch it and return the partial
+  // success — comment recorded, run not started, reason attached — rather than
+  // throwing. (The operator @mention refusal is a separate governed signal.)
+  try {
+    if (target.session) {
     // 4a. Resume the agent's existing provider session, reusing the clone
     //     workdir so it keeps its repo context.
     const workdir = resumeWorkdir(
@@ -1316,6 +1349,25 @@ export async function commentToAgent(
       runId = started.runId;
     }
     triggered = "started";
+    }
+  } catch (error) {
+    logger.warn("@mention run did not start; the comment was still recorded", {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: target.profileId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return {
+      ...base,
+      agent: agentIdentity,
+      triggered: null,
+      logThreadId: null,
+      runtimeDenied: false,
+      runNotStarted:
+        error instanceof AppError
+          ? error.userMessage
+          : "the run could not be started",
+    };
   }
 
   // 5. Install THE canonical completion handler (reply → reconcile → verdict →
@@ -1359,7 +1411,14 @@ export async function commentToAgent(
   // hiccup just yields null and the UI simply doesn't auto-select).
   const logThreadId = resolveReplyLogThread(db, input.projectSlug, input.taskKey, runId);
 
-  return { ...base, agent: agentIdentity, triggered, logThreadId, runtimeDenied: false };
+  return {
+    ...base,
+    agent: agentIdentity,
+    triggered,
+    logThreadId,
+    runtimeDenied: false,
+    runNotStarted: null,
+  };
 }
 
 /**

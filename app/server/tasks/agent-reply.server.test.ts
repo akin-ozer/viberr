@@ -921,6 +921,52 @@ describe("commentToAgent", () => {
     expect(audit[0]?.taskKey).toBe("VIB-1");
   }, 30_000);
 
+  it("A8: a comment whose run FAILS to start still posts the comment and reports the reason", async () => {
+    deployDevSpecialist();
+    // A live DELIVERING run holds the single-flight slot, so a fresh @dev run is
+    // refused at start — the exact partial-success shape A8 surfaces instead of a
+    // bare error that reads as "the comment failed".
+    upsertRun(store.db, {
+      id: "run_live_primary",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: null,
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "running",
+    });
+
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev take a look" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    // The run did NOT start, and the call did NOT throw.
+    expect(result.triggered).toBeNull();
+    expect(result.agent).toMatchObject({ profileId: "dev" });
+    expect(result.runNotStarted).toContain(
+      "delivering agent run is already in progress",
+    );
+    // The human's comment IS on the timeline (recorded before the start attempt).
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    const humanComment = file.parsed.timeline.find(
+      (e) => e.type === "comment" && e.actor.kind === "human",
+    );
+    expect(humanComment?.text).toContain("@dev take a look");
+  });
+
   it("RESUMES the agent's existing session (reusing its session_id) on a later comment", async () => {
     // First run establishes a session.
     await startAgentRun(
