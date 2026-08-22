@@ -570,8 +570,21 @@ export async function fireDueSchedules(
   return { fired, skipped };
 }
 
-// The single interval handle — module-scoped so a repeat start() is a no-op.
-let runnerHandle: ReturnType<typeof setInterval> | null = null;
+// C10 (pass 23): HMR-safe singleton, the same convention the reconcile poller
+// documents (reconcile-poller.server.ts). A module-scoped handle RESETS to null
+// when a dev reload re-evaluates this module, so a repeat startScheduleRunner
+// then set a SECOND interval next to the orphaned first, double-firing every due
+// schedule (duplicate operator runs). Behind a process-global registry symbol,
+// a repeat start() is a true no-op — no duplicate interval, no re-fired boot pass.
+const RUNNER_KEY = Symbol.for("viberr.scheduleRunner");
+interface RunnerHost {
+  [RUNNER_KEY]?: ReturnType<typeof setInterval>;
+}
+function runnerCache(): RunnerHost {
+  // SAFETY: a viberr-namespaced registry symbol only this function reads/writes,
+  // so the slot holds either the interval handle put there or nothing at all.
+  return globalThis as RunnerHost;
+}
 
 /**
  * Start the server-side schedule runner: fire once at boot (catches schedules
@@ -579,10 +592,18 @@ let runnerHandle: ReturnType<typeof setInterval> | null = null;
  * overlapping (a slow tick can't stack). Idempotent — a second call is a no-op.
  */
 export function startScheduleRunner(db: DatabaseSync): void {
-  void fireDueSchedules(db).catch(() => {});
-  if (runnerHandle) return;
+  const cache = runnerCache();
+  if (cache[RUNNER_KEY]) return;
+  // C10: the boot catch-up used to swallow every failure with an EMPTY catch, so
+  // a boot-time schedule failure (e.g. a bad task file) was invisible. Log it
+  // like the interval tick does.
+  void fireDueSchedules(db).catch((error) => {
+    logger.warn("schedule runner boot pass failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
   let running = false;
-  runnerHandle = setInterval(() => {
+  const handle = setInterval(() => {
     if (running) return;
     running = true;
     void fireDueSchedules(db)
@@ -596,5 +617,6 @@ export function startScheduleRunner(db: DatabaseSync): void {
       });
   }, SCHEDULE_TICK_MS);
   // Don't keep the process alive for the timer (tests, graceful shutdown).
-  runnerHandle.unref?.();
+  handle.unref?.();
+  cache[RUNNER_KEY] = handle;
 }
