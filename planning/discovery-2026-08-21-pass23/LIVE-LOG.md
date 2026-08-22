@@ -131,3 +131,49 @@ exfiltration refused at the tool seam. (No scope_violations row: enforcement ret
 PASS: F1, F2, F3(health+wiring), F4/UC-04, UC-05, UC-07, UC-08, UC-09, UC-10, UC-11,
 UC-12, UC-13, UC-20, UC-22, UC-23. FOUND: BUG-1 (web-egress editor/runtime mismatch).
 Remaining (cheaper, no Claude quota): UC-14/15/16/17 RBAC, UC-18 KB, UC-19 MCP, UC-25 sweep.
+
+### ✅ UC-14 members-only privacy + UC-15 role gates (live, 2nd user Bora)
+Created a 2nd org account **Bora** (org Member, Local, temp-password→own-password flow
+worked; "setup pending" → forced password reset on first login). Bora is NOT a member
+of the Viberr project.
+- **UC-14**: Bora's home shows "No projects yet" (Viberr invisible). Direct nav to
+  `/projects/viberr/board` AND `/projects/viberr/tasks/VIB-1` → **"Page not found — No
+  project at projects/viberr"** (404-as-absence: existence stays private, NOT "access
+  denied"). Airtight at project AND task level. ✅
+- **UC-15**: Bora hitting `/org/settings?tab=users` → **403 Forbidden** (admin-only).
+  Coherent distinction: members-only PROJECTS hide existence (404), org SETTINGS are
+  known-but-access-gated (403). Home shows Bora read-only setting summaries
+  ("Org admins manage this"). ✅
+
+### ✅ UC-18 KB lifecycle (create / rename-repoint / delete-drop) — LIVE
+- Created org KB "API Conventions" (`store://kb/api-conventions/`), granted to the
+  Viberr developer (`kb: [api-conventions]` in project.md).
+- Renamed → "API Standards" (slug `api-conventions`→`api-standards`): the developer's
+  grant **repointed** to `api-standards` (NOT orphaned). Pass-13 "rename orphans grants"
+  bug confirmed FIXED live (`updateResourceReferences` on rename).
+- Deleted the KB: the developer's grant **dropped** to `kb: []` (no dangling reference).
+- MINOR OBSERVATION (not a bug): the delete-confirm says "No agent template grants it"
+  — it counts only ORG-TEMPLATE grants; a PROJECT-deployment grant (the Viberr developer)
+  is handled silently by `updateResourceReferences` (documented P14-KM-09). Could mislead
+  an admin into thinking the KB is unused when a project agent grants it. Low-pri polish:
+  the tail could also surface "N project agent grant(s) will be dropped."
+
+## Pass-23 scorecard (updated)
+LIVE PASS: F1, F2, F3, F4/UC-04, UC-05, UC-07..13, UC-14, UC-15, UC-18, UC-20, UC-22, UC-23.
+FOUND+FIXED: BUG-1 (web-egress editor) → PR #194. Remaining: UC-19 MCP, UC-21 comments/@mention.
+
+### ✅ UC-19 MCP creation + handshake (live)
+Added org MCP "test-mcp" (HTTP http://localhost:9999/sse, no credential): the real
+handshake ran on save, failed gracefully → stored with **"unreachable · connection
+refused"** health (save not blocked; honest status). Credential disclosure intact
+("Encrypted at rest, injected only into the agent run, never in timelines/comments/
+audit" — F7-MCP1). Deleted to clean up. (Positive tool-call path needs a real MCP
+server + agent run — not run this pass; validated in prior passes.)
+
+### Coherence sweep (UC-25) — clean
+- Home dashboard: accurate ("All quiet", 1 active task, archived VIB-2 off-board).
+- Activity feed: 32/32 events, correctly typed+attributed, full VIB-2 reject flow with
+  consistent honesty disclosures; TODAY/YESTERDAY date-rollover grouping correct.
+- Notifications: correctly typed (packet/policy/approval/quality), targeted to Arda,
+  accurate to events.
+- Bora's account menu omits "Org settings" (admin-only) — coherent role-scoped nav.
