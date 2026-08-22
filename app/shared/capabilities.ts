@@ -374,6 +374,31 @@ export const SCOPED_DELIVERY_CAPABILITY_IDS: readonly string[] = [
   "open-review-pr",
 ];
 
+/**
+ * The capabilities that must be GRANTED to be held — absence is withholding, not
+ * permission (P14-LV-01). Everything that can push code, change the repo, or
+ * record a binding verdict lives here: for these the runtime treats an ABSENT
+ * grant as `off` (see `specialist-tool-policy.isWithheld`). Every OTHER
+ * capability keeps the permissive default when absent — notably
+ * `use-web-search-fetch`, whose catalog default is `direct`, so an absent grant
+ * leaves WebFetch/WebSearch available.
+ *
+ * This is the single source of truth for "safe-by-default withheld", consumed by
+ * BOTH the tool-layer enforcement (server) and the profile editor's toggle
+ * seeding (client) — so the editor shows exactly what the runtime does for an
+ * absent grant, instead of hardcoding `off` and misrepresenting an on-by-default
+ * capability (BUG: the editor showed "Search & fetch from the web" as Off while
+ * the runtime left it On, and any save then silently persisted that Off).
+ */
+export const GRANT_REQUIRED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
+  "execute-code-or-write-repo",
+  "create-task-branch",
+  "commit-push-branch",
+  "open-review-pr",
+  "merge-pull-request",
+  "report-validation-verdict",
+]);
+
 /** What the save layer did — or deliberately did NOT do — with a pair of
  * grants that must agree (the delivery headline over its scoped steps, or web
  * egress under the browser). */

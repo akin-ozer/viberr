@@ -4,6 +4,7 @@ import { useFetcher } from "react-router";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   BROWSER_CAP_ID,
+  GRANT_REQUIRED_CAPABILITY_IDS,
   WEB_EGRESS_CAP_ID,
 } from "~/shared/capabilities";
 import { Icon } from "~/ui/icon";
@@ -150,19 +151,28 @@ function seedCaps(
 ): CapSelection {
   if (!initial) return coupleGrants({ ...defaults });
   const caps: CapSelection = {};
-  for (const id of Object.keys(defaults)) caps[id] = "off";
-  // F10-07: seed EVERY toggle from the STORED grant only — never synthesize an
-  // implicit default. Verdict authority is explicit-only (F10-14), so an absent
-  // `report-validation-verdict` grant stays OFF; the old code fabricated a
-  // `direct` verdict for a non-delivering profile from the delivers-dependent
-  // runtime default, and saving any unrelated field then PERSISTED that `direct`
-  // — silently arming verdict veto. Any non-`direct` stored mode (a legacy
-  // `recommend`, or a `human` written by some other path) also seeds OFF: it is
-  // exactly what the save layer persists for this id
-  // (`agent-profile-actions.server.ts:180` — `mode = mode === "direct" ?
-  // "direct" : "off"`, create path :249), so seeding it any other way would
-  // show the admin a mode the next save silently rewrites (F19 UX-13). A
-  // lossless round-trip can only preserve or narrow authority, never widen it.
+  // Seed each ABSENT toggle to the mode the RUNTIME uses for a missing grant, so
+  // the editor shows exactly what the agent may do — not a hardcoded "off".
+  //   - A GRANT-REQUIRED capability (repo write, branch, push, open-PR, merge,
+  //     verdict) is withheld when absent, so it seeds OFF. This preserves the
+  //     F10-07/F10-14 invariant: `report-validation-verdict` is grant-required,
+  //     so an absent verdict still seeds OFF and a save can never silently arm
+  //     the acceptance veto.
+  //   - Every OTHER capability keeps its permissive default when absent, so it
+  //     seeds from the catalog default. This fixes the BUG where
+  //     `use-web-search-fetch` (catalog default `direct`, i.e. web egress ON)
+  //     rendered as "Off" while WebFetch/WebSearch stayed available, and any
+  //     save then persisted that phantom "off" and silently WITHHELD egress the
+  //     admin never touched. Seeding from the effective default keeps the
+  //     display truthful and the round-trip behaviour-preserving.
+  for (const id of Object.keys(defaults)) {
+    caps[id] = GRANT_REQUIRED_CAPABILITY_IDS.has(id) ? "off" : defaults[id];
+  }
+  // Stored grants win over the seed. Verdict stays explicit-only: a non-`direct`
+  // stored verdict (a legacy `recommend`, or a `human` from some other path)
+  // seeds OFF — exactly what the save layer persists for it
+  // (`agent-profile-actions.server.ts` — `mode = mode === "direct" ? "direct" :
+  // "off"`), so the admin never sees a mode the next save silently rewrites.
   for (const grant of initial.capabilities) {
     if (grant.capabilityId in caps) {
       caps[grant.capabilityId] =

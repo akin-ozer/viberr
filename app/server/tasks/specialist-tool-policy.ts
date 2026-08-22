@@ -1,6 +1,7 @@
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
+  GRANT_REQUIRED_CAPABILITY_IDS,
   SCOPED_DELIVERY_CAPABILITY_IDS,
 } from "~/shared/capabilities";
 
@@ -95,19 +96,9 @@ const CAP_DENY_RULES: readonly {
   // from the catalog rather than narrowed.
 ];
 
-/**
- * Capabilities that must be GRANTED to be held — absence is withholding, not
- * permission (P14-LV-01). Everything that can push code, change the repo, or
- * record a binding verdict lives here.
- */
-const GRANT_REQUIRED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
-  "execute-code-or-write-repo",
-  "create-task-branch",
-  "commit-push-branch",
-  "open-review-pr",
-  "merge-pull-request",
-  "report-validation-verdict",
-]);
+// GRANT_REQUIRED_CAPABILITY_IDS moved to ~/shared/capabilities (single source of
+// truth) so the profile editor seeds its toggles from the same set the runtime
+// withholds by — an absent grant renders exactly as the runtime treats it.
 
 /**
  * Grants → mode lookup, repairing ONE thing: a headline

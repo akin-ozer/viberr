@@ -1413,6 +1413,41 @@ describe("CreateProfileModal", () => {
   });
 
   /**
+   * BUG (pass 23, owner ruling 2026-08-22 — web egress ON by default): editing a
+   * profile seeded every ABSENT toggle to Off. `use-web-search-fetch` ships
+   * absent on the base Developer/Reviewer, but the runtime leaves WebFetch/
+   * WebSearch ON for an absent grant — so the row read "Off" while the agent
+   * could still reach the web, and saving then PERSISTED that phantom Off,
+   * silently withholding egress the admin never touched. The editor now seeds
+   * each absent toggle to the mode the runtime uses for a missing grant.
+   */
+  it("edit mode: an absent web-egress grant seeds Allowed, not Off", () => {
+    const { container, getByText } = renderModal({
+      initial: mkProfile({
+        capabilities: [
+          // Neither web egress nor repo-write is granted here.
+          { capabilityId: "create-task-branch", mode: "direct" },
+        ],
+      }),
+    });
+    fireEvent.click(getByText("Collaboration"));
+    const checkedMode = (label: string) => {
+      const row = container.querySelector<HTMLElement>(
+        `[role="radiogroup"][aria-label^="Policy for ${label}"]`,
+      )!;
+      return Array.from(row.querySelectorAll("button")).find(
+        (b) => b.getAttribute("aria-checked") === "true",
+      )?.textContent;
+    };
+    // Non-grant-required, catalog default `direct` → the runtime leaves WebFetch
+    // on for an absent grant, so the editor seeds Allowed (was Off — the bug).
+    expect(checkedMode("Search & fetch from the web")).toBe("Allowed");
+    // A GRANT-REQUIRED capability (the verdict) stays Off when absent — the
+    // runtime withholds it, preserving the F10-07/F10-14 verdict-safety invariant.
+    expect(checkedMode("Report a validation verdict")).toBe("Off");
+  });
+
+  /**
    * F19 UX-19 — UXA-4 gave this control the radiogroup ROLE and stopped there.
    * A radiogroup promises arrow-key traversal (`app/ui/roving-radio.ts`), which
    * UXA-7 wired into the twin on the Policy sheet (policy-page.tsx:158/:474) and
