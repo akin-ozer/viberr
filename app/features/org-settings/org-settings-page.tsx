@@ -136,6 +136,7 @@ export function OrgSettingsPage({
               mcps={view.mcps}
               skills={view.skills}
               gagents={view.gagents}
+              projectGrants={view.projectGrants}
               stages={view.stages}
             />
           )}

@@ -541,7 +541,9 @@ describe("ResourcesPanel", () => {
   it("kb delete confirms with the spec copy; deployed profile delete is guarded", async () => {
     const { getByText, getByLabelText } = renderResources();
     fireEvent.click(getByLabelText("Delete Architecture notes"));
-    expect(getByText(/The index is removed from the store/)).toBeTruthy();
+    // A2: the confirm discloses the permanent document deletion (server rmSync's
+    // the whole folder), not the euphemistic "the index is removed".
+    expect(getByText(/Permanently deletes the folder/)).toBeTruthy();
     // C6: outcome-naming confirm label per resource kind.
     fireEvent.click(getByText("Remove knowledge base", { selector: "button.btn.danger" }));
     await waitFor(() =>
@@ -640,8 +642,53 @@ describe("ResourcesPanel", () => {
     expect(getByText(/14 tools · checked just now · auth: configured · 1 template/)).toBeTruthy();
 
     fireEvent.click(getByLabelText("Remove github-mcp"));
+    // A2: the tail now names templates AND project agents; this panel render
+    // supplies no `projectGrants` map, so only the 1 template is counted.
     expect(
-      getByText(/The grant is dropped from 1 agent template and from every project/),
+      getByText(/The grant is dropped from 1 agent template\./),
+    ).toBeTruthy();
+  });
+
+  it("A2: the delete tail names PROJECT agents, not just org templates", () => {
+    // A KB granted by NO org template but by two project deployments read as
+    // "Nothing grants it" while the delete silently dropped both grants. The
+    // loader now supplies a per-slug count so the confirm discloses it.
+    const { getByText, getByLabelText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={GAGENTS}
+        projectGrants={{ kbs: { "architecture-notes": 2 }, mcps: {}, skills: {} }}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Delete Architecture notes"));
+    // No template grants this KB (GAGENTS[].kbs is empty), so the OLD copy would
+    // have said "Nothing grants it" — the exact lie A2 fixes.
+    expect(
+      getByText(/The grant is dropped from 2 project agents\./),
+    ).toBeTruthy();
+  });
+
+  it("A2: templates AND project agents are counted together in one tail", () => {
+    // github-mcp is granted by 1 org template (Developer) and, say, 3 project
+    // deployments — the tail must name both, joined.
+    const { getByText, getByLabelText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={GAGENTS}
+        projectGrants={{ kbs: {}, mcps: { "github-mcp": 3 }, skills: {} }}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Remove github-mcp"));
+    expect(
+      getByText(
+        /The grant is dropped from 1 agent template and 3 project agents\./,
+      ),
     ).toBeTruthy();
   });
 
@@ -928,6 +975,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
           mcps: MCPS,
           skills: SKILLS,
           gagents: GAGENTS,
+          projectGrants: { kbs: {}, mcps: {}, skills: {} },
           stages: STAGES,
           providers: { github: false, google: false },
           authProviders: AUTH_PROVIDERS,
@@ -962,6 +1010,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
           mcps: MCPS,
           skills: SKILLS,
           gagents: GAGENTS,
+          projectGrants: { kbs: {}, mcps: {}, skills: {} },
           stages: STAGES,
           providers: { github: false, google: false },
           authProviders: AUTH_PROVIDERS,
