@@ -845,6 +845,57 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     });
     expect(fm().frontmatter.stage).toBe("review");
   });
+
+  it("A9: an UNVERIFIABLE head that still merges records the caveat in the completion event", async () => {
+    // The head reads (a different sha), but the CONTAINMENT compare 404s — the
+    // check could not run. Acceptance still proceeds (an unverifiable head is
+    // allowed, unlike a KNOWN mismatch), the merge lands, and the record must
+    // say the containment check did not run. Canary: drop the A9 branch in
+    // applyAcceptanceWrite and the completion event reads like a verified accept.
+    healthySeed();
+    const patActor = actor(store.users.arda);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0009" },
+      patActor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    // Only the PR-head read is registered; the compare route 404s (unverifiable).
+    github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: "f".repeat(40) } } },
+    });
+    mergeMock.mockResolvedValue({ status: "merged", prNumber: 114, sha: null });
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+      actor(store.users.arda),
+      dataCtx(),
+    );
+
+    const parsed = fm();
+    expect(parsed.frontmatter.stage).toBe("done");
+    expect(parsed.frontmatter.pr?.state).toBe("merged");
+    const completion = parsed.timeline.find((e) => e.type === "completion");
+    expect(completion!.text).toContain("could not be verified against the");
+    expect(completion!.text).toContain("without that containment check");
+  });
+
+  it("A9: a VERIFIED head adds NO caveat (a clean accept never reads as unverified)", async () => {
+    healthySeed();
+    githubReportsHead("f".repeat(40), "ahead"); // head CONTAINS the delivery
+    mergeMock.mockResolvedValue({ status: "merged", prNumber: 114, sha: null });
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+      actor(store.users.arda),
+      dataCtx(),
+    );
+
+    const completion = fm().timeline.find((e) => e.type === "completion");
+    expect(completion!.text).not.toContain("could not be verified");
+  });
 });
 
 describe("F15-11: no acceptance affordance on a task already at the terminal stage", () => {

@@ -6106,6 +6106,17 @@ function forceIrreducibleRefusal(
 export interface AcceptancePrHeadCheck {
   /** The refusal sentence, or null when the head is verified or unverifiable. */
   refusal: string | null;
+  /**
+   * A9 (pass 23): WHY `refusal` is null — the two cases used to be
+   * indistinguishable. `verified` = a live read confirmed the PR head contains
+   * the delivered revision. `unverifiable` = the check could not run (GitHub
+   * unreachable, the PR read or compare failed) — acceptance is still ALLOWED
+   * (the merge's own honesty covers unreachability), but the record must SAY the
+   * containment check did not run or a verified accept and an unverified one read
+   * identically. `not-applicable` = nothing to verify (no PR, no revision, or the
+   * PR is already merged).
+   */
+  verification: "verified" | "unverifiable" | "not-applicable";
   prNumber: number | null;
   revisionHeadSha: string | null;
 }
@@ -6131,8 +6142,10 @@ export async function acceptancePrHeadCheck(
 ): Promise<AcceptancePrHeadCheck> {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   const fm = file?.parsed.frontmatter;
+  const verdict = await evaluateAcceptancePrHead(db, ctx, projectSlug, taskKey);
   return {
-    refusal: await acceptancePrHeadMismatch(db, ctx, projectSlug, taskKey),
+    refusal: verdict.refusal,
+    verification: verdict.verification,
     prNumber: fm?.pr?.number ?? null,
     revisionHeadSha: fm?.workRevision?.headSha ?? null,
   };
@@ -6179,12 +6192,33 @@ export async function acceptancePrHeadMismatch(
   projectSlug: string,
   taskKey: string,
 ): Promise<string | null> {
+  return (await evaluateAcceptancePrHead(db, ctx, projectSlug, taskKey)).refusal;
+}
+
+/**
+ * The one live PR-head evaluation, reporting BOTH the refusal (a KNOWN mismatch)
+ * and WHY a null refusal is null — `verified` (containment confirmed) vs
+ * `unverifiable` (the check could not run) vs `not-applicable` (nothing to
+ * verify). A9 split these apart so the acceptance record can disclose an
+ * unverified head instead of reading like a verified one. Never throws.
+ */
+async function evaluateAcceptancePrHead(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<{
+  refusal: string | null;
+  verification: "verified" | "unverifiable" | "not-applicable";
+}> {
   try {
     const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     const fm = file?.parsed.frontmatter;
     const pr = fm?.pr ?? null;
     const rev = fm?.workRevision ?? null;
-    if (!pr || !rev || pr.state === "merged") return null;
+    if (!pr || !rev || pr.state === "merged") {
+      return { refusal: null, verification: "not-applicable" };
+    }
     const { getProjectGithubContext } = await import(
       "~/server/github/github-context.server"
     );
@@ -6192,16 +6226,21 @@ export async function acceptancePrHeadMismatch(
     const ghOptions: GithubContextOptions = {};
     if (ctx.fetchImpl) ghOptions.fetchImpl = ctx.fetchImpl;
     const gh = getProjectGithubContext(db, projectSlug, ghOptions);
-    if (gh.status !== "ok") return null;
+    if (gh.status !== "ok") {
+      return { refusal: null, verification: "unverifiable" };
+    }
     const live = await gh.client.request(
       "GET",
       `/repos/${gh.repo}/pulls/${pr.number}`,
       pullHeadShaSchema,
     );
-    if (!live.ok) return null;
-    if (!live.data) return null;
+    if (!live.ok || !live.data) {
+      return { refusal: null, verification: "unverifiable" };
+    }
     const headSha = live.data.head.sha;
-    if (headSha === rev.headSha) return null;
+    if (headSha === rev.headSha) {
+      return { refusal: null, verification: "verified" };
+    }
     // Not identical — a head that CONTAINS the delivered commit (e.g. the
     // delivery plus an auto-commit) is still reviewing the delivered work.
     const cmp = await gh.client.request(
@@ -6209,21 +6248,26 @@ export async function acceptancePrHeadMismatch(
       `/repos/${gh.repo}/compare/${rev.headSha}...${headSha}`,
       compareStatusSchema,
     );
-    if (!cmp.ok) return null; // could not compare — unknown, not a refusal
-    if (cmp.data.status === "ahead" || cmp.data.status === "identical") {
-      return null;
+    if (!cmp.ok) {
+      // Could not compare — unknown, not a refusal, but NOT a verification either.
+      return { refusal: null, verification: "unverifiable" };
     }
-    return (
-      `PR #${pr.number}'s head (${headSha.slice(0, 7)}) does not contain the delivered ` +
-      `revision ${rev.headSha.slice(0, 7)}: the PR carries different content than was ` +
-      `delivered. Re-deliver the branch (or fix the remote branch), then re-review.`
-    );
+    if (cmp.data.status === "ahead" || cmp.data.status === "identical") {
+      return { refusal: null, verification: "verified" };
+    }
+    return {
+      refusal:
+        `PR #${pr.number}'s head (${headSha.slice(0, 7)}) does not contain the delivered ` +
+        `revision ${rev.headSha.slice(0, 7)}: the PR carries different content than was ` +
+        `delivered. Re-deliver the branch (or fix the remote branch), then re-review.`,
+      verification: "verified",
+    };
   } catch (error) {
     logger.warn("PR-head verification failed (treated as unknown)", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    return null;
+    return { refusal: null, verification: "unverifiable" };
   }
 }
 
@@ -6700,6 +6744,25 @@ export async function applyAcceptanceWrite(
     // resolution path's long-standing behavior.
     parsed.frontmatter.recommendations = [];
     parsed.packet = null;
+    // A9 (pass 23): the PR head could NOT be verified against the delivered
+    // revision (GitHub unreachable / the compare failed), yet an irreversible
+    // merge still closed this task. The head gate refuses a KNOWN mismatch; an
+    // UNVERIFIABLE head is allowed through (the merge's own honesty covers
+    // unreachability) — but the completion record must SAY the containment check
+    // did not run, or a verified accept and an unverified one read identically on
+    // the most consequential action the product has. Only when a merge actually
+    // landed (an "accepted, merge pending" outcome already discloses the
+    // unreachability itself, so no double note).
+    if (
+      headCheck.verification === "unverifiable" &&
+      headCheck.prNumber !== null &&
+      parsed.frontmatter.pr?.state === "merged"
+    ) {
+      input.event.text +=
+        `\n\nNote: PR #${headCheck.prNumber}'s head could not be verified against the ` +
+        `delivered revision before the merge (GitHub could not be reached for the check). ` +
+        `It was accepted without that containment check.`;
+    }
     parsed.timeline.unshift(input.event);
     accepted = true;
   });
