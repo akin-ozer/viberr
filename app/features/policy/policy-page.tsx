@@ -17,6 +17,7 @@ import {
 /** The Agent-capability rows need the matrix shape plus the role sub-line. */
 export type PcapProfile = MatrixProfile & { role: string };
 import { CapabilityMatrixModal } from "~/features/agents/capability-matrix-modal";
+import { GOVERNED_CAP_LABELS } from "~/features/agents/capability-catalog";
 import type { MembershipView } from "~/features/project-settings/membership.server";
 import type { PolicyViewData, TransitionView } from "./policy-query.server";
 import {
@@ -298,7 +299,18 @@ export function AgentCapability({
       </div>
 
       <div className="pcap-list">
-        {profiles.map((p) => (
+        {profiles.map((p) => {
+          // D-2 (pass 24): the policy count must sum only GOVERNED caps. The
+          // buckets also carry group-null advisory persona lines the runtime never
+          // reads, which the profile-detail page (one click away) relegates to
+          // "Advisory only · N lines". Counting them here made "N direct" disagree
+          // with the detail's "acts directly" column (e.g. Reviewer 11 vs 5).
+          const g = (labels: readonly string[]) =>
+            labels.filter((l) => GOVERNED_CAP_LABELS.has(l));
+          const direct = g(p.actions.direct);
+          const recommend = g(p.actions.recommend);
+          const human = g(p.actions.forbidden);
+          return (
           <button
             type="button"
             className="pcap-row"
@@ -320,10 +332,7 @@ export function AgentCapability({
               </span>
             </span>
             <span className="pcap-counts">
-              {p.actions.direct.length +
-                p.actions.recommend.length +
-                p.actions.forbidden.length ===
-              0 ? (
+              {direct.length + recommend.length + human.length === 0 ? (
                 <span
                   className="cs pcap-readonly"
                   title="This profile holds no gated capabilities. It acts read-only (e.g. reviews the diff and reports a verdict)."
@@ -334,21 +343,22 @@ export function AgentCapability({
                 <>
                   <span className="cs">
                     <span className="d direct"></span>
-                    {p.actions.direct.length} direct
+                    {direct.length} direct
                   </span>
                   <span className="cs">
                     <span className="d recommend"></span>
-                    {p.actions.recommend.length} recommend
+                    {recommend.length} recommend
                   </span>
                   <span className="cs">
                     <span className="d human"></span>
-                    {p.actions.forbidden.length} human
+                    {human.length} human
                   </span>
                 </>
               )}
             </span>
           </button>
-        ))}
+          );
+        })}
       </div>
 
       <div className="human-only">

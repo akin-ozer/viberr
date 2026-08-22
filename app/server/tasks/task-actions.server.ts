@@ -1835,57 +1835,84 @@ export async function postAgentReplyComment(
   // comment, the audit, AND the @mention fan-out, and a log-only catch meant a
   // write failure vanished all of it while the run showed finished, with nothing
   // pointing at the run log. Retry the write once; if it still fails, land a
-  // MINIMAL fallback note so the timeline at least says the report is in the run
-  // log instead of showing nothing.
-  return writeReply()
-    .then(finalizeReply)
-    .catch(async (cause: unknown) => {
-      logger.error("agent reply comment write failed — retrying once", {
+  // C3 (pass-24 fix): retry the WRITE, but keep the write and the finalize on
+  // SEPARATE error paths. The old chain — `writeReply().then(finalizeReply)
+  // .catch(() => { writeReply(); finalizeReply(); })` — re-ran `writeReply` when
+  // `finalizeReply` threw (a transient projection-DB SQLITE_BUSY is a documented
+  // hazard in this repo), posting a reply that had ALREADY landed a SECOND time:
+  // `writeReply` unconditionally unshifts the event (the F22-12 dedup is upstream,
+  // deciding whether to run this at all). Retry only the write; finalize once.
+  let wrote = false;
+  try {
+    await writeReply();
+    wrote = true;
+  } catch (cause: unknown) {
+    logger.error("agent reply comment write failed — retrying once", {
+      taskKey: input.taskKey,
+      runId: input.runId,
+      err: cause instanceof Error ? cause : new Error(String(cause)),
+    });
+    try {
+      await writeReply();
+      wrote = true;
+    } catch (retryCause) {
+      logger.error("agent reply comment write failed on retry", {
         taskKey: input.taskKey,
         runId: input.runId,
-        err: cause instanceof Error ? cause : new Error(String(cause)),
+        err:
+          retryCause instanceof Error
+            ? retryCause
+            : new Error(String(retryCause)),
       });
-      try {
-        await writeReply();
-        finalizeReply();
-        return;
-      } catch (retryCause) {
-        logger.error("agent reply comment write failed on retry", {
-          taskKey: input.taskKey,
-          runId: input.runId,
-          err:
-            retryCause instanceof Error
-              ? retryCause
-              : new Error(String(retryCause)),
-        });
-      }
-      try {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "run" },
-              title: null,
-              text: "The agent's report could not be posted to the timeline. Its full output is in the run log.",
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      } catch (fallbackCause) {
-        logger.error("agent reply fallback note could not be written", {
-          taskKey: input.taskKey,
-          runId: input.runId,
-          err:
-            fallbackCause instanceof Error
-              ? fallbackCause
-              : new Error(String(fallbackCause)),
-        });
-      }
+    }
+  }
+  if (!wrote) {
+    // MINIMAL fallback note so the timeline at least says the report is in the run
+    // log instead of showing nothing.
+    try {
+      await updateTaskFile(
+        taskRef(ctx, input.projectSlug, input.taskKey),
+        (parsed) => {
+          parsed.timeline.unshift({
+            occurredAt: new Date().toISOString(),
+            type: "note",
+            actor: { kind: "system", systemId: "run" },
+            title: null,
+            text: "The agent's report could not be posted to the timeline. Its full output is in the run log.",
+            toAgent: false,
+            evidence: null,
+          });
+        },
+      );
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    } catch (fallbackCause) {
+      logger.error("agent reply fallback note could not be written", {
+        taskKey: input.taskKey,
+        runId: input.runId,
+        err:
+          fallbackCause instanceof Error
+            ? fallbackCause
+            : new Error(String(fallbackCause)),
+      });
+    }
+    return;
+  }
+  // The reply IS posted. Finalize (reproject + audit + @mention fan-out) is
+  // best-effort and must NEVER re-run `writeReply` — a finalize failure loses the
+  // audit row and the human notifications, not the reply, and re-posting the
+  // reply to recover them would duplicate it on the timeline.
+  try {
+    finalizeReply();
+  } catch (finalizeCause) {
+    logger.error("agent reply finalize failed — reply posted, audit/notify lost", {
+      taskKey: input.taskKey,
+      runId: input.runId,
+      err:
+        finalizeCause instanceof Error
+          ? finalizeCause
+          : new Error(String(finalizeCause)),
     });
+  }
 }
 
 // ------------------------------------------------------------ operatorPromptAgent
@@ -2595,19 +2622,27 @@ export async function registerAgentCompletion(
       input.runId,
     );
   }
-  const { registerRunCompletion } = await import(
+  const { registerRunCompletion, noteCompletionEffectsLost } = await import(
     "~/server/runtimes/run-service.server"
   );
   registerRunCompletion(input.runId, (finished) => {
     void applyAgentCompletionEffects(db, ctx, input, {
       id: finished.id,
       state: finished.state,
-    }).catch((cause: unknown) => {
+    }).catch(async (cause: unknown) => {
       logger.error("agent-run completion handler failed", {
         taskKey: input.taskKey,
         runId: finished.id,
         err: cause instanceof Error ? cause : new Error(String(cause)),
       });
+      // C4 (pass-24 fix): THIS rejection is the real failure path. The callback
+      // is `void applyAgentCompletionEffects(...).catch(...)`, so it never throws
+      // synchronously — the guard in run-service (`fireIfAlreadyTerminal`) wraps a
+      // synchronous `cb()` call and can never catch an async rejection here. Surface
+      // the lost effects where they actually fail, or the board reads "agent working"
+      // until the next restart replays recovery. `noteCompletionEffectsLost` is
+      // itself best-effort and never throws.
+      await noteCompletionEffectsLost(db, finished, ctx.dataRoot);
     });
   }, db);
 }
@@ -2747,6 +2782,20 @@ export async function applyAgentCompletionEffects(
     // back to the prose classifier (G4). The regex NEVER runs without authority
     // (R1 — a developer's "tests pass" can't flip validation).
     let verdict = verdictAuthorized ? (outcome?.verdict ?? null) : null;
+    if (!verdictAuthorized && outcome?.verdict) {
+      // B-5 (pass 24): a Codex agent CAN fill the `verdict` field of its outcome
+      // envelope even without the `report-validation-verdict` grant — the JSON
+      // schema always carries the field, whereas Claude's `report_outcome` omits
+      // it when ungranted, so this asymmetry is Codex-only. The verdict is
+      // correctly discarded (validation stays gated on the grant), but the drop
+      // must not be silent — a maintainer reading the reply's "I approve" prose
+      // would otherwise believe a review judgement was recorded.
+      logger.info("agent emitted a verdict without the grant — discarded", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        verdict: outcome.verdict,
+      });
+    }
     if (!verdict && verdictAuthorized) {
       verdict = classifyReviewerVerdict(replyText);
       if (verdict) {
@@ -2806,7 +2855,26 @@ export async function applyAgentCompletionEffects(
     // verdict and no note, and had to diff run logs against validation to notice
     // the judgment was lost. Say so, so the review can be re-run or a verdict
     // recorded by hand. Best-effort: a note failure never fails the completion.
-    if (verdictAuthorized && !verdict) {
+    //
+    // pass-24 (C-4) narrows the trigger. The pass-23 condition fired on EVERY
+    // completion of a verdict-capable reviewer, so a conversational @mention reply
+    // ("@Reviewer summarize your concerns") — which produces no verdict by design
+    // — got a spurious "acceptance stays gated" warning, even on tasks nowhere near
+    // review. Only warn when a verdict was actually EXPECTED: the reviewer asked no
+    // question (a question is a legitimate no-verdict outcome), and the task is at
+    // the review stage the note is about.
+    const reviewStageId = ((): string | null => {
+      const proj = readProjectFile({
+        projectSlug: input.projectSlug,
+        dataRoot: ctx.dataRoot,
+      })?.parsed.frontmatter;
+      return proj ? resolveStageRoles(proj.stages, proj.workflow).reviewId : null;
+    })();
+    const atReviewStage =
+      !!completionFm &&
+      !!reviewStageId &&
+      completionFm.stage === reviewStageId;
+    if (verdictAuthorized && !verdict && !question && atReviewStage) {
       try {
         await updateTaskFile(
           taskRef(ctx, input.projectSlug, input.taskKey),

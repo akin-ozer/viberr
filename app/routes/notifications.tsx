@@ -8,6 +8,7 @@ import {
   countUnreadNotifications,
   listNotifications,
 } from "~/server/projections/notifications.server";
+import { decisionsRequiring } from "~/server/projections/decisions.server";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -53,11 +54,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     unread: countUnreadNotifications(db, user.id),
     truncated,
     limit: NOTIF_PAGE_LIMIT,
+    // D-3 (pass 24): the AUTHORITATIVE count of decisions this viewer must act on
+    // — the SAME source the home hero's "N decisions waiting on you" uses. The
+    // "Waiting on you" panel used to count notification ROWS (`needsTotal`), which
+    // misses a decision whose watcher set predates the viewer's authority (a later
+    // promotion), or one past the row window — so home said "1 waiting" while this
+    // page said "nothing". The header now states this number; the row list still
+    // shows the rows that exist, with the shortfall disclosed.
+    decisionCount: decisionsRequiring(db, user.id).mine.length,
   };
 }
 
 export default function Notifications({ loaderData }: Route.ComponentProps) {
-  const { notifications, unread, truncated, limit } = loaderData;
+  const { notifications, unread, truncated, limit, decisionCount } = loaderData;
   const navigate = useNavigate();
   const location = useLocation();
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -122,6 +131,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
       <NotificationsPage
         items={notifications}
         unread={unread}
+        decisionCount={decisionCount}
         truncated={truncated}
         limit={limit}
         onRead={markRead}

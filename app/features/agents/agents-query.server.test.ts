@@ -246,6 +246,57 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
 });
 
 /**
+ * A-1 / A-2 (pass 24): the operator materialization must match the OPERATOR gate,
+ * not the specialist polarity. `update-task-branch` (governance-dependent) was
+ * EXCLUDED from the view while the editor seeded it at a flat catalog `direct`, so
+ * an unrelated save silently widened it recommend→direct on a strict project; and
+ * an absent operator COORDINATION cap was shown at its catalog default while
+ * `gate()` denies it (`policy.get(id) ?? "off"`). Both are the F15-20 "display
+ * asserts a mode the runtime does not use" class (fourth recurrence).
+ */
+describe("A-1/A-2 (pass 24): operator materialization matches the runtime gate", () => {
+  const operatorDeployment = (capabilities: CapabilityGrant[]): AgentDeployment => ({
+    profileId: "operator",
+    capabilities,
+    extras: [],
+    definition: { kind: "operator", name: "Operator", role: "Task coordinator" },
+  });
+
+  it("materializes an absent update-task-branch at the delivery-gate mode (auto ⇒ direct)", () => {
+    const view = effectiveProfileView(
+      operatorDeployment([cap("deliver-review-pr", "direct")]),
+      undefined,
+      absentDeliverReviewPrMode(false),
+    );
+    expect(view.actions.direct).toContain("Bring the task branch up to date");
+  });
+
+  it("on a human-gated project the absent update-task-branch shows recommend, never direct (no silent widening)", () => {
+    // Canary: seed `update-task-branch` at a flat catalog `direct` (the pre-fix
+    // seedCaps value an unrelated save would then persist) and this fails.
+    const view = effectiveProfileView(
+      operatorDeployment([cap("deliver-review-pr", "recommend")]),
+      undefined,
+      absentDeliverReviewPrMode(true),
+    );
+    expect(view.actions.recommend).toContain("Bring the task branch up to date");
+    expect(view.actions.direct).not.toContain("Bring the task branch up to date");
+  });
+
+  it("an absent operator COORDINATION cap materializes as off, not the catalog default (the gate denies it)", () => {
+    // `stage-transitions` absent ⇒ `gate()` = off; the pre-fix specialist polarity
+    // showed its catalog `recommend`, and a save would have armed it.
+    const view = effectiveProfileView(
+      operatorDeployment([cap("assign-primary-specialist", "direct")]),
+      undefined,
+      absentDeliverReviewPrMode(false),
+    );
+    expect(view.actions.off).toContain("Stage transitions");
+    expect(view.actions.recommend).not.toContain("Stage transitions");
+  });
+});
+
+/**
  * A1 (pass 23, BUG-1 follow-on): BUG-1 fixed the EDITOR to seed an absent
  * permissive-default grant at its runtime-effective mode; the READ surfaces
  * (matrix / profile detail / policy counts) still rendered only persisted grants,

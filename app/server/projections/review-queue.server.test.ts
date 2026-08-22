@@ -8,6 +8,7 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "./rebuilder.server";
 import { getReviewQueue } from "./review-queue.server";
 
@@ -173,6 +174,28 @@ describe("getReviewQueue", () => {
 
   it("returns empty panels for a project with no review-stage tasks", () => {
     const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const queue = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(queue).toEqual({ ready: [], working: [], total: 0 });
+  });
+
+  it("D-1 (pass 24): an ARCHIVED project has an EMPTY review queue (parity with decisionsRequiring)", () => {
+    // The review queue counted only archived TASKS, never archived PROJECTS — so
+    // an acceptance-ready review task on an archived project showed under "waiting
+    // on your acceptance" (and the board chip) while home/notifications said
+    // nothing waited and the server refused the accept. Archive the project the
+    // way the app does (flip the frontmatter flag + reproject) and the queue is
+    // empty, matching `decisionsRequiring`, which drops archived projects.
+    // Canary: drop the `!project.archived` guard in getReviewQueue and this fails.
+    const store = setup();
+    const proj = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, { ...proj.parsed.frontmatter, archived: true });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const queue = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,

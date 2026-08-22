@@ -223,16 +223,20 @@ describe("loader", () => {
     expect(operator.spanAll).toBe(true);
     expect(operator.model).toBe("orchestration runtime");
     // Operator action-bucket sizes: the 4 granted coordination caps + R15-2's
-    // materialized `deliver-review-pr`, PLUS A1's materialized `use-web-search-
-    // fetch` — the seeded operator omits the web grant but the runtime keeps
-    // WebFetch on (operator-run.server.ts absent⇒kept), so the read surfaces now
-    // show it Allowed instead of "Not granted". => 6 direct / 2 recommend / 3
-    // forbidden. (`update-task-branch` stays governance-dependent, not shown.)
-    expect(operator.actions.direct).toHaveLength(6);
+    // materialized `deliver-review-pr`, A1's materialized `use-web-search-fetch`,
+    // AND pass-24 A-1's materialized `update-task-branch` — the seeded operator
+    // omits both grants but the runtime keeps web egress ON (absent⇒kept) and
+    // updateBranchGate resolves an absent branch-update through the delivery gate
+    // (here `direct`, an auto-advance project). => 7 direct / 2 recommend / 3
+    // forbidden. Every governance-derived grant is now shown at its runtime mode.
+    expect(operator.actions.direct).toHaveLength(7);
     expect(operator.actions.recommend).toHaveLength(2);
     expect(operator.actions.forbidden).toHaveLength(3);
     // A1: the operator's absent web-egress renders Allowed (matches the runtime).
     expect(operator.actions.direct).toContain("Search & fetch from the web");
+    // A-1 (pass 24): the absent branch-update grant renders at the delivery-gate
+    // mode (Allowed on this auto project), not omitted, not a flat catalog direct.
+    expect(operator.actions.direct).toContain("Bring the task branch up to date");
     // F19-12: the rendered label is the shipped vocabulary ("delivering agent",
     // per execution-profile.tsx); the capability ID stays `assign-primary-specialist`
     // because it is a persisted key. Reverting app/shared/capabilities.ts fails this.

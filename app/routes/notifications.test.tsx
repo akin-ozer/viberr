@@ -39,6 +39,7 @@ const LOADER_DATA: Route.ComponentProps["loaderData"] = {
   unread: 1,
   truncated: false,
   limit: 200,
+  decisionCount: 1,
 };
 
 function renderOverlay(result: { ok: boolean; error?: string }) {

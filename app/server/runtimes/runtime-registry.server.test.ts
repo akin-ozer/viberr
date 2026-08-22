@@ -753,14 +753,14 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     expect(operator.claude.permissionMode).toBe("bypassPermissions");
     expect(operator.codex.thread.sandboxMode).not.toBe("danger-full-access");
 
-    // The one DISCLOSED operator asymmetry ("The Claude operator can reach the
-    // web when Search & fetch from the web is granted; the Codex operator
-    // cannot"): with the grant held, Claude keeps the web tools and Codex still
-    // refuses. If Codex ever gained operator web access this fails and the
-    // capability-matrix note has to change with it.
+    // B-2 (pass 24, owner ruling): the operator now honors `use-web-search-fetch`
+    // on BOTH backends, removing the old asymmetry. With the grant HELD, Claude
+    // keeps WebFetch/WebSearch AND the Codex operator gets web search — its
+    // OS-sandbox network stays off (`networkAccessEnabled: false`, above), which
+    // is a different egress. A withheld grant disables web search on both.
     expect(operator.claude.disallowedTools ?? []).not.toContain("WebFetch");
     expect(operator.claude.disallowedTools ?? []).not.toContain("WebSearch");
-    expect(operator.codex.thread.webSearchMode).toBe("disabled");
+    expect(operator.codex.thread.webSearchMode).not.toBe("disabled");
   });
 
   it("both backends carry the same task identity into the run (NFR15 traceability)", async () => {

@@ -224,7 +224,7 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
         projectSlug={board.project.slug}
         projectName={board.project.name}
         projectRepo={board.project.repo}
-        membersCount={board.members.length}
+        membersCount={board.members.filter((m) => !m.missing).length}
         boardCount={loaderData.taskCount}
         reviewCount={loaderData.reviewCount}
         violations={loaderData.violations}

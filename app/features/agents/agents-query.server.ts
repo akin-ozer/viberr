@@ -303,13 +303,31 @@ export function effectiveProfileView(
   // not be edited: an operator was pushing branches and opening PRs with no
   // row saying so. Materialize it at the mode the runtime actually applies —
   // which since R15-9 depends on the project's governance, not on a constant.
-  const operatorGrants =
-    deployment.capabilities.some((c) => c.capabilityId === "deliver-review-pr")
-      ? deployment.capabilities
-      : [
-          ...deployment.capabilities,
-          { capabilityId: "deliver-review-pr", mode: absentDeliverMode },
-        ];
+  // Operator governance-dependent caps (deliver-review-pr, update-task-branch)
+  // resolve an ABSENT grant through the delivery gate, not a flat catalog
+  // default. `updateBranchGate` falls back to `deliverGate`, so BOTH share the
+  // operator's EFFECTIVE deliver mode: its explicit `deliver-review-pr` grant, or
+  // `absentDeliverMode` when that too is absent. Pass-24 A-1: `update-task-branch`
+  // used to be excluded from materialization entirely (invisible on the matrix /
+  // detail / policy) while the editor seeded it at a flat catalog `direct` — an
+  // unrelated save then silently WIDENED it recommend→direct on a strict project.
+  // Materializing it here at the runtime mode makes all surfaces AND the editor
+  // seed agree (seedCaps reads this view).
+  const operatorGrants = (() => {
+    if (isSpecialist) return deployment.capabilities;
+    const has = new Set(deployment.capabilities.map((c) => c.capabilityId));
+    const deliverMode =
+      deployment.capabilities.find((c) => c.capabilityId === "deliver-review-pr")
+        ?.mode ?? absentDeliverMode;
+    const added: { capabilityId: string; mode: CapabilityMode }[] = [];
+    if (!has.has("deliver-review-pr")) {
+      added.push({ capabilityId: "deliver-review-pr", mode: absentDeliverMode });
+    }
+    if (!has.has("update-task-branch")) {
+      added.push({ capabilityId: "update-task-branch", mode: deliverMode });
+    }
+    return [...deployment.capabilities, ...added];
+  })();
   const effectiveGrants = isSpecialist
     ? deployment.capabilities.map((c) => ({
         capabilityId: c.capabilityId,
@@ -331,26 +349,27 @@ export function effectiveProfileView(
   const grantKind = isSpecialist ? "agent" : "operator";
   const alwaysHuman = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
   const present = new Set(effectiveGrants.map((c) => c.capabilityId));
-  // `deliver-review-pr` (materialized above at `absentDeliverMode`) and
-  // `update-task-branch` resolve their ABSENT mode from the project's governance
-  // (`deliverGate`/`updateBranchGate`), not from a flat catalog default —
-  // materializing them here at `direct` would over-state them on a human-gated
-  // project. `deliver-review-pr` is already in `present`; exclude update-branch.
-  const governanceDependent = new Set(["update-task-branch"]);
+  // The mode the RUNTIME applies to an ABSENT grant, per profile kind — this must
+  // match the gate the runtime consults, or the display (and the editor seed that
+  // reads it) over/under-states authority (F15-20 / BUG-1 / pass-24 A-1,A-2):
+  //  · specialist: the `isWithheld` polarity — grant-required → `off`, else the
+  //    catalog default.
+  //  · operator: `gate()` reads an absent grant as `off` for EVERY coordination
+  //    capability (`authority.policy.get(id) ?? "off"`); the two governance-
+  //    dependent grants are already materialized above at the delivery-gate mode;
+  //    web egress keeps its catalog default (`operatorWebWithheld` leaves an
+  //    absent grant ON). Materializing a coordination cap at its catalog `direct`/
+  //    `recommend` would show — and let a save arm — authority the gate denies.
+  const absentMode = (c: (typeof UNIFIED_CAP_CATALOG)[number]): CapabilityMode => {
+    if (alwaysHuman.has(c.id)) return "human";
+    if (grantKind === "operator") {
+      return c.id === "use-web-search-fetch" ? c.defaultMode : "off";
+    }
+    return GRANT_REQUIRED_CAPABILITY_IDS.has(c.id) ? "off" : c.defaultMode;
+  };
   const absentMaterialized = UNIFIED_CAP_CATALOG.filter(
-    (c) =>
-      c.kinds.includes(grantKind) &&
-      c.group !== null &&
-      !present.has(c.id) &&
-      !governanceDependent.has(c.id),
-  ).map((c) => ({
-    capabilityId: c.id,
-    mode: (alwaysHuman.has(c.id)
-      ? "human"
-      : GRANT_REQUIRED_CAPABILITY_IDS.has(c.id)
-        ? "off"
-        : c.defaultMode) as CapabilityMode,
-  }));
+    (c) => c.kinds.includes(grantKind) && c.group !== null && !present.has(c.id),
+  ).map((c) => ({ capabilityId: c.id, mode: absentMode(c) }));
   const capabilities = [
     ...effectiveGrants.map((c) => ({
       capabilityId: c.capabilityId,

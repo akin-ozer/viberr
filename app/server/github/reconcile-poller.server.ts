@@ -7,7 +7,24 @@ import {
   reconcileProject,
   RECONCILE_POLL_TASK_BUDGET,
   type GithubActionContext,
+  type ProjectReconcileSummary,
 } from "./github-reconciler.server";
+
+/**
+ * C7 (pass-24 fix): did this pass fail for a reason the "GitHub sync failing"
+ * alert is about — a credential or network problem, not a clean pass? A missing
+ * or removed credential comes back as `status !== "ok"` (a project only enters
+ * the poll set once it has a branched task, so it HAD a working credential); a
+ * revoked/expired PAT or a network drop surfaces as per-task `auth_failed` /
+ * `network_unavailable` results. None of these throw, so the poller must read the
+ * returned summary rather than relying on its try/catch.
+ */
+export function reconcileSummaryFailed(summary: ProjectReconcileSummary): boolean {
+  if (summary.status !== "ok") return true;
+  return summary.results.some(
+    (r) => r.status === "auth_failed" || r.status === "network_unavailable",
+  );
+}
 
 /**
  * Background PR-status poller (P11-14, owner ruling 2026-07-24). The R8-6
@@ -214,8 +231,16 @@ export async function pollGithubReconcile(
       });
       reconciled += summary.reconciled;
       changed += summary.changed;
-      // C7: a clean pass clears any failure streak so a fresh outage re-alerts.
-      noteReconcileSuccess(slug);
+      // C7 (pass-24 fix): `reconcileProject` does NOT throw for the failure class
+      // the alert names — a revoked/expired/removed credential returns a summary
+      // (`status !== "ok"`, or per-task `auth_failed`/`network_unavailable`
+      // results), never an exception. Detecting failure only in the catch below
+      // meant every tick ran `noteReconcileSuccess` and cleared the streak, so the
+      // "GitHub sync failing" alert could fire only on unrelated DB/file throws.
+      // Read the summary: a credential/network failure is a failure.
+      if (reconcileSummaryFailed(summary)) noteReconcileFailure(db, slug);
+      // A clean pass clears any streak so a fresh outage re-alerts.
+      else noteReconcileSuccess(slug);
     } catch (error) {
       logger.warn("github reconcile poll failed for a project", {
         projectSlug: slug,
