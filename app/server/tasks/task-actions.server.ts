@@ -883,6 +883,15 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * The route can toast about this; we never throw for a well-formed comment.
    */
   runtimeDenied: boolean;
+  /**
+   * Why an @operator mention did NOT start a run even though the commenter could
+   * trigger one: `open-packet` (a decision packet is awaiting the human — resolve
+   * it first) or `terminal-stage` (the task is Done — reopen it). Null when the
+   * operator run started normally or no operator was mentioned. Without this the
+   * operator branch reported `triggered: "started"` on a refused run, so the route
+   * toasted "@Operator is picking it up" while nothing ran (the reply never came).
+   */
+  operatorRefused: "open-packet" | "terminal-stage" | null;
 }
 
 // ------------------------------------------------- canonical re-anchor (D-3)
@@ -1102,7 +1111,14 @@ export async function commentToAgent(
         },
       });
     }
-    return { ...base, agent: null, triggered: null, logThreadId: null, runtimeDenied: false };
+    return {
+      ...base,
+      agent: null,
+      triggered: null,
+      logThreadId: null,
+      runtimeDenied: false,
+      operatorRefused: null,
+    };
   }
 
   const agentIdentity = {
@@ -1120,6 +1136,7 @@ export async function commentToAgent(
       triggered: null,
       logThreadId: null,
       runtimeDenied: true,
+      operatorRefused: null,
     };
   }
 
@@ -1140,13 +1157,36 @@ export async function commentToAgent(
       dataRoot: ctx.dataRoot,
       actor: { userId: actor.userId, label: actor.label },
     });
+    // A manual operator trigger is REFUSED (no run) while a decision packet is
+    // open or the task is Done — a paid no-op that would spin the operator while
+    // the ball is in the human's court. `runOperator` returns `refused` +
+    // `runId: null` then; report that honestly instead of claiming the operator
+    // is picking the comment up (the reply would never come). The comment is
+    // already recorded via `base`.
+    if (result.refused) {
+      return {
+        ...base,
+        agent: agentIdentity,
+        triggered: null,
+        logThreadId: null,
+        runtimeDenied: false,
+        operatorRefused: result.refused,
+      };
+    }
     const logThreadId = resolveReplyLogThread(
       db,
       input.projectSlug,
       input.taskKey,
       result.runId,
     );
-    return { ...base, agent: agentIdentity, triggered: "started", logThreadId, runtimeDenied: false };
+    return {
+      ...base,
+      agent: agentIdentity,
+      triggered: "started",
+      logThreadId,
+      runtimeDenied: false,
+      operatorRefused: null,
+    };
   }
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
@@ -1359,7 +1399,14 @@ export async function commentToAgent(
   // hiccup just yields null and the UI simply doesn't auto-select).
   const logThreadId = resolveReplyLogThread(db, input.projectSlug, input.taskKey, runId);
 
-  return { ...base, agent: agentIdentity, triggered, logThreadId, runtimeDenied: false };
+  return {
+    ...base,
+    agent: agentIdentity,
+    triggered,
+    logThreadId,
+    runtimeDenied: false,
+    operatorRefused: null,
+  };
 }
 
 /**
