@@ -3299,6 +3299,86 @@ export async function releaseOwner(
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
 }
 
+/** A row from `task_projections` naming a task with a projected human owner. */
+const ownedTaskKeyRow = z.object({ task_key: z.string() });
+
+/**
+ * A3 (pass 23): release every task a departing member OWNS in one project.
+ *
+ * Removing a member from a project — or deleting their org account — dropped
+ * them from `members[]` and stopped there, leaving every task they OWNED
+ * pointing at an `ownerUserId` that is no longer a member. The board resolved a
+ * GHOST owner and review/acceptance stalled on a seat nobody could fill, while
+ * both removal dialogs promised the seat was handled ("returns to the operator
+ * for reassignment") — it was not touched at all. Ownership is a HUMAN seat that
+ * `assignOwner` keeps deliberately orthogonal to the operator, so the honest
+ * response is to RELEASE the seat — the same clear-to-null `releaseOwner`
+ * performs — so a contributor+ can take it. Returns how many tasks were freed.
+ *
+ * Best-effort per task: a task that vanished or was re-owned between the
+ * projection read and the write is skipped, never fatal to the removal that
+ * triggered it. Archived tasks are left alone — they sit off every active board
+ * and queue, so a ghost owner there blocks nothing; a restore re-opens ownership
+ * the normal way. Enumerated from the projection (the board's own owner index),
+ * re-checked against the authoritative task file inside the write lock.
+ */
+export async function releaseTasksOwnedBy(
+  db: DatabaseSync,
+  input: { projectSlug: string; userId: string; removedName: string },
+  actor: { userId: string | null; label: string },
+  ctx: TaskMutationContext = {},
+): Promise<number> {
+  const keys = db
+    .prepare(
+      `SELECT task_key FROM task_projections
+        WHERE project_slug = ? AND owner_user_id = ? AND archived = 0`,
+    )
+    .all(input.projectSlug, input.userId)
+    .flatMap((row) => {
+      const parsed = ownedTaskKeyRow.safeParse(row);
+      return parsed.success ? [parsed.data.task_key] : [];
+    });
+
+  let released = 0;
+  for (const taskKey of keys) {
+    const ref = taskRef(ctx, input.projectSlug, taskKey);
+    const existing = readTaskFile(ref);
+    // Projection can lag the file (a re-owned or deleted task): trust the file.
+    if (!existing || existing.parsed.frontmatter.ownerUserId !== input.userId) {
+      continue;
+    }
+    const event: TaskFileEvent = {
+      occurredAt: new Date().toISOString(),
+      type: "assign",
+      actor: { kind: "system", systemId: "membership" },
+      title: null,
+      text: `**${input.removedName}** was removed from the project, releasing task ownership. The seat is open for any contributor or above to take; review & acceptance stall until someone does.`,
+      toAgent: false,
+      evidence: null,
+    };
+    let changed = false;
+    await updateTaskFile(ref, (parsed) => {
+      if (parsed.frontmatter.ownerUserId !== input.userId) return;
+      parsed.frontmatter.ownerUserId = null;
+      parsed.timeline.unshift(event);
+      changed = true;
+    });
+    if (!changed) continue;
+    reprojectTask(db, ctx, input.projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.ownership.released_on_removal",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug: input.projectSlug,
+      taskKey,
+      details: { previousOwnerUserId: input.userId },
+    });
+    released += 1;
+  }
+  return released;
+}
+
 // -------------------------------------------------------------- transition
 
 /** Apply a declared workflow transition with its configured authority boundary. */

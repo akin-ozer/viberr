@@ -38,6 +38,7 @@ import {
   spliceStageIntoChain,
 } from "~/shared/workflow/transitions";
 import { countLiveAdmins, removedAccountLabel } from "./membership.server";
+import { releaseTasksOwnedBy } from "~/server/tasks/task-actions.server";
 
 /**
  * F20-15: GitHub's `/repos/{owner}/{repo}` returns the `permissions` block it
@@ -899,16 +900,33 @@ export async function removeMember(
   });
 
   reprojectProject(db, ctx, input.projectSlug);
+  // A3 (pass 23): a removed member must not stay the OWNER of tasks they can no
+  // longer reach. Release each seat (clear → null + a system timeline note) so a
+  // contributor+ can take it — the honest form of the dialog's promise that
+  // "any task they own returns … for reassignment", which nothing did before.
+  const released = await releaseTasksOwnedBy(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      userId: input.targetUserId,
+      removedName: displayName,
+    },
+    actor,
+    { dataRoot: ctx.dataRoot },
+  );
   recordAudit(db, {
     action: "project.member.removed",
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "user",
     subjectId: input.targetUserId,
     projectSlug: input.projectSlug,
-    details: {},
+    details: { tasksReleased: released },
   });
   return {
-    toast: `${displayName} removed from ${projectName}`,
+    toast:
+      released > 0
+        ? `${displayName} removed from ${projectName}. ${released} owned task${released === 1 ? "" : "s"} released for reassignment.`
+        : `${displayName} removed from ${projectName}`,
   };
 }
 

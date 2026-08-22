@@ -803,7 +803,7 @@ export function UsersPanel({
         <ConfirmDelete
           what={confirm.item.name}
           confirmLabel="Remove member"
-          detail="Their comments and decisions stay in the audit history. Task assignments return to the operator for reassignment."
+          detail="Their comments and decisions stay in the audit history. Any task they own is released in every project: each ownership seat reopens for another contributor to take."
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             rowAction.submit({ intent: "user-remove", userId: confirm.item.id });

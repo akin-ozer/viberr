@@ -1079,7 +1079,7 @@ export function MembersPanel({
           body={
             confirmRemove.missing
               ? "This clears the stale membership left by a deleted org account. The audit history is untouched."
-              : "They lose access to this project. Their comments and decisions stay in the audit history, and any task they own returns to the operator for reassignment."
+              : "They lose access to this project. Their comments and decisions stay in the audit history, and any task they own is released: the ownership seat reopens for another contributor to take."
           }
           confirmLabel="Remove member"
           busy={busy}

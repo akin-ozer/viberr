@@ -418,13 +418,35 @@ describe("members", () => {
       intent: "remove-member",
       userId: ids.selin,
     });
+    // A3 (pass 23): Selin owns a task in the demo seed; removing her RELEASES it
+    // (clears the owner seat) so nothing strands on a ghost owner, and the toast
+    // discloses the reassignment the dialog copy promises.
     expect(remove).toEqual({
       ok: true,
-      toast: "Selin Aksoy removed from Viberr Core",
+      toast:
+        "Selin Aksoy removed from Viberr Core. 1 owned task released for reassignment.",
     });
     expect(
       listAuditEvents(app.db, { action: "project.member.removed" })[0],
-    ).toMatchObject({ subjectId: ids.selin, projectSlug: "viberr-core" });
+    ).toMatchObject({
+      subjectId: ids.selin,
+      projectSlug: "viberr-core",
+      details: { tasksReleased: 1 },
+    });
+    // The release is auditable per task, and no task still names her as owner.
+    expect(
+      listAuditEvents(app.db, {
+        action: "task.ownership.released_on_removal",
+      }).length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      app.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM task_projections
+            WHERE project_slug = 'viberr-core' AND owner_user_id = ?`,
+        )
+        .get(ids.selin),
+    ).toMatchObject({ n: 0 });
     // Restore Selin via invite + role change back to reviewer (Policy owns
     // roles; the settings invite always lands on Viewer).
     await postAction(ids.arda, {

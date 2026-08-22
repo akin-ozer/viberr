@@ -32,6 +32,7 @@ import {
 } from "~/server/files/project-writer.server";
 import { listProjects } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { releaseTasksOwnedBy } from "~/server/tasks/task-actions.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { initialsOfName } from "~/shared/mapping/actor.server";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
@@ -332,6 +333,10 @@ export async function pruneUserFromProjects(
   ctx: { dataRoot?: string } = {},
 ): Promise<string[]> {
   const changed: string[] = [];
+  // A3 (pass 23): the removed member's display name for the ownership-release
+  // timeline note. Prune runs BEFORE the `users` row is deleted, so the name is
+  // present; a fallback covers any future caller that prunes post-deletion.
+  const removedName = findUserById(db, userId)?.name ?? "A removed member";
   for (const project of listProjects(db)) {
     const ref = { projectSlug: project.slug, dataRoot: ctx.dataRoot };
     const file = readProjectFile(ref);
@@ -347,13 +352,27 @@ export async function pruneUserFromProjects(
     rebuildPath(db, projectFilePath(project.slug, ctx.dataRoot), {
       dataRoot: ctx.dataRoot,
     });
+    // A3: release the tasks this user OWNED in the project before their account
+    // disappears, so no task strands on a ghost owner. Mirrors the project-level
+    // removeMember path — the org dialog's "Task assignments return … for
+    // reassignment" promise, made real across every project at once.
+    const released = await releaseTasksOwnedBy(
+      db,
+      { projectSlug: project.slug, userId, removedName },
+      actor,
+      { dataRoot: ctx.dataRoot },
+    );
     recordAudit(db, {
       action: "project.member.removed",
       actor,
       subjectKind: "user",
       subjectId: userId,
       projectSlug: project.slug,
-      details: { reason: "org account removed", targetUserId: userId },
+      details: {
+        reason: "org account removed",
+        targetUserId: userId,
+        tasksReleased: released,
+      },
     });
     changed.push(project.slug);
   }

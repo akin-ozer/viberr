@@ -40,6 +40,7 @@ import {
   postAgentReplyComment,
   recordAgentCompletion,
   releaseOwner,
+  releaseTasksOwnedBy,
   setOwner,
   clearWaitingToHuman,
   performDelivery,
@@ -1296,6 +1297,115 @@ describe("ownership", () => {
     expect(getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]?.text).toBe(
       "Released task ownership. Review & acceptance stall until another member takes the seat.",
     );
+  });
+});
+
+describe("releaseTasksOwnedBy (A3: member removal releases owned seats)", () => {
+  const adminActor = (store: TestStore) => ({
+    userId: store.users.arda.id,
+    label: store.users.arda.email,
+  });
+  const owner = (store: TestStore, key: string) =>
+    readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.ownerUserId;
+
+  it("clears every seat the departing member owned, with a system note + per-task audit", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.selin.id }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { ownerUserId: store.users.selin.id }),
+    });
+    // A task owned by SOMEONE ELSE must be left alone.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const released = await releaseTasksOwnedBy(
+      store.db,
+      {
+        projectSlug: store.slug,
+        userId: store.users.selin.id,
+        removedName: store.users.selin.name,
+      },
+      adminActor(store),
+      { dataRoot: store.dataRoot },
+    );
+
+    expect(released).toBe(2);
+    expect(owner(store, "VIB-1")).toBeNull();
+    expect(owner(store, "VIB-2")).toBeNull();
+    expect(owner(store, "VIB-3")).toBe(store.users.arda.id);
+
+    // A system-authored timeline note explains the release.
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]).toMatchObject({
+      type: "assign",
+      text: `**${store.users.selin.name}** was removed from the project, releasing task ownership. The seat is open for any contributor or above to take; review & acceptance stall until someone does.`,
+    });
+
+    // Each release is auditable and names the previous owner.
+    const audits = listAuditEvents(store.db, {
+      action: "task.ownership.released_on_removal",
+    });
+    expect(audits.length).toBe(2);
+    expect(audits[0]?.details).toMatchObject({
+      previousOwnerUserId: store.users.selin.id,
+    });
+    // The projection no longer indexes selin as an owner in the project.
+    expect(
+      store.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM task_projections
+            WHERE project_slug = ? AND owner_user_id = ?`,
+        )
+        .get(store.slug, store.users.selin.id),
+    ).toMatchObject({ n: 0 });
+  });
+
+  it("skips an ARCHIVED owned task — it sits off every active surface, so a ghost owner there blocks nothing", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.selin.id,
+        archived: true,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const released = await releaseTasksOwnedBy(
+      store.db,
+      {
+        projectSlug: store.slug,
+        userId: store.users.selin.id,
+        removedName: store.users.selin.name,
+      },
+      adminActor(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(released).toBe(0);
+    expect(owner(store, "VIB-1")).toBe(store.users.selin.id);
+  });
+
+  it("returns 0 when the member owned nothing", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: null }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const released = await releaseTasksOwnedBy(
+      store.db,
+      {
+        projectSlug: store.slug,
+        userId: store.users.selin.id,
+        removedName: store.users.selin.name,
+      },
+      adminActor(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(released).toBe(0);
   });
 });
 
