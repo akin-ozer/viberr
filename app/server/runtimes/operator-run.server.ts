@@ -515,7 +515,11 @@ function releaseOperatorLease(
     queuedHumanComments: leaseState().pending.get(key)?.humanComments.length ?? 0,
   });
   void runOperator(db, queued).catch((error) =>
-    noteQueuedTriggerFireFailed(db, queued, error),
+    noteQueuedTriggerFireFailed(
+      db,
+      queued,
+      error instanceof Error ? error : new Error(String(error)),
+    ),
   );
 }
 
@@ -540,7 +544,11 @@ function drainPendingAfterInFlight(db: DatabaseSync, key: string): void {
     queuedHumanComments: state.pending.get(key)?.humanComments.length ?? 0,
   });
   void runOperator(db, queued).catch((error) =>
-    noteQueuedTriggerFireFailed(db, queued, error),
+    noteQueuedTriggerFireFailed(
+      db,
+      queued,
+      error instanceof Error ? error : new Error(String(error)),
+    ),
   );
 }
 
@@ -563,11 +571,11 @@ function leaseRefFromKey(key: string) {
 async function noteQueuedTriggerFireFailed(
   db: DatabaseSync,
   queued: RunOperatorInput,
-  error: unknown,
+  error: Error,
 ): Promise<void> {
   logger.error("queued operator trigger failed", {
     key: `${queued.projectSlug}/${queued.taskKey}`,
-    err: error instanceof Error ? error : new Error(String(error)),
+    err: error,
   });
   const ref = {
     projectSlug: queued.projectSlug,
