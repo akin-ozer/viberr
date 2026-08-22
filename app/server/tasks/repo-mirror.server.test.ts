@@ -13,8 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  cloneStepLabel,
   cloneWorkspaceRepo,
   mirrorGitEnv,
+  mirrorIsCold,
   projectRepoMirrorDir,
   refreshProjectMirror,
 } from "./repo-mirror.server";
@@ -405,5 +407,37 @@ describe("projectRepoMirrorDir", () => {
     ]) {
       expect(projectRepoMirrorDir("p", bad, root)).toBeNull();
     }
+  });
+});
+
+describe("D1: mirrorIsCold + cloneStepLabel (first-task clone honesty)", () => {
+  let root: string;
+  let ctx: TestDbContext;
+  beforeEach(() => {
+    ctx = createTestDbContext();
+    root = ctx.makeTempDir();
+  });
+  afterEach(() => ctx.cleanup());
+
+  it("is COLD when no mirror HEAD exists, WARM once it does", () => {
+    // No mirror on disk → the first task is building it.
+    expect(mirrorIsCold("p", "acme/widgets", root)).toBe(true);
+    // Materialize a mirror HEAD → later tasks fetch warm.
+    const dir = projectRepoMirrorDir("p", "acme/widgets", root)!;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "HEAD"), "ref: refs/heads/main\n");
+    expect(mirrorIsCold("p", "acme/widgets", root)).toBe(false);
+  });
+
+  it("reports NOT cold for a repo that does not resolve to a mirror path", () => {
+    // An invalid owner/name has no mirror to prewarm; never mislabel the wait.
+    expect(mirrorIsCold("p", "../../etc/passwd", root)).toBe(false);
+  });
+
+  it("labels the cold clone as the multi-minute first-task build, warm as plain", () => {
+    expect(cloneStepLabel("acme/widgets", true)).toBe(
+      "Cloning acme/widgets · first task in this project, this can take a few minutes",
+    );
+    expect(cloneStepLabel("acme/widgets", false)).toBe("Cloning acme/widgets");
   });
 });

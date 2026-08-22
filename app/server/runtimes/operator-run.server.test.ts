@@ -2672,8 +2672,12 @@ describe("R19-1 — the operator's read-only repository view", () => {
       });
 
       expect(seen).toHaveLength(1);
-      // Named: a spinner over a blank line is what the human already had.
-      expect(seen[0]!.step).toBe("Cloning acme/widgets");
+      // Named: a spinner over a blank line is what the human already had. D1:
+      // first task in the project (no mirror yet) → the step names the one-time
+      // cold clone so the multi-minute wait reads as setup, not a stall.
+      expect(seen[0]!.step).toBe(
+        "Cloning acme/widgets · first task in this project, this can take a few minutes",
+      );
       // ONE row for the whole drive — the reserved row IS the run's row, so the
       // strip the human watched never blinks or duplicates, and the launched
       // run keeps the thread the reservation opened.

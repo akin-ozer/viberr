@@ -3296,8 +3296,12 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
     });
 
     expect(observed).toHaveLength(1);
-    // Named: a spinner over a blank line is what the human already had.
-    expect(observed[0]!.step).toBe("Cloning acme/widgets");
+    // Named: a spinner over a blank line is what the human already had. D1: this
+    // is the FIRST task in the project (no mirror yet), so the step is honest
+    // that the wait is the one-time cold clone, not a hang.
+    expect(observed[0]!.step).toBe(
+      "Cloning acme/widgets · first task in this project, this can take a few minutes",
+    );
     // ONE row for the whole thing — the reserved row IS the run's row, so the
     // strip the human watched during the clone never blinks or duplicates.
     const rows = listRunsForTaskRows(store.db, store.slug, "VIB-1");

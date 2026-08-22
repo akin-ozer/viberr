@@ -20,7 +20,9 @@ import {
   cloneFailureSentence,
 } from "~/server/tasks/git-clone-auth.server";
 import {
+  cloneStepLabel,
   cloneWorkspaceRepo,
+  mirrorIsCold,
   type WorkspaceCloneInput,
 } from "~/server/tasks/repo-mirror.server";
 import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
@@ -1207,7 +1209,14 @@ export async function runOperator(
         agentName: authority.name,
         agentProfileId: "operator",
         phase: RUN_PHASE.preparing,
-        step: `Cloning ${cloning}`,
+        // D1 (pass 23, owner ruling Q3): the same cold-clone honesty the
+        // specialist strip gets — say when the multi-minute first-task mirror
+        // build is what the wait is, rather than a static "Cloning …" that reads
+        // as a hang.
+        step: cloneStepLabel(
+          cloning,
+          mirrorIsCold(input.projectSlug, cloning, input.dataRoot),
+        ),
       })
     : null;
   try {

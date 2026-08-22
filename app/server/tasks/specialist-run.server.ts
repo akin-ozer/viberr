@@ -133,7 +133,9 @@ import {
   type CloneFailureLogDetails,
 } from "./git-clone-auth.server";
 import {
+  cloneStepLabel,
   cloneWorkspaceRepo,
+  mirrorIsCold,
   type WorkspaceCloneInput,
 } from "./repo-mirror.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
@@ -1281,6 +1283,11 @@ async function dispatchAgentRun(
   // reserved row renders the strip with a real phase; `startRun` adopts it (id,
   // thread and started_at) instead of minting a second row, and the catch in
   // `startAgentRun` abandons it if preparation throws.
+  // D1 (pass 23, owner ruling Q3): only the FIRST task in a project pays the
+  // full cold clone (~minutes on a large repo) — later tasks fetch from the local
+  // mirror in seconds. The strip showed a static "Cloning …" for the whole
+  // download and "looked stalled for minutes" on the first-run experience; say
+  // when the wait is the one-time mirror build so it reads as expected setup.
   pending.reservation = reserveRun(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -1293,7 +1300,9 @@ async function dispatchAgentRun(
     agentProfileId: engagement.profileId,
     phase: RUN_PHASE.preparing,
     step:
-      repo && realBackend ? `Cloning ${repo}` : "Setting up the run workspace",
+      repo && realBackend
+        ? cloneStepLabel(repo, mirrorIsCold(input.projectSlug, repo, ctx.dataRoot))
+        : "Setting up the run workspace",
   });
 
   const clone =
