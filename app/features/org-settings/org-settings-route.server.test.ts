@@ -437,3 +437,41 @@ describe("R19-16 sign-in providers, configured in the app", () => {
   });
 });
 
+
+describe("E5: route-only authority gates", () => {
+  it("user-edit refuses a self-demotion (the guard the user-role twin has but this one lacked a test for)", async () => {
+    // The self-demotion guard is DUPLICATED in user-edit; only its user-role twin
+    // was tested. A regressed user-edit guard lets the last admin self-demote and
+    // lock the org out of policy/members/delete.
+    const self = await postAction(ids.arda, {
+      intent: "user-edit",
+      userId: ids.arda,
+      role: "member",
+      name: "Arda",
+      email: "arda@viberr.dev",
+    });
+    expect(self).toMatchObject({ ok: false, error: "You can't demote yourself" });
+  });
+
+  it("user-edit of SOMEONE ELSE to member is allowed (the guard is self-only)", async () => {
+    const other = await postAction(ids.arda, {
+      intent: "user-edit",
+      userId: ids.selin,
+      role: "member",
+      name: "Selin Aksoy",
+      email: "selin@viberr.dev",
+    });
+    expect(other.ok).toBe(true);
+  });
+
+  it("agent-delete of a DEPLOYED profile is refused with a 409 (in_use → the route maps it)", async () => {
+    // Every seeded template is deployed in viberr-core (see the loader test), so
+    // deleting one must refuse — the route's in_use → 409 mapping.
+    const result = await postAction(ids.arda, {
+      intent: "agent-delete",
+      profileId: "developer",
+    });
+    expect(result.ok).toBe(false);
+    expect(typeof result.error).toBe("string");
+  });
+});

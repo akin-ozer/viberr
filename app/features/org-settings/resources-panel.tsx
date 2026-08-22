@@ -30,13 +30,19 @@ import { AgentPanel, KbPanel, McpPanel, SkillPanel } from "./resource-rows";
  * `resource-modals.tsx`, `agent-template-modal.tsx` and `resource-rows.tsx`.
  */
 
-/** Delete-confirm tail naming the grants that are about to be dropped
- *  (P14-KM-09). "Templates" because project deployments carry their own copies
- *  and are rewritten separately by `updateResourceReferences`. */
-function grantTail(templates: number): string {
-  return templates > 0
-    ? ` The grant is dropped from ${templates} agent template${templates === 1 ? "" : "s"} and from every project that deployed them.`
-    : " No agent template grants it.";
+/** Delete-confirm tail naming the grants that are about to be dropped (P14-KM-09
+ *  / A2). BOTH org TEMPLATES and PROJECT DEPLOYMENTS are rewritten by
+ *  `updateResourceReferences`, so the confirm counts both — the old copy counted
+ *  only templates, so a resource used ONLY by a project agent read as "nothing
+ *  uses this" right before the delete silently dropped that project grant. */
+function grantTail(templates: number, projects: number): string {
+  const n = (count: number, noun: string) =>
+    `${count} ${noun}${count === 1 ? "" : "s"}`;
+  if (templates === 0 && projects === 0) return " Nothing grants it.";
+  const parts: string[] = [];
+  if (templates > 0) parts.push(n(templates, "agent template"));
+  if (projects > 0) parts.push(n(projects, "project agent"));
+  return ` The grant is dropped from ${parts.join(" and ")}.`;
 }
 
 // ------------------------------------------------------------------ panel
@@ -59,12 +65,21 @@ export function ResourcesPanel({
   mcps,
   skills,
   gagents,
+  // The loader always provides this (A2); it is optional here only so component
+  // tests that render the panel directly need not build the map — an absent map
+  // means "no project grants counted", i.e. the delete tail counts templates only.
+  projectGrants = { kbs: {}, mcps: {}, skills: {} },
   stages,
 }: {
   kbs: KbView[];
   mcps: McpView[];
   skills: SkillView[];
   gagents: GagentView[];
+  projectGrants?: {
+    kbs: Record<string, number>;
+    mcps: Record<string, number>;
+    skills: Record<string, number>;
+  };
   stages: StageDef[];
 }) {
   const [modal, setModal] = useState<ResourceModal | null>(null);
@@ -135,6 +150,11 @@ export function ResourcesPanel({
 
   const usedBy = (key: "skills" | "mcps" | "kbs", slug: string) =>
     gagents.filter((a) => a[key].includes(slug)).length;
+  // A2: how many PROJECT DEPLOYMENTS grant it (computed server-side by walking
+  // every project.md — `org-view.server.getOrgSettingsView`). The delete drops
+  // those grants too, so the confirm must disclose them, not just the templates.
+  const projectGrantsFor = (key: "skills" | "mcps" | "kbs", slug: string) =>
+    projectGrants[key][slug] ?? 0;
 
   const doDelete = () => {
     if (!confirm) return;
@@ -289,17 +309,28 @@ export function ResourcesPanel({
           }
           detail={
             confirm.kind === "kb"
-              ? "The index is removed from the store." +
-                grantTail(usedBy("kbs", confirm.item.dir))
+              ? // A2: the server `rmSync`s the whole document folder, not "the
+                // index" — disclose the permanent data loss and the real count.
+                `Permanently deletes the folder and its ${confirm.item.fileCount} file${confirm.item.fileCount === 1 ? "" : "s"}. This cannot be undone.` +
+                grantTail(
+                  usedBy("kbs", confirm.item.dir),
+                  projectGrantsFor("kbs", confirm.item.dir),
+                )
               : confirm.kind === "mcp"
                 ? // P14-KM-09: this said "profiles referencing this server" with
                   // no idea how many there were — the last guardrail before a
                   // destructive change was the only blind one of the three.
                   "Its tools disappear from every run." +
-                  grantTail(usedBy("mcps", confirm.item.name))
+                  grantTail(
+                    usedBy("mcps", confirm.item.name),
+                    projectGrantsFor("mcps", confirm.item.name),
+                  )
                 : confirm.kind === "skill"
                   ? "store://skills/" + confirm.item.name + "/ is deleted." +
-                    grantTail(usedBy("skills", confirm.item.name))
+                    grantTail(
+                      usedBy("skills", confirm.item.name),
+                      projectGrantsFor("skills", confirm.item.name),
+                    )
                   : "The base definition is deleted. It isn't deployed anywhere."
           }
           onCancel={() => setConfirm(null)}

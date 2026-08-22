@@ -5,7 +5,10 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeProject } from "../../../test-support/test-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
-import { updateResourceReferences } from "./resource-references.server";
+import {
+  countProjectDeploymentGrants,
+  updateResourceReferences,
+} from "./resource-references.server";
 
 /**
  * P14-KM-07: the DEPLOYMENT leg of reference rewriting had no test at all. The
@@ -157,5 +160,62 @@ describe("updateResourceReferences — project deployments (rewriteProjects)", (
     expect(deployedResources(store.dataRoot, store.slug, "scout").mcps).toEqual([
       "vm-graph-memory",
     ]);
+  });
+});
+
+describe("countProjectDeploymentGrants — the read-only twin", () => {
+  it("counts a KB granted ONLY by a project deployment (the org-template blind spot)", () => {
+    const store = setupTestStore(ctx);
+    deployProfile(store.dataRoot, store.slug, {
+      skills: [],
+      mcps: [],
+      kb: ["p13-facts", "release-checklist"],
+    });
+
+    // The delete-confirm counts org TEMPLATE grants; this KB has none, yet a
+    // project agent grants it — the count the dialog was missing.
+    expect(
+      countProjectDeploymentGrants("kb", "p13-facts", store.dataRoot),
+    ).toBe(1);
+    expect(
+      countProjectDeploymentGrants("kb", "release-checklist", store.dataRoot),
+    ).toBe(1);
+  });
+
+  it("counts each deployment that grants the slug across projects", () => {
+    const store = setupTestStore(ctx);
+    deployProfile(store.dataRoot, store.slug, { skills: [], mcps: ["vm-memory"], kb: [] });
+    // A second project also granting the same MCP — both deployments count.
+    deployProfile(store.dataRoot, "second-project", {
+      skills: [],
+      mcps: ["vm-memory"],
+      kb: [],
+    });
+
+    expect(
+      countProjectDeploymentGrants("mcps", "vm-memory", store.dataRoot),
+    ).toBe(2);
+  });
+
+  it("returns 0 when no deployment grants the slug", () => {
+    const store = setupTestStore(ctx);
+    deployProfile(store.dataRoot, store.slug, { skills: [], mcps: [], kb: [] });
+
+    expect(
+      countProjectDeploymentGrants("skills", "never-granted", store.dataRoot),
+    ).toBe(0);
+  });
+
+  it("skips a malformed project.md instead of throwing", () => {
+    const store = setupTestStore(ctx);
+    deployProfile(store.dataRoot, store.slug, { skills: [], mcps: ["vm-memory"], kb: [] });
+    const brokenDir = path.join(store.dataRoot, "projects", "broken");
+    mkdirSync(brokenDir, { recursive: true });
+    writeFileSync(path.join(brokenDir, "project.md"), "not: [valid\n---\nnope");
+
+    // The healthy deployment still counts; the broken one is skipped, not fatal.
+    expect(
+      countProjectDeploymentGrants("mcps", "vm-memory", store.dataRoot),
+    ).toBe(1);
   });
 });

@@ -8,6 +8,14 @@ import {
   resolveOAuthProvider,
   type OAuthSource,
 } from "~/server/auth/oauth-providers.server";
+import {
+  cachedDataRootSpace,
+  type DiskSpace,
+} from "~/server/ops/disk-space.server";
+import {
+  maintenanceState,
+  type MaintenanceState,
+} from "~/server/ops/maintenance.server";
 import { listConnections, type ConnectionRecord } from "./connections.server";
 import { listGlobalAgentProfiles, type GagentView } from "./gagents.server";
 import {
@@ -25,6 +33,7 @@ import {
   type OrgSeedContext,
   type SkillView,
 } from "./resources.server";
+import { countProjectDeploymentGrants } from "./resource-references.server";
 
 /**
  * The /org/settings loader payload — all slices at once (they're small,
@@ -40,6 +49,18 @@ export interface OrgSettingsView {
   mcps: McpView[];
   skills: SkillView[];
   gagents: GagentView[];
+  /**
+   * A2 (pass 23): how many PROJECT DEPLOYMENTS grant each resource, keyed by the
+   * same slug the delete-confirm passes (`kbs` by dir, `mcps`/`skills` by name).
+   * The confirm dialog's grant tail counts only org TEMPLATES from `gagents`; a
+   * resource used ONLY by a project agent read as "nothing uses this" while the
+   * delete silently dropped that project grant. This lets the dialog say so.
+   */
+  projectGrants: {
+    kbs: Record<string, number>;
+    mcps: Record<string, number>;
+    skills: Record<string, number>;
+  };
   stages: StageDef[];
   /**
    * F18-3: which OAuth sign-in providers are actually configured on this
@@ -54,6 +75,18 @@ export interface OrgSettingsView {
    * carries a client secret.
    */
   authProviders: AuthProviderView[];
+  /**
+   * C9 (pass 23): instance storage health for the settings UI. The periodic
+   * maintenance scheduler (ops/maintenance.server) already reclaims finished-task
+   * clones on an interval and reports to `/resources/health`, but that ops probe
+   * is JSON only — an admin had no in-app view of free space or whether the
+   * cleanup is alive. Both reads are cheap process-global snapshots (the disk
+   * measurement is cached), so surfacing them here costs nothing per load.
+   */
+  storage: {
+    disk: DiskSpace | null;
+    maintenance: MaintenanceState;
+  };
 }
 
 export interface AuthProviderView {
@@ -113,14 +146,32 @@ export function getOrgSettingsView(
     authProviderView(db, "github"),
     authProviderView(db, "google"),
   ];
+  const kbs = listKnowledgeBases(db, ctx);
+  const mcps = listMcpServers(db);
+  const skills = listSkills(db, ctx);
+  // A2: count project-deployment grants for each resource, keyed by the slug the
+  // delete-confirm passes (KB by `dir`; MCP/skill by `name`). The `ResourceKind`
+  // the deployment stores is `kb` (singular) / `mcps` / `skills`.
+  const countGrants = (slugs: string[], kind: "kb" | "mcps" | "skills") =>
+    Object.fromEntries(
+      slugs.map((slug) => [
+        slug,
+        countProjectDeploymentGrants(kind, slug, ctx.dataRoot),
+      ]),
+    );
   return {
     connections: listConnections(db),
     users: listOrgUsers(db),
     domains: listDomains(db),
-    kbs: listKnowledgeBases(db, ctx),
-    mcps: listMcpServers(db),
-    skills: listSkills(db, ctx),
+    kbs,
+    mcps,
+    skills,
     gagents: listGlobalAgentProfiles(db, ctx),
+    projectGrants: {
+      kbs: countGrants(kbs.map((k) => k.dir), "kb"),
+      mcps: countGrants(mcps.map((m) => m.name), "mcps"),
+      skills: countGrants(skills.map((s) => s.name), "skills"),
+    },
     stages: GOVERNED_TEMPLATE.stages,
     // R19-16: what the app can ACTUALLY grant now (app row overriding env),
     // not what the process happened to boot with.
@@ -129,5 +180,10 @@ export function getOrgSettingsView(
       google: authProviders[1]!.active,
     },
     authProviders,
+    // C9: instance storage health (cheap cached reads).
+    storage: {
+      disk: cachedDataRootSpace(),
+      maintenance: maintenanceState(),
+    },
   };
 }

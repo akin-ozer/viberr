@@ -120,6 +120,33 @@ export function projectRepoMirrorDir(
 }
 
 /**
+ * D1 (pass 23, owner ruling Q3): is THIS clone the cold FIRST-task clone?
+ *
+ * Only the first task in a project pays the full network clone (minutes on a
+ * large repo); every later task fetches from the local mirror in seconds. A
+ * present mirror `HEAD` means the mirror already exists (warm); its absence means
+ * this run is building it. A repo that does not resolve to a mirror path (invalid
+ * owner/name) reports NOT cold — there is nothing to prewarm, and the caller's
+ * clone will fail honestly on its own terms rather than mislabel the wait.
+ */
+export function mirrorIsCold(
+  projectSlug: string,
+  repo: string,
+  dataRoot?: string,
+): boolean {
+  const dir = projectRepoMirrorDir(projectSlug, repo, dataRoot);
+  return dir !== null && !existsSync(path.join(dir, "HEAD"));
+}
+
+/** D1: the reservation step label for a workspace clone, honest about whether it
+ *  is the cold first-task clone (minutes) or a warm mirror fetch (seconds). */
+export function cloneStepLabel(repo: string, coldClone: boolean): string {
+  return coldClone
+    ? `Cloning ${repo} · first task in this project, this can take a few minutes`
+    : `Cloning ${repo}`;
+}
+
+/**
  * One mirror operation at a time per mirror directory.
  *
  * Two runs on the same project start together routinely (the operator drive

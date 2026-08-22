@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -13,7 +13,15 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import { pollGithubReconcile } from "./reconcile-poller.server";
+import {
+  noteReconcileFailure,
+  noteReconcileSuccess,
+  pollGithubReconcile,
+  RECONCILE_FAILURE_ALERT_THRESHOLD,
+  startGithubReconcilePoller,
+  stopGithubReconcilePoller,
+} from "./reconcile-poller.server";
+import * as reconciler from "./github-reconciler.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -200,3 +208,127 @@ describe("pollGithubReconcile (P11-14)", () => {
     expect(nudges).toBe(0);
   });
 });
+
+describe("C7: a persistent reconcile failure alerts the people who can fix it", () => {
+  const policyRows = (store: TestStore) =>
+    store.db
+      .prepare(
+        `SELECT user_id AS userId, title FROM notifications
+          WHERE project_slug = ? AND kind = 'policy'
+          ORDER BY user_id ASC`,
+      )
+      .all(store.slug) as { userId: string; title: string }[];
+
+  it("stays silent below the threshold, then notifies admins + maintainers once", () => {
+    const store = setupTestStore(ctx);
+    // Project the members into `project_members` (what listProjectMembers reads).
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    noteReconcileSuccess(store.slug); // clear any global streak from a prior test
+
+    for (let i = 1; i < RECONCILE_FAILURE_ALERT_THRESHOLD; i += 1) {
+      noteReconcileFailure(store.db, store.slug);
+    }
+    // Below the threshold: nothing yet.
+    expect(policyRows(store)).toHaveLength(0);
+
+    // Crossing the threshold alerts arda (admin) + murat (maintainer), NOT selin
+    // (contributor cannot edit policy / fix the credential).
+    noteReconcileFailure(store.db, store.slug);
+    const alerted = policyRows(store);
+    expect(alerted.map((r) => r.userId).sort()).toEqual(
+      [store.users.arda.id, store.users.murat.id].sort(),
+    );
+    expect(alerted[0]!.title).toBe("GitHub sync is failing for this project");
+
+    // Further failures do NOT pile up duplicate rows (alerted flag + stable id).
+    noteReconcileFailure(store.db, store.slug);
+    noteReconcileFailure(store.db, store.slug);
+    expect(policyRows(store)).toHaveLength(2);
+
+    // A success clears the streak so a genuinely-new outage can alert again.
+    noteReconcileSuccess(store.slug);
+  });
+})
+
+describe("E4: poller failure isolation + lifecycle", () => {
+  const POLLER_KEY = Symbol.for("viberr.githubReconcilePoller");
+  // SAFETY: a viberr-namespaced registry symbol the poller parks its interval
+  // handle under; the test only reads presence/identity, never the handle's API.
+  const pollerHandle = () =>
+    (globalThis as Record<symbol, unknown>)[POLLER_KEY];
+
+  afterEach(() => {
+    stopGithubReconcilePoller();
+    vi.restoreAllMocks();
+  });
+
+  it("a second start is a no-op (same handle); stop clears it", () => {
+    const store = setupTestStore(ctx); // no branched tasks → boot pass polls nothing
+    stopGithubReconcilePoller();
+    expect(pollerHandle()).toBeUndefined();
+
+    startGithubReconcilePoller(store.db);
+    const handle = pollerHandle();
+    expect(handle).toBeDefined();
+
+    // A repeat start must NOT arm a second interval next to the first.
+    startGithubReconcilePoller(store.db);
+    expect(pollerHandle()).toBe(handle);
+
+    stopGithubReconcilePoller();
+    expect(pollerHandle()).toBeUndefined();
+  });
+
+  it("one project's reconcile throwing does not abort the remaining projects", async () => {
+    const store = setupTestStore(ctx);
+    seedBranchedTask(store, "VIB-1"); // project A: branched + credentialed
+
+    // A SECOND branched project, so the poll iterates two slugs.
+    const base = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    const betaSlug = "beta-project";
+    writeProject(store.dataRoot, {
+      ...base,
+      name: "Beta",
+      slug: betaSlug,
+      taskPrefix: "BETA",
+    });
+    writeTask(store.dataRoot, betaSlug, {
+      frontmatter: baseTaskFrontmatter("BETA-1", {
+        title: "Branched",
+        stage: "review",
+        branch: "beta-1",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // The FIRST project reconciled throws; the second must still be reached.
+    const spy = vi
+      .spyOn(reconciler, "reconcileProject")
+      .mockImplementation(async (_db, slug) => {
+        if (slug === store.slug) throw new Error("boom for project A");
+        return {
+          status: "ok",
+          results: [],
+          reconciled: 1,
+          changed: 0,
+          failed: 0,
+          skipped: 0,
+        };
+      });
+
+    // The poll must NOT throw, and must have called BOTH projects.
+    const summary = await pollGithubReconcile(store.db, {
+      dataRoot: store.dataRoot,
+    });
+
+    const slugsReconciled = spy.mock.calls.map((c) => c[1]).sort();
+    expect(slugsReconciled).toEqual([betaSlug, store.slug].sort());
+    expect(summary.projects).toBe(2);
+    // Project B's success survived project A's throw.
+    expect(summary.reconciled).toBe(1);
+  });
+})

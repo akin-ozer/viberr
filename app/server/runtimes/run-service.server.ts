@@ -149,6 +149,9 @@ function fireIfAlreadyTerminal(
       runId,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    // C4: the effects (reply/verdict/reconcile/react + waiting flip) are lost —
+    // surface it so the board doesn't show "agent working" until a restart.
+    void noteCompletionEffectsLost(db, run);
   }
 }
 
@@ -931,6 +934,50 @@ async function noteContinuityReset(
   }
 }
 
+/**
+ * C4 (pass 23): a run finished, but its completion CALLBACK threw — so the reply,
+ * verdict, delivery reconcile, operator re-engagement AND the waiting-state flip
+ * were all lost, leaving the task reading `waiting: agent` with no live run: the
+ * board shows "agent working" forever, until boot recovery replays the effects on
+ * the NEXT restart. Stamp the task with a visible continuity warning and flip it
+ * to `waiting: human` so the board stops lying about a run that already ended and
+ * a supervisor can act (re-run the agent) without waiting for a restart. Recovery
+ * still replays on restart; this makes the gap visible in the meantime.
+ * Best-effort: a task file we cannot write must never mask the original failure.
+ */
+export async function noteCompletionEffectsLost(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  dataRoot?: string,
+): Promise<void> {
+  const ref: TaskFileRef = {
+    projectSlug: run.project_slug,
+    taskKey: run.task_key,
+  };
+  if (dataRoot) ref.dataRoot = dataRoot;
+  try {
+    await updateTaskFile(ref, (parsed) => {
+      parsed.frontmatter.waiting = "human";
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "continuity",
+        actor: { kind: "system", systemId: "runtime-continuity" },
+        title: null,
+        text: `The ${run.agent_name ?? run.role} run finished, but applying its completion effects (its reply, any verdict, the delivery reconcile, and re-engaging the operator) failed, so none of them landed. This task is not being worked right now. Run recovery replays the effects on the next restart; you can also re-run the agent. The run log it already produced is unchanged.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
+  } catch (error) {
+    logger.error("completion-effects-lost timeline note failed", {
+      runId: run.id,
+      taskKey: run.task_key,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
 /** The follow-up turn `resumeRun` starts on an existing run's session. */
 export interface ResumeRunInput {
   runId: string;
@@ -1191,14 +1238,18 @@ function launch(
       const cb = state.completions.get(spec.runId);
       if (cb) {
         state.completions.delete(spec.runId);
+        let finished: AgentRunRow | null = null;
         try {
-          const finished = getRun(db, spec.runId);
+          finished = getRun(db, spec.runId);
           if (finished) cb(finished);
         } catch (error) {
           logger.error("run completion callback failed", {
             runId: spec.runId,
             err: error instanceof Error ? error : new Error(String(error)),
           });
+          // C4: the completion effects are lost — stamp the task so it isn't
+          // stuck on "agent working" with no live run until the next restart.
+          if (finished) void noteCompletionEffectsLost(db, finished);
         }
       }
       exited = true;

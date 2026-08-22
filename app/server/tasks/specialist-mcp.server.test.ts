@@ -195,6 +195,33 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     expect(resolveSpecialistMcpServers(store.db, [])).toEqual({});
   });
 
+  it("C6: a registry read failure lands EVERY declared grant in unresolved, not silence", () => {
+    // The org MCP registry read throwing used to drop every grant with no
+    // unresolved entry and no log — the run advertised tool surfaces that never
+    // mounted, invisibly. A db whose query throws stands in for that failure.
+    const throwingDb = {
+      prepare() {
+        throw new Error("registry unreadable");
+      },
+    } as unknown as Parameters<typeof resolveSpecialistMcpServersDetailed>[0];
+    const resolved = resolveSpecialistMcpServersDetailed(throwingDb, [
+      "billing-api",
+      "vm-memory",
+      "viberr", // reserved: built in-process, never a grant → not reported
+    ]);
+    expect(resolved.servers).toEqual({});
+    expect(resolved.unresolved).toEqual([
+      {
+        name: "billing-api",
+        reason: "the org MCP registry could not be read — it exposes no tools",
+      },
+      {
+        name: "vm-memory",
+        reason: "the org MCP registry could not be read — it exposes no tools",
+      },
+    ]);
+  });
+
   it("F7-MCP1: injects a sealed HTTP credential as an Authorization header", async () => {
     const { sealSecret } = await import("~/server/secrets/secret-box.server");
     const store = setupTestStore(ctx);

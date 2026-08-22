@@ -132,7 +132,23 @@ export function resolveSpecialistMcpServersDetailed(
   }[];
   try {
     registry = listMcpServers(db);
-  } catch {
+  } catch (error) {
+    // C6 (pass 23): the org MCP registry read failing used to drop EVERY declared
+    // grant in silence — no `unresolved` entry, no log — exactly the P13-KM-11
+    // silence this module's own drop() path exists to prevent. A registry that
+    // cannot be read means none of these tool surfaces mounted, so say so for each
+    // one the run's persona promised, and log it once.
+    logger.warn("MCP registry unreadable — all declared MCP grants dropped", {
+      mcps: mcpNames.filter((n) => !RESERVED_MCP_NAMES.has(n)),
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    for (const name of mcpNames) {
+      if (RESERVED_MCP_NAMES.has(name)) continue;
+      unresolved.push({
+        name,
+        reason: "the org MCP registry could not be read — it exposes no tools",
+      });
+    }
     return { servers, unresolved };
   }
   const byName = new Map(registry.map((m) => [m.name, m]));

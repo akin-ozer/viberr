@@ -1,9 +1,10 @@
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   BROWSER_CAP_ID,
+  capabilityEnforcement,
   GRANT_REQUIRED_CAPABILITY_IDS,
   WEB_EGRESS_CAP_ID,
 } from "~/shared/capabilities";
@@ -405,6 +406,8 @@ function ModelEffortFields({
   setEffort,
   catalog,
   catalogLoading,
+  catalogFailed,
+  onRetryCatalog,
   selectedModel,
   showEffort,
   effortOptions,
@@ -417,6 +420,10 @@ function ModelEffortFields({
   setEffort: (v: string) => void;
   catalog: ModelCatalog | null;
   catalogLoading: boolean;
+  /** D5: the model-catalog load settled with no data — a real fetch failure. */
+  catalogFailed: boolean;
+  /** D5: re-fire the model-catalog load. */
+  onRetryCatalog: () => void;
   selectedModel: CatalogModel | null;
   showEffort: boolean;
   effortOptions: string[];
@@ -429,8 +436,22 @@ function ModelEffortFields({
           <span className="fhint">
             {catalogLoading
               ? "loading available models…"
-              : "the model this profile runs on"}
+              : catalogFailed
+                ? "couldn't load the models"
+                : "the model this profile runs on"}
           </span>
+          {/* D5 (pass 23): a fetch that failed used to strand Save forever with
+              no error and no way out — the picker sat empty and the footer said
+              "Saving is held until a model loads". Offer the retry. */}
+          {catalogFailed && (
+            <button
+              type="button"
+              className="btn ghost xs"
+              onClick={onRetryCatalog}
+            >
+              Retry
+            </button>
+          )}
         </label>
         <select
           id={`${uid}-model`}
@@ -612,6 +633,7 @@ function CapabilityGrants({
   setCaps,
   openGroups,
   setOpenGroups,
+  backend,
 }: {
   capCatalog: readonly ModalCapGroup[];
   /** The mode buttons offered per row: 4 for the operator, 3 honest ones
@@ -621,6 +643,9 @@ function CapabilityGrants({
   setCaps: Dispatch<SetStateAction<CapSelection>>;
   openGroups: Record<string, boolean>;
   setOpenGroups: Dispatch<SetStateAction<Record<string, boolean>>>;
+  /** B1 (pass 23): the profile's pinned backend, so a claude-only withholding
+   *  can be tagged advisory/inert on a Codex profile at the point it is set. */
+  backend: "codex" | "claude" | "";
 }) {
   const capId = useId();
   return (
@@ -725,9 +750,37 @@ function CapabilityGrants({
                       (m) => m.id === caps[capDef.id],
                     );
                     const tabIdx = checkedIdx < 0 ? 0 : checkedIdx;
+                    // B1 (pass 23): on a Codex-pinned profile, a claude-only
+                    // withholding is advisory (the Codex SDK ignores tool
+                    // allow/deny lists; the server-owned delivery gate is the real
+                    // boundary), and `read-github-api` is never mounted on Codex
+                    // at all — the grant is inert. The editor is where the grant
+                    // is MADE, so tag the row so an admin does not trust a toggle
+                    // that cannot bind on the chosen backend. (The matrix tags the
+                    // same rows via capabilityEnforcement; this is its editor
+                    // twin, backend-aware because the editor is pinned to one.)
+                    const codexAdvisory =
+                      backend === "codex" &&
+                      !locked &&
+                      capabilityEnforcement(capDef.id) === "claude-only";
+                    const codexInert = codexAdvisory && capDef.id === "read-github-api";
                     return (
                       <div className="cap-mrow" key={capDef.id}>
-                        <span className="cap-mname">{capDef.label}</span>
+                        <span className="cap-mname">
+                          {capDef.label}
+                          {codexAdvisory && (
+                            <span
+                              className="mx-scope"
+                              title={
+                                codexInert
+                                  ? "This tool is Claude-only and is never mounted on Codex, so on this Codex profile the grant is inert."
+                                  : "Enforced on Claude runs (tool denylist). On this Codex profile it is advisory only: the Codex SDK ignores tool allow/deny lists, so the server-owned delivery gate is the real boundary."
+                              }
+                            >
+                              {codexInert ? "inert on Codex" : "advisory on Codex"}
+                            </span>
+                          )}
+                        </span>
                         {/* UXA-4: the Direct/Recommend/Human/Off control is a
                             single-select whose state was carried by CSS alone.
                             The SAME control on the Policy sheet (the workflow
@@ -1089,13 +1142,33 @@ export function CreateProfileModal({
   // create mode). The endpoint returns the curated fallback even with no
   // credential, so the pickers always populate.
   const catalogFetcher = useFetcher<{ data: ModelCatalog }>();
+  // D5 (pass 23): so a fetch that SETTLED with no data reads as a failure, not as
+  // the pre-load window. Flipped true once a load has actually fired for the
+  // current backend; a backend switch resets it.
+  const catalogLoadFired = useRef(false);
+  const loadCatalog = () => {
+    if (!backend) return;
+    catalogLoadFired.current = true;
+    catalogFetcher.load(`/resources/model-catalog?backend=${backend}`);
+  };
   useEffect(() => {
     if (!backend) return;
-    catalogFetcher.load(`/resources/model-catalog?backend=${backend}`);
+    catalogLoadFired.current = false;
+    loadCatalog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backend]);
   const catalog = catalogFetcher.data?.data ?? null;
   const catalogLoading = catalogFetcher.state === "loading";
+  // D5: a load fired and SETTLED (idle) with no catalog → the fetch failed. The
+  // endpoint returns a curated fallback even without a credential, so this is a
+  // real transport/500 failure. Without a signal, `modelPending` stays true
+  // forever and the footer says "Saving is held" over an empty picker with no
+  // way out. This offers the retry.
+  const catalogFailed =
+    Boolean(backend) &&
+    catalogLoadFired.current &&
+    catalogFetcher.state === "idle" &&
+    !catalog;
 
   // Default the picks to the catalog defaults once it loads and no pick is set
   // (create mode, or a backend switch that invalidated the prior model).
@@ -1167,7 +1240,10 @@ export function CreateProfileModal({
         modelPending
         ? catalogLoading
           ? `Loading the models available on ${backendLabel}. Saving is held until this profile has one of them.`
-          : `Pick a model available on ${backendLabel}. Saving is held until this profile has one.`
+          : catalogFailed
+            ? // D5: don't say "pick a model" over an empty picker — the fetch failed.
+              `Couldn't load the models available on ${backendLabel}. Retry above, then pick one. Saving is held until this profile has a model.`
+            : `Pick a model available on ${backendLabel}. Saving is held until this profile has one.`
         : editing
           ? forksTemplate
             ? `Ready to save: this forks ${initial.name} for ${projectName}.`
@@ -1219,6 +1295,8 @@ export function CreateProfileModal({
           setEffort={setEffort}
           catalog={catalog}
           catalogLoading={catalogLoading}
+          catalogFailed={catalogFailed}
+          onRetryCatalog={loadCatalog}
           selectedModel={selectedModel}
           showEffort={showEffort}
           effortOptions={effortOptions}
@@ -1242,6 +1320,7 @@ export function CreateProfileModal({
           setCaps={setCaps}
           openGroups={openGroups}
           setOpenGroups={setOpenGroups}
+          backend={backend}
         />
 
         <ResourcePicker

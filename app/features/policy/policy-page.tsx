@@ -1,5 +1,6 @@
 import { Fragment, useState } from "react";
 import { useFetcher, useNavigate } from "react-router";
+import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, storeIcon } from "~/ui/icon";
@@ -281,7 +282,10 @@ export function AgentCapability({
         <Icon name="agents" />
         <h2>Agent capability</h2>
         <span className="right sub fine">
-          {profiles.length} profiles
+          {/* D6 (pass 23): the one un-pluralized count in a codebase that
+              pluralizes fastidiously — a project with only its operator read
+              "1 profiles". */}
+          {countLabel(profiles.length, "profile")}
         </span>
       </div>
       <div className="pol-note">

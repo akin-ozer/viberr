@@ -11,7 +11,10 @@ import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { ToastProvider } from "~/ui/toast";
 import { ConnectionsPanel } from "./connections-panel";
 import { OrgSettingsPage } from "./org-settings-page";
-import type { AuthProviderView } from "~/server/org/org-view.server";
+import type {
+  AuthProviderView,
+  OrgSettingsView,
+} from "~/server/org/org-view.server";
 import { ResourcesPanel } from "./resources-panel";
 import { UsersPanel } from "./users-panel";
 
@@ -54,7 +57,7 @@ const CONNECTIONS: ConnectionRecord[] = [
     id: "akin-ozer", owner: "akin-ozer", method: "PAT", patId: "pat_1",
     masked: "····0000", def: true, repos: null, expiresAt: null, daysLeft: null,
     validationState: "unvalidated", scopes: [], lastValidatedAt: null,
-    createdAt: "2026-07-01T09:00:00.000Z",
+    createdAt: "2026-07-01T09:00:00.000Z", boundProjects: 0,
   },
   {
     id: "hepapi", owner: "hepapi", method: "PAT", patId: "pat_2",
@@ -65,7 +68,7 @@ const CONNECTIONS: ConnectionRecord[] = [
       { id: "workflow", ok: true, source: "header" },
       { id: "pull_request:write", ok: true, source: "header" },
     ], lastValidatedAt: "2026-07-01T09:00:00.000Z",
-    createdAt: "2026-07-01T09:05:00.000Z",
+    createdAt: "2026-07-01T09:05:00.000Z", boundProjects: 2,
   },
 ];
 
@@ -94,8 +97,11 @@ describe("ConnectionsPanel", () => {
 
     fireEvent.click(getByLabelText("Remove hepapi"));
     expect(getByText("Remove hepapi?")).toBeTruthy();
+    // A4 (pass 23): hepapi has 2 bound projects (fixture), so the confirm
+    // discloses the sync loss the PAT-delete cascade causes, not just the
+    // harmless half the old copy named.
     expect(
-      getByText(/Projects already created from hepapi keep their repos/),
+      getByText(/2 projects bound to it lose branch and PR sync/),
     ).toBeTruthy();
     // C6: the confirm button now names the outcome instead of a bare "Remove".
     fireEvent.click(getByText("Remove connection", { selector: "button.btn.danger" }));
@@ -105,6 +111,20 @@ describe("ConnectionsPanel", () => {
         connectionId: "hepapi",
       }),
     );
+  });
+
+  it("A4: with no bound projects, the confirm keeps the harmless copy (no false sync-loss claim)", async () => {
+    const unbound: ConnectionRecord[] = [
+      { ...CONNECTIONS[1]!, id: "solo", owner: "solo", def: false, boundProjects: 0 },
+    ];
+    const { getByLabelText, getByText, queryByText } = renderPanel(
+      <ConnectionsPanel connections={unbound} />,
+    );
+    fireEvent.click(getByLabelText("Remove solo"));
+    expect(
+      getByText(/Projects already created from solo keep their repos/),
+    ).toBeTruthy();
+    expect(queryByText(/lose branch and PR sync/)).toBeNull();
   });
 
   it("add-connection modal: duplicate guard fires client-side", async () => {
@@ -541,7 +561,9 @@ describe("ResourcesPanel", () => {
   it("kb delete confirms with the spec copy; deployed profile delete is guarded", async () => {
     const { getByText, getByLabelText } = renderResources();
     fireEvent.click(getByLabelText("Delete Architecture notes"));
-    expect(getByText(/The index is removed from the store/)).toBeTruthy();
+    // A2: the confirm discloses the permanent document deletion (server rmSync's
+    // the whole folder), not the euphemistic "the index is removed".
+    expect(getByText(/Permanently deletes the folder/)).toBeTruthy();
     // C6: outcome-naming confirm label per resource kind.
     fireEvent.click(getByText("Remove knowledge base", { selector: "button.btn.danger" }));
     await waitFor(() =>
@@ -640,8 +662,53 @@ describe("ResourcesPanel", () => {
     expect(getByText(/14 tools · checked just now · auth: configured · 1 template/)).toBeTruthy();
 
     fireEvent.click(getByLabelText("Remove github-mcp"));
+    // A2: the tail now names templates AND project agents; this panel render
+    // supplies no `projectGrants` map, so only the 1 template is counted.
     expect(
-      getByText(/The grant is dropped from 1 agent template and from every project/),
+      getByText(/The grant is dropped from 1 agent template\./),
+    ).toBeTruthy();
+  });
+
+  it("A2: the delete tail names PROJECT agents, not just org templates", () => {
+    // A KB granted by NO org template but by two project deployments read as
+    // "Nothing grants it" while the delete silently dropped both grants. The
+    // loader now supplies a per-slug count so the confirm discloses it.
+    const { getByText, getByLabelText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={GAGENTS}
+        projectGrants={{ kbs: { "architecture-notes": 2 }, mcps: {}, skills: {} }}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Delete Architecture notes"));
+    // No template grants this KB (GAGENTS[].kbs is empty), so the OLD copy would
+    // have said "Nothing grants it" — the exact lie A2 fixes.
+    expect(
+      getByText(/The grant is dropped from 2 project agents\./),
+    ).toBeTruthy();
+  });
+
+  it("A2: templates AND project agents are counted together in one tail", () => {
+    // github-mcp is granted by 1 org template (Developer) and, say, 3 project
+    // deployments — the tail must name both, joined.
+    const { getByText, getByLabelText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={GAGENTS}
+        projectGrants={{ kbs: {}, mcps: { "github-mcp": 3 }, skills: {} }}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Remove github-mcp"));
+    expect(
+      getByText(
+        /The grant is dropped from 1 agent template and 3 project agents\./,
+      ),
     ).toBeTruthy();
   });
 
@@ -916,6 +983,18 @@ const AUTH_PROVIDERS: AuthProviderView[] = [
   },
 ];
 
+const STORAGE: OrgSettingsView["storage"] = {
+  disk: null,
+  maintenance: {
+    intervalMs: 6 * 3_600_000,
+    diskCheckIntervalMs: 5 * 60_000,
+    lastPassAt: null,
+    lastPassReason: null,
+    lastFreedBytes: 0,
+    scheduled: true,
+  },
+};
+
 describe("resources tab badge counts resources, not resources+templates", () => {
   it("shows the resource count and discloses profiles in the tooltip", () => {
     const { getByRole } = renderPanel(
@@ -928,9 +1007,11 @@ describe("resources tab badge counts resources, not resources+templates", () => 
           mcps: MCPS,
           skills: SKILLS,
           gagents: GAGENTS,
+          projectGrants: { kbs: {}, mcps: {}, skills: {} },
           stages: STAGES,
           providers: { github: false, google: false },
           authProviders: AUTH_PROVIDERS,
+          storage: STORAGE,
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
@@ -942,6 +1023,75 @@ describe("resources tab badge counts resources, not resources+templates", () => 
     const badge = tab.querySelector(".count")!;
     expect(badge.textContent).toBe("4");
     expect(badge.getAttribute("title")).toContain("2 agent profiles");
+  });
+});
+
+describe("C9: instance storage line", () => {
+  const viewWith = (storage: OrgSettingsView["storage"]): OrgSettingsView => ({
+    connections: CONNECTIONS,
+    users: [ME],
+    domains: DOMAINS,
+    kbs: KBS,
+    mcps: MCPS,
+    skills: SKILLS,
+    gagents: GAGENTS,
+    projectGrants: { kbs: {}, mcps: {}, skills: {} },
+    stages: STAGES,
+    providers: { github: false, google: false },
+    authProviders: AUTH_PROVIDERS,
+    storage,
+  });
+
+  it("shows free space, usage, and the automatic-cleanup cadence; flags a low disk", () => {
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewWith({
+          disk: {
+            freeBytes: 900_000_000,
+            totalBytes: 20_000_000_000,
+            usedPercent: 95.5,
+            status: "low",
+            lowThresholdBytes: 1_000_000_000,
+            criticalThresholdBytes: 200_000_000,
+          },
+          maintenance: {
+            intervalMs: 6 * 3_600_000,
+            diskCheckIntervalMs: 5 * 60_000,
+            lastPassAt: "2026-08-22T00:00:00.000Z",
+            lastPassReason: "interval",
+            lastFreedBytes: 45_000_000,
+            scheduled: true,
+          },
+        })}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+      />,
+    );
+    // Free-of-total with the usage percent, the low flag, and the cleanup cadence.
+    expect(getByText(/free of 20\.0 GB on the data volume \(95\.5% used\)/)).toBeTruthy();
+    expect(getByText(/· low/)).toBeTruthy();
+    expect(getByText(/automatic cleanup runs every 6h/)).toBeTruthy();
+  });
+
+  it("says cleanup is not scheduled when the maintenance timer is not live", () => {
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewWith({
+          disk: null,
+          maintenance: {
+            intervalMs: 6 * 3_600_000,
+            diskCheckIntervalMs: 5 * 60_000,
+            lastPassAt: null,
+            lastPassReason: null,
+            lastFreedBytes: 0,
+            scheduled: false,
+          },
+        })}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+      />,
+    );
+    expect(getByText(/automatic cleanup is not scheduled/)).toBeTruthy();
   });
 });
 
@@ -962,9 +1112,11 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
           mcps: MCPS,
           skills: SKILLS,
           gagents: GAGENTS,
+          projectGrants: { kbs: {}, mcps: {}, skills: {} },
           stages: STAGES,
           providers: { github: false, google: false },
           authProviders: AUTH_PROVIDERS,
+          storage: STORAGE,
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"

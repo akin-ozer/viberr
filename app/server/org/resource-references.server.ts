@@ -6,7 +6,10 @@ import {
   agentProfilesDir,
   projectsDir,
 } from "~/server/files/file-store-root.server";
-import { updateProjectFile } from "~/server/files/project-writer.server";
+import {
+  readProjectFile,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
 import {
   parseAgentProfileContent,
   serializeAgentProfile,
@@ -179,4 +182,36 @@ async function rewriteProjects(
     }
   }
   return updated;
+}
+
+/**
+ * A2 (pass 23): the read-only twin of `rewriteProjects`' walk — how many PROJECT
+ * DEPLOYMENTS currently grant `slug` of `kind`. The org resource delete-confirm
+ * counted only ORG TEMPLATE grants, so a KB/MCP/skill used ONLY by a project
+ * agent read as "nothing uses this" right before the delete silently dropped
+ * that project grant. This lets the dialog disclose it. Never throws — a
+ * malformed project.md is skipped, exactly as the rewrite skips it.
+ */
+export function countProjectDeploymentGrants(
+  kind: ResourceKind,
+  slug: string,
+  dataRoot?: string,
+): number {
+  const root = projectsDir(dataRoot);
+  if (!existsSync(root)) return 0;
+  let count = 0;
+  for (const projectSlug of readdirSync(root).sort()) {
+    if (!existsSync(path.join(root, projectSlug, "project.md"))) continue;
+    try {
+      const read = readProjectFile({ projectSlug, dataRoot });
+      if (!read) continue;
+      for (const deployment of read.parsed.frontmatter.agents) {
+        if (deployment.definition?.resources?.[kind]?.includes(slug)) count += 1;
+      }
+    } catch {
+      // A project.md we cannot parse cannot be counted — skip it, as the
+      // rewrite does; the delete still proceeds and best-effort-drops its grant.
+    }
+  }
+  return count;
 }

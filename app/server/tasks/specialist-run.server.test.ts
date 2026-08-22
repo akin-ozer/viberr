@@ -1086,6 +1086,61 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(spec.webSearchWithheld).toBe(true);
   });
 
+  it("E2: a dispatch failure AFTER reserveRun abandons the reservation, freeing the delivering slot", async () => {
+    // The R21-4 hazard `startAgentRun`'s wrapper catch exists for: dispatchAgentRun
+    // throws AFTER reserveRun has claimed the delivering row, and without abandon()
+    // that row sits "running" holding the single-flight slot — the task then
+    // refuses EVERY further run until a restart. Force the throw at adapter.start
+    // (which runs after the reservation), then prove a later run is not refused.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    // repo:null → the run reaches adapter.start with no network clone.
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const { configureRunServiceForTests } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    const throwingAdapter = (backend: RealBackend): RuntimeAdapter => ({
+      backend,
+      start(): RunHandle {
+        throw new Error("dispatch blew up after reserveRun");
+      },
+    });
+    configureRunServiceForTests({
+      claude: throwingAdapter("claude"),
+      codex: throwingAdapter("codex"),
+    });
+
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/dispatch blew up/);
+
+    // No phantom "running" delivering row survives: a working adapter's run is
+    // accepted, NOT refused by single-flight. Canary: drop the wrapper's abandon()
+    // in startAgentRun and this second run 409s ("A delivering agent run is
+    // already in progress").
+    configureRunServiceForTests({
+      claude: recordingAdapter("claude"),
+      codex: recordingAdapter("codex"),
+    });
+    const retry = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(retry.runId).toMatch(/^run_/);
+    // The retry's recordingAdapter fires its onExit on a microtask; let its
+    // completion drain before teardown closes the DB (avoids a caught-but-noisy
+    // "database is not open" from the completion handler racing cleanup).
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
   /**
    * D4: the specialist spec merged its MCP servers but passed NO `allowedTools`,
    * so the collaboration toolkit's `mcp__*` tools were never auto-approved. That
@@ -3296,8 +3351,12 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
     });
 
     expect(observed).toHaveLength(1);
-    // Named: a spinner over a blank line is what the human already had.
-    expect(observed[0]!.step).toBe("Cloning acme/widgets");
+    // Named: a spinner over a blank line is what the human already had. D1: this
+    // is the FIRST task in the project (no mirror yet), so the step is honest
+    // that the wait is the one-time cold clone, not a hang.
+    expect(observed[0]!.step).toBe(
+      "Cloning acme/widgets · first task in this project, this can take a few minutes",
+    );
     // ONE row for the whole thing — the reserved row IS the run's row, so the
     // strip the human watched during the clone never blinks or duplicates.
     const rows = listRunsForTaskRows(store.db, store.slug, "VIB-1");

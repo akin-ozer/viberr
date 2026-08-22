@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
+import { createNotification } from "~/server/projections/notifications.server";
+import { listProjectMembers } from "~/server/projections/board-query.server";
 import {
   reconcileProject,
   RECONCILE_POLL_TASK_BUDGET,
@@ -96,6 +98,81 @@ async function nudgeMergePendingTasks(
   return nudged;
 }
 
+/**
+ * C7 (pass 23): a persistent reconcile failure for a project (a revoked PAT, a
+ * network partition) was invisible — PRs GitHub merged/closed days ago still show
+ * open on the board, and every 5-minute tick logged the same warn with no
+ * notification or health surface. After this many CONSECUTIVE failures for a
+ * project (~15 min at the poll cadence), raise ONE deduped policy notification to
+ * the people who can fix it (project admins + maintainers); a later success
+ * clears the streak so a fresh outage re-alerts. In-memory + reset-on-restart,
+ * exactly like the poller handle: a restart re-counts from zero and re-crosses
+ * the threshold within N ticks if the outage persists.
+ */
+export const RECONCILE_FAILURE_ALERT_THRESHOLD = 3;
+
+const FAILURE_KEY = Symbol.for("viberr.githubReconcileFailures");
+interface FailureHost {
+  [FAILURE_KEY]?: Map<string, { fails: number; alerted: boolean }>;
+}
+function failureTracker(): Map<string, { fails: number; alerted: boolean }> {
+  // SAFETY: a viberr-namespaced registry symbol only these two helpers touch.
+  const host = globalThis as FailureHost;
+  return (host[FAILURE_KEY] ??= new Map());
+}
+
+/** A project reconcile succeeded — clear any failure streak so a new outage
+ *  re-alerts (and, if we had alerted, stop suppressing future alerts). */
+export function noteReconcileSuccess(slug: string): void {
+  const tracker = failureTracker();
+  if (tracker.has(slug)) tracker.delete(slug);
+}
+
+/** A project reconcile threw — count it, and at the threshold notify the people
+ *  who can fix the credential, exactly once until it recovers. Best-effort:
+ *  the alert must never turn a per-project failure into a poll-aborting throw. */
+export function noteReconcileFailure(db: DatabaseSync, slug: string): void {
+  const tracker = failureTracker();
+  const entry = tracker.get(slug) ?? { fails: 0, alerted: false };
+  entry.fails += 1;
+  tracker.set(slug, entry);
+  if (entry.fails < RECONCILE_FAILURE_ALERT_THRESHOLD || entry.alerted) return;
+  try {
+    // Admins + maintainers: the roles that manage the GitHub connection (admin)
+    // and bind the project credential (maintainer). A contributor/viewer can do
+    // nothing about a failing token, so alerting them would only be noise.
+    const recipients = listProjectMembers(db, slug).filter(
+      (m) => m.role === "admin" || m.role === "maintainer",
+    );
+    const title = "GitHub sync is failing for this project";
+    const text = `Viberr has been unable to reach GitHub for this project's repository across ${entry.fails} checks. Branch and PR status may be stale (a merged or closed PR can still show open). Check the project's GitHub credential — the token may be expired, revoked, or missing repository access.`;
+    for (const member of recipients) {
+      createNotification(db, {
+        // Deterministic id → restart-safe idempotency (INSERT OR REPLACE), on
+        // top of the in-memory `alerted` flag that stops per-tick repeats.
+        id: `ntf_ghsync_${slug}_${member.userId}`,
+        userId: member.userId,
+        kind: "policy",
+        projectSlug: slug,
+        title,
+        text,
+        from: POLICY_ENGINE_NOTIFY_FROM,
+      });
+    }
+    entry.alerted = true;
+    logger.warn("github reconcile failing — alerted project admins", {
+      projectSlug: slug,
+      consecutiveFailures: entry.fails,
+      recipients: recipients.length,
+    });
+  } catch (error) {
+    logger.error("could not raise github-sync-failing notification", {
+      projectSlug: slug,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
 /** Active projects that have at least one branched task worth reconciling. */
 function projectsToPoll(db: DatabaseSync): string[] {
   // SAFETY: `task_projections.project_slug` is NOT NULL TEXT
@@ -137,11 +214,16 @@ export async function pollGithubReconcile(
       });
       reconciled += summary.reconciled;
       changed += summary.changed;
+      // C7: a clean pass clears any failure streak so a fresh outage re-alerts.
+      noteReconcileSuccess(slug);
     } catch (error) {
       logger.warn("github reconcile poll failed for a project", {
         projectSlug: slug,
         err: error instanceof Error ? error : new Error(String(error)),
       });
+      // C7: after enough consecutive failures, tell the people who can fix it
+      // instead of failing silently into the log forever.
+      noteReconcileFailure(db, slug);
     }
   }
   // F12-05: nudge the human to finish any merge-pending (accepted-but-open) PR.

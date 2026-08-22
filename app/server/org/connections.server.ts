@@ -99,6 +99,15 @@ export interface ConnectionRecord {
   scopes: ConnectionScopeEvidence[];
   lastValidatedAt: string | null;
   createdAt: string;
+  /**
+   * A4 (pass 23): how many projects are BOUND to this connection's credential
+   * (`project_github_credentials`). Removing the connection deletes the PAT, and
+   * `deletePat`'s bindings cascade — so every one of these projects loses branch
+   * and PR sync the moment the connection goes. The remove-confirm reassured the
+   * opposite ("Projects already created keep their repos") while naming only the
+   * harmless half; this count lets it disclose the sync loss.
+   */
+  boundProjects: number;
 }
 
 type ConnectionRow = {
@@ -112,6 +121,7 @@ type ConnectionRow = {
   token_suffix: string | null;
   last_validated_at: string | null;
   validation_json: string | null;
+  bound_projects: number;
 };
 
 function validationState(
@@ -150,12 +160,15 @@ function mapRow(row: ConnectionRow, now = new Date()): ConnectionRecord {
     }),
     lastValidatedAt: row.last_validated_at,
     createdAt: row.created_at,
+    boundProjects: row.bound_projects,
   };
 }
 
 const LIST_SQL = `
   SELECT c.id, c.owner, c.pat_id, c.is_default, c.repos_count, c.expires_at,
-         c.created_at, p.token_suffix, p.last_validated_at, p.validation_json
+         c.created_at, p.token_suffix, p.last_validated_at, p.validation_json,
+         (SELECT COUNT(*) FROM project_github_credentials b
+            WHERE b.pat_id = c.pat_id) AS bound_projects
   FROM github_connections c
   LEFT JOIN github_pats p ON p.id = c.pat_id`;
 

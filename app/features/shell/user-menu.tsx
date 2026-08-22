@@ -178,7 +178,11 @@ export function UserMenu({
                 onClick={() => setMenu(false)}
               >
                 <Icon name="sliders" />
-                Org settings
+                {/* D2 (pass 23): the destination's own H1 and every other
+                    direction call it "Instance settings"; the only nav entry to
+                    it said "Org settings", so users relaying an error hunted for
+                    a name the menu doesn't show. One name. */}
+                Instance settings
               </Link>
             )}
             <div className="menu-sep" />

@@ -721,6 +721,35 @@ export async function autoInvokeOperator(
       trigger,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    // C1 (pass 23): every caller is fire-and-forget, so a THROW here (before a
+    // run row exists) left coordination silently stopped — the human created a
+    // task or resolved a packet and nothing woke the operator, with no timeline
+    // note and no waiting-state change. A runOperator REFUSAL is not a throw (it
+    // returns `{refused}` and is handled at the call site), so only a genuine
+    // error reaches this catch — record it so the human knows to run the operator
+    // manually. Best-effort: this recovery must never throw out of a fire-and-
+    // forget handoff.
+    try {
+      await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "operator" },
+          title: null,
+          text: `The operator could not be started automatically (${error instanceof AppError ? error.userMessage : "an internal error"}). Coordination is paused for this task; run the operator manually when you're ready.`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, projectSlug, taskKey);
+    } catch (noteError) {
+      logger.error("auto operator failure note could not be written", {
+        taskKey,
+        trigger,
+        err:
+          noteError instanceof Error ? noteError : new Error(String(noteError)),
+      });
+    }
   }
 }
 
@@ -892,6 +921,18 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * toasted "@Operator is picking it up" while nothing ran (the reply never came).
    */
   operatorRefused: "open-packet" | "terminal-stage" | null;
+  /**
+   * A8 (pass 23): the comment is recorded BEFORE any run starts, so a SPECIALIST
+   * run-start failure (single-flight conflict, backend not configured, stage
+   * ineligibility) used to throw out of here — the commenter saw a bare error and
+   * could not tell their comment HAD posted. This carries the reason the run did
+   * not start (the comment did), so the route toasts "comment posted, run not
+   * started: <reason>" instead of an error that reads as total failure. Null on
+   * the happy path and on the runtime-denied path (which has its own signal).
+   * Distinct from `operatorRefused`, which is the operator branch's governed
+   * refusal signal.
+   */
+  runNotStarted: string | null;
 }
 
 // ------------------------------------------------- canonical re-anchor (D-3)
@@ -1118,6 +1159,7 @@ export async function commentToAgent(
       logThreadId: null,
       runtimeDenied: false,
       operatorRefused: null,
+      runNotStarted: null,
     };
   }
 
@@ -1137,6 +1179,7 @@ export async function commentToAgent(
       logThreadId: null,
       runtimeDenied: true,
       operatorRefused: null,
+      runNotStarted: null,
     };
   }
 
@@ -1171,6 +1214,7 @@ export async function commentToAgent(
         logThreadId: null,
         runtimeDenied: false,
         operatorRefused: result.refused,
+        runNotStarted: null,
       };
     }
     const logThreadId = resolveReplyLogThread(
@@ -1186,6 +1230,7 @@ export async function commentToAgent(
       logThreadId,
       runtimeDenied: false,
       operatorRefused: null,
+      runNotStarted: null,
     };
   }
 
@@ -1236,7 +1281,14 @@ export async function commentToAgent(
   let triggered: "resumed" | "started";
   let resumeOutcomeKey: string | undefined;
 
-  if (target.session) {
+  // A8 (pass 23): the comment is ALREADY on the timeline. A run-start failure
+  // (single-flight conflict, backend not configured, stage ineligibility) below
+  // used to throw straight out of here, so the commenter saw only an error and
+  // could not tell their comment HAD posted. Catch it and return the partial
+  // success — comment recorded, run not started, reason attached — rather than
+  // throwing. (The operator @mention refusal is a separate governed signal.)
+  try {
+    if (target.session) {
     // 4a. Resume the agent's existing provider session, reusing the clone
     //     workdir so it keeps its repo context.
     const workdir = resumeWorkdir(
@@ -1356,6 +1408,26 @@ export async function commentToAgent(
       runId = started.runId;
     }
     triggered = "started";
+    }
+  } catch (error) {
+    logger.warn("@mention run did not start; the comment was still recorded", {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: target.profileId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return {
+      ...base,
+      agent: agentIdentity,
+      triggered: null,
+      logThreadId: null,
+      runtimeDenied: false,
+      operatorRefused: null,
+      runNotStarted:
+        error instanceof AppError
+          ? error.userMessage
+          : "the run could not be started",
+    };
   }
 
   // 5. Install THE canonical completion handler (reply → reconcile → verdict →
@@ -1406,6 +1478,7 @@ export async function commentToAgent(
     logThreadId,
     runtimeDenied: false,
     operatorRefused: null,
+    runNotStarted: null,
   };
 }
 
@@ -1712,57 +1785,106 @@ export async function postAgentReplyComment(
   );
   const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
   const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
+  // The reply write, on its own so it can be RETRIED (C3).
+  const writeReply = () =>
+    updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift(event);
+      if (compactOn) {
+        parsed.timeline = compactTimelineEvents(
+          parsed.timeline,
+          compactAt != null
+            ? {
+                threshold: compactAt,
+                keepRecent: Math.min(
+                  DEFAULT_COMPACTION.keepRecent,
+                  Math.max(4, Math.floor(compactAt / 2)),
+                ),
+              }
+            : DEFAULT_COMPACTION,
+        );
+      }
+    });
+  const finalizeReply = () => {
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    // When a producing note stood in for a suppressed reply, the reason stays
+    // honest (the REPLY was dropped/deduped even though a files note landed);
+    // when the reply itself posted, it is simply a processed-reply mark.
+    recordAgentRepliedAudit(
+      db,
+      input.projectSlug,
+      input.taskKey,
+      input.runId,
+      postsReplyEvent ? null : suppressedReason,
+    );
+    // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
+    // inbox — same fan-out as human comments, with the agent as `from`
+    // (under its OWN name, not the runtime label — NEW-5).
+    notifyMentionedUsers(db, {
+      text: event.text,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      from: createActorResolver(db, {
+        agentNames: agentNamesByProfile(db, input.projectSlug),
+      })(input.actorRef),
+      occurredAt: event.occurredAt,
+    });
+  };
   // Returns the write promise so a caller (the operator react loop) can await
-  // the reply landing before it re-reads the task. Errors are logged, never
-  // propagated — the run finished and the transcript is in the logs.
-  return updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(event);
-    if (compactOn) {
-      parsed.timeline = compactTimelineEvents(
-        parsed.timeline,
-        compactAt != null
-          ? {
-              threshold: compactAt,
-              keepRecent: Math.min(
-                DEFAULT_COMPACTION.keepRecent,
-                Math.max(4, Math.floor(compactAt / 2)),
-              ),
-            }
-          : DEFAULT_COMPACTION,
-      );
-    }
-  })
-    .then(() => {
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      // When a producing note stood in for a suppressed reply, the reason stays
-      // honest (the REPLY was dropped/deduped even though a files note landed);
-      // when the reply itself posted, it is simply a processed-reply mark.
-      recordAgentRepliedAudit(
-        db,
-        input.projectSlug,
-        input.taskKey,
-        input.runId,
-        postsReplyEvent ? null : suppressedReason,
-      );
-      // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
-      // inbox — same fan-out as human comments, with the agent as `from`
-      // (under its OWN name, not the runtime label — NEW-5).
-      notifyMentionedUsers(db, {
-        text: event.text,
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        from: createActorResolver(db, {
-          agentNames: agentNamesByProfile(db, input.projectSlug),
-        })(input.actorRef),
-        occurredAt: event.occurredAt,
-      });
-    })
-    .catch((cause: unknown) => {
-      logger.error("agent reply comment write failed", {
+  // the reply landing before it re-reads the task. Errors are never propagated
+  // — the run finished — but C3 (pass 23): this ONE promise carried the reply
+  // comment, the audit, AND the @mention fan-out, and a log-only catch meant a
+  // write failure vanished all of it while the run showed finished, with nothing
+  // pointing at the run log. Retry the write once; if it still fails, land a
+  // MINIMAL fallback note so the timeline at least says the report is in the run
+  // log instead of showing nothing.
+  return writeReply()
+    .then(finalizeReply)
+    .catch(async (cause: unknown) => {
+      logger.error("agent reply comment write failed — retrying once", {
         taskKey: input.taskKey,
         runId: input.runId,
         err: cause instanceof Error ? cause : new Error(String(cause)),
       });
+      try {
+        await writeReply();
+        finalizeReply();
+        return;
+      } catch (retryCause) {
+        logger.error("agent reply comment write failed on retry", {
+          taskKey: input.taskKey,
+          runId: input.runId,
+          err:
+            retryCause instanceof Error
+              ? retryCause
+              : new Error(String(retryCause)),
+        });
+      }
+      try {
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "run" },
+              title: null,
+              text: "The agent's report could not be posted to the timeline. Its full output is in the run log.",
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      } catch (fallbackCause) {
+        logger.error("agent reply fallback note could not be written", {
+          taskKey: input.taskKey,
+          runId: input.runId,
+          err:
+            fallbackCause instanceof Error
+              ? fallbackCause
+              : new Error(String(fallbackCause)),
+        });
+      }
     });
 }
 
@@ -2678,6 +2800,40 @@ export async function applyAgentCompletionEffects(
       evidence,
       attachments: runAttachments,
     });
+    // C5 (pass 23): a verdict-GRANTED reviewer finished but produced NO readable
+    // verdict (no envelope, no classifiable prose). Validation is left unchanged
+    // — fail-safe, correct — but the human saw a completed review run with no
+    // verdict and no note, and had to diff run logs against validation to notice
+    // the judgment was lost. Say so, so the review can be re-run or a verdict
+    // recorded by hand. Best-effort: a note failure never fails the completion.
+    if (verdictAuthorized && !verdict) {
+      try {
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: null,
+              text: "The reviewer finished without a readable verdict, so validation is unchanged and acceptance stays gated. Re-run the review or record a verdict manually.",
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      } catch (noteError) {
+        logger.error("could not write the no-verdict note", {
+          taskKey: input.taskKey,
+          runId: finished.id,
+          err:
+            noteError instanceof Error
+              ? noteError
+              : new Error(String(noteError)),
+        });
+      }
+    }
   } else {
     await postAgentReplyComment(db, ctx, {
       projectSlug: input.projectSlug,
@@ -3344,6 +3500,86 @@ export async function releaseOwner(
   });
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
+}
+
+/** A row from `task_projections` naming a task with a projected human owner. */
+const ownedTaskKeyRow = z.object({ task_key: z.string() });
+
+/**
+ * A3 (pass 23): release every task a departing member OWNS in one project.
+ *
+ * Removing a member from a project — or deleting their org account — dropped
+ * them from `members[]` and stopped there, leaving every task they OWNED
+ * pointing at an `ownerUserId` that is no longer a member. The board resolved a
+ * GHOST owner and review/acceptance stalled on a seat nobody could fill, while
+ * both removal dialogs promised the seat was handled ("returns to the operator
+ * for reassignment") — it was not touched at all. Ownership is a HUMAN seat that
+ * `assignOwner` keeps deliberately orthogonal to the operator, so the honest
+ * response is to RELEASE the seat — the same clear-to-null `releaseOwner`
+ * performs — so a contributor+ can take it. Returns how many tasks were freed.
+ *
+ * Best-effort per task: a task that vanished or was re-owned between the
+ * projection read and the write is skipped, never fatal to the removal that
+ * triggered it. Archived tasks are left alone — they sit off every active board
+ * and queue, so a ghost owner there blocks nothing; a restore re-opens ownership
+ * the normal way. Enumerated from the projection (the board's own owner index),
+ * re-checked against the authoritative task file inside the write lock.
+ */
+export async function releaseTasksOwnedBy(
+  db: DatabaseSync,
+  input: { projectSlug: string; userId: string; removedName: string },
+  actor: { userId: string | null; label: string },
+  ctx: TaskMutationContext = {},
+): Promise<number> {
+  const keys = db
+    .prepare(
+      `SELECT task_key FROM task_projections
+        WHERE project_slug = ? AND owner_user_id = ? AND archived = 0`,
+    )
+    .all(input.projectSlug, input.userId)
+    .flatMap((row) => {
+      const parsed = ownedTaskKeyRow.safeParse(row);
+      return parsed.success ? [parsed.data.task_key] : [];
+    });
+
+  let released = 0;
+  for (const taskKey of keys) {
+    const ref = taskRef(ctx, input.projectSlug, taskKey);
+    const existing = readTaskFile(ref);
+    // Projection can lag the file (a re-owned or deleted task): trust the file.
+    if (!existing || existing.parsed.frontmatter.ownerUserId !== input.userId) {
+      continue;
+    }
+    const event: TaskFileEvent = {
+      occurredAt: new Date().toISOString(),
+      type: "assign",
+      actor: { kind: "system", systemId: "membership" },
+      title: null,
+      text: `**${input.removedName}** was removed from the project, releasing task ownership. The seat is open for any contributor or above to take; review & acceptance stall until someone does.`,
+      toAgent: false,
+      evidence: null,
+    };
+    let changed = false;
+    await updateTaskFile(ref, (parsed) => {
+      if (parsed.frontmatter.ownerUserId !== input.userId) return;
+      parsed.frontmatter.ownerUserId = null;
+      parsed.timeline.unshift(event);
+      changed = true;
+    });
+    if (!changed) continue;
+    reprojectTask(db, ctx, input.projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.ownership.released_on_removal",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug: input.projectSlug,
+      taskKey,
+      details: { previousOwnerUserId: input.userId },
+    });
+    released += 1;
+  }
+  return released;
 }
 
 // -------------------------------------------------------------- transition
@@ -6073,6 +6309,17 @@ function forceIrreducibleRefusal(
 export interface AcceptancePrHeadCheck {
   /** The refusal sentence, or null when the head is verified or unverifiable. */
   refusal: string | null;
+  /**
+   * A9 (pass 23): WHY `refusal` is null — the two cases used to be
+   * indistinguishable. `verified` = a live read confirmed the PR head contains
+   * the delivered revision. `unverifiable` = the check could not run (GitHub
+   * unreachable, the PR read or compare failed) — acceptance is still ALLOWED
+   * (the merge's own honesty covers unreachability), but the record must SAY the
+   * containment check did not run or a verified accept and an unverified one read
+   * identically. `not-applicable` = nothing to verify (no PR, no revision, or the
+   * PR is already merged).
+   */
+  verification: "verified" | "unverifiable" | "not-applicable";
   prNumber: number | null;
   revisionHeadSha: string | null;
 }
@@ -6098,8 +6345,10 @@ export async function acceptancePrHeadCheck(
 ): Promise<AcceptancePrHeadCheck> {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   const fm = file?.parsed.frontmatter;
+  const verdict = await evaluateAcceptancePrHead(db, ctx, projectSlug, taskKey);
   return {
-    refusal: await acceptancePrHeadMismatch(db, ctx, projectSlug, taskKey),
+    refusal: verdict.refusal,
+    verification: verdict.verification,
     prNumber: fm?.pr?.number ?? null,
     revisionHeadSha: fm?.workRevision?.headSha ?? null,
   };
@@ -6146,12 +6395,33 @@ export async function acceptancePrHeadMismatch(
   projectSlug: string,
   taskKey: string,
 ): Promise<string | null> {
+  return (await evaluateAcceptancePrHead(db, ctx, projectSlug, taskKey)).refusal;
+}
+
+/**
+ * The one live PR-head evaluation, reporting BOTH the refusal (a KNOWN mismatch)
+ * and WHY a null refusal is null — `verified` (containment confirmed) vs
+ * `unverifiable` (the check could not run) vs `not-applicable` (nothing to
+ * verify). A9 split these apart so the acceptance record can disclose an
+ * unverified head instead of reading like a verified one. Never throws.
+ */
+async function evaluateAcceptancePrHead(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<{
+  refusal: string | null;
+  verification: "verified" | "unverifiable" | "not-applicable";
+}> {
   try {
     const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     const fm = file?.parsed.frontmatter;
     const pr = fm?.pr ?? null;
     const rev = fm?.workRevision ?? null;
-    if (!pr || !rev || pr.state === "merged") return null;
+    if (!pr || !rev || pr.state === "merged") {
+      return { refusal: null, verification: "not-applicable" };
+    }
     const { getProjectGithubContext } = await import(
       "~/server/github/github-context.server"
     );
@@ -6159,16 +6429,21 @@ export async function acceptancePrHeadMismatch(
     const ghOptions: GithubContextOptions = {};
     if (ctx.fetchImpl) ghOptions.fetchImpl = ctx.fetchImpl;
     const gh = getProjectGithubContext(db, projectSlug, ghOptions);
-    if (gh.status !== "ok") return null;
+    if (gh.status !== "ok") {
+      return { refusal: null, verification: "unverifiable" };
+    }
     const live = await gh.client.request(
       "GET",
       `/repos/${gh.repo}/pulls/${pr.number}`,
       pullHeadShaSchema,
     );
-    if (!live.ok) return null;
-    if (!live.data) return null;
+    if (!live.ok || !live.data) {
+      return { refusal: null, verification: "unverifiable" };
+    }
     const headSha = live.data.head.sha;
-    if (headSha === rev.headSha) return null;
+    if (headSha === rev.headSha) {
+      return { refusal: null, verification: "verified" };
+    }
     // Not identical — a head that CONTAINS the delivered commit (e.g. the
     // delivery plus an auto-commit) is still reviewing the delivered work.
     const cmp = await gh.client.request(
@@ -6176,21 +6451,26 @@ export async function acceptancePrHeadMismatch(
       `/repos/${gh.repo}/compare/${rev.headSha}...${headSha}`,
       compareStatusSchema,
     );
-    if (!cmp.ok) return null; // could not compare — unknown, not a refusal
-    if (cmp.data.status === "ahead" || cmp.data.status === "identical") {
-      return null;
+    if (!cmp.ok) {
+      // Could not compare — unknown, not a refusal, but NOT a verification either.
+      return { refusal: null, verification: "unverifiable" };
     }
-    return (
-      `PR #${pr.number}'s head (${headSha.slice(0, 7)}) does not contain the delivered ` +
-      `revision ${rev.headSha.slice(0, 7)}: the PR carries different content than was ` +
-      `delivered. Re-deliver the branch (or fix the remote branch), then re-review.`
-    );
+    if (cmp.data.status === "ahead" || cmp.data.status === "identical") {
+      return { refusal: null, verification: "verified" };
+    }
+    return {
+      refusal:
+        `PR #${pr.number}'s head (${headSha.slice(0, 7)}) does not contain the delivered ` +
+        `revision ${rev.headSha.slice(0, 7)}: the PR carries different content than was ` +
+        `delivered. Re-deliver the branch (or fix the remote branch), then re-review.`,
+      verification: "verified",
+    };
   } catch (error) {
     logger.warn("PR-head verification failed (treated as unknown)", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    return null;
+    return { refusal: null, verification: "unverifiable" };
   }
 }
 
@@ -6667,6 +6947,25 @@ export async function applyAcceptanceWrite(
     // resolution path's long-standing behavior.
     parsed.frontmatter.recommendations = [];
     parsed.packet = null;
+    // A9 (pass 23): the PR head could NOT be verified against the delivered
+    // revision (GitHub unreachable / the compare failed), yet an irreversible
+    // merge still closed this task. The head gate refuses a KNOWN mismatch; an
+    // UNVERIFIABLE head is allowed through (the merge's own honesty covers
+    // unreachability) — but the completion record must SAY the containment check
+    // did not run, or a verified accept and an unverified one read identically on
+    // the most consequential action the product has. Only when a merge actually
+    // landed (an "accepted, merge pending" outcome already discloses the
+    // unreachability itself, so no double note).
+    if (
+      headCheck.verification === "unverifiable" &&
+      headCheck.prNumber !== null &&
+      parsed.frontmatter.pr?.state === "merged"
+    ) {
+      input.event.text +=
+        `\n\nNote: PR #${headCheck.prNumber}'s head could not be verified against the ` +
+        `delivered revision before the merge (GitHub could not be reached for the check). ` +
+        `It was accepted without that containment check.`;
+    }
     parsed.timeline.unshift(input.event);
     accepted = true;
   });

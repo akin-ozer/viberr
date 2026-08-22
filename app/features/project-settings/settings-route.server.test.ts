@@ -418,13 +418,35 @@ describe("members", () => {
       intent: "remove-member",
       userId: ids.selin,
     });
+    // A3 (pass 23): Selin owns a task in the demo seed; removing her RELEASES it
+    // (clears the owner seat) so nothing strands on a ghost owner, and the toast
+    // discloses the reassignment the dialog copy promises.
     expect(remove).toEqual({
       ok: true,
-      toast: "Selin Aksoy removed from Viberr Core",
+      toast:
+        "Selin Aksoy removed from Viberr Core. 1 owned task released for reassignment.",
     });
     expect(
       listAuditEvents(app.db, { action: "project.member.removed" })[0],
-    ).toMatchObject({ subjectId: ids.selin, projectSlug: "viberr-core" });
+    ).toMatchObject({
+      subjectId: ids.selin,
+      projectSlug: "viberr-core",
+      details: { tasksReleased: 1 },
+    });
+    // The release is auditable per task, and no task still names her as owner.
+    expect(
+      listAuditEvents(app.db, {
+        action: "task.ownership.released_on_removal",
+      }).length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      app.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM task_projections
+            WHERE project_slug = 'viberr-core' AND owner_user_id = ?`,
+        )
+        .get(ids.selin),
+    ).toMatchObject({ n: 0 });
     // Restore Selin via invite + role change back to reviewer (Policy owns
     // roles; the settings invite always lands on Viewer).
     await postAction(ids.arda, {
@@ -656,3 +678,34 @@ describe("F21-5: the settings loader withholds credential detail without the gra
     expect(JSON.stringify(view)).not.toContain("f215");
   });
 });
+
+describe("E9: repair-repo + set-branch-cleanup authority gates", () => {
+  it("set-branch-cleanup is edit-policy (admin): a contributor is refused, an admin round-trips", async () => {
+    const denied = actionOutcome(
+      await postAction(ids.selin, { intent: "set-branch-cleanup", enabled: "0" }),
+    );
+    expect(denied.status).toBe(403);
+
+    const ok = actionOutcome(
+      await postAction(ids.arda, { intent: "set-branch-cleanup", enabled: "0" }),
+    );
+    expect(ok.ok).toBe(true);
+    expect(ok.toast).toMatch(/kept on GitHub/);
+
+    // Round-trip the other way so the test leaves the default (on) in place.
+    await postAction(ids.arda, { intent: "set-branch-cleanup", enabled: "1" });
+  });
+
+  it("repair-repo is edit-policy (admin): a maintainer is refused before any GitHub probe", async () => {
+    // Murat is a maintainer, above contributor but below the edit-policy tier
+    // this destructive repair demands — refused before it can touch GitHub.
+    const denied = actionOutcome(
+      await postAction(ids.murat, {
+        intent: "repair-repo",
+        repo: "akin-ozer/viberr",
+        confirmFootprint: "1",
+      }),
+    );
+    expect(denied.status).toBe(403);
+  });
+})

@@ -42,6 +42,7 @@ import {
   updateTaskGoal,
   userName,
 } from "~/server/tasks/task-actions.server";
+import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listTaskAttachments } from "~/server/files/task-attachments.server";
 import {
@@ -298,6 +299,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     operatorBackend: operatorBackendFor({}, params.slug),
     // R19-A: the ceiling, so the run picker offers only what will actually run.
     operatorAutonomy: operatorAutonomyFor({}, params.slug),
+    // A6 (pass 23): does THIS project's operator hold the one exception to the
+    // human-only Done boundary (full autonomy + completion-for-acceptance:
+    // direct)? The Permissions panel's boundary row stated the rule flatly on
+    // every project, contradicting the Review queue one click away. Same read
+    // model the queue uses, so the two surfaces cannot disagree.
+    acceptanceAuthority: resolveAcceptanceAuthority(params.slug),
     // P11-41: which backends are actually configured, so the run picker can
     // disable an option that would fail fast rather than offering it blindly.
     backendAvailable: {
@@ -415,7 +422,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         // note when a mention was recorded but the run was not triggered (RBAC);
         // an @operator mention that was REFUSED (packet open / task Done) must
         //   NOT read as "picking it up" — the run never started; point the human
-        //   at the action that unblocks it;
+        //   at the action that unblocks it (BUG-2);
+        // A8 (pass 23): a SPECIALIST run that FAILED to start after the comment
+        //   posted says so with its reason, so the commenter knows the comment
+        //   landed and only the run didn't (was a bare error toast that read as
+        //   total failure);
         // else the original routed/plain copy (verbatim spec contract).
         const toast =
           result.triggered && result.agent
@@ -424,11 +435,13 @@ export async function action({ request, params }: Route.ActionArgs) {
               ? "Comment posted · resolve the open decision to continue"
               : result.operatorRefused === "terminal-stage"
                 ? "Comment posted · reopen the task to run the operator"
-                : result.runtimeDenied && result.agent
-                  ? "Comment posted · your role can't trigger agent runs"
-                  : result.toAgent
-                    ? "Comment posted · routed to mentioned agent"
-                    : "Comment posted";
+                : result.runNotStarted && result.agent
+                  ? `Comment posted · @${result.agent.name}'s run did not start: ${result.runNotStarted}`
+                  : result.runtimeDenied && result.agent
+                    ? "Comment posted · your role can't trigger agent runs"
+                    : result.toAgent
+                      ? "Comment posted · routed to mentioned agent"
+                      : "Comment posted";
         return {
           ok: true as const,
           intent,
@@ -928,13 +941,23 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
+          // A7 (pass 23), BUG-2's sibling on the manual "Run operator" control:
+          // runOperator REFUSES with `refused: "open-packet" | "terminal-stage"`
+          // (an open decision blocks it; a terminal-stage task is scheduled-only),
+          // and this toast branched on `queued` alone — so a refused start toasted
+          // "Operator running" for a run that never began. The UI disables the
+          // control in those states, so this is the crafted-POST / SSE-race path;
+          // it now tells the truth, exactly as commentToAgent does (PR #195).
           // B10 (pass 16): a trigger that lands while a run already holds the
           // lease is QUEUED, not started — it drains when the current run ends.
-          // "Operator running" for both left the human watching for a run that
-          // had not begun; `queued` now distinguishes them.
-          toast: started.queued
-            ? `Operator queued · runs when the current run finishes · ${backendLabel} · ${started.autonomy} autonomy`
-            : `Operator running · ${backendLabel} · ${started.autonomy} autonomy`,
+          toast:
+            started.refused === "open-packet"
+              ? "Operator not started · resolve the open decision to continue"
+              : started.refused === "terminal-stage"
+                ? "Operator not started · reopen the task to run the operator"
+                : started.queued
+                  ? `Operator queued · runs when the current run finishes · ${backendLabel} · ${started.autonomy} autonomy`
+                  : `Operator running · ${backendLabel} · ${started.autonomy} autonomy`,
         };
       }
       case "schedule-action": {
@@ -1052,6 +1075,7 @@ export default function TaskDetailRoute({
       schedules={loaderData.schedules}
       archived={loaderData.archived}
       acceptance={loaderData.acceptance}
+      acceptanceAuthority={loaderData.acceptanceAuthority}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
       githubCheckedAt={loaderData.githubCheckedAt}

@@ -185,7 +185,7 @@ function RemoveCredentialDialog({
       <p>
         Branch and PR sync go offline until a credential is attached again.
         Nothing already pushed to GitHub is affected, and the token itself stays
-        in org settings.
+        in Instance settings.
       </p>
       <div className="confirm-actions">
         <button type="button" className="btn ghost" onClick={close}>
