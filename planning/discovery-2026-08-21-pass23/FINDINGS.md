@@ -114,3 +114,39 @@ Validation:
   from the web · Off" (captured while adding read-github-api). AFTER: the
   component test asserts Allowed. (A live project-editor screenshot needs a
   PAT-connected project; the org-level editor exposes no capability toggles.)
+
+---
+
+## BUG-2 (MEDIUM, coherence / misleading-feedback) — @operator "is picking it up" toast lies when the run is refused
+
+**Found live (VIB-3).** With a decision packet open ("Onboarding-doc outline ready —
+approve, revise, or decline?"), I @mentioned `@operator` in a comment. Server logged:
+`manual operator run refused — a decision packet is open`. **No operator run started** —
+correct, intentional (don't spin the operator while a human decision is pending). BUT
+the UI told me the operator was responding.
+
+### Root cause (verified in code)
+- `runOperator` (`app/server/runtimes/operator-run.server.ts:1066-1082`) returns
+  `{ runId: null, queued: false, refused: "open-packet" }` when a packet is open.
+- `commentToAgent`'s operator branch (`app/server/tasks/task-actions.server.ts`,
+  `if (target.isOperator)`) calls `runOperator` and then returns
+  `{ ...base, triggered: "started", logThreadId, runtimeDenied: false }`
+  **unconditionally** — it never inspects `result.refused` (or `result.runId === null`).
+- The route (`app/routes/project.task.tsx` comment intent) toasts on
+  `result.triggered && result.agent` → **"Comment posted · @Operator is picking it up"**.
+- So the human is told the operator is responding while the run was refused. The reply
+  never comes; the only trace is the server log. (`terminal-stage` refusal has the same gap.)
+
+### Impact
+A human @mentions the operator to ask something while a packet is open, sees "picking it
+up", and waits indefinitely. The correct action (resolve the open packet) is never
+surfaced. Undermines the app's otherwise-strong honesty (R15-1 family, silent-drop care
+seen in the `ambiguousBackendHandle` note right beside this code).
+
+### Fix
+Make `commentToAgent` surface the refusal: add `operatorRefused?: "open-packet" |
+"terminal-stage" | null` to `CommentToAgentResult`; in the operator branch, when
+`result.refused` is set, return `triggered: null, operatorRefused: result.refused` (the
+comment is still recorded via `base`). The route toasts accordingly, e.g. open-packet →
+"Comment posted · resolve the open decision to continue"; terminal-stage → "Comment
+posted · reopen the task to run the operator".
