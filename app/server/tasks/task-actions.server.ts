@@ -721,6 +721,35 @@ export async function autoInvokeOperator(
       trigger,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    // C1 (pass 23): every caller is fire-and-forget, so a THROW here (before a
+    // run row exists) left coordination silently stopped — the human created a
+    // task or resolved a packet and nothing woke the operator, with no timeline
+    // note and no waiting-state change. A runOperator REFUSAL is not a throw (it
+    // returns `{refused}` and is handled at the call site), so only a genuine
+    // error reaches this catch — record it so the human knows to run the operator
+    // manually. Best-effort: this recovery must never throw out of a fire-and-
+    // forget handoff.
+    try {
+      await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "operator" },
+          title: null,
+          text: `The operator could not be started automatically (${error instanceof AppError ? error.userMessage : "an internal error"}). Coordination is paused for this task; run the operator manually when you're ready.`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, projectSlug, taskKey);
+    } catch (noteError) {
+      logger.error("auto operator failure note could not be written", {
+        taskKey,
+        trigger,
+        err:
+          noteError instanceof Error ? noteError : new Error(String(noteError)),
+      });
+    }
   }
 }
 
@@ -1724,57 +1753,106 @@ export async function postAgentReplyComment(
   );
   const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
   const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
+  // The reply write, on its own so it can be RETRIED (C3).
+  const writeReply = () =>
+    updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift(event);
+      if (compactOn) {
+        parsed.timeline = compactTimelineEvents(
+          parsed.timeline,
+          compactAt != null
+            ? {
+                threshold: compactAt,
+                keepRecent: Math.min(
+                  DEFAULT_COMPACTION.keepRecent,
+                  Math.max(4, Math.floor(compactAt / 2)),
+                ),
+              }
+            : DEFAULT_COMPACTION,
+        );
+      }
+    });
+  const finalizeReply = () => {
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    // When a producing note stood in for a suppressed reply, the reason stays
+    // honest (the REPLY was dropped/deduped even though a files note landed);
+    // when the reply itself posted, it is simply a processed-reply mark.
+    recordAgentRepliedAudit(
+      db,
+      input.projectSlug,
+      input.taskKey,
+      input.runId,
+      postsReplyEvent ? null : suppressedReason,
+    );
+    // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
+    // inbox — same fan-out as human comments, with the agent as `from`
+    // (under its OWN name, not the runtime label — NEW-5).
+    notifyMentionedUsers(db, {
+      text: event.text,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      from: createActorResolver(db, {
+        agentNames: agentNamesByProfile(db, input.projectSlug),
+      })(input.actorRef),
+      occurredAt: event.occurredAt,
+    });
+  };
   // Returns the write promise so a caller (the operator react loop) can await
-  // the reply landing before it re-reads the task. Errors are logged, never
-  // propagated — the run finished and the transcript is in the logs.
-  return updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(event);
-    if (compactOn) {
-      parsed.timeline = compactTimelineEvents(
-        parsed.timeline,
-        compactAt != null
-          ? {
-              threshold: compactAt,
-              keepRecent: Math.min(
-                DEFAULT_COMPACTION.keepRecent,
-                Math.max(4, Math.floor(compactAt / 2)),
-              ),
-            }
-          : DEFAULT_COMPACTION,
-      );
-    }
-  })
-    .then(() => {
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      // When a producing note stood in for a suppressed reply, the reason stays
-      // honest (the REPLY was dropped/deduped even though a files note landed);
-      // when the reply itself posted, it is simply a processed-reply mark.
-      recordAgentRepliedAudit(
-        db,
-        input.projectSlug,
-        input.taskKey,
-        input.runId,
-        postsReplyEvent ? null : suppressedReason,
-      );
-      // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
-      // inbox — same fan-out as human comments, with the agent as `from`
-      // (under its OWN name, not the runtime label — NEW-5).
-      notifyMentionedUsers(db, {
-        text: event.text,
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        from: createActorResolver(db, {
-          agentNames: agentNamesByProfile(db, input.projectSlug),
-        })(input.actorRef),
-        occurredAt: event.occurredAt,
-      });
-    })
-    .catch((cause: unknown) => {
-      logger.error("agent reply comment write failed", {
+  // the reply landing before it re-reads the task. Errors are never propagated
+  // — the run finished — but C3 (pass 23): this ONE promise carried the reply
+  // comment, the audit, AND the @mention fan-out, and a log-only catch meant a
+  // write failure vanished all of it while the run showed finished, with nothing
+  // pointing at the run log. Retry the write once; if it still fails, land a
+  // MINIMAL fallback note so the timeline at least says the report is in the run
+  // log instead of showing nothing.
+  return writeReply()
+    .then(finalizeReply)
+    .catch(async (cause: unknown) => {
+      logger.error("agent reply comment write failed — retrying once", {
         taskKey: input.taskKey,
         runId: input.runId,
         err: cause instanceof Error ? cause : new Error(String(cause)),
       });
+      try {
+        await writeReply();
+        finalizeReply();
+        return;
+      } catch (retryCause) {
+        logger.error("agent reply comment write failed on retry", {
+          taskKey: input.taskKey,
+          runId: input.runId,
+          err:
+            retryCause instanceof Error
+              ? retryCause
+              : new Error(String(retryCause)),
+        });
+      }
+      try {
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "run" },
+              title: null,
+              text: "The agent's report could not be posted to the timeline. Its full output is in the run log.",
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      } catch (fallbackCause) {
+        logger.error("agent reply fallback note could not be written", {
+          taskKey: input.taskKey,
+          runId: input.runId,
+          err:
+            fallbackCause instanceof Error
+              ? fallbackCause
+              : new Error(String(fallbackCause)),
+        });
+      }
     });
 }
 

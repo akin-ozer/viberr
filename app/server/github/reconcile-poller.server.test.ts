@@ -13,7 +13,12 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import { pollGithubReconcile } from "./reconcile-poller.server";
+import {
+  noteReconcileFailure,
+  noteReconcileSuccess,
+  pollGithubReconcile,
+  RECONCILE_FAILURE_ALERT_THRESHOLD,
+} from "./reconcile-poller.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -200,3 +205,44 @@ describe("pollGithubReconcile (P11-14)", () => {
     expect(nudges).toBe(0);
   });
 });
+
+describe("C7: a persistent reconcile failure alerts the people who can fix it", () => {
+  const policyRows = (store: TestStore) =>
+    store.db
+      .prepare(
+        `SELECT user_id AS userId, title FROM notifications
+          WHERE project_slug = ? AND kind = 'policy'
+          ORDER BY user_id ASC`,
+      )
+      .all(store.slug) as { userId: string; title: string }[];
+
+  it("stays silent below the threshold, then notifies admins + maintainers once", () => {
+    const store = setupTestStore(ctx);
+    // Project the members into `project_members` (what listProjectMembers reads).
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    noteReconcileSuccess(store.slug); // clear any global streak from a prior test
+
+    for (let i = 1; i < RECONCILE_FAILURE_ALERT_THRESHOLD; i += 1) {
+      noteReconcileFailure(store.db, store.slug);
+    }
+    // Below the threshold: nothing yet.
+    expect(policyRows(store)).toHaveLength(0);
+
+    // Crossing the threshold alerts arda (admin) + murat (maintainer), NOT selin
+    // (contributor cannot edit policy / fix the credential).
+    noteReconcileFailure(store.db, store.slug);
+    const alerted = policyRows(store);
+    expect(alerted.map((r) => r.userId).sort()).toEqual(
+      [store.users.arda.id, store.users.murat.id].sort(),
+    );
+    expect(alerted[0]!.title).toBe("GitHub sync is failing for this project");
+
+    // Further failures do NOT pile up duplicate rows (alerted flag + stable id).
+    noteReconcileFailure(store.db, store.slug);
+    noteReconcileFailure(store.db, store.slug);
+    expect(policyRows(store)).toHaveLength(2);
+
+    // A success clears the streak so a genuinely-new outage can alert again.
+    noteReconcileSuccess(store.slug);
+  });
+})
