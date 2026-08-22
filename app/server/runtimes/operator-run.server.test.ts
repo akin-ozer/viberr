@@ -1658,6 +1658,36 @@ describe("pending trigger queue", () => {
     });
   });
 
+  it("C2: overflowing the pending-@operator queue notes the dropped turn on the timeline", async () => {
+    await drive({ trigger: "manual" }); // holds the lease
+    expect(adapter3.pending).not.toBeNull();
+
+    // Nine DISTINCT authors queue behind the held lease (distinct so none merge).
+    // The cap is 8, so the oldest — Asker1 — is dropped.
+    for (let i = 1; i <= 9; i += 1) {
+      await drive({
+        trigger: "manual",
+        humanComment: `@operator question ${i}`,
+        humanCommentBy: `Asker${i}`,
+      });
+    }
+
+    // The drop is SURFACED, not a silent log: a system note names who fell off.
+    await eventually(() => {
+      const note = readTaskFile({
+        projectSlug: store3.slug,
+        taskKey: "VIB-1",
+        dataRoot: store3.dataRoot,
+      })!.parsed.timeline.find(
+        (e) => e.type === "note" && e.text.includes("did not get its own operator turn"),
+      );
+      expect(note?.text).toContain("Asker1");
+    });
+    // The drop note is written fire-and-forget; let its projection rebuild drain
+    // before teardown closes the DB (matches the run-service settle pattern).
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+
   it("S3-1: consecutive questions from the SAME human are ONE turn", async () => {
     await drive({ trigger: "manual" });
     await drive({

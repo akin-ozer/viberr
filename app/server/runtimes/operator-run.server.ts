@@ -378,9 +378,13 @@ const MAX_PENDING_HUMAN_TRIGGERS = 8;
  * not three. Different authors are never merged: each is owed their own answer, in
  * arrival order.
  */
-function queueOperatorTrigger(key: string, input: RunOperatorInput): void {
+function queueOperatorTrigger(
+  key: string,
+  input: RunOperatorInput,
+): RunOperatorInput[] {
   const state = leaseState();
   const queue = state.pending.get(key) ?? { latest: null, humanComments: [] };
+  const dropped: RunOperatorInput[] = [];
   if (input.humanComment?.trim()) {
     const previous = queue.humanComments[queue.humanComments.length - 1];
     const by = input.humanCommentBy?.trim();
@@ -390,14 +394,15 @@ function queueOperatorTrigger(key: string, input: RunOperatorInput): void {
         humanComment: `${previous.humanComment?.trim()}\n\n${input.humanComment.trim()}`,
       };
       state.pending.set(key, queue);
-      return;
+      return dropped;
     }
     queue.humanComments.push(input);
     while (queue.humanComments.length > MAX_PENDING_HUMAN_TRIGGERS) {
-      const dropped = queue.humanComments.shift();
+      const drop = queue.humanComments.shift();
+      if (drop) dropped.push(drop);
       logger.warn("dropping the oldest queued @operator comment — queue is full", {
         key,
-        by: dropped?.humanCommentBy ?? "unknown",
+        by: drop?.humanCommentBy ?? "unknown",
         cap: MAX_PENDING_HUMAN_TRIGGERS,
       });
     }
@@ -405,6 +410,55 @@ function queueOperatorTrigger(key: string, input: RunOperatorInput): void {
     queue.latest = input;
   }
   state.pending.set(key, queue);
+  // C2 (pass 23): the caller surfaces these on the timeline — the module's own
+  // doc promises "no trigger is ever silently dropped", and a warn is not that.
+  return dropped;
+}
+
+/**
+ * C2 (pass 23): the queue of pending @operator turns overflowed, so an earlier
+ * turn was dropped. The comment itself stays on the timeline (a later drive may
+ * still read it), but its DEDICATED turn is gone — say so, so a human whose
+ * question fell off the back of the queue is not left waiting for an answer that
+ * will never come as its own turn. Best-effort: never blocks queueing.
+ */
+async function noteDroppedOperatorTurn(
+  db: DatabaseSync,
+  dropped: RunOperatorInput,
+): Promise<void> {
+  const ref: TaskFileRef = {
+    projectSlug: dropped.projectSlug,
+    taskKey: dropped.taskKey,
+  };
+  if (dropped.dataRoot) ref.dataRoot = dropped.dataRoot;
+  const who = dropped.humanCommentBy?.trim() || "someone";
+  try {
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "operator" },
+        title: null,
+        text: `The pending @operator queue was full, so ${who}'s earlier comment did not get its own operator turn. It stays on the timeline for the operator to read, but re-send it if it needs a dedicated answer.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { resolveTaskFilePath } = await import(
+      "~/server/files/task-writer.server"
+    );
+    rebuildPath(
+      db,
+      resolveTaskFilePath(ref),
+      dropped.dataRoot ? { dataRoot: dropped.dataRoot } : {},
+    );
+  } catch (error) {
+    logger.error("could not note a dropped @operator turn", {
+      taskKey: dropped.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 /**
@@ -1097,7 +1151,9 @@ export async function runOperator(
   const lease = leaseState();
   const heldByProcess = lease.held.get(leaseKey);
   if (heldByProcess) {
-    queueOperatorTrigger(leaseKey, input);
+    for (const drop of queueOperatorTrigger(leaseKey, input)) {
+      void noteDroppedOperatorTurn(db, drop);
+    }
     logger.info("operator run queued — one already in flight (process lease)", {
       taskKey: input.taskKey,
       trigger: input.trigger ?? "manual",
@@ -1132,7 +1188,9 @@ export async function runOperator(
       interruptedBy: "restart",
     });
   } else if (inflight) {
-    queueOperatorTrigger(leaseKey, input);
+    for (const drop of queueOperatorTrigger(leaseKey, input)) {
+      void noteDroppedOperatorTurn(db, drop);
+    }
     const { chainRunCompletion } = await import("./run-service.server");
     chainRunCompletion(inflight.id, () => drainPendingAfterInFlight(db, leaseKey));
     logger.info("operator run queued — DB row already in flight", {
