@@ -213,3 +213,21 @@ developer run:
 Validates: agents' browser capabilities, browser↔egress coupling + pinning, live external
 navigation (network egress), the attachments evidence store, AND the external-MCP tool-call
 path (viberr_browser IS an MCP server) — so UC-19's tool-call is covered here too.
+
+### ✅ Codex/Claude backend parity + operator-choice + graceful Codex-failure — LIVE (VIB-5)
+Created a Codex-backed profile "Codex Dev" (backend Codex, In Progress, full delivery caps;
+web-fetch correctly shows Allowed on the CREATE path — confirming BUG-1 is edit-path-only).
+Created VIB-5 (small file, "produced by a Codex agent"). Observations:
+- **"Operator chooses correct agents"**: with Developer(Claude) + Reviewer + Codex-Dev all
+  eligible, the operator **chose codex-dev** (agent_selected candidates listed all three).
+- **Parity — same governance from viberr's eye**: operator selected → `task.specialist.assigned`
+  → `task.agent.run_started {backend:codex, cloned:true}` (repo cloned for Codex, same as
+  Claude) → ran. IDENTICAL flow to the Claude path.
+- **Codex hit its usage quota** (exhausted — expected). Viberr handled it GRACEFULLY: typed
+  `error·quota`, operator opened a **"Work stalled: pick a recovery path"** blocked packet,
+  `waiting:human`. Body names the reason ("Codex is over its usage quota"); an observation
+  surfaces the EXACT provider message verbatim ("You've hit your usage limit … try again at
+  Sep 18th, 2026 5:20 PM"). Options: **"Retry on Claude"** (backend-parity recovery) |
+  Redirect | Send back | Hold. No crash, no silent hang.
+This is the deepest parity proof: both backends are interchangeable governed agents, and a
+provider failure on one offers recovery onto the other.
