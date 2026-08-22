@@ -678,3 +678,34 @@ describe("F21-5: the settings loader withholds credential detail without the gra
     expect(JSON.stringify(view)).not.toContain("f215");
   });
 });
+
+describe("E9: repair-repo + set-branch-cleanup authority gates", () => {
+  it("set-branch-cleanup is edit-policy (admin): a contributor is refused, an admin round-trips", async () => {
+    const denied = actionOutcome(
+      await postAction(ids.selin, { intent: "set-branch-cleanup", enabled: "0" }),
+    );
+    expect(denied.status).toBe(403);
+
+    const ok = actionOutcome(
+      await postAction(ids.arda, { intent: "set-branch-cleanup", enabled: "0" }),
+    );
+    expect(ok.ok).toBe(true);
+    expect(ok.toast).toMatch(/kept on GitHub/);
+
+    // Round-trip the other way so the test leaves the default (on) in place.
+    await postAction(ids.arda, { intent: "set-branch-cleanup", enabled: "1" });
+  });
+
+  it("repair-repo is edit-policy (admin): a maintainer is refused before any GitHub probe", async () => {
+    // Murat is a maintainer, above contributor but below the edit-policy tier
+    // this destructive repair demands — refused before it can touch GitHub.
+    const denied = actionOutcome(
+      await postAction(ids.murat, {
+        intent: "repair-repo",
+        repo: "akin-ozer/viberr",
+        confirmFootprint: "1",
+      }),
+    );
+    expect(denied.status).toBe(403);
+  });
+})
