@@ -156,6 +156,18 @@ describe("AgentCapability", () => {
     expect(onOpenProfile).toHaveBeenCalledWith("developer");
   });
 
+  it("D6: a single profile reads '1 profile', not '1 profiles'", () => {
+    const { getByText } = render(
+      <AgentCapability
+        profiles={[PROFILES[0]!]}
+        onOpenProfile={() => {}}
+        onManageProfiles={() => {}}
+        onMatrix={() => {}}
+      />,
+    );
+    expect(getByText("1 profile")).toBeTruthy();
+  });
+
   // P14-WL-05: the library deploy copies the NAME into `role` when a template
   // declares none, and this row printed it raw — the deployed "Org Docs Writer"
   // read "Org Docs Writer · Org Docs Writer" here.

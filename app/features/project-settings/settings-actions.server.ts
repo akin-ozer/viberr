@@ -412,7 +412,7 @@ export async function repairProjectRepo(
       );
     } else if (res.status === 401) {
       throw AppError.validation(
-        "GitHub rejected the attached credential. Update the token in org settings, then repair again. Nothing was changed.",
+        "GitHub rejected the attached credential. Update the token in Instance settings, then repair again. Nothing was changed.",
       );
     } else {
       throw AppError.validation(

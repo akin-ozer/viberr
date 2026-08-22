@@ -1994,9 +1994,18 @@ export function BoardPage({
         onRescan={rescan}
         // UI-58: `?? "triage"` was a magic literal for a project with no stages
         // — a create that could only fail server-side. With no stages there is
-        // nothing to create INTO, so the control stays a no-op instead.
+        // nothing to create INTO. D3 (pass 23): a silent no-op broke the
+        // refusal-must-never-be-silence rule — the button rendered enabled and
+        // the click did nothing; now it says why and points at the fix.
         onNew={() => {
-          if (stages[0]) setCreating(true);
+          if (stages[0]) {
+            setCreating(true);
+          } else {
+            push(
+              "Add a stage in project settings before creating tasks: there is no stage to create into.",
+              "error",
+            );
+          }
         }}
       />
 

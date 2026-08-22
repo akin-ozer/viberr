@@ -163,7 +163,7 @@ function ProfileIdentity({
             <label className="flabel" htmlFor="profile-email">
               Email{" "}
               <span className="fhint">
-                {signsInVia} · an org admin can change it in Org settings →
+                {signsInVia} · an org admin can change it in Instance settings →
                 Users &amp; access
               </span>
             </label>
