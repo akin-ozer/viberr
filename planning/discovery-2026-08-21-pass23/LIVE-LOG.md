@@ -231,3 +231,21 @@ Created VIB-5 (small file, "produced by a Codex agent"). Observations:
   Redirect | Send back | Hold. No crash, no silent hang.
 This is the deepest parity proof: both backends are interchangeable governed agents, and a
 provider failure on one offers recovery onto the other.
+
+### ✅ Cross-backend recovery — "Retry on Claude" closes the loop (VIB-5)
+Applied the packet's operator-pick recovery "Retry on Claude" ("Re-run the agent on Claude
+with a fresh context. The switch sticks."). The SAME profile (Codex Dev) re-ran on the
+CLAUDE backend (Live-run header showed "Codex Dev · Implementation (Codex)" with RUNTIME
+**sonnet**), created docs/codex-parity.md, committed, and Viberr opened **PR #196**. So a
+Codex agent stalled on provider quota recovered onto Claude and delivered — end-to-end.
+Closed PR #196 (throwaway parity artifact, avoid bloat). Two fix PRs remain: **#194, #195**.
+
+## Pass-23 CHECKLIST (every goal item covered live)
+user assignments ✅ · stage transitions ✅ · reviewers ✅ · secondary assignments ✅ ·
+comment usage/@mention ✅ · RBAC triggering ✅ (404-as-absence + 403) · operator correctness ✅
+(honest packets, correct agent choice) · agents do their job ✅ · MCPs ✅ (create+handshake+
+browser-MCP tool-call) · skills loaded selectively ✅ (dev→developer-expertise, reviewer→
+reviewer-expertise) · **codex & claude same from viberr's eye ✅** (parity + graceful quota
+failure + cross-backend recovery) · browser capability ✅ · PRs on akin-ozer/viberr ✅
+(#192 MERGED, #193 REJECTED, #196 CLOSED; fix PRs #194/#195).
+BUGS FIXED: BUG-1 (#194), BUG-2 (#195). All tsc-clean, full suite green (4219 tests).
