@@ -913,14 +913,24 @@ export interface CommentToAgentResult extends AppendCommentResult {
    */
   runtimeDenied: boolean;
   /**
-   * A8 (pass 23): the comment is recorded BEFORE any run starts, so a run-start
-   * failure (single-flight conflict, backend not configured, stage ineligibility)
-   * used to throw out of here — the commenter saw a bare error and could not tell
-   * their comment HAD posted. This carries the reason the run did not start (the
-   * comment did), so the route toasts "comment posted, run not started: <reason>"
-   * instead of an error that reads as total failure. Null on the happy path and
-   * on the runtime-denied path (which has its own signal). BUG-2's operator
-   * refusal is a separate, governed signal on the operator branch.
+   * Why an @operator mention did NOT start a run even though the commenter could
+   * trigger one: `open-packet` (a decision packet is awaiting the human — resolve
+   * it first) or `terminal-stage` (the task is Done — reopen it). Null when the
+   * operator run started normally or no operator was mentioned. Without this the
+   * operator branch reported `triggered: "started"` on a refused run, so the route
+   * toasted "@Operator is picking it up" while nothing ran (the reply never came).
+   */
+  operatorRefused: "open-packet" | "terminal-stage" | null;
+  /**
+   * A8 (pass 23): the comment is recorded BEFORE any run starts, so a SPECIALIST
+   * run-start failure (single-flight conflict, backend not configured, stage
+   * ineligibility) used to throw out of here — the commenter saw a bare error and
+   * could not tell their comment HAD posted. This carries the reason the run did
+   * not start (the comment did), so the route toasts "comment posted, run not
+   * started: <reason>" instead of an error that reads as total failure. Null on
+   * the happy path and on the runtime-denied path (which has its own signal).
+   * Distinct from `operatorRefused`, which is the operator branch's governed
+   * refusal signal.
    */
   runNotStarted: string | null;
 }
@@ -1148,6 +1158,7 @@ export async function commentToAgent(
       triggered: null,
       logThreadId: null,
       runtimeDenied: false,
+      operatorRefused: null,
       runNotStarted: null,
     };
   }
@@ -1167,6 +1178,7 @@ export async function commentToAgent(
       triggered: null,
       logThreadId: null,
       runtimeDenied: true,
+      operatorRefused: null,
       runNotStarted: null,
     };
   }
@@ -1188,6 +1200,23 @@ export async function commentToAgent(
       dataRoot: ctx.dataRoot,
       actor: { userId: actor.userId, label: actor.label },
     });
+    // A manual operator trigger is REFUSED (no run) while a decision packet is
+    // open or the task is Done — a paid no-op that would spin the operator while
+    // the ball is in the human's court. `runOperator` returns `refused` +
+    // `runId: null` then; report that honestly instead of claiming the operator
+    // is picking the comment up (the reply would never come). The comment is
+    // already recorded via `base`.
+    if (result.refused) {
+      return {
+        ...base,
+        agent: agentIdentity,
+        triggered: null,
+        logThreadId: null,
+        runtimeDenied: false,
+        operatorRefused: result.refused,
+        runNotStarted: null,
+      };
+    }
     const logThreadId = resolveReplyLogThread(
       db,
       input.projectSlug,
@@ -1200,6 +1229,7 @@ export async function commentToAgent(
       triggered: "started",
       logThreadId,
       runtimeDenied: false,
+      operatorRefused: null,
       runNotStarted: null,
     };
   }
@@ -1392,6 +1422,7 @@ export async function commentToAgent(
       triggered: null,
       logThreadId: null,
       runtimeDenied: false,
+      operatorRefused: null,
       runNotStarted:
         error instanceof AppError
           ? error.userMessage
@@ -1446,6 +1477,7 @@ export async function commentToAgent(
     triggered,
     logThreadId,
     runtimeDenied: false,
+    operatorRefused: null,
     runNotStarted: null,
   };
 }

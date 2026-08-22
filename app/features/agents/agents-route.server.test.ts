@@ -222,13 +222,17 @@ describe("loader", () => {
     expect(operator.kind).toBe("operator");
     expect(operator.spanAll).toBe(true);
     expect(operator.model).toBe("orchestration runtime");
-    // Operator action-bucket sizes after the role-bindings prune (removed the
-    // never-gated `compress-timelines` from direct and `owner-reassignment` from
-    // recommend), plus R15-2's `deliver-review-pr` (direct in the shipped
-    // template): 5 direct / 2 recommend / 3 forbidden.
-    expect(operator.actions.direct).toHaveLength(5);
+    // Operator action-bucket sizes: the 4 granted coordination caps + R15-2's
+    // materialized `deliver-review-pr`, PLUS A1's materialized `use-web-search-
+    // fetch` — the seeded operator omits the web grant but the runtime keeps
+    // WebFetch on (operator-run.server.ts absent⇒kept), so the read surfaces now
+    // show it Allowed instead of "Not granted". => 6 direct / 2 recommend / 3
+    // forbidden. (`update-task-branch` stays governance-dependent, not shown.)
+    expect(operator.actions.direct).toHaveLength(6);
     expect(operator.actions.recommend).toHaveLength(2);
     expect(operator.actions.forbidden).toHaveLength(3);
+    // A1: the operator's absent web-egress renders Allowed (matches the runtime).
+    expect(operator.actions.direct).toContain("Search & fetch from the web");
     // F19-12: the rendered label is the shipped vocabulary ("delivering agent",
     // per execution-profile.tsx); the capability ID stays `assign-primary-specialist`
     // because it is a persisted key. Reverting app/shared/capabilities.ts fails this.

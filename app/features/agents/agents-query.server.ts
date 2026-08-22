@@ -22,9 +22,12 @@ import { unavailableModels } from "~/server/runtimes/model-availability.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   absentDeliverReviewPrMode,
+  ALWAYS_HUMAN_CAPABILITY_IDS,
   applyVerdictOutcomeGate,
   capabilityById,
   coerceSpecialistCapabilityMode,
+  GRANT_REQUIRED_CAPABILITY_IDS,
+  UNIFIED_CAP_CATALOG,
 } from "~/shared/capabilities";
 import { humanGatesPreWorkAdvance } from "~/shared/workflow/stage-roles";
 import { DEFAULT_PROFILE_ROLE_LABEL } from "./agent-types";
@@ -313,10 +316,48 @@ export function effectiveProfileView(
         mode: coerceSpecialistCapabilityMode(c.mode),
       }))
     : operatorGrants;
-  const capabilities = effectiveGrants.map((c) => ({
-    capabilityId: c.capabilityId,
-    mode: c.mode,
+  // A1 (BUG-1 follow-on): the capability MATRIX, the read-only profile DETAIL and
+  // the POLICY counts render ONLY persisted grants, so an ABSENT permissive-
+  // default capability (`use-web-search-fetch`, `attach-evidence-references`, …)
+  // showed as "Not granted"/omitted while the runtime kept it ON — the exact
+  // display≠runtime gap PR #194 fixed in the EDITOR, still live on the READ
+  // surfaces an admin audits. Materialize every catalog capability of this
+  // profile's kind that is absent from the stored grants at the mode the runtime
+  // uses for a missing grant (the `isWithheld`/`effectiveCollabMode` polarity):
+  // grant-required or always-human → withheld (`off`/`human`), everything else →
+  // its catalog default. `deliver-review-pr` is already materialized above at its
+  // governance-dependent `absentDeliverMode`, so `present` skips it. One writer —
+  // matrix, detail and policy now agree with the editor and the runtime.
+  const grantKind = isSpecialist ? "agent" : "operator";
+  const alwaysHuman = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
+  const present = new Set(effectiveGrants.map((c) => c.capabilityId));
+  // `deliver-review-pr` (materialized above at `absentDeliverMode`) and
+  // `update-task-branch` resolve their ABSENT mode from the project's governance
+  // (`deliverGate`/`updateBranchGate`), not from a flat catalog default —
+  // materializing them here at `direct` would over-state them on a human-gated
+  // project. `deliver-review-pr` is already in `present`; exclude update-branch.
+  const governanceDependent = new Set(["update-task-branch"]);
+  const absentMaterialized = UNIFIED_CAP_CATALOG.filter(
+    (c) =>
+      c.kinds.includes(grantKind) &&
+      c.group !== null &&
+      !present.has(c.id) &&
+      !governanceDependent.has(c.id),
+  ).map((c) => ({
+    capabilityId: c.id,
+    mode: (alwaysHuman.has(c.id)
+      ? "human"
+      : GRANT_REQUIRED_CAPABILITY_IDS.has(c.id)
+        ? "off"
+        : c.defaultMode) as CapabilityMode,
   }));
+  const capabilities = [
+    ...effectiveGrants.map((c) => ({
+      capabilityId: c.capabilityId,
+      mode: c.mode,
+    })),
+    ...absentMaterialized,
+  ];
   const extras = deployment.extras.map((e) => ({ label: e.label, mode: e.mode }));
   const model = def?.model ?? template?.model ?? "";
   // The model that would actually RUN: the primary (first) backend's, resolved
@@ -387,7 +428,7 @@ export function effectiveProfileView(
     spanAll: def?.spanAll ?? template?.spanAll ?? false,
     autonomy: operatorAutonomy,
     actions: capabilitiesToActionLabels(
-      effectiveGrants,
+      capabilities,
       deployment.extras,
       operatorAutonomy,
     ),

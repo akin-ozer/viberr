@@ -420,20 +420,28 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         // Toast copy: name the agent when one is picking the comment up;
         // note when a mention was recorded but the run was not triggered (RBAC);
-        // A8 (pass 23): a run that FAILED to start after the comment posted says
-        // so with its reason, so the commenter knows the comment landed and only
-        // the run didn't (was a bare error toast that read as total failure);
+        // an @operator mention that was REFUSED (packet open / task Done) must
+        //   NOT read as "picking it up" — the run never started; point the human
+        //   at the action that unblocks it (BUG-2);
+        // A8 (pass 23): a SPECIALIST run that FAILED to start after the comment
+        //   posted says so with its reason, so the commenter knows the comment
+        //   landed and only the run didn't (was a bare error toast that read as
+        //   total failure);
         // else the original routed/plain copy (verbatim spec contract).
         const toast =
           result.triggered && result.agent
             ? `Comment posted · @${result.agent.name} is picking it up`
-            : result.runNotStarted && result.agent
-              ? `Comment posted · @${result.agent.name}'s run did not start: ${result.runNotStarted}`
-              : result.runtimeDenied && result.agent
-                ? "Comment posted · your role can't trigger agent runs"
-                : result.toAgent
-                  ? "Comment posted · routed to mentioned agent"
-                  : "Comment posted";
+            : result.operatorRefused === "open-packet"
+              ? "Comment posted · resolve the open decision to continue"
+              : result.operatorRefused === "terminal-stage"
+                ? "Comment posted · reopen the task to run the operator"
+                : result.runNotStarted && result.agent
+                  ? `Comment posted · @${result.agent.name}'s run did not start: ${result.runNotStarted}`
+                  : result.runtimeDenied && result.agent
+                    ? "Comment posted · your role can't trigger agent runs"
+                    : result.toAgent
+                      ? "Comment posted · routed to mentioned agent"
+                      : "Comment posted";
         return {
           ok: true as const,
           intent,

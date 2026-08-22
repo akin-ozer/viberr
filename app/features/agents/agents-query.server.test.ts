@@ -12,6 +12,7 @@ import type {
   CapabilityMode,
 } from "~/schemas/project-file.schema";
 import { absentDeliverReviewPrMode } from "~/shared/capabilities";
+import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
 
 const cap = (capabilityId: string, mode: CapabilityMode) => ({ capabilityId, mode });
 
@@ -241,6 +242,61 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
     expect(view.actions.direct).not.toContain(
       "Deliver the branch & open the review PR",
     );
+  });
+});
+
+/**
+ * A1 (pass 23, BUG-1 follow-on): BUG-1 fixed the EDITOR to seed an absent
+ * permissive-default grant at its runtime-effective mode; the READ surfaces
+ * (matrix / profile detail / policy counts) still rendered only persisted grants,
+ * so an absent `use-web-search-fetch` (ON at runtime) showed "Not granted".
+ * `effectiveProfileView` now materializes every absent catalog capability at the
+ * mode the runtime applies — so the display and the enforcement layer agree
+ * (the F15-20 "display asserts a mode the runtime does not use" class; third
+ * recurrence F15-20 → BUG-1 → A1).
+ */
+describe("A1: read surfaces materialize an absent grant at its runtime mode", () => {
+  const specialistDeployment = (
+    capabilities: CapabilityGrant[],
+  ): AgentDeployment => ({
+    profileId: "developer",
+    capabilities,
+    extras: [],
+    definition: {
+      kind: "specialist",
+      name: "Developer",
+      role: "Implementation",
+    },
+  });
+
+  it("shows an ABSENT permissive-default grant (web egress) as Allowed, agreeing with the enforcement layer", () => {
+    const grants = [cap("execute-code-or-write-repo", "direct")]; // web egress ABSENT
+    const view = effectiveProfileView(
+      specialistDeployment(grants),
+      undefined,
+      absentDeliverReviewPrMode(false),
+    );
+    // Display: the matrix/detail/policy now render it Allowed (was "Not granted").
+    expect(view.actions.direct).toContain("Search & fetch from the web");
+    // Runtime: the enforcement layer leaves WebFetch/WebSearch available for the
+    // same absent grant — display and runtime agree.
+    expect(resolveSpecialistDisallowedTools(grants)).not.toContain("WebFetch");
+  });
+
+  it("keeps a GRANT-REQUIRED absent capability out of the granted buckets (withheld — matches the runtime)", () => {
+    const grants = [cap("comment-on-task", "direct")]; // execute-code ABSENT
+    const view = effectiveProfileView(
+      specialistDeployment(grants),
+      undefined,
+      absentDeliverReviewPrMode(false),
+    );
+    // A grant-required capability that is absent stays withheld on every surface.
+    expect(view.actions.direct).not.toContain("Execute code or write to the repo");
+    expect(view.actions.recommend).not.toContain(
+      "Execute code or write to the repo",
+    );
+    // Runtime agrees: absent repo-write is denied.
+    expect(resolveSpecialistDisallowedTools(grants)).toContain("Write");
   });
 });
 
