@@ -328,6 +328,92 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
       path.basename(mirrorDir()),
     ]);
   });
+
+  /** A second bare origin under `origins/acme/<name>.git` with one commit, so a
+   *  project repointed to it builds a NEW mirror beside the old one. */
+  async function makeBareOrigin(name: string): Promise<void> {
+    const bare = path.join(origins, "acme", `${name}.git`);
+    mkdirSync(path.dirname(bare), { recursive: true });
+    await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
+    const seed = path.join(origins, `seed-${name}`);
+    mkdirSync(seed, { recursive: true });
+    writeFileSync(path.join(seed, "README.md"), `# ${name}\n`);
+    await exec("git", ["init", "-q", "-b", "main", seed]);
+    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
+    await exec("git", ["-C", seed, "config", "user.name", "T"]);
+    await exec("git", ["-C", seed, "add", "-A"]);
+    await exec("git", ["-C", seed, "commit", "-qm", "init"]);
+    await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
+  }
+
+  it("E1: a HEALTHY mirror whose local clone fails falls back to a direct GitHub clone", async () => {
+    // The tested fallback (repo-mirror.server.test.ts elsewhere) breaks mirror
+    // CREATION; this arm is different — the mirror is fine, but `git clone
+    // <mirror> <dest>` (or the origin rewrite) fails, so the code warns, rmSync's
+    // the half-written destination, and re-clones from GitHub. If that rmSync
+    // regresses, the direct re-clone refuses the non-empty dir and EVERY run on
+    // the project fails at clone, blamed on GitHub.
+    await makeOrigin();
+    // Force the mirror→workspace clone to fail deterministically: git refuses a
+    // destination that already exists and is not empty. The MIRROR is untouched.
+    const dest = workspace("a");
+    mkdirSync(dest, { recursive: true });
+    writeFileSync(path.join(dest, "occupied.txt"), "in the way\n");
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+    const result = await withOrigin(origins, () =>
+      cloneWorkspaceRepo({
+        projectSlug: SLUG,
+        repo: REPO,
+        destination: dest,
+        dataRoot,
+      }),
+    );
+
+    // It fell back to the direct clone, and the fallback arm is the one that ran:
+    expect(result.viaMirror).toBe(false);
+    expect(warn.mock.calls.map(([msg]) => msg)).toContain(
+      "cloning from the project's repository mirror failed — cloning from GitHub",
+    );
+    // The half-written destination was cleared (rmSync) before the re-clone…
+    expect(existsSync(path.join(dest, "occupied.txt"))).toBe(false);
+    // …and the tree is a real working clone.
+    expect(existsSync(path.join(dest, "README.md"))).toBe(true);
+    // This is NOT the broken-cache path: the mirror was built healthy.
+    expect(existsSync(path.join(mirrorDir(), "HEAD"))).toBe(true);
+  });
+
+  it("E7: building the mirror for a CHANGED repo evicts the old repo's mirror, keeps the new", async () => {
+    // `pruneStaleMirrors` recursive-deletes every sibling of the mirror it just
+    // built, keyed on basename. A wrong comparison silently deletes the
+    // just-built mirror (re-paying the full download every clone, hidden by the
+    // fallback) or never evicts (unbounded growth). Repoint the project and prove
+    // the old mirror is gone while the new one survives.
+    await makeOrigin(); // acme/widgets
+    await makeBareOrigin("gadgets"); // acme/gadgets, the repointed target
+    await withOrigin(origins, () => clone("a"));
+    const widgetsMirror = projectRepoMirrorDir(SLUG, "acme/widgets", dataRoot)!;
+    expect(existsSync(path.join(widgetsMirror, "HEAD"))).toBe(true);
+
+    // The project now points at acme/gadgets: cloning it builds the gadgets
+    // mirror and prunes the stale widgets sibling in the same `.repo-mirror` dir.
+    await withOrigin(origins, () =>
+      cloneWorkspaceRepo({
+        projectSlug: SLUG,
+        repo: "acme/gadgets",
+        destination: workspace("b"),
+        dataRoot,
+      }),
+    );
+
+    const gadgetsMirror = projectRepoMirrorDir(SLUG, "acme/gadgets", dataRoot)!;
+    expect(existsSync(path.join(gadgetsMirror, "HEAD"))).toBe(true); // new survives
+    expect(existsSync(widgetsMirror)).toBe(false); // old evicted
+    // Exactly one mirror remains in the parent — the current one.
+    expect(readdirSync(path.dirname(gadgetsMirror))).toEqual([
+      path.basename(gadgetsMirror),
+    ]);
+  });
 });
 
 /**
