@@ -142,6 +142,58 @@ export function OrgSettingsPage({
           )}
         </div>
       </div>
+      <StorageLine storage={view.storage} />
     </main>
+  );
+}
+
+/** Bytes → a short human string (GB/MB), for the storage line only. */
+function fmtBytes(bytes: number): string {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+  if (bytes >= 1_000_000) return `${Math.round(bytes / 1_000_000)} MB`;
+  if (bytes >= 1_000) return `${Math.round(bytes / 1_000)} KB`;
+  return `${bytes} B`;
+}
+
+/**
+ * C9 (pass 23): instance storage health, in the UI at last. The periodic
+ * maintenance scheduler reclaims finished-task clones and reports to
+ * `/resources/health`, but that ops probe is JSON only, so an admin had no in-app
+ * view of free space or whether the cleanup is alive. A low/critical disk status
+ * is called out; a healthy one stays quiet.
+ */
+function StorageLine({
+  storage,
+}: {
+  storage: OrgSettingsView["storage"];
+}) {
+  const { disk, maintenance } = storage;
+  const cleanup = maintenance.scheduled
+    ? maintenance.lastPassAt
+      ? `automatic cleanup runs every ${Math.round(maintenance.intervalMs / 3_600_000)}h; last freed ${fmtBytes(maintenance.lastFreedBytes)}`
+      : `automatic cleanup runs every ${Math.round(maintenance.intervalMs / 3_600_000)}h`
+    : "automatic cleanup is not scheduled";
+  return (
+    <div className="pol-note after last">
+      <Icon name="memory" />
+      <span>
+        {disk ? (
+          <>
+            <strong>{fmtBytes(disk.freeBytes)}</strong> free of{" "}
+            {fmtBytes(disk.totalBytes)} on the data volume ({disk.usedPercent}%
+            used)
+            {disk.status !== "ok" && (
+              <strong>
+                {" "}
+                {disk.status === "critical" ? "· critically low" : "· low"}
+              </strong>
+            )}
+            . {cleanup}.
+          </>
+        ) : (
+          <>Data-volume free space is unavailable. {cleanup}.</>
+        )}
+      </span>
+    </div>
   );
 }

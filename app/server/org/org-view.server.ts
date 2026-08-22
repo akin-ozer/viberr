@@ -8,6 +8,14 @@ import {
   resolveOAuthProvider,
   type OAuthSource,
 } from "~/server/auth/oauth-providers.server";
+import {
+  cachedDataRootSpace,
+  type DiskSpace,
+} from "~/server/ops/disk-space.server";
+import {
+  maintenanceState,
+  type MaintenanceState,
+} from "~/server/ops/maintenance.server";
 import { listConnections, type ConnectionRecord } from "./connections.server";
 import { listGlobalAgentProfiles, type GagentView } from "./gagents.server";
 import {
@@ -67,6 +75,18 @@ export interface OrgSettingsView {
    * carries a client secret.
    */
   authProviders: AuthProviderView[];
+  /**
+   * C9 (pass 23): instance storage health for the settings UI. The periodic
+   * maintenance scheduler (ops/maintenance.server) already reclaims finished-task
+   * clones on an interval and reports to `/resources/health`, but that ops probe
+   * is JSON only — an admin had no in-app view of free space or whether the
+   * cleanup is alive. Both reads are cheap process-global snapshots (the disk
+   * measurement is cached), so surfacing them here costs nothing per load.
+   */
+  storage: {
+    disk: DiskSpace | null;
+    maintenance: MaintenanceState;
+  };
 }
 
 export interface AuthProviderView {
@@ -160,5 +180,10 @@ export function getOrgSettingsView(
       google: authProviders[1]!.active,
     },
     authProviders,
+    // C9: instance storage health (cheap cached reads).
+    storage: {
+      disk: cachedDataRootSpace(),
+      maintenance: maintenanceState(),
+    },
   };
 }

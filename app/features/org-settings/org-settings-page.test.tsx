@@ -11,7 +11,10 @@ import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { ToastProvider } from "~/ui/toast";
 import { ConnectionsPanel } from "./connections-panel";
 import { OrgSettingsPage } from "./org-settings-page";
-import type { AuthProviderView } from "~/server/org/org-view.server";
+import type {
+  AuthProviderView,
+  OrgSettingsView,
+} from "~/server/org/org-view.server";
 import { ResourcesPanel } from "./resources-panel";
 import { UsersPanel } from "./users-panel";
 
@@ -980,6 +983,18 @@ const AUTH_PROVIDERS: AuthProviderView[] = [
   },
 ];
 
+const STORAGE: OrgSettingsView["storage"] = {
+  disk: null,
+  maintenance: {
+    intervalMs: 6 * 3_600_000,
+    diskCheckIntervalMs: 5 * 60_000,
+    lastPassAt: null,
+    lastPassReason: null,
+    lastFreedBytes: 0,
+    scheduled: true,
+  },
+};
+
 describe("resources tab badge counts resources, not resources+templates", () => {
   it("shows the resource count and discloses profiles in the tooltip", () => {
     const { getByRole } = renderPanel(
@@ -996,6 +1011,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
           stages: STAGES,
           providers: { github: false, google: false },
           authProviders: AUTH_PROVIDERS,
+          storage: STORAGE,
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
@@ -1007,6 +1023,75 @@ describe("resources tab badge counts resources, not resources+templates", () => 
     const badge = tab.querySelector(".count")!;
     expect(badge.textContent).toBe("4");
     expect(badge.getAttribute("title")).toContain("2 agent profiles");
+  });
+});
+
+describe("C9: instance storage line", () => {
+  const viewWith = (storage: OrgSettingsView["storage"]): OrgSettingsView => ({
+    connections: CONNECTIONS,
+    users: [ME],
+    domains: DOMAINS,
+    kbs: KBS,
+    mcps: MCPS,
+    skills: SKILLS,
+    gagents: GAGENTS,
+    projectGrants: { kbs: {}, mcps: {}, skills: {} },
+    stages: STAGES,
+    providers: { github: false, google: false },
+    authProviders: AUTH_PROVIDERS,
+    storage,
+  });
+
+  it("shows free space, usage, and the automatic-cleanup cadence; flags a low disk", () => {
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewWith({
+          disk: {
+            freeBytes: 900_000_000,
+            totalBytes: 20_000_000_000,
+            usedPercent: 95.5,
+            status: "low",
+            lowThresholdBytes: 1_000_000_000,
+            criticalThresholdBytes: 200_000_000,
+          },
+          maintenance: {
+            intervalMs: 6 * 3_600_000,
+            diskCheckIntervalMs: 5 * 60_000,
+            lastPassAt: "2026-08-22T00:00:00.000Z",
+            lastPassReason: "interval",
+            lastFreedBytes: 45_000_000,
+            scheduled: true,
+          },
+        })}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+      />,
+    );
+    // Free-of-total with the usage percent, the low flag, and the cleanup cadence.
+    expect(getByText(/free of 20\.0 GB on the data volume \(95\.5% used\)/)).toBeTruthy();
+    expect(getByText(/· low/)).toBeTruthy();
+    expect(getByText(/automatic cleanup runs every 6h/)).toBeTruthy();
+  });
+
+  it("says cleanup is not scheduled when the maintenance timer is not live", () => {
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewWith({
+          disk: null,
+          maintenance: {
+            intervalMs: 6 * 3_600_000,
+            diskCheckIntervalMs: 5 * 60_000,
+            lastPassAt: null,
+            lastPassReason: null,
+            lastFreedBytes: 0,
+            scheduled: false,
+          },
+        })}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+      />,
+    );
+    expect(getByText(/automatic cleanup is not scheduled/)).toBeTruthy();
   });
 });
 
@@ -1031,6 +1116,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
           stages: STAGES,
           providers: { github: false, google: false },
           authProviders: AUTH_PROVIDERS,
+          storage: STORAGE,
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
