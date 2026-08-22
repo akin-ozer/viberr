@@ -2768,6 +2768,40 @@ export async function applyAgentCompletionEffects(
       evidence,
       attachments: runAttachments,
     });
+    // C5 (pass 23): a verdict-GRANTED reviewer finished but produced NO readable
+    // verdict (no envelope, no classifiable prose). Validation is left unchanged
+    // — fail-safe, correct — but the human saw a completed review run with no
+    // verdict and no note, and had to diff run logs against validation to notice
+    // the judgment was lost. Say so, so the review can be re-run or a verdict
+    // recorded by hand. Best-effort: a note failure never fails the completion.
+    if (verdictAuthorized && !verdict) {
+      try {
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: null,
+              text: "The reviewer finished without a readable verdict, so validation is unchanged and acceptance stays gated. Re-run the review or record a verdict manually.",
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      } catch (noteError) {
+        logger.error("could not write the no-verdict note", {
+          taskKey: input.taskKey,
+          runId: finished.id,
+          err:
+            noteError instanceof Error
+              ? noteError
+              : new Error(String(noteError)),
+        });
+      }
+    }
   } else {
     await postAgentReplyComment(db, ctx, {
       projectSlug: input.projectSlug,

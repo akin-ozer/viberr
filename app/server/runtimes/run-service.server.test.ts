@@ -14,13 +14,14 @@ import {
   interruptRun,
   listRunsForTask,
   MODEL_SUBSTITUTED_TAG,
+  noteCompletionEffectsLost,
   registerRunCompletion,
   repoWriteWithheldFromDenylist,
   reserveRun,
   resumeRun,
   startRun,
 } from "./run-service.server";
-import { getRun, listRunLines, listRunsForTaskRows } from "./run-store.server";
+import { getRun, listRunLines, listRunsForTaskRows, upsertRun } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import { RUN_PHASE } from "./adapter.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
@@ -1427,5 +1428,50 @@ describe("run phase throttling (R21-4)", () => {
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     await settle();
+  });
+});
+
+describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
+  it("stamps a continuity warning and flips the task off 'agent working'", async () => {
+    // The task was being worked (waiting: agent) when its run finished, but the
+    // completion callback threw so nothing flipped it back — the board would show
+    // "agent working" forever until a restart replays the effects.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "impl",
+        waiting: "agent",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    upsertRun(store.db, {
+      id: "run_effects_lost",
+      projectSlug: store.slug,
+      taskKey: "VIB-2",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    const run = getRun(store.db, "run_effects_lost")!;
+
+    await noteCompletionEffectsLost(store.db, run, store.dataRoot);
+
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-2",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // No longer stuck reading "agent working": a human is asked to look.
+    expect(parsed.frontmatter.waiting).toBe("human");
+    // A visible continuity warning (not a neutral note buried mid-timeline).
+    expect(parsed.timeline[0]).toMatchObject({ type: "continuity" });
+    expect(parsed.timeline[0]!.text).toContain("completion effects");
   });
 });
