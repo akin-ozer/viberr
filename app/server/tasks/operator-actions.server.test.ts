@@ -973,6 +973,63 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
     await new Promise((r) => setTimeout(r, 50));
     interruptRunningRuns("VIB-1");
   });
+
+  /**
+   * BUG-2 (pass 23): a manual @operator trigger is REFUSED while a decision
+   * packet is open (coordination is paused, waiting on the human). `runOperator`
+   * returns `refused: "open-packet"` + `runId: null`; `commentToAgent` used to
+   * report `triggered: "started"` anyway, so the route toasted "@Operator is
+   * picking it up" for a run that never ran and the reply never came. It now
+   * surfaces the refusal so the human is pointed at resolving the packet.
+   */
+  it("an @operator comment is REFUSED (not 'started') while a decision packet is open", async () => {
+    deployRoster(DEFAULT_POLICY);
+    // Seed the task WITH an open packet (coordination paused, waiting on human).
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "blocked",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+      }),
+      goal: "Prove the operator drives the task.",
+      packet: {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Pick a recovery path",
+        body: "",
+        observations: [],
+        options: [{ kind: "block_on_policy", t: "Unblock", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { resetOperatorLeasesForTests } = await import(
+      "~/server/runtimes/operator-run.server"
+    );
+    resetOperatorLeasesForTests();
+
+    const { commentToAgent } = await import("./task-actions.server");
+    const res = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@operator can you summarize?" },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+
+    // Refusal is surfaced, NOT reported as a started run.
+    expect(res.triggered).toBeNull();
+    expect(res.operatorRefused).toBe("open-packet");
+    expect(res.runtimeDenied).toBe(false);
+    // The comment is still recorded and tinted as routed to the mentioned agent.
+    expect(res.toAgent).toBe(true);
+    // …and no operator run was created for it.
+    const opRuns = listRunsForTask(store.db, store.slug, "VIB-1").filter(
+      (r) => r.kind === "operator",
+    );
+    expect(opRuns).toHaveLength(0);
+  });
 });
 
 describe("operatorTransitionStage", () => {
