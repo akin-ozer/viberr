@@ -197,3 +197,19 @@ Created VIB-3 "Recommend a minimal onboarding doc" (discussion-only goal). Obser
 LIVE PASS: F1, F2, F3, F4/UC-04, UC-05, UC-07..15, UC-18, UC-19(create+handshake),
 UC-20, UC-21, UC-22, UC-23, UC-25. FOUND+FIXED: **BUG-1 → PR #194**, **BUG-2 → PR #195**.
 Test PRs: **#192 MERGED, #193 REJECTED**. All fixes tsc-clean + full suite green.
+
+### ✅ Browser capability (goal-emphasized) + external-MCP tool-call — LIVE (VIB-4)
+Granted the developer `use-browser` (editor auto-COUPLED `use-web-search-fetch` on and
+pinned it, with a clear "the browser is web egress" note — coherent). Created VIB-4
+"open https://example.com, report its <h1> in a comment, no repo changes". The Claude
+developer run:
+- Mounted BOTH MCPs: `mcp: viberr_browser, viberr_agent` (Playwright + in-process).
+- `mcp__viberr_browser__browser_navigate {url: https://example.com}` → Playwright ran
+  `page.goto(...)`, captured a page snapshot **saved as a task attachment**
+  (`/data/projects/viberr/tasks/VIB-4/attachments/page-*.yml` — R19-19 attachments store).
+- Read the snapshot → found `heading "Example Domain" [level=1]`, reported it EXACTLY via
+  `post_comment` ("@operator ... the page's <h1> reads exactly Example Domain ... no repo
+  changes made"). Respected the browser-only directive (no branch/PR).
+Validates: agents' browser capabilities, browser↔egress coupling + pinning, live external
+navigation (network egress), the attachments evidence store, AND the external-MCP tool-call
+path (viberr_browser IS an MCP server) — so UC-19's tool-call is covered here too.
