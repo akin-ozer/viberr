@@ -375,9 +375,12 @@ export function GithubTrace({
 export function TaskDetailsPanel({
   task,
   canEdit,
+  labelSuggestions = [],
 }: {
   task: TaskDetail;
   canEdit: boolean;
+  /** Labels already used in this project, offered as label autocomplete. */
+  labelSuggestions?: string[];
 }) {
   const csrf = useCsrfToken();
   const fetcher = useFetcher<ActionResult>();
@@ -432,7 +435,11 @@ export function TaskDetailsPanel({
             {/* Custom token input — a hidden field carries the value into the
                 fetcher.Form's serialization. */}
             <input type="hidden" name="labels" value={labels.join(",")} />
-            <LabelInput value={labels} onChange={setLabels} />
+            <LabelInput
+              value={labels}
+              onChange={setLabels}
+              suggestions={labelSuggestions}
+            />
           </div>
           <div className="meta-field">
             <span className="meta-label">Due date</span>

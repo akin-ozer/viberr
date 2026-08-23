@@ -11,6 +11,7 @@ import {
 } from "~/shared/mapping/project.server";
 import {
   mapTaskProjectionRow,
+  parseTaskLabels,
   withLiveAgentBackends,
   type TaskProjectionRow,
   type TaskSummary,
@@ -261,6 +262,31 @@ export function listProjectTasks(
       quiet: isQuiet(quietAt),
     };
   });
+}
+
+/** The distinct labels used across a project's live tasks, sorted, for label
+ *  autocomplete. Reads only the `labels_json` column (no per-row mapping) so it
+ *  stays cheap enough for the task-detail loader to call on every view. */
+export function listProjectLabels(db: DatabaseSync, slug: string): string[] {
+  // SAFETY: the query projects exactly the `labels_json` column, which
+  // 0001_baseline declares NOT NULL on `task_projections`, so every returned row
+  // has a string `labels_json` and nothing else this shape claims.
+  const rows = db
+    .prepare(
+      `SELECT labels_json FROM task_projections
+         WHERE project_slug = ? AND archived = 0`,
+    )
+    .all(slug) as { labels_json: string }[];
+  const seen = new Map<string, string>();
+  for (const row of rows) {
+    for (const label of parseTaskLabels(row.labels_json)) {
+      // First spelling wins; a later case-variant of the same label collapses
+      // into it, matching the input's case-insensitive de-duplication.
+      const key = label.toLowerCase();
+      if (!seen.has(key)) seen.set(key, label);
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
 /** Full board read model: columns in project stage order. */

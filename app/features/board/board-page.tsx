@@ -1016,10 +1016,13 @@ function AcceptOnBoardConfirm({
 
 function NewTaskModal({
   entryStageName,
+  labelSuggestions,
   onClose,
 }: {
   /** R19-14: every task is created at the entry stage — the modal names it. */
   entryStageName: string;
+  /** Labels already used across the board, offered as label autocomplete. */
+  labelSuggestions: string[];
   onClose: () => void;
 }) {
   const [title, setTitle] = useState("");
@@ -1178,7 +1181,11 @@ function NewTaskModal({
             Labels
             <span className="fhint">type and press Enter, optional</span>
           </span>
-          <LabelInput value={labels} onChange={setLabels} />
+          <LabelInput
+            value={labels}
+            onChange={setLabels}
+            suggestions={labelSuggestions}
+          />
         </div>
       </div>
       <div className="modal-foot">
@@ -1788,6 +1795,16 @@ export function BoardPage({
     () => [...columns.flatMap((c) => c.tasks), ...orphanTasks],
     [columns, orphanTasks],
   );
+  // Distinct labels already used on this board, sorted, as New-task
+  // autocomplete — so a project's label vocabulary stays consistent instead of
+  // every task inventing its own spelling of the same tag.
+  const labelSuggestions = useMemo(
+    () =>
+      [...new Set(allTasks.flatMap((t) => t.labels))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [allTasks],
+  );
   // Subtitle stat: project-wide "waiting on a human decision" (the subtitle
   // labels that scope — P14-WL-04). Archived tasks are a terminal disposition
   // and never wait on anyone, so they are out of both counts (R14-3).
@@ -2134,6 +2151,7 @@ export function BoardPage({
       {creating && stages[0] && (
         <NewTaskModal
           entryStageName={stages[0].name}
+          labelSuggestions={labelSuggestions}
           onClose={() => setCreating(false)}
         />
       )}

@@ -101,6 +101,7 @@ function recReachesAcceptance(
 
 export function TaskDetailPage({
   task,
+  labelSuggestions = [],
   attachments = [],
   attachmentsTotal,
   attachmentProducers = {},
@@ -136,6 +137,9 @@ export function TaskDetailPage({
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
+  /** The project's existing label vocabulary, for the Details panel's label
+   *  autocomplete. */
+  labelSuggestions?: string[];
   /** R19-19: browser-produced files (loader; `[]` for non-members — the same
    *  visibility bar as the run console). */
   attachments?: TaskAttachmentEntry[];
@@ -669,7 +673,11 @@ export function TaskDetailPage({
           acceptBusy={acceptBusy}
           dispositionBusy={archiveBusy}
         />
-        <TaskDetailsPanel task={task} canEdit={canEditMeta} />
+        <TaskDetailsPanel
+          task={task}
+          canEdit={canEditMeta}
+          labelSuggestions={labelSuggestions}
+        />
         <PolicyPanel
           projectSlug={task.projectSlug}
           myRole={myRole}
