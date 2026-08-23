@@ -1021,6 +1021,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
       />,
     );
     // 1 KB + 2 MCP + 1 skill = 4. It used to add the 2 agent templates and
@@ -1071,6 +1072,7 @@ describe("C9: instance storage line", () => {
         })}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
       />,
     );
     // Free-of-total with the usage percent, the low flag, and the cleanup cadence.
@@ -1095,9 +1097,72 @@ describe("C9: instance storage line", () => {
         })}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
       />,
     );
     expect(getByText(/automatic cleanup is not scheduled/)).toBeTruthy();
+  });
+});
+
+describe("run concurrency control", () => {
+  const viewBase: OrgSettingsView = {
+    connections: CONNECTIONS,
+    users: [ME],
+    domains: DOMAINS,
+    kbs: KBS,
+    mcps: MCPS,
+    skills: SKILLS,
+    gagents: GAGENTS,
+    projectGrants: { kbs: {}, mcps: {}, skills: {} },
+    stages: STAGES,
+    providers: { github: false, google: false },
+    authProviders: AUTH_PROVIDERS,
+    storage: STORAGE,
+  };
+
+  it("shows the cap and the live/queued counts", () => {
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 2, live: 2, queued: 1 }}
+      />,
+    );
+    expect(getByText(/capped at 2/)).toBeTruthy();
+    expect(getByText(/2 runs live, 1 queued/)).toBeTruthy();
+  });
+
+  it("says unlimited when the cap is 0", () => {
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+      />,
+    );
+    // The lead reads "…· unlimited · 0 runs live" — distinct from the "0 =
+    // unlimited" field hint.
+    expect(getByText(/unlimited · 0 runs live/)).toBeTruthy();
+  });
+
+  it("submits set-concurrency with the new value", async () => {
+    const { getByLabelText, getByRole } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+      />,
+    );
+    const input = getByLabelText(/Maximum concurrent agent runs/);
+    fireEvent.change(input, { target: { value: "3" } });
+    fireEvent.click(getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(lastForm?.intent).toBe("set-concurrency");
+      expect(lastForm?.maxConcurrentRuns).toBe("3");
+    });
   });
 });
 
@@ -1126,6 +1191,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
       />,
     );
     const h1s = container.querySelectorAll("h1");

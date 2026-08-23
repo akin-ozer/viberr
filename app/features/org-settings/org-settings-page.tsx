@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import type { OrgSettingsView } from "~/server/org/org-view.server";
 import { countLabel } from "~/shared/text/plural";
@@ -5,6 +6,7 @@ import { Icon, type IconName } from "~/ui/icon";
 import { ConnectionsPanel } from "./connections-panel";
 import { ResourcesPanel } from "./resources-panel";
 import { SsoPanel } from "./sso-panel";
+import { useOrgAction } from "./use-org-action";
 import { UsersPanel } from "./users-panel";
 
 /**
@@ -31,15 +33,27 @@ function resolveOrgTab(raw: string | null): OrgSettingsTab {
     : "connections";
 }
 
+/** The instance run-concurrency snapshot the admin control reads/edits. */
+export interface RunConcurrencyView {
+  /** Configured cap (0 = unlimited). */
+  cap: number;
+  /** Runs executing right now. */
+  live: number;
+  /** Runs waiting on a slot right now. */
+  queued: number;
+}
+
 export function OrgSettingsPage({
   view,
   meId,
   callbackOrigin,
+  runConcurrency,
 }: {
   view: OrgSettingsView;
   meId: string;
   /** This deployment's origin — the callback URL an OAuth app must carry. */
   callbackOrigin: string;
+  runConcurrency: RunConcurrencyView;
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -142,8 +156,73 @@ export function OrgSettingsPage({
           )}
         </div>
       </div>
+      <RunConcurrencyControl runConcurrency={runConcurrency} />
       <StorageLine storage={view.storage} />
     </main>
+  );
+}
+
+/**
+ * Instance run-concurrency cap — the max agent runs executing at once. 0 means
+ * unlimited (the default). A positive N caps live provider processes at N and
+ * queues the rest (run-service gate); this control shows the live/queued counts
+ * so an admin can see the cap biting. Admin-only, like the whole page.
+ */
+function RunConcurrencyControl({
+  runConcurrency,
+}: {
+  runConcurrency: RunConcurrencyView;
+}) {
+  const { submit, busy } = useOrgAction();
+  const [value, setValue] = useState(String(runConcurrency.cap));
+  // Re-seed the field when the server value changes (a save round-trips a fresh
+  // loader value through this prop).
+  useEffect(() => {
+    setValue(String(runConcurrency.cap));
+  }, [runConcurrency.cap]);
+  const parsed = Number(value);
+  const valid = Number.isInteger(parsed) && parsed >= 0;
+  const dirty = valid && parsed !== runConcurrency.cap;
+  return (
+    <div className="pol-note after conc">
+      <Icon name="cpu" />
+      <span className="conc-body">
+        <span className="conc-lead">
+          <strong>Run concurrency</strong> ·{" "}
+          {runConcurrency.cap === 0
+            ? "unlimited"
+            : `capped at ${runConcurrency.cap}`}
+          {" · "}
+          {countLabel(runConcurrency.live, "run")} live
+          {runConcurrency.queued > 0 && `, ${runConcurrency.queued} queued`}
+        </span>
+        <span className="conc-edit">
+          <label htmlFor="max-concurrent-runs" className="conc-label">
+            Max at once
+          </label>
+          <input
+            id="max-concurrent-runs"
+            type="number"
+            min={0}
+            step={1}
+            value={value}
+            onChange={(e) => setValue(e.currentTarget.value)}
+            aria-label="Maximum concurrent agent runs (0 means unlimited)"
+          />
+          <button
+            type="button"
+            className="btn sm"
+            disabled={busy || !dirty}
+            onClick={() =>
+              submit({ intent: "set-concurrency", maxConcurrentRuns: value })
+            }
+          >
+            Save
+          </button>
+          <span className="conc-hint fine sm">0 = unlimited</span>
+        </span>
+      </span>
+    </div>
   );
 }
 

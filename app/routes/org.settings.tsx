@@ -32,6 +32,11 @@ import {
   whitelistGoogleAccount,
 } from "~/server/org/org-users.server";
 import { getOrgSettingsView } from "~/server/org/org-view.server";
+import {
+  drainRunQueue,
+  runConcurrencySnapshot,
+} from "~/server/runtimes/run-service.server";
+import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 import { oauthCallbackUrl } from "~/shared/auth/auth-paths";
 import {
   testOAuthCredentials,
@@ -90,6 +95,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     // `window.location`, so the callback URL the card tells an admin to
     // register is identical in the SSR markup and after hydration.
     callbackOrigin: new URL(request.url).origin,
+    // Instance run-concurrency: the configured cap and the live/queued counts,
+    // for the admin control below StorageLine.
+    runConcurrency: runConcurrencySnapshot(getDb()),
   };
 }
 
@@ -207,6 +215,22 @@ export async function action({ request }: Route.ActionArgs) {
         }
         if (result.status === "is_default") return fail(result.message, 409);
         return ok(result.toast);
+      }
+      // ------------------------------------------------- run concurrency
+      case "set-concurrency": {
+        const raw = Number(field("maxConcurrentRuns"));
+        if (!Number.isFinite(raw) || raw < 0) {
+          return fail("Enter a whole number (0 = unlimited).");
+        }
+        const applied = setMaxConcurrentRuns(db, raw);
+        // A raised (or lifted) cap frees slots right away — promote any runs
+        // that were waiting behind the old, lower limit.
+        drainRunQueue(db);
+        return ok(
+          applied === 0
+            ? "Run concurrency is now unlimited."
+            : `Agent runs are now capped at ${applied} at a time.`,
+        );
       }
 
       // ------------------------------------------------- users & access
@@ -583,6 +607,7 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
       view={loaderData.view}
       meId={loaderData.meId}
       callbackOrigin={loaderData.callbackOrigin}
+      runConcurrency={loaderData.runConcurrency}
     />
   );
 }

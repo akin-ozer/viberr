@@ -232,6 +232,14 @@ CREATE TABLE user_prefs (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, key)
 );
+-- Instance-wide admin settings (single deployment). Key-value, JSON-encoded, no
+-- FK — these are process/instance config an org admin edits (e.g. the run
+-- concurrency cap), not per-user or per-project data.
+CREATE TABLE instance_settings (
+  key        TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE github_pats (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,

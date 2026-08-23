@@ -1976,7 +1976,7 @@ dialog[data-closing]::backdrop {
    must stay (0,2,1): the later `.field input.mono` face override wins by source
    order, and a :not() chain here would outrank it. */
 .field input[type="text"], .field input[type="password"], .field input[type="email"],
-.field input[type="search"], .field input[type="date"], .field textarea {
+.field input[type="search"], .field input[type="date"], .field input[type="number"], .field textarea {
   width: 100%; border: 1px solid var(--border); border-radius: var(--radius-button);
   padding: .55rem .7rem; background: var(--surface); color: var(--fg);
   font-family: var(--font-body); font-size: .9rem; outline: 0;
@@ -4092,6 +4092,16 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .pol-note.after { margin-top: .85rem; }
 .pol-note.before { margin-bottom: .85rem; }
 .pol-note.last { margin-bottom: 0; }
+
+/* Instance run-concurrency admin control (org settings footer). */
+.pol-note.conc { align-items: center; }
+.conc-body { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; width: 100%; }
+.conc-lead { color: var(--muted); }
+.conc-edit { display: inline-flex; align-items: center; gap: .5rem; margin-left: auto; }
+.conc-label { color: var(--muted); font-size: .78rem; }
+.conc-edit input { width: 4.5rem; font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .25rem .45rem; }
+.conc-edit input:focus { outline: none; border-color: var(--blue); }
+.conc-hint { color: var(--muted); }
 .deny-note.before { margin-bottom: .55rem; }
 .flabel.danger { color: var(--coral-dark); }
 .probe-note {
