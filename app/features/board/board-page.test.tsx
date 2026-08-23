@@ -676,15 +676,15 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     expect(hint.className).not.toContain("err");
   });
 
-  it("offers priority, due date and labels — matching the task Details panel", () => {
+  it("offers priority, a date picker and a label input — matching the Details panel", () => {
     const { container } = openDialog();
     expect(container.querySelector("#new-task-priority")).toBeTruthy();
-    expect(container.querySelector("#new-task-due")).toBeTruthy();
-    expect(container.querySelector("#new-task-labels")).toBeTruthy();
-    // The due field is a real date picker, the labels a free-text input.
-    expect(
-      container.querySelector<HTMLInputElement>("#new-task-due")!.type,
-    ).toBe("date");
+    // The due field is the custom calendar date-picker trigger (a button), not a
+    // native date input; the labels field is the token-chip input.
+    const due = container.querySelector("#new-task-due");
+    expect(due?.tagName).toBe("BUTTON");
+    expect(due?.classList.contains("datepick-trigger")).toBe(true);
+    expect(container.querySelector(".label-input")).toBeTruthy();
   });
 });
 

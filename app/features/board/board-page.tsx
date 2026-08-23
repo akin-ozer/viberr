@@ -42,7 +42,9 @@ import {
 } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { DatePicker } from "~/ui/date-picker";
 import { Icon, type IconName } from "~/ui/icon";
+import { LabelInput } from "~/ui/label-input";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
 import {
@@ -1023,7 +1025,7 @@ function NewTaskModal({
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("normal");
-  const [labels, setLabels] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState("");
   const fetcher = useFetcher<{
     ok: boolean;
@@ -1069,7 +1071,7 @@ function NewTaskModal({
     fd.set("title", title.trim());
     fd.set("goal", goal.trim());
     if (priority !== "normal") fd.set("priority", priority);
-    if (labels.trim()) fd.set("labels", labels.trim());
+    if (labels.length > 0) fd.set("labels", labels.join(","));
     if (dueDate) fd.set("dueDate", dueDate);
     // R19-14: no stage field — the server creates at the entry stage.
     fetcher.submit(fd, { method: "post" });
@@ -1164,26 +1166,19 @@ function NewTaskModal({
             <label className="flabel" htmlFor="new-task-due">
               Due date
             </label>
-            <input
+            <DatePicker
               id="new-task-due"
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              value={dueDate || null}
+              onChange={(v) => setDueDate(v ?? "")}
             />
           </div>
         </div>
         <div className="field">
-          <label className="flabel" htmlFor="new-task-labels">
+          <span className="flabel">
             Labels
-            <span className="fhint">comma separated, optional</span>
-          </label>
-          <input
-            id="new-task-labels"
-            type="text"
-            value={labels}
-            onChange={(e) => setLabels(e.target.value)}
-            placeholder="e.g. runtime, github"
-          />
+            <span className="fhint">type and press Enter, optional</span>
+          </span>
+          <LabelInput value={labels} onChange={setLabels} />
         </div>
       </div>
       <div className="modal-foot">

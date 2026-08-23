@@ -196,9 +196,10 @@ describe("TaskDetailsPanel", () => {
     const editor = renderDetails({ priority: "high" }, true);
     const edit = editor.getByRole("button", { name: /Edit details/ });
     fireEvent.click(edit);
-    // The inline form appears with the three fields seeded from the task.
-    expect(editor.getByLabelText(/Labels, comma separated/)).toBeTruthy();
-    expect(editor.getByLabelText(/Due date/)).toBeTruthy();
+    // The inline form appears with the priority select, the token label input,
+    // and the calendar date-picker trigger.
+    expect(editor.getByLabelText(/Add a label/)).toBeTruthy();
+    expect(editor.container.querySelector(".datepick-trigger")).toBeTruthy();
     expect(editor.getByRole("button", { name: "Save" })).toBeTruthy();
   });
 });
