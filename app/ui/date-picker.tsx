@@ -70,7 +70,7 @@ export function DatePicker({
         type="button"
         ref={btnRef}
         id={id}
-        className={"datepick-trigger" + (value ? "" : " empty")}
+        className={"datepick-trigger" + (value ? "" : " dp-empty")}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={toggle}
