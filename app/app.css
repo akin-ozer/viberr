@@ -1168,7 +1168,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .cal-day.today:not(.sel) { box-shadow: inset 0 0 0 1px var(--blue); color: var(--blue-pressed); }
 .cal-day.sel { background: var(--blue-soft); color: var(--blue-pressed); border: 1px solid var(--blue); }
 
-/* --- Label combobox (GitHub-style chips + autocomplete) --- */
+/* --- Label multi-select (chips + checkbox list) --- */
 .label-combo { position: relative; }
 .label-input {
   display: flex; flex-wrap: wrap; align-items: center; gap: .3rem;
@@ -1177,37 +1177,44 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .label-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .label-token {
-  display: inline-flex; align-items: center; gap: .1rem;
-  padding: .16rem .2rem .16rem .5rem; border-radius: .5rem;
+  display: inline-flex; align-items: center;
+  padding: .18rem .5rem; border-radius: .5rem;
   font-size: .72rem; font-weight: 600; font-family: var(--font-mono);
   background: color-mix(in srgb, var(--fg), transparent 92%); color: var(--fg);
 }
-.label-token-x {
-  display: inline-grid; place-items: center; width: 16px; height: 16px;
-  border-radius: 5px; color: var(--placeholder); background: transparent; cursor: pointer;
-}
-.label-token-x:hover { color: var(--coral-dark); background: color-mix(in srgb, var(--coral-light), transparent 50%); }
-.label-token-x .ico { width: 11px; height: 11px; }
 .label-input-field { flex: 1; min-width: 6rem; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: .85rem; padding: .18rem .1rem; }
 
-.label-suggest {
+.label-select {
   margin-top: .4rem; padding: .3rem; list-style: none;
   border: 1px solid var(--border); border-radius: 12px;
   background: var(--surface); box-shadow: var(--shadow-pop);
-  max-height: 216px; overflow-y: auto;
+  max-height: 232px; overflow-y: auto;
   display: flex; flex-direction: column; gap: 1px;
 }
 .label-opt {
-  display: flex; align-items: center; gap: .5rem;
+  display: flex; align-items: center; gap: .55rem;
   padding: .42rem .5rem; border-radius: 8px; cursor: pointer;
-  font-size: .82rem; color: var(--muted);
+  font-size: .82rem; color: var(--fg);
 }
-.label-opt .ico { width: 14px; height: 14px; flex: none; color: var(--faint); }
-.label-opt[data-active="true"] { background: color-mix(in srgb, var(--blue), transparent 90%); color: var(--fg); }
-.label-opt[data-active="true"] .ico { color: var(--blue-pressed); }
+.label-opt[data-active="true"] { background: color-mix(in srgb, var(--blue), transparent 90%); }
 .label-opt-name { font-family: var(--font-mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label-opt.create { color: var(--muted); }
 .label-opt.create .label-opt-name { font-family: var(--font-body); }
 .label-opt-hint { margin-left: auto; font-size: .68rem; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--placeholder); }
+/* shadcn-style checkbox: a rounded square that fills with the accent + a check
+   when its label is selected. The check is hidden by opacity (not a transparent
+   text colour) so the contrast sweep never reads a 1:1 phantom glyph. */
+.lc-check {
+  display: grid; place-items: center; flex: none;
+  width: 16px; height: 16px; border-radius: 4px;
+  border: 1.5px solid var(--placeholder);
+  transition: background .12s var(--ease-out), border-color .12s var(--ease-out);
+}
+.lc-check[data-checked="true"] { background: var(--cta-bg); border-color: var(--cta-bg); color: var(--cta-fg); }
+.lc-check .ico { width: 11px; height: 11px; color: inherit; opacity: 0; }
+.lc-check[data-checked="true"] .ico { opacity: 1; }
+.lc-plus { display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--faint); }
+.lc-plus .ico { width: 13px; height: 13px; }
 
 .hero-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .hero-file {
