@@ -18,6 +18,7 @@ import {
   createTask,
   releaseOwner,
   setOwner,
+  setTaskMetadata,
   transitionStage,
   updateTaskGoal,
   reorderTask,
@@ -411,6 +412,23 @@ function matrixDrivers() {
               projectSlug: store.slug,
               taskKey: "VIB-1",
               goal: "an updated goal that is long enough",
+            },
+            actor,
+            { dataRoot: store.dataRoot },
+          );
+        },
+      },
+    ],
+    "edit-task-meta": [
+      {
+        label: "setTaskMetadata",
+        run: async (actor) => {
+          await setTaskMetadata(
+            store.db,
+            {
+              projectSlug: store.slug,
+              taskKey: "VIB-1",
+              priority: "high",
             },
             actor,
             { dataRoot: store.dataRoot },
@@ -1692,6 +1710,7 @@ describe("the matrix itself is pinned, not just the call sites", () => {
     "resolve-packet": ["admin", "maintainer"],
     "accept-completion": ["admin", "maintainer"],
     "update-goal": ["admin", "maintainer"],
+    "edit-task-meta": ["admin", "maintainer", "contributor"],
     "run-agents": ["admin", "maintainer"],
     "reorder-board": ["admin", "maintainer"],
     "reconcile-github": ["admin", "maintainer"],

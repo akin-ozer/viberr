@@ -11,10 +11,23 @@ import type {
   PrReviewState,
   Readiness,
   TaskPacket,
+  TaskPriority,
   Validation,
   Waiting,
 } from "~/schemas/task-file.schema";
 import type { ActorRender } from "./actor.server";
+
+/** Pass-25: the stored `labels_json` is a JSON string-array (the write path
+ *  normalizes it so). Parse it at this read boundary through the schema — a
+ *  malformed or corrupt value yields no labels rather than throwing. */
+const TASK_LABELS_SCHEMA = z.array(z.string()).catch([]);
+function parseTaskLabels(labelsJson: string): string[] {
+  try {
+    return TASK_LABELS_SCHEMA.parse(JSON.parse(labelsJson));
+  } catch {
+    return [];
+  }
+}
 import {
   agentRoleDisplay,
   decodeActorRef,
@@ -39,6 +52,9 @@ export type TaskProjectionRow = {
   stored_readiness: string | null;
   waiting: Waiting;
   urgent: 0 | 1;
+  priority: TaskPriority;
+  labels_json: string;
+  due_date: string | null;
   archived: 0 | 1;
   validation: Validation;
   validation_block_reason: string | null;
@@ -124,6 +140,10 @@ export interface TaskSummary {
    * the project-wide `waiting === "human"` enum. */
   waitingOnMe?: boolean;
   urgent: boolean;
+  /** Pass-25 task metadata. */
+  priority: TaskPriority;
+  labels: string[];
+  dueDate: string | null;
   /** R14-3: archived tasks leave every default view but keep their record. */
   archived: boolean;
   validation: Validation;
@@ -507,6 +527,9 @@ export function mapTaskProjectionRow(
       : row.readiness,
     waiting: row.waiting,
     urgent: row.urgent === 1,
+    priority: row.priority,
+    labels: parseTaskLabels(row.labels_json),
+    dueDate: row.due_date,
     archived: row.archived === 1,
     validation: row.validation,
     acceptance: row.acceptance ?? null,

@@ -35,13 +35,22 @@ import type { TaskSummary } from "~/shared/mapping/task.server";
 import {
   archivedTaskBlockedReason,
   closedPrBlockedReason,
+  coercePriority,
   conflictingPrBlockedReason,
+  PRIORITY_VALUES,
+  type TaskPriority,
 } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
+import {
+  DueDatePill,
+  LabelChips,
+  PriorityFlag,
+  hasVisibleMeta,
+} from "~/ui/task-meta";
 import {
   checksPill,
   prStatePill,
@@ -549,6 +558,13 @@ function TaskCard({
           <OwnerLine task={task} />
           <ReviewerStack task={task} />
         </div>
+        {!archived && hasVisibleMeta(task) && (
+          <div className="card-meta">
+            <PriorityFlag priority={task.priority} sm />
+            <LabelChips labels={task.labels} />
+            <DueDatePill dueDate={task.dueDate} sm />
+          </div>
+        )}
         <div className="card-foot">
           {task.branch ? (
             <span className="trace ok">
@@ -1006,6 +1022,7 @@ function NewTaskModal({
 }) {
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
+  const [priority, setPriority] = useState<TaskPriority>("normal");
   const fetcher = useFetcher<{
     ok: boolean;
     key?: string;
@@ -1049,6 +1066,7 @@ function NewTaskModal({
     fd.set("intent", "create-task");
     fd.set("title", title.trim());
     fd.set("goal", goal.trim());
+    if (priority !== "normal") fd.set("priority", priority);
     // R19-14: no stage field — the server creates at the entry stage.
     fetcher.submit(fd, { method: "post" });
   };
@@ -1120,6 +1138,25 @@ function NewTaskModal({
             onChange={(e) => setGoal(e.target.value)}
             placeholder="One or two sentences. A vague goal gets flagged by the operator at triage."
           />
+        </div>
+        <div className="field">
+          <label className="flabel" htmlFor="new-task-priority">
+            Priority
+            <span className="fhint">
+              labels and a due date can be added on the task page
+            </span>
+          </label>
+          <select
+            id="new-task-priority"
+            value={priority}
+            onChange={(e) => setPriority(coercePriority(e.target.value) ?? "normal")}
+          >
+            {PRIORITY_VALUES.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
       <div className="modal-foot">

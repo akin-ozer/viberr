@@ -3,6 +3,7 @@ import type {
   TaskFileEvent,
   TaskFrontmatter,
   TaskPacket,
+  TaskPriority,
 } from "~/schemas/task-file.schema";
 import {
   DEFAULT_GUARDRAILS,
@@ -45,6 +46,14 @@ function at(base: Date, h: number, m: number): string {
 /** Mock "today H:MM" → today at that LOCAL wall-clock time. */
 export function todayAt(h: number, m: number): string {
   return at(NOW, h, m);
+}
+
+/** Mock due date N days from now, as a plain calendar date (YYYY-MM-DD). */
+export function dueInDays(days: number): string {
+  const d = new Date(NOW.getTime() + days * 24 * 60 * 60 * 1000);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 /** Mock "Yesterday H:MM". */
@@ -246,6 +255,9 @@ function fm(input: {
   reviewers: { profileId: string; backend: "codex" | "claude"; role: string }[];
   operator: TaskFrontmatter["operator"];
   urgent: boolean;
+  priority?: TaskPriority;
+  labels?: string[];
+  dueDate?: string | null;
   validation: TaskFrontmatter["validation"];
   branch: string | null;
   pr: TaskFrontmatter["pr"];
@@ -313,6 +325,9 @@ function fm(input: {
     recommendations: input.recommendations ?? [],
     schedules: [],
     urgent: input.urgent,
+    priority: input.priority ?? (input.urgent ? "urgent" : "normal"),
+    labels: input.labels ?? [],
+    dueDate: input.dueDate ?? null,
     archived: false,
     validation: input.validation,
     workRevision,
@@ -346,6 +361,8 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         reviewers: [reviewer("claude")],
         operator: { assignedAtStageId: "triage" },
         urgent: true,
+        labels: ["runtime", "github"],
+        dueDate: dueInDays(2),
         validation: "changed",
         branch: "vib-142-attach-workspace",
         pr: { number: 318, state: "review", title: "Attach execution workspace" },

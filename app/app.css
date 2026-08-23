@@ -1004,6 +1004,21 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .trace.pr { color: var(--blue-pressed); }
 .trace.ok { color: var(--teal-dark); }
 
+/* Lightweight task metadata row (priority flag, freeform labels, due date).
+   Sits between the owner row and the trace foot, and only renders when the
+   task carries non-default metadata (board card + task hero share it). */
+.card-meta { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; padding-top: .5rem; }
+/* Freeform labels: the neutral-pill pairing (--muted on a 94%-transparent
+   --fg wash), which the R19-12 contrast sweep already clears. */
+.label-chip {
+  display: inline-flex; align-items: center;
+  padding: .12rem .44rem; border-radius: .5rem;
+  font-size: .68rem; font-weight: 600; font-family: var(--font-mono);
+  background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--muted);
+  white-space: nowrap;
+}
+.label-chip.more { font-weight: 700; }
+
 .wait-tag {
   display: inline-flex; align-items: center; gap: .35rem;
   margin-left: auto;
@@ -1078,6 +1093,19 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .goal-textarea { width: 100%; resize: vertical; font: inherit; font-size: .95rem; line-height: 1.5; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .5rem .6rem; }
 .goal-textarea:focus { outline: none; border-color: var(--blue); }
 .goal-edit-actions { display: flex; gap: .5rem; }
+
+/* Lightweight metadata editor (priority / labels / due date) under the goal.
+   Mirrors the goal-edit vocabulary so the two editors read as siblings. */
+.meta-edit-btn { display: inline-flex; align-items: center; gap: .35rem; margin-top: .5rem; padding: .1rem .5rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: .35rem; cursor: pointer; }
+.meta-edit-btn:hover { border-color: var(--blue); }
+.meta-edit-btn .ico { width: 13px; height: 13px; }
+.meta-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem; margin-top: .5rem; max-width: 70ch; }
+.meta-field { display: flex; flex-direction: column; gap: .25rem; }
+.meta-label { font-size: .72rem; color: var(--faint); font-weight: 600; }
+.meta-edit .meta-field select, .meta-edit .meta-field input { font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .3rem .5rem; }
+.meta-edit .meta-field select:focus, .meta-edit .meta-field input:focus { outline: none; border-color: var(--blue); }
+.meta-edit-actions { display: flex; gap: .5rem; align-items: center; }
+
 .hero-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .hero-file {
   display: inline-flex; align-items: center; gap: .4rem;

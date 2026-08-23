@@ -38,10 +38,12 @@ import {
   resolvePacket,
   setOwner,
   setTaskArchived,
+  setTaskMetadata,
   transitionStage,
   updateTaskGoal,
   userName,
 } from "~/server/tasks/task-actions.server";
+import { coercePriority } from "~/schemas/task-file.schema";
 import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
@@ -470,6 +472,28 @@ export async function action({ request, params }: Route.ActionArgs) {
           actor,
         );
         return { ok: true as const, intent, toast: "Goal updated" };
+      }
+      case "set-task-metadata": {
+        // The detail editor submits all three axes at once, so it is a full
+        // replace: an empty labels field clears the set, an empty due date
+        // clears the date. `setTaskMetadata` validates priority + due date and
+        // normalizes labels; a bad value throws before any write.
+        const priorityRaw = String(formData.get("priority") ?? "").trim();
+        const labelsRaw = String(formData.get("labels") ?? "");
+        const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
+        const metaInput: Parameters<typeof setTaskMetadata>[1] = {
+          projectSlug,
+          taskKey,
+          labels: labelsRaw
+            .split(/[,\n]/)
+            .map((s) => s.trim())
+            .filter(Boolean),
+          dueDate: dueDateRaw,
+        };
+        const priority = coercePriority(priorityRaw);
+        if (priority) metaInput.priority = priority;
+        await setTaskMetadata(db, metaInput, actor);
+        return { ok: true as const, intent, toast: "Task metadata updated" };
       }
       case "resolve-packet": {
         const raw = Number(formData.get("option"));

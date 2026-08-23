@@ -81,6 +81,13 @@ CREATE TABLE task_projections (
   stored_readiness TEXT,
   waiting TEXT NOT NULL CHECK (waiting IN ('human', 'agent', 'none')),
   urgent INTEGER NOT NULL DEFAULT 0,
+  -- Pass-25 task metadata: graded priority (urgent is derived into `urgent`
+  -- above for the existing board highlight), triage labels (JSON array), and an
+  -- optional ISO `YYYY-MM-DD` due date.
+  priority TEXT NOT NULL DEFAULT 'normal'
+    CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  labels_json TEXT NOT NULL DEFAULT '[]',
+  due_date TEXT,
   -- R14-3: the terminal disposition for abandoned work. Projected because every
   -- board/queue/inbox read model reads this table and each of them has to hide
   -- archived tasks without re-reading task files on a loader path.
