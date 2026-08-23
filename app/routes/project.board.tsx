@@ -65,6 +65,17 @@ export async function action({ request, params }: Route.ActionArgs) {
       };
       const priority = coercePriority(String(formData.get("priority") ?? "").trim());
       if (priority) createInput.priority = priority;
+      // Labels arrive comma/newline-separated; `createTask` normalizes them.
+      const labelsRaw = String(formData.get("labels") ?? "");
+      if (labelsRaw.trim()) {
+        createInput.labels = labelsRaw
+          .split(/[,\n]/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+      }
+      // Due date is validated in `createTask` (blank ⇒ no due date).
+      const dueDate = String(formData.get("dueDate") ?? "").trim();
+      if (dueDate) createInput.dueDate = dueDate;
       const result = await createTask(db, createInput, actor);
       return {
         ok: true as const,

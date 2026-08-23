@@ -675,6 +675,17 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     expect(hint.textContent).toBe("The task key is assigned automatically.");
     expect(hint.className).not.toContain("err");
   });
+
+  it("offers priority, due date and labels — matching the task Details panel", () => {
+    const { container } = openDialog();
+    expect(container.querySelector("#new-task-priority")).toBeTruthy();
+    expect(container.querySelector("#new-task-due")).toBeTruthy();
+    expect(container.querySelector("#new-task-labels")).toBeTruthy();
+    // The due field is a real date picker, the labels a free-text input.
+    expect(
+      container.querySelector<HTMLInputElement>("#new-task-due")!.type,
+    ).toBe("date");
+  });
 });
 
 /**
