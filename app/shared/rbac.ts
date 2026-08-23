@@ -63,6 +63,11 @@ export const RBAC_DEFINITIONS = [
   { id: "comment", label: "Comment on tasks", roles: [A, M, C, V] },
   { id: "create-task", label: "Create tasks", roles: [A, M, C] },
   { id: "own-task", label: "Take / release own task ownership", roles: [A, M, C] },
+  // Lightweight planning attributes (priority, labels, due date) — a contributor
+  // who can create and own a task also grooms its metadata. Distinct from
+  // `update-goal` ([A,M]): the goal is the reviewable acceptance contract, this
+  // is scheduling metadata that changes no gate.
+  { id: "edit-task-meta", label: "Edit task priority, labels & due date", roles: [A, M, C] },
   { id: "approve-transition", label: "Approve stage transitions", roles: [A, M] },
   { id: "resolve-packet", label: "Resolve decision packets", roles: [A, M] },
   { id: "accept-completion", label: "Accept completion → Done", roles: [A, M] },

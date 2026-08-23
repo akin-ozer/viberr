@@ -109,6 +109,7 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
       "Comment on tasks",
       "Create tasks",
       "Take / release own task ownership",
+      "Edit task priority, labels & due date",
       "Approve stage transitions",
       "Resolve decision packets",
       "Accept completion → Done",
@@ -139,13 +140,14 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
       ),
     ).toEqual(["View board, tasks & timelines", "Comment on tasks"]);
     expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([
-      1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ]);
+    // edit-task-meta is the 5th row (index 4) and contributor+ holds it.
     expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([
-      1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ]);
     expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
     ]);
   });
 });

@@ -425,10 +425,14 @@ export function ProjectSections({
 function OrgTile({
   isAdmin,
   to,
+  verb = "Manage",
   children,
 }: {
   isAdmin: boolean;
   to: string;
+  /** The action word in the tile foot (default "Manage"; a read-only tile like
+   *  Insights passes "View"). */
+  verb?: string;
   children: ReactNode;
 }) {
   if (!isAdmin) {
@@ -443,7 +447,7 @@ function OrgTile({
     <Link className="org-tile go" to={to}>
       {children}
       <span className="foot go-hint">
-        Manage
+        {verb}
         <Icon name="arrow" />
       </span>
     </Link>
@@ -522,6 +526,18 @@ export function SettingsPanel({
                 {countLabel(org.mcpServers, "MCP server")} ·{" "}
                 {countLabel(org.skills, "skill")}
               </div>
+            </span>
+          </span>
+        </OrgTile>
+        <OrgTile isAdmin={isAdmin} to="/insights" verb="View">
+          <span className="lbl">
+            <Icon name="activity" />
+            Insights
+          </span>
+          <span className="val">
+            <span>
+              <span className="nm">Agent-run analytics</span>
+              <div className="sub">cost, tokens, timing &amp; outcomes</div>
             </span>
           </span>
         </OrgTile>

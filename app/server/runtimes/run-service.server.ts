@@ -16,6 +16,7 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
+import { getMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 import {
   RUN_PHASE,
   type RunHandle,
@@ -101,6 +102,23 @@ interface ServiceState {
    * the agent logs). Documented in feature-agent-reply.md.
    */
   completions: Map<string, RunCompletionCallback>;
+  /**
+   * FIFO of runs admitted past the concurrency cap: their DB row is `queued`
+   * and their adapter has NOT been launched. The drain (run onExit) promotes
+   * the oldest whose row is still `queued` when a live slot frees. In-process
+   * only — a restart's orphan recovery finalizes any surviving `queued` row.
+   */
+  pending: PendingRun[];
+  /** Reentrancy guard for `drainRunQueue` — a synchronously-exiting promoted run
+   *  fires onExit (→ drain) during its own launch; the outer drain loop handles
+   *  the freed slot, so the nested call returns immediately. */
+  draining?: boolean;
+}
+
+/** A run waiting for a concurrency slot: launch it by calling `launch`. */
+interface PendingRun {
+  runId: string;
+  launch: () => void;
 }
 
 /** Invoked once when a registered run reaches a terminal state. */
@@ -112,7 +130,12 @@ function getState(): ServiceState {
   const cache: Record<symbol, ServiceState | undefined> = globalThis;
   let state = cache[SERVICE_KEY];
   if (!state) {
-    state = { handles: new Map(), adapters: createAdapters(), completions: new Map() };
+    state = {
+      handles: new Map(),
+      adapters: createAdapters(),
+      completions: new Map(),
+      pending: [],
+    };
     cache[SERVICE_KEY] = state;
   }
   return state;
@@ -201,7 +224,12 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
   setBackendAvailability("claude", true);
   setBackendAvailability("codex", true);
   const cache: Record<symbol, ServiceState | undefined> = globalThis;
-  cache[SERVICE_KEY] = { handles: new Map(), adapters, completions: new Map() };
+  cache[SERVICE_KEY] = {
+    handles: new Map(),
+    adapters,
+    completions: new Map(),
+    pending: [],
+  };
 }
 
 // ---------------------------------------------- start / resume
@@ -755,7 +783,18 @@ export async function startRun(
   const launchOpts: Parameters<typeof launch>[3] = {};
   if (reservation) launchOpts.startedAt = reservation.startedAt;
   if (modelSubstitution) launchOpts.notice = modelSubstitution;
-  launch(db, spec, selection.adapter, launchOpts);
+  const launchThunk = () => launch(db, spec, selection.adapter, launchOpts);
+  // A RESERVED run already rendered "Preparing workspace" as a `running` row and
+  // committed its slot — it bypasses the gate rather than being demoted back to
+  // `queued` (which would blink the strip and confuse the drain's queued-row
+  // check). Every other run (operator, reviewer, resume-less start) is admitted
+  // under the cap: launched now if a slot is free, else parked in `queued` until
+  // one frees.
+  if (reservation) {
+    launchThunk();
+  } else {
+    admitRun(db, runId, launchThunk);
+  }
   return { runId };
 }
 
@@ -1142,6 +1181,86 @@ export async function resumeRun(
   return startRun(db, resumedTurn);
 }
 
+// ---------------------------------------------- concurrency gate
+
+/**
+ * Admit a run for launch under the instance concurrency cap.
+ *
+ * `state.handles` holds exactly one entry per LIVE adapter, so `handles.size`
+ * is the ground truth of how many runs execute right now — there is no separate
+ * counter to leak or drift. When the cap (getMaxConcurrentRuns) is 0 the gate is
+ * off and every run launches immediately (the historical behavior, so an
+ * untouched deployment is unchanged). Otherwise a run that would exceed the cap
+ * is PARKED: its DB row stays `queued` (that is the state startRun already
+ * inserts for a non-reserved run) and its launch thunk waits in `state.pending`,
+ * promoted by `drainRunQueue` when a live slot frees.
+ */
+function admitRun(db: DatabaseSync, runId: string, launchThunk: () => void): void {
+  const state = getState();
+  const cap = getMaxConcurrentRuns(db);
+  if (cap === 0 || state.handles.size < cap) {
+    launchThunk();
+    return;
+  }
+  state.pending.push({ runId, launch: launchThunk });
+  logger.info("run queued behind the concurrency cap", {
+    runId,
+    live: state.handles.size,
+    cap,
+    queuedAhead: state.pending.length - 1,
+  });
+}
+
+/**
+ * Promote queued runs while a live slot is free. Called from every run's onExit
+ * (a finished run frees its slot) and after an interrupt. A pending run whose
+ * row is no longer `queued` (interrupted / errored while waiting) is DROPPED —
+ * it must never spring to life. The cap is re-read each pass so an admin lowering
+ * it mid-drain is honored; `handles.size` grows as each promoted run launches,
+ * so the loop is self-limiting.
+ */
+export function drainRunQueue(db: DatabaseSync): void {
+  const state = getState();
+  // A synchronously-exiting promoted run re-enters this via its onExit; the
+  // outer loop already accounts for the freed slot, so the nested call yields.
+  if (state.draining) return;
+  state.draining = true;
+  try {
+    for (;;) {
+      const cap = getMaxConcurrentRuns(db);
+      if (cap !== 0 && state.handles.size >= cap) return;
+      const next = state.pending.shift();
+      if (!next) return;
+      const row = getRun(db, next.runId);
+      if (!row || row.state !== "queued") continue; // stopped while waiting
+      next.launch();
+    }
+  } finally {
+    state.draining = false;
+  }
+}
+
+/** A point-in-time view of the run concurrency gate. */
+export interface RunConcurrencySnapshot {
+  /** Configured cap (0 = unlimited). */
+  cap: number;
+  /** Runs executing right now — the ground-truth live adapter count. */
+  live: number;
+  /** Runs parked behind the cap right now. */
+  queued: number;
+}
+
+/** How many runs are executing vs waiting on a slot right now — for the admin
+ *  concurrency card and diagnostics. */
+export function runConcurrencySnapshot(db: DatabaseSync): RunConcurrencySnapshot {
+  const state = getState();
+  return {
+    cap: getMaxConcurrentRuns(db),
+    live: state.handles.size,
+    queued: state.pending.length,
+  };
+}
+
 /** Wires the sink + adapter callbacks and starts the adapter process/timer. */
 function launch(
   db: DatabaseSync,
@@ -1232,6 +1351,17 @@ function launch(
         });
       }
       state.handles.delete(spec.runId);
+      // This run's slot is now free — promote the oldest queued run behind the
+      // concurrency cap. Before the completion callback, so a chain of queued
+      // runs keeps flowing even if the callback throws.
+      try {
+        drainRunQueue(db);
+      } catch (error) {
+        logger.error("run queue drain failed", {
+          runId: spec.runId,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
       // Fire a one-shot completion callback (opaque to run-service — the
       // reply-comment wiring lives in task-actions). Reads the finalized row
       // so the callback sees the terminal state + folded session/usage facts.

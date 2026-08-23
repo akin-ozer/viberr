@@ -271,6 +271,7 @@ export function TaskDetailPage({
   // agrees today only because the matrix happens to line up — a role change to
   // either row silently desyncs the button from the endpoint behind it.
   const canEditGoal = roleCan(role, "update-goal");
+  const canEditMeta = roleCan(role, "edit-task-meta");
   // The viewer may resolve THIS packet when they're admin|maintainer OR the
   // task owner (M2 / owner ruling Q2, WIDENED by R14-2). The owner bypass
   // requires `own-task` (contributor+): the server's owner check does too, so a
@@ -681,6 +682,7 @@ export function TaskDetailPage({
           task={task}
           stage={stage}
           canEditGoal={canEditGoal}
+          canEditMeta={canEditMeta}
           archived={archived}
           agentWorking={anyRunLive}
           editGoalSignal={editGoalSignal}

@@ -146,18 +146,46 @@ export function getPatValidationRateLimiter(): TokenBucketLimiter {
   return cachedLimiter(PAT_LIMITER_KEY, PAT_VALIDATION_RATE_LIMIT);
 }
 
+/** How many trusted reverse proxies sit in front of the app, from
+ *  `VIBERR_TRUST_PROXY` (default 0 = trust none). See `clientIpOf`. Read from
+ *  raw env so a test can flip it per case; a non-positive/garbage value is 0. */
+function trustedProxyHops(): number {
+  const raw = process.env.VIBERR_TRUST_PROXY;
+  if (!raw) return 0;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
 /**
- * Best-effort client ip (X-Forwarded-For when behind a proxy). Falls back to
- * "local" — the shipped deployment serves react-router-serve directly with no
- * proxy, so there is no header to read and every request buckets under the
- * same ip. That is safe here only because the bucket key also carries the
- * email.
+ * Best-effort client ip for the `email|ip` login bucket key.
+ *
+ * `X-Forwarded-For` is CLIENT-SETTABLE: every proxy APPENDS the ip it observed,
+ * so the LEFTMOST value is whatever the original caller chose to send. Trusting
+ * it (the old behavior) let a brute-forcer rotate the ip half of the bucket key
+ * on every attempt and defeat the per-email throttle outright — and in the
+ * shipped proxy-less deployment the header is 100% attacker input, so there is
+ * no safe leftmost value to read at all.
+ *
+ * So the header is honored ONLY when the operator declares how many trusted
+ * proxies sit in front (`VIBERR_TRUST_PROXY=N`), and the ip is read as the Nth
+ * hop FROM THE RIGHT — the address the outermost trusted proxy actually saw,
+ * past any spoofed prefix the client prepended. Trust none (the default) or a
+ * chain shorter than N (misconfig / stripped) → "local", so every attempt for
+ * an email shares one bucket and the throttle holds. Safe because the key also
+ * carries the email.
  */
 export function clientIpOf(headers?: Headers | null): string {
-  const forwarded = headers?.get("X-Forwarded-For");
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
+  const hops = trustedProxyHops();
+  if (hops > 0) {
+    const chain = headers
+      ?.get("X-Forwarded-For")
+      ?.split(",")
+      .map((h) => h.trim())
+      .filter(Boolean);
+    if (chain && chain.length >= hops) {
+      const ip = chain[chain.length - hops];
+      if (ip) return ip;
+    }
   }
   return "local";
 }

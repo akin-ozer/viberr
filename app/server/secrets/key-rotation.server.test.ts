@@ -225,7 +225,8 @@ describe("SEALED_STORES covers every sealed store", () => {
     expect(callers.sort()).toEqual([
       // The definition itself.
       "server/secrets/secret-box.server.ts",
-      // The two sealed stores…
+      // The sealed stores…
+      "server/audit/s3-config.server.ts",
       "server/auth/oauth-providers.server.ts",
       "server/org/resources.server.ts",
       "server/secrets/pat-store.server.ts",
@@ -238,6 +239,8 @@ describe("SEALED_STORES covers every sealed store", () => {
       // unregistered store would silently outlive a key rotation.
       "oauth_providers",
       "org_mcp_servers",
+      // Pass-25: the S3 audit-export secret access key.
+      "s3_audit_config",
     ]);
   });
 });

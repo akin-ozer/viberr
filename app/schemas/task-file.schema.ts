@@ -40,7 +40,61 @@ export type Waiting = (typeof WAITING_VALUES)[number];
 // `validation` field the projection caches, so it must be a first-class member
 // of the enum for the round-trip and the derivation return type.
 export const VALIDATION_VALUES = ["healthy", "changed", "failing", "none", "bypassed"] as const;
+
+/** Task priority (pass-25 feature). Replaces the old boolean `urgent` with a
+ *  graded scale: "urgent" is the top rung (the board still highlights it). */
+export const PRIORITY_VALUES = ["low", "normal", "high", "urgent"] as const;
+export type TaskPriority = (typeof PRIORITY_VALUES)[number];
 export type Validation = (typeof VALIDATION_VALUES)[number];
+
+/** Narrow an arbitrary string to a `TaskPriority`, or `undefined` when it is not
+ *  one. The SINGLE place the priority cast lives — every UI/route boundary
+ *  parses form input through here instead of asserting the type itself. */
+export function coercePriority(value: string): TaskPriority | undefined {
+  // SAFETY: the membership test proves `value` is one of PRIORITY_VALUES, so
+  // the assertion only states to the compiler what the runtime check just
+  // established.
+  return (PRIORITY_VALUES as readonly string[]).includes(value)
+    ? (value as TaskPriority)
+    : undefined;
+}
+
+/** Freeform-label bounds — the card can only show a handful before it blows out
+ *  the column, and an unbounded label is a denial-of-service on the layout. */
+export const MAX_TASK_LABELS = 12;
+export const MAX_LABEL_LENGTH = 32;
+
+/** Trim, collapse inner whitespace, cap length, drop empties, dedupe
+ *  case-insensitively (order preserved), cap count. Shared by the server action
+ *  and the create path so a label set means the same thing however it entered. */
+export function normalizeTaskLabels(labels: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of labels) {
+    const l = raw.trim().replace(/\s+/g, " ").slice(0, MAX_LABEL_LENGTH);
+    if (!l) continue;
+    const key = l.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(l);
+    if (out.length >= MAX_TASK_LABELS) break;
+  }
+  return out;
+}
+
+/** A due date is a plain `YYYY-MM-DD` calendar date (no timezone). Rejects
+ *  malformed strings AND impossible dates (2026-02-31). */
+export function isValidDueDate(due: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return false;
+  const [y, m, d] = due.split("-").map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  );
+}
 
 /** The 11 timeline event types (cross-cutting contracts §1.3). Parsers keep
  * unknown strings as-is (renderer falls back to comment meta).
@@ -519,6 +573,16 @@ const taskFrontmatterFields = {
   /** Pending/fired scheduled actions (O-3) — a server-side runner fires them. */
   schedules: z.array(scheduleSchema),
   urgent: z.boolean(),
+  /** Task priority (pass-25). A graded triage scale; "urgent" is the top rung and
+   *  keeps the board's existing urgent highlight (`urgent` is derived from it at
+   *  write time so the projection/board/filter that already read `urgent` are
+   *  unchanged). */
+  priority: z.enum(PRIORITY_VALUES).default("normal"),
+  /** Free-form triage labels (pass-25) — board chips + filter. */
+  labels: z.array(z.string()).default([]),
+  /** Optional due date, an ISO date string `YYYY-MM-DD` (pass-25). Board shows
+   *  it and flags overdue; null = none. */
+  dueDate: z.string().nullable().default(null),
   /** R14-3: the task was archived — abandoned work, kept for the record.
    *  Archived tasks leave the board's default view and the review queue, keep
    *  their whole timeline, and can be restored. The one honest ending for a task
@@ -843,6 +907,9 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "recommendations",
   "schedules",
   "urgent",
+  "priority",
+  "labels",
+  "dueDate",
   "archived",
   "validation",
   "workRevision",
@@ -1156,6 +1223,28 @@ export function parseTaskFrontmatter(
       "urgent",
       taskFrontmatterFields.urgent,
       false,
+    ),
+    // Pass-25 task metadata: all default cleanly when absent (no diagnostic).
+    priority: tolerant(
+      diagnostics,
+      data,
+      "priority",
+      taskFrontmatterFields.priority,
+      "normal",
+    ),
+    labels: tolerant(
+      diagnostics,
+      data,
+      "labels",
+      taskFrontmatterFields.labels,
+      [],
+    ),
+    dueDate: tolerant(
+      diagnostics,
+      data,
+      "dueDate",
+      taskFrontmatterFields.dueDate,
+      null,
     ),
     // archived, likewise: absent means "not archived" and is not a diagnostic.
     archived: tolerant(

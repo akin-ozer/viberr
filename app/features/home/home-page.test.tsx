@@ -269,7 +269,8 @@ describe("B-FD4: the Settings tiles are admin-only links", () => {
     expect(getByText("5 users")).toBeTruthy();
     // …but the route they linked to hard-requires the org admin role.
     expect(container.querySelectorAll('a[href^="/org/settings"]').length).toBe(0);
-    expect(getAllByText("Org admins manage this").length).toBe(3);
+    // Four admin-only tiles now: connections, users, resources, and Insights.
+    expect(getAllByText("Org admins manage this").length).toBe(4);
   });
 
   it("a member's New-project hint drops the host store path", () => {

@@ -493,17 +493,19 @@ export function rebuildTaskFile(
   db.prepare(
     `INSERT INTO task_projections
        (project_slug, task_key, title, stage, readiness, stored_readiness,
-        waiting, urgent, archived, validation, validation_block_reason, acceptance, continuity, owner_user_id, specialist_json,
+        waiting, urgent, priority, labels_json, due_date, archived, validation, validation_block_reason, acceptance, continuity, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         work_revision_sha, goal, packet_json, recommendation_count,
         schedules_json, event_count, comment_count,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
        waiting = excluded.waiting, urgent = excluded.urgent,
+       priority = excluded.priority, labels_json = excluded.labels_json,
+       due_date = excluded.due_date,
        archived = excluded.archived,
        validation = excluded.validation,
        validation_block_reason = excluded.validation_block_reason,
@@ -536,6 +538,9 @@ export function rebuildTaskFile(
     storedReadiness,
     projectedWaiting,
     fm.urgent ? 1 : 0,
+    fm.priority,
+    JSON.stringify(fm.labels),
+    fm.dueDate,
     fm.archived ? 1 : 0,
     derivedValidation,
     acceptanceBlockReason(fm, {

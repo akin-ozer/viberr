@@ -8,7 +8,12 @@ import {
 } from "~/server/auth/form-action.server";
 import { rescanProject } from "~/server/projections/rescan.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
-import { createTask, reorderTask } from "~/server/tasks/task-actions.server";
+import {
+  createTask,
+  reorderTask,
+  type CreateTaskInput,
+} from "~/server/tasks/task-actions.server";
+import { coercePriority } from "~/schemas/task-file.schema";
 import { parseAcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import { roleCan } from "~/shared/rbac";
 import { BoardPage } from "~/features/board/board-page";
@@ -49,16 +54,18 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   try {
     if (intent === "create-task") {
-      const result = await createTask(
-        db,
-        {
-          projectSlug: params.slug,
-          title: String(formData.get("title") ?? ""),
-          goal: String(formData.get("goal") ?? ""),
-          stageId: String(formData.get("stage") ?? "") || undefined,
-        },
-        actor,
-      );
+      // Optional at creation; the board modal only sends it when non-default.
+      // An unrecognized value from a hand-crafted POST coerces to undefined and
+      // falls back to the "normal" default rather than failing the create.
+      const createInput: CreateTaskInput = {
+        projectSlug: params.slug,
+        title: String(formData.get("title") ?? ""),
+        goal: String(formData.get("goal") ?? ""),
+        stageId: String(formData.get("stage") ?? "") || undefined,
+      };
+      const priority = coercePriority(String(formData.get("priority") ?? "").trim());
+      if (priority) createInput.priority = priority;
+      const result = await createTask(db, createInput, actor);
       return {
         ok: true as const,
         key: result.key,

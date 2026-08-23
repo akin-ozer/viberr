@@ -18,7 +18,11 @@ import {
   type TaskFileEvent,
   type TaskFrontmatter,
   type TaskPacket,
+  type TaskPriority,
   type WorkRevision,
+  PRIORITY_VALUES,
+  isValidDueDate,
+  normalizeTaskLabels,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 // R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
@@ -395,6 +399,18 @@ function summaryOrThrow(
 
 export const DEFAULT_GOAL = "Goal to be refined at the triage quality gate.";
 
+/** Validate an optional create-time due date to the same rule the edit action
+ *  enforces: blank/omitted → null, a real `YYYY-MM-DD` → itself, anything else
+ *  is a validation error (never a silently-dropped bad date). */
+function normalizeCreateDueDate(dueDate: string | null | undefined): string | null {
+  const raw = dueDate?.trim() ?? "";
+  if (raw === "") return null;
+  if (isValidDueDate(raw)) return raw;
+  throw AppError.validation(
+    `Due date must be a calendar date (YYYY-MM-DD); got "${dueDate}".`,
+  );
+}
+
 export interface CreateTaskInput {
   projectSlug: string;
   title: string;
@@ -403,6 +419,10 @@ export interface CreateTaskInput {
    *  omitted defaults to it. Any other stage is refused. */
   stageId?: string;
   urgent?: boolean;
+  /** Pass-25 task metadata (all optional at creation). */
+  priority?: TaskPriority;
+  labels?: string[];
+  dueDate?: string | null;
 }
 
 /**
@@ -423,6 +443,9 @@ export async function createTask(
   const title = input.title.trim();
   if (title.length < 3) {
     throw AppError.validation("A title of at least 3 characters is required.");
+  }
+  if (input.priority !== undefined && !PRIORITY_VALUES.includes(input.priority)) {
+    throw AppError.validation(`Unknown priority "${input.priority}".`);
   }
   // R19-14: every task goes through the triage quality gate, so creation lands
   // at the entry stage only — downstream stages presuppose work that has not
@@ -463,7 +486,13 @@ export async function createTask(
     // R19-14: creation is gated to the entry stage above, and a task in triage
     // has no operator until it advances (contracts §1.1) — always null at birth.
     operator: null,
-    urgent: input.urgent ?? false,
+    priority: input.priority ?? "normal",
+    labels: input.labels ? normalizeTaskLabels(input.labels) : [],
+    dueDate: normalizeCreateDueDate(input.dueDate),
+    // `urgent` is derived from priority (its top rung) so the board highlight and
+    // filter that already read it keep working; an explicit `urgent` input is
+    // also honored for back-compat.
+    urgent: input.priority === "urgent" || (input.urgent ?? false),
     archived: false,
     validation: "none",
     workRevision: null,
@@ -581,6 +610,134 @@ export async function updateTaskGoal(
   // (resolve_decision_packet) instead of treating this as a generic poke.
   void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "goal-updated");
 
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+}
+
+/** A partial metadata edit — the axes a caller chose to touch (an omitted axis
+ *  is left unchanged). Shared by the validated `patch` and the audit `details`
+ *  so both carry the same named owner contract. */
+type TaskMetadataPatch = {
+  priority?: TaskPriority;
+  labels?: string[];
+  dueDate?: string | null;
+};
+
+/**
+ * Edit the lightweight planning metadata (priority, labels, due date).
+ *
+ * Distinct from `updateTaskGoal`: the goal is the reviewable acceptance
+ * contract, so a human editing it re-anchors every downstream agent and clears
+ * scope packets. Metadata changes NO gate and NO agent's instructions, so this
+ * writes the frontmatter, reprojects, audits, and stops — no operator re-invoke.
+ * A `patch` only touches the fields it names (partial update), so the create
+ * form, the board, and the detail panel can each set one axis independently.
+ *
+ * `urgent` is kept as a derived mirror of `priority === "urgent"` so the board
+ * highlight / "risk" filter that read it keep agreeing with the graded scale.
+ */
+export async function setTaskMetadata(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    priority?: TaskPriority;
+    labels?: readonly string[];
+    dueDate?: string | null;
+  },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "edit-task-meta", "edit task metadata");
+
+  // Validate + normalize every provided axis up front, so a bad value fails the
+  // whole edit before any file write (never a half-applied patch).
+  const patch: TaskMetadataPatch = {};
+  if (input.priority !== undefined) {
+    if (!PRIORITY_VALUES.includes(input.priority)) {
+      throw AppError.validation(`Unknown priority "${input.priority}".`);
+    }
+    patch.priority = input.priority;
+  }
+  if (input.labels !== undefined) {
+    patch.labels = normalizeTaskLabels(input.labels);
+  }
+  if (input.dueDate !== undefined) {
+    const raw = input.dueDate?.trim() ?? "";
+    if (raw === "") {
+      patch.dueDate = null;
+    } else if (isValidDueDate(raw)) {
+      patch.dueDate = raw;
+    } else {
+      throw AppError.validation(
+        `Due date must be a calendar date (YYYY-MM-DD); got "${input.dueDate}".`,
+      );
+    }
+  }
+
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const fm = existing.parsed.frontmatter;
+
+  // No-op guard: if every provided axis already holds its target value, skip the
+  // write (mirrors updateTaskGoal's equality short-circuit).
+  const priorityChanges =
+    patch.priority !== undefined && patch.priority !== fm.priority;
+  const labelsChange =
+    patch.labels !== undefined &&
+    JSON.stringify(patch.labels) !== JSON.stringify(fm.labels);
+  const dueChanges =
+    patch.dueDate !== undefined && patch.dueDate !== fm.dueDate;
+  if (!priorityChanges && !labelsChange && !dueChanges) {
+    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+  }
+
+  const changed: string[] = [];
+  if (priorityChanges) changed.push(`priority → ${patch.priority}`);
+  if (labelsChange) {
+    changed.push(
+      patch.labels && patch.labels.length > 0
+        ? `labels → ${patch.labels.join(", ")}`
+        : "labels cleared",
+    );
+  }
+  if (dueChanges) {
+    changed.push(patch.dueDate ? `due ${patch.dueDate}` : "due date cleared");
+  }
+
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    const f = parsed.frontmatter;
+    if (patch.priority !== undefined) {
+      f.priority = patch.priority;
+      // Keep the derived `urgent` rung in lock-step with the graded scale.
+      f.urgent = patch.priority === "urgent";
+    }
+    if (patch.labels !== undefined) f.labels = patch.labels;
+    if (patch.dueDate !== undefined) f.dueDate = patch.dueDate;
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: humanActorRef(db, actor),
+      title: "Task metadata updated",
+      text: `Planning metadata changed: ${changed.join(" · ")}.`,
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  const details: TaskMetadataPatch = {};
+  if (priorityChanges) details.priority = patch.priority;
+  if (labelsChange) details.labels = patch.labels;
+  if (dueChanges) details.dueDate = patch.dueDate;
+  recordAudit(db, {
+    action: "task.metadata.updated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details,
+  });
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
 
@@ -3523,6 +3680,26 @@ export async function setOwner(
   const currentOwnerId = existing.parsed.frontmatter.ownerUserId;
 
   const isTake = input.targetUserId === actor.userId;
+  // A TAKEOVER of an OCCUPIED seat (claiming a task another member owns) is the
+  // governance hole: ownership carries the owner-exception
+  // (`requireAcceptCompletion` / `requireDecisionAuthority`), so a CONTRIBUTOR
+  // who seized an owned task would gain accept-completion + resolve-packet
+  // authority on it that their role does not otherwise grant. A maintainer/admin
+  // already holds that authority, so their takeover escalates nothing (and is a
+  // legitimate supervisory reassignment). So a takeover of an occupied seat is
+  // gated on ALREADY holding acceptance authority; claiming an OPEN seat, or
+  // re-taking your own (the idempotent case below), stays `own-task`
+  // (contributor+).
+  if (
+    isTake &&
+    currentOwnerId &&
+    currentOwnerId !== actor.userId &&
+    !roleCan(actorRole, "accept-completion")
+  ) {
+    throw AppError.forbidden(
+      "This task already has an owner. Taking it over needs completion-acceptance authority (maintainer or admin); ask them to reassign it.",
+    );
+  }
   if (!isTake) {
     // Hand off: current owner, or the tier that may manage OTHERS' ownership
     // (`release-any-ownership` — admin today, single-sourced in ACTION_ROLES

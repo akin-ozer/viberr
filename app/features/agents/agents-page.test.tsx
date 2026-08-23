@@ -209,10 +209,35 @@ describe("ProfileDetail", () => {
     expect(container.querySelectorAll(".cap-col")).toHaveLength(3);
     expect(getByText("Acts directly")).toBeTruthy();
     expect(getByText("Reserved for humans")).toBeTruthy();
+    // The default deployment is `running: false` (waiting on human), so the hero
+    // reports it as ENGAGED, not running — the fix for the false "running on N".
+    expect(getByText("idle · engaged on 1 task")).toBeTruthy();
     // Deployment row navigates by task key.
-    expect(getByText("running on 1 task")).toBeTruthy();
     fireEvent.click(container.querySelector(".deploy-row")!);
     expect(onOpen).toHaveBeenCalledWith("VIB-142");
+  });
+
+  it("hero says 'running on N tasks' only for deployments with a LIVE run", () => {
+    // Two engagements, one actually running. The count reflects the live run,
+    // not the two idle engagements (the old code counted every task key).
+    const { getByText, queryByText } = render(
+      <ProfileDetail
+        a={mkProfile({})}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[
+          mkDeployment({ taskKey: "VIB-142", running: true }),
+          mkDeployment({ taskKey: "VIB-143", running: false }),
+        ]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={vi.fn()}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(getByText("running on 1 task")).toBeTruthy();
+    expect(queryByText(/engaged on/)).toBeNull();
   });
 
   /**

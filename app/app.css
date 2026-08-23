@@ -1004,6 +1004,21 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .trace.pr { color: var(--blue-pressed); }
 .trace.ok { color: var(--teal-dark); }
 
+/* Lightweight task metadata row (priority flag, freeform labels, due date).
+   Sits between the owner row and the trace foot, and only renders when the
+   task carries non-default metadata (board card + task hero share it). */
+.card-meta { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; padding-top: .5rem; }
+/* Freeform labels: the neutral-pill pairing (--muted on a 94%-transparent
+   --fg wash), which the R19-12 contrast sweep already clears. */
+.label-chip {
+  display: inline-flex; align-items: center;
+  padding: .12rem .44rem; border-radius: .5rem;
+  font-size: .68rem; font-weight: 600; font-family: var(--font-mono);
+  background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--muted);
+  white-space: nowrap;
+}
+.label-chip.more { font-weight: 700; }
+
 .wait-tag {
   display: inline-flex; align-items: center; gap: .35rem;
   margin-left: auto;
@@ -1078,6 +1093,19 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .goal-textarea { width: 100%; resize: vertical; font: inherit; font-size: .95rem; line-height: 1.5; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .5rem .6rem; }
 .goal-textarea:focus { outline: none; border-color: var(--blue); }
 .goal-edit-actions { display: flex; gap: .5rem; }
+
+/* Lightweight metadata editor (priority / labels / due date) under the goal.
+   Mirrors the goal-edit vocabulary so the two editors read as siblings. */
+.meta-edit-btn { display: inline-flex; align-items: center; gap: .35rem; margin-top: .5rem; padding: .1rem .5rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: .35rem; cursor: pointer; }
+.meta-edit-btn:hover { border-color: var(--blue); }
+.meta-edit-btn .ico { width: 13px; height: 13px; }
+.meta-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem; margin-top: .5rem; max-width: 70ch; }
+.meta-field { display: flex; flex-direction: column; gap: .25rem; }
+.meta-label { font-size: .72rem; color: var(--faint); font-weight: 600; }
+.meta-edit .meta-field select, .meta-edit .meta-field input { font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .3rem .5rem; }
+.meta-edit .meta-field select:focus, .meta-edit .meta-field input:focus { outline: none; border-color: var(--blue); }
+.meta-edit-actions { display: flex; gap: .5rem; align-items: center; }
+
 .hero-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .hero-file {
   display: inline-flex; align-items: center; gap: .4rem;
@@ -1948,7 +1976,7 @@ dialog[data-closing]::backdrop {
    must stay (0,2,1): the later `.field input.mono` face override wins by source
    order, and a :not() chain here would outrank it. */
 .field input[type="text"], .field input[type="password"], .field input[type="email"],
-.field input[type="search"], .field input[type="date"], .field textarea {
+.field input[type="search"], .field input[type="date"], .field input[type="number"], .field textarea {
   width: 100%; border: 1px solid var(--border); border-radius: var(--radius-button);
   padding: .55rem .7rem; background: var(--surface); color: var(--fg);
   font-family: var(--font-body); font-size: .9rem; outline: 0;
@@ -4064,6 +4092,52 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .pol-note.after { margin-top: .85rem; }
 .pol-note.before { margin-bottom: .85rem; }
 .pol-note.last { margin-bottom: 0; }
+
+/* Instance run-concurrency admin control (org settings footer). */
+.pol-note.conc { align-items: center; }
+.conc-body { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; width: 100%; }
+.conc-lead { color: var(--muted); }
+.conc-edit { display: inline-flex; align-items: center; gap: .5rem; margin-left: auto; }
+.conc-label { color: var(--muted); font-size: .78rem; }
+.conc-edit input { width: 4.5rem; font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .25rem .45rem; }
+.conc-edit input:focus { outline: none; border-color: var(--blue); }
+.conc-hint { color: var(--muted); }
+
+/* Audit-log export card (org settings footer). */
+.audit-export { margin-top: .9rem; }
+.audit-dl { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
+.audit-dl .btn { text-decoration: none; }
+.audit-s3 h3 { font-size: .82rem; font-weight: 700; margin-bottom: .5rem; }
+.audit-s3-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem .8rem; }
+.audit-s3-grid .field { margin: 0; }
+.audit-s3-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; }
+
+/* Insights — instance analytics dashboard. */
+.insights { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+.insights-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
+.insights-head h1 { font-size: 1.5rem; font-weight: 800; }
+.insights-head .btn { text-decoration: none; flex: none; }
+.stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; margin-bottom: 1.25rem; }
+.stat-card { display: flex; flex-direction: column; gap: .15rem; padding: .9rem 1rem; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-card); }
+.stat-ico { color: var(--blue-pressed); }
+.stat-ico .ico { width: 16px; height: 16px; }
+.stat-val { font-size: 1.5rem; font-weight: 800; font-family: var(--font-display); line-height: 1.1; }
+.stat-label { font-size: .8rem; color: var(--muted); font-weight: 600; }
+.stat-sub { font-size: .72rem; color: var(--faint); }
+.insights-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.breakdown, .daily { margin-bottom: 1rem; }
+.bar-list { display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }
+.bar-row { display: grid; grid-template-columns: 8rem 1fr auto; align-items: center; gap: .6rem; }
+.bar-label { font-size: .8rem; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); }
+.bar-track { height: .55rem; background: color-mix(in srgb, var(--fg), transparent 92%); border-radius: 999px; overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--blue); border-radius: 999px; }
+.bar-val { font-size: .8rem; font-weight: 700; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: .45rem; }
+.bar-cost { font-size: .72rem; font-weight: 500; color: var(--muted); }
+.daily-chart { display: flex; align-items: flex-end; gap: 2px; height: 110px; margin-top: .6rem; }
+.daily-col { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.daily-bar { display: block; width: 100%; min-height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; }
+.daily-col:hover .daily-bar { background: var(--blue-pressed); }
+
 .deny-note.before { margin-bottom: .55rem; }
 .flabel.danger { color: var(--coral-dark); }
 .probe-note {
@@ -4180,6 +4254,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .policy-cols { grid-template-columns: 1fr; }
   .activity-cols { grid-template-columns: 1fr; }
   .profile-cols { grid-template-columns: 1fr; }
+  /* the audit-export S3 field grid */
+  .audit-s3-grid { grid-template-columns: 1fr; }
+  /* insights: the stat grid and breakdown columns go 1-up */
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .insights-cols { grid-template-columns: 1fr; }
   /* review queue rows wrap instead of crushing the title */
   .rq-row { flex-wrap: wrap; }
   .rq-main { min-width: 220px; }

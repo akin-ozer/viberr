@@ -81,6 +81,13 @@ CREATE TABLE task_projections (
   stored_readiness TEXT,
   waiting TEXT NOT NULL CHECK (waiting IN ('human', 'agent', 'none')),
   urgent INTEGER NOT NULL DEFAULT 0,
+  -- Pass-25 task metadata: graded priority (urgent is derived into `urgent`
+  -- above for the existing board highlight), triage labels (JSON array), and an
+  -- optional ISO `YYYY-MM-DD` due date.
+  priority TEXT NOT NULL DEFAULT 'normal'
+    CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  labels_json TEXT NOT NULL DEFAULT '[]',
+  due_date TEXT,
   -- R14-3: the terminal disposition for abandoned work. Projected because every
   -- board/queue/inbox read model reads this table and each of them has to hide
   -- archived tasks without re-reading task files on a loader path.
@@ -224,6 +231,29 @@ CREATE TABLE user_prefs (
   value_json TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, key)
+);
+-- Instance-wide admin settings (single deployment). Key-value, JSON-encoded, no
+-- FK — these are process/instance config an org admin edits (e.g. the run
+-- concurrency cap), not per-user or per-project data. NEVER store a secret here:
+-- a sealed secret belongs in a dedicated column so key rotation can reseal it
+-- (see s3_audit_config + SEALED_STORES).
+CREATE TABLE instance_settings (
+  key        TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- The S3 audit-export target (at most one; id is always 'default'). The secret
+-- access key is SEALED in its own column so key rotation covers it (registered
+-- in SEALED_STORES). The rest of the config is non-secret.
+CREATE TABLE s3_audit_config (
+  id            TEXT PRIMARY KEY DEFAULT 'default',
+  bucket        TEXT NOT NULL,
+  region        TEXT NOT NULL,
+  prefix        TEXT NOT NULL DEFAULT '',
+  endpoint      TEXT NOT NULL DEFAULT '',
+  access_key_id TEXT NOT NULL,
+  secret_box    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
 );
 CREATE TABLE github_pats (
   id TEXT PRIMARY KEY,

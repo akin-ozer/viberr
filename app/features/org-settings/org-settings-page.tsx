@@ -1,10 +1,13 @@
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import type { OrgSettingsView } from "~/server/org/org-view.server";
+import type { S3AuditConfigView } from "~/server/audit/s3-config.server";
 import { countLabel } from "~/shared/text/plural";
 import { Icon, type IconName } from "~/ui/icon";
 import { ConnectionsPanel } from "./connections-panel";
 import { ResourcesPanel } from "./resources-panel";
 import { SsoPanel } from "./sso-panel";
+import { useOrgAction } from "./use-org-action";
 import { UsersPanel } from "./users-panel";
 
 /**
@@ -31,15 +34,30 @@ function resolveOrgTab(raw: string | null): OrgSettingsTab {
     : "connections";
 }
 
+/** The instance run-concurrency snapshot the admin control reads/edits. */
+export interface RunConcurrencyView {
+  /** Configured cap (0 = unlimited). */
+  cap: number;
+  /** Runs executing right now. */
+  live: number;
+  /** Runs waiting on a slot right now. */
+  queued: number;
+}
+
 export function OrgSettingsPage({
   view,
   meId,
   callbackOrigin,
+  runConcurrency,
+  s3Audit,
 }: {
   view: OrgSettingsView;
   meId: string;
   /** This deployment's origin — the callback URL an OAuth app must carry. */
   callbackOrigin: string;
+  runConcurrency: RunConcurrencyView;
+  /** The S3 audit-export target (null when none is configured). */
+  s3Audit: S3AuditConfigView | null;
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -142,8 +160,219 @@ export function OrgSettingsPage({
           )}
         </div>
       </div>
+      <RunConcurrencyControl runConcurrency={runConcurrency} />
+      <AuditExportCard s3Audit={s3Audit} />
       <StorageLine storage={view.storage} />
     </main>
+  );
+}
+
+/**
+ * Audit-log export: download the log as CSV/JSON, and configure + fire an
+ * export to an S3 bucket. Admin-only (the whole page is). The secret access key
+ * is write-only here — stored sealed, never rendered — so the field shows a
+ * "leave blank to keep" placeholder once one is on file.
+ */
+function AuditExportCard({ s3Audit }: { s3Audit: S3AuditConfigView | null }) {
+  const { submit, busy } = useOrgAction();
+  const [bucket, setBucket] = useState(s3Audit?.bucket ?? "");
+  const [region, setRegion] = useState(s3Audit?.region ?? "");
+  const [prefix, setPrefix] = useState(s3Audit?.prefix ?? "");
+  const [endpoint, setEndpoint] = useState(s3Audit?.endpoint ?? "");
+  const [accessKeyId, setAccessKeyId] = useState(s3Audit?.accessKeyId ?? "");
+  const [secret, setSecret] = useState("");
+  const configured = s3Audit !== null;
+  const canSave = bucket.trim() && region.trim() && accessKeyId.trim() &&
+    (configured || secret.trim());
+  return (
+    <section className="panel audit-export">
+      <div className="panel-head">
+        <Icon name="file" />
+        <h2>Audit log</h2>
+      </div>
+      <p className="fine">
+        Download the full audit log, or push it to an S3 bucket. Exports carry
+        every recorded fact (actor, action, subject, details).
+      </p>
+      <div className="audit-dl">
+        {/* A real file response (Content-Disposition) — the browser saves it. */}
+        <a className="btn sm" href="/org/settings/audit-export?format=csv">
+          <Icon name="file" />
+          Download CSV
+        </a>
+        <a className="btn sm" href="/org/settings/audit-export?format=json">
+          <Icon name="file" />
+          Download JSON
+        </a>
+      </div>
+      <div className="audit-s3">
+        <h3>S3 export target</h3>
+        <div className="audit-s3-grid">
+          <label className="field">
+            <span className="flabel">Bucket</span>
+            <input
+              type="text"
+              value={bucket}
+              onChange={(e) => setBucket(e.currentTarget.value)}
+              placeholder="my-audit-bucket"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Region</span>
+            <input
+              type="text"
+              value={region}
+              onChange={(e) => setRegion(e.currentTarget.value)}
+              placeholder="eu-central-1"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Key prefix</span>
+            <input
+              type="text"
+              value={prefix}
+              onChange={(e) => setPrefix(e.currentTarget.value)}
+              placeholder="audit/ (optional)"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Endpoint</span>
+            <input
+              type="text"
+              value={endpoint}
+              onChange={(e) => setEndpoint(e.currentTarget.value)}
+              placeholder="optional, for S3-compatible stores"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Access key ID</span>
+            <input
+              type="text"
+              value={accessKeyId}
+              onChange={(e) => setAccessKeyId(e.currentTarget.value)}
+              placeholder="AKIA…"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Secret access key</span>
+            <input
+              type="password"
+              value={secret}
+              onChange={(e) => setSecret(e.currentTarget.value)}
+              placeholder={configured ? "leave blank to keep" : "required"}
+              aria-label="S3 secret access key"
+            />
+          </label>
+        </div>
+        <div className="audit-s3-actions">
+          <button
+            type="button"
+            className="btn primary sm"
+            disabled={busy || !canSave}
+            onClick={() =>
+              submit({
+                intent: "s3-config-save",
+                bucket,
+                region,
+                prefix,
+                endpoint,
+                accessKeyId,
+                secretAccessKey: secret,
+              })
+            }
+          >
+            Save target
+          </button>
+          <button
+            type="button"
+            className="btn sm"
+            disabled={busy || !configured}
+            onClick={() =>
+              submit({ intent: "audit-export-s3", format: "json" })
+            }
+            title={
+              configured ? "Upload the audit log to S3 now" : "Save a target first"
+            }
+          >
+            Export to S3 now
+          </button>
+          {configured && (
+            <button
+              type="button"
+              className="btn sm danger"
+              disabled={busy}
+              onClick={() => submit({ intent: "s3-config-clear" })}
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Instance run-concurrency cap — the max agent runs executing at once. 0 means
+ * unlimited (the default). A positive N caps live provider processes at N and
+ * queues the rest (run-service gate); this control shows the live/queued counts
+ * so an admin can see the cap biting. Admin-only, like the whole page.
+ */
+function RunConcurrencyControl({
+  runConcurrency,
+}: {
+  runConcurrency: RunConcurrencyView;
+}) {
+  const { submit, busy } = useOrgAction();
+  const [value, setValue] = useState(String(runConcurrency.cap));
+  // Re-seed the field when the server value changes (a save round-trips a fresh
+  // loader value through this prop).
+  useEffect(() => {
+    setValue(String(runConcurrency.cap));
+  }, [runConcurrency.cap]);
+  const parsed = Number(value);
+  const valid = Number.isInteger(parsed) && parsed >= 0;
+  const dirty = valid && parsed !== runConcurrency.cap;
+  return (
+    <div className="pol-note after conc">
+      <Icon name="cpu" />
+      <span className="conc-body">
+        <span className="conc-lead">
+          <strong>Run concurrency</strong> ·{" "}
+          {runConcurrency.cap === 0
+            ? "unlimited"
+            : `capped at ${runConcurrency.cap}`}
+          {" · "}
+          {countLabel(runConcurrency.live, "run")} live
+          {runConcurrency.queued > 0 && `, ${runConcurrency.queued} queued`}
+        </span>
+        <span className="conc-edit">
+          <label htmlFor="max-concurrent-runs" className="conc-label">
+            Max at once
+          </label>
+          <input
+            id="max-concurrent-runs"
+            type="number"
+            min={0}
+            step={1}
+            value={value}
+            onChange={(e) => setValue(e.currentTarget.value)}
+            aria-label="Maximum concurrent agent runs (0 means unlimited)"
+          />
+          <button
+            type="button"
+            className="btn sm"
+            disabled={busy || !dirty}
+            onClick={() =>
+              submit({ intent: "set-concurrency", maxConcurrentRuns: value })
+            }
+          >
+            Save
+          </button>
+          <span className="conc-hint fine sm">0 = unlimited</span>
+        </span>
+      </span>
+    </div>
   );
 }
 

@@ -34,6 +34,28 @@ Legend: ⏳ running · ✅ pass · ⚠️ issue found (→ FINDINGS.md) · ❌ f
   or archive." + operator auto-raised a **"PR #204 closed without merging — choose a recovery path"** decision
   packet (Rework and reopen / archive / reopen-on-GitHub-auto-detected). Honest, correct, matches pass-24 VQL-2.
 
+## Discovery-round verified use cases (live on the rebuilt container)
+- **UC-13 [✅] KB authoring** — created KB "Pass-25 QA conventions" (Instance settings → Agent resources → New);
+  `store://kb/pass-25-qa-conventions/ · 0 docs · agents read the live folder · re-scanned just now`. Honest copy
+  ("controls the doc count and freshness stamp only … Every run loads the live folder either way").
+- **UC-14 [✅] MCP honest disclosure** — the org registry shows `test-mcp` (HTTP localhost:9999) as
+  **unreachable · connection refused** with a red dot, not falsely healthy. (A credentialed server would also
+  carry the new F-P3 "Claude runs only · Codex mounts unauthenticated" caveat.)
+- **UC-15 [✅] Skills scoped per-agent** — from run data: Developer loads only `developer-expertise`, Reviewer only
+  `reviewer-expertise`, operator only `viberr-app-expertise` — no unrelated/host skills leak (the pass-13 hazard).
+- **UC-16 [✅] Browser capability** — VIB-4: the Developer opened example.com live, reported the h1, attached a
+  browser snapshot `.yml`, made no repo changes (browser-only scope honored).
+- **UC-17 [✅] Agent profile creation** — created the Codex Dev profile (backend/model/effort/stages/persona/
+  capability policy; "ADVISORY ON CODEX" tags shown for a Codex profile — B1).
+- **UC-18 [✅] Admin password reset (RBAC action)** — reset member Bora's password → one-time temp shown, "password
+  reset pending" pill, forced set-new-password on next sign-in.
+- **UC-19 [✅] Search palette** — ⌘K cross-project task search ("canary" → VQ-2/VQ-1/VQL-1 with project labels).
+- **UC-20 [✅] Notifications routing** — 8 decisions authoritative vs 9 unread rows (D-3); per-user routing toggles.
+- **UC-21 [✅] Strict vs Balanced autonomy** — VS-1 (Strict) shows an operator RECOMMEND for Triage→Ready (human
+  approval), whereas Balanced (VQ-1/VQ-2) auto-advanced pre-work boundaries.
+- **UC-22 [✅] Review queue / Activity / GitHub / Profile / SSO surfaces** — all render coherently with honest
+  empty/health states (documented in UI-WALKTHROUGH.md).
+
 ## Planned
 - UC-2 Codex parity: same shape task on Codex Dev backend; compare to UC-1.
 - UC-3 Reject path: request-changes / reject a delivered PR; verify board + reconcile.

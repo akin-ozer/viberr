@@ -21,6 +21,10 @@ export default [
   layout("routes/palette-shell.tsx", [
     // The real tabbed org-settings surface (org profile, members, resources).
     route("org/settings", "routes/org.settings.tsx"),
+    // Audit-log download (CSV/JSON) — org-admin gated file response.
+    route("org/settings/audit-export", "routes/org.settings.audit-export.ts"),
+    // Instance-wide agent-run analytics (org-admin).
+    route("insights", "routes/insights.tsx"),
     route("profile", "routes/profile.tsx"),
     route("notifications", "routes/notifications.tsx"),
   ]),
