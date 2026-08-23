@@ -1132,7 +1132,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .datepick-trigger .ico { width: 15px; height: 15px; color: var(--faint); flex: none; }
 .datepick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.datepick-trigger.empty .datepick-value { color: var(--muted); }
+.datepick-trigger.dp-empty .datepick-value { color: var(--muted); }
 .datepick-trigger:hover { border-color: var(--blue); }
 .datepick-trigger:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .datepick-clear {
