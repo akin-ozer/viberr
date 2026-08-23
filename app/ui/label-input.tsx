@@ -4,24 +4,31 @@ import { Icon } from "./icon";
 import { useDismiss } from "./use-dismiss";
 
 /**
- * A GitHub-style label combobox. Type a label and commit it with Enter or comma
- * (or on blur); each label is a removable chip (its own named Remove button);
- * Backspace on an empty field removes the last chip. As you type, a popover
- * offers the labels ALREADY used elsewhere in the project (passed in
- * `suggestions`) filtered to what matches, plus a "Create <label>" row for a
- * brand-new one — arrow to a row and Enter/click to take it, or just keep typing
- * and Enter to commit the typed text. Labels are trimmed, whitespace-collapsed,
- * de-duplicated case-insensitively, and capped to match the server's
- * `normalizeTaskLabels` (so the UI never builds a set the server would silently
- * trim). A polite live region announces adds/removes/rejections.
+ * A GitHub-style label multi-select. The field shows the chosen labels as chips
+ * and, while focused, opens a checkbox list: the CHOSEN labels are pinned to the
+ * top (checked — uncheck to remove), the project's other labels follow
+ * (unchecked — check to add), filtered by what you type, and a "Create <label>"
+ * row appears for a brand-new one. The list stays open across toggles so several
+ * labels can be picked in a row. Type + Enter (or comma / blur) also commits a
+ * new label directly; Backspace on the empty field removes the last chip.
  *
- * The suggestion popover renders IN FLOW (not a portaled floating layer) for the
- * same reason the date-picker's calendar does: this input is used inside the
- * New-task `<dialog>`, which is transform-centered with `overflow: hidden`, so a
+ * Labels are trimmed, whitespace-collapsed, de-duplicated case-insensitively,
+ * and capped to match the server's `normalizeTaskLabels`, so the UI never builds
+ * a set the server would silently trim. A polite live region announces changes.
+ *
+ * The list renders IN FLOW (not a portaled floating layer) for the same reason
+ * the date-picker's calendar does: this input is used inside the New-task
+ * `<dialog>`, which is transform-centered with `overflow: hidden`, so a
  * `position: fixed` popover mis-anchors and an absolute one is clipped. An
  * in-flow block lives in the scrollable modal body and is never clipped, and
  * behaves identically in the (non-dialog) Details panel.
  */
+
+type Row =
+  | { kind: "selected"; value: string }
+  | { kind: "suggest"; value: string }
+  | { kind: "create"; value: string };
+
 export function LabelInput({
   value,
   onChange,
@@ -47,30 +54,51 @@ export function LabelInput({
   const has = (label: string) =>
     value.some((l) => l.toLowerCase() === label.toLowerCase());
 
-  // Options offered right now: existing project labels not already picked and
-  // matching the buffer, then (if the typed text is a genuinely new label) a
-  // "Create" row. Nothing is offered once the set is full — there is no room.
+  // Rows offered right now: the chosen labels pinned to the top (always shown, so
+  // any of them can be unchecked), then the project's other labels filtered by
+  // the query, then a "Create" row for genuinely-new typed text. Nothing can be
+  // ADDED once the set is full, but the chosen rows stay so labels can be removed.
   const query = normalize(buffer);
+  const q = query.toLowerCase();
   const room = value.length < max;
-  const matches = room
-    ? suggestions.filter(
-        (s) => !has(s) && (query === "" || s.toLowerCase().includes(query.toLowerCase())),
-      )
+  const suggestRows: Row[] = room
+    ? suggestions
+        .filter((s) => !has(s) && (q === "" || s.toLowerCase().includes(q)))
+        .map((s): Row => ({ kind: "suggest", value: s }))
     : [];
   const canCreate =
     room &&
     query !== "" &&
     !has(query) &&
-    !suggestions.some((s) => s.toLowerCase() === query.toLowerCase());
-  const options: { value: string; create: boolean }[] = [
-    ...matches.map((s) => ({ value: s, create: false })),
-    ...(canCreate ? [{ value: query, create: true }] : []),
-  ];
-  const showPopover = open && options.length > 0;
-  // `active` can dangle when options shrink under it; treat out-of-range as none.
-  const activeOpt = active >= 0 && active < options.length ? active : -1;
+    !suggestions.some((s) => s.toLowerCase() === q);
+  const rows: Row[] = value.map((v): Row => ({ kind: "selected", value: v }));
+  rows.push(...suggestRows);
+  if (canCreate) rows.push({ kind: "create", value: query });
+  const showList = open && rows.length > 0;
+  // `active` can dangle when rows shrink under it; treat out-of-range as none.
+  const activeRow = active >= 0 && active < rows.length ? active : -1;
 
-  /** Fold one or more raw strings into the label set in a SINGLE onChange — so a
+  const announce = (next: string[], verb: "Added" | "Removed", label: string) => {
+    setStatus(`${verb} label ${label}, ${next.length} of ${max}`);
+  };
+
+  const addLabel = (raw: string) => {
+    const label = normalize(raw);
+    if (!label) return;
+    if (has(label)) {
+      setStatus("That label is already added");
+      return;
+    }
+    if (value.length >= max) {
+      setStatus(`Maximum ${max} labels reached`);
+      return;
+    }
+    const next = [...value, label];
+    onChange(next);
+    announce(next, "Added", label);
+  };
+
+  /** Fold one or more raw strings into the set in a SINGLE onChange — so a
    *  multi-item paste/comma-list doesn't stale-closure-overwrite itself. */
   const addLabels = (raws: readonly string[]) => {
     let next = value;
@@ -101,54 +129,53 @@ export function LabelInput({
     }
   };
 
-  const removeAt = (index: number) => {
-    const removed = value[index];
-    onChange(value.filter((_, i) => i !== index));
-    setStatus(`Removed label ${removed}, ${value.length - 1} of ${max}`);
-    inputRef.current?.focus();
+  const removeLabel = (label: string) => {
+    const next = value.filter((l) => l !== label);
+    onChange(next);
+    announce(next, "Removed", label);
   };
 
-  /** Take an option (a suggestion or the Create row): add it, clear the buffer,
-   *  and keep the field open + focused so more can be added in a flow. */
-  const takeOption = (index: number) => {
-    const opt = options[index];
-    if (!opt) return;
-    addLabels([opt.value]);
-    setBuffer("");
-    setActive(-1);
+  /** A checkbox row was toggled (click or Enter): flip its membership and keep
+   *  the list open + focused so several labels can be picked in one flow. */
+  const toggleRow = (index: number) => {
+    const row = rows[index];
+    if (!row) return;
+    if (row.kind === "selected") {
+      removeLabel(row.value);
+    } else {
+      addLabel(row.value);
+      setBuffer(""); // reset the filter so the fresh selection is easy to see
+      setActive(-1);
+    }
     inputRef.current?.focus();
-  };
-
-  const commitBuffer = () => {
-    addLabels([buffer]);
-    setBuffer("");
-    setActive(-1);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Comma is handled in onChange (the char lands in the value); the rest is
-    // navigation + commit for the combobox.
-    if (e.key === "ArrowDown" && options.length > 0) {
+    if (e.key === "ArrowDown" && rows.length > 0) {
       e.preventDefault();
       setOpen(true);
-      setActive((a) => (a + 1) % options.length);
-    } else if (e.key === "ArrowUp" && options.length > 0) {
+      setActive((a) => (a + 1) % rows.length);
+    } else if (e.key === "ArrowUp" && rows.length > 0) {
       e.preventDefault();
       setOpen(true);
-      setActive((a) => (a <= 0 ? options.length - 1 : a - 1));
+      setActive((a) => (a <= 0 ? rows.length - 1 : a - 1));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (showPopover && activeOpt >= 0) takeOption(activeOpt);
-      else commitBuffer();
-    } else if (e.key === "Escape" && showPopover) {
-      // Consume Escape ONLY to close the popover; a closed popover lets Escape
-      // bubble so the enclosing dialog can cancel on it.
+      if (showList && activeRow >= 0) toggleRow(activeRow);
+      else if (query !== "") {
+        addLabel(query);
+        setBuffer("");
+        setActive(-1);
+      }
+    } else if (e.key === "Escape" && showList) {
+      // Consume Escape ONLY to close the list; a closed list lets Escape bubble
+      // so the enclosing dialog can cancel on it.
       e.preventDefault();
       e.stopPropagation();
       setOpen(false);
     } else if (e.key === "Backspace" && buffer === "" && value.length > 0) {
       e.preventDefault();
-      removeAt(value.length - 1);
+      removeLabel(value[value.length - 1]);
     }
   };
 
@@ -167,30 +194,26 @@ export function LabelInput({
     }
   };
 
-  const listId = "label-suggest-list";
-  const optionId = (i: number) => `label-opt-${i}`;
+  const listId = "label-select-list";
+  const rowId = (i: number) => `label-row-${i}`;
 
   return (
     <div className="label-combo" ref={wrapRef}>
-      <div className="label-input" onMouseDown={(e) => {
-        // Clicking the chrome (not a chip button) focuses the field without
-        // stealing focus away from an already-focused input mid-selection.
-        if (e.target === e.currentTarget) inputRef.current?.focus();
-      }}>
-        {value.map((label, i) => (
+      <div
+        className="label-input"
+        onMouseDown={(e) => {
+          // Clicking the chrome (a chip or the gap) focuses the field and opens
+          // the list, without stealing focus mid-interaction from the input.
+          if (e.target !== inputRef.current) {
+            e.preventDefault();
+            inputRef.current?.focus();
+            setOpen(true);
+          }
+        }}
+      >
+        {value.map((label) => (
           <span key={label} className="label-token">
             {label}
-            <button
-              type="button"
-              className="label-token-x"
-              aria-label={`Remove label ${label}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                removeAt(i);
-              }}
-            >
-              <Icon name="x" />
-            </button>
           </span>
         ))}
         <input
@@ -198,49 +221,55 @@ export function LabelInput({
           type="text"
           className="label-input-field"
           role="combobox"
-          aria-expanded={showPopover}
+          aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"
-          aria-activedescendant={activeOpt >= 0 ? optionId(activeOpt) : undefined}
+          aria-activedescendant={activeRow >= 0 ? rowId(activeRow) : undefined}
           value={buffer}
           onChange={onChangeText}
           onKeyDown={onKeyDown}
           onFocus={() => setOpen(true)}
           onBlur={() => {
-            commitBuffer();
+            // Commit a half-typed label so it is not lost, then close.
+            if (query !== "") {
+              addLabel(query);
+              setBuffer("");
+            }
             setOpen(false);
           }}
           placeholder={value.length === 0 ? "Add a label" : ""}
           aria-label="Add a label"
         />
       </div>
-      {showPopover && (
-        <ul className="label-suggest" id={listId} role="listbox">
-          {options.map((opt, i) => (
+      {showList && (
+        <ul className="label-select" id={listId} role="listbox" aria-multiselectable="true">
+          {rows.map((row, i) => (
             <li
-              key={(opt.create ? "new:" : "sug:") + opt.value}
-              id={optionId(i)}
+              key={row.kind + ":" + row.value}
+              id={rowId(i)}
               role="option"
-              aria-selected={i === activeOpt}
-              className={"label-opt" + (opt.create ? " create" : "")}
-              data-active={i === activeOpt}
+              aria-selected={row.kind === "selected"}
+              className={"label-opt" + (row.kind === "create" ? " create" : "")}
+              data-active={i === activeRow}
               // mousedown, not click: fire before the input's blur so focus is
-              // never lost (preventDefault keeps it), and the popover stays put.
+              // never lost (preventDefault keeps it) and the list stays open.
               onMouseDown={(e) => {
                 e.preventDefault();
-                takeOption(i);
+                toggleRow(i);
               }}
               onMouseEnter={() => setActive(i)}
             >
-              {opt.create ? (
-                <>
+              {row.kind === "create" ? (
+                <span className="lc-plus">
                   <Icon name="plus" />
-                  <span className="label-opt-name">{opt.value}</span>
-                  <span className="label-opt-hint">create</span>
-                </>
+                </span>
               ) : (
-                <span className="label-opt-name">{opt.value}</span>
+                <span className="lc-check" data-checked={row.kind === "selected"}>
+                  <Icon name="check" />
+                </span>
               )}
+              <span className="label-opt-name">{row.value}</span>
+              {row.kind === "create" && <span className="label-opt-hint">create</span>}
             </li>
           ))}
         </ul>

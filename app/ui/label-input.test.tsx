@@ -29,8 +29,18 @@ function field(c: HTMLElement): HTMLInputElement {
 function tokens(c: HTMLElement): string[] {
   return [...c.querySelectorAll(".label-token")].map((t) => t.textContent!.replace(/\s+$/, ""));
 }
-function options(c: HTMLElement): string[] {
-  return [...c.querySelectorAll(".label-opt .label-opt-name")].map((o) => o.textContent!);
+/** Each visible row: its name, whether it is a checked/unchecked/create row. */
+function rows(c: HTMLElement) {
+  return [...c.querySelectorAll(".label-select .label-opt")].map((o) => ({
+    name: o.querySelector(".label-opt-name")!.textContent,
+    checked: o.querySelector(".lc-check")?.getAttribute("data-checked") ?? null,
+    create: o.classList.contains("create"),
+  }));
+}
+function rowNamed(c: HTMLElement, name: string): HTMLElement {
+  return [...c.querySelectorAll<HTMLElement>(".label-select .label-opt")].find(
+    (o) => o.querySelector(".label-opt-name")!.textContent === name,
+  )!;
 }
 
 describe("LabelInput", () => {
@@ -56,14 +66,6 @@ describe("LabelInput", () => {
     const { container, getByTestId } = render(<Harness initial={["a", "b"]} />);
     fireEvent.keyDown(field(container), { key: "Backspace" });
     expect(getByTestId("value").textContent).toBe("a");
-  });
-
-  it("a chip's named Remove button removes it", () => {
-    const { getByLabelText, getByTestId } = render(
-      <Harness initial={["runtime", "github"]} />,
-    );
-    fireEvent.click(getByLabelText("Remove label runtime"));
-    expect(getByTestId("value").textContent).toBe("github");
   });
 
   it("caps at 12 labels and 32 chars", () => {
@@ -92,57 +94,47 @@ describe("LabelInput", () => {
   });
 });
 
-describe("LabelInput autocomplete", () => {
+describe("LabelInput checkbox multi-select", () => {
   const suggestions = ["runtime", "regression", "docs", "flaky"];
 
-  it("offers matching project labels on focus and filters as you type", () => {
-    const { container } = render(<Harness suggestions={suggestions} />);
-    fireEvent.focus(field(container));
-    // Focus with an empty buffer shows all suggestions.
-    expect(options(container)).toEqual(suggestions);
-    fireEvent.change(field(container), { target: { value: "re" } });
-    // "re" is a substring of regression (not runtime), plus a Create row.
-    expect(options(container)).toEqual(["regression", "re"]);
-  });
-
-  it("already-picked labels drop out of the suggestion list", () => {
+  it("on focus, pins the chosen labels (checked) above the rest (unchecked)", () => {
     const { container } = render(
-      <Harness initial={["runtime"]} suggestions={suggestions} />,
+      <Harness initial={["docs"]} suggestions={suggestions} />,
     );
     fireEvent.focus(field(container));
-    expect(options(container)).toEqual(["regression", "docs", "flaky"]);
+    expect(rows(container)).toEqual([
+      { name: "docs", checked: "true", create: false }, // chosen, pinned top
+      { name: "runtime", checked: "false", create: false },
+      { name: "regression", checked: "false", create: false },
+      { name: "flaky", checked: "false", create: false },
+    ]);
   });
 
-  it("ArrowDown + Enter takes the highlighted suggestion, not the typed text", () => {
+  it("checking an unchosen row adds it; the list stays open", () => {
     const { container, getByTestId } = render(
       <Harness suggestions={suggestions} />,
     );
     fireEvent.focus(field(container));
-    fireEvent.change(field(container), { target: { value: "d" } });
-    // Options: docs (match) + Create "d". Arrow to the first, commit it.
-    fireEvent.keyDown(field(container), { key: "ArrowDown" });
-    fireEvent.keyDown(field(container), { key: "Enter" });
-    expect(getByTestId("value").textContent).toBe("docs");
-    expect(field(container).value).toBe("");
-  });
-
-  it("clicking a suggestion adds it", () => {
-    const { container, getByTestId } = render(
-      <Harness suggestions={suggestions} />,
-    );
-    fireEvent.focus(field(container));
-    const flaky = [...container.querySelectorAll(".label-opt")].find(
-      (o) => o.textContent === "flaky",
-    )!;
-    fireEvent.mouseDown(flaky);
+    fireEvent.mouseDown(rowNamed(container, "flaky"));
     expect(getByTestId("value").textContent).toBe("flaky");
+    // Still open (multi-select), and "flaky" is now the pinned, checked row.
+    expect(container.querySelector(".label-select")).toBeTruthy();
+    expect(rows(container)[0]).toEqual({ name: "flaky", checked: "true", create: false });
   });
 
-  it("offers a Create row for a brand-new label", () => {
+  it("unchecking a chosen row removes it", () => {
+    const { container, getByTestId } = render(
+      <Harness initial={["runtime", "docs"]} suggestions={suggestions} />,
+    );
+    fireEvent.focus(field(container));
+    fireEvent.mouseDown(rowNamed(container, "runtime"));
+    expect(getByTestId("value").textContent).toBe("docs");
+  });
+
+  it("offers a Create row for brand-new typed text and adds it", () => {
     const { container, getByTestId } = render(
       <Harness suggestions={suggestions} />,
     );
-    fireEvent.focus(field(container));
     fireEvent.change(field(container), { target: { value: "brand-new" } });
     const create = container.querySelector(".label-opt.create")!;
     expect(create).toBeTruthy();
@@ -150,34 +142,41 @@ describe("LabelInput autocomplete", () => {
     expect(getByTestId("value").textContent).toBe("brand-new");
   });
 
-  it("Enter with nothing highlighted commits the typed text over a match", () => {
+  it("filters the unchosen rows as you type", () => {
+    const { container } = render(<Harness suggestions={suggestions} />);
+    fireEvent.change(field(container), { target: { value: "re" } });
+    // "re" is a substring of regression (not runtime), plus a Create row.
+    expect(rows(container).map((r) => r.name)).toEqual(["regression", "re"]);
+  });
+
+  it("ArrowDown + Enter toggles the highlighted row", () => {
     const { container, getByTestId } = render(
       <Harness suggestions={suggestions} />,
     );
     fireEvent.focus(field(container));
-    fireEvent.change(field(container), { target: { value: "runtime" } });
-    // A match is listed, but without arrowing to it Enter commits the buffer.
+    fireEvent.keyDown(field(container), { key: "ArrowDown" }); // -> runtime
+    fireEvent.keyDown(field(container), { key: "ArrowDown" }); // -> regression
     fireEvent.keyDown(field(container), { key: "Enter" });
-    expect(getByTestId("value").textContent).toBe("runtime");
+    expect(getByTestId("value").textContent).toBe("regression");
   });
 
-  it("Escape closes the suggestion popover without clearing the buffer", () => {
+  it("Escape closes the list without clearing the buffer", () => {
     const { container } = render(<Harness suggestions={suggestions} />);
-    fireEvent.focus(field(container));
     fireEvent.change(field(container), { target: { value: "re" } });
-    expect(container.querySelector(".label-suggest")).toBeTruthy();
+    expect(container.querySelector(".label-select")).toBeTruthy();
     fireEvent.keyDown(field(container), { key: "Escape" });
-    expect(container.querySelector(".label-suggest")).toBeNull();
-    expect(field(container).value).toBe("re"); // buffer intact
+    expect(container.querySelector(".label-select")).toBeNull();
+    expect(field(container).value).toBe("re");
   });
 
-  it("offers nothing once the label set is full", () => {
+  it("at the 12-label cap, chosen rows stay (removable) but nothing can be added", () => {
     const twelve = Array.from({ length: 12 }, (_, i) => `l${i}`);
     const { container } = render(
       <Harness initial={twelve} suggestions={["runtime"]} />,
     );
-    fireEvent.focus(field(container));
     fireEvent.change(field(container), { target: { value: "run" } });
-    expect(container.querySelector(".label-suggest")).toBeNull();
+    const r = rows(container);
+    expect(r).toHaveLength(12); // only the 12 chosen, all checked
+    expect(r.every((row) => row.checked === "true")).toBe(true);
   });
 });
