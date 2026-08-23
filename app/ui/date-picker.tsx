@@ -51,7 +51,14 @@ export function DatePicker({
     if (!r) return;
     const width = Math.max(r.width, 268);
     const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
-    setPos({ top: r.bottom + 6, left, width });
+    // Open downward by default; flip above the trigger when the calendar (a
+    // fixed ~300px block) would spill past the viewport bottom and there is room
+    // above (the Due-date field sits mid-modal).
+    const estHeight = 300;
+    const below = r.bottom + 6;
+    const flipUp = below + estHeight > window.innerHeight - 8 && r.top - estHeight > 8;
+    const top = flipUp ? r.top - 6 - estHeight : below;
+    setPos({ top, left, width });
   };
   const toggle = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -63,6 +70,14 @@ export function DatePicker({
     setOpen(false);
     btnRef.current?.focus();
   };
+
+  // When the trigger sits inside a top-layer <dialog> (the New-task modal uses
+  // showModal()), a popover portaled to document.body renders BEHIND the
+  // dialog's top layer. Portal into the dialog instead so it shares that layer;
+  // position:fixed keeps it viewport-anchored (never clipped by the dialog's
+  // own overflow). Falls back to document.body outside a dialog (the Details
+  // panel). Computed while `open` (the trigger is mounted, so `closest` works).
+  const portalTarget = btnRef.current?.closest("dialog") ?? document.body;
 
   return (
     <div className="datepick">
@@ -106,7 +121,7 @@ export function DatePicker({
           >
             <Calendar selected={value} onSelect={select} />
           </div>,
-          document.body,
+          portalTarget,
         )}
     </div>
   );
