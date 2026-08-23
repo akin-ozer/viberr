@@ -110,14 +110,16 @@ describe("LabelInput checkbox multi-select", () => {
     ]);
   });
 
-  it("checking an unchosen row adds it; the list stays open", () => {
+  it("checking an unchosen row adds it; the list stays open across the blur", () => {
     const { container, getByTestId } = render(
       <Harness suggestions={suggestions} />,
     );
     fireEvent.focus(field(container));
     fireEvent.mouseDown(rowNamed(container, "flaky"));
+    // A pointer press on a row blurs the input; the list must survive it so the
+    // multi-select flow continues (this is the "show it immediately" fix).
+    fireEvent.blur(field(container));
     expect(getByTestId("value").textContent).toBe("flaky");
-    // Still open (multi-select), and "flaky" is now the pinned, checked row.
     expect(container.querySelector(".label-select")).toBeTruthy();
     expect(rows(container)[0]).toEqual({ name: "flaky", checked: "true", create: false });
   });

@@ -48,6 +48,12 @@ export function LabelInput({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
+  // True while a pointer is pressing inside the list. A press on a row would
+  // otherwise blur the input (moving focus off it) and close the list before the
+  // click registers; this guard lets `onBlur` keep the list open across a pick,
+  // so several labels can be toggled in a row. (The row's mousedown also
+  // `preventDefault`s, which suffices in real browsers; this is the belt.)
+  const interactingRef = useRef(false);
   const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   const normalize = (raw: string) => raw.trim().replace(/\s+/g, " ").slice(0, maxLen);
@@ -230,6 +236,13 @@ export function LabelInput({
           onKeyDown={onKeyDown}
           onFocus={() => setOpen(true)}
           onBlur={() => {
+            // A press inside the list is a pick, not a leave: keep focus + the
+            // list open so the multi-select flow continues.
+            if (interactingRef.current) {
+              interactingRef.current = false;
+              inputRef.current?.focus();
+              return;
+            }
             // Commit a half-typed label so it is not lost, then close.
             if (query !== "") {
               addLabel(query);
@@ -242,7 +255,20 @@ export function LabelInput({
         />
       </div>
       {showList && (
-        <ul className="label-select" id={listId} role="listbox" aria-multiselectable="true">
+        <ul
+          className="label-select"
+          id={listId}
+          role="listbox"
+          aria-multiselectable="true"
+          // Mark the press as an in-list interaction before it can blur the
+          // input; clear it once the press ends (whether or not a blur fired).
+          onMouseDown={() => {
+            interactingRef.current = true;
+          }}
+          onMouseUp={() => {
+            interactingRef.current = false;
+          }}
+        >
           {rows.map((row, i) => (
             <li
               key={row.kind + ":" + row.value}
