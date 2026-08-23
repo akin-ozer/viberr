@@ -645,6 +645,13 @@ export function ProfileDetail({
   onEdit: (a: AgentProfileView) => void;
 }) {
   const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
+  // "running on N" is a claim about LIVE runs, not engagements: an assigned
+  // profile sits idle on most of its tasks (the F16 note below). Count only the
+  // tasks with an agent_runs row actually state='running' (`d.running`), or the
+  // hero read "running on 3 tasks" for a profile executing nothing.
+  const runningKeys = [
+    ...new Set(insts.filter((d) => d.running).map((d) => d.taskKey)),
+  ];
   const [confirm, setConfirm] = useState(false);
   // F16: "idle · available" was the page's answer no matter what — live, a
   // Codex profile on an instance with no Codex credential read "idle ·
@@ -745,15 +752,21 @@ export function ProfileDetail({
             <Pill kind={a.kind === "operator" ? "agent" : "neutral"} sm>
               {profileRoleLabel(a.name, a.role, a.kind)}
             </Pill>
-            {activeKeys.length > 0 ? (
+            {runningKeys.length > 0 ? (
               <span className="ag-running">
                 <span className="working" />
-                running on {countLabel(activeKeys.length, "task")}
+                running on {countLabel(runningKeys.length, "task")}
               </span>
             ) : backendMissing ? (
               <Pill kind="risk" sm>
                 idle · {backendLabel} not configured
               </Pill>
+            ) : activeKeys.length > 0 ? (
+              // Engaged (assigned) but not executing a run right now — say so
+              // rather than the false "running on N" or the bare "available".
+              <span className="ag-idle">
+                idle · engaged on {countLabel(activeKeys.length, "task")}
+              </span>
             ) : (
               <span className="ag-idle">idle · available</span>
             )}
