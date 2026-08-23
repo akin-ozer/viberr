@@ -137,6 +137,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     orgAdminOverride,
     taskCount: liveTasks.length,
     reviewCount: (() => {
+      // F25-2 (pass 25): an ARCHIVED project has no review boundary — the server
+      // refuses acceptance and `getReviewQueue` returns total 0 for it (D-1). The
+      // rail badge must agree, or it shows "Review N" one click from a queue that
+      // says "0 tasks · no review work in flight" (the F19-9 badge/queue-parity
+      // class, recurring). Zero it for an archived project, same predicate.
+      if (board.project.archived) return 0;
       const reviewId = resolveStageRoles(
         board.project.stages,
         board.project.workflow,

@@ -32,6 +32,7 @@ import {
 } from "./policy-data";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageFlowPath } from "~/shared/workflow/transitions";
+import { isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
 
 /**
  * Policy view:
@@ -310,6 +311,15 @@ export function AgentCapability({
           const direct = g(p.actions.direct);
           const recommend = g(p.actions.recommend);
           const human = g(p.actions.forbidden);
+          // F-P2 (pass 25): a Codex-primary profile's direct/recommend counts
+          // above can include grants that only bind advisorily on Codex (the
+          // tool layer doesn't enforce them there — the same caveat the
+          // capability matrix and profile detail already show per row). Flag
+          // it here too, without splitting the counts.
+          const codexPrimary = p.backends[0] === "codex";
+          const advisoryOnCodex =
+            codexPrimary &&
+            [...direct, ...recommend].some((l) => isClaudeOnlyEnforcedLabel(l));
           return (
           <button
             type="button"
@@ -353,6 +363,14 @@ export function AgentCapability({
                     <span className="d human"></span>
                     {human.length} human
                   </span>
+                  {advisoryOnCodex && (
+                    <span
+                      className="fhint"
+                      title="Claude-enforced. On this profile's Codex runtime the tool layer does not bind it: the server-owned delivery gate is the real boundary."
+                    >
+                      · some grants advisory on Codex
+                    </span>
+                  )}
                 </>
               )}
             </span>

@@ -36,6 +36,7 @@ const TRANSITIONS: TransitionView[] = [
 const PROFILES: PcapProfile[] = [
   {
     id: "operator", kind: "operator", name: "Operator", icon: "shield", role: "Task coordinator",
+    backends: ["claude"],
     actions: {
       direct: [
         "Assign the delivering agent",
@@ -58,6 +59,7 @@ const PROFILES: PcapProfile[] = [
   },
   {
     id: "developer", kind: "specialist", name: "Developer", icon: "branch", role: "Implementation",
+    backends: ["claude"],
     actions: {
       direct: [
         "Post mid-run comments",
@@ -188,6 +190,37 @@ describe("AgentCapability", () => {
 
     fireEvent.click(container.querySelectorAll(".pcap-row")[1]!);
     expect(onOpenProfile).toHaveBeenCalledWith("developer");
+  });
+
+  // F-P2 (pass 25): a Codex-primary profile's direct/recommend counts can
+  // include grants that only BIND on Claude (e.g. "Post mid-run comments" —
+  // comment-on-task is in CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS) — advisory only
+  // on Codex. Two identically-configured profiles differing only in backend
+  // must not render identical counts with no way to tell them apart.
+  it("F-P2: flags a Codex-primary profile whose counted grants are advisory there", () => {
+    const codexDeveloper: PcapProfile = { ...PROFILES[1]!, id: "codex-dev", backends: ["codex"] };
+    const { container, getAllByText } = render(
+      <AgentCapability
+        profiles={[codexDeveloper]}
+        onOpenProfile={() => {}}
+        onManageProfiles={() => {}}
+        onMatrix={() => {}}
+      />,
+    );
+    expect(getAllByText("· some grants advisory on Codex")).toHaveLength(1);
+    expect(container.textContent).toContain("advisory on Codex");
+  });
+
+  it("F-P2: a Claude-primary profile with the same grants shows no caveat", () => {
+    const { container } = render(
+      <AgentCapability
+        profiles={[PROFILES[1]!]}
+        onOpenProfile={() => {}}
+        onManageProfiles={() => {}}
+        onMatrix={() => {}}
+      />,
+    );
+    expect(container.textContent).not.toContain("advisory on Codex");
   });
 
   it("D6: a single profile reads '1 profile', not '1 profiles'", () => {

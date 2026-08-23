@@ -461,13 +461,17 @@ export function extractFullReplyText(lines: LogLine[]): string | null {
  * An absolute host path that points INTO a task workspace clone, matched at a
  * boundary that is not part of a URL (F7-UX1). Structure:
  *   `<data-root>/…/tasks/<KEY>/workspace/<repo>/<rest>`  →  captured `<rest>`.
+ * P8 (pass 25): a SUPPORTING run's checkout is one level deeper —
+ *   `…/tasks/<KEY>/workspace/support/<profileId>/<repo>/<rest>` — so the optional
+ * `support/<profileId>/` group is skipped before the repo segment; without it a
+ * reviewer's echoed path would rewrite to `<profileId>/<repo>/<rest>` (wrong).
  * The leading `/` must not follow a word char, `:`, `/`, or `.` so `http(s)://`
  * and `file://` URLs (and interior path segments) are never anchored on. The
  * `<rest>` capture stops at whitespace or bracket/paren so a markdown link's
  * closing `)` / `]` is left intact.
  */
 const WORKSPACE_ABS_PATH_RE =
-  /(?<![:\w/.])\/(?:[^\s()<>[\]]*?\/)?tasks\/[^/\s()<>[\]]+\/workspace\/[^/\s()<>[\]]+\/([^\s()<>[\]]+)/g;
+  /(?<![:\w/.])\/(?:[^\s()<>[\]]*?\/)?tasks\/[^/\s()<>[\]]+\/workspace\/(?:support\/[^/\s()<>[\]]+\/)?[^/\s()<>[\]]+\/([^\s()<>[\]]+)/g;
 
 /**
  * Rewrite workspace-absolute host paths in an agent reply to repo-relative ones
@@ -641,14 +645,20 @@ export function resumeWorkdir(
   taskKey: string,
   repo: string | null,
   dataRoot?: string,
+  /** P8 (pass 25): a resumed SUPPORTING run stays in its OWN isolated checkout
+   *  (`workspace/support/<profileId>/<repo>`) — never the delivering engagement's
+   *  canonical `workspace/<repo>`, so its writes never reach the delivered PR. */
+  support?: { profileId: string },
 ): string {
   const base = taskDir(projectSlug, taskKey, dataRoot);
+  const scopedRoot = support
+    ? path.join(base, "workspace", "support", support.profileId)
+    : path.join(base, "workspace");
   if (repo) {
     const name = repo.split("/").pop() ?? repo;
-    const clone = path.join(base, "workspace", name);
+    const clone = path.join(scopedRoot, name);
     if (existsSync(path.join(clone, ".git"))) return clone;
   }
-  const workspace = path.join(base, "workspace");
-  mkdirSync(workspace, { recursive: true });
-  return workspace;
+  mkdirSync(scopedRoot, { recursive: true });
+  return scopedRoot;
 }

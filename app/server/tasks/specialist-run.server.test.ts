@@ -1504,7 +1504,12 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       delivers: false,
       delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
     });
-    expect(prompt).toContain("READ-ONLY for you");
+    // P8 (pass 25): a supporting run gets its own isolated checkout, so the
+    // load-bearing guarantee is delivery-isolation (true on both backends), not
+    // the Claude-only "the tool layer blocks these".
+    expect(prompt).toContain("isolated checkout");
+    expect(prompt).toContain("nothing you write here reaches the delivered PR");
+    expect(prompt).not.toContain("The tool layer blocks these");
     expect(prompt).toContain("Do NOT create a branch");
     expect(prompt).not.toContain("git checkout -B");
     expect(prompt).not.toContain("Commit your work locally");
@@ -1558,7 +1563,12 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("if it asks a question or for advice, answer it directly");
     expect(prompt).toContain("conversational teammate");
     // Still read-only.
-    expect(prompt).toContain("READ-ONLY for you");
+    // P8 (pass 25): a supporting run gets its own isolated checkout, so the
+    // load-bearing guarantee is delivery-isolation (true on both backends), not
+    // the Claude-only "the tool layer blocks these".
+    expect(prompt).toContain("isolated checkout");
+    expect(prompt).toContain("nothing you write here reaches the delivered PR");
+    expect(prompt).not.toContain("The tool layer blocks these");
   });
 
   it("R-C: every prompt carries the prompt-injection trust boundary", () => {
@@ -2847,12 +2857,125 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(spec.systemPrompt ?? "").toContain("house-kb (knowledge base)");
       // …R19-3: its SKILL does not, on either channel.
       expect(spec.skills).toEqual(["critic-craft"]);
-      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+      // P8 (pass 25): the reviewer runs in its OWN isolated checkout
+      // (`workspace/support/<profileId>/<repo>`), not the delivering tree, so its
+      // skills mount THERE — and the delivering checkout stays untouched.
+      const criticWs = path.join(
+        path.dirname(ws),
+        "support",
+        "critic",
+        path.basename(ws),
+      );
+      expect(readdirSync(path.join(criticWs, ".claude", "skills"))).toEqual([
         "critic-craft",
       ]);
+      expect(existsSync(path.join(ws, ".claude", "skills"))).toBe(false);
       const assembled = JSON.stringify(spec);
       expect(assembled).not.toContain("deliverer-craft");
       expect(assembled).not.toContain("SENTINEL-DELIVERER-SKILL");
+    });
+  });
+
+  describe("P8 — per-engagement workspace isolation", () => {
+    it("a SUPPORTING run gets its OWN checkout, so its writes never reach the delivering tree", async () => {
+      // The delivering (canonical) checkout `workspace/<repo>` — the ONLY tree
+      // delivery's `git add -A` ships. Pre-create it with a commit.
+      const ws = await workspaceCheckout();
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "dev", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "dev", role: "developer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+          {
+            // Even a WRITE-CAPABLE reviewer must not be able to pollute the
+            // delivering tree — isolation is structural, not a capability gate.
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+        actor(store.users.arda));
+
+      const criticWs = path.join(
+        path.dirname(ws), "support", "critic", path.basename(ws),
+      );
+      // The reviewer runs in its OWN isolated checkout, never the delivering tree.
+      expect(lastRunSpec()?.workdir).toBe(criticWs);
+      expect(criticWs).not.toBe(ws);
+      expect(existsSync(path.join(criticWs, ".git"))).toBe(true);
+      // It carries the delivering checkout's content (cloned from it), so a
+      // reviewer can still read the delivered work.
+      expect(existsSync(path.join(criticWs, "README.md"))).toBe(true);
+      // F-P8: a write in the reviewer's isolated checkout does NOT appear in the
+      // delivering tree, so delivery's `git add -A` can never sweep it into the PR.
+      writeFileSync(path.join(criticWs, "reviewer-scratch.txt"), "leaked?");
+      expect(existsSync(path.join(ws, "reviewer-scratch.txt"))).toBe(false);
+    });
+
+    it("refuses a second run of the SAME supporting engagement while one is in flight (its isolated dir is re-cloned fresh)", async () => {
+      // Finding-2: the support checkout is deleted + re-cloned FRESH per dispatch,
+      // so two overlapping runs of the same reviewer would share (and destroy) one
+      // dir. Serialize same-engagement runs; different engagements still run free.
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const { upsertRun } = await import("~/server/runtimes/run-store.server");
+      upsertRun(store.db, {
+        id: "run_inflight_critic",
+        projectSlug: store.slug, taskKey: "VIB-1",
+        threadId: "critic-inflight", role: "reviewer", kind: "reviewer",
+        agentProfileId: "critic", backend: "claude", model: "claude-sonnet-4-5",
+        sdk: "Claude Agent SDK", state: "running",
+        startedAt: "2026-08-23T00:00:00.000Z",
+      });
+      await expect(
+        startAgentRun(store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+          actor(store.users.arda), { dataRoot: store.dataRoot }),
+      ).rejects.toMatchObject({ status: 409 });
     });
   });
 });

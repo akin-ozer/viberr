@@ -101,6 +101,7 @@ function recReachesAcceptance(
 export function TaskDetailPage({
   task,
   attachments = [],
+  attachmentsTotal,
   attachmentProducers = {},
   attachmentsBase = null,
   runtime,
@@ -140,6 +141,9 @@ export function TaskDetailPage({
   /** Attachment name → who saved it and when (from the events that claim
    *  names). Names no event claims are absent — the panel omits the line. */
   attachmentProducers?: Record<string, { actor: string; occurredAt: string }>;
+  /** C8 (pass 25): true total attachment count, so the panel can disclose the
+   *  100-item list cap ("showing 100 of N") instead of hiding older evidence. */
+  attachmentsTotal?: number;
   /** `/projects/<slug>/tasks/<KEY>/attachments` — the serving route's base,
    *  built by the route component (the one place that knows the params).
    *  Null hides the panel and the evidence links (e.g. bare test renders). */
@@ -826,6 +830,7 @@ export function TaskDetailPage({
           <AttachmentsPanel
             base={attachmentsBase}
             attachments={attachments}
+            {...(attachmentsTotal !== undefined ? { total: attachmentsTotal } : {})}
             producers={attachmentProducers}
             // D8: show an empty state (not nothing) when a browser-capable agent
             // is deployed — its runs are what fill this panel.

@@ -59,6 +59,31 @@ describe("AttachmentsPanel", () => {
     expect(file.textContent).toContain("10.0 KB");
   });
 
+  // C8: listTaskAttachments caps at 100 with nothing telling a viewer the
+  // store holds more. `total` (from the new countTaskAttachments sibling)
+  // lets the panel say so; it's optional so a caller that hasn't wired it
+  // through yet (unchanged behavior) renders exactly as before.
+  it("C8: says nothing extra when total is unset or equals the list length", () => {
+    const attachments = [entry("a.png"), entry("b.pdf")];
+    const { container: noTotal } = render(
+      <AttachmentsPanel base={BASE} attachments={attachments} />,
+    );
+    expect(noTotal.querySelector(".ntf-truncated")).toBeNull();
+    const { container: sameTotal } = render(
+      <AttachmentsPanel base={BASE} attachments={attachments} total={2} />,
+    );
+    expect(sameTotal.querySelector(".ntf-truncated")).toBeNull();
+  });
+
+  it("C8: flags a truncated list when total exceeds what's shown", () => {
+    const { container } = render(
+      <AttachmentsPanel base={BASE} attachments={[entry("a.png")]} total={140} />,
+    );
+    const note = container.querySelector(".ntf-truncated")!;
+    expect(note).not.toBeNull();
+    expect(note.textContent).toContain("Showing the most recent 1 of 140 files");
+  });
+
   it("URL-encodes filenames so an odd-but-legal name still resolves", () => {
     const { container } = render(
       <AttachmentsPanel base={BASE} attachments={[entry("after fix #2.png")]} />,

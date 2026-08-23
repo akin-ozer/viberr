@@ -336,7 +336,8 @@ export function McpModal({
           <span>
             Encrypted at rest and injected only into the agent run (Authorization header
             or MCP_CREDENTIAL env). Never shown again, and never in task timelines,
-            comments, or audit records.
+            comments, or audit records. On a Codex-backend agent this credential is not
+            sent: Codex mounts the server unauthenticated.
           </span>
         </div>
       </div>

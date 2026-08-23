@@ -157,6 +157,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // Claude-only tool or claims "you have no shell" — it defers to the
     // per-backend anchored read the workspace section now describes.
     "51a2ebfd35bf4b2c49428732357514b364e2dc55a46fb0afc707517023de03ae",
+    // pass-25 outgoing (F25-3): the "your working directory holds task.md AND a
+    // read-only checkout" line was Claude-accurate but false for the Codex
+    // operator (its writable cwd is the isolated .operator-scratch since B-1);
+    // it now defers to the per-backend workspace section for exact paths.
+    "7e42028407b0f59873086d97229d60e5e9237f39cb1b7dc480675c8a78d1b82c",
   ],
   [path.join("agents", "profiles", "operator.md")]: [
     "339ad23dd69f63e57bf52d110b263a2da4ae683bdbf5b020039eaf075115dec4",

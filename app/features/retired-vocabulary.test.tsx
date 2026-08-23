@@ -248,6 +248,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
       kind: "operator",
       name: "Operator",
       icon: "shield",
+      backends: ["claude"],
       actions: {
         direct: ["Assign the delivering agent"],
         recommend: ["Stage transitions"],
@@ -259,6 +260,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
       kind: "specialist",
       name: "Developer",
       icon: "branch",
+      backends: ["claude"],
       actions: {
         direct: ["Commit & push to the branch"],
         recommend: [],

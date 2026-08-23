@@ -27,6 +27,7 @@ export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
 export function AttachmentsPanel({
   base,
   attachments,
+  total,
   producers = {},
   browserExpected = false,
 }: {
@@ -34,6 +35,13 @@ export function AttachmentsPanel({
    *  the one place that actually knows the URL params. */
   base: string;
   attachments: TaskAttachmentEntry[];
+  /** C8: the store's TRUE file count, from `countTaskAttachments`
+   *  (task-attachments.server.ts) — `listTaskAttachments` caps its return at
+   *  100, so on a heavily-evidenced task `attachments.length` alone can't
+   *  tell the panel it's showing a partial list. Optional and defaults to
+   *  `attachments.length` (no truncation note) so a caller that hasn't wired
+   *  the true count through yet renders exactly as before. */
+  total?: number;
   /** Attachment name → who saved it (from the timeline event that claims the
    *  name — the same event renders the file as a chip in place). A name with
    *  no claiming event gets no producer line rather than a guess. */
@@ -65,6 +73,10 @@ export function AttachmentsPanel({
   const href = (name: string) => `${base}/${encodeURIComponent(name)}`;
   const images = attachments.filter((a) => IMAGE_RE.test(a.name));
   const files = attachments.filter((a) => !IMAGE_RE.test(a.name));
+  // C8: only render the caveat when the store actually holds more than the
+  // list shows — an unset `total` (caller hasn't wired it through) or a
+  // `total` equal to the list length is not a truncation.
+  const moreNotShown = total !== undefined && total > attachments.length;
   return (
     <section className="panel" data-comment-anchor="attachments">
       <div className="panel-head">
@@ -74,6 +86,12 @@ export function AttachmentsPanel({
           {attachments.length === 1 ? "1 file" : `${attachments.length} files`}
         </span>
       </div>
+      {moreNotShown && (
+        <p className="ntf-truncated sub">
+          Showing the most recent {attachments.length} of {total} files.
+          Older ones aren't listed here.
+        </p>
+      )}
       {images.length > 0 && (
         <div className="attach-grid">
           {images.map((a) => (

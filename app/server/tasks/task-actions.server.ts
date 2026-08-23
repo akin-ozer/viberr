@@ -1290,12 +1290,14 @@ export async function commentToAgent(
   try {
     if (target.session) {
     // 4a. Resume the agent's existing provider session, reusing the clone
-    //     workdir so it keeps its repo context.
+    //     workdir so it keeps its repo context. P8 (pass 25): a supporting agent
+    //     resumes into its OWN isolated checkout, never the delivering tree.
     const workdir = resumeWorkdir(
       input.projectSlug,
       input.taskKey,
       repo,
       ctx.dataRoot,
+      target.isPrimary ? undefined : { profileId: target.profileId },
     );
     // Re-establish the specialist's run confinement — denylist, git ceiling,
     // MCP set, persona — that the fresh-run path applies. Without this a
@@ -1458,6 +1460,16 @@ export async function commentToAgent(
         profileId: target.profileId,
         name: target.name,
       }),
+      // C5 (pass 25): this is the @mention resume path in `commentToAgent` — a
+      // human's conversational reply to the agent, never a bare review
+      // invocation. A reviewer answering it owes no verdict, so the no-verdict
+      // note must not fire for it (see applyAgentCompletionEffects).
+      fromHumanDirective: true,
+      // F-P11 (pass 25): `envelopeRequested` is intentionally left undefined here
+      // — the confinement (which knows whether the resumed run got the envelope
+      // schema) is scoped to the resume branch above, so this shared registration
+      // keeps the legacy re-parse (undefined), which is safe: a resumed run that
+      // genuinely had an envelope still resolves it.
     };
     if (resumeOutcomeKey) completion.outcomeKey = resumeOutcomeKey;
     if (ctx.operatorRun) completion.operatorRun = ctx.operatorRun;
@@ -2023,12 +2035,48 @@ async function openStuckLoopPacket(
         taskKey: input.taskKey,
         reason: result.message,
       });
+      // C10.4 (pass 25): the task IS in a stuck loop (this function only runs
+      // past the already-escalated early-return when it is), but the escalation
+      // packet was refused — so without a note the task sits waiting on a human
+      // with no card saying why. Leave one.
+      await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
     }
   } catch (error) {
     logger.warn("stuck-loop packet escalation failed", {
       taskKey: input.taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
+  }
+}
+
+/** C10.4 (pass 25): a visible fallback when a stuck-loop escalation can't open
+ *  its packet — so a task that has stopped making progress never sits waiting on
+ *  a human with nothing on the timeline explaining why. Guarded: never throws. */
+async function noteStuckLoopEscalationFailed(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<void> {
+  try {
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text:
+          "This task's operator turns stopped making progress, but the recovery " +
+          "packet could not be opened. It is waiting on a human: run the operator " +
+          "manually or intervene, then resolve it.",
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+  } catch {
+    // Best-effort: the stuck state is already logged above.
   }
 }
 
@@ -2609,6 +2657,17 @@ export async function registerAgentCompletion(
     workdir: string | null;
     /** The agent's @mention handle, for the stuck-loop packet copy. */
     agentHandle: string;
+    /** C5 (pass 25): this run answers a human's @mention/directive, not a bare
+     *  review invocation — gates the reviewer no-verdict note (see
+     *  applyAgentCompletionEffects). */
+    fromHumanDirective?: boolean;
+    /** F-P11 (pass 25): this Codex run was actually given the outcome-envelope
+     *  outputSchema (verdict/ask/evidence-capable). When explicitly `false`, its
+     *  reply is plain prose and must NOT be re-parsed as an envelope (a plain
+     *  developer's reply that happens to be a bare JSON object would otherwise be
+     *  silently truncated to its `summary` field). Undefined → unknown (recovery),
+     *  which keeps the legacy re-parse so a recovered envelope still resolves. */
+    envelopeRequested?: boolean;
     /** Present when started inside an operator react loop (continue the chain). */
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
@@ -2666,6 +2725,19 @@ export async function applyAgentCompletionEffects(
     outcomeKey?: string;
     workdir: string | null;
     agentHandle: string;
+    /** C5 (pass 25): this run was started to answer a human's @mention/directive
+     *  (`directiveFrom` was set), not as a bare review invocation. A reviewer
+     *  answering a conversational @mention produces no verdict BY DESIGN, so the
+     *  "reviewer finished without a readable verdict" note must NOT fire for it —
+     *  even while the task sits at the review stage. Only a run started FOR review
+     *  (Run button / operator review, no human directive quoted) expects a verdict. */
+    fromHumanDirective?: boolean;
+    /** F-P11 (pass 25): this Codex run was given the outcome-envelope outputSchema
+     *  (verdict/ask/evidence-capable). Explicit `false` skips the Codex reply-JSON
+     *  re-parse so a plain developer's prose reply that happens to be a bare JSON
+     *  object is never silently truncated to its `summary`. Undefined (recovery)
+     *  keeps the legacy re-parse so a recovered envelope still resolves. */
+    envelopeRequested?: boolean;
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
   finished: { id: string; state: string },
@@ -2768,7 +2840,18 @@ export async function applyAgentCompletionEffects(
   // outputSchema reply (JSON) parsed from the stored full text.
   let outcome = input.outcomeKey ? takeStagedOutcome(db, input.outcomeKey) : null;
   let replyText = fullText;
-  if (!outcome && input.backend === "codex" && fullText) {
+  // F-P11 (pass 25): only re-parse a Codex reply as an outcome envelope when this
+  // run was ACTUALLY given the envelope outputSchema. A plain Codex developer
+  // (no verdict/ask/evidence grant) never gets it, so its prose reply — even one
+  // that happens to be a bare `{ "summary": ... }` JSON object — must stay whole
+  // rather than being truncated to a field. `undefined` (a recovered run) keeps
+  // the legacy re-parse so a genuine recovered envelope still resolves.
+  if (
+    !outcome &&
+    input.backend === "codex" &&
+    input.envelopeRequested !== false &&
+    fullText
+  ) {
     const parsedEnvelope = parseAgentOutcomeJson(fullText);
     if (parsedEnvelope) {
       outcome = parsedEnvelope;
@@ -2863,6 +2946,14 @@ export async function applyAgentCompletionEffects(
     // review. Only warn when a verdict was actually EXPECTED: the reviewer asked no
     // question (a question is a legitimate no-verdict outcome), and the task is at
     // the review stage the note is about.
+    //
+    // pass-25 (C5) closes the residual gap C-4 left open: a conversational
+    // @mention that happens WHILE the task sits at the review stage (the normal
+    // state during a pending review) still slipped through, because `atReviewStage`
+    // was true and the reply carried no verdict/question. Gate on the run's intent
+    // too — `fromHumanDirective` is set only when this run answers a human's
+    // @mention, never for a bare review invocation — so the note fires only when a
+    // verdict was genuinely expected.
     const reviewStageId = ((): string | null => {
       const proj = readProjectFile({
         projectSlug: input.projectSlug,
@@ -2874,7 +2965,13 @@ export async function applyAgentCompletionEffects(
       !!completionFm &&
       !!reviewStageId &&
       completionFm.stage === reviewStageId;
-    if (verdictAuthorized && !verdict && !question && atReviewStage) {
+    if (
+      verdictAuthorized &&
+      !verdict &&
+      !question &&
+      atReviewStage &&
+      !input.fromHumanDirective
+    ) {
       try {
         await updateTaskFile(
           taskRef(ctx, input.projectSlug, input.taskKey),
@@ -7341,6 +7438,31 @@ async function acceptCompletion(
         taskKey: input.taskKey,
         err: error instanceof Error ? error : new Error(String(error)),
       });
+      // C10.3 (pass 25): `deleteTaskRemoteBranch` never throws, so a throw here is
+      // the note-write / reproject failing — which would leave the empty branch
+      // quietly standing with no record that the cleanup was attempted and lost.
+      // Surface it, guarded so a second failure can never escape this handler.
+      try {
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: null,
+              text:
+                `The empty branch \`${branchDisposition.branch}\` may not have been ` +
+                "deleted: the cleanup step failed. Remove it on GitHub if it is still there.",
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      } catch {
+        // Already logged above; nothing more we can safely do here.
+      }
     }
   }
   return true;

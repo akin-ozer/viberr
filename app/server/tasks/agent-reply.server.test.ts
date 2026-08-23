@@ -675,6 +675,21 @@ describe("extractReplyText", () => {
     const fileUrl = "file:///data/tasks/VIB-9/workspace/repo/README.md";
     expect(normalizeWorkspacePaths(fileUrl)).toBe(fileUrl);
   });
+
+  it("P8: a SUPPORTING run's isolated checkout path collapses to the repo-relative path too", () => {
+    // The support checkout is one level deeper (workspace/support/<profileId>/<repo>/…),
+    // so the `support/<profileId>/` group must be skipped, not folded into `<rest>`.
+    expect(
+      normalizeWorkspacePaths(
+        "/data/tasks/VIB-9/workspace/support/critic/viberr/docs/x.md",
+      ),
+    ).toBe("docs/x.md");
+    expect(
+      normalizeWorkspacePaths(
+        "See [the file](/Users/akinozer/data/tasks/VIB-2/workspace/support/reviewer/viberr/src/a.ts)",
+      ),
+    ).toContain("[the file](src/a.ts)");
+  });
 });
 
 /* --------------------------------------------------------- runFailureReason */

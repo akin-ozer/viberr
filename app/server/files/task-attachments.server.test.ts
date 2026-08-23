@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   attachmentContentType,
   attachmentNamesSince,
+  countTaskAttachments,
   listTaskAttachments,
   resolveTaskAttachment,
 } from "./task-attachments.server";
@@ -49,6 +50,45 @@ describe("listTaskAttachments", () => {
     const first = listTaskAttachments("p1", "VIB-1", root)[0]!;
     expect(first.size).toBeGreaterThan(0);
     expect(first.modifiedAt).toContain("2033");
+  });
+});
+
+// C8: listTaskAttachments caps its return at LIST_CAP (100) with nothing
+// telling a caller the store holds more. countTaskAttachments is the
+// sibling that answers the true count, cheaply (dirent type check, no
+// per-file stat) — kept separate so listTaskAttachments's shape (and every
+// existing caller) stays untouched.
+describe("countTaskAttachments", () => {
+  it("returns 0 when the task has no attachments dir (the common case)", () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(0);
+  });
+
+  it("counts files, skipping dotfiles and directories, matching the list length under the cap", () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    seed({
+      "old-shot.png": { at: 1_000_000_000_000 },
+      "new-shot.png": { at: 2_000_000_000_000 },
+      ".DS_Store": { at: 3_000_000_000_000 },
+    });
+    mkdirSync(
+      path.join(root, "projects", "p1", "tasks", "VIB-1", "attachments", "sub"),
+    );
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(2);
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(
+      listTaskAttachments("p1", "VIB-1", root).length,
+    );
+  });
+
+  it("keeps counting past LIST_CAP, unlike listTaskAttachments's capped return", () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    const files: Record<string, { at: number }> = {};
+    for (let i = 0; i < 110; i++) {
+      files[`shot-${i}.png`] = { at: 1_000_000_000_000 + i };
+    }
+    seed(files);
+    expect(listTaskAttachments("p1", "VIB-1", root)).toHaveLength(100);
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(110);
   });
 });
 
