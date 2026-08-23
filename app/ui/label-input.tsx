@@ -48,12 +48,6 @@ export function LabelInput({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
-  // True while a pointer is pressing inside the list. A press on a row would
-  // otherwise blur the input (moving focus off it) and close the list before the
-  // click registers; this guard lets `onBlur` keep the list open across a pick,
-  // so several labels can be toggled in a row. (The row's mousedown also
-  // `preventDefault`s, which suffices in real browsers; this is the belt.)
-  const interactingRef = useRef(false);
   const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   const normalize = (raw: string) => raw.trim().replace(/\s+/g, " ").slice(0, maxLen);
@@ -235,40 +229,28 @@ export function LabelInput({
           onChange={onChangeText}
           onKeyDown={onKeyDown}
           onFocus={() => setOpen(true)}
-          onBlur={() => {
-            // A press inside the list is a pick, not a leave: keep focus + the
-            // list open so the multi-select flow continues.
-            if (interactingRef.current) {
-              interactingRef.current = false;
-              inputRef.current?.focus();
-              return;
+          onBlur={(e) => {
+            // Close only when focus actually leaves the combo for another
+            // element. A press on a (non-focusable) list row blurs the input
+            // with a null relatedTarget — that is a pick, not a leave, so the
+            // list stays open and the multi-select flow continues. A real
+            // outside press is caught by useDismiss instead. This is
+            // deterministic (no dependence on mousedown/mouseup/blur ordering).
+            const next = e.relatedTarget;
+            if (next instanceof Node && !wrapRef.current?.contains(next)) {
+              if (query !== "") {
+                addLabel(query); // commit a half-typed label so it is not lost
+                setBuffer("");
+              }
+              setOpen(false);
             }
-            // Commit a half-typed label so it is not lost, then close.
-            if (query !== "") {
-              addLabel(query);
-              setBuffer("");
-            }
-            setOpen(false);
           }}
           placeholder={value.length === 0 ? "Add a label" : ""}
           aria-label="Add a label"
         />
       </div>
       {showList && (
-        <ul
-          className="label-select"
-          id={listId}
-          role="listbox"
-          aria-multiselectable="true"
-          // Mark the press as an in-list interaction before it can blur the
-          // input; clear it once the press ends (whether or not a blur fired).
-          onMouseDown={() => {
-            interactingRef.current = true;
-          }}
-          onMouseUp={() => {
-            interactingRef.current = false;
-          }}
-        >
+        <ul className="label-select" id={listId} role="listbox" aria-multiselectable="true">
           {rows.map((row, i) => (
             <li
               key={row.kind + ":" + row.value}
