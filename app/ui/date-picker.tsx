@@ -1,15 +1,20 @@
-import { useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useRef, useState } from "react";
 import { Calendar, fromISODate } from "./calendar";
 import { Icon } from "./icon";
 import { useDismiss } from "./use-dismiss";
 
 /**
  * A calendar date-picker: a trigger button showing the selected date (or a
- * placeholder) that opens a portaled calendar popover; picking a day sets the
- * value and closes. Emits/accepts a plain `YYYY-MM-DD` string (or null). The
- * popover mirrors StageMenu — `useDismiss` for outside-press/Escape/reflow, a
- * fixed-position portal measured from the trigger rect.
+ * placeholder) that reveals an in-flow calendar; picking a day sets the value
+ * and closes. Emits/accepts a plain `YYYY-MM-DD` string (or null).
+ *
+ * The calendar is rendered IN FLOW (not a portaled floating popover) on purpose:
+ * this component is used inside the New-task `<dialog>`, which is transform-
+ * centered with `overflow: hidden` — a `position: fixed` popover anchors to the
+ * transformed card (wrong coords) and an absolute one is clipped. An in-flow
+ * block lives in the scrollable modal body, so it is never clipped or
+ * mis-anchored, and works identically in the (non-dialog) Details panel.
+ * `useDismiss` still closes it on an outside press or Escape.
  */
 
 const MONTHS_SHORT = [
@@ -37,92 +42,64 @@ export function DatePicker({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(
-    null,
-  );
   const btnRef = useRef<HTMLButtonElement>(null);
-  const popRef = useDismiss<HTMLDivElement>(open, () => setOpen(false), {
-    onReflow: true,
-    also: [btnRef],
-  });
+  const popRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
-  const place = () => {
-    const r = btnRef.current?.getBoundingClientRect();
-    if (!r) return;
-    const width = Math.max(r.width, 268);
-    const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
-    // Open downward by default; flip above the trigger when the calendar (a
-    // fixed ~300px block) would spill past the viewport bottom and there is room
-    // above (the Due-date field sits mid-modal).
-    const estHeight = 300;
-    const below = r.bottom + 6;
-    const flipUp = below + estHeight > window.innerHeight - 8 && r.top - estHeight > 8;
-    const top = flipUp ? r.top - 6 - estHeight : below;
-    setPos({ top, left, width });
-  };
-  const toggle = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (!open) place();
-    setOpen((o) => !o);
-  };
-  const select = (iso: string) => {
-    onChange(iso);
+  // Scroll the calendar into view when it opens inside a scrollable modal body.
+  // Optional-chained call: jsdom has no `scrollIntoView`, so it no-ops in tests.
+  useEffect(() => {
+    if (open) popRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [open]);
+
+  const close = () => {
     setOpen(false);
     btnRef.current?.focus();
   };
-
-  // When the trigger sits inside a top-layer <dialog> (the New-task modal uses
-  // showModal()), a popover portaled to document.body renders BEHIND the
-  // dialog's top layer. Portal into the dialog instead so it shares that layer;
-  // position:fixed keeps it viewport-anchored (never clipped by the dialog's
-  // own overflow). Falls back to document.body outside a dialog (the Details
-  // panel). Computed while `open` (the trigger is mounted, so `closest` works).
-  const portalTarget = btnRef.current?.closest("dialog") ?? document.body;
+  const select = (iso: string) => {
+    onChange(iso);
+    close();
+  };
 
   return (
-    <div className="datepick">
-      <button
-        type="button"
-        ref={btnRef}
-        id={id}
-        className={"datepick-trigger" + (value ? "" : " dp-empty")}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={toggle}
-      >
-        <Icon name="clock" />
-        <span className="datepick-value">{value ? displayDate(value) : placeholder}</span>
-      </button>
-      {value && (
+    <div
+      className="datepick"
+      ref={wrapRef}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) close();
+      }}
+    >
+      <div className="datepick-control">
         <button
           type="button"
-          className="datepick-clear"
-          aria-label="Clear date"
-          onClick={() => onChange(null)}
+          ref={btnRef}
+          id={id}
+          className={"datepick-trigger" + (value ? "" : " dp-empty")}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
         >
-          <Icon name="x" />
+          <Icon name="clock" />
+          <span className="datepick-value">
+            {value ? displayDate(value) : placeholder}
+          </span>
         </button>
-      )}
-      {open &&
-        pos &&
-        createPortal(
-          <div
-            ref={popRef}
-            className="datepick-pop"
-            style={{ position: "fixed", top: pos.top, left: pos.left, minWidth: pos.width }}
-            // The popover's own presses must not bubble to a card/row behind it.
-            onMouseDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setOpen(false);
-                btnRef.current?.focus();
-              }
-            }}
+        {value && (
+          <button
+            type="button"
+            className="datepick-clear"
+            aria-label="Clear date"
+            onClick={() => onChange(null)}
           >
-            <Calendar selected={value} onSelect={select} />
-          </div>,
-          portalTarget,
+            <Icon name="x" />
+          </button>
         )}
+      </div>
+      {open && (
+        <div className="datepick-pop" ref={popRef}>
+          <Calendar selected={value} onSelect={select} />
+        </div>
+      )}
     </div>
   );
 }

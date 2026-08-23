@@ -1121,8 +1121,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    with Priority + Due date misaligns. Pin both to the button height. */
 .field-row select, .field-row .datepick-trigger, .field-row input[type="date"] { min-height: 38px; line-height: 1.2; }
 
-/* --- Date picker: a button trigger opening a portaled calendar popover --- */
-.datepick { position: relative; }
+/* --- Date picker: a button trigger revealing an in-flow calendar --- */
+.datepick { display: flex; flex-direction: column; }
+.datepick-control { position: relative; }
 .datepick-trigger {
   display: inline-flex; align-items: center; gap: .5rem; width: 100%;
   padding: .5rem .7rem; border: 1px solid var(--border); border-radius: var(--radius-button);
@@ -1143,8 +1144,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .datepick-clear:hover { color: var(--fg); background: color-mix(in srgb, var(--fg), transparent 92%); }
 .datepick-clear .ico { width: 13px; height: 13px; }
 .datepick-pop {
-  z-index: 1000; background: var(--surface); border: 1px solid var(--border);
-  border-radius: 11px; box-shadow: var(--shadow-pop); padding: .6rem;
+  margin-top: .4rem; width: max-content; max-width: 100%;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 11px; box-shadow: var(--shadow-card); padding: .6rem;
   animation: smPop .16s var(--ease-out);
 }
 
