@@ -1,15 +1,24 @@
-import { Link } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { Link, useFetcher } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import {
+  coercePriority,
+  PRIORITY_VALUES,
+  type TaskPriority,
+} from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
+import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { LocalRelative } from "~/ui/local-time";
+import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import type { AcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
+import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
 /**
  * The task-detail SIDE column, in its contracted order (spec §2): GitHub trace
@@ -350,6 +359,152 @@ export function GithubTrace({
           </a>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The task's lightweight planning metadata (priority · labels · due date) as a
+ * side panel, in the contracted order between Current state and Permissions.
+ * Reads as `.kv` rows like the panels around it; a contributor+ (`edit-task-meta`)
+ * gets an inline editor. Re-seeds from server truth on every open so a concurrent
+ * edit is never clobbered (the goal-editor rule).
+ */
+export function TaskDetailsPanel({
+  task,
+  canEdit,
+}: {
+  task: TaskDetail;
+  canEdit: boolean;
+}) {
+  const csrf = useCsrfToken();
+  const fetcher = useFetcher<ActionResult>();
+  useActionFeedback(fetcher);
+  const [open, setOpen] = useState(false);
+  const [priority, setPriority] = useState<TaskPriority>(task.priority);
+  const [labels, setLabels] = useState(task.labels.join(", "));
+  const [due, setDue] = useState(task.dueDate ?? "");
+  const handled = useRef<unknown>(null);
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data?.ok) return;
+    if (handled.current === fetcher.data) return;
+    handled.current = fetcher.data;
+    setOpen(false);
+  }, [fetcher.state, fetcher.data]);
+
+  const startEdit = () => {
+    setPriority(task.priority);
+    setLabels(task.labels.join(", "));
+    setDue(task.dueDate ?? "");
+    setOpen(true);
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="sliders" />
+        <h2>Details</h2>
+      </div>
+      {open ? (
+        <fetcher.Form method="post" className="meta-edit-panel">
+          <input type="hidden" name="intent" value="set-task-metadata" />
+          <input type="hidden" name="_csrf" value={csrf} />
+          <label className="meta-field">
+            <span className="meta-label">Priority</span>
+            <select
+              name="priority"
+              value={priority}
+              onChange={(e) =>
+                setPriority(coercePriority(e.currentTarget.value) ?? "normal")
+              }
+            >
+              {PRIORITY_VALUES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="meta-field">
+            <span className="meta-label">Labels</span>
+            <input
+              type="text"
+              name="labels"
+              value={labels}
+              onChange={(e) => setLabels(e.currentTarget.value)}
+              placeholder="comma separated"
+              aria-label="Labels, comma separated"
+            />
+          </label>
+          <label className="meta-field">
+            <span className="meta-label">Due date</span>
+            <input
+              type="date"
+              name="dueDate"
+              value={due}
+              onChange={(e) => setDue(e.currentTarget.value)}
+              aria-label="Due date"
+            />
+          </label>
+          <div className="meta-edit-actions">
+            <button
+              type="submit"
+              className="btn primary sm"
+              disabled={fetcher.state !== "idle"}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </fetcher.Form>
+      ) : (
+        <>
+          <div className="kv">
+            <div className="kv-row">
+              <span className="k">Priority</span>
+              <span className="v">
+                {task.priority === "normal" ? (
+                  <span className="sub">Normal</span>
+                ) : (
+                  <PriorityFlag priority={task.priority} sm />
+                )}
+              </span>
+            </div>
+            <div className="kv-row">
+              <span className="k">Labels</span>
+              <span className="v meta-chips">
+                {task.labels.length > 0 ? (
+                  <LabelChips labels={task.labels} max={6} />
+                ) : (
+                  <span className="sub">None</span>
+                )}
+              </span>
+            </div>
+            <div className="kv-row">
+              <span className="k">Due date</span>
+              <span className="v">
+                {task.dueDate ? (
+                  <DueDatePill dueDate={task.dueDate} sm />
+                ) : (
+                  <span className="sub">None</span>
+                )}
+              </span>
+            </div>
+          </div>
+          {canEdit && (
+            <button type="button" className="meta-edit-btn" onClick={startEdit}>
+              <Icon name="sliders" />
+              Edit details
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }

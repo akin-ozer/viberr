@@ -44,6 +44,7 @@ import {
   CurrentStatePanel,
   GithubTrace,
   PolicyPanel,
+  TaskDetailsPanel,
 } from "./task-side-panels";
 import {
   DiagnosticsPanel,
@@ -668,6 +669,7 @@ export function TaskDetailPage({
           acceptBusy={acceptBusy}
           dispositionBusy={archiveBusy}
         />
+        <TaskDetailsPanel task={task} canEdit={canEditMeta} />
         <PolicyPanel
           projectSlug={task.projectSlug}
           myRole={myRole}
@@ -682,7 +684,6 @@ export function TaskDetailPage({
           task={task}
           stage={stage}
           canEditGoal={canEditGoal}
-          canEditMeta={canEditMeta}
           archived={archived}
           agentWorking={anyRunLive}
           editGoalSignal={editGoalSignal}
