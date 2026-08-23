@@ -1186,11 +1186,15 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     expect(staticSites).toEqual([]);
   });
 
-  it("holds the line at 20 sites", () => {
+  it("holds the line at 22 sites", () => {
     // A ceiling, not a target. It exists because the previous pass moved the
     // `<select>` half of this finding and left the inline-style half, and
-    // nothing noticed the count climbing back for three passes.
-    expect(sites.length).toBeLessThanOrEqual(20);
+    // nothing noticed the count climbing back for three passes. Raised 20 → 22
+    // for the two data-driven bar sizes on the Insights dashboard (a bar-fill
+    // width and a daily-column height, both a row's share of its max) — the
+    // sheet cannot know a runtime percentage, which is exactly the dynamic case
+    // this rule exempts.
+    expect(sites.length).toBeLessThanOrEqual(22);
   });
 });
 
