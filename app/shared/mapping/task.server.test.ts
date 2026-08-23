@@ -117,6 +117,53 @@ describe("displayReadiness derivation (F7-UI3)", () => {
     });
     expect(summarize(r, false).displayReadiness).toBe("ready");
   });
+
+  const inputPacket = JSON.stringify({
+    id: "pkt_1",
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "PR closed without merging",
+    body: "",
+    options: [],
+  });
+
+  it("an open input packet awaiting a human lifts 'ready' → 'input required' (display only)", () => {
+    const r = row({ readiness: "ready", waiting: "human", packet_json: inputPacket });
+    const s = summarize(r, false);
+    expect(s.displayReadiness).toBe("input_required");
+    // The STORED readiness is untouched — the acceptance gate + board filter read it.
+    expect(s.readiness).toBe("ready");
+  });
+
+  it("'ready' with no packet still reads 'ready'", () => {
+    const r = row({ readiness: "ready", waiting: "human", packet_json: null });
+    expect(summarize(r, false).displayReadiness).toBe("ready");
+  });
+
+  it("a blocked-type packet does not trigger the input-required lift", () => {
+    const blockedPacket = JSON.stringify({
+      id: "pkt_2",
+      type: "blocked",
+      kind: "Blocked decision",
+      from: "operator",
+      title: "x",
+      body: "",
+      options: [],
+    });
+    const r = row({ readiness: "ready", waiting: "human", packet_json: blockedPacket });
+    expect(summarize(r, false).displayReadiness).toBe("ready");
+  });
+
+  it("an input packet never overrides a non-ready readiness (blocked stays blocked)", () => {
+    const r = row({ readiness: "blocked", waiting: "human", packet_json: inputPacket });
+    expect(summarize(r, false).displayReadiness).toBe("blocked");
+  });
+
+  it("an input packet not waiting on a human is left alone (agent's turn)", () => {
+    const r = row({ readiness: "ready", waiting: "agent", packet_json: inputPacket });
+    expect(summarize(r, false).displayReadiness).toBe("ready");
+  });
 });
 
 describe("N20-14: acceptance fact surfaces on the summary", () => {
