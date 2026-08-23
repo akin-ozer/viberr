@@ -124,6 +124,22 @@ describe("LabelInput checkbox multi-select", () => {
     expect(rows(container)[0]).toEqual({ name: "flaky", checked: "true", create: false });
   });
 
+  it("a row press does not bubble to the document (so an outside-press dismiss can't fire)", () => {
+    // Adding a label re-renders the list; if the press reached a document-level
+    // outside-press listener, it would see a now-detached target and close the
+    // list. The row stops propagation to prevent exactly that.
+    const { container } = render(<Harness suggestions={suggestions} />);
+    fireEvent.focus(field(container));
+    let documentSawPress = false;
+    const onDoc = () => {
+      documentSawPress = true;
+    };
+    document.addEventListener("mousedown", onDoc);
+    fireEvent.mouseDown(rowNamed(container, "flaky"));
+    document.removeEventListener("mousedown", onDoc);
+    expect(documentSawPress).toBe(false);
+  });
+
   it("unchecking a chosen row removes it", () => {
     const { container, getByTestId } = render(
       <Harness initial={["runtime", "docs"]} suggestions={suggestions} />,
