@@ -269,7 +269,11 @@ export function LabelInput({
         >
           {rows.map((row, i) => (
             <li
-              key={row.kind + ":" + row.value}
+              // Key by value (stable across a suggest<->selected transition) so a
+              // toggled row is REORDERED, not unmounted — otherwise React detaches
+              // it mid-click and the outside-press guard (which then sees a
+              // detached target) would wrongly close the list.
+              key={row.value}
               id={rowId(i)}
               role="option"
               aria-selected={row.kind === "selected"}
@@ -277,8 +281,12 @@ export function LabelInput({
               data-active={i === activeRow}
               // mousedown, not click: fire before the input's blur so focus is
               // never lost (preventDefault keeps it) and the list stays open.
+              // stopPropagation so the press never reaches useDismiss's
+              // document-level listener — adding a label re-renders the list, and
+              // a detached target there reads as "outside" and dismisses.
               onMouseDown={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 toggleRow(i);
               }}
               onMouseEnter={() => setActive(i)}
