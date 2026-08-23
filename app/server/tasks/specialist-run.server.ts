@@ -1307,6 +1307,11 @@ async function dispatchAgentRun(
         : "Setting up the run workspace",
   });
 
+  // P8 (pass 25): a SUPPORTING (non-delivering) engagement runs in its OWN
+  // isolated checkout so its writes never reach the delivering tree (which
+  // delivery's `git add -A` ships). Only the delivering engagement uses the
+  // canonical `workspace/<repo>` the delivery / evidence / operator paths read.
+  const support = delivers ? undefined : { profileId: engagement.profileId };
   const clone =
     repo && realBackend
       ? await cloneRepo(db, {
@@ -1315,17 +1320,25 @@ async function dispatchAgentRun(
           repo,
           dataRoot: ctx.dataRoot,
           identity: agentGitIdentity(engagement.profileId),
+          // `support` is undefined for the delivering engagement (→ canonical
+          // checkout) and set for a supporting one (→ isolated checkout).
+          support,
         })
       : null;
   // The run's cwd is ALWAYS an isolated workspace dir for a real backend —
-  // NEVER the task dir. Confine git with GIT_CEILING (workspaceRunEnv).
+  // NEVER the task dir. Confine git with GIT_CEILING (workspaceRunEnv). A
+  // supporting run with no checkout falls back to its OWN scoped root, never the
+  // shared `workspace/`, so even a checkout-less run stays isolated.
   const workspaceRoot = taskWorkspaceRoot(
     input.projectSlug,
     input.taskKey,
     ctx.dataRoot,
   );
+  const supportRoot = support
+    ? path.join(workspaceRoot, "support", support.profileId)
+    : workspaceRoot;
   const cloneFailure = clone?.failure ?? null;
-  const runWorkdir = clone?.dir ?? (realBackend ? workspaceRoot : null);
+  const runWorkdir = clone?.dir ?? (realBackend ? supportRoot : null);
   if (runWorkdir && !existsSync(runWorkdir)) {
     mkdirSync(runWorkdir, { recursive: true });
   }
@@ -1399,6 +1412,7 @@ async function dispatchAgentRun(
   const unresolvedResources: { name: string; reason: string }[] = [];
   const personaInput: SpecialistPersonaInput = {
     profileId: engagement.profileId,
+    backend,
     skills,
     nativeSkills: skillMount.mounted,
     kb,
@@ -1813,6 +1827,14 @@ async function dispatchAgentRun(
     outcomeKey,
     workdir: runWorkdir,
     agentHandle: agentMentionHandle({ profileId: engagement.profileId, name: agentName }),
+    // C5 (pass 25): a run that quotes a human's words (@mention directive) is a
+    // conversational turn, not a review invocation — a reviewer answering it
+    // owes no verdict. The no-verdict note is gated on this so it never fires for
+    // a chat reply that merely lands while the task sits at the review stage.
+    fromHumanDirective: !!input.directiveFrom,
+    // F-P11 (pass 25): a plain Codex developer (no envelope schema) must not have
+    // its prose reply re-parsed as an outcome envelope.
+    envelopeRequested: useEnvelopeSchema,
   };
   // Only a run started INSIDE an operator react loop carries the loop state —
   // its absence is what tells the completion handler not to continue a chain.
@@ -1849,6 +1871,9 @@ export function githubReadForRun(input: {
 
 export interface SpecialistPersonaInput {
   profileId: string;
+  /** F-P4 (pass 25): the run's backend, so backend-asymmetric persona text (the
+   *  browser section — Codex screenshots do not return to the model) is honest. */
+  backend?: RealBackend;
   skills: string[];
   /** The subset of `skills` that Viberr MOUNTED into the run's workspace for the
    *  Claude SDK's native skills mechanism (`mountGrantedSkills`). Their bodies
@@ -2064,7 +2089,7 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
     parts.push(githubReadPersonaSection(input.githubRead.repo));
   }
   if (input.browser && "attachmentsRel" in input.browser) {
-    parts.push(browserPersonaSection(input.browser.attachmentsRel));
+    parts.push(browserPersonaSection(input.browser.attachmentsRel, input.backend));
   } else if (input.browser && "refusedReason" in input.browser) {
     parts.push(
       "\n\n---\n# Browser not mounted\n\n" +
@@ -2222,8 +2247,14 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       // or push — regardless of the profile's capabilities — or it obeys the
       // contract into denied tool calls and wastes the run (the XS-4 failure).
       // It reads and reports only.
+      // F-P8 (pass 25): the claim used to be "the tool layer blocks these" —
+      // true on Claude, FALSE on Codex (no OS sandbox). Now that a supporting run
+      // gets its OWN isolated checkout (per-engagement isolation), the load-bearing
+      // guarantee is delivery-isolation, not tool denial: nothing written here can
+      // reach the delivered PR on EITHER backend. Say that instead of a mechanism
+      // that only holds on one backend.
       prompt +=
-        `- You are a SUPPORTING agent: this workspace is READ-ONLY for you. Do NOT create a branch, edit files, run \`git commit\`/\`git push\`, or open a PR — even if a directive says to. The tool layer blocks these. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n` +
+        `- You are a SUPPORTING agent: this workspace is your OWN isolated checkout — nothing you write here reaches the delivered PR (the delivering agent's tree is separate). Do NOT create a branch, edit files, run \`git commit\`/\`git push\`, or open a PR — even if a directive says to; that is not a supporting agent's job and would not ship. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n` +
         (input.reviewSubject
           ? `- The review subject is PINNED to the delivered revision \`${input.reviewSubject.headSha}\`` +
             (input.reviewSubject.prNumber
@@ -2399,11 +2430,38 @@ function taskCloneDir(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
+  support?: { profileId: string },
 ): string | null {
   const repo = projectRepo(ctx, projectSlug);
   if (!repo) return null;
   const name = repo.split("/").pop() ?? repo;
-  return path.join(taskWorkspaceRoot(projectSlug, taskKey, ctx.dataRoot), name);
+  return supportCheckoutDir(
+    taskWorkspaceRoot(projectSlug, taskKey, ctx.dataRoot),
+    name,
+    support,
+  );
+}
+
+/**
+ * P8 (pass 25): per-engagement workspace isolation. The DELIVERING engagement
+ * owns the canonical checkout `<workspaceRoot>/<repo>` — the tree delivery's
+ * `git add -A` ships (push-workspace), the operator reads, and evidence paths
+ * resolve against. Every SUPPORTING (non-delivering) engagement gets its OWN
+ * checkout at `<workspaceRoot>/support/<profileId>/<repo>`, so a supporting run's
+ * writes — only ADVISORY-blocked on Codex since R22 removed the read-only
+ * sandbox — can NEVER reach the delivering tree or be swept into the delivered
+ * PR (the F-P8 governance hole). Keyed by engagement (profileId), so it is
+ * reused across that engagement's runs and stays bounded; retention removes it
+ * with the rest of `workspace/` when the task reaches its terminal stage.
+ */
+function supportCheckoutDir(
+  workspaceRoot: string,
+  repoName: string,
+  support?: { profileId: string },
+): string {
+  return support
+    ? path.join(workspaceRoot, "support", support.profileId, repoName)
+    : path.join(workspaceRoot, repoName);
 }
 
 /** The whole confinement a RESUMED run inherits — one contract so a resume can
@@ -2458,6 +2516,11 @@ export async function resolveResumeConfinement(
     // F24: keep the unified delivery identity on resumed runs too.
     ...agentGitIdentityEnv(input.profileId),
   };
+  // P8 (pass 25): a resumed SUPPORTING run reuses its OWN isolated checkout, the
+  // same one its fresh run cloned — never the delivering engagement's canonical
+  // tree. `resumeWorkdir` scopes the actual cwd; this scopes the disclosure +
+  // skill mount to match.
+  const support = input.delivers ? undefined : { profileId: input.profileId };
   try {
     const resolved = resolveDeployedSpecialist(
       ctx,
@@ -2500,7 +2563,7 @@ export async function resolveResumeConfinement(
     let skillMount: SkillMount = { mounted: [], skipped: [] };
     if (input.backend === "claude") {
       const mountInput: SkillMountInput = {
-        workspaceDir: taskCloneDir(ctx, input.projectSlug, input.taskKey),
+        workspaceDir: taskCloneDir(ctx, input.projectSlug, input.taskKey, support),
         skills: resolved.skills,
       };
       // Omitted on the default store — the mount resolves its own root then.
@@ -2528,6 +2591,8 @@ export async function resolveResumeConfinement(
     const resumeRepo = projectRepo(ctx, input.projectSlug);
     const personaInput: SpecialistPersonaInput = {
       profileId: input.profileId,
+      // undefined on a run with no backend (no-op) → no backend-specific persona.
+      backend: input.backend,
       skills: resolved.skills,
       nativeSkills: skillMount.mounted,
       kb,
@@ -2604,7 +2669,7 @@ export async function resolveResumeConfinement(
       grantedServers[BROWSER_MCP_NAME] = resumeBrowser.server;
     }
     const merged = { ...grantedServers, ...toolkit?.mcpServers };
-    const cloneDir = taskCloneDir(ctx, input.projectSlug, input.taskKey);
+    const cloneDir = taskCloneDir(ctx, input.projectSlug, input.taskKey, support);
     const disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
     const confinement: ResumeConfinement = {
       disallowedTools,
@@ -2648,7 +2713,7 @@ export async function resolveResumeConfinement(
       // silent — "this run's profile could not be resolved" is exactly the kind
       // of thing a human reading the console needs to be told.
       runInputs: resolvedResourceInputs({
-        cwd: taskCloneDir(ctx, input.projectSlug, input.taskKey),
+        cwd: taskCloneDir(ctx, input.projectSlug, input.taskKey, support),
         repo: projectRepo(ctx, input.projectSlug),
         cloned: false,
         delivers: input.delivers === true,
@@ -2766,6 +2831,11 @@ async function cloneRepo(
      *  config, so viberr's server-side auto-commit (push-workspace) attributes
      *  to the same author as the agent's own commits. */
     identity?: { name: string; email: string };
+    /** P8 (pass 25): a SUPPORTING engagement's isolated checkout, keyed by its
+     *  profileId — `workspace/support/<profileId>/<repo>` instead of the
+     *  delivering engagement's canonical `workspace/<repo>`. See
+     *  {@link supportCheckoutDir}. */
+    support?: { profileId: string };
   },
 ): Promise<CloneOutcome> {
   let hadCredential = false;
@@ -2785,10 +2855,48 @@ async function cloneRepo(
   };
   try {
     const name = input.repo.split("/").pop() ?? input.repo;
-    const dir = path.join(
-      taskWorkspaceRoot(input.projectSlug, input.taskKey, input.dataRoot),
-      name,
+    const workspaceRoot = taskWorkspaceRoot(
+      input.projectSlug,
+      input.taskKey,
+      input.dataRoot,
     );
+    const dir = supportCheckoutDir(workspaceRoot, name, input.support);
+
+    // P8 (pass 25): a SUPPORTING run gets its OWN checkout, but it must still
+    // contain the TASK BRANCH to review the delivering agent's work — and that
+    // branch is a LOCAL branch the delivering agent created in the canonical
+    // checkout, which the shared mirror does not have until a push. So clone the
+    // isolated support checkout FROM the delivering checkout when one exists: a
+    // fast `--local` clone that carries the branch and its commits, made FRESH
+    // each run (removed and re-cloned) so a re-review never reads a stale tree.
+    // origin is re-pointed at GitHub afterwards; the run is read-only here, so
+    // nothing it writes can reach the delivering tree or the delivered PR.
+    if (input.support) {
+      const deliveringDir = supportCheckoutDir(workspaceRoot, name);
+      rmSync(dir, { recursive: true, force: true });
+      if (existsSync(path.join(deliveringDir, ".git"))) {
+        mkdirSync(path.dirname(dir), { recursive: true });
+        try {
+          await execFileAsync("git", ["clone", "--local", deliveringDir, dir], {
+            timeout: CLONE_TIMEOUT_MS,
+          });
+          await execFileAsync(
+            "git",
+            githubRemoteSanitizationArgs(input.repo, dir),
+            { timeout: 10_000 },
+          );
+          await setIdentity(dir);
+          await stripUngovernedRepoCatalog(dir);
+          return { dir };
+        } finally {
+          if (!existsSync(path.join(dir, ".git", "HEAD"))) {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      }
+      // No delivering checkout yet — nothing has been delivered to review. Fall
+      // through to a normal mirror clone (default branch) in the isolated dir.
+    }
     if (existsSync(path.join(dir, ".git"))) {
       // Already cloned for this task — scrub URLs produced by older Viberr
       // versions before reuse. `--replace-all` removes every prior origin URL,

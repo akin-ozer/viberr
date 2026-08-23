@@ -161,6 +161,18 @@ export function notifyTaskWatchers(
     // A corrupt project/task file (or context load failure) must NOT silently
     // notify nobody of a real event — log it so the blind spot is diagnosable
     // instead of an undiagnosable "no one got the alert".
+    //
+    // C10.1: this is a DELIBERATE fail-open, not an oversight. The mutation
+    // that produced `notice` has already committed by the time this runs, so
+    // throwing here would surface a confusing secondary error for an
+    // unrelated write and still leave the mutation applied — worse than a
+    // silently-empty recipient set. There is no human-facing surface at this
+    // layer to report the failure per-notice (the caller only sees the
+    // returned array, and most callers don't inspect its length), so this log
+    // line naming the project/task/kind and the real error is, today, the
+    // ONLY diagnostic trail for "watchers got nothing". If that ever proves
+    // insufficient, the fix belongs in the caller (surface `notified.length
+    // === 0` against the notice's expected recipients), not here.
     logger.error("notifyTaskWatchers: recipient resolution failed", {
       projectSlug: notice.projectSlug,
       taskKey: notice.taskKey,

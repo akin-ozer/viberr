@@ -588,6 +588,19 @@ export function capabilityByLabel(label: string): CapabilityDef | null {
 }
 
 /**
+ * F-P1/F-P3 (pass 25): does this capability LABEL name a grant that BINDS on
+ * Claude but is only ADVISORY on Codex? The capability-display surfaces (profile
+ * detail, policy counts) carry resolved label strings, not ids, so they need a
+ * label-keyed bridge to `capabilityEnforcement` to render the same
+ * "advisory on Codex" caveat the matrix and editor already show per row. A
+ * label that maps to no def, or to a both-backend / advisory cap, returns false.
+ */
+export function isClaudeOnlyEnforcedLabel(label: string): boolean {
+  const def = capabilityByLabel(label);
+  return !!def && capabilityEnforcement(def.id) === "claude-only";
+}
+
+/**
  * R15-9 — the mode the runtime applies for `deliver-review-pr` when a
  * deployment persisted NO grant for it.
  *

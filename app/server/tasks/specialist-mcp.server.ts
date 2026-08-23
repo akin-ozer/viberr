@@ -285,12 +285,39 @@ export async function verifyStdioMcpMountsForRun(
     });
     if (disc.kind === "up") continue; // it starts — leave the mount as it was
 
-    // The mount failed at run-spawn: drop it, disclose it, and correct the row.
+    // The mount failed at run-spawn: drop it and disclose it for THIS run.
     delete servers[name];
-    markMcpServerUnreachableFromRun(db, name, disc.reason);
+
+    // P9 (pass 25): the shared `org_mcp_servers.up` row is backend-agnostic. On
+    // Codex we pre-flight WITHOUT the credential (B-4), so a server that needs
+    // its credential just to START fails here even though it is perfectly
+    // healthy for Claude runs (which DO receive the credential). Writing `up=0`
+    // from that failure would corrupt the shared health — falsely marking a
+    // Claude-healthy server down org-wide and poisoning the next Claude run's
+    // disclosure. So on a Codex credential-less failure, re-probe WITH the
+    // credential before touching the row: only downgrade the shared row if it
+    // fails WITH the credential too; otherwise leave the row alone and disclose
+    // the drop as Codex-specific (it mounts unauthenticated there).
+    let corruptsSharedHealth = true;
+    let disclosedReason = disc.reason;
+    if (options.backend === "codex" && credential.state === "ok") {
+      const credProbe = await discoverStdioMcpTools(row.target, {
+        spawnImpl: options.spawnImpl,
+        timeoutMs: options.timeoutMs,
+        token: credential.token,
+      });
+      if (credProbe.kind === "up") {
+        corruptsSharedHealth = false;
+        disclosedReason =
+          "it needs a credential to start, which Codex runs do not receive — Codex mounts it unauthenticated; it is healthy for Claude runs";
+      }
+    }
+    if (corruptsSharedHealth) {
+      markMcpServerUnreachableFromRun(db, name, disc.reason);
+    }
     const entry = {
       name,
-      reason: `it failed to start for this run — ${disc.reason}`,
+      reason: `it failed to start for this run — ${disclosedReason}`,
       mounted: false,
     };
     const idx = unresolved.findIndex((u) => u.name === name);
@@ -299,6 +326,7 @@ export async function verifyStdioMcpMountsForRun(
     logger.warn("org MCP server failed to start at run-mount — dropped and flagged", {
       mcp: name,
       reason: disc.reason,
+      sharedHealthDowngraded: corruptsSharedHealth,
     });
   }
   return { servers, unresolved };

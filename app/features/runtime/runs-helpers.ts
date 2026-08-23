@@ -135,7 +135,10 @@ const NONE_GRANTED = "none granted";
  * base that quietly reached no run is exactly the thing this surface exists to
  * catch, and a row that disappears when it has nothing to say cannot report one.
  */
-export function runInputRows(inputs: RunInputs): RunInputRow[] {
+export function runInputRows(
+  inputs: RunInputs,
+  backend?: "claude" | "codex",
+): RunInputRow[] {
   const rows: RunInputRow[] = [];
 
   rows.push({
@@ -222,7 +225,15 @@ export function runInputRows(inputs: RunInputs): RunInputRow[] {
         ? `viberr tools: ${inputs.tools.toolkit.join(", ")}`
         : "viberr tools: none",
       inputs.tools.denied.length
-        ? `denied by its capability grants: ${inputs.tools.denied.join(", ")}`
+        ? // F-P10 (pass 25): the deny list binds on Claude (SDK denylist) but is
+          // ADVISORY on Codex — codex-runtime never consults `disallowedTools`
+          // (R22 removed the read-only sandbox). This console is the per-run
+          // audit surface, so it must not claim a denial that did not happen on
+          // this backend: say "advisory on this Codex run" rather than a flat
+          // "denied".
+          backend === "codex"
+          ? `capability grants deny (advisory on this Codex run, not tool-enforced): ${inputs.tools.denied.join(", ")}`
+          : `denied by its capability grants: ${inputs.tools.denied.join(", ")}`
         : "no built-in tools denied",
     ].join(" · "),
   });

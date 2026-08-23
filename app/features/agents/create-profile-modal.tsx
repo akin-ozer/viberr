@@ -860,12 +860,19 @@ function ResourcePicker({
   toggleRes,
   openRes,
   setOpenRes,
+  backend,
 }: {
   resCatalog: readonly ResCatalogGroup[];
   res: ResourceSelection;
   toggleRes: (key: keyof ResourceSelection, item: string) => void;
   openRes: Record<string, boolean>;
   setOpenRes: Dispatch<SetStateAction<Record<string, boolean>>>;
+  /** F-P3: the profile's pinned backend, so the MCP group can disclose the
+   *  Codex auth-drop here too. The resource catalog does not carry each
+   *  server's `hasCred` through to this picker (`buildResourceCatalog`
+   *  collapses every MCP row to a bare id), so this is one group-level note
+   *  rather than a per-chip tag. */
+  backend: "codex" | "claude" | "";
 }) {
   const capId = useId();
   return (
@@ -962,6 +969,20 @@ function ResourcePicker({
                       settings.
                     </p>
                   )}
+                  {/* F-P3: a credentialed MCP server's credential is injected
+                      only on Claude runs — Codex drops it (it would otherwise
+                      leak into the Codex CLI's --config argv), so on this
+                      Codex-pinned profile every server granted here mounts
+                      unauthenticated regardless of which ones carry a
+                      credential. */}
+                  {g.key === "mcps" &&
+                    backend === "codex" &&
+                    displayItems.length > 0 && (
+                      <p className="cap-mnote">
+                        Codex mounts MCP servers unauthenticated. Any
+                        credential a server needs is not sent on Codex runs.
+                      </p>
+                    )}
                 </div>
               )}
             </div>
@@ -1329,6 +1350,7 @@ export function CreateProfileModal({
           toggleRes={toggleRes}
           openRes={openRes}
           setOpenRes={setOpenRes}
+          backend={backend}
         />
       </div>
 

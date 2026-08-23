@@ -151,10 +151,17 @@ export function profileRoleLabel(
 }
 
 /** Minimal profile shape the CapabilityMatrixModal needs (Policy passes
- * the same roster). */
+ * the same roster).
+ *
+ * F-P2 (pass 25): also carries `backends` — the Policy page's per-profile
+ * direct/recommend/human counts had no way to flag that a Codex-primary
+ * profile's counted grants only bind advisorily (capabilityEnforcement is
+ * `claude-only` for several), so two identically-configured Claude and Codex
+ * profiles rendered identical counts. Purely additive: existing consumers
+ * (the matrix modal) only read the fields they already destructured. */
 export type MatrixProfile = Pick<
   AgentProfileView,
-  "id" | "kind" | "name" | "icon" | "actions"
+  "id" | "kind" | "name" | "icon" | "actions" | "backends"
 >;
 
 /** Mock statusKind (agents.jsx): status string → pill kind. */

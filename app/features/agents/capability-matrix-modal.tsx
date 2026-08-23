@@ -270,9 +270,18 @@ export function CapabilityMatrixModal({
                 capability.
               </li>
               <li>
-                The Claude operator can reach the web (WebFetch/WebSearch) when
-                <b> Search &amp; fetch from the web</b> is granted; the Codex operator
-                cannot.
+                Both operators can reach the web (WebFetch/WebSearch) when
+                <b> Search &amp; fetch from the web</b> is granted. The Codex
+                operator's OS-sandbox network stays off, but its web search
+                follows the grant the same way an agent's does; a withheld grant
+                disables it on either backend.
+              </li>
+              <li>
+                A browser screenshot returns to the model as an image on Claude
+                (the agent can see the page), but not on Codex. A Codex agent with
+                <b> Drive a live web browser</b> can drive and read a page's text
+                and accessibility tree, and its screenshots still save for humans
+                on the task page, but it cannot visually see what it captured.
               </li>
             </ul>
           </div>

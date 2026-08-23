@@ -659,7 +659,13 @@ describe("ResourcesPanel", () => {
     const { getByText, getByLabelText } = renderResources();
     // KB and skill rows have counted templates since P13-KM-08; the MCP row was
     // the one destructive path with no idea what depended on it.
-    expect(getByText(/14 tools · checked just now · auth: configured · 1 template/)).toBeTruthy();
+    // F-P3 (pass 25): a credentialed server's row now carries the backend caveat
+    // between "auth: configured" and the grant tail.
+    expect(
+      getByText(
+        /14 tools · checked just now · auth: configured \(Claude runs only · Codex mounts it unauthenticated\) · 1 template/,
+      ),
+    ).toBeTruthy();
 
     fireEvent.click(getByLabelText("Remove github-mcp"));
     // A2: the tail now names templates AND project agents; this panel render

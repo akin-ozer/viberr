@@ -44,7 +44,10 @@ import {
 } from "~/server/tasks/task-actions.server";
 import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { listTaskAttachments } from "~/server/files/task-attachments.server";
+import {
+  countTaskAttachments,
+  listTaskAttachments,
+} from "~/server/files/task-attachments.server";
 import {
   assignReviewer,
   assignSpecialist,
@@ -266,10 +269,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const attachments = runsVisible
     ? listTaskAttachments(params.slug, params.key)
     : [];
+  // C8 (pass 25): the list is capped (LIST_CAP=100); the panel needs the true
+  // total to say "showing 100 of N" instead of hiding the older evidence silently.
+  const attachmentsTotal = runsVisible
+    ? countTaskAttachments(params.slug, params.key)
+    : 0;
 
   return {
     task: { ...detail, timeline: slice.events },
     attachments,
+    attachmentsTotal,
     // Who saved each attachment and when, from the events that claim names —
     // same visibility bar as the list itself.
     attachmentProducers: runsVisible
@@ -1053,6 +1062,7 @@ export default function TaskDetailRoute({
       key={loaderData.task.key}
       task={loaderData.task}
       attachments={loaderData.attachments}
+      attachmentsTotal={loaderData.attachmentsTotal}
       attachmentProducers={loaderData.attachmentProducers}
       attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
       runtime={loaderData.runtime}

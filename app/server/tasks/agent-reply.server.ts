@@ -641,14 +641,20 @@ export function resumeWorkdir(
   taskKey: string,
   repo: string | null,
   dataRoot?: string,
+  /** P8 (pass 25): a resumed SUPPORTING run stays in its OWN isolated checkout
+   *  (`workspace/support/<profileId>/<repo>`) — never the delivering engagement's
+   *  canonical `workspace/<repo>`, so its writes never reach the delivered PR. */
+  support?: { profileId: string },
 ): string {
   const base = taskDir(projectSlug, taskKey, dataRoot);
+  const scopedRoot = support
+    ? path.join(base, "workspace", "support", support.profileId)
+    : path.join(base, "workspace");
   if (repo) {
     const name = repo.split("/").pop() ?? repo;
-    const clone = path.join(base, "workspace", name);
+    const clone = path.join(scopedRoot, name);
     if (existsSync(path.join(clone, ".git"))) return clone;
   }
-  const workspace = path.join(base, "workspace");
-  mkdirSync(workspace, { recursive: true });
-  return workspace;
+  mkdirSync(scopedRoot, { recursive: true });
+  return scopedRoot;
 }

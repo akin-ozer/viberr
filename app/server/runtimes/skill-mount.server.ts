@@ -342,10 +342,25 @@ function excludeCatalogFromDelivery(repoDir: string): void {
       `${current}${gap}# Viberr: the run's granted skills are mounted here — never deliver them.\n${EXCLUDE_ENTRY}\n`,
     );
   } catch (error) {
-    logger.warn("could not exclude the mounted .claude from delivery", {
-      repoDir,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
+    // C10.5: non-fatal on purpose (a broken exclude write must not abort the
+    // run), but this is a real delivery-safety gap, not routine noise — with
+    // no working `.git/info/exclude` entry, the mounted `.claude/skills`
+    // catalog is NOT git-ignored, so a later `git add -A` (viberr's delivery
+    // finalization, or the agent's own commit) can sweep the granted skill
+    // folders into the PR. Keep this at WARN and name the risk explicitly so
+    // it is findable in the run log rather than reading as a generic I/O
+    // warning. A cheap follow-up (out of scope here, would need a
+    // `mountGrantedSkills`/`SkillMount` shape change every caller picks up)
+    // would be to return an `excluded: boolean` flag so a caller could refuse
+    // delivery or surface this to a human instead of only logging it.
+    logger.warn(
+      "could not write .git/info/exclude — the mounted skill catalog is NOT git-ignored and may be swept into the delivered PR",
+      {
+        repoDir,
+        excludeFile: file,
+        err: error instanceof Error ? error : new Error(String(error)),
+      },
+    );
   }
 }
 

@@ -878,8 +878,11 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // A4: the fallback must not re-advertise the one action with effects
     // outside Viberr (push a branch, open a PR) that this policy just withheld.
     const tools = operatorPlanToolsFor(authority({ "deliver-review-pr": "off" }));
-    expect(tools).toHaveLength(9);
+    // F-P6 (pass 25): `flag_context_conflict` joined the plan tools (gated on
+    // append-typed-events, like set_goal), so the fallback list grew by one.
+    expect(tools).toHaveLength(10);
     expect(tools).not.toContain("deliver_for_review");
+    expect(tools).toContain("flag_context_conflict");
   });
 
   it("A4: an UNDEPLOYED operator is never offered delivery, whatever the board's preset", () => {

@@ -54,6 +54,7 @@ import {
   operatorOpenPacket,
   operatorPostComment,
   operatorSetGoal,
+  operatorFlagContextConflict,
   operatorPromptAgentGeneric,
   operatorRunAgent,
   operatorSnapshot,
@@ -1417,6 +1418,11 @@ const OPERATOR_PLAN_TOOLS = [
   // Server-owned merge+push; a conflict opens a packet, never a force.
   "update_branch_from_base",
   "accept_completion",
+  // F-P6 (pass 25): the plan mirror of Claude's `flag_context_conflict` — a
+  // Codex operator holding `append-typed-events` can raise the R19-2 KB-vs-repo
+  // conflict as the same typed `quality` event + notification, not just a plain
+  // comment. `kbSource`/`repoSource` name the two sides; `text` is the detail.
+  "flag_context_conflict",
 ] as const;
 
 const OPERATOR_PACKET_TYPES = ["input", "blocked"] as const;
@@ -1447,6 +1453,8 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   // updateBranchGate below, not the plain gate.
   update_branch_from_base: ["update-task-branch"],
   accept_completion: ["completion-for-acceptance"],
+  // F-P6 (pass 25): same gate as Claude's `flag_context_conflict` tool.
+  flag_context_conflict: ["append-typed-events"],
 } satisfies Record<OperatorPlanTool, readonly string[]>;
 
 /**
@@ -1512,8 +1520,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           delivers: { type: ["boolean", "null"], description: "engage_agent/prompt_agent: true = the delivering builder (owns branch/PR, one per task); false = supporting (review). Else null." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          text: { type: ["string", "null"], description: "For post_comment and prompt_/open_packet: the comment text, agent prompt, or packet title; else null." },
+          text: { type: ["string", "null"], description: "For post_comment and prompt_/open_packet: the comment text, agent prompt, or packet title; for flag_context_conflict: the one-or-two-sentence detail of what each side says; else null." },
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
+          kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees; else null." },
+          repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative; else null." },
           // P11-27: let the Codex operator AUTHOR the packet's option set from its
           // own reasoning (2–4 options), instead of always getting the canned
           // default set. Null → use the packet type's default options.
@@ -1553,7 +1563,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource"],
       },
     },
   },
@@ -1575,6 +1585,10 @@ const operatorPlanActionSchema = z.strictObject({
   packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
   text: z.string().nullable(),
   reason: z.string().nullable(),
+  // F-P6 (pass 25): the two sides of a KB-vs-repo conflict. Tolerated as ABSENT
+  // (not just null) so plans persisted before these fields existed still replay.
+  kbSource: z.string().nullable().optional(),
+  repoSource: z.string().nullable().optional(),
   packetOptions: z
     .array(
       z.strictObject({
@@ -2147,6 +2161,32 @@ async function executeCodexPlan(
             record(a.tool, await operatorSetGoal(db, ctx, goal, authority));
           } else skippedMalformed(a.tool, "the drafted goal text");
           break;
+        case "flag_context_conflict":
+          // F-P6 (pass 25): `kbSource`/`repoSource` name the two sides; `text` is
+          // the detail. Same action Claude's tool calls — a typed `quality` event
+          // + the R19-2 watcher notification, not a plain comment.
+          if (a.kbSource && a.repoSource && a.text) {
+            record(
+              a.tool,
+              await operatorFlagContextConflict(
+                db,
+                ctx,
+                {
+                  ...base,
+                  kbSource: a.kbSource,
+                  repoSource: a.repoSource,
+                  detail: a.text,
+                },
+                authority,
+              ),
+            );
+          } else {
+            skippedMalformed(
+              a.tool,
+              "the KB source, the repo source, and the detail",
+            );
+          }
+          break;
       }
     } catch (error) {
       // ABORT the remaining plan on a governed-action failure: executing later
@@ -2690,7 +2730,10 @@ function workspaceSection(
       // even though the tree is outside its writable scratch root).
       (isolatedWritableRoot
         ? `run \`git -C ${workspace.dir} show origin/${workspace.defaultBranch}:<path>\` — it ` +
-          "reads the tracked ref directly (no fetch, no network). "
+          `reads the tracked ref directly (no fetch, no network), so it reflects \`${workspace.defaultBranch}\` ` +
+          "as of when this checkout was cloned and can be stale if other work has merged since. " +
+          "Treat a surprising absence or presence with that in mind, and never accuse anyone of an " +
+          "out-of-band merge on a single stale-looking read alone. "
         : "call `read_default_branch_file` — it reads " +
           `\`origin/${workspace.defaultBranch}\` directly. `) +
       "Never claim a file, line or change is (or " +

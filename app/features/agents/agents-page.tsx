@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useNavigate, useSearchParams } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
-import { capabilityById } from "~/shared/capabilities";
+import { capabilityById, isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
 import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
 import { countLabel } from "~/shared/text/plural";
 import {
@@ -233,9 +233,14 @@ function DeploymentStatusPill({
 function CapColumn({
   group,
   items,
+  codexPrimary,
 }: {
   group: keyof typeof CAP_META;
   items: string[];
+  /** F-P1 (pass 25): the profile's first (run) backend is Codex, so any
+   *  claude-only-enforced grant listed here binds only advisorily — the same
+   *  caveat the capability matrix and editor already show per row. */
+  codexPrimary?: boolean;
 }) {
   const m = CAP_META[group];
   return (
@@ -245,12 +250,24 @@ function CapColumn({
         {m.label}
       </div>
       <div className="cap-list">
-        {items.map((x) => (
-          <div className="cap-item" key={x}>
-            <Icon name={m.icon} />
-            <span>{x}</span>
-          </div>
-        ))}
+        {items.map((x) => {
+          const advisoryOnCodex = codexPrimary && isClaudeOnlyEnforcedLabel(x);
+          return (
+            <div className="cap-item" key={x}>
+              <Icon name={m.icon} />
+              <span>{x}</span>
+              {advisoryOnCodex && (
+                <span
+                  className="fhint"
+                  title="Claude-enforced. On this profile's Codex runtime the tool layer does not bind it; the server-owned delivery gate is the real boundary."
+                >
+                  {" "}
+                  · advisory on Codex
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -646,6 +663,9 @@ export function ProfileDetail({
   // the one server-side interpretation of the stored grants
   // (`capabilitiesToActionLabels`), verdict outcomes gated included.
   const isGoverned = (label: string) => GOVERNED_CAP_LABELS.has(label);
+  // F-P1 (pass 25): when a run would resolve to Codex, the claude-only-enforced
+  // grants in these columns bind only advisorily — CapColumn shows the caveat.
+  const codexPrimary = primaryBackend(a) === "codex";
   const governed = {
     direct: a.actions.direct.filter(isGoverned),
     recommend: a.actions.recommend.filter(isGoverned),
@@ -805,9 +825,9 @@ export function ProfileDetail({
           </p>
         )}
         <div className="cap-cols">
-          <CapColumn group="direct" items={governed.direct} />
-          <CapColumn group="recommend" items={governed.recommend} />
-          <CapColumn group="forbidden" items={governed.forbidden} />
+          <CapColumn group="direct" items={governed.direct} codexPrimary={codexPrimary} />
+          <CapColumn group="recommend" items={governed.recommend} codexPrimary={codexPrimary} />
+          <CapColumn group="forbidden" items={governed.forbidden} codexPrimary={codexPrimary} />
         </div>
         {advisory.length > 0 && (
           /* R15-12: these were disclosed inline, above the fold, next to the
