@@ -1023,6 +1023,8 @@ function NewTaskModal({
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("normal");
+  const [labels, setLabels] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const fetcher = useFetcher<{
     ok: boolean;
     key?: string;
@@ -1067,6 +1069,8 @@ function NewTaskModal({
     fd.set("title", title.trim());
     fd.set("goal", goal.trim());
     if (priority !== "normal") fd.set("priority", priority);
+    if (labels.trim()) fd.set("labels", labels.trim());
+    if (dueDate) fd.set("dueDate", dueDate);
     // R19-14: no stage field — the server creates at the entry stage.
     fetcher.submit(fd, { method: "post" });
   };
@@ -1139,24 +1143,47 @@ function NewTaskModal({
             placeholder="One or two sentences. A vague goal gets flagged by the operator at triage."
           />
         </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="flabel" htmlFor="new-task-priority">
+              Priority
+            </label>
+            <select
+              id="new-task-priority"
+              value={priority}
+              onChange={(e) => setPriority(coercePriority(e.target.value) ?? "normal")}
+            >
+              {PRIORITY_VALUES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label className="flabel" htmlFor="new-task-due">
+              Due date
+            </label>
+            <input
+              id="new-task-due"
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+          </div>
+        </div>
         <div className="field">
-          <label className="flabel" htmlFor="new-task-priority">
-            Priority
-            <span className="fhint">
-              labels and a due date can be added on the task page
-            </span>
+          <label className="flabel" htmlFor="new-task-labels">
+            Labels
+            <span className="fhint">comma separated, optional</span>
           </label>
-          <select
-            id="new-task-priority"
-            value={priority}
-            onChange={(e) => setPriority(coercePriority(e.target.value) ?? "normal")}
-          >
-            {PRIORITY_VALUES.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
+          <input
+            id="new-task-labels"
+            type="text"
+            value={labels}
+            onChange={(e) => setLabels(e.target.value)}
+            placeholder="e.g. runtime, github"
+          />
         </div>
       </div>
       <div className="modal-foot">

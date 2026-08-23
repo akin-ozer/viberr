@@ -212,3 +212,46 @@ describe("board reorder — the acceptance disclosure (ruling 88)", () => {
     expect("stage" in result ? result.stage : null).toBe("impl");
   });
 });
+
+describe("create-task carries the metadata fields from the form", () => {
+  it("persists priority, labels (trimmed + deduped) and due date", async () => {
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const result = await post("viberr-core", ids.arda, {
+      intent: "create-task",
+      title: "Metadata probe",
+      goal: "a goal long enough to pass the floor",
+      priority: "high",
+      labels: "runtime, github, runtime",
+      dueDate: "2026-09-15",
+    });
+    const key = z.object({ key: z.string() }).parse(result).key;
+    const fm = readTaskFile({
+      projectSlug: "viberr-core",
+      taskKey: key,
+      dataRoot: app.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.priority).toBe("high");
+    expect(fm.labels).toEqual(["runtime", "github"]);
+    expect(fm.dueDate).toBe("2026-09-15");
+    // urgent stays derived from priority (high is not the urgent rung).
+    expect(fm.urgent).toBe(false);
+  });
+
+  it("a blank labels/due form still creates a clean task", async () => {
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const result = await post("viberr-core", ids.arda, {
+      intent: "create-task",
+      title: "Bare probe",
+      goal: "a goal long enough to pass the floor",
+    });
+    const key = z.object({ key: z.string() }).parse(result).key;
+    const fm = readTaskFile({
+      projectSlug: "viberr-core",
+      taskKey: key,
+      dataRoot: app.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.priority).toBe("normal");
+    expect(fm.labels).toEqual([]);
+    expect(fm.dueDate).toBeNull();
+  });
+});
