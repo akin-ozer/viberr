@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { createAuth, type ViberrAuth } from "~/lib/auth.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -14,6 +14,20 @@ import { findUserById, insertUser } from "./user-store.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
+
+// These tests probe the `email|ip` login bucket with distinct client ips, which
+// is meaningful only when a trusted proxy sets X-Forwarded-For (otherwise the
+// header is client-spoofable and `clientIpOf` ignores it — the security fix).
+// Declare one trusted proxy so the single-hop XFF each request carries is read
+// as the client ip, preserving the per-ip assertions below.
+const savedTrustProxy = process.env.VIBERR_TRUST_PROXY;
+beforeAll(() => {
+  process.env.VIBERR_TRUST_PROXY = "1";
+});
+afterAll(() => {
+  if (savedTrustProxy === undefined) delete process.env.VIBERR_TRUST_PROXY;
+  else process.env.VIBERR_TRUST_PROXY = savedTrustProxy;
+});
 
 const PASSWORD = "correct-password";
 

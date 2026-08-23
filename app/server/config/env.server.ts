@@ -148,6 +148,12 @@ const envSchema = z.object({
   VIBERR_CLAUDE_MAX_TURNS: z.string().optional(),
   VIBERR_CODEX_IDLE_TIMEOUT_MS: z.string().optional(),
   VIBERR_CLAUDE_IDLE_TIMEOUT_MS: z.string().optional(),
+  // Number of trusted reverse proxies in front of the app (default 0 = none).
+  // Only when set does the login throttle read X-Forwarded-For, and then as the
+  // Nth hop from the right — the ip the outermost trusted proxy saw. Left unset
+  // in the shipped proxy-less deployment, where the header is pure client input
+  // (see clientIpOf in rate-limit.server.ts).
+  VIBERR_TRUST_PROXY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

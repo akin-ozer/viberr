@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { clientIpOf, TokenBucketLimiter } from "./rate-limit.server";
 
 describe("TokenBucketLimiter", () => {
@@ -64,11 +64,48 @@ describe("TokenBucketLimiter", () => {
 });
 
 describe("clientIpOf", () => {
-  it("uses the first X-Forwarded-For hop, else 'local'", () => {
+  const savedTrust = process.env.VIBERR_TRUST_PROXY;
+  afterEach(() => {
+    if (savedTrust === undefined) delete process.env.VIBERR_TRUST_PROXY;
+    else process.env.VIBERR_TRUST_PROXY = savedTrust;
+  });
+
+  it("ignores X-Forwarded-For entirely when no proxy is trusted (the default)", () => {
+    delete process.env.VIBERR_TRUST_PROXY;
+    // The leftmost hop is client-settable — trusting it would let a brute-forcer
+    // rotate the ip half of the bucket key, so with no trusted proxy the header
+    // is not read at all and every request buckets under "local".
     expect(
       clientIpOf(new Headers({ "X-Forwarded-For": "203.0.113.9, 10.0.0.1" })),
-    ).toBe("203.0.113.9");
+    ).toBe("local");
     expect(clientIpOf(new Headers())).toBe("local");
     expect(clientIpOf(undefined)).toBe("local");
+  });
+
+  it("with one trusted proxy, reads the rightmost hop (past a spoofed prefix)", () => {
+    process.env.VIBERR_TRUST_PROXY = "1";
+    // One trusted proxy appends the ip IT saw as the last entry; a client that
+    // prepends a spoofed hop cannot move it.
+    expect(
+      clientIpOf(new Headers({ "X-Forwarded-For": "203.0.113.9" })),
+    ).toBe("203.0.113.9");
+    expect(
+      clientIpOf(new Headers({ "X-Forwarded-For": "1.2.3.4, 203.0.113.9" })),
+    ).toBe("203.0.113.9");
+    expect(clientIpOf(new Headers())).toBe("local");
+  });
+
+  it("with N trusted proxies, reads the Nth hop from the right", () => {
+    process.env.VIBERR_TRUST_PROXY = "2";
+    // Two trusted proxies → the real client ip is the 2nd from the right; the
+    // spoofed leftmost is ignored.
+    expect(
+      clientIpOf(new Headers({ "X-Forwarded-For": "9.9.9.9, 203.0.113.9, 10.0.0.1" })),
+    ).toBe("203.0.113.9");
+    // A chain shorter than the declared hop count is a misconfig / stripped
+    // header → "local" rather than a spoofable guess.
+    expect(
+      clientIpOf(new Headers({ "X-Forwarded-For": "203.0.113.9" })),
+    ).toBe("local");
   });
 });
