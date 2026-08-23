@@ -134,3 +134,33 @@ Branch `fix/pass25-discovery`. tsc clean throughout. Every logic change tested.
 - **C10.8** (LOW): stale shipped `operator.md` divergence is a boot-console WARN; a new Instance-settings
   banner is disproportionate to a self-healing (PRIOR_SHIPPED_HASHES) boot path. Left as boot warn.
 - **B2** (MED): backend quota pre-run signal — **owner ruled leave-as-is** (Q-B).
+
+---
+
+# ADVERSARIAL REVIEW of the P8 diff (post-commit) — 3 findings, 2 fixed + tested
+
+An adversarial review of the pass-25 diff (focused on P8) surfaced 3 real regressions I had missed:
+
+- **Rev-1 (MED) FIXED+TESTED** — `WORKSPACE_ABS_PATH_RE` (`agent-reply.server.ts`) assumed ONE segment
+  after `workspace/`, so a SUPPORTING run's isolated path (`workspace/support/<profileId>/<repo>/rest`)
+  rewrote to `<profileId>/<repo>/rest` instead of `rest` — a reviewer echoing an absolute path posted a
+  mangled relative path on the timeline. Fixed: the regex skips an optional `support/<profileId>/` group.
+  New test in `agent-reply.server.test.ts`.
+- **Rev-2 (MED) FIXED+TESTED** — no single-flight for a SUPPORTING engagement: because the support
+  checkout is `rmSync`+re-cloned FRESH per dispatch, two overlapping runs of the SAME reviewer profileId
+  would share one dir and the second's re-clone would yank the first's tree out mid-run. Added a
+  per-profileId single-flight for non-delivering runs (different engagements still run concurrently). New
+  test in `specialist-run.server.test.ts` (P8 describe).
+- **Rev-3 (LOW/MED) DOCUMENTED** — the C5 `fromHumanDirective` gate is not honored on the run-RECOVERY
+  path (`run-recovery.server.ts` replays completion with `state:"finished"` and no `fromHumanDirective`),
+  so a conversational reviewer @mention that crashes mid-run and is boot-recovered can still fire the
+  spurious "no readable verdict" note. **Not fixed:** the flag is in-memory only; persisting it across the
+  fresh/resume/recovery run-row lifecycle is subtle and disproportionate to a *cosmetic* note on a rare
+  crash+recovery, and suppress-on-recovery would wrongly hide the legit "re-run this review" nudge on a
+  recovered genuine review run. Recorded for a future run-row-metadata change if the owner wants it.
+
+Review VERIFIED-CORRECT (no issue): the support derivation at all 3 sites; cloneRepo failure modes +
+`deliveringDir !== dir` invariant; delivery/evidence/operator stay canonical; no-delivering-checkout
+fallback; retention sweeps `workspace/support/`; Codex `workspace-write` scopes writes to `spec.workdir`
+(so the isolation claim holds structurally on Codex too); C5 set correctly at the live sites; F-P11
+fresh/recovery gating; P9 single-write; F-P6 field mapping + gate.

@@ -1126,6 +1126,33 @@ async function dispatchAgentRun(
           "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
       });
     }
+  } else {
+    // P8/Finding-2 (pass 25): a SUPPORTING run now has its OWN isolated checkout
+    // (`workspace/support/<profileId>/<repo>`) that `cloneRepo` deletes and
+    // re-clones FRESH on every dispatch. Two overlapping runs of the SAME
+    // supporting engagement would share that one dir, so the second's re-clone
+    // would yank the first's working tree out mid-run. Serialize same-engagement
+    // runs (an @mention or operator re-summon while it is already running refuses
+    // until the first finishes); DIFFERENT supporting engagements still run
+    // concurrently — their profileIds map to separate dirs. Before P8 the shared
+    // canonical checkout's reuse path was non-destructive, so this could not bite.
+    const liveSameEngagement = listRunsForTaskRows(
+      db,
+      input.projectSlug,
+      input.taskKey,
+    ).find(
+      (r) =>
+        r.agent_profile_id === engagement.profileId &&
+        (r.state === "running" || r.state === "queued"),
+    );
+    if (liveSameEngagement) {
+      throw new AppError({
+        code: ERROR_CODES.CONFLICT,
+        status: 409,
+        userMessage:
+          "This agent already has a run in progress on this task — wait for it to finish or interrupt it before starting another.",
+      });
+    }
   }
 
   // Resolve the CURRENT deployment before picking the backend: the run follows

@@ -2937,6 +2937,46 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       writeFileSync(path.join(criticWs, "reviewer-scratch.txt"), "leaked?");
       expect(existsSync(path.join(ws, "reviewer-scratch.txt"))).toBe(false);
     });
+
+    it("refuses a second run of the SAME supporting engagement while one is in flight (its isolated dir is re-cloned fresh)", async () => {
+      // Finding-2: the support checkout is deleted + re-cloned FRESH per dispatch,
+      // so two overlapping runs of the same reviewer would share (and destroy) one
+      // dir. Serialize same-engagement runs; different engagements still run free.
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const { upsertRun } = await import("~/server/runtimes/run-store.server");
+      upsertRun(store.db, {
+        id: "run_inflight_critic",
+        projectSlug: store.slug, taskKey: "VIB-1",
+        threadId: "critic-inflight", role: "reviewer", kind: "reviewer",
+        agentProfileId: "critic", backend: "claude", model: "claude-sonnet-4-5",
+        sdk: "Claude Agent SDK", state: "running",
+        startedAt: "2026-08-23T00:00:00.000Z",
+      });
+      await expect(
+        startAgentRun(store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+          actor(store.users.arda), { dataRoot: store.dataRoot }),
+      ).rejects.toMatchObject({ status: 409 });
+    });
   });
 });
 
