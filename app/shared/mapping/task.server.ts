@@ -21,7 +21,7 @@ import type { ActorRender } from "./actor.server";
  *  normalizes it so). Parse it at this read boundary through the schema — a
  *  malformed or corrupt value yields no labels rather than throwing. */
 const TASK_LABELS_SCHEMA = z.array(z.string()).catch([]);
-function parseTaskLabels(labelsJson: string): string[] {
+export function parseTaskLabels(labelsJson: string): string[] {
   try {
     return TASK_LABELS_SCHEMA.parse(JSON.parse(labelsJson));
   } catch {

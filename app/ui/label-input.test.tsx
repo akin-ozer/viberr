@@ -7,11 +7,17 @@ import { LabelInput } from "./label-input";
 afterEach(cleanup);
 
 /** A controlled host so the token list actually updates between events. */
-function Harness({ initial = [] }: { initial?: string[] }) {
+function Harness({
+  initial = [],
+  suggestions,
+}: {
+  initial?: string[];
+  suggestions?: string[];
+}) {
   const [labels, setLabels] = useState<string[]>(initial);
   return (
     <div>
-      <LabelInput value={labels} onChange={setLabels} />
+      <LabelInput value={labels} onChange={setLabels} suggestions={suggestions} />
       <output data-testid="value">{labels.join("|")}</output>
     </div>
   );
@@ -22,6 +28,9 @@ function field(c: HTMLElement): HTMLInputElement {
 }
 function tokens(c: HTMLElement): string[] {
   return [...c.querySelectorAll(".label-token")].map((t) => t.textContent!.replace(/\s+$/, ""));
+}
+function options(c: HTMLElement): string[] {
+  return [...c.querySelectorAll(".label-opt .label-opt-name")].map((o) => o.textContent!);
 }
 
 describe("LabelInput", () => {
@@ -80,5 +89,95 @@ describe("LabelInput", () => {
     expect(getByTestId("value").textContent).toBe("a|b");
     fireEvent.keyDown(field(container), { key: "Enter" });
     expect(getByTestId("value").textContent).toBe("a|b|c");
+  });
+});
+
+describe("LabelInput autocomplete", () => {
+  const suggestions = ["runtime", "regression", "docs", "flaky"];
+
+  it("offers matching project labels on focus and filters as you type", () => {
+    const { container } = render(<Harness suggestions={suggestions} />);
+    fireEvent.focus(field(container));
+    // Focus with an empty buffer shows all suggestions.
+    expect(options(container)).toEqual(suggestions);
+    fireEvent.change(field(container), { target: { value: "re" } });
+    // "re" is a substring of regression (not runtime), plus a Create row.
+    expect(options(container)).toEqual(["regression", "re"]);
+  });
+
+  it("already-picked labels drop out of the suggestion list", () => {
+    const { container } = render(
+      <Harness initial={["runtime"]} suggestions={suggestions} />,
+    );
+    fireEvent.focus(field(container));
+    expect(options(container)).toEqual(["regression", "docs", "flaky"]);
+  });
+
+  it("ArrowDown + Enter takes the highlighted suggestion, not the typed text", () => {
+    const { container, getByTestId } = render(
+      <Harness suggestions={suggestions} />,
+    );
+    fireEvent.focus(field(container));
+    fireEvent.change(field(container), { target: { value: "d" } });
+    // Options: docs (match) + Create "d". Arrow to the first, commit it.
+    fireEvent.keyDown(field(container), { key: "ArrowDown" });
+    fireEvent.keyDown(field(container), { key: "Enter" });
+    expect(getByTestId("value").textContent).toBe("docs");
+    expect(field(container).value).toBe("");
+  });
+
+  it("clicking a suggestion adds it", () => {
+    const { container, getByTestId } = render(
+      <Harness suggestions={suggestions} />,
+    );
+    fireEvent.focus(field(container));
+    const flaky = [...container.querySelectorAll(".label-opt")].find(
+      (o) => o.textContent === "flaky",
+    )!;
+    fireEvent.mouseDown(flaky);
+    expect(getByTestId("value").textContent).toBe("flaky");
+  });
+
+  it("offers a Create row for a brand-new label", () => {
+    const { container, getByTestId } = render(
+      <Harness suggestions={suggestions} />,
+    );
+    fireEvent.focus(field(container));
+    fireEvent.change(field(container), { target: { value: "brand-new" } });
+    const create = container.querySelector(".label-opt.create")!;
+    expect(create).toBeTruthy();
+    fireEvent.mouseDown(create);
+    expect(getByTestId("value").textContent).toBe("brand-new");
+  });
+
+  it("Enter with nothing highlighted commits the typed text over a match", () => {
+    const { container, getByTestId } = render(
+      <Harness suggestions={suggestions} />,
+    );
+    fireEvent.focus(field(container));
+    fireEvent.change(field(container), { target: { value: "runtime" } });
+    // A match is listed, but without arrowing to it Enter commits the buffer.
+    fireEvent.keyDown(field(container), { key: "Enter" });
+    expect(getByTestId("value").textContent).toBe("runtime");
+  });
+
+  it("Escape closes the suggestion popover without clearing the buffer", () => {
+    const { container } = render(<Harness suggestions={suggestions} />);
+    fireEvent.focus(field(container));
+    fireEvent.change(field(container), { target: { value: "re" } });
+    expect(container.querySelector(".label-suggest")).toBeTruthy();
+    fireEvent.keyDown(field(container), { key: "Escape" });
+    expect(container.querySelector(".label-suggest")).toBeNull();
+    expect(field(container).value).toBe("re"); // buffer intact
+  });
+
+  it("offers nothing once the label set is full", () => {
+    const twelve = Array.from({ length: 12 }, (_, i) => `l${i}`);
+    const { container } = render(
+      <Harness initial={twelve} suggestions={["runtime"]} />,
+    );
+    fireEvent.focus(field(container));
+    fireEvent.change(field(container), { target: { value: "run" } });
+    expect(container.querySelector(".label-suggest")).toBeNull();
   });
 });

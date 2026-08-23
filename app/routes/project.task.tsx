@@ -73,7 +73,11 @@ import {
   operatorBackendFor,
 } from "~/server/tasks/operator-actions.server";
 import { parseAcceptanceDisclosure } from "~/shared/acceptance-disclosure";
-import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
+import {
+  getProject,
+  listProjectLabels,
+  listProjectMembers,
+} from "~/server/projections/board-query.server";
 import { requireVisibleProject } from "./project-visibility.server";
 import {
   requireRunAgents,
@@ -279,6 +283,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   return {
     task: { ...detail, timeline: slice.events },
+    // The project's existing label vocabulary, for the Details panel's label
+    // autocomplete — same source the board's New-task modal draws from.
+    labelSuggestions: listProjectLabels(db, params.slug),
     attachments,
     attachmentsTotal,
     // Who saved each attachment and when, from the events that claim names —
@@ -1085,6 +1092,7 @@ export default function TaskDetailRoute({
       // log selection (mock `key={task.key}` behavior, spec §1).
       key={loaderData.task.key}
       task={loaderData.task}
+      labelSuggestions={loaderData.labelSuggestions}
       attachments={loaderData.attachments}
       attachmentsTotal={loaderData.attachmentsTotal}
       attachmentProducers={loaderData.attachmentProducers}
