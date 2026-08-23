@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import type { OrgSettingsView } from "~/server/org/org-view.server";
+import type { S3AuditConfigView } from "~/server/settings/instance-settings.server";
 import { countLabel } from "~/shared/text/plural";
 import { Icon, type IconName } from "~/ui/icon";
 import { ConnectionsPanel } from "./connections-panel";
@@ -48,12 +49,15 @@ export function OrgSettingsPage({
   meId,
   callbackOrigin,
   runConcurrency,
+  s3Audit,
 }: {
   view: OrgSettingsView;
   meId: string;
   /** This deployment's origin — the callback URL an OAuth app must carry. */
   callbackOrigin: string;
   runConcurrency: RunConcurrencyView;
+  /** The S3 audit-export target (null when none is configured). */
+  s3Audit: S3AuditConfigView | null;
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -157,8 +161,154 @@ export function OrgSettingsPage({
         </div>
       </div>
       <RunConcurrencyControl runConcurrency={runConcurrency} />
+      <AuditExportCard s3Audit={s3Audit} />
       <StorageLine storage={view.storage} />
     </main>
+  );
+}
+
+/**
+ * Audit-log export: download the log as CSV/JSON, and configure + fire an
+ * export to an S3 bucket. Admin-only (the whole page is). The secret access key
+ * is write-only here — stored sealed, never rendered — so the field shows a
+ * "leave blank to keep" placeholder once one is on file.
+ */
+function AuditExportCard({ s3Audit }: { s3Audit: S3AuditConfigView | null }) {
+  const { submit, busy } = useOrgAction();
+  const [bucket, setBucket] = useState(s3Audit?.bucket ?? "");
+  const [region, setRegion] = useState(s3Audit?.region ?? "");
+  const [prefix, setPrefix] = useState(s3Audit?.prefix ?? "");
+  const [endpoint, setEndpoint] = useState(s3Audit?.endpoint ?? "");
+  const [accessKeyId, setAccessKeyId] = useState(s3Audit?.accessKeyId ?? "");
+  const [secret, setSecret] = useState("");
+  const configured = s3Audit !== null;
+  const canSave = bucket.trim() && region.trim() && accessKeyId.trim() &&
+    (configured || secret.trim());
+  return (
+    <section className="panel audit-export">
+      <div className="panel-head">
+        <Icon name="file" />
+        <h2>Audit log</h2>
+      </div>
+      <p className="fine">
+        Download the full audit log, or push it to an S3 bucket. Exports carry
+        every recorded fact (actor, action, subject, details).
+      </p>
+      <div className="audit-dl">
+        {/* A real file response (Content-Disposition) — the browser saves it. */}
+        <a className="btn sm" href="/org/settings/audit-export?format=csv">
+          <Icon name="file" />
+          Download CSV
+        </a>
+        <a className="btn sm" href="/org/settings/audit-export?format=json">
+          <Icon name="file" />
+          Download JSON
+        </a>
+      </div>
+      <div className="audit-s3">
+        <h3>S3 export target</h3>
+        <div className="audit-s3-grid">
+          <label className="field">
+            <span className="flabel">Bucket</span>
+            <input
+              type="text"
+              value={bucket}
+              onChange={(e) => setBucket(e.currentTarget.value)}
+              placeholder="my-audit-bucket"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Region</span>
+            <input
+              type="text"
+              value={region}
+              onChange={(e) => setRegion(e.currentTarget.value)}
+              placeholder="eu-central-1"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Key prefix</span>
+            <input
+              type="text"
+              value={prefix}
+              onChange={(e) => setPrefix(e.currentTarget.value)}
+              placeholder="audit/ (optional)"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Endpoint</span>
+            <input
+              type="text"
+              value={endpoint}
+              onChange={(e) => setEndpoint(e.currentTarget.value)}
+              placeholder="optional, for S3-compatible stores"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Access key ID</span>
+            <input
+              type="text"
+              value={accessKeyId}
+              onChange={(e) => setAccessKeyId(e.currentTarget.value)}
+              placeholder="AKIA…"
+            />
+          </label>
+          <label className="field">
+            <span className="flabel">Secret access key</span>
+            <input
+              type="password"
+              value={secret}
+              onChange={(e) => setSecret(e.currentTarget.value)}
+              placeholder={configured ? "leave blank to keep" : "required"}
+              aria-label="S3 secret access key"
+            />
+          </label>
+        </div>
+        <div className="audit-s3-actions">
+          <button
+            type="button"
+            className="btn primary sm"
+            disabled={busy || !canSave}
+            onClick={() =>
+              submit({
+                intent: "s3-config-save",
+                bucket,
+                region,
+                prefix,
+                endpoint,
+                accessKeyId,
+                secretAccessKey: secret,
+              })
+            }
+          >
+            Save target
+          </button>
+          <button
+            type="button"
+            className="btn sm"
+            disabled={busy || !configured}
+            onClick={() =>
+              submit({ intent: "audit-export-s3", format: "json" })
+            }
+            title={
+              configured ? "Upload the audit log to S3 now" : "Save a target first"
+            }
+          >
+            Export to S3 now
+          </button>
+          {configured && (
+            <button
+              type="button"
+              className="btn sm danger"
+              disabled={busy}
+              onClick={() => submit({ intent: "s3-config-clear" })}
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 

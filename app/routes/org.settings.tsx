@@ -36,7 +36,20 @@ import {
   drainRunQueue,
   runConcurrencySnapshot,
 } from "~/server/runtimes/run-service.server";
-import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
+import {
+  clearS3AuditConfig,
+  getS3AuditConfigForUse,
+  getS3AuditConfigView,
+  setMaxConcurrentRuns,
+  setS3AuditConfig,
+} from "~/server/settings/instance-settings.server";
+import {
+  EXPORT_FORMATS,
+  isAuditExportFormat,
+  queryAuditEventsForExport,
+  serializeAuditExport,
+} from "~/server/audit/audit-export.server";
+import { putObjectToS3 } from "~/server/audit/s3-put.server";
 import { oauthCallbackUrl } from "~/shared/auth/auth-paths";
 import {
   testOAuthCredentials,
@@ -98,6 +111,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Instance run-concurrency: the configured cap and the live/queued counts,
     // for the admin control below StorageLine.
     runConcurrency: runConcurrencySnapshot(getDb()),
+    // The S3 audit-export target (never carries the secret key).
+    s3Audit: getS3AuditConfigView(getDb()),
   };
 }
 
@@ -231,6 +246,54 @@ export async function action({ request }: Route.ActionArgs) {
             ? "Run concurrency is now unlimited."
             : `Agent runs are now capped at ${applied} at a time.`,
         );
+      }
+      // ------------------------------------------------- audit S3 export
+      case "s3-config-save": {
+        try {
+          setS3AuditConfig(db, {
+            bucket: field("bucket"),
+            region: field("region"),
+            prefix: field("prefix"),
+            endpoint: field("endpoint"),
+            accessKeyId: field("accessKeyId"),
+            // Blank keeps the existing sealed secret (edit without re-typing).
+            secretAccessKey: field("secretAccessKey"),
+          });
+        } catch (error) {
+          return fail(
+            error instanceof Error ? error.message : "Could not save the S3 target.",
+          );
+        }
+        return ok("S3 audit-export target saved.");
+      }
+      case "s3-config-clear": {
+        clearS3AuditConfig(db);
+        return ok("S3 audit-export target removed.");
+      }
+      case "audit-export-s3": {
+        const config = getS3AuditConfigForUse(db);
+        if (!config) {
+          return fail(
+            "No S3 target is configured (or its secret could not be read). Save one first.",
+          );
+        }
+        const formatRaw = field("format") || "json";
+        const format = isAuditExportFormat(formatRaw) ? formatRaw : "json";
+        const rows = queryAuditEventsForExport(db);
+        const body = Buffer.from(serializeAuditExport(rows, format), "utf8");
+        const spec = EXPORT_FORMATS[format];
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const objectKey = `viberr-audit-${stamp}.${spec.ext}`;
+        const result = await putObjectToS3(config, objectKey, body, {
+          contentType: spec.contentType,
+          isoNow: new Date().toISOString(),
+        });
+        if (!result.ok) {
+          return fail(
+            `S3 upload failed (HTTP ${result.status}). ${result.error.slice(0, 200)}`.trim(),
+          );
+        }
+        return ok(`Exported ${rows.length} audit rows to S3 (${objectKey}).`);
       }
 
       // ------------------------------------------------- users & access
@@ -608,6 +671,7 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
       meId={loaderData.meId}
       callbackOrigin={loaderData.callbackOrigin}
       runConcurrency={loaderData.runConcurrency}
+      s3Audit={loaderData.s3Audit}
     />
   );
 }

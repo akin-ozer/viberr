@@ -1022,6 +1022,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        s3Audit={null}
       />,
     );
     // 1 KB + 2 MCP + 1 skill = 4. It used to add the 2 agent templates and
@@ -1073,6 +1074,7 @@ describe("C9: instance storage line", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        s3Audit={null}
       />,
     );
     // Free-of-total with the usage percent, the low flag, and the cleanup cadence.
@@ -1098,6 +1100,7 @@ describe("C9: instance storage line", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        s3Audit={null}
       />,
     );
     expect(getByText(/automatic cleanup is not scheduled/)).toBeTruthy();
@@ -1127,6 +1130,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 2, live: 2, queued: 1 }}
+        s3Audit={null}
       />,
     );
     expect(getByText(/capped at 2/)).toBeTruthy();
@@ -1140,6 +1144,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        s3Audit={null}
       />,
     );
     // The lead reads "…· unlimited · 0 runs live" — distinct from the "0 =
@@ -1154,6 +1159,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        s3Audit={null}
       />,
     );
     const input = getByLabelText(/Maximum concurrent agent runs/);
@@ -1192,6 +1198,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        s3Audit={null}
       />,
     );
     const h1s = container.querySelectorAll("h1");
