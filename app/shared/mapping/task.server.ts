@@ -425,6 +425,33 @@ export function mapOperatorRef(
   };
 }
 
+/**
+ * DISPLAY readiness when an OPEN input packet is awaiting the human.
+ *
+ * An `input` packet ("Decision required" / an agent's ask-human) is a request
+ * for human input, but the operator leaves `readiness` as-is when it opens one —
+ * only a `blocked` packet flips readiness to "blocked" (operator-actions.server:
+ * "Blocked-ness lives on readiness alone"). That left the hero and the board card
+ * showing green "ready" beside a "Decision required" packet, which reads as a
+ * contradiction: the task is NOT ready, it needs your input.
+ *
+ * So for the DISPLAY only, a task waiting on a human with an open input packet
+ * reads "input required". The STORED readiness, the acceptance gate, and the
+ * board attention filter (which all read `readiness`, never `displayReadiness`)
+ * are untouched — only the "ready" case is lifted, so a blocked/risk task keeps
+ * its stronger signal.
+ */
+function displayReadinessWithPacket(
+  readiness: Readiness,
+  waiting: Waiting,
+  packet: TaskPacket | null,
+): Readiness {
+  if (readiness === "ready" && waiting === "human" && packet?.type === "input") {
+    return "input_required";
+  }
+  return readiness;
+}
+
 export function mapPacket(packet: TaskPacket | null): PacketRender | null {
   if (!packet) return null;
   const { from, ...rest } = packet;
@@ -524,7 +551,7 @@ export function mapTaskProjectionRow(
       ? pr?.state === "merged"
         ? "merged"
         : "accepted"
-      : row.readiness,
+      : displayReadinessWithPacket(row.readiness, row.waiting, columns.packet),
     waiting: row.waiting,
     urgent: row.urgent === 1,
     priority: row.priority,
