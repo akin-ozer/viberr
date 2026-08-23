@@ -70,6 +70,17 @@ export const SEALED_STORES = [
     // column every table is assumed to carry.
     idColumn: "provider",
   },
+  // Pass-25: the S3 audit-export secret access key. One row (id 'default'); the
+  // secret lives in its OWN column (not a JSON blob) precisely so this rescan
+  // reaches it — an unregistered sealed secret silently outlives a rotation.
+  {
+    id: "s3_audit_config",
+    label: "S3 audit-export secret",
+    table: "s3_audit_config",
+    column: "secret_box",
+    nameColumn: "bucket",
+    idColumn: "id",
+  },
 ] as const;
 
 export type SealedStoreId = (typeof SEALED_STORES)[number]["id"];

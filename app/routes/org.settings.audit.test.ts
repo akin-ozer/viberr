@@ -4,7 +4,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
-import { getS3AuditConfigView } from "~/server/settings/instance-settings.server";
+import { getS3AuditConfigView } from "~/server/audit/s3-config.server";
 
 /**
  * Audit export: the org-admin download route (CSV/JSON) and the S3 config +

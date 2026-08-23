@@ -1208,13 +1208,13 @@ describe("ownership", () => {
     );
   });
 
-  it("take-OVER of an occupied seat is admin-only (owner-exception escalation)", async () => {
+  it("take-OVER of an occupied seat needs acceptance authority (owner-exception escalation)", async () => {
     const store = prepared();
     withTask(store, store.users.arda.id); // owned by admin arda
     // A contributor SEIZING an owned task would gain the owner-exception
     // (accept-completion + resolve-packet) on arda's task — the governance hole.
     // Taking is `isTake`, so it slips past the hand-off guard; the takeover guard
-    // catches it and requires release-any-ownership (admin).
+    // catches it because a contributor lacks accept-completion.
     await expect(
       setOwner(
         store.db,
@@ -1223,19 +1223,21 @@ describe("ownership", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
-    // A maintainer who is neither the owner nor an admin cannot take over either
-    // — the same displacement releaseOwner gates behind release-any-ownership.
-    await expect(
-      setOwner(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.murat.id },
-        actor(store.users.murat),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
     // The seat is unchanged — still arda's.
     expect(getTaskDetail(store.db, store.slug, "VIB-1")?.owner).toMatchObject({
       userId: store.users.arda.id,
+    });
+
+    // A maintainer already HOLDS accept-completion, so taking over escalates
+    // nothing — it is a legitimate supervisory reassignment and is allowed.
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.murat.id },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")?.owner).toMatchObject({
+      userId: store.users.murat.id,
     });
   });
 

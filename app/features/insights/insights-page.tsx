@@ -30,7 +30,7 @@ function fmtCount(n: number): string {
 }
 
 function fmtDuration(ms: number | null): string {
-  if (ms === null) return "—";
+  if (ms === null) return "n/a";
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
@@ -41,7 +41,7 @@ function fmtDuration(ms: number | null): string {
 }
 
 function fmtPercent(rate: number | null): string {
-  return rate === null ? "—" : `${Math.round(rate * 100)}%`;
+  return rate === null ? "n/a" : `${Math.round(rate * 100)}%`;
 }
 
 export function InsightsPage({ summary }: { summary: InsightsSummary }) {

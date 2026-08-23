@@ -36,13 +36,13 @@ import {
   drainRunQueue,
   runConcurrencySnapshot,
 } from "~/server/runtimes/run-service.server";
+import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 import {
   clearS3AuditConfig,
   getS3AuditConfigForUse,
   getS3AuditConfigView,
-  setMaxConcurrentRuns,
   setS3AuditConfig,
-} from "~/server/settings/instance-settings.server";
+} from "~/server/audit/s3-config.server";
 import {
   EXPORT_FORMATS,
   isAuditExportFormat,

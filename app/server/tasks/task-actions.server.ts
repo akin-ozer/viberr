@@ -3680,23 +3680,24 @@ export async function setOwner(
   const currentOwnerId = existing.parsed.frontmatter.ownerUserId;
 
   const isTake = input.targetUserId === actor.userId;
-  // A TAKEOVER of an OCCUPIED seat (claiming a task another member owns) evicts
-  // that member from the review/acceptance seat. Ownership carries the
-  // owner-exception (`requireAcceptCompletion` / `requireDecisionAuthority`), so
-  // a plain `own-task` holder who seized an owned task would gain acceptance and
-  // packet-resolution authority they do not otherwise hold — a real governance
-  // escalation. `releaseOwner` already gates evicting ANOTHER member behind
-  // `release-any-ownership` (admin); a takeover is the same displacement and
-  // takes the same grant. Claiming an OPEN seat, or re-taking your own (the
-  // idempotent case, handled below), stays `own-task` (contributor+).
+  // A TAKEOVER of an OCCUPIED seat (claiming a task another member owns) is the
+  // governance hole: ownership carries the owner-exception
+  // (`requireAcceptCompletion` / `requireDecisionAuthority`), so a CONTRIBUTOR
+  // who seized an owned task would gain accept-completion + resolve-packet
+  // authority on it that their role does not otherwise grant. A maintainer/admin
+  // already holds that authority, so their takeover escalates nothing (and is a
+  // legitimate supervisory reassignment). So a takeover of an occupied seat is
+  // gated on ALREADY holding acceptance authority; claiming an OPEN seat, or
+  // re-taking your own (the idempotent case below), stays `own-task`
+  // (contributor+).
   if (
     isTake &&
     currentOwnerId &&
     currentOwnerId !== actor.userId &&
-    !roleCan(actorRole, "release-any-ownership")
+    !roleCan(actorRole, "accept-completion")
   ) {
     throw AppError.forbidden(
-      "This task already has an owner. Only a project admin can take over another member's ownership.",
+      "This task already has an owner. Taking it over needs completion-acceptance authority (maintainer or admin); ask them to reassign it.",
     );
   }
   if (!isTake) {

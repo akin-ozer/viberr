@@ -89,13 +89,13 @@ describe("InsightsPage", () => {
     expect(container.querySelector(".stat-grid")).toBeNull();
   });
 
-  it("renders — with a null success rate and null duration", () => {
+  it("renders with a null success rate and null duration", () => {
     const { getAllByText } = renderPage({
       ...FULL,
       outcomes: { ...FULL.outcomes, finished: 0, error: 0, interrupted: 0, successRate: null },
       avgDurationMs: null,
     });
-    // Both the success-rate and avg-duration cards read the em-dash placeholder.
-    expect(getAllByText("—").length).toBeGreaterThanOrEqual(2);
+    // Both the success-rate and avg-duration cards read the "n/a" placeholder.
+    expect(getAllByText("n/a").length).toBeGreaterThanOrEqual(2);
   });
 });
