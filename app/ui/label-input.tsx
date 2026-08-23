@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MAX_LABEL_LENGTH, MAX_TASK_LABELS } from "~/schemas/task-file.schema";
 import { Icon } from "./icon";
 import { useDismiss } from "./use-dismiss";
@@ -48,6 +48,7 @@ export function LabelInput({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   const normalize = (raw: string) => raw.trim().replace(/\s+/g, " ").slice(0, maxLen);
@@ -77,6 +78,15 @@ export function LabelInput({
   const showList = open && rows.length > 0;
   // `active` can dangle when rows shrink under it; treat out-of-range as none.
   const activeRow = active >= 0 && active < rows.length ? active : -1;
+
+  // Scroll the list into view when it opens. This field is used inside the
+  // New-task <dialog>, whose body scrolls under a pinned footer; without this,
+  // a list opened near the bottom renders below the fold and behind the footer,
+  // where its lower rows are unclickable. (Same reason the date-picker does it;
+  // optional-chained so jsdom's missing `scrollIntoView` is a no-op.)
+  useEffect(() => {
+    if (showList) listRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [showList]);
 
   const announce = (next: string[], verb: "Added" | "Removed", label: string) => {
     setStatus(`${verb} label ${label}, ${next.length} of ${max}`);
@@ -250,7 +260,13 @@ export function LabelInput({
         />
       </div>
       {showList && (
-        <ul className="label-select" id={listId} role="listbox" aria-multiselectable="true">
+        <ul
+          ref={listRef}
+          className="label-select"
+          id={listId}
+          role="listbox"
+          aria-multiselectable="true"
+        >
           {rows.map((row, i) => (
             <li
               key={row.kind + ":" + row.value}
