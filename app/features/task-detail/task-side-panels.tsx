@@ -8,7 +8,9 @@ import {
 } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { DatePicker } from "~/ui/date-picker";
 import { Icon } from "~/ui/icon";
+import { LabelInput } from "~/ui/label-input";
 import { Pill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { LocalRelative } from "~/ui/local-time";
@@ -382,7 +384,7 @@ export function TaskDetailsPanel({
   useActionFeedback(fetcher);
   const [open, setOpen] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
-  const [labels, setLabels] = useState(task.labels.join(", "));
+  const [labels, setLabels] = useState<string[]>(task.labels);
   const [due, setDue] = useState(task.dueDate ?? "");
   const handled = useRef<unknown>(null);
   useEffect(() => {
@@ -394,7 +396,7 @@ export function TaskDetailsPanel({
 
   const startEdit = () => {
     setPriority(task.priority);
-    setLabels(task.labels.join(", "));
+    setLabels(task.labels);
     setDue(task.dueDate ?? "");
     setOpen(true);
   };
@@ -425,27 +427,18 @@ export function TaskDetailsPanel({
               ))}
             </select>
           </label>
-          <label className="meta-field">
+          <div className="meta-field">
             <span className="meta-label">Labels</span>
-            <input
-              type="text"
-              name="labels"
-              value={labels}
-              onChange={(e) => setLabels(e.currentTarget.value)}
-              placeholder="comma separated"
-              aria-label="Labels, comma separated"
-            />
-          </label>
-          <label className="meta-field">
+            {/* Custom token input — a hidden field carries the value into the
+                fetcher.Form's serialization. */}
+            <input type="hidden" name="labels" value={labels.join(",")} />
+            <LabelInput value={labels} onChange={setLabels} />
+          </div>
+          <div className="meta-field">
             <span className="meta-label">Due date</span>
-            <input
-              type="date"
-              name="dueDate"
-              value={due}
-              onChange={(e) => setDue(e.currentTarget.value)}
-              aria-label="Due date"
-            />
-          </label>
+            <input type="hidden" name="dueDate" value={due} />
+            <DatePicker value={due || null} onChange={(v) => setDue(v ?? "")} />
+          </div>
           <div className="meta-edit-actions">
             <button
               type="submit"

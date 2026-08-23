@@ -1186,15 +1186,15 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     expect(staticSites).toEqual([]);
   });
 
-  it("holds the line at 22 sites", () => {
+  it("holds the line at 23 sites", () => {
     // A ceiling, not a target. It exists because the previous pass moved the
     // `<select>` half of this finding and left the inline-style half, and
     // nothing noticed the count climbing back for three passes. Raised 20 → 22
-    // for the two data-driven bar sizes on the Insights dashboard (a bar-fill
-    // width and a daily-column height, both a row's share of its max) — the
-    // sheet cannot know a runtime percentage, which is exactly the dynamic case
-    // this rule exempts.
-    expect(sites.length).toBeLessThanOrEqual(22);
+    // for the two data-driven bar sizes on the Insights dashboard, then 22 → 23
+    // for the date-picker calendar popover's `top/left/minWidth` — measured from
+    // the trigger's `getBoundingClientRect()`, the same sanctioned dynamic case
+    // StageMenu already uses. The sheet cannot know a runtime rect.
+    expect(sites.length).toBeLessThanOrEqual(23);
   });
 });
 
@@ -2200,6 +2200,7 @@ const UNFIXED_HIDDEN: Record<string, string> = {};
  *  that are already there. */
 const VIEWPORT_READS = {
   "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
+  "app/ui/date-picker.tsx": "clamps the calendar popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`, exactly as StageMenu does — it positions an already-open, already-rendered popover and no branch of the tree depends on the number.",
 } satisfies Record<string, string>;
 
 type Hidden = {
