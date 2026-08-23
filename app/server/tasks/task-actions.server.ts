@@ -3680,6 +3680,25 @@ export async function setOwner(
   const currentOwnerId = existing.parsed.frontmatter.ownerUserId;
 
   const isTake = input.targetUserId === actor.userId;
+  // A TAKEOVER of an OCCUPIED seat (claiming a task another member owns) evicts
+  // that member from the review/acceptance seat. Ownership carries the
+  // owner-exception (`requireAcceptCompletion` / `requireDecisionAuthority`), so
+  // a plain `own-task` holder who seized an owned task would gain acceptance and
+  // packet-resolution authority they do not otherwise hold — a real governance
+  // escalation. `releaseOwner` already gates evicting ANOTHER member behind
+  // `release-any-ownership` (admin); a takeover is the same displacement and
+  // takes the same grant. Claiming an OPEN seat, or re-taking your own (the
+  // idempotent case, handled below), stays `own-task` (contributor+).
+  if (
+    isTake &&
+    currentOwnerId &&
+    currentOwnerId !== actor.userId &&
+    !roleCan(actorRole, "release-any-ownership")
+  ) {
+    throw AppError.forbidden(
+      "This task already has an owner. Only a project admin can take over another member's ownership.",
+    );
+  }
   if (!isTake) {
     // Hand off: current owner, or the tier that may manage OTHERS' ownership
     // (`release-any-ownership` — admin today, single-sourced in ACTION_ROLES

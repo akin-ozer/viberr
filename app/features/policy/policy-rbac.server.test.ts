@@ -308,6 +308,10 @@ function matrixDrivers() {
     "own-task": [
       {
         label: "setOwner (take ownership)",
+        // Clear the seat before each role so every attempt is a take of an
+        // UNOWNED task (own-task) — not a take-OVER of the previous role's seat,
+        // which is now admin-only (the owner-exception escalation fix).
+        reset: () => resetTaskStage("impl"),
         run: async (actor) => {
           await setOwner(
             store.db,
