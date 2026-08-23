@@ -4,17 +4,11 @@ import type {
   DiagnosticRecord,
   TaskDetail,
 } from "~/server/projections/task-query.server";
-import {
-  coercePriority,
-  PRIORITY_VALUES,
-  type TaskPriority,
-  type TaskSchedule,
-} from "~/schemas/task-file.schema";
+import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
-import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { LocalDayDotTime } from "~/ui/local-time";
 import {
   ExecutionProfile,
@@ -92,7 +86,6 @@ export function TaskHero({
   task,
   stage,
   canEditGoal,
-  canEditMeta = false,
   archived = false,
   agentWorking = false,
   editGoalSignal = 0,
@@ -101,9 +94,6 @@ export function TaskHero({
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
   canEditGoal: boolean;
-  /** `edit-task-meta` — a contributor+ grooms priority, labels and due date.
-   *  Gates the metadata editor; display of the pills is unconditional. */
-  canEditMeta?: boolean;
   /** R14-3: archived tasks are off the board and out of the review queue —
    *  say so at the top, or the page reads like ordinary open work. */
   archived?: boolean;
@@ -219,9 +209,6 @@ export function TaskHero({
             withdrawn on every terminal task, not just archived ones — see the
             `terminal` note above. */}
         {!terminal && <ValidationPill value={task.validation} />}
-        <PriorityFlag priority={task.priority} />
-        <DueDatePill dueDate={task.dueDate} />
-        <LabelChips labels={task.labels} />
         <span className="hero-file">
           <Icon name="file" />
           <span>{task.filePath}</span>
@@ -294,105 +281,12 @@ export function TaskHero({
           )}
         </p>
       )}
-      {canEditMeta && !archived && <TaskMetaEditor task={task} />}
     </div>
   );
 }
 
-/** Inline editor for the lightweight planning metadata (priority, labels, due
- *  date). Gated by `edit-task-meta`; the pills in the hero-meta row above are the
- *  read view, so this renders only the Edit affordance and its form. Re-seeds
- *  from server truth on every open so a concurrent edit is never clobbered. */
-function TaskMetaEditor({ task }: { task: TaskDetail }) {
-  const csrf = useCsrfToken();
-  const fetcher = useFetcher<ActionResult>();
-  useActionFeedback(fetcher);
-  const [open, setOpen] = useState(false);
-  const [priority, setPriority] = useState<TaskPriority>(task.priority);
-  const [labels, setLabels] = useState(task.labels.join(", "));
-  const [due, setDue] = useState(task.dueDate ?? "");
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data?.ok) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    setOpen(false);
-  }, [fetcher.state, fetcher.data]);
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className="meta-edit-btn"
-        onClick={() => {
-          // Re-seed from the CURRENT task so a save never writes stale state
-          // over an edit made elsewhere since this page loaded (goal-editor rule).
-          setPriority(task.priority);
-          setLabels(task.labels.join(", "));
-          setDue(task.dueDate ?? "");
-          setOpen(true);
-        }}
-      >
-        <Icon name="sliders" />
-        Edit details
-      </button>
-    );
-  }
-
-  return (
-    <fetcher.Form method="post" className="meta-edit">
-      <input type="hidden" name="intent" value="set-task-metadata" />
-      <input type="hidden" name="_csrf" value={csrf} />
-      <label className="meta-field">
-        <span className="meta-label">Priority</span>
-        <select
-          name="priority"
-          value={priority}
-          onChange={(e) => setPriority(coercePriority(e.currentTarget.value) ?? "normal")}
-        >
-          {PRIORITY_VALUES.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="meta-field">
-        <span className="meta-label">Labels</span>
-        <input
-          type="text"
-          name="labels"
-          value={labels}
-          onChange={(e) => setLabels(e.currentTarget.value)}
-          placeholder="comma separated"
-          aria-label="Labels, comma separated"
-        />
-      </label>
-      <label className="meta-field">
-        <span className="meta-label">Due date</span>
-        <input
-          type="date"
-          name="dueDate"
-          value={due}
-          onChange={(e) => setDue(e.currentTarget.value)}
-          aria-label="Due date"
-        />
-      </label>
-      <div className="meta-edit-actions">
-        <button
-          type="submit"
-          className="btn primary"
-          disabled={fetcher.state !== "idle"}
-        >
-          Save details
-        </button>
-        <button type="button" className="btn" onClick={() => setOpen(false)}>
-          Cancel
-        </button>
-      </div>
-    </fetcher.Form>
-  );
-}
+/* Task metadata (priority/labels/due date) now lives in its own side panel —
+   TaskDetailsPanel in task-side-panels.tsx — beside Current state and Permissions. */
 
 /** O-3: pending scheduled operator re-runs + a form to schedule one. Scheduling
  *  and cancelling are `run-agents` (maintainer+); the server re-checks. Hidden

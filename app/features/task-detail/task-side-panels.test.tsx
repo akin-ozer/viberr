@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import { CurrentStatePanel } from "./task-side-panels";
+import { ToastProvider } from "~/ui/toast";
+import { CurrentStatePanel, TaskDetailsPanel } from "./task-side-panels";
 
 /**
  * Pass-19 gap 10 — the task page showed stage, readiness, validation, owner and
@@ -147,5 +148,57 @@ describe("gap-10: Current state shows when anything last happened", () => {
     expect(kv(moving.container, "Last activity")).toMatch(
       /ago|yesterday|just now/,
     );
+  });
+});
+
+function renderDetails(patch: Partial<TaskDetail>, canEdit: boolean) {
+  const task = detail(patch);
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => (
+        <ToastProvider>
+          <TaskDetailsPanel task={task} canEdit={canEdit} />
+        </ToastProvider>
+      ),
+      action: async () => ({ ok: true }),
+    },
+  ]);
+  return render(<Stub initialEntries={["/"]} />);
+}
+
+describe("TaskDetailsPanel", () => {
+  it("reads the metadata as kv rows, matching the side-panel style", () => {
+    const { container } = renderDetails(
+      { priority: "high", labels: ["qa", "codex"], dueDate: "2026-08-30" },
+      false,
+    );
+    // Panel head + the three rows.
+    expect(container.querySelector(".panel-head h2")?.textContent).toBe("Details");
+    expect(kv(container, "Priority")).toContain("high");
+    expect(kv(container, "Labels")).toContain("qa");
+    expect(kv(container, "Labels")).toContain("codex");
+    expect(kv(container, "Due date")).toContain("due Aug 30");
+  });
+
+  it("shows 'Normal / None / None' for a bare task", () => {
+    const { container } = renderDetails({}, false);
+    expect(kv(container, "Priority")).toContain("Normal");
+    expect(kv(container, "Labels")).toContain("None");
+    expect(kv(container, "Due date")).toContain("None");
+  });
+
+  it("offers the editor only to an editor, and opening it reveals the form", () => {
+    const viewer = renderDetails({}, false);
+    expect(viewer.queryByRole("button", { name: /Edit details/ })).toBeNull();
+    cleanup();
+
+    const editor = renderDetails({ priority: "high" }, true);
+    const edit = editor.getByRole("button", { name: /Edit details/ });
+    fireEvent.click(edit);
+    // The inline form appears with the three fields seeded from the task.
+    expect(editor.getByLabelText(/Labels, comma separated/)).toBeTruthy();
+    expect(editor.getByLabelText(/Due date/)).toBeTruthy();
+    expect(editor.getByRole("button", { name: "Save" })).toBeTruthy();
   });
 });

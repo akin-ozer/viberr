@@ -1100,11 +1100,18 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .meta-edit-btn:hover { border-color: var(--blue); }
 .meta-edit-btn .ico { width: 13px; height: 13px; }
 .meta-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem; margin-top: .5rem; max-width: 70ch; }
+/* The same editor as a side panel (Details): fields stack full-width. */
+.meta-edit-panel { display: flex; flex-direction: column; gap: .6rem; }
 .meta-field { display: flex; flex-direction: column; gap: .25rem; }
-.meta-label { font-size: .72rem; color: var(--faint); font-weight: 600; }
-.meta-edit .meta-field select, .meta-edit .meta-field input { font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .3rem .5rem; }
-.meta-edit .meta-field select:focus, .meta-edit .meta-field input:focus { outline: none; border-color: var(--blue); }
+.meta-label { font-size: .72rem; color: var(--muted); font-weight: 600; }
+.meta-edit .meta-field select, .meta-edit .meta-field input,
+.meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .3rem .5rem; }
+.meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { width: 100%; }
+.meta-edit .meta-field select:focus, .meta-edit .meta-field input:focus,
+.meta-edit-panel .meta-field select:focus, .meta-edit-panel .meta-field input:focus { outline: none; border-color: var(--blue); }
 .meta-edit-actions { display: flex; gap: .5rem; align-items: center; }
+/* The labels row in the Details panel wraps its chips. */
+.meta-chips { display: flex; flex-wrap: wrap; gap: .3rem; justify-content: flex-end; }
 
 .hero-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .hero-file {
