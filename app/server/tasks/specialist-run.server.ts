@@ -1155,10 +1155,10 @@ async function dispatchAgentRun(
     }
   }
 
-  // Resolve the CURRENT deployment before picking the backend: the run follows
-  // the live profile, not the engage-time snapshot in task.md, so switching a
-  // profile to the other backend takes effect on the very next run (manual,
-  // operator prompt or @mention) instead of pinning the task forever.
+  // Resolve the CURRENT deployment before picking the backend: absent a pin, the
+  // run follows the live profile, not the engage-time snapshot in task.md, so
+  // editing a profile's backend takes effect on the very next run (manual,
+  // operator prompt or @mention) instead of pinning the task by accident.
   let resolved: ResolvedSpecialist | null = null;
   try {
     resolved = resolveDeployedSpecialist(
@@ -1169,10 +1169,14 @@ async function dispatchAgentRun(
   } catch {
     // Profile may have been undeployed since engagement — snapshot fallback.
   }
-  // Backend: an explicit D4 retry override wins; then the live deployment;
-  // then the snapshot (undeployed profile).
+  // Backend priority: an explicit D4 retry override for THIS run wins; then a
+  // STUCK retry pin (F27-B1, owner ruling 2026-08-24 — a prior retry-on-other-
+  // backend switch that later prompts must keep following, OVER the live profile);
+  // then the live deployment; then the snapshot (undeployed profile). The pin is
+  // set only by a deliberate retry below, so a plain profile edit still wins here.
   const backend: RealBackend =
     input.backendOverride ??
+    engagement.pinnedBackend ??
     resolved?.backend ??
     (engagement.backend === "codex" ? "codex" : "claude");
   // Resolve the model + effort from the deployment (falls back to a sane
@@ -1774,13 +1778,20 @@ async function dispatchAgentRun(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
       // Keep the engage-time snapshot in step with the backend that actually
-      // ran (deployment edit or D4 retry): the exec-profile label stays honest
-      // and every later resolution (operator prompt, @mention) follows it.
+      // ran (deployment edit or D4 retry): the exec-profile label stays honest.
       const engaged = parsed.frontmatter.engagements.find(
         (r) => r.profileId === engagement.profileId,
       );
       if (engaged && engaged.backend !== backend) {
         engaged.backend = backend;
+      }
+      // F27-B1 (owner ruling 2026-08-24): a D4 retry-on-other-backend is a
+      // DELIBERATE switch that must STICK — pin it so later resolutions (operator
+      // prompt / @mention) follow it OVER the live profile primary. Only an
+      // explicit override sets the pin; a plain deployment-edit run leaves it be,
+      // so an admin's later profile-backend change still takes effect.
+      if (engaged && input.backendOverride) {
+        engaged.pinnedBackend = input.backendOverride;
       }
       parsed.timeline.unshift(
         agentEvent(

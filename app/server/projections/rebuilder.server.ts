@@ -294,10 +294,17 @@ function listTaskDirs(slug: string, dataRoot?: string): string[] {
  * is the dead end R14-2/P14-LV-06 exist to abolish.
  *
  * Mirrors `acceptanceRefusalReason` (task-actions.server.ts) in the same order,
- * and must move with it. Only two of its gates stay out: `archived` and the
- * STAGE boundary. Those really are per-reader state — every consumer filters
- * rows on `archived = 0` and on the resolved review stage before it ever looks
- * at this column.
+ * and must move with it. THREE of its gates stay out: `archived`, the STAGE
+ * boundary, and the no-change WORK refusal (R20-2/F20-6). The first two are
+ * per-reader state — every consumer filters rows on `archived = 0` and on the
+ * resolved review stage before it ever looks at this column. The third needs a
+ * LIVE async GitHub probe (`acceptanceNoChangeCheck`) this SYNCHRONOUS projection
+ * cannot run, so it is structurally absent — but it fails SAFE: for a has-work
+ * branch the accept action refuses with the probe's commit-count sentence while
+ * this column refuses with `verdictGateReason`'s generic "no PR" sentence (same
+ * disposition, different wording), and the empty-branch case is routed away by
+ * auto-detect before it reaches either gate. (F27-L1: this note previously read
+ * "Only two of its gates stay out", omitting the work refusal.)
  *
  * UX19-3: the OPEN BLOCKED PACKET and CONFLICTING PR gates used to be excluded
  * under that same "per-reader state" heading, and that was false — both are task

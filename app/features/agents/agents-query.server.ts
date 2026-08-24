@@ -30,6 +30,7 @@ import {
   UNIFIED_CAP_CATALOG,
 } from "~/shared/capabilities";
 import { humanGatesPreWorkAdvance } from "~/shared/workflow/stage-roles";
+import { specialistGrantModes } from "~/server/tasks/specialist-tool-policy";
 import { DEFAULT_PROFILE_ROLE_LABEL } from "./agent-types";
 import type { AgentProfileView, LibraryProfileView } from "./agent-types";
 
@@ -328,11 +329,24 @@ export function effectiveProfileView(
     }
     return [...deployment.capabilities, ...added];
   })();
+  // F27-L2: route the DISPLAY through the SAME grant inference the RUNTIME uses
+  // (`specialistGrantModes`) so a scoped-only delivery grant (create/commit/open-PR
+  // granted, headline `execute-code-or-write-repo` absent — reachable on a
+  // hand-edited or non-standard-save profile) materializes that headline as
+  // `direct` on the matrix, exactly as the run resolves it — instead of the matrix
+  // showing "Not granted" for repo-write the agent actually holds. It repairs only
+  // the ABSENT headline and respects an EXPLICIT `off` (unlike
+  // `normalizeDeliveryGrants`), so an admin's withholding still reads as off.
   const effectiveGrants = isSpecialist
-    ? deployment.capabilities.map((c) => ({
-        capabilityId: c.capabilityId,
-        mode: coerceSpecialistCapabilityMode(c.mode),
-      }))
+    ? [...specialistGrantModes(deployment.capabilities)].map(
+        ([capabilityId, mode]) => ({
+          capabilityId,
+          // SAFETY: specialistGrantModes' map values are this profile's stored
+          // grant modes plus the one inferred `direct` headline — each already a
+          // valid CapabilityMode. coerce then narrows any `recommend` down to `off`.
+          mode: coerceSpecialistCapabilityMode(mode as CapabilityMode),
+        }),
+      )
     : operatorGrants;
   // A1 (BUG-1 follow-on): the capability MATRIX, the read-only profile DETAIL and
   // the POLICY counts render ONLY persisted grants, so an ABSENT permissive-

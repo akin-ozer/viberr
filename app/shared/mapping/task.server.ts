@@ -97,6 +97,10 @@ export interface AgentRender {
   /** "Codex" | "Claude". */
   name: string;
   role: string;
+  /** F27-B1: a stuck retry pin. When set, `withLiveAgentBackends` does NOT
+   *  overlay the live profile backend — the run follows the pin, so the card
+   *  must too. */
+  pinnedBackend?: "codex" | "claude" | null;
 }
 
 /** Operator cell render (ruling 16: stage id stored). */
@@ -367,6 +371,7 @@ export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
     backend: ref.backend,
     name: agentBackendName(ref.backend),
     role: ref.role,
+    pinnedBackend: ref.pinnedBackend ?? null,
   };
 }
 
@@ -393,6 +398,9 @@ export function withLiveAgentBackends(
 ): TaskSummary {
   if (live.size === 0) return summary;
   const patch = (agent: AgentRender): AgentRender => {
+    // F27-B1: a STUCK retry pin wins over the live profile — the run resolves to
+    // it (specialist-run backend resolution), so the card must show it too.
+    if (agent.pinnedBackend) return agent;
     const backend = live.get(agent.profileId);
     if (!backend || backend === agent.backend) return agent;
     return { ...agent, backend, name: agentBackendName(backend) };

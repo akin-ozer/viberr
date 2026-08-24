@@ -3266,8 +3266,11 @@ export async function applyAgentCompletionEffects(
       });
     }
     // Backend-level failure (quota / auth / no credential): the packet's first
-    // recovery option is a one-click retry on the OTHER backend (D4) — the
-    // switch persists to the assignment, so later operator prompts follow it.
+    // recovery option is a one-click retry on the OTHER backend (D4). F27-B1
+    // (owner ruling 2026-08-24): the switch STICKS — the retry run sets a
+    // per-engagement `pinnedBackend`, and every later resolution (operator prompt,
+    // @mention) follows the pin over the live profile primary (specialist-run
+    // backend resolution: override ?? pinnedBackend ?? live deployment ?? snapshot).
     const backendFailure =
       failure?.kind === "quota" ||
       failure?.kind === "auth" ||
@@ -3281,7 +3284,7 @@ export async function applyAgentCompletionEffects(
             {
               kind: "retry_other_backend" as const,
               title: `Retry on ${altLabel}`,
-              detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks, and later prompts follow it.`,
+              detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks: later prompts on this task follow it.`,
               recommended: true,
               backend: altBackend,
               profileId: failedProfileId,
@@ -5892,8 +5895,9 @@ export async function resolvePacket(
     }
     case "retry_other_backend": {
       // Backend-failure recovery (D4): the run restarts below on the option's
-      // target backend; startSpecialistRun/startReviewerRun persist the switch
-      // to the assignment snapshot so later prompts follow it.
+      // target backend; startSpecialistRun/startReviewerRun set the engagement's
+      // `pinnedBackend` (F27-B1) so the switch STICKS — every later prompt on this
+      // task follows the pin over the live profile until another retry re-pins it.
       const targetLabel =
         (option.backend ?? "claude") === "claude" ? "Claude" : "Codex";
       event = {

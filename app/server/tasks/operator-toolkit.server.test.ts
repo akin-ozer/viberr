@@ -8,6 +8,7 @@ import {
   OPERATOR_TOOLKIT_INSTRUCTIONS,
 } from "./operator-toolkit.server";
 import type { OperatorAuthority } from "./operator-actions.server";
+import { operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -129,6 +130,104 @@ describe("buildOperatorToolkit — deliver_for_review (R15-2)", () => {
       authority: auth,
     });
     expect(toolkit.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
+  });
+});
+
+/**
+ * F27-O3 — the Claude live toolkit (this file) and the Codex plan-tool schema
+ * (`operatorPlanToolsFor`, operator-run.server) are two hand-maintained lists
+ * with no shared generator. They MUST expose the same governed-action vocabulary
+ * for the same authority, or an operator would silently be able to do different
+ * things on Codex than on Claude. This pins that parity: add a governed action
+ * to one list but not the other and this fails — the guard F21-3 already gives
+ * OPERATOR_READ_ONLY_DENIED_TOOLS via capability-denylist-markers.test.
+ */
+describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (F27-O3)", () => {
+  // get_task / read_default_branch_file are read-only Claude tools with no plan
+  // mirror (Codex gets that information embedded in its prompt). The two packet
+  // tools carry different display names either side; everything else matches.
+  const READ_ONLY = new Set(["get_task", "read_default_branch_file"]);
+  const RENAME = new Map([
+    ["open_decision_packet", "open_packet"],
+    ["resolve_decision_packet", "resolve_packet"],
+  ]);
+  const claudeGovernedTools = (allowedTools: string[]): Set<string> =>
+    new Set(
+      allowedTools
+        .filter((t) => t.startsWith("mcp__viberr__"))
+        .map((t) => t.slice("mcp__viberr__".length))
+        .filter((t) => !READ_ONLY.has(t))
+        .map((t) => RENAME.get(t) ?? t),
+    );
+
+  const withPolicy = (
+    policy: Record<string, "direct" | "recommend" | "off">,
+  ): OperatorAuthority => ({
+    ...authority([]),
+    policy: new Map(Object.entries(policy)),
+  });
+
+  const ALL_CAPS = [
+    "append-typed-events",
+    "generate-packets",
+    "assign-primary-specialist",
+    "summon-reviewers",
+    "stage-transitions",
+    "deliver-review-pr",
+    "update-task-branch",
+    "completion-for-acceptance",
+  ] as const;
+  const uniform = (mode: "direct" | "off") =>
+    Object.fromEntries(ALL_CAPS.map((c) => [c, mode]));
+
+  const build = (auth: OperatorAuthority) =>
+    buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: auth,
+    });
+
+  // For any policy that grants SOMETHING, the two toolkits expose exactly the
+  // same governed vocabulary. This is the drift guard.
+  it.each([
+    ["every governed capability granted", withPolicy(uniform("direct"))],
+    [
+      "a realistic supervised mix (transitions/acceptance recommend-only)",
+      withPolicy({
+        "append-typed-events": "direct",
+        "generate-packets": "direct",
+        "assign-primary-specialist": "direct",
+        "summon-reviewers": "direct",
+        "stage-transitions": "recommend",
+        "deliver-review-pr": "direct",
+        "update-task-branch": "direct",
+        "completion-for-acceptance": "recommend",
+      }),
+    ],
+  ])(
+    "the two toolkits expose the same governed actions — %s",
+    (_label, auth) => {
+      const claude = [...claudeGovernedTools(build(auth).allowedTools)].sort();
+      const plan = [...operatorPlanToolsFor(auth)].sort();
+      expect(claude).toEqual(plan);
+    },
+  );
+
+  // The one DELIBERATE divergence: with nothing granted, Claude builds an empty
+  // governed toolkit (fine — the model just has no governance tools), but a
+  // structured-output enum may not be empty, so the Codex plan schema falls back
+  // to the full in-Viberr set (never deliver/update — effects OUTSIDE Viberr)
+  // and every action the operator then proposes is refused visibly by
+  // narrateRefusedActions. Pins that this asymmetry stays the enum-only one.
+  it("nothing granted: Claude builds no governed tool; the Codex plan enum falls back and never advertises delivery", () => {
+    const auth = withPolicy(uniform("off"));
+    expect([...claudeGovernedTools(build(auth).allowedTools)]).toEqual([]);
+    const plan = operatorPlanToolsFor(auth);
+    expect(plan.length).toBeGreaterThan(0); // enum can't be empty
+    expect(plan).not.toContain("deliver_for_review");
+    expect(plan).not.toContain("update_branch_from_base");
   });
 });
 

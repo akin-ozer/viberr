@@ -116,7 +116,9 @@ const CAP_DENY_RULES: readonly {
  * image — permission appearing from something other than a grant — so the one
  * mode this layer never reinterprets is an explicit withholding.
  */
-function grantModes(grants: readonly CapabilityGrant[]): Map<string, string> {
+export function specialistGrantModes(
+  grants: readonly CapabilityGrant[],
+): Map<string, string> {
   const modes = new Map<string, string>(
     grants.map((g) => [g.capabilityId, g.mode]),
   );
@@ -145,7 +147,7 @@ function isWithheld(
 export function resolveSpecialistDisallowedTools(
   grants: readonly CapabilityGrant[],
 ): string[] {
-  const modeById = grantModes(grants);
+  const modeById = specialistGrantModes(grants);
   const denied = new Set<string>();
   for (const rule of CAP_DENY_RULES) {
     if (isWithheld(modeById, rule.capabilityId)) {
@@ -188,7 +190,7 @@ export interface DeliveryPermissions {
 export function resolveDeliveryPermissions(
   grants: readonly CapabilityGrant[],
 ): DeliveryPermissions {
-  const modeById = grantModes(grants);
+  const modeById = specialistGrantModes(grants);
   // The headline repo-write capability gates ALL delivery. The tool layer
   // already denies `git commit` when `execute-code-or-write-repo` is withheld
   // (CAP_DENY_RULES above) — but this prompt-side resolution used to consult

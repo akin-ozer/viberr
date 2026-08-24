@@ -374,6 +374,68 @@ describe("A1: read surfaces materialize an absent grant at its runtime mode", ()
  * non-resources field, present AND different from the template", which the last
  * three cases pin from both sides.
  */
+/**
+ * F27-L2 — the capability MATRIX must not lie about repo-write. A scoped-only
+ * delivery grant (create/commit/open-PR granted, the headline
+ * `execute-code-or-write-repo` ABSENT — reachable on a hand-edited or
+ * non-standard-save profile) has the RUNTIME infer repo-write (`specialistGrantModes`),
+ * but the display used to materialize the absent headline as "off"/"Not granted"
+ * — telling an admin the agent could not write while the run kept Edit/Write and
+ * `git push`. The display now routes through the same inference; these pin
+ * display == runtime, including that an EXPLICIT withholding still wins.
+ */
+describe("F27-L2: capability matrix agrees with the runtime on repo-write", () => {
+  const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
+
+  const headlineMode = (deployment: AgentDeployment, dataRoot: string) =>
+    effectiveProfileView(
+      deployment,
+      dataRoot,
+      absentDeliverReviewPrMode(false),
+    ).capabilities.find((c) => c.capabilityId === "execute-code-or-write-repo")
+      ?.mode;
+
+  it("a scoped-only delivery grant shows repo-write as granted, matching the run", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const scopedOnly: AgentDeployment = {
+      profileId: "developer",
+      capabilities: [
+        cap("create-task-branch", "direct"),
+        cap("commit-push-branch", "direct"),
+        cap("open-review-pr", "direct"),
+      ],
+      extras: [],
+    };
+    // Display: NOT "off"/"Not granted".
+    expect(headlineMode(scopedOnly, dataRoot)).toBe("direct");
+    // Runtime: the same grant set keeps repo-write — no Edit/Write deny.
+    const denied = resolveSpecialistDisallowedTools(scopedOnly.capabilities);
+    expect(denied).not.toContain("Edit");
+    expect(denied).not.toContain("Write");
+  });
+
+  it("an EXPLICIT withholding still reads off on the matrix and denies Edit at runtime", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const withheld: AgentDeployment = {
+      profileId: "developer",
+      capabilities: [
+        cap("commit-push-branch", "direct"),
+        cap("execute-code-or-write-repo", "off"),
+      ],
+      extras: [],
+    };
+    // A scoped grant must NOT overturn an admin's explicit "off" (the mirror-image
+    // polarity bug the runtime's specialistGrantModes deliberately refuses).
+    expect(headlineMode(withheld, dataRoot)).toBe("off");
+    expect(resolveSpecialistDisallowedTools(withheld.capabilities)).toContain(
+      "Edit",
+    );
+  });
+});
+
 describe("OBS-7: a project-forked global profile is labeled as customized", () => {
   const ctx = createTestDbContext();
   afterEach(ctx.cleanup);

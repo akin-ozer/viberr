@@ -813,6 +813,20 @@ describe("Codex structured operator completion", () => {
     expect(systemPrompt).toContain("No MCP servers are attached to you.");
     expect(systemPrompt).toContain("never repeat");
   });
+
+  // R26-1: the operator is told its get_task snapshot carries the task's human
+  // triage metadata as ADVISORY signals. Canary: drop the "Triage signals" push
+  // in buildOperatorSystemPrompt and this fails. Pairs with the operatorSnapshot
+  // metadata-propagation test in operator-actions.server.test.
+  it("R26-1: the system prompt carries the advisory Triage-signals note", async () => {
+    await start();
+    const systemPrompt = adapter.pending!.spec.systemPrompt ?? "";
+    expect(systemPrompt).toContain("# Triage signals (advisory)");
+    expect(systemPrompt).toContain("`priority`");
+    expect(systemPrompt).toContain("`dueDate`");
+    // Advisory, never a gate — the note must say so.
+    expect(systemPrompt).toContain("change no gate and grant no authority");
+  });
 });
 
 // ------------------------------------------- P13-RT-03: denials must be visible

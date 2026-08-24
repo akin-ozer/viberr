@@ -2638,6 +2638,46 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
   });
 
   /**
+   * R26-1 — the operator's snapshot carries the task's human triage metadata
+   * (priority · labels · dueDate) as advisory signals. Canary: drop any of the
+   * three from `operatorSnapshot`'s payload and this fails. Pairs with the
+   * "Triage signals (advisory)" prompt-note assertion in operator-run.server.test.
+   */
+  it("R26-1: carries the task's triage metadata (priority · labels · dueDate)", () => {
+    deployScopedRoster();
+    seedTask("impl");
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    const file = readTaskFile(ref)!;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...file.parsed.frontmatter,
+        priority: "urgent",
+        labels: ["security", "hotfix"],
+        dueDate: "2026-08-30",
+      },
+      goal: file.parsed.goal,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const snap = snapshot();
+    // The exact fields the get_task tool exposes to the operator, and that the
+    // "Triage signals (advisory)" prompt note points it at.
+    expect(snap.priority).toBe("urgent");
+    expect(snap.labels).toEqual(["security", "hotfix"]);
+    expect(snap.dueDate).toBe("2026-08-30");
+  });
+
+  /** The common task carries the defaults — the advisory signals stay quiet. */
+  it("R26-1: a plain task reports normal priority, no labels, no due date", () => {
+    deployScopedRoster();
+    seedTask("impl");
+    const snap = snapshot();
+    expect(snap.priority).toBe("normal");
+    expect(snap.labels).toEqual([]);
+    expect(snap.dueDate).toBeNull();
+  });
+
+  /**
    * F21-17 — the drift fact the PR-closed recovery packet was missing. The
    * operator was structurally blind to it: `pr` carried number/state/title only.
    */

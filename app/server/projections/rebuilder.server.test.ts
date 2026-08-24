@@ -858,6 +858,18 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     expect(task.blockReason).toBeNull();
   });
 
+  it("F27-L1: a PR-less delivered task is never projected acceptable — the safe fallback for the live no-change gate the sync projection can't run", () => {
+    const store = setupTestStore(ctx);
+    // acceptanceRefusalReason carries a no-change WORK gate (R20-2/F20-6) driven
+    // by a LIVE async GitHub probe this synchronous projection cannot run, so it
+    // is structurally absent from acceptanceBlockReason. It must fail SAFE: with
+    // the required reviewer approved AND the verdict healthy, the only thing left
+    // is the missing review PR — the column must still REFUSE (a lower gate) and
+    // never fabricate a ready acceptance the accept action would decline.
+    const task = seed(store, { pr: null, verdicts: [APPROVAL] });
+    expect(task.blockReason).not.toBeNull();
+  });
+
   it("a CONFLICTING PR blocks acceptance in the projected column (P14-LV-07)", () => {
     const store = setupTestStore(ctx);
     const task = seed(store, {

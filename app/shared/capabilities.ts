@@ -436,7 +436,7 @@ export interface CoupledGrants<G> {
  * who set "Execute code or write to the repo: Off" while leaving
  * `commit-push-branch: Allowed` had the withholding flipped to `direct` on the
  * next save — silently, with no audit row, and in the opposite direction from
- * the ENFORCEMENT layer (`grantModes`, specialist-tool-policy), which honors the
+ * the ENFORCEMENT layer (`specialistGrantModes`, specialist-tool-policy), which honors the
  * explicit `off`. Two layers disagreeing about the same stored grants is the
  * P14-LV-01 polarity bug in mirror image: permission appearing from something
  * other than a grant. An explicit `off` (like an explicit `human`) is now

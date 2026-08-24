@@ -165,6 +165,10 @@ const agentRefSchema = z
     profileId: z.string().min(1),
     backend: z.enum(["codex", "claude"]),
     role: z.string().min(1),
+    /** F27-B1: a STUCK retry backend pin, carried from the engagement so the
+     *  exec-profile display shows what a run will ACTUALLY use — the pinned
+     *  backend, not the live profile primary the display otherwise overlays. */
+    pinnedBackend: z.enum(["codex", "claude"]).nullable().optional(),
   })
   .loose();
 export type AgentRef = z.infer<typeof agentRefSchema>;
@@ -190,6 +194,15 @@ export const engagementSchema = z
      *  current work revision. A pure, file-local flag so the required-reviewer
      *  set needs no live profile lookup (mirrors role/backend/delivers). */
     verdictCapable: z.boolean().default(false),
+    /** F27-B1 (owner ruling 2026-08-24): a deliberate backend switch that STICKS.
+     *  A `retry_other_backend` recovery sets this to the target backend, and later
+     *  runs of THIS engagement resolve to it OVER the live profile's primary — so a
+     *  task the operator moved to Codex because Claude was quota-failing keeps using
+     *  Codex on the next operator prompt / @mention, instead of reverting to the
+     *  profile's Claude. Absent/null (the common case) leaves the "a run follows the
+     *  live profile" rule intact, so an ADMIN's profile-backend change still takes
+     *  effect on the next run — the retry pin and a profile edit stay distinct. */
+    pinnedBackend: z.enum(["codex", "claude"]).nullable().optional(),
   })
   .loose();
 export type Engagement = z.infer<typeof engagementSchema>;

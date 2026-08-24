@@ -400,6 +400,29 @@ describe("withLiveAgentBackends (live deployment wins over the engage-time snaps
     expect(out.reviewers[0]).toMatchObject({ backend: "claude", name: "Claude" });
   });
 
+  it("F27-B1: a PINNED engagement keeps its backend — a stuck retry pin wins over the live deployment", () => {
+    // The engagement was switched to Codex by a retry and PINNED there; the
+    // profile is now Claude. The run resolves to the pin, so the card must too:
+    // withLiveAgentBackends must NOT patch a pinned agent to the live Claude.
+    const pinned = summarize(
+      row({
+        specialist_json: JSON.stringify({
+          profileId: "developer",
+          backend: "codex",
+          role: "Implementation",
+          pinnedBackend: "codex",
+        }),
+        reviewers_json: JSON.stringify([]),
+      }),
+      false,
+    );
+    const live = new Map<string, "codex" | "claude">([["developer", "claude"]]);
+    expect(withLiveAgentBackends(pinned, live).specialist).toMatchObject({
+      backend: "codex",
+      name: "Codex",
+    });
+  });
+
   it("a profile absent from the map (undeployed since engagement) keeps its snapshot", () => {
     const out = withLiveAgentBackends(
       base(),

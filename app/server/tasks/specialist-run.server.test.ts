@@ -594,29 +594,39 @@ describe("startSpecialistRun", () => {
     expect(file.parsed.timeline[0]!.text).toContain("switched from Claude");
   });
 
-  it("persists a D4 backendOverride to the snapshot so later prompts follow it", async () => {
-    await assign(); // snapshot: claude
-    const result = await startAgentRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "codex" },
-      actor(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    expect(result.backend).toBe("codex");
-
+  it("F27-B1: a D4 backendOverride pins the engagement so the switch STICKS on later runs", async () => {
+    await assign(); // deployed profile + engagement snapshot: claude
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
-      actor(store.users.arda),
-    );
+    const runOnce = async (over?: "codex" | "claude") => {
+      const r = await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: over },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      interruptRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: r.runId },
+        actor(store.users.arda),
+      );
+      return r;
+    };
+    const read = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
 
-    const file = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      dataRoot: store.dataRoot,
-    })!;
-    expect(deliveringEngagement(file.parsed.frontmatter)?.backend).toBe("codex");
+    // The retry runs on Codex and PINS the engagement to it.
+    const retry = await runOnce("codex");
+    expect(retry.backend).toBe("codex");
+    const afterRetry = deliveringEngagement(read());
+    expect(afterRetry?.backend).toBe("codex");
+    expect(afterRetry?.pinnedBackend).toBe("codex");
+
+    // The next run carries NO override — the profile is still Claude, but the pin
+    // wins, so the switch STICKS (owner ruling 2026-08-24). Before the pin this
+    // reverted to the live profile's Claude.
+    const later = await runOnce();
+    expect(later.backend).toBe("codex");
   });
 
   it("denies reviewer + viewer (admin|maintainer only)", async () => {

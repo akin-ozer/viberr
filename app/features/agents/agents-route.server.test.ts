@@ -520,7 +520,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
    * B-AG1: save-time normalization used to rewrite an EXPLICIT headline `off`
    * to `direct` whenever any scoped delivery grant was actionable — silently,
    * with no audit row, and in the opposite direction from the enforcement layer
-   * (`grantModes`), which honors the `off`. An admin who deliberately withheld
+   * (`specialistGrantModes`), which honors the `off`. An admin who deliberately withheld
    * repo writes got them back on the next save.
    */
   it("an EXPLICIT headline `off` survives the save, and the contradiction is recorded (B-AG1)", async () => {
