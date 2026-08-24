@@ -2678,6 +2678,48 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
   });
 
   /**
+   * F27-O5 — the operator gets the DERIVED review outcome and each reviewer's
+   * own verdict explicitly, so it need not reconstruct review state from the
+   * timeline window. Canary: drop `validation`/reviewer `verdict` and this fails.
+   */
+  it("F27-O5: carries the derived validation state + each reviewer's verdict", () => {
+    deployScopedRoster();
+    seedTask("review");
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    const file = readTaskFile(ref)!;
+    const rev = {
+      id: "rev_o5",
+      headSha: "a".repeat(40),
+      treeSha: "b".repeat(40),
+      branch: "vib-1",
+      createdAt: "2026-08-24T00:00:00.000Z",
+      sourceProfileId: "developer",
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...file.parsed.frontmatter,
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ],
+        workRevision: rev,
+        verdicts: [
+          { profileId: "reviewer", revisionId: rev.id, headSha: rev.headSha, result: "approve", reason: "ok", at: "2026-08-24T01:00:00.000Z" },
+        ],
+      },
+      goal: file.parsed.goal,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const snap = snapshot();
+    // The one required reviewer approved the current revision -> healthy.
+    expect(snap.validation).toBe("healthy");
+    expect(snap.reviewers.find((r) => r.profileId === "reviewer")?.verdict).toBe(
+      "approve",
+    );
+  });
+
+  /**
    * F21-17 — the drift fact the PR-closed recovery packet was missing. The
    * operator was structurally blind to it: `pr` carried number/state/title only.
    */

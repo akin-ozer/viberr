@@ -2020,6 +2020,36 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(none).not.toContain("MCP tools are governed too");
   });
 
+  it("F27-P2: a Codex run discloses that an MCP server's stored credential was NOT forwarded", () => {
+    const dataRoot = tempRoot();
+    const codex = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["github-mcp"],
+      backend: "codex",
+      dataRoot,
+    });
+    expect(codex).toContain("MCP credentials on this Codex run");
+    expect(codex).toContain("UNAUTHENTICATED");
+    // A Claude run keeps the credential — no such note.
+    const claude = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["github-mcp"],
+      backend: "claude",
+      dataRoot,
+    });
+    expect(claude).not.toContain("MCP credentials on this Codex run");
+    // No MCP servers → no note even on Codex.
+    const noMcp = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      backend: "codex",
+      dataRoot,
+    });
+    expect(noMcp).not.toContain("MCP credentials on this Codex run");
+  });
+
   it("mounts ONLY the declared skills — an ungranted skill sitting in the same store never reaches the run", () => {
     // UC-23's NEGATIVE half. The positive ("a granted skill changed behavior")
     // was proven live via the conventional-commits commit message; the negative

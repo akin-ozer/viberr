@@ -8,7 +8,9 @@ import type {
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import { effectiveCollabMode } from "./agent-outcome.server";
 import {
+  currentVerdicts,
   deliveringEngagement,
+  deriveValidation,
   supportingEngagements,
   type Engagement,
   type PacketOption,
@@ -1210,9 +1212,24 @@ export interface OperatorTaskSnapshot {
   stageName: string;
   readiness: string;
   waiting: string;
+  /** F27-O5: the DERIVED review outcome on the current revision — `healthy`
+   *  (every required reviewer approved), `failing` (a required reviewer requested
+   *  changes), `changed` (a revision under review, verdicts pending), or `none`
+   *  (nothing delivered). The operator used to infer this from the timeline
+   *  window alone; naming it here makes review state explicit and robust to a
+   *  long/noisy timeline. Advisory context, not authority — acceptance is still
+   *  gated server-side. */
+  validation: string;
   owner: string | null;
   specialist: { profileId: string; role: string; backend: string } | null;
-  reviewers: { profileId: string; role: string; backend: string }[];
+  /** `verdict` is each reviewer's OWN verdict on the current revision (F27-O5):
+   *  `approve` | `request_changes`, or `null` when it has not weighed in yet. */
+  reviewers: {
+    profileId: string;
+    role: string;
+    backend: string;
+    verdict: "approve" | "request_changes" | null;
+  }[];
   /** Stages the task may move to next (declared workflow boundaries). */
   nextStages: { id: string; name: string; boundary: string }[];
   /** All stage ids in workflow order (first → done). Lets a coordinator tell a
@@ -1548,6 +1565,9 @@ export function operatorSnapshot(
     stageName: stageName(fm.stage),
     readiness: fm.readiness,
     waiting: fm.waiting,
+    // F27-O5: the explicit derived review outcome, so review state does not have
+    // to be reconstructed from the timeline window alone.
+    validation: deriveValidation(fm),
     owner: ownerName,
     specialist: (() => {
       const delivering = deliveringEngagement(fm);
@@ -1559,11 +1579,21 @@ export function operatorSnapshot(
           }
         : null;
     })(),
-    reviewers: supportingEngagements(fm).map((r) => ({
-      profileId: r.profileId,
-      role: r.role,
-      backend: r.backend,
-    })),
+    reviewers: (() => {
+      const cur = currentVerdicts(fm);
+      const verdictOf = (
+        profileId: string,
+      ): "approve" | "request_changes" | null => {
+        const r = cur.find((v) => v.profileId === profileId)?.result;
+        return r === "approve" || r === "request_changes" ? r : null;
+      };
+      return supportingEngagements(fm).map((r) => ({
+        profileId: r.profileId,
+        role: r.role,
+        backend: r.backend,
+        verdict: verdictOf(r.profileId),
+      }));
+    })(),
     nextStages,
     stageIds: stages.map((s) => s.id),
     doneStageId,

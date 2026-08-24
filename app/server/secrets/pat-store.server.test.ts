@@ -27,6 +27,7 @@ import {
   getPatToken,
   getProjectCredential,
   getProjectCredentialHealth,
+  markWriteScopeProven,
   recordPatValidation,
   setProjectCredential,
 } from "./pat-store.server";
@@ -111,6 +112,45 @@ describe("pat-store", () => {
     expect(reloaded?.lastValidatedAt).toBe("2026-07-05T10:00:00.000Z");
     expect(reloaded?.validation?.status).toBe("valid");
     expect(reloaded?.validation?.login).toBe("viberr-bot");
+  });
+
+  it("F27-U2: a real write proves pull_request:write on the bound credential", () => {
+    const store = setupTestStore(ctx);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: TOKEN },
+      ACTOR,
+    );
+    // The honest "verified on first use" state: a fine-grained token whose
+    // pull_request:write was ASSUMED (never write-probed).
+    recordPatValidation(store.db, pat.id, {
+      status: "valid",
+      checkedAt: "2026-08-24T00:00:00.000Z",
+      login: "viberr-bot",
+      tokenKind: "fine_grained",
+      expiresAt: null,
+      repo: "akin-ozer/viberr",
+      scopes: [
+        { id: "repo", ok: true, source: "probe" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ],
+      missingScopes: [],
+      detail: "Authenticated as viberr-bot.",
+    });
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
+
+    const scopeOf = () =>
+      getProjectCredential(store.db, store.slug)!.validation!.scopes.find(
+        (s) => s.id === "pull_request:write",
+      );
+    expect(scopeOf()).toMatchObject({ source: "assumed" });
+
+    // A real PR opened → the write proves the scope; the cached chip flips.
+    markWriteScopeProven(store.db, store.slug);
+    expect(scopeOf()).toMatchObject({ ok: true, source: "probe" });
+
+    // No-op when nothing is bound (must never throw).
+    markWriteScopeProven(store.db, "no-such-project");
   });
 
   it("binds one credential per project; delete cascades the binding", () => {

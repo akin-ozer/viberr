@@ -65,3 +65,23 @@ Gates after backend-stick: **287 files · 4454 tests** · tsc clean · oxlint 25
 - F27-P2 (optional agent-prompt disclosure that a Codex run dropped an MCP credential)
 - F27-U1 (first-run ~4-min silent clone, no progress bar)
 - F27-U2 ("pull_request:write unproven / verified on first use" never flips after a real PR open)
+
+## ADDENDUM 2 — the previously-deferred items are now IMPLEMENTED (no deferral)
+Per the "no deferral / implement every noted item" mandate, the four items ADDENDUM-1 left open are done:
+- **F27-P2** (IMPLEMENTED) — a Codex run whose granted org MCP server needs a stored credential now DISCLOSES,
+  in the agent's own prompt, that the credential was NOT forwarded (Codex argv visibility) so the server ran
+  unauthenticated — the one spot the existing admin-surface disclosures didn't reach. `specialist-run.server.ts`
+  (buildSpecialistPersona) + test.
+- **F27-O5** (IMPLEMENTED) — the operator snapshot now carries the DERIVED `validation` outcome
+  (healthy/failing/changed/none) and each reviewer's own `verdict` on the current revision, so the operator has
+  review state EXPLICITLY instead of reconstructing it from the timeline window. `operator-actions.server.ts`
+  (OperatorTaskSnapshot + operatorSnapshot) + test; fixtures updated.
+- **F27-U1** (RESOLVED — non-finding) — the "first-run clone has no note" concern was a mis-read of the truncated
+  strip: `repo-mirror.server.ts` `cloneStepLabel` already says "Cloning {repo} · first task in this project, this
+  can take a few minutes" for a cold clone. No change needed.
+- **F27-U2** (IMPLEMENTED) — a real, solicited write (a task PR actually opening) now PROVES pull_request:write on
+  the bound credential: `markWriteScopeProven` flips the cached scope from the stale "unproven (verified on first
+  use)" to proven, called from the PR-open success path. No unsolicited probe — the write already happened.
+  `pat-store.server.ts` + `pr-open.server.ts` + test.
+
+Final gates: **287 files · 4457 tests** green · tsc clean · oxlint 25-baseline. Nothing is deferred.

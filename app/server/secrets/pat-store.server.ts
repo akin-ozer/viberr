@@ -252,6 +252,33 @@ export function recordPatValidation(
   ).run(JSON.stringify(validation), validation.checkedAt, patId);
 }
 
+/**
+ * F27-U2: a real, SOLICITED write to GitHub (a task's PR actually opened or
+ * merged) genuinely proves `pull_request:write` on the project's bound
+ * credential — so flip its cached scope from the honest-but-stale "unproven
+ * (verified on first use)" to `probe` (proven). Validation deliberately never
+ * fires an UNSOLICITED write to prove this scope (that is the opt-in
+ * `VIBERR_GITHUB_WRITE_PROBE`); this costs nothing extra because the write the
+ * task needed already happened. No-op when nothing is bound, no validation is
+ * cached, or the scope already reads proven.
+ */
+export function markWriteScopeProven(
+  db: DatabaseSync,
+  projectSlug: string,
+): void {
+  const pat = getProjectCredential(db, projectSlug);
+  const validation = pat?.validation ?? null;
+  if (!pat || !validation) return;
+  const scope = validation.scopes.find((s) => s.id === "pull_request:write");
+  if (!scope || (scope.ok && scope.source === "probe")) return;
+  recordPatValidation(db, pat.id, {
+    ...validation,
+    scopes: validation.scopes.map((s) =>
+      s.id === "pull_request:write" ? { ...s, ok: true, source: "probe" } : s,
+    ),
+  });
+}
+
 // --------------------------------------------- project credential binding
 
 export function setProjectCredential(

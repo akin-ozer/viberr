@@ -22,6 +22,7 @@ const SNAPSHOT: OperatorTaskSnapshot = {
   stageName: "In Progress",
   readiness: "ready",
   waiting: "none",
+  validation: "changed",
   owner: null,
   specialist: null,
   reviewers: [],

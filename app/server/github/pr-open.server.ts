@@ -7,6 +7,7 @@ import {
 } from "~/schemas/task-file.schema";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
 import {
   appendTimelineEvent,
   patchTaskFrontmatter,
@@ -514,6 +515,10 @@ export async function openTaskPr(
 
   if (created.ok) {
     await writePrToTask(db, ref, input, gh, created.data, actor, true, ctx, fm.pr);
+    // F27-U2: a fresh PR just opened — a real, solicited write that PROVES
+    // `pull_request:write` on the bound credential, so its cached scope stops
+    // reading "unproven (verified on first use)" after the first actual use.
+    markWriteScopeProven(db, input.projectSlug);
     return {
       status: "ok",
       prNumber: created.data.number,

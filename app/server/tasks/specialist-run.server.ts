@@ -2085,6 +2085,21 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
         "policy withholds. Viberr owns delivery and merging — if a tool would " +
         "do one of those, stop and report instead.",
     );
+    // F27-P2: an org MCP server's stored credential is honored on CLAUDE runs
+    // but NEVER forwarded to a Codex process (it would be visible in the process
+    // arguments — specialist-mcp BACKEND SCOPE / F7-MCP1). Admin surfaces disclose
+    // this, but the AGENT was told nothing — so a server that tolerates anonymous
+    // access degraded silently. State it where the agent reads, on Codex runs.
+    if (input.backend === "codex") {
+      parts.push(
+        "\n\n---\n# MCP credentials on this Codex run\n\n" +
+          "A stored credential for an attached org MCP server is NOT forwarded to " +
+          "a Codex process, so a server that normally authenticates is reached " +
+          "UNAUTHENTICATED here. If a tool returns an auth error, or fewer results " +
+          "than you expected, say so in your report rather than treating it as your " +
+          "own error — the same server would authenticate on a Claude run.",
+      );
+    }
   }
   // P14-LV-09: a granted MCP server that resolves to nothing used to be
   // announced in the prompt and mounted nowhere — silent capability loss the
