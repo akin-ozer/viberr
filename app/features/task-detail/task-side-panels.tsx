@@ -497,12 +497,19 @@ export function TaskDetailsPanel({
               </span>
             </div>
           </div>
-          {canEdit && (
-            <button type="button" className="meta-edit-btn" onClick={startEdit}>
-              <Icon name="sliders" />
-              Edit details
-            </button>
-          )}
+          {/* F26-13: an archived task's planning metadata is frozen (the server
+              refuses the write too) — restore it first. */}
+          {canEdit &&
+            (task.archived ? (
+              <p className="meta-archived-note">
+                Archived. Restore this task to edit its details.
+              </p>
+            ) : (
+              <button type="button" className="meta-edit-btn" onClick={startEdit}>
+                <Icon name="sliders" />
+                Edit details
+              </button>
+            ))}
         </>
       )}
     </div>

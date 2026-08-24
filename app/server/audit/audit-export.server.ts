@@ -10,7 +10,9 @@ import { z } from "zod";
  */
 
 /** Hard ceiling on rows per export — a guard so a single download can't try to
- *  materialize an unbounded table into one string. The UI states the cap. */
+ *  materialize an unbounded table into one string. F26-9: the Audit-log panel copy
+ *  (org-settings-page.tsx) discloses this cap AND the 90-day retention window, so
+ *  "the full log" is never claimed where both silently bound it. */
 export const AUDIT_EXPORT_MAX_ROWS = 100_000;
 
 export interface AuditExportFilters {
@@ -134,13 +136,18 @@ function cellFor(row: AuditExportRow, column: (typeof COLUMNS)[number]): string 
   return value ?? "";
 }
 
-/** RFC 4180 escaping: a field with a comma, quote, CR or LF is wrapped in double
- *  quotes and its own quotes doubled. */
+/** RFC 4180 escaping (comma / quote / CR / LF → wrapped + quotes doubled), with
+ *  F26-10 formula-injection neutralization first: a cell beginning with `= + - @`
+ *  (or a leading tab/CR) is a live formula in Excel/Sheets on open, so prefix a
+ *  single quote to force it to render literally. This matters because `actorLabel`
+ *  is a user-supplied email and the email validator permits a leading `+`/`-`, so
+ *  a crafted signup could land a formula in an admin's spreadsheet. */
 function csvField(value: string): string {
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
+  const neutralized = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  if (/[",\r\n]/.test(neutralized)) {
+    return `"${neutralized.replace(/"/g, '""')}"`;
   }
-  return value;
+  return neutralized;
 }
 
 /** Serialize rows to CSV with a header line and CRLF terminators (RFC 4180). */

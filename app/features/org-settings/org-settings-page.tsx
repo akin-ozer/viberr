@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import type { OrgSettingsView } from "~/server/org/org-view.server";
 import type { S3AuditConfigView } from "~/server/audit/s3-config.server";
+import type { AuditBrowseRow } from "~/server/audit/audit-browse.server";
+import { LocalDayDotTime } from "~/ui/local-time";
 import { countLabel } from "~/shared/text/plural";
 import { Icon, type IconName } from "~/ui/icon";
 import { ConnectionsPanel } from "./connections-panel";
@@ -50,6 +52,7 @@ export function OrgSettingsPage({
   callbackOrigin,
   runConcurrency,
   s3Audit,
+  auditEvents,
 }: {
   view: OrgSettingsView;
   meId: string;
@@ -58,6 +61,8 @@ export function OrgSettingsPage({
   runConcurrency: RunConcurrencyView;
   /** The S3 audit-export target (null when none is configured). */
   s3Audit: S3AuditConfigView | null;
+  /** PG26-A: recent audit events for the in-app browse panel. */
+  auditEvents: AuditBrowseRow[];
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -161,7 +166,7 @@ export function OrgSettingsPage({
         </div>
       </div>
       <RunConcurrencyControl runConcurrency={runConcurrency} />
-      <AuditExportCard s3Audit={s3Audit} />
+      <AuditExportCard s3Audit={s3Audit} events={auditEvents} />
       <StorageLine storage={view.storage} />
     </main>
   );
@@ -173,7 +178,89 @@ export function OrgSettingsPage({
  * is write-only here — stored sealed, never rendered — so the field shows a
  * "leave blank to keep" placeholder once one is on file.
  */
-function AuditExportCard({ s3Audit }: { s3Audit: S3AuditConfigView | null }) {
+/**
+ * PG26-A — the in-app audit browse. Recent events, newest first, with a text
+ * filter and an "Org-scoped" toggle that isolates the class this feature exists
+ * for: `project_slug`-less events (sign-ins, PAT changes, user admin) that the
+ * project Activity page can't show. Filtering is client-side over the ~150 rows
+ * the loader already fetched — the export is the path to the full record.
+ */
+function AuditBrowse({ events }: { events: AuditBrowseRow[] }) {
+  const [q, setQ] = useState("");
+  const [orgOnly, setOrgOnly] = useState(false);
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return events.filter((e) => {
+      if (orgOnly && e.projectSlug) return false;
+      if (!needle) return true;
+      return [e.action, e.actorLabel, e.subjectId ?? "", e.projectSlug ?? ""].some(
+        (v) => v.toLowerCase().includes(needle),
+      );
+    });
+  }, [events, q, orgOnly]);
+  return (
+    <div className="audit-browse">
+      <div className="audit-browse-bar">
+        <label className="board-filter-input">
+          <Icon name="filter" />
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.currentTarget.value)}
+            placeholder="Filter recent events…"
+            aria-label="Filter audit events"
+          />
+        </label>
+        <button
+          type="button"
+          className={"fchip" + (orgOnly ? " on" : "")}
+          aria-pressed={orgOnly}
+          onClick={() => setOrgOnly((v) => !v)}
+          title="Show only org / instance-scoped events (sign-ins, PAT changes, user administration). These are the events the project Activity page cannot show."
+        >
+          Org-scoped
+        </button>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="fine">
+          {events.length === 0
+            ? "No audit events recorded yet."
+            : "No events match this filter."}
+        </p>
+      ) : (
+        <ul className="audit-list">
+          {filtered.map((e) => (
+            <li key={e.id} className="audit-row">
+              <span className="audit-when">
+                <LocalDayDotTime iso={e.occurredAt} />
+              </span>
+              <span className="audit-actor">{e.actorLabel}</span>
+              <span className="audit-action">{e.action}</span>
+              <span className="audit-scope">
+                <span className={e.projectSlug ? "audit-scope-tag" : "audit-scope-tag org"}>
+                  {e.projectSlug ?? "org"}
+                </span>
+                {e.subjectId ? <span className="audit-subject">{e.subjectId}</span> : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="fine audit-browse-foot">
+        Showing {filtered.length} of {events.length} most-recent events. Download or
+        push to S3 for the full log.
+      </p>
+    </div>
+  );
+}
+
+function AuditExportCard({
+  s3Audit,
+  events,
+}: {
+  s3Audit: S3AuditConfigView | null;
+  events: AuditBrowseRow[];
+}) {
   const { submit, busy } = useOrgAction();
   const [bucket, setBucket] = useState(s3Audit?.bucket ?? "");
   const [region, setRegion] = useState(s3Audit?.region ?? "");
@@ -191,9 +278,18 @@ function AuditExportCard({ s3Audit }: { s3Audit: S3AuditConfigView | null }) {
         <h2>Audit log</h2>
       </div>
       <p className="fine">
-        Download the full audit log, or push it to an S3 bucket. Exports carry
-        every recorded fact (actor, action, subject, details).
+        {/* F26-9: state the two real bounds instead of claiming "the full log" —
+            events past the 90-day retention sweep are gone (AUDIT_RETENTION_DAYS),
+            and one export carries at most 100,000 rows (AUDIT_EXPORT_MAX_ROWS). */}
+        Download the audit log, or push it to an S3 bucket. An export carries every
+        recorded field (actor, action, subject, details) for the events still on
+        file: the most recent 100,000 rows, within the 90-day retention window. For
+        a longer record, export on a schedule.
       </p>
+      {/* PG26-A: browse the recent log in-app. Org/instance-scoped events
+          (sign-ins, PAT changes, user admin) have no other in-app view — the
+          project Activity page is project-scoped. */}
+      <AuditBrowse events={events} />
       <div className="audit-dl">
         {/* A real file response (Content-Disposition) — the browser saves it. */}
         <a className="btn sm" href="/org/settings/audit-export?format=csv">

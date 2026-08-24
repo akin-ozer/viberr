@@ -1322,6 +1322,12 @@ export function AgentsPage({
   const counts = useMemo(() => {
     const sets = new Map<string, Set<string>>();
     for (const d of deployments) {
+      // F26-2: the sidebar's "working" pulse is a claim about LIVE runs, not
+      // engagements — count only tasks with an actual running row (`d.running`),
+      // exactly like the profile hero does (1cd86c8). Without this, a profile
+      // assigned to N tasks it is executing nothing on pulsed "working · N" here
+      // while the hero on the same page said "idle · engaged on N".
+      if (!d.running) continue;
       let keys = sets.get(d.profileId);
       if (!keys) {
         keys = new Set();

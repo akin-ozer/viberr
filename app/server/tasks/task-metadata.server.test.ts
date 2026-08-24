@@ -79,6 +79,30 @@ describe("setTaskMetadata", () => {
     expect(readFm(store).urgent).toBe(false);
   });
 
+  // F26-13: an archived task's planning metadata is frozen (the Details editor is
+  // hidden on the client too, but the server is the belt that must fail closed).
+  it("refuses to edit an archived task's metadata", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        archived: true,
+        priority: "high",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await expect(
+      setTaskMetadata(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", priority: "urgent" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/archived/i);
+    // Nothing was written — the frozen value stands.
+    expect(readFm(store).priority).toBe("high");
+  });
+
   it("normalizes labels: trims, drops empties, dedupes case-insensitively, caps", async () => {
     const store = prepared();
     await setTaskMetadata(
@@ -275,6 +299,23 @@ describe("createTask metadata", () => {
     const fm = readFm(store, key);
     expect(fm.priority).toBe("urgent");
     expect(fm.urgent).toBe(true);
+  });
+
+  // F26-16: `urgent` is derived PURELY from priority — there is no separate
+  // `urgent` input that could desync from the graded scale.
+  it("leaves urgent off for any non-urgent priority", async () => {
+    const store = prepared();
+    for (const priority of ["low", "normal", "high"] as const) {
+      const { key } = await createTask(
+        store.db,
+        { projectSlug: store.slug, title: `A ${priority} task`, priority },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const fm = readFm(store, key);
+      expect(fm.priority).toBe(priority);
+      expect(fm.urgent).toBe(false);
+    }
   });
 
   it("normalizes create-time labels and validates a create-time due date", async () => {

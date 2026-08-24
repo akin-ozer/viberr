@@ -55,6 +55,9 @@ type TaskRow = {
   title: string;
   stage: string;
   branch: string | null;
+  /** F26-12: the task's labels as the stored JSON array string — searched via a
+   *  substring LIKE so typing a label finds the task. */
+  labels_json: string;
   /** 0/1 — see `archivedSub` below. */
   archived: number;
 };
@@ -125,17 +128,21 @@ export function searchWorkspace(
   const placeholders = projects.map(() => "?").join(", ");
   const term = likeTerm(q);
   const prefix = likePrefix(q);
-  // SAFETY: TaskRow names exactly the six columns this SELECT lists, in the
+  // SAFETY: TaskRow names exactly the seven columns this SELECT lists, in the
   // types 0001_baseline declares for `task_projections` — `branch` is the one
-  // nullable column and `archived` its 0/1 INTEGER.
+  // nullable column, `archived` its 0/1 INTEGER, and `labels_json` a NOT NULL
+  // JSON-array string.
   const rows = db
     .prepare(
-      `SELECT project_slug, task_key, title, stage, branch, archived
+      `SELECT project_slug, task_key, title, stage, branch, labels_json, archived
          FROM task_projections
         WHERE project_slug IN (${placeholders})
-          AND ( LOWER(task_key) LIKE ? ESCAPE '\\'
-             OR LOWER(title)    LIKE ? ESCAPE '\\'
-             OR LOWER(branch)   LIKE ? ESCAPE '\\' )
+          AND ( LOWER(task_key)    LIKE ? ESCAPE '\\'
+             OR LOWER(title)       LIKE ? ESCAPE '\\'
+             OR LOWER(branch)      LIKE ? ESCAPE '\\'
+             -- F26-12: match a triage label (the value is a JSON array string, so
+             -- a substring LIKE finds the label inside it).
+             OR LOWER(labels_json) LIKE ? ESCAPE '\\' )
         -- F20-28: a viewer who types a FULL task key almost always wants THAT
         -- task, not a newer one whose title merely mentions the key (e.g.
         -- "VIB-1" also matches VIB-2's title "…verify the merged VIB-1 marker").
@@ -153,9 +160,10 @@ export function searchWorkspace(
     )
     .all(
       ...projects.map((p) => p.slug),
-      term,
-      term,
-      term,
+      term, // task_key
+      term, // title
+      term, // branch
+      term, // labels_json (F26-12)
       q,
       prefix,
     ) as TaskRow[];

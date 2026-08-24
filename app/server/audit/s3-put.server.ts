@@ -69,6 +69,29 @@ export function canonicalKeyPath(key: string): string {
   );
 }
 
+/**
+ * F26-7: the canonical URI for a request, folding in any BASE PATH the endpoint
+ * carries.
+ *
+ * A path-style S3-compatible endpoint (MinIO/Ceph default, `https://host:9000/
+ * bucket`) puts the bucket — or any base prefix — in the endpoint's path. That
+ * path rides into the real request URL (`origin + key`), so the SIGNED canonical
+ * URI must include it too, or every push fails `SignatureDoesNotMatch` (the
+ * server signs `/bucket/key`, we signed `/key`). The default AWS virtual-hosted
+ * endpoint has an empty path, so this is a no-op there.
+ *
+ * `basePath` comes off `URL.pathname` (already percent-encoded), so its segments
+ * are DECODED before re-encoding, exactly once, to match `encodeSegment`'s rule.
+ */
+export function canonicalRequestUri(basePath: string, key: string): string {
+  const baseSegments = basePath
+    .split("/")
+    .filter(Boolean)
+    .map((seg) => encodeSegment(decodeURIComponent(seg)));
+  const keySegments = key.split("/").map((seg) => encodeSegment(seg));
+  return "/" + [...baseSegments, ...keySegments].join("/");
+}
+
 /** The two time forms SigV4 needs, from an ISO instant. */
 export interface SigV4Dates {
   /** YYYYMMDDTHHMMSSZ */
@@ -102,12 +125,19 @@ export function signS3Put(
   opts: { contentType: string; isoNow: string },
 ): SignedRequest {
   const { amzDate, dateStamp } = sigV4Dates(opts.isoNow);
+  // Region case matters: it is part of the credential SCOPE the server rebuilds,
+  // so a mixed-case region signs a scope the server never forms (F26-11).
+  const region = config.region.toLowerCase();
   const origin =
     config.endpoint ??
-    `https://${config.bucket}.${SERVICE}.${config.region}.amazonaws.com`;
-  const host = new URL(origin).host;
+    `https://${config.bucket}.${SERVICE}.${region}.amazonaws.com`;
+  const originUrl = new URL(origin);
+  const host = originUrl.host;
   const fullKey = `${config.prefix ?? ""}${objectKey}`.replace(/^\/+/, "");
-  const canonicalUri = canonicalKeyPath(fullKey);
+  // F26-7: fold the endpoint's base path (e.g. `/bucket` for a path-style store)
+  // into the canonical URI so the signature covers the SAME path the request URL
+  // carries. Empty for the default virtual-hosted endpoint.
+  const canonicalUri = canonicalRequestUri(originUrl.pathname, fullKey);
   const payloadHash = sha256Hex(body);
 
   // Canonical headers are sorted, lowercase, with trimmed values. These four are
@@ -135,7 +165,7 @@ export function signS3Put(
     payloadHash,
   ].join("\n");
 
-  const scope = `${dateStamp}/${config.region}/${SERVICE}/aws4_request`;
+  const scope = `${dateStamp}/${region}/${SERVICE}/aws4_request`;
   const stringToSign = [
     ALGORITHM,
     amzDate,
@@ -145,7 +175,7 @@ export function signS3Put(
 
   const signature = createHmac(
     "sha256",
-    signingKey(config.secretAccessKey, dateStamp, config.region),
+    signingKey(config.secretAccessKey, dateStamp, region),
   )
     .update(stringToSign, "utf8")
     .digest("hex");
@@ -155,7 +185,11 @@ export function signS3Put(
     `SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
   return {
-    url: `${origin}${canonicalUri}`,
+    // Build from protocol + host + the (base-path-inclusive) canonical URI, NOT
+    // `origin + canonicalUri`: the canonical URI now already carries the endpoint's
+    // base path, so concatenating it onto `origin` (which also has that path) would
+    // double it.
+    url: `${originUrl.protocol}//${host}${canonicalUri}`,
     headers: {
       "Content-Type": opts.contentType,
       "x-amz-content-sha256": payloadHash,

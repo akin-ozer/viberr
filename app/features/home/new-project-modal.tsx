@@ -28,6 +28,7 @@ function NewProjectNameFields({
   setKeyTouched,
   keyStripped,
   setKeyStripped,
+  keyInUse,
   submit,
 }: {
   nameRef: RefObject<HTMLInputElement | null>;
@@ -39,6 +40,8 @@ function NewProjectNameFields({
   setKeyTouched: (v: boolean) => void;
   keyStripped: boolean;
   setKeyStripped: (v: boolean) => void;
+  /** Q26-3: the resolved key already belongs to another project (allowed, noted). */
+  keyInUse: boolean;
   submit: () => void;
 }) {
   return (
@@ -92,12 +95,19 @@ function NewProjectNameFields({
             setKey(cleaned);
           }}
         />
-        <div className="fhint" id="np-key-note">
+        <div
+          className={"fhint" + (keyInUse ? " warn" : "")}
+          id="np-key-note"
+        >
           {keyStripped
             ? "Only letters are kept; digits and symbols aren't allowed in a task key."
             : effKey.length > 0 && effKey.length < 2
               ? "At least 2 letters."
-              : `2-4 letters · ids look like ${(effKey || "PAY") + "-1"}`}
+              : keyInUse
+                ? // Q26-3: allowed (keys are project-scoped) but worth flagging so
+                  // the admin knows the ids will share a prefix across two projects.
+                  `Another project already uses ${effKey}. Both projects' ids read ${effKey}-1; they stay separate. Pick another key to tell them apart.`
+                : `2-4 letters · ids look like ${(effKey || "PAY") + "-1"}`}
         </div>
       </div>
     </div>
@@ -409,6 +419,7 @@ export function NewProjectModal({
   connectionHealth,
   storeRoot,
   isAdmin,
+  existingKeys,
   onClose,
 }: {
   /** Connection owners (Phase-4 stand-in — distinct repo owners in use). */
@@ -425,6 +436,11 @@ export function NewProjectModal({
    * the gate is honest either way and never guesses "admin" for a member.
    */
   isAdmin?: boolean;
+  /** Q26-3: task keys already in use by other projects. Task keys are project-
+   *  scoped (the slug disambiguates), so a collision is allowed, not blocked —
+   *  but the auto-derived key can silently match another project's, so we NOTE
+   *  it so the creating admin is aware their task ids will read the same prefix. */
+  existingKeys?: string[];
   onClose: () => void;
 }) {
   const admin = isAdmin ?? storeRoot !== null;
@@ -459,6 +475,11 @@ export function NewProjectModal({
   }, []);
 
   const effKey = keyTouched ? key : keyFromName(name);
+  // Q26-3: does the resolved key already belong to another project? (Only once
+  // it is a valid 2+-letter key; case-insensitive, since keys are upper-cased.)
+  const keyInUse =
+    effKey.length >= 2 &&
+    (existingKeys ?? []).some((k) => k.toUpperCase() === effKey.toUpperCase());
   const effRepo = repo || slugifyProjectName(name);
   const slug = slugifyProjectName(name);
   // Name ↔ repo AUTOCOMPLETE (not a persistent two-way lock — pass-8 P1 ruling):
@@ -577,6 +598,7 @@ export function NewProjectModal({
           setKeyTouched={setKeyTouched}
           keyStripped={keyStripped}
           setKeyStripped={setKeyStripped}
+          keyInUse={keyInUse}
           submit={submit}
         />
         <NewProjectConnectionField

@@ -11,6 +11,9 @@ afterEach(cleanup);
 const rowHuman: ReviewRowView = {
   key: "VIB-142",
   title: "Attach execution workspace to task runtime",
+  priority: "normal",
+  labels: [],
+  dueDate: null,
   waiting: "human",
   packet: {
     kind: "Completion report",
@@ -28,6 +31,9 @@ const rowHuman: ReviewRowView = {
 const rowAgent: ReviewRowView = {
   key: "VIB-145",
   title: "Live task activity via SSE",
+  priority: "normal",
+  labels: [],
+  dueDate: null,
   waiting: "agent",
   packet: null,
   latestEventText:
@@ -278,6 +284,9 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
   const closedRow: ReviewRowView = {
     key: "VIB-9",
     title: "Delivered, then rejected on GitHub",
+    priority: "normal",
+    labels: [],
+    dueDate: null,
     waiting: "human",
     packet: null,
     latestEventText: null,

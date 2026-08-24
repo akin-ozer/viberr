@@ -4,6 +4,9 @@ import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 const base: ReviewRowView = {
   key: "VIB-1",
   title: "t",
+  priority: "normal",
+  labels: [],
+  dueDate: null,
   waiting: "agent",
   packet: null,
   latestEventText: null,

@@ -384,13 +384,33 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
     );
   });
 
+  // F26-12 / R26-2: the board label filter (`?label=`) narrows to tasks carrying
+  // that label, and the chip for it renders from the project's label vocabulary.
+  it("filters the board to a single label", () => {
+    const { container, getByTitle } = renderBoard(
+      [
+        task({ key: "VIB-1", stage: "impl", labels: ["security"] }),
+        task({ key: "VIB-2", stage: "impl", labels: ["docs"] }),
+      ],
+      { search: "label=security" },
+    );
+    // Only the security-labelled task is shown; the other is hidden by the label.
+    expect(subtitle(container)).toBe(
+      "1 of 2 tasks · 0 waiting on a human in this project",
+    );
+    // The active label chip flips to its "click to clear" title.
+    getByTitle('Showing only “security”. Click to clear.');
+    // The other project label is offered as an (inactive) filter chip.
+    getByTitle('Show only tasks labelled “docs”');
+  });
+
   it("offers one Clear affordance that resets the filter AND the search", () => {
     const { container, getByTitle, queryByText } = renderBoard(
       [task({ key: "VIB-1", stage: "impl" })],
       { search: "filter=risk&q=zzz" },
     );
     const clear = getByTitle(
-      "Show every task again. Clears the board filter and the search",
+      "Show every task again. Clears the board filter, the label filter and the search",
     );
     fireEvent.click(clear);
     // Both hiding mechanisms are gone: the card is back and the chip retires.

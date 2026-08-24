@@ -80,10 +80,21 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
               sub={`${fmtTokens(totals.inputTokens)} in · ${fmtTokens(totals.cachedInputTokens)} cached`}
             />
             <StatCard
-              label="Success rate"
+              // R26-3 (owner ruling): "Completion rate", not "Success rate" — this
+              // measures runs that RAN to completion (finished vs errored/stopped),
+              // which is not the same as work that was accepted on review. F26-5:
+              // running/queued join the sub-label when present, so the outcome
+              // counts always reconcile with "Total runs".
+              label="Completion rate"
               value={fmtPercent(outcomes.successRate)}
               icon="check"
-              sub={`${outcomes.finished} finished · ${outcomes.error} error · ${outcomes.interrupted} stopped`}
+              sub={[
+                `${outcomes.finished} finished`,
+                `${outcomes.error} error`,
+                `${outcomes.interrupted} stopped`,
+                ...(outcomes.running ? [`${outcomes.running} running`] : []),
+                ...(outcomes.queued ? [`${outcomes.queued} queued`] : []),
+              ].join(" · ")}
             />
             <StatCard
               label="Avg run time"

@@ -113,6 +113,9 @@ describe("/projects/:slug/review", () => {
     const bare: ReviewRowView = {
       key: "VIB-999",
       title: "t",
+      priority: "normal",
+      labels: [],
+      dueDate: null,
       waiting: "none",
       packet: null,
       latestEventText: null,

@@ -2955,6 +2955,13 @@ export function buildOperatorSystemPrompt(
       OPERATOR_POLICY_SCOPE_NOTE +
       "\n\nUse only the governance tools offered for this run. Tool results enforce the policy; stop after a recommendation. Reach Done only through `accept_completion`.",
   );
+  // R26-1 (owner ruling): the operator sees the task's triage metadata in its
+  // get_task snapshot (`priority`, `labels`, `dueDate`). Advisory, not a gate — it
+  // shapes ordering/urgency in what the operator recommends, never authority.
+  parts.push(
+    "\n\n---\n# Triage signals (advisory)\n\n" +
+      "The task's `priority`, `labels` and `dueDate` in your `get_task` snapshot are human triage hints. Let a `high`/`urgent` priority or a near/overdue `dueDate` inform how you sequence work and how you word what you recommend to a human — e.g. flag urgency in a recommendation, or prompt a delivering agent sooner. They change no gate and grant no authority: never treat them as a human decision or a reason to skip a boundary.",
+  );
   // Non-negotiable invariants (R-A / R-C): appended UNCONDITIONALLY so they hold
   // even when a project supplies a custom operator persona that omits them.
   parts.push(

@@ -707,6 +707,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .fchip:hover:not(:disabled) { border-color: var(--border); color: var(--fg); }
 .fchip.on { background: var(--fg); color: var(--surface); border-color: var(--fg); }
 .fchip .ico { width: 14px; height: 14px; }
+/* F26-12 / R26-2: label-filter chips — the project's own tags, used as board
+   filters. Monospace + muted resting colour marks them as labels (matching the
+   .label-chip vocabulary) and distinct from the icon-bearing readiness chips; the
+   shared .fchip.on state paints the active one. */
+.fchip.lbl { font-family: var(--font-mono); font-weight: 600; font-size: .74rem; }
+.fchip.lbl:not(.on) { color: var(--muted); }
 
 /* R15-5: the board's own term filter, moved off the topbar (whose box now
    opens the global palette). Sized to sit in the chip row without dominating
@@ -1099,6 +1105,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .meta-edit-btn { display: inline-flex; align-items: center; gap: .35rem; margin-top: .5rem; padding: .1rem .5rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: .35rem; cursor: pointer; }
 .meta-edit-btn:hover { border-color: var(--blue); }
 .meta-edit-btn .ico { width: 13px; height: 13px; }
+/* F26-13: shown in place of the Edit-details button on an archived task, whose
+   planning metadata is frozen until it is restored. */
+.meta-archived-note { margin-top: .5rem; font-size: .75rem; color: var(--muted); }
 .meta-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem; margin-top: .5rem; max-width: 70ch; }
 /* The same editor as a side panel (Details): fields stack full-width. */
 .meta-edit-panel { display: flex; flex-direction: column; gap: .6rem; }
@@ -2079,6 +2088,9 @@ dialog[data-closing]::backdrop {
 .flabel { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .flabel .req { color: var(--coral-dark); margin-left: .15rem; }
 .fhint { font-size: .76rem; color: var(--faint); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: .5rem; }
+/* Q26-3: a warn-toned field hint (the same caution colour the timeline/pills use)
+   — e.g. the new-project key already belongs to another project. */
+.fhint.warn { color: var(--yellow-dark); }
 /* Typing fields opt in per TYPE (checkboxes and file pickers keep native
    chrome), so this list must name every text-like type the markup uses — pass
    20 flipped the login email to type="email" and the field silently fell back
@@ -4215,6 +4227,23 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 
 /* Audit-log export card (org settings footer). */
 .audit-export { margin-top: .9rem; }
+/* PG26-A: in-app audit browse (recent events + filter, above the export controls). */
+.audit-browse { margin: .5rem 0 1rem; }
+.audit-browse-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .6rem; }
+.audit-list { list-style: none; margin: 0; padding: 0; max-height: 15rem; overflow-y: auto;
+  border: 1px solid var(--hairline); border-radius: var(--radius-chip); }
+.audit-row { display: grid; grid-template-columns: 8.5rem 9rem 1fr auto; gap: .6rem; align-items: baseline;
+  padding: .34rem .6rem; border-bottom: 1px solid var(--hairline); font-size: .78rem; }
+.audit-row:last-child { border-bottom: 0; }
+.audit-when { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.audit-actor { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-action { font-family: var(--font-mono); color: var(--fg); }
+.audit-scope { display: inline-flex; align-items: center; gap: .4rem; justify-self: end; color: var(--muted); }
+.audit-scope-tag { font-family: var(--font-mono); font-size: .68rem; padding: .06rem .38rem; border-radius: .4rem;
+  background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--muted); white-space: nowrap; }
+.audit-scope-tag.org { background: color-mix(in srgb, var(--blue), transparent 86%); color: var(--blue-pressed); }
+.audit-subject { font-family: var(--font-mono); font-size: .72rem; color: var(--muted); }
+.audit-browse-foot { margin-top: .5rem; }
 .audit-dl { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
 .audit-dl .btn { text-decoration: none; }
 .audit-s3 h3 { font-size: .82rem; font-weight: 700; margin-bottom: .5rem; }

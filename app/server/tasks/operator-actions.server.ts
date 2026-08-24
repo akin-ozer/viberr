@@ -1198,6 +1198,14 @@ export interface OperatorTaskSnapshot {
   key: string;
   title: string;
   goal: string;
+  /** R26-1 (owner ruling): the human triage metadata, surfaced to the OPERATOR
+   *  (not the delivering agent) so it can factor urgency and deadlines into how it
+   *  sequences work and what it recommends. Purely informational — it changes no
+   *  gate and grants no authority. `priority: "normal"`, an empty label set and a
+   *  null due date are the unremarkable defaults. */
+  priority: string;
+  labels: string[];
+  dueDate: string | null;
   stage: string;
   stageName: string;
   readiness: string;
@@ -1532,6 +1540,10 @@ export function operatorSnapshot(
     key: fm.key,
     title: fm.title,
     goal: file.parsed.goal,
+    // R26-1: surface the human triage metadata to the operator.
+    priority: fm.priority,
+    labels: fm.labels,
+    dueDate: fm.dueDate,
     stage: fm.stage,
     stageName: stageName(fm.stage),
     readiness: fm.readiness,

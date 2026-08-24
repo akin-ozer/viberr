@@ -9,10 +9,11 @@ import { listProjectLabels } from "./board-query.server";
 import { rebuildAll } from "./rebuilder.server";
 
 /**
- * `listProjectLabels` is the label-autocomplete source shared by the board's
- * New-task modal and the task-detail Details panel. It must return the project's
- * DISTINCT labels, case-collapsed and sorted, and never leak an archived task's
- * labels into the live vocabulary.
+ * `listProjectLabels` is the label-autocomplete source for the task-detail Details
+ * panel; the board's New-task modal computes the SAME vocabulary client-side from
+ * the board tasks under this identical contract (F26-15). It must return the
+ * project's DISTINCT labels, case-collapsed (first spelling wins) and sorted, and
+ * never leak an archived task's labels into the live vocabulary.
  */
 
 const ctx = createTestDbContext();

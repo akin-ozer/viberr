@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canonicalKeyPath,
+  canonicalRequestUri,
   putObjectToS3,
   sigV4Dates,
   signS3Put,
@@ -40,6 +41,28 @@ describe("canonicalKeyPath", () => {
       "/audit/2026/exports/log%201.csv",
     );
     expect(canonicalKeyPath("a+b/c&d")).toBe("/a%2Bb/c%26d");
+  });
+});
+
+// F26-7: the canonical URI must include any base path the endpoint carries, or a
+// path-style S3-compatible store (MinIO/Ceph) signs a different path than it
+// receives and rejects every push with SignatureDoesNotMatch.
+describe("canonicalRequestUri", () => {
+  it("is just the key path for a root (virtual-hosted) endpoint", () => {
+    expect(canonicalRequestUri("/", "exports/log.csv")).toBe(
+      "/exports/log.csv",
+    );
+    expect(canonicalRequestUri("", "exports/log.csv")).toBe("/exports/log.csv");
+  });
+  it("folds a path-style bucket prefix into the signed path", () => {
+    expect(canonicalRequestUri("/viberr-audit", "team/log.json")).toBe(
+      "/viberr-audit/team/log.json",
+    );
+  });
+  it("re-encodes a base path exactly once (no double-encoding)", () => {
+    expect(canonicalRequestUri("/my%20bucket", "k.csv")).toBe(
+      "/my%20bucket/k.csv",
+    );
   });
 });
 
@@ -85,6 +108,20 @@ describe("signS3Put", () => {
       { contentType: "application/json", isoNow: "2026-08-23T00:00:00.000Z" },
     );
     expect(signed.url).toBe("https://minio.internal:9000/viberr-audit/team/log.json");
+    // F26-7: the path-style bucket prefix must be SIGNED, not just present in the
+    // URL — otherwise the server 403s. Signing the same key against the same host
+    // WITHOUT the `/viberr-audit` base path must produce a different signature; if
+    // the base path were dropped from the canonical URI (the bug), these would be
+    // byte-identical.
+    const withoutBasePath = signS3Put(
+      { ...CONFIG, prefix: "team/", endpoint: "https://minio.internal:9000" },
+      "log.json",
+      Buffer.from("[]"),
+      { contentType: "application/json", isoNow: "2026-08-23T00:00:00.000Z" },
+    );
+    expect(withoutBasePath.headers.Authorization).not.toBe(
+      signed.headers.Authorization,
+    );
   });
 
   it("changing the body changes the signature (payload is signed)", () => {

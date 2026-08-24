@@ -305,6 +305,8 @@ export function HomePage({
           // zero-connections note must name who can instead of linking them into
           // an org-settings 403.
           isAdmin={user.role === "admin"}
+          // Q26-3: the keys already in use, so the modal can flag a collision.
+          existingKeys={projects.map((p) => p.key)}
           onClose={() => setModal(false)}
         />
       )}

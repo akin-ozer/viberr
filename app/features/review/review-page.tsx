@@ -4,6 +4,7 @@ import { LocalRelative } from "~/ui/local-time";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { capabilityById } from "~/shared/capabilities";
 import { prStatePill } from "~/features/github/github-pills";
+import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 
 /**
@@ -97,6 +98,13 @@ function RQRow({
           </Pill>
         )}
         <ValidationPill value={t.validation} sm />
+        {/* F26-14: the same triage metadata the board card shows — priority,
+            labels and due date — so the acceptance boundary is not blind to an
+            urgent or overdue task. Shared `task-meta.tsx` pills (one vocabulary);
+            only non-default values render, so a plain task adds nothing. */}
+        <PriorityFlag priority={t.priority} sm />
+        {t.labels.length > 0 && <LabelChips labels={t.labels} max={3} />}
+        <DueDatePill dueDate={t.dueDate} sm />
         {/* Gap-10: the acceptance boundary is where a forgotten task costs the
             most — a completion report nobody answered blocks the merge and the
             branch behind it. The queue carried no time at all, so a row that

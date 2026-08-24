@@ -50,6 +50,7 @@ import {
   serializeAuditExport,
 } from "~/server/audit/audit-export.server";
 import { putObjectToS3 } from "~/server/audit/s3-put.server";
+import { listRecentAuditEvents } from "~/server/audit/audit-browse.server";
 import { oauthCallbackUrl } from "~/shared/auth/auth-paths";
 import {
   testOAuthCredentials,
@@ -113,6 +114,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     runConcurrency: runConcurrencySnapshot(getDb()),
     // The S3 audit-export target (never carries the secret key).
     s3Audit: getS3AuditConfigView(getDb()),
+    // PG26-A: the recent audit events for the in-app browse panel — the only way
+    // to READ org/instance-scoped events (sign-ins, PAT changes, user admin) in
+    // the app; the project Activity page is project-scoped and the export is a file.
+    auditEvents: listRecentAuditEvents(getDb()),
   };
 }
 
@@ -284,10 +289,24 @@ export async function action({ request }: Route.ActionArgs) {
         const spec = EXPORT_FORMATS[format];
         const stamp = new Date().toISOString().replace(/[:.]/g, "-");
         const objectKey = `viberr-audit-${stamp}.${spec.ext}`;
-        const result = await putObjectToS3(config, objectKey, body, {
-          contentType: spec.contentType,
-          isoNow: new Date().toISOString(),
-        });
+        // F26-11: putObjectToS3 returns a result for an HTTP error, but a
+        // network-level failure (DNS, connection refused, TLS) makes `fetch`
+        // THROW — without this catch it escaped the crafted message and
+        // re-threw raw (appErrorResponse only maps AppError), surfacing a
+        // stack-shaped 500 instead of "S3 upload failed".
+        let result;
+        try {
+          result = await putObjectToS3(config, objectKey, body, {
+            contentType: spec.contentType,
+            isoNow: new Date().toISOString(),
+          });
+        } catch (error) {
+          return fail(
+            `S3 upload failed: could not reach the bucket. ${
+              error instanceof Error ? error.message : String(error)
+            }`.slice(0, 240),
+          );
+        }
         if (!result.ok) {
           return fail(
             `S3 upload failed (HTTP ${result.status}). ${result.error.slice(0, 200)}`.trim(),
@@ -672,6 +691,7 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
       callbackOrigin={loaderData.callbackOrigin}
       runConcurrency={loaderData.runConcurrency}
       s3Audit={loaderData.s3Audit}
+      auditEvents={loaderData.auditEvents}
     />
   );
 }

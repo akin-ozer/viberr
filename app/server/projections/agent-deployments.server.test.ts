@@ -92,7 +92,11 @@ describe("listAgentDeployments", () => {
     seedTasks(store.dataRoot, store.slug);
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    const deployments = listAgentDeployments(store.db, store.slug);
+    // Pass this store's dataRoot so the live-backend overlay reads THIS project's
+    // deployed profiles, not the global env root — otherwise a "developer"
+    // deployment another test leaked into the shared root flips this project's
+    // developer backend (claude → codex) depending on test order.
+    const deployments = listAgentDeployments(store.db, store.slug, { dataRoot: store.dataRoot });
     // VIB-1: 3 · VIB-2: 3 · VIB-3: 2 · VIB-4 (done): 0 · VIB-5: 0.
     expect(deployments).toHaveLength(8);
     expect(deployments.some((d) => d.taskKey === "VIB-4")).toBe(false);
@@ -166,7 +170,7 @@ describe("listAgentDeployments", () => {
       state: "finished",
     });
 
-    const deployments = listAgentDeployments(store.db, store.slug);
+    const deployments = listAgentDeployments(store.db, store.slug, { dataRoot: store.dataRoot });
     const vib2 = deployments.filter((d) => d.taskKey === "VIB-2");
     expect(vib2.find((d) => d.engagement === "primary")!.running).toBe(true);
     expect(vib2.find((d) => d.engagement === "reviewer")!.running).toBe(true);
@@ -213,7 +217,7 @@ describe("an operator is only 'packet open' when a packet is actually open", () 
     seedNoPacket(store, "VIB-10", "impl");
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    const statuses = listAgentDeployments(store.db, store.slug)
+    const statuses = listAgentDeployments(store.db, store.slug, { dataRoot: store.dataRoot })
       .filter((d) => d.engagement === "operator")
       .map((d) => [d.taskKey, d.status]);
     expect(statuses).toEqual([
@@ -238,7 +242,7 @@ describe("an operator is only 'packet open' when a packet is actually open", () 
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    const operator = listAgentDeployments(store.db, store.slug).find(
+    const operator = listAgentDeployments(store.db, store.slug, { dataRoot: store.dataRoot }).find(
       (d) => d.engagement === "operator",
     )!;
     expect(operator.status).toBe("packet open");
@@ -255,7 +259,7 @@ describe("an operator is only 'packet open' when a packet is actually open", () 
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(
-      listAgentDeployments(store.db, store.slug).find((d) => d.engagement === "operator")!.status,
+      listAgentDeployments(store.db, store.slug, { dataRoot: store.dataRoot }).find((d) => d.engagement === "operator")!.status,
     ).toBe("coordinating");
   });
 });

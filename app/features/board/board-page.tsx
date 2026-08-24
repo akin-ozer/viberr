@@ -73,6 +73,7 @@ import {
   isArchived,
   isBoardFilterId,
   matchesBoardFilter,
+  matchesLabelFilter,
   matchesSearch,
   shortBranch,
   type BoardFilterId,
@@ -1354,6 +1355,8 @@ function BoardHeader({
 function FilterBar({
   filter,
   query,
+  labelFilter,
+  projectLabels,
   waitingOnMe,
   quiet,
   continuity,
@@ -1362,6 +1365,10 @@ function FilterBar({
   onClear,
 }: {
   filter: BoardFilterId;
+  /** F26-12 / R26-2: the active label filter (`?label=`), and the project's label
+   *  vocabulary offered as filter chips. */
+  labelFilter: string | null;
+  projectLabels: string[];
   /** Board filter term (`?q=`) — it hides cards exactly like the chips do. */
   query: string;
   /** R8-3: member-scoped count for the "Waiting on me" chip. */
@@ -1417,6 +1424,26 @@ function FilterBar({
           "Search tasks, branches, agents…" while only ever filtering the open
           board; the global question moved to the ⌘K palette and this one says
           exactly what it does. */}
+      {/* F26-12 / R26-2: one chip per label the project actually uses (the same
+          vocabulary the New-task modal offers). Single-select: clicking a label
+          narrows the board to its tasks; clicking the active one clears it. They
+          AND with the readiness chips and the term, and only render when the
+          project has labels — a board that never tagged anything stays clean. */}
+      {projectLabels.map((l) => {
+        const active = labelFilter?.toLowerCase() === l.toLowerCase();
+        return (
+          <button
+            type="button"
+            key={l}
+            className={"fchip lbl" + (active ? " on" : "")}
+            aria-pressed={active}
+            onClick={() => setParam("label", active ? null : l)}
+            title={active ? `Showing only “${l}”. Click to clear.` : `Show only tasks labelled “${l}”`}
+          >
+            {l}
+          </button>
+        );
+      })}
       <label className="board-filter-input">
         <Icon name="filter" />
         <input
@@ -1429,13 +1456,14 @@ function FilterBar({
       </label>
       {/* P13-D-34: the board's clear-filter affordance. "All tasks" resets the
           filter but NOT `?q=`, so a board hidden by a stale term needs one
-          control that resets both. One chip per board, not one per column. */}
-      {(filter !== "all" || query.trim() !== "") && (
+          control that resets both (and the label filter — F26-12). One chip per
+          board, not one per column. */}
+      {(filter !== "all" || query.trim() !== "" || labelFilter) && (
         <button
           type="button"
           className="fchip"
           onClick={onClear}
-          title="Show every task again. Clears the board filter and the search"
+          title="Show every task again. Clears the board filter, the label filter and the search"
         >
           <Icon name="x" />
           Clear
@@ -1575,6 +1603,8 @@ export function BoardPage({
   const filter: BoardFilterId = isBoardFilterId(rawFilter) ? rawFilter : "all";
   const group = searchParams.get("view") === "list" ? "list" : "stage";
   const query = searchParams.get("q") ?? "";
+  // F26-12 / R26-2: the active label filter (`?label=`), or null when off.
+  const labelFilter = searchParams.get("label");
   // R19-14: creation always lands at the entry stage, so this is a plain
   // open/closed flag — no per-lane stage rides along any more.
   const [creating, setCreating] = useState(false);
@@ -1798,13 +1828,26 @@ export function BoardPage({
   // Distinct labels already used on this board, sorted, as New-task
   // autocomplete — so a project's label vocabulary stays consistent instead of
   // every task inventing its own spelling of the same tag.
-  const labelSuggestions = useMemo(
-    () =>
-      [...new Set(allTasks.flatMap((t) => t.labels))].sort((a, b) =>
-        a.localeCompare(b),
-      ),
-    [allTasks],
-  );
+  //
+  // F26-15: mirror the server's `listProjectLabels` contract EXACTLY — exclude
+  // archived tasks (`allTasks` carries them; they are hidden only per-filter) and
+  // dedupe case-insensitively, first spelling wins — so the New-task modal and the
+  // task Details panel (which reads `listProjectLabels`) offer the SAME vocabulary
+  // rather than two subtly different lists.
+  const labelSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const t of allTasks) {
+      if (t.archived) continue;
+      for (const l of t.labels) {
+        const key = l.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(l);
+      }
+    }
+    return out.sort((a, b) => a.localeCompare(b));
+  }, [allTasks]);
   // Subtitle stat: project-wide "waiting on a human decision" (the subtitle
   // labels that scope — P14-WL-04). Archived tasks are a terminal disposition
   // and never wait on anyone, so they are out of both counts (R14-3).
@@ -1852,7 +1895,10 @@ export function BoardPage({
 
   const visible = (tasks: BoardTask[]) =>
     tasks.filter(
-      (t) => matchesBoardFilter(t, filter) && matchesSearch(t, query),
+      (t) =>
+        matchesBoardFilter(t, filter) &&
+        matchesLabelFilter(t, labelFilter) &&
+        matchesSearch(t, query),
     );
   // The all-tasks filter feeds the roving tab stop, the "N shown" count and the
   // list view; run it once per render rather than three times (each pass
@@ -2015,6 +2061,7 @@ export function BoardPage({
         const next = new URLSearchParams(prev);
         next.delete("filter");
         next.delete("q");
+        next.delete("label"); // F26-12: Clear resets the label filter too.
         return next;
       },
       { replace: true, preventScrollReset: true },
@@ -2088,6 +2135,8 @@ export function BoardPage({
       <FilterBar
         filter={filter}
         query={query}
+        labelFilter={labelFilter}
+        projectLabels={labelSuggestions}
         waitingOnMe={waitingOnMe}
         quiet={quietCount}
         continuity={continuityCount}

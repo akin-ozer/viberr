@@ -1023,6 +1023,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
+        auditEvents={[]}
       />,
     );
     // 1 KB + 2 MCP + 1 skill = 4. It used to add the 2 agent templates and
@@ -1075,6 +1076,7 @@ describe("C9: instance storage line", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
+        auditEvents={[]}
       />,
     );
     // Free-of-total with the usage percent, the low flag, and the cleanup cadence.
@@ -1101,6 +1103,7 @@ describe("C9: instance storage line", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
+        auditEvents={[]}
       />,
     );
     expect(getByText(/automatic cleanup is not scheduled/)).toBeTruthy();
@@ -1131,6 +1134,7 @@ describe("run concurrency control", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 2, live: 2, queued: 1 }}
         s3Audit={null}
+        auditEvents={[]}
       />,
     );
     expect(getByText(/capped at 2/)).toBeTruthy();
@@ -1145,11 +1149,53 @@ describe("run concurrency control", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
+        auditEvents={[]}
       />,
     );
     // The lead reads "…· unlimited · 0 runs live" — distinct from the "0 =
     // unlimited" field hint.
     expect(getByText(/unlimited · 0 runs live/)).toBeTruthy();
+  });
+
+  // PG26-A: the in-app audit browse + the Org-scoped toggle that isolates the
+  // events the project Activity page cannot show.
+  it("browses recent audit events; the Org-scoped toggle hides project events", () => {
+    const { getByText, queryByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        s3Audit={null}
+        auditEvents={[
+          {
+            id: "a1",
+            occurredAt: "2026-08-22T10:00:00.000Z",
+            actorLabel: "arda@viberr.dev",
+            action: "github.pat.created",
+            subjectKind: "github_pat",
+            subjectId: "pat_1",
+            projectSlug: null, // org-scoped
+          },
+          {
+            id: "a2",
+            occurredAt: "2026-08-21T10:00:00.000Z",
+            actorLabel: "arda@viberr.dev",
+            action: "task.metadata.updated",
+            subjectKind: "task",
+            subjectId: "VIB-1",
+            projectSlug: "viberr-core", // project-scoped
+          },
+        ]}
+      />,
+    );
+    // Both events render by default.
+    expect(getByText("github.pat.created")).toBeTruthy();
+    expect(getByText("task.metadata.updated")).toBeTruthy();
+    // Toggling "Org-scoped" hides the project-scoped event, keeps the org one.
+    fireEvent.click(getByText("Org-scoped"));
+    expect(getByText("github.pat.created")).toBeTruthy();
+    expect(queryByText("task.metadata.updated")).toBeNull();
   });
 
   it("submits set-concurrency with the new value", async () => {
@@ -1160,6 +1206,7 @@ describe("run concurrency control", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
+        auditEvents={[]}
       />,
     );
     const input = getByLabelText(/Maximum concurrent agent runs/);
@@ -1199,6 +1246,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
+        auditEvents={[]}
       />,
     );
     const h1s = container.querySelectorAll("h1");

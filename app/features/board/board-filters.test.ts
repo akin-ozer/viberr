@@ -5,6 +5,7 @@ import {
   isArchived,
   isBoardFilterId,
   matchesBoardFilter,
+  matchesLabelFilter,
   matchesSearch,
   shortBranch,
   type FilterableTask,
@@ -195,6 +196,7 @@ const task: SearchableTask = {
   key: "VIB-142",
   title: "Attach execution workspace to task runtime",
   branch: "vib-142-attach-workspace",
+  labels: ["security", "backend"],
   owner: { name: "Arda Kaya" },
   specialist: { name: "Codex", role: "Developer", profileId: "docs-writer" },
   reviewers: [
@@ -202,6 +204,23 @@ const task: SearchableTask = {
   ],
   operator: { name: "Operator" },
 };
+
+describe("matchesLabelFilter", () => {
+  const labelled = { labels: ["Security", "backend"] };
+  it("no active label matches everything", () => {
+    expect(matchesLabelFilter(labelled, null)).toBe(true);
+    expect(matchesLabelFilter({ labels: [] }, null)).toBe(true);
+  });
+  it("matches a task carrying the label, case-insensitively", () => {
+    expect(matchesLabelFilter(labelled, "security")).toBe(true);
+    expect(matchesLabelFilter(labelled, "SECURITY")).toBe(true);
+    expect(matchesLabelFilter(labelled, "backend")).toBe(true);
+  });
+  it("excludes a task without the label", () => {
+    expect(matchesLabelFilter(labelled, "frontend")).toBe(false);
+    expect(matchesLabelFilter({ labels: [] }, "security")).toBe(false);
+  });
+});
 
 describe("matchesSearch", () => {
   it("empty query matches", () => {
@@ -218,6 +237,14 @@ describe("matchesSearch", () => {
     expect(matchesSearch(task, "claude")).toBe(true);
     expect(matchesSearch(task, "arda")).toBe(true);
     expect(matchesSearch(task, "operator")).toBe(true);
+  });
+  // F26-12: labels join the haystack — typing a label filters the board to its
+  // tasks, so a set-only label field is no longer unfindable.
+  it("matches a triage label", () => {
+    expect(matchesSearch(task, "security")).toBe(true);
+    expect(matchesSearch(task, "SECURITY")).toBe(true);
+    expect(matchesSearch(task, "backend")).toBe(true);
+    expect(matchesSearch(task, "frontend")).toBe(false);
   });
   // F15-16: `AgentRender.name` is the BACKEND label, so the only thing on a
   // card that carries an agent's own identity is its profile id. Typing the

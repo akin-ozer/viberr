@@ -122,6 +122,40 @@ describe("getInsightsSummary", () => {
     expect(s.avgDurationMs).toBeCloseTo(180000, -2);
   });
 
+  // F26-6: a row whose finished_at precedes started_at is clamped to 0, never
+  // dragging the average negative into a nonsense "-600s".
+  it("clamps a negative duration (finished before started) to zero", () => {
+    const db = ctx.makeDb();
+    insertRun(db, {
+      state: "finished",
+      startedAt: "2026-08-20T10:10:00.000Z",
+      finishedAt: "2026-08-20T10:00:00.000Z", // 10 min BEFORE start
+    });
+    const s = getInsightsSummary(db, NOW);
+    expect(s.avgDurationMs).not.toBeNull();
+    expect(s.avgDurationMs!).toBeGreaterThanOrEqual(0);
+  });
+
+  // F26-4: the byModel/byProject breakdowns are capped at TOP_N (8). A rare but
+  // expensive model must survive the cap — it is exactly what a cost dashboard
+  // exists to surface — so ordering is cost-first, not run-first.
+  it("keeps the top cost driver in the breakdown even when frequency is low", () => {
+    const db = ctx.makeDb();
+    // One pricey model, one run. Then 8 cheap-but-frequent models, 3 runs each —
+    // enough distinct models to overflow the TOP_N cap.
+    insertRun(db, { model: "pricey-xl", cost: 500, state: "finished" });
+    for (let m = 0; m < 8; m++) {
+      for (let r = 0; r < 3; r++) {
+        insertRun(db, { model: `cheap-${m}`, cost: 0.01, state: "finished" });
+      }
+    }
+    const s = getInsightsSummary(db, NOW);
+    expect(s.byModel).toHaveLength(8);
+    // The expensive outlier is present (a run-first order would have dropped it).
+    expect(s.byModel[0]?.label).toBe("pricey-xl");
+    expect(s.byModel.some((r) => r.label === "pricey-xl")).toBe(true);
+  });
+
   it("gap-fills the daily window to exactly windowDays points, oldest first", () => {
     const db = ctx.makeDb();
     insertRun(db, { state: "finished", startedAt: "2026-08-22T09:00:00.000Z", cost: 0.5 });

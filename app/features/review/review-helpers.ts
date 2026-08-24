@@ -1,10 +1,16 @@
-import type { PrState } from "~/schemas/task-file.schema";
+import type { PrState, TaskPriority } from "~/schemas/task-file.schema";
 import type { ValidationValue } from "~/ui/pill";
 import { plainText } from "~/features/notifications/notification-meta";
 
 export interface ReviewRowView {
   key: string;
   title: string;
+  /** F26-14: the same lightweight triage metadata the board card shows, carried
+   *  to the acceptance boundary (where a forgotten high/overdue task costs most).
+   *  Rendered via the shared `task-meta.tsx` pills. */
+  priority: TaskPriority;
+  labels: string[];
+  dueDate: string | null;
   waiting: "human" | "agent" | "none";
   packet: { kind: string; title: string } | null;
   latestEventText: string | null;

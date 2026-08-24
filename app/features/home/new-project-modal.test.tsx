@@ -89,6 +89,32 @@ describe("#14: the zero-connections note never hands a member a 403", () => {
   });
 });
 
+describe("Q26-3: a task key already used by another project is flagged (not blocked)", () => {
+  it("notes the collision when the resolved key matches an existing project's", () => {
+    const { getByLabelText, getByText } = renderModal({
+      existingKeys: ["VIB", "PAY"],
+    });
+    fireEvent.change(getByLabelText("Task key"), { target: { value: "vib" } });
+    expect(getByText(/Another project already uses VIB/)).toBeTruthy();
+  });
+
+  it("shows the normal hint for a unique key", () => {
+    const { getByLabelText, getByText, queryByText } = renderModal({
+      existingKeys: ["VIB"],
+    });
+    fireEvent.change(getByLabelText("Task key"), { target: { value: "QAX" } });
+    expect(queryByText(/already uses/)).toBeNull();
+    expect(getByText(/ids look like QAX-1/)).toBeTruthy();
+  });
+
+  it("does not flag a 1-letter partial key as a collision", () => {
+    const { getByLabelText, queryByText } = renderModal({ existingKeys: ["V"] });
+    fireEvent.change(getByLabelText("Task key"), { target: { value: "v" } });
+    // Too short to be a real key yet — the "at least 2 letters" hint owns it.
+    expect(queryByText(/already uses/)).toBeNull();
+  });
+});
+
 describe("N20-11: the repo field says the owner is fixed by the connection", () => {
   it("names the connection owner and tells the typist to enter just the repo name", () => {
     const { container } = renderModal({

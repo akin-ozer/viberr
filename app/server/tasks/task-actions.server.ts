@@ -418,7 +418,6 @@ export interface CreateTaskInput {
   /** Entry stage only (R19-14): when given it must equal the first stage;
    *  omitted defaults to it. Any other stage is refused. */
   stageId?: string;
-  urgent?: boolean;
   /** Pass-25 task metadata (all optional at creation). */
   priority?: TaskPriority;
   labels?: string[];
@@ -489,10 +488,11 @@ export async function createTask(
     priority: input.priority ?? "normal",
     labels: input.labels ? normalizeTaskLabels(input.labels) : [],
     dueDate: normalizeCreateDueDate(input.dueDate),
-    // `urgent` is derived from priority (its top rung) so the board highlight and
-    // filter that already read it keep working; an explicit `urgent` input is
-    // also honored for back-compat.
-    urgent: input.priority === "urgent" || (input.urgent ?? false),
+    // F26-16: `urgent` is the SINGLE derived mirror of `priority === "urgent"` —
+    // the board highlight and "Blocked or waiting" filter read `urgent`, and it must
+    // never disagree with the graded scale. Derived purely here (no separate input)
+    // so the two cannot desync; the edit path (`setTaskMetadata`) does the same.
+    urgent: input.priority === "urgent",
     archived: false,
     validation: "none",
     workRevision: null,
@@ -678,6 +678,16 @@ export async function setTaskMetadata(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const fm = existing.parsed.frontmatter;
+
+  // F26-13: an archived task is abandoned work kept for the record — its planning
+  // metadata is frozen. (This guard existed before the metadata editor moved into
+  // the Details panel and was lost in that move; restore it, and fail CLOSED here
+  // even if a client renders the editor on an archived task.)
+  if (fm.archived) {
+    throw AppError.validation(
+      `${input.taskKey} is archived — restore it before editing its priority, labels or due date.`,
+    );
+  }
 
   // No-op guard: if every provided axis already holds its target value, skip the
   // write (mirrors updateTaskGoal's equality short-circuit).

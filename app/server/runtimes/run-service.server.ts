@@ -88,6 +88,17 @@ import { newId } from "~/shared/ids/new-id.server";
 
 interface ServiceState {
   handles: Map<string, RunHandle>;
+  /**
+   * F26-1: run ids RESERVED (a `running`/`queued`-row committed to a live slot by
+   * `reserveRun`) whose adapter has NOT launched yet — the workspace is still
+   * cloning/preparing. A reserved run OCCUPIES a concurrency slot from the moment
+   * it is granted until it either launches (moves into `handles`) or is abandoned,
+   * so the cap must count it. Without this, every specialist dispatch (which always
+   * reserves) bypassed the cap entirely: `handles.size` alone saw nothing during
+   * the multi-minute clone window, so N delivering/reviewer runs all launched at
+   * once regardless of the configured cap.
+   */
+  reserved: Set<string>;
   adapters: AdapterSet;
   /**
    * In-process run-completion callbacks keyed by run id. `launch()`'s onExit
@@ -132,6 +143,7 @@ function getState(): ServiceState {
   if (!state) {
     state = {
       handles: new Map(),
+      reserved: new Set(),
       adapters: createAdapters(),
       completions: new Map(),
       pending: [],
@@ -226,6 +238,7 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
   const cache: Record<symbol, ServiceState | undefined> = globalThis;
   cache[SERVICE_KEY] = {
     handles: new Map(),
+    reserved: new Set(),
     adapters,
     completions: new Map(),
     pending: [],
@@ -394,6 +407,18 @@ export function reserveRun(
   db: DatabaseSync,
   input: ReserveRunInput,
 ): RunReservation | null {
+  const state = getState();
+  // F26-1: a reservation COMMITS a live slot (a reserved run bypasses the later
+  // `admitRun` gate and launches directly, holding its slot from clone to spawn).
+  // So it must be granted UNDER the cap. When no slot is free, decline the
+  // reservation (return null): the caller then starts the run through the normal
+  // non-reserved path, where `startRun` parks it as `queued` behind the cap. The
+  // only cost is no live "Preparing" strip during that run's clone — the rare
+  // cap-full case — instead of the cap being silently exceeded on every dispatch.
+  const cap = getMaxConcurrentRuns(db);
+  if (cap !== 0 && liveCount(state) >= cap) {
+    return null;
+  }
   const runId = newId("run");
   const startedAt = new Date().toISOString();
   try {
@@ -421,6 +446,9 @@ export function reserveRun(
     });
     return null;
   }
+  // The reserved row now holds a concurrency slot until `startRun` adopts it (→
+  // handles) or `abandon()` releases it.
+  state.reserved.add(runId);
   const publish = (state: "running" | "error") => {
     publishRunStateChanged({
       projectSlug: input.projectSlug,
@@ -446,6 +474,9 @@ export function reserveRun(
       }
     },
     abandon(reason) {
+      // F26-1: release the committed slot whatever the row's final state — a
+      // reserved run that never launches must not keep occupying the cap.
+      state.reserved.delete(runId);
       try {
         // C4-opres: never demote a row another writer already finalized. A
         // human's interrupt landing during preparation IS this run's outcome
@@ -467,6 +498,9 @@ export function reserveRun(
           reason,
           err: error instanceof Error ? error : new Error(String(error)),
         });
+      } finally {
+        // A freed slot may let a run parked behind the cap start now.
+        drainRunQueue(db);
       }
     },
   };
@@ -776,6 +810,12 @@ export async function startRun(
   if (input.env && Object.keys(input.env).length) spec.env = input.env;
 
   if (selection.kind === "unavailable") {
+    // F26-1: a reserved run that fails here never launches — release its slot
+    // and let a run parked behind the cap take it.
+    if (reservation) {
+      state.reserved.delete(reservation.runId);
+      drainRunQueue(db);
+    }
     failRunUnavailable(db, spec, reservation?.startedAt);
     return { runId };
   }
@@ -785,12 +825,15 @@ export async function startRun(
   if (modelSubstitution) launchOpts.notice = modelSubstitution;
   const launchThunk = () => launch(db, spec, selection.adapter, launchOpts);
   // A RESERVED run already rendered "Preparing workspace" as a `running` row and
-  // committed its slot — it bypasses the gate rather than being demoted back to
-  // `queued` (which would blink the strip and confuse the drain's queued-row
-  // check). Every other run (operator, reviewer, resume-less start) is admitted
-  // under the cap: launched now if a slot is free, else parked in `queued` until
-  // one frees.
+  // committed its slot at reserve time (counted in `state.reserved` under the cap,
+  // F26-1) — it launches directly rather than being demoted back to `queued`
+  // (which would blink the strip and confuse the drain's queued-row check). The
+  // slot moves from `reserved` to `handles` in the same synchronous step, so the
+  // live count never dips and no parked run can race into this run's slot. Every
+  // other run (operator/reviewer/resume-less start with no reservation) is admitted
+  // under the cap: launched now if a slot is free, else parked in `queued`.
   if (reservation) {
+    state.reserved.delete(reservation.runId);
     launchThunk();
   } else {
     admitRun(db, runId, launchThunk);
@@ -1184,28 +1227,39 @@ export async function resumeRun(
 // ---------------------------------------------- concurrency gate
 
 /**
+ * Runs occupying a concurrency slot right now: LIVE adapters (`handles`) plus
+ * runs RESERVED but not yet launched (`reserved`, still cloning/preparing —
+ * F26-1). A reserved run has committed to running, so it counts against the cap
+ * exactly like a live one; counting only `handles` let every reserving dispatch
+ * (all specialist runs) slip past the cap during its multi-minute clone.
+ */
+function liveCount(state: ServiceState): number {
+  return state.handles.size + state.reserved.size;
+}
+
+/**
  * Admit a run for launch under the instance concurrency cap.
  *
- * `state.handles` holds exactly one entry per LIVE adapter, so `handles.size`
- * is the ground truth of how many runs execute right now — there is no separate
- * counter to leak or drift. When the cap (getMaxConcurrentRuns) is 0 the gate is
- * off and every run launches immediately (the historical behavior, so an
- * untouched deployment is unchanged). Otherwise a run that would exceed the cap
- * is PARKED: its DB row stays `queued` (that is the state startRun already
- * inserts for a non-reserved run) and its launch thunk waits in `state.pending`,
- * promoted by `drainRunQueue` when a live slot frees.
+ * The live count is `handles.size + reserved.size` (see {@link liveCount}) — the
+ * ground truth of how many runs hold a slot right now, with no separate counter
+ * to leak or drift. When the cap (getMaxConcurrentRuns) is 0 the gate is off and
+ * every run launches immediately (the historical behavior, so an untouched
+ * deployment is unchanged). Otherwise a run that would exceed the cap is PARKED:
+ * its DB row stays `queued` (that is the state startRun already inserts for a
+ * non-reserved run) and its launch thunk waits in `state.pending`, promoted by
+ * `drainRunQueue` when a live slot frees.
  */
 function admitRun(db: DatabaseSync, runId: string, launchThunk: () => void): void {
   const state = getState();
   const cap = getMaxConcurrentRuns(db);
-  if (cap === 0 || state.handles.size < cap) {
+  if (cap === 0 || liveCount(state) < cap) {
     launchThunk();
     return;
   }
   state.pending.push({ runId, launch: launchThunk });
   logger.info("run queued behind the concurrency cap", {
     runId,
-    live: state.handles.size,
+    live: liveCount(state),
     cap,
     queuedAhead: state.pending.length - 1,
   });
@@ -1228,7 +1282,7 @@ export function drainRunQueue(db: DatabaseSync): void {
   try {
     for (;;) {
       const cap = getMaxConcurrentRuns(db);
-      if (cap !== 0 && state.handles.size >= cap) return;
+      if (cap !== 0 && liveCount(state) >= cap) return;
       const next = state.pending.shift();
       if (!next) return;
       const row = getRun(db, next.runId);
@@ -1244,7 +1298,9 @@ export function drainRunQueue(db: DatabaseSync): void {
 export interface RunConcurrencySnapshot {
   /** Configured cap (0 = unlimited). */
   cap: number;
-  /** Runs executing right now — the ground-truth live adapter count. */
+  /** Runs holding a slot right now — live adapters plus reserved-but-not-yet-
+   *  launched runs (still preparing their workspace). This is what the cap gates
+   *  against, so it is what the admin card must show. */
   live: number;
   /** Runs parked behind the cap right now. */
   queued: number;
@@ -1256,7 +1312,7 @@ export function runConcurrencySnapshot(db: DatabaseSync): RunConcurrencySnapshot
   const state = getState();
   return {
     cap: getMaxConcurrentRuns(db),
-    live: state.handles.size,
+    live: liveCount(state),
     queued: state.pending.length,
   };
 }

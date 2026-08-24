@@ -3,6 +3,7 @@ import {
   conflictingPrBlockedReason,
   type PrMergeable,
   type PrState,
+  type TaskPriority,
   type Validation,
   type Waiting,
 } from "~/schemas/task-file.schema";
@@ -45,6 +46,11 @@ import { getProject, listProjectTasks } from "./board-query.server";
 export interface ReviewQueueRow {
   key: string;
   title: string;
+  /** F26-14: lightweight triage metadata carried to the acceptance boundary,
+   *  the same values the board card reads. */
+  priority: TaskPriority;
+  labels: string[];
+  dueDate: string | null;
   waiting: Waiting;
   /** Pending packet header only — the queue reads kind + title, nothing else. */
   packet: { kind: string; title: string } | null;
@@ -175,6 +181,12 @@ export function getReviewQueue(
     return {
       key: t.key,
       title: t.title,
+      // F26-14: carry the triage metadata to the review queue (same source the
+      // board card reads), so a high/urgent or overdue task is visible at the
+      // acceptance boundary too.
+      priority: t.priority,
+      labels: t.labels,
+      dueDate: t.dueDate,
       waiting: t.waiting,
       packet: t.packet ? { kind: t.packet.kind, title: t.packet.title } : null,
       latestEventText: latestByKey.get(t.key) ?? null,

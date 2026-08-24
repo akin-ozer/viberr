@@ -137,6 +137,11 @@ export function getInsightsSummary(
   const interrupted = byState("interrupted");
   const terminal = finished + errored + interrupted;
 
+  // F26-4: order by COST first, then runs. This is a cost dashboard, and the
+  // breakdown is capped at TOP_N — a run-first order could truncate away a rare
+  // but expensive outlier (the exact thing "what's driving spend" needs), keeping
+  // eight cheap-but-frequent groups instead. Cost-first guarantees the top cost
+  // drivers always survive the cap.
   const group = (column: string): CountRow[] =>
     z
       .array(groupSchema)
@@ -147,7 +152,7 @@ export function getInsightsSummary(
                     COALESCE(SUM(total_cost_usd), 0) AS cost
              FROM agent_runs ${clause}
              GROUP BY ${column}
-             ORDER BY runs DESC, cost DESC
+             ORDER BY cost DESC, runs DESC
              LIMIT ${TOP_N}`,
           )
           .all(...params),
@@ -158,7 +163,10 @@ export function getInsightsSummary(
     db
       .prepare(
         // julianday() parses the ISO instants; the diff in days × 86.4e6 = ms.
-        `SELECT AVG((julianday(finished_at) - julianday(started_at)) * 86400000) AS avg_ms
+        // F26-6: clamp at 0 (MAX is SQLite's scalar 2-arg form) so a row whose
+        // finished_at precedes started_at — a clock adjustment, an import, a future
+        // regression — can never drag the average negative and render "-600s".
+        `SELECT AVG(MAX(0, (julianday(finished_at) - julianday(started_at)) * 86400000)) AS avg_ms
          FROM agent_runs
          ${and("state = 'finished' AND started_at IS NOT NULL AND finished_at IS NOT NULL")}`,
       )

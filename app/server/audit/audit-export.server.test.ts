@@ -46,6 +46,22 @@ describe("CSV serialization", () => {
     // A null details cell is empty, not the string "null".
     expect(csv.trimEnd().endsWith(",")).toBe(true);
   });
+
+  // F26-10: neutralize spreadsheet formula injection. actorLabel is a user email,
+  // and the email validator permits a leading + or -, so a crafted signup could
+  // otherwise land a live formula in an admin's spreadsheet.
+  it("neutralizes a formula-leading value with a single quote", () => {
+    for (const lead of ["=", "+", "-", "@"]) {
+      const csv = auditRowsToCsv([
+        { ...ROW, actorLabel: `${lead}cmd()`, detailsJson: null },
+      ]);
+      const cell = csv.split("\r\n")[1]!.split(",")[3];
+      expect(cell).toBe(`'${lead}cmd()`);
+    }
+    // A benign leading char is untouched.
+    const ok = auditRowsToCsv([{ ...ROW, actorLabel: "arda@x.dev" }]);
+    expect(ok.split("\r\n")[1]).toContain("arda@x.dev");
+  });
 });
 
 describe("JSON serialization", () => {

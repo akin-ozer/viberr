@@ -106,6 +106,22 @@ export function isArchived(task: FilterableTask): boolean {
   return task.archived === true;
 }
 
+/**
+ * F26-12 / R26-2: the board's label filter. `label` is a single selected label
+ * (the `?label=` param) or null when off; a task matches when it carries that
+ * label (case-insensitively, the same collapse `normalizeTaskLabels` applies).
+ * Composes with the readiness chips and the free-text term — all three AND
+ * together, so "urgent + label:security + 'auth'" narrows to their intersection.
+ */
+export function matchesLabelFilter(
+  task: { labels: readonly string[] },
+  label: string | null,
+): boolean {
+  if (!label) return true;
+  const want = label.toLowerCase();
+  return task.labels.some((l) => l.toLowerCase() === want);
+}
+
 /** Archived tasks hidden from the current (non-archived) view — the count the
  *  board discloses next to the Archived chip, so the disposition is never a
  *  silent disappearance. */
@@ -117,6 +133,9 @@ export interface SearchableTask {
   key: string;
   title: string;
   branch: string | null;
+  /** F26-12: the task's triage labels join the haystack — a set-only label field
+   *  you can't find by is half-built. */
+  labels: string[];
   owner: { name: string } | null;
   specialist: { name: string; role: string; profileId: string } | null;
   reviewers: { name: string; role: string; profileId: string }[];
@@ -143,6 +162,9 @@ export function matchesSearch(task: SearchableTask, query: string): boolean {
       task.key,
       task.title,
       task.branch ?? "",
+      // F26-12: labels are searchable — typing a label filters the board to its
+      // tasks, matching the ⌘K palette and the label filter chips.
+      ...task.labels,
       task.owner?.name ?? "",
       task.specialist
         ? `${task.specialist.name} ${task.specialist.role} ${task.specialist.profileId}`

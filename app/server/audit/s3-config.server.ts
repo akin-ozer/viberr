@@ -1,6 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { openSecret, sealSecret } from "~/server/secrets/secret-box.server";
+import {
+  openSecretRotating,
+  sealSecret,
+} from "~/server/secrets/secret-box.server";
 import { logger } from "~/server/logging/logger.server";
 import type { S3Config } from "./s3-put.server";
 
@@ -66,7 +69,27 @@ export function getS3AuditConfigForUse(db: DatabaseSync): S3Config | null {
   if (!row || !row.secret_box) return null;
   let secretAccessKey: string;
   try {
-    secretAccessKey = openSecret(row.secret_box);
+    // F26-8: open through the ROTATING path (+ lazy re-seal), exactly like the PAT
+    // and OAuth stores. `openSecret` alone bricked the S3 secret after a
+    // VIBERR_SECRET_ENCRYPTION_KEY rotation — export silently failed with a
+    // misleading "No S3 target configured" until an operator ran the reseal CLI.
+    const opened = openSecretRotating(row.secret_box);
+    secretAccessKey = opened.plaintext;
+    if (opened.staleKey) {
+      try {
+        db.prepare(`UPDATE s3_audit_config SET secret_box = ? WHERE id = ?`).run(
+          sealSecret(opened.plaintext),
+          ROW_ID,
+        );
+        logger.info("re-sealed the S3 audit secret under the current encryption key");
+      } catch (error) {
+        // The read succeeded — a failed re-seal only costs the next read another
+        // fallback, so never fail the export over it.
+        logger.warn("could not re-seal the S3 audit secret under the current key", {
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
   } catch (error) {
     logger.error("S3 audit secret could not be opened", {
       err: error instanceof Error ? error : new Error(String(error)),
