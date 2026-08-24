@@ -85,3 +85,31 @@ Per the "no deferral / implement every noted item" mandate, the four items ADDEN
   `pat-store.server.ts` + `pr-open.server.ts` + test.
 
 Final gates: **287 files · 4457 tests** green · tsc clean · oxlint 25-baseline. Nothing is deferred.
+
+## ADDENDUM 3 — F27-U1 BUILT as a real feature (owner chose "build it")
+ADDENDUM 2 had softened F27-U1 (first-run clone has no progress bar) to a "non-finding" on the
+grounds that the cold-clone LABEL was already honest ("this can take a few minutes"). That was a
+partial dodge: an honest label is not a progress indicator, and a ~4-min silent wait on a first task
+is a genuine UX gap. Presented as the one open product-design choice; **owner chose to build it.**
+
+Shipped (F27-U1):
+- **New `git-clone-progress.server.ts`** — `parseCloneProgressFraction` (maps git's stderr
+  "Receiving objects" → first 90%, "Resolving deltas" → last 10%, monotonic) + `runGitCloneWithProgress`
+  (streams `git clone --progress` via `spawn`, preserving execFile's resolve/reject/`.stderr`/`.code`/
+  timeout contract EXACTLY, so `gitErrorText`/`redactGitOutput` and the callers' failure classification
+  are unchanged). Throttled to integer-percent changes so a chatty clone never hammers the run row.
+- **`repo-mirror.server.ts`** — the bare-mirror clone AND the direct-from-GitHub fallback both run
+  through the streamed helper (with `--progress`); `onCloneProgress` threaded through `ensureProjectMirror`
+  → `ProjectMirrorRequest` → `cloneWorkspaceRepo`/`WorkspaceCloneInput`. New `cloneProgressStep(repo,
+  fraction)` label ("Cloning {repo} · first task in this project · NN%").
+- **Callers** — `specialist-run.server.ts` (`cloneRepo`) and `operator-run.server.ts`
+  (`ensureOperatorRepoCheckout`, the operator drive that often pays the cold clone FIRST) pass a callback
+  that drives `reservation.phase(preparing, cloneProgressStep(...))` — the existing live-update channel,
+  no new infra.
+- **Tests** — `git-clone-progress.server.test.ts` (parser units + REAL-git integration: a `--no-local
+  file://` clone streams a monotonic 0..1 that ends ≥0.9; a failed clone rejects with git's stderr intact
+  so redaction still works) + `cloneProgressStep` unit in `repo-mirror.server.test.ts`.
+
+Gates after F27-U1: **288 files · 4464 tests** green · tsc clean · oxlint 25-baseline (0 new). The
+streamed clone is proven against real git; the render path (reservation step → run strip) is unchanged
+and already covered by the 189 operator/specialist caller tests.

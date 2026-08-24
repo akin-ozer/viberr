@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  cloneProgressStep,
   cloneStepLabel,
   cloneWorkspaceRepo,
   mirrorGitEnv,
@@ -525,5 +526,20 @@ describe("D1: mirrorIsCold + cloneStepLabel (first-task clone honesty)", () => {
       "Cloning acme/widgets · first task in this project, this can take a few minutes",
     );
     expect(cloneStepLabel("acme/widgets", false)).toBe("Cloning acme/widgets");
+  });
+
+  it("F27-U1: cloneProgressStep folds the live transfer percentage into the cold label", () => {
+    expect(cloneProgressStep("acme/widgets", 0)).toBe(
+      "Cloning acme/widgets · first task in this project · 0%",
+    );
+    expect(cloneProgressStep("acme/widgets", 0.387)).toBe(
+      "Cloning acme/widgets · first task in this project · 39%",
+    );
+    expect(cloneProgressStep("acme/widgets", 1)).toBe(
+      "Cloning acme/widgets · first task in this project · 100%",
+    );
+    // A stray out-of-range fraction clamps rather than printing "-10%"/"120%".
+    expect(cloneProgressStep("acme/widgets", -0.1)).toContain("· 0%");
+    expect(cloneProgressStep("acme/widgets", 1.2)).toContain("· 100%");
   });
 });

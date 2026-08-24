@@ -20,6 +20,7 @@ import {
   cloneFailureSentence,
 } from "~/server/tasks/git-clone-auth.server";
 import {
+  cloneProgressStep,
   cloneStepLabel,
   cloneWorkspaceRepo,
   mirrorIsCold,
@@ -1026,6 +1027,9 @@ export function pendingOperatorClone(input: TaskFileRef): string | null {
 export async function ensureOperatorRepoCheckout(
   db: DatabaseSync,
   input: TaskFileRef,
+  /** F27-U1: 0..1 progress for the cold clone the operator drive often pays
+   *  first on a project (see the reservation set up by the caller). */
+  onCloneProgress?: (fraction: number) => void,
 ): Promise<OperatorWorkspaceView> {
   const target = operatorCheckoutTarget(input);
   if (!target) return { kind: "none" };
@@ -1052,6 +1056,7 @@ export async function ensureOperatorRepoCheckout(
         token,
       };
       if (input.dataRoot) cloneInput.dataRoot = input.dataRoot;
+      if (onCloneProgress) cloneInput.onCloneProgress = onCloneProgress;
       await cloneWorkspaceRepo(cloneInput);
     } finally {
       // A clone killed mid-transfer leaves a partial tree that the next run's
@@ -1363,7 +1368,16 @@ export async function runOperator(
     // `unavailable` arm rather than stranding the run, and the prompt then SAYS
     // the operator is blind instead of letting it read its empty task folder as
     // "the repo" (F19-4).
-    const workspace = await ensureOperatorRepoCheckout(db, taskFileRef(input));
+    const workspace = await ensureOperatorRepoCheckout(
+      db,
+      taskFileRef(input),
+      // F27-U1: `cloning` is the repo of the cold first-task clone; stream its
+      // percentage onto the reservation the operator drive just claimed.
+      reservation && cloning
+        ? (fraction) =>
+            reservation.phase(RUN_PHASE.preparing, cloneProgressStep(cloning, fraction))
+        : undefined,
+    );
     const start = { threadId, reservation };
     return backend === "codex"
       ? await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken, workspace, start)

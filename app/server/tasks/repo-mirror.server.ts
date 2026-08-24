@@ -16,6 +16,10 @@ import {
   setOriginUrlArgs,
   type GitHubAskpassEnv,
 } from "./git-clone-auth.server";
+import {
+  runGitCloneWithProgress,
+  type CloneProgress,
+} from "./git-clone-progress.server";
 
 const execFileAsync = promisify(execFile);
 
@@ -146,6 +150,15 @@ export function cloneStepLabel(repo: string, coldClone: boolean): string {
     : `Cloning ${repo}`;
 }
 
+/** F27-U1: the same cold-clone step, with the live transfer percentage folded
+ *  in. Only the cold first-task network clone reports progress (a warm mirror
+ *  clone hardlinks in well under a frame), so this always reads as first-task
+ *  setup; the fraction clamps into 0..100. */
+export function cloneProgressStep(repo: string, fraction: number): string {
+  const pct = Math.max(0, Math.min(100, Math.round(fraction * 100)));
+  return `Cloning ${repo} · first task in this project · ${pct}%`;
+}
+
 /**
  * One mirror operation at a time per mirror directory.
  *
@@ -260,6 +273,10 @@ async function ensureProjectMirror(input: {
    *  The workspace clone pays that gladly, since it is the cost it is replacing;
    *  a read-side refresh must never turn one tool call into a 113 MB download. */
   create: boolean;
+  /** F27-U1: notified with a 0..1 fraction as the (cold) network clone streams,
+   *  so the caller can turn a multi-minute silent wait into a live percentage.
+   *  Only fires on the CREATE/rebuild arm — a refresh moves seconds of delta. */
+  onCloneProgress?: CloneProgress;
 }): Promise<ProjectMirror | null> {
   const { mirrorDir, remoteUrl, token } = input;
   const fields = {
@@ -312,10 +329,15 @@ async function ensureProjectMirror(input: {
     // repeated fetch failures above condemned this copy.
     rmSync(mirrorDir, { recursive: true, force: true });
     mkdirSync(path.dirname(mirrorDir), { recursive: true });
-    await execFileAsync("git", ["clone", "--bare", remoteUrl, mirrorDir], {
-      timeout: MIRROR_TIMEOUT_MS,
-      env,
-    });
+    // F27-U1: `--progress` makes git emit transfer percentages to stderr even
+    // without a TTY; `runGitCloneWithProgress` streams them to `onCloneProgress`
+    // while keeping execFile's resolve/reject/`.stderr`/timeout contract, so the
+    // failure path below (and its redaction) is unchanged.
+    await runGitCloneWithProgress(
+      ["clone", "--bare", "--progress", remoteUrl, mirrorDir],
+      { timeout: MIRROR_TIMEOUT_MS, env },
+      input.onCloneProgress,
+    );
     // `--bare` writes `remote.origin.url` but NO fetch refspec, so a later
     // `fetch origin` would update nothing. Branch heads only: GitHub also
     // advertises `refs/pull/*`, which `--mirror`'s `+refs/*:refs/*` would drag
@@ -363,6 +385,8 @@ export interface ProjectMirrorRequest {
   dataRoot?: string;
   /** Default false — see `ensureProjectMirror`'s `create`. */
   create?: boolean;
+  /** F27-U1: 0..1 progress for a cold network clone — see `onCloneProgress`. */
+  onCloneProgress?: CloneProgress;
 }
 
 /**
@@ -382,16 +406,20 @@ export function refreshProjectMirror(
     input.dataRoot,
   );
   if (!mirrorDir) return Promise.resolve(null);
-  return withMirrorLock(mirrorDir, () =>
-    ensureProjectMirror({
+  return withMirrorLock(mirrorDir, () => {
+    const ensureInput: Parameters<typeof ensureProjectMirror>[0] = {
       mirrorDir,
       repo: input.repo,
       remoteUrl: githubRepositoryUrl(input.repo),
       token: input.token,
       projectSlug: input.projectSlug,
       create: input.create ?? false,
-    }),
-  );
+    };
+    // Conditional set (exactOptionalPropertyTypes): never hand across an
+    // explicit `undefined` for the optional callback.
+    if (input.onCloneProgress) ensureInput.onCloneProgress = input.onCloneProgress;
+    return ensureProjectMirror(ensureInput);
+  });
 }
 
 /** Drop mirrors for repositories this project no longer points at — otherwise a
@@ -420,6 +448,10 @@ export interface WorkspaceCloneInput {
   /** The project's PAT, when one is bound. Absent ⇒ the clone is anonymous. */
   token?: string | null;
   dataRoot?: string;
+  /** F27-U1: 0..1 progress for a cold network clone (the mirror build, or the
+   *  direct-from-GitHub fallback). Silent on the warm hardlink clone from the
+   *  mirror, which finishes in seconds. */
+  onCloneProgress?: CloneProgress;
 }
 
 export interface WorkspaceCloneResult {
@@ -449,6 +481,9 @@ export async function cloneWorkspaceRepo(
     create: true,
   };
   if (input.dataRoot) mirrorRequest.dataRoot = input.dataRoot;
+  // F27-U1: the mirror build is the cold clone in the normal path — stream its
+  // percentage through to the run strip.
+  if (input.onCloneProgress) mirrorRequest.onCloneProgress = input.onCloneProgress;
   const mirror = await refreshProjectMirror(mirrorRequest);
 
   if (mirror) {
@@ -488,10 +523,19 @@ export async function cloneWorkspaceRepo(
   if (token) planInput.token = token;
   const plan = createGitHubClonePlan(planInput);
   try {
-    await execFileAsync("git", plan.args, {
-      timeout: CLONE_TIMEOUT_MS,
-      env: plan.env,
-    });
+    // F27-U1: the fallback is also a full network clone (the mirror was
+    // unavailable), so it too streams progress. `--progress` goes right after
+    // the `clone` subcommand the plan opens with; if the plan ever led with
+    // something else, the flag is simply omitted and the clone still runs.
+    const progressArgs =
+      plan.args[0] === "clone"
+        ? ["clone", "--progress", ...plan.args.slice(1)]
+        : plan.args;
+    await runGitCloneWithProgress(
+      progressArgs,
+      { timeout: CLONE_TIMEOUT_MS, env: plan.env },
+      input.onCloneProgress,
+    );
     return { viaMirror: false };
   } finally {
     plan.dispose();

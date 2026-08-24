@@ -133,6 +133,7 @@ import {
   type CloneFailureLogDetails,
 } from "./git-clone-auth.server";
 import {
+  cloneProgressStep,
   cloneStepLabel,
   cloneWorkspaceRepo,
   mirrorIsCold,
@@ -1354,6 +1355,13 @@ async function dispatchAgentRun(
           // `support` is undefined for the delivering engagement (→ canonical
           // checkout) and set for a supporting one (→ isolated checkout).
           support,
+          // F27-U1: turn the cold first-task network clone from a silent
+          // multi-minute wait into a live percentage on the run strip.
+          onCloneProgress: (fraction) =>
+            pending.reservation?.phase(
+              RUN_PHASE.preparing,
+              cloneProgressStep(repo, fraction),
+            ),
         })
       : null;
   // The run's cwd is ALWAYS an isolated workspace dir for a real backend —
@@ -2889,6 +2897,9 @@ async function cloneRepo(
      *  delivering engagement's canonical `workspace/<repo>`. See
      *  {@link supportCheckoutDir}. */
     support?: { profileId: string };
+    /** F27-U1: 0..1 progress for a cold network clone, so the caller can drive a
+     *  live percentage onto the run strip. */
+    onCloneProgress?: (fraction: number) => void;
   },
 ): Promise<CloneOutcome> {
   let hadCredential = false;
@@ -2983,6 +2994,7 @@ async function cloneRepo(
         token,
       };
       if (input.dataRoot) cloneInput.dataRoot = input.dataRoot;
+      if (input.onCloneProgress) cloneInput.onCloneProgress = input.onCloneProgress;
       await cloneWorkspaceRepo(cloneInput);
       await setIdentity(dir);
       await stripUngovernedRepoCatalog(dir);
