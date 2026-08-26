@@ -19,7 +19,12 @@ import type {
 } from "~/schemas/task-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
-import { rebuildAll, rebuildPath, rebuildProject } from "./rebuilder.server";
+import {
+  rebuildAll,
+  rebuildPath,
+  rebuildProject,
+  rebuildTaskFile,
+} from "./rebuilder.server";
 import { getBoard, listProjectTasks } from "./board-query.server";
 import { getTaskDetail } from "./task-query.server";
 
@@ -1030,5 +1035,86 @@ describe("scoped project rescan (F20)", () => {
 
     expect(scopes).toContain("project");
     expect(scopes).not.toContain("full");
+  });
+});
+
+/* ------------------------------------------------------ F28-D3 crash-consistency */
+describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
+  const mkEvent = (userId: string, at: string, text: string) => ({
+    occurredAt: at,
+    type: "comment" as const,
+    actor: { kind: "human" as const, userId, nameHint: null },
+    title: null,
+    toAgent: false,
+    evidence: null,
+    text,
+  });
+
+  it("a crash during the events rewrite heals on the next rebuild, never strands the timeline", () => {
+    const store = setupTestStore(ctx);
+    const uid = store.users.arda.id;
+    const eventCount = () =>
+      (
+        store.db
+          .prepare(
+            `SELECT COUNT(*) AS c FROM task_events WHERE project_slug = ? AND task_key = ?`,
+          )
+          .get(store.slug, "VIB-1") as { c: number }
+      ).c;
+
+    // Baseline: a task with a 2-event timeline, fully projected.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "Do the thing.",
+      timeline: [
+        mkEvent(uid, "2026-08-26T10:00:00.000Z", "first"),
+        mkEvent(uid, "2026-08-26T10:01:00.000Z", "second"),
+      ],
+    });
+    rebuildTaskFile(store.db, store.slug, "VIB-1", { dataRoot: store.dataRoot });
+    expect(eventCount()).toBe(2);
+
+    // A 3rd comment lands (new file content, new hash). Simulate a crash DURING
+    // the task_events rewrite: the first `INSERT INTO task_events` throws.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "Do the thing.",
+      timeline: [
+        mkEvent(uid, "2026-08-26T10:00:00.000Z", "first"),
+        mkEvent(uid, "2026-08-26T10:01:00.000Z", "second"),
+        mkEvent(uid, "2026-08-26T10:02:00.000Z", "third"),
+      ],
+    });
+    const realPrepare = store.db.prepare.bind(store.db);
+    let tripped = false;
+    (store.db as unknown as { prepare: unknown }).prepare = (sql: string) => {
+      if (!tripped && sql.includes("INSERT INTO task_events")) {
+        tripped = true;
+        return {
+          run: () => {
+            throw new Error("simulated crash mid-events-rewrite");
+          },
+        };
+      }
+      return realPrepare(sql);
+    };
+    expect(() =>
+      rebuildTaskFile(store.db, store.slug, "VIB-1", {
+        dataRoot: store.dataRoot,
+      }),
+    ).toThrow(/crash mid-events-rewrite/);
+    (store.db as unknown as { prepare: typeof realPrepare }).prepare =
+      realPrepare;
+
+    // content_hash is written LAST, so the interrupted rebuild left the sentinel
+    // — NOT the new file's hash — and the next ORDINARY rebuild re-runs (not
+    // short-circuited) and heals to 3 events. Before F28-D3 the hash rode the
+    // upsert, so this state read "unchanged" forever and the 3rd comment was
+    // invisible.
+    const healed = rebuildTaskFile(store.db, store.slug, "VIB-1", {
+      dataRoot: store.dataRoot,
+    });
+    expect(healed.action).toBe("projected");
+    expect(eventCount()).toBe(3);
   });
 });

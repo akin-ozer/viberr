@@ -30,8 +30,18 @@ const FENCE = "---";
 
 export function splitFrontmatter(content: string): FrontmatterSplit {
   const diagnostics: FileDiagnostic[] = [];
-  // Normalize BOM; keep the rest byte-faithful.
-  const text = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
+  // Normalize BOM and line endings (CRLF / lone CR → LF). The data root lives
+  // OUTSIDE git, so a file touched by a Windows editor or `git core.autocrlf`
+  // is never re-normalized. F28-D2: without this a leading `---\r\n` failed the
+  // opening-fence check, so the ENTIRE file (frontmatter + task.md Goal /
+  // Timeline body sections, which also split on `\n`) fell back to defaults —
+  // and the rebuilder projected that broken state (the write-guard's hardStop
+  // only refuses WRITES, never the read/projection path). The closing-fence
+  // search was already CRLF-tolerant, which is why this was an unconsidered
+  // asymmetry, not a deliberate LF-only contract.
+  const text = (
+    content.charCodeAt(0) === 0xfeff ? content.slice(1) : content
+  ).replace(/\r\n?/g, "\n");
 
   if (!text.startsWith(`${FENCE}\n`) && text !== FENCE) {
     diagnostics.push(

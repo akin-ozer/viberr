@@ -169,9 +169,18 @@ export function listActivityStream(
   // which is why TaskEventRow types that one, and only that one, nullable.
   const rows = db
     .prepare(
+      // F28-D1: tie-break on `id ASC`, NOT `id DESC`. Unlike the append-only
+      // notifications / audit tables (where a larger id IS newer, so their
+      // shared `id DESC` idiom is right), `task_events` is rebuilt wholesale
+      // per task with `position 0` (the file's NEWEST) inserted FIRST — so the
+      // smallest id is the newest event. The task page orders `position ASC`
+      // (newest first); matching that here means smallest-id-first on a
+      // same-`occurred_at` tie, i.e. `id ASC`. `id DESC` reversed the two
+      // relative to the task page whenever timestamps collided (e.g. the up-to-4
+      // events one reconcile pass stamps in a single tick).
       `SELECT id, task_key, type, actor_json, occurred_at, title, text
        FROM task_events WHERE ${where.sql}
-       ORDER BY occurred_at DESC, id DESC LIMIT ?`,
+       ORDER BY occurred_at DESC, id ASC LIMIT ?`,
     )
     .all(...where.args, options.limit ?? ACTIVITY_STREAM_LIMIT) as Pick<
     TaskEventRow,
