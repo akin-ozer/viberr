@@ -116,13 +116,14 @@ describe("listActivityStream", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     // The task page reads task_events `position ASC` → [newer, older].
-    const taskPage = (
-      store.db
-        .prepare(
-          `SELECT text FROM task_events WHERE project_slug = ? AND task_key = ? ORDER BY position ASC`,
-        )
-        .all(store.slug, "VIB-9") as { text: string }[]
-    ).map((r) => r.text);
+    // SAFETY: the SELECT names exactly `text`, which 0001_baseline declares
+    // NOT NULL on task_events, so every row is `{ text: string }`.
+    const rows = store.db
+      .prepare(
+        `SELECT text FROM task_events WHERE project_slug = ? AND task_key = ? ORDER BY position ASC`,
+      )
+      .all(store.slug, "VIB-9") as { text: string }[];
+    const taskPage = rows.map((r) => r.text);
     expect(taskPage).toEqual(["newer", "older"]);
 
     // The activity stream must AGREE on the tie. Before F28-D1 its `id DESC`

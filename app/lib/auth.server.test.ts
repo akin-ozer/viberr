@@ -1,5 +1,6 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { createTestDbContext } from "../../test-support/test-db";
 import { buildAuthOptions } from "./auth.server";
 
 /**
@@ -8,11 +9,16 @@ import { buildAuthOptions } from "./auth.server";
  * regression guard, no live handler needed.
  */
 describe("buildAuthOptions account linking (F28-A1)", () => {
+  const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
+  let db: DatabaseSync;
+  beforeEach(() => {
+    db = ctx.makeDb();
+  });
+
   const opts = () =>
     buildAuthOptions({
-      // buildAuthOptions only ASSIGNS the db (the hooks are closures, not called
-      // during construction), so a stub is enough for this config assertion.
-      db: {} as unknown as DatabaseSync,
+      db,
       secret: "test-secret-at-least-32-characters-long-000",
       trustedOrigins: ["http://localhost:5173"],
       github: { clientId: "gh-id", clientSecret: "gh-secret" },

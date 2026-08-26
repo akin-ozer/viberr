@@ -1050,16 +1050,18 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
     text,
   });
 
+  const countRow = z.object({ c: z.number() });
+
   it("a crash during the events rewrite heals on the next rebuild, never strands the timeline", () => {
     const store = setupTestStore(ctx);
     const uid = store.users.arda.id;
     const eventCount = () =>
-      (
+      countRow.parse(
         store.db
           .prepare(
             `SELECT COUNT(*) AS c FROM task_events WHERE project_slug = ? AND task_key = ?`,
           )
-          .get(store.slug, "VIB-1") as { c: number }
+          .get(store.slug, "VIB-1"),
       ).c;
 
     // Baseline: a task with a 2-event timeline, fully projected.
@@ -1074,8 +1076,7 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
     rebuildTaskFile(store.db, store.slug, "VIB-1", { dataRoot: store.dataRoot });
     expect(eventCount()).toBe(2);
 
-    // A 3rd comment lands (new file content, new hash). Simulate a crash DURING
-    // the task_events rewrite: the first `INSERT INTO task_events` throws.
+    // A 3rd comment lands (new file content, new hash).
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
       goal: "Do the thing.",
@@ -1085,26 +1086,18 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
         mkEvent(uid, "2026-08-26T10:02:00.000Z", "third"),
       ],
     });
-    const realPrepare = store.db.prepare.bind(store.db);
-    let tripped = false;
-    (store.db as unknown as { prepare: unknown }).prepare = (sql: string) => {
-      if (!tripped && sql.includes("INSERT INTO task_events")) {
-        tripped = true;
-        return {
-          run: () => {
-            throw new Error("simulated crash mid-events-rewrite");
-          },
-        };
-      }
-      return realPrepare(sql);
-    };
+
+    // Simulate a crash DURING the task_events rewrite by pulling the table out
+    // from under it — the DELETE/INSERT throws, aborting the rebuild AFTER the
+    // task_projections upsert (which now writes only the sentinel hash) but
+    // BEFORE the events are rewritten. Restore it immediately after.
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_crashed`);
     expect(() =>
       rebuildTaskFile(store.db, store.slug, "VIB-1", {
         dataRoot: store.dataRoot,
       }),
-    ).toThrow(/crash mid-events-rewrite/);
-    (store.db as unknown as { prepare: typeof realPrepare }).prepare =
-      realPrepare;
+    ).toThrow();
+    store.db.exec(`ALTER TABLE task_events_crashed RENAME TO task_events`);
 
     // content_hash is written LAST, so the interrupted rebuild left the sentinel
     // — NOT the new file's hash — and the next ORDINARY rebuild re-runs (not
