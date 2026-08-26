@@ -257,4 +257,29 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
     expect(reserve()).not.toBeNull();
     expect(reserve()).not.toBeNull();
   });
+
+  it("F28-R1: INTERRUPTING a still-reserved run frees its slot and drains a queued run", async () => {
+    setMaxConcurrentRuns(store.db, 1);
+    const res = reserve();
+    expect(res).not.toBeNull();
+    // A normal run now exceeds the cap (the reservation holds the one slot) → queued.
+    const held = await startHeldRun("held");
+    await settle();
+    expect(getRun(store.db, held)?.state).toBe("queued");
+
+    // The human presses Stop on the "Preparing workspace" strip DURING the clone
+    // — before the reservation ever adopts an adapter. Before F28-R1 interruptRun
+    // marked the row `interrupted` but LEFT it in `state.reserved`, so the queued
+    // run stayed parked until the abandoned clone finished on its own (~15 min).
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: res!.runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    await settle();
+    expect(getRun(store.db, res!.runId)?.state).toBe("interrupted");
+    // The freed slot promotes the queued run NOW, not 15 minutes from now.
+    expect(getRun(store.db, held)?.state).toBe("running");
+    expect(runConcurrencySnapshot(store.db)).toMatchObject({ cap: 1, live: 1 });
+  });
 });
