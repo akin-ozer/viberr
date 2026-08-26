@@ -50,6 +50,18 @@ describe("shipped default assets", () => {
     }
   });
 
+  it("ships the Frontend/Design skill into a fresh store, like the base specialists' skills", async () => {
+    const { seedDefaultAgentAssets } = await import("./default-assets.server");
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-frontend-design-skill-"));
+    roots.push(dataRoot);
+    seedDefaultAgentAssets(dataRoot);
+    const skill = readFileSync(
+      path.join(dataRoot, "skills", "frontend-design-expertise", "SKILL.md"),
+      "utf8",
+    );
+    expect(skill).toContain("Frontend/Design specialist");
+  });
+
   it("uses no Vite-only import loader anywhere the CLI entrypoints can reach", () => {
     // `scripts/*.ts` run under tsx, which has no `?raw` loader. Keeping the
     // server tree free of it is what makes `npm run seed` / `npm run seed:demo`

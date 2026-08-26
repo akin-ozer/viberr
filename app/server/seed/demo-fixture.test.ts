@@ -69,7 +69,9 @@ describe("demo fixture", () => {
       tasks: 12,
       events: 36,
       notifications: 10,
-      agentProfiles: 3,
+      // Every SEED_AGENT_PROFILES entry gets an org-level template (operator,
+      // developer, reviewer, frontend-design).
+      agentProfiles: 4,
     });
     const rows = (sql: string) => Number(db.prepare(sql).get()!.c);
     expect(rows(`SELECT count(*) AS c FROM projects`)).toBe(3);

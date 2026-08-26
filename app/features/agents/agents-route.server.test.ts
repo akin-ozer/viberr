@@ -216,6 +216,7 @@ describe("loader", () => {
       "operator",
       "developer",
       "reviewer",
+      "frontend-design",
     ]);
 
     const operator = data.profiles[0]!;
@@ -911,8 +912,8 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       expect(result.ok).toBe(true);
     }
     const data = await runLoader(ids.arda);
-    // Back to the base roster: operator + developer + reviewer.
-    expect(data.profiles).toHaveLength(3);
+    // Back to the seeded roster: operator + developer + reviewer + frontend-design.
+    expect(data.profiles).toHaveLength(4);
 
     // Deleting a TEMPLATE-deployed profile also only removes the deployment.
     const del = saved(await postAction(ids.arda, {

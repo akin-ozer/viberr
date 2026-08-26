@@ -475,6 +475,36 @@ const ALLOWED_LITERALS: ReadonlyArray<{
     why: "seeded KB architecture doc — agent context, not product copy",
   },
   {
+    file: "server/org/org-seed.server.ts",
+    contains: "No optimistic UI for governed state.",
+    why: "repo-conventions KB doc (docs/architecture/decisions.md excerpt) — agent context, not product copy",
+  },
+  {
+    file: "server/org/org-seed.server.ts",
+    contains: "Every governed action (approval, transition, ownership change, policy change, PAT change,",
+    why: "repo-conventions KB doc (docs/architecture/decisions.md excerpt) — agent context, not product copy",
+  },
+  {
+    file: "server/org/org-seed.server.ts",
+    contains: "Frontmatter (all governed project state)",
+    why: "repo-conventions KB doc (docs/architecture/file-formats.md excerpt) — agent context, not product copy",
+  },
+  {
+    file: "server/org/org-seed.server.ts",
+    contains: "# governed boundaries: auto|approval|human",
+    why: "repo-conventions KB doc (docs/architecture/file-formats.md excerpt) — agent context, not product copy",
+  },
+  {
+    file: "server/org/org-seed.server.ts",
+    contains: "reserved for genuine governance violations and refusals",
+    why: "repo-conventions KB doc (docs/architecture/file-formats.md excerpt) — agent context, not product copy",
+  },
+  {
+    file: "server/org/org-seed.server.ts",
+    contains: "Preserve authorization, audit, and typed error paths when changing governed actions.",
+    why: "repo-conventions KB doc (CONTRIBUTING.md excerpt) — agent context, not product copy",
+  },
+  {
     file: "server/runtimes/operator-run.server.ts",
     contains: 'the "viberr" governance tools',
     why: "FALLBACK_OPERATOR_DEFINITION — the operator's own system prompt",
@@ -581,6 +611,16 @@ const ALLOWED_ASSET_LINES: ReadonlyArray<{
     file: "reviewer-expertise.skill.md",
     contains: "a governed unit of delivery",
     why: "reviewer skill doc — same sentence, same audience",
+  },
+  {
+    file: "frontend-design-expertise.skill.md",
+    contains: "a governed unit of delivery",
+    why: "frontend/design skill doc — same sentence, same audience",
+  },
+  {
+    file: "frontend-design-expertise.skill.md",
+    contains: "packet-styled confirm dialogs for governed decisions",
+    why: "frontend/design skill doc — which confirm-dialog pattern to reuse",
   },
   {
     file: "viberr-app-expertise.skill.md",

@@ -31,9 +31,10 @@ describe("seedOrgResources", () => {
     const { db, dataRoot, demo, org } = await seedAll();
 
     // Existing seed output regression (brief contract). 12 tasks = 10
-    // viberr-core + 2 stub-project tasks (DEP-31/BIL-9); 3 profiles after the
-    // Advisor/consultant removal AND the Tester→Reviewer merge (operator +
-    // developer + reviewer). No `runs` — the seed fabricates ZERO run
+    // viberr-core + 2 stub-project tasks (DEP-31/BIL-9); 4 org-level profile
+    // templates — operator, developer, reviewer, and frontend-design (every
+    // catalog entry gets a template; only the first three auto-deploy into a
+    // project's roster). No `runs` — the seed fabricates ZERO run
     // history (R7-2).
     expect(demo).toMatchObject({
       users: 5,
@@ -41,11 +42,11 @@ describe("seedOrgResources", () => {
       tasks: 12,
       events: 36,
       notifications: 10,
-      agentProfiles: 3,
+      agentProfiles: 4,
     });
 
     expect(org).toMatchObject({
-      kbs: 3,
+      kbs: 4,
       skills: 4,
       mcps: 0, // honest empty slate — no fabricated MCP health seeded
       domains: 1,
@@ -58,14 +59,21 @@ describe("seedOrgResources", () => {
       "architecture-notes",
       "api-contracts",
       "deploy-runbooks",
+      "repo-conventions",
     ]);
-    // Real files on disk, scanned counts match the mock spread (6/6/3).
-    expect(kbs.map((k) => k.fileCount)).toEqual([6, 6, 3]);
+    // Real files on disk, scanned counts match the mock spread (6/6/3), plus
+    // the repo-conventions KB's 4 real doc files.
+    expect(kbs.map((k) => k.fileCount)).toEqual([6, 6, 3, 4]);
     expect(
       existsSync(
         path.join(dataRoot, "kb", "architecture-notes", "decisions", "adr-001-task-store.md"),
       ),
     ).toBe(true);
+    // repo-conventions is grounded in THIS repo's real docs, not a fabricated
+    // demo ADR — assert the real file landed with real content.
+    expect(
+      readFileSync(path.join(dataRoot, "kb", "repo-conventions", "contributing.md"), "utf8"),
+    ).toContain("## Running the test suite");
 
     const skills = listSkills(db, ctx);
     expect(skills.map((s) => s.name)).toEqual([
@@ -94,7 +102,7 @@ describe("seedOrgResources", () => {
     // credentials are ever seeded (honest empty slate).
     seedOrgResources(db, { dataRoot });
     expect(listConnections(db)).toHaveLength(0);
-    expect(listKnowledgeBases(db, { dataRoot })).toHaveLength(3);
+    expect(listKnowledgeBases(db, { dataRoot })).toHaveLength(4);
     expect(
       db.prepare(`SELECT count(*) AS c FROM github_pats`).get(),
     ).toEqual({ c: 0 });
@@ -104,7 +112,7 @@ describe("seedOrgResources", () => {
     db.prepare(`DELETE FROM org_skills`).run();
     await runDemoSeed(db, { dataRoot, reset: true });
     const org = seedOrgResources(db, { dataRoot, reset: true });
-    expect(org).toMatchObject({ kbs: 3, skills: 4, mcps: 0, connections: 0 });
+    expect(org).toMatchObject({ kbs: 4, skills: 4, mcps: 0, connections: 0 });
     expect(listSkills(db, { dataRoot })).toHaveLength(4);
     expect(listConnections(db)).toHaveLength(0);
   });

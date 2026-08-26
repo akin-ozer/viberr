@@ -100,9 +100,10 @@ describe("home org tile counts (Phase 10)", () => {
   it("counts KBs / MCP servers / skills from the real 0008 tables", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const data = await runHomeLoader(cookie);
-    // seedOrgResources: 3 KBs · 4 skills · 0 MCP rows (honest empty slate — no
-    // fabricated MCP health is seeded; an admin adds real servers).
-    expect(data.org.knowledgeBases).toBe(3);
+    // seedOrgResources: 4 KBs (the 3 demo ADR/runbook KBs plus repo-conventions)
+    // · 4 skills · 0 MCP rows (honest empty slate — no fabricated MCP health is
+    // seeded; an admin adds real servers).
+    expect(data.org.knowledgeBases).toBe(4);
     expect(data.org.mcpServers).toBe(0);
     expect(data.org.skills).toBe(4);
     expect(data.org.globalAgents).toBeGreaterThan(0);
@@ -119,9 +120,10 @@ describe("home org tile counts (Phase 10)", () => {
     const { cookie } = await app.cookieFor(ardaId);
     const data = await runHomeLoader(cookie);
 
-    // runDemoSeed writes 3 profile templates: operator + developer + reviewer.
+    // runDemoSeed writes 4 profile templates: operator + developer + reviewer +
+    // frontend-design.
     const profiles = listGlobalAgentProfiles(app.db, { dataRoot: app.dataRoot });
-    expect(profiles.map((p) => p.id)).toEqual(["developer", "reviewer"]);
+    expect(profiles.map((p) => p.id)).toEqual(["developer", "frontend-design", "reviewer"]);
     // The operator template IS on disk — the count excludes it by kind, not by
     // it being absent.
     const { existsSync } = await import("node:fs");
@@ -130,8 +132,9 @@ describe("home org tile counts (Phase 10)", () => {
       existsSync(path.join(app.dataRoot, "agents", "profiles", "operator.md")),
     ).toBe(true);
 
-    // Exact count, same population the catalog lists — 2, not 3.
-    expect(data.org.globalAgents).toBe(2);
+    // Exact count, same population the catalog lists: 3 specialists, not 4
+    // (the operator is excluded by kind).
+    expect(data.org.globalAgents).toBe(3);
     expect(data.org.globalAgents).toBe(profiles.length);
   });
 });

@@ -110,26 +110,34 @@ describe("RBAC", () => {
     expect(data.view.connections).toHaveLength(0);
     expect(data.view.users.length).toBeGreaterThanOrEqual(5);
     expect(data.view.domains).toHaveLength(1);
-    expect(data.view.kbs).toHaveLength(3);
+    // repo-conventions is the 4th KB: this repo's own real docs, granted to
+    // Developer/Reviewer, alongside the two demo ADR KBs and deploy-runbooks.
+    expect(data.view.kbs).toHaveLength(4);
     expect(data.view.mcps).toHaveLength(0);
-    // Disk is truth (finding #7): the 4 org-managed skill rows PLUS the 3
+    // Disk is truth (finding #7): the 4 org-managed skill rows PLUS the 4
     // shipped *-expertise skill folders that have no row — all listed. (Tester
-    // was merged into the Reviewer, so tester-expertise no longer ships.)
-    expect(data.view.skills).toHaveLength(7);
+    // was merged into the Reviewer, so tester-expertise no longer ships;
+    // frontend-design-expertise is the newest shipped skill folder.)
+    expect(data.view.skills).toHaveLength(8);
     const skillNames = data.view.skills.map((s) => s.name);
     expect(skillNames).toContain("developer-expertise");
     expect(skillNames).toContain("reviewer-expertise");
+    expect(skillNames).toContain("frontend-design-expertise");
     expect(skillNames).not.toContain("tester-expertise");
     const devSkill = data.view.skills.find((s) => s.name === "developer-expertise")!;
     // A disk-only skill: synthetic id + a summary derived from its SKILL.md.
     expect(devSkill.id).toBe("disk:developer-expertise");
     expect(devSkill.summary.length).toBeGreaterThan(0);
-    // Specialists only — the operator template is not listed.
+    // Specialists only — the operator template is not listed. frontend-design
+    // is a real catalog specialist too, sorted alphabetically alongside the
+    // base pair.
     expect(data.view.gagents.map((g) => g.id)).toEqual([
       "developer",
+      "frontend-design",
       "reviewer",
     ]);
-    // Every seeded template is deployed in viberr-core → delete-guarded.
+    // Every seeded template is deployed in viberr-core (defaultAgentDeployments
+    // preinstalls the whole catalog on project creation) → delete-guarded.
     expect(data.view.gagents.every((g) => g.used >= 1)).toBe(true);
     expect(data.view.stages.map((s) => s.id)).toEqual([
       "triage", "ready", "impl", "review", "done",

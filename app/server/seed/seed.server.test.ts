@@ -57,9 +57,11 @@ describe("runSeed (clean-sheet product seed)", () => {
       userPrefs: 0,
     });
 
-    // The built-in catalog templates are on disk (operator/developer/reviewer).
-    expect(summary.agentProfiles).toBe(3);
-    for (const id of ["operator", "developer", "reviewer"]) {
+    // The built-in catalog templates are on disk (operator/developer/reviewer/
+    // frontend-design — every profile in SEED_AGENT_PROFILES, not just the
+    // base agents auto-deployed into a project's roster).
+    expect(summary.agentProfiles).toBe(4);
+    for (const id of ["operator", "developer", "reviewer", "frontend-design"]) {
       expect(existsSync(agentProfileFilePath(id, dataRoot)), id).toBe(true);
     }
 
@@ -127,6 +129,7 @@ describe("runSeed (clean-sheet product seed)", () => {
     expect(parsed!.frontmatter.resources.kb).toEqual([
       "architecture-notes",
       "api-contracts",
+      "repo-conventions",
     ]);
   });
 

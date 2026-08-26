@@ -173,6 +173,7 @@ describe("loader", () => {
       "operator",
       "developer",
       "reviewer",
+      "frontend-design",
     ]);
     // Fresh seed: no policy-change audit yet → the chip hides.
     expect(view.edited).toBeNull();

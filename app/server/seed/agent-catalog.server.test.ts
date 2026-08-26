@@ -97,6 +97,37 @@ describe("seeded specialist capability modes (F20-21 / R20-6 — direct or withh
   });
 });
 
+describe("seeded Frontend/Design specialist (repo-grounded UI craft profile)", () => {
+  const frontendDesign = SEED_AGENT_PROFILES.find(
+    (p) => p.frontmatter.id === "frontend-design",
+  );
+
+  it("ships as a specialist profile carrying its own skill", () => {
+    expect(frontendDesign).toBeDefined();
+    expect(frontendDesign!.frontmatter.kind).toBe("specialist");
+    expect(frontendDesign!.frontmatter.resources.skills).toEqual([
+      "frontend-design-expertise",
+    ]);
+  });
+
+  it("does not hold the review-verdict outcomes — the Reviewer stays the required gate", () => {
+    const modeOf = (capId: string) =>
+      frontendDesign!.frontmatter.capabilities.find((c) => c.capabilityId === capId)?.mode;
+    expect(modeOf("report-validation-verdict")).toBeUndefined();
+    expect(modeOf("approve-review")).toBeUndefined();
+    expect(modeOf("request-changes")).toBeUndefined();
+  });
+});
+
+describe("repo-grounded KB granted to Developer + Reviewer", () => {
+  it("both carry the repo-conventions KB (not a fabricated demo ADR)", () => {
+    const dev = SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === "developer")!;
+    const reviewer = SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === "reviewer")!;
+    expect(dev.frontmatter.resources.kb).toContain("repo-conventions");
+    expect(reviewer.frontmatter.resources.kb).toContain("repo-conventions");
+  });
+});
+
 describe("seeded Developer backend (owner ruling 2026-08-21)", () => {
   it("defaults to CLAUDE so a fresh install runs without a Codex quota; Codex stays available", () => {
     const dev = SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === "developer")!;
