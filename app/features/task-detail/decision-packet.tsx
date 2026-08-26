@@ -563,11 +563,13 @@ export function DecisionPacket({
   // and Tab walked every option.
   const move = (delta: number) => {
     if (choiceCount === 0) return;
-    setSel((s) => {
-      const next = (s + delta + choiceCount) % choiceCount;
-      requestAnimationFrame(() => optionRefs.current[next]?.focus());
-      return next;
-    });
+    // Keep the focus side effect out of the state updater — updaters can run
+    // more than once, which would schedule the frame twice. `sel` is current
+    // here (this only runs from a keydown handler), matching the click path at
+    // the option buttons below.
+    const next = (sel + delta + choiceCount) % choiceCount;
+    setSel(next);
+    requestAnimationFrame(() => optionRefs.current[next]?.focus());
   };
 
   return (

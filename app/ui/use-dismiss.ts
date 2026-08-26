@@ -55,7 +55,6 @@ export function useDismiss<T extends HTMLElement = HTMLElement>(
   // Held in a ref so an inline arrow callback (the common call shape) does not
   // resubscribe the listeners on every render of the host component.
   const dismissRef = useRef(onDismiss);
-  dismissRef.current = onDismiss;
 
   const outside = options?.outside ?? true;
   const onReflow = options?.onReflow ?? false;
@@ -63,7 +62,13 @@ export function useDismiss<T extends HTMLElement = HTMLElement>(
   // a fresh identity per render would tear down and re-add the listeners on
   // every keystroke of whatever else lives in the host component.
   const alsoRef = useRef(options?.also);
-  alsoRef.current = options?.also;
+
+  // Kept current in an effect rather than during render (which must stay pure);
+  // both are read only from the deferred event handlers below.
+  useEffect(() => {
+    dismissRef.current = onDismiss;
+    alsoRef.current = options?.also;
+  });
 
   useEffect(() => {
     if (!open) return;

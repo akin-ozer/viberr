@@ -74,7 +74,11 @@ export function Topbar({
   // the keyboard half of that dismissal — not a duplicate of it.
   const railToggleRef = useRef<HTMLButtonElement>(null);
   const toggleRailRef = useRef(onToggleRail);
-  toggleRailRef.current = onToggleRail;
+  // Kept current in an effect, not during render (render must stay pure); read
+  // only from the deferred keydown handler below.
+  useEffect(() => {
+    toggleRailRef.current = onToggleRail;
+  });
   useEffect(() => {
     if (!railOpen) return;
     const onKey = (event: KeyboardEvent) => {

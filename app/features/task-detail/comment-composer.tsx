@@ -83,7 +83,11 @@ function EditorBridge({ editorRef }: { editorRef: React.MutableRefObject<Lexical
 function MentionHighlightPlugin({ names }: { names: string[] }) {
   const [editor] = useLexicalComposerContext();
   const namesRef = useRef(names);
-  namesRef.current = names;
+  // Kept current in an effect, not during render (render must stay pure); read
+  // lazily by the highlighter registered below.
+  useEffect(() => {
+    namesRef.current = names;
+  });
   useEffect(
     () => registerMentionHighlighting(editor, () => namesRef.current),
     [editor],
@@ -176,9 +180,7 @@ export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposer
   function CommentComposer({ mentionables, onChange, onSubmit }, ref) {
     const editorRef = useRef<LexicalEditor | null>(null);
     const onChangeRef = useRef(onChange);
-    onChangeRef.current = onChange;
     const onSubmitRef = useRef(onSubmit);
-    onSubmitRef.current = onSubmit;
 
     const menu = useMentionAutocomplete(mentionables, (result) => {
       const editor = editorRef.current;
@@ -192,7 +194,13 @@ export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposer
       editor.focus();
     });
     const menuRef = useRef(menu);
-    menuRef.current = menu;
+    // Kept current in an effect, not during render (render must stay pure); all
+    // three are read only from deferred Lexical command / onChange handlers.
+    useEffect(() => {
+      onChangeRef.current = onChange;
+      onSubmitRef.current = onSubmit;
+      menuRef.current = menu;
+    });
 
     useImperativeHandle(
       ref,

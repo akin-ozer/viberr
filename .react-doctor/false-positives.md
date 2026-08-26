@@ -14,6 +14,21 @@ against stale copies — `design/support.js` alone accounted for 45 phantom
 
 ## Verified false positives
 
+- `anti-slop(*)` (require-safety-comment-for-type-assertion / no-runtime-typeof /
+  no-unknown-parameters / no-unsafe-dictionary-type / no-known-value-widening /
+  no-conditional-empty-object-spread / no-chained-type-assertions) — react-doctor bundles
+  an `anti-slop` plugin that DUPLICATES the repo's own `tools/oxlint/anti-slop` rules, so
+  its hits on `app/` code are the SAME accepted `npm run lint` baseline (oxlint-25),
+  triaged there, not here. The recurring shapes are all correct: `self-heal.server.ts`
+  narrows a caught `unknown` throwable (`typeof`/`instanceof` is the only guard a thrown
+  value allows) and copies dynamic `SELECT *` rows (`Record<string, unknown>` is the honest
+  shape, guarded by a SAFETY comment); `boot.server.ts` / `specialist-run.server.ts`
+  conditionally spread an optional log-context / view prop; `pr-open.server.ts` /
+  `self-heal.server.ts` annotate an explicit anonymous return type. Do NOT contort correct
+  error-handling / dynamic-row / logging code to satisfy a second ruleset — keep the oxlint
+  count at its baseline instead. The `tools/oxlint/**` source that IMPLEMENTS these rules is
+  scoped out in doctor.config.ts (its AST visitors must use `unknown` params + runtime `typeof`).
+
 - `deslop/unused-export` — `DEFAULT_NUDGE` / `PROFILE_NUDGE_HOURS` in
   app/features/profile/notification-prefs.ts — schema-only exports kept by ruling 13
   for the future "re-ping unanswered decisions" feature. Verify the ruling-13 comment
@@ -111,6 +126,13 @@ against stale copies — `design/support.js` alone accounted for 45 phantom
   is an EventSource/WebSocket created inside the same effect and `.close()` is in the
   returned cleanup; a listener on a PERSISTENT target (window/document) still needs an
   explicit `removeEventListener` and must not be suppressed.
+  use-live-updates.ts fires a THIRD `effect-needs-cleanup` (0.9.12) on its `setTimeout`s:
+  they live in the `scheduleRevalidate` helper and the `source.onerror` closure, and the
+  effect's returned teardown captures the mutable `timer` / `reopen` ids and `clearTimeout`s
+  both — but the matcher only scans the effect's top-level statements, so it misses the
+  nested-helper allocations (same validation-prompt condition 2 miss). Verify the returned
+  cleanup clears every `timer`/`reopen` id set anywhere in the effect before suppressing a
+  `setTimeout` case; a bare `setTimeout` in the effect body with no matching clear is real.
 
 - `react-doctor/no-pass-live-state-to-parent` — store-browser.tsx GitHub-import effect:
   `dispatchGh({ type: "err", err: d.error })`. `dispatchGh` is a `useReducer` dispatch

@@ -15,9 +15,14 @@ export function useFetcherResult<T>(
 ): void {
   const seen = useRef<unknown>(null);
   // Ref'd so a per-render handler identity neither re-fires the effect nor
-  // closes over stale state (the repo's handled-ref fetcher pattern).
+  // closes over stale state (the repo's handled-ref fetcher pattern). Written
+  // in an effect rather than during render to keep render pure; declared before
+  // the settle effect so it runs first on the same commit and the handler is
+  // current when a result is delivered.
   const handler = useRef(onResult);
-  handler.current = onResult;
+  useEffect(() => {
+    handler.current = onResult;
+  });
   useEffect(() => {
     if (fetcher.state !== "idle" || fetcher.data == null) return;
     if (seen.current === fetcher.data) return;

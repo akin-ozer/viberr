@@ -18,7 +18,11 @@ import { useEffect, useRef } from "react";
  */
 export function useCommandPaletteShortcut(onOpen: () => void): void {
   const onOpenRef = useRef(onOpen);
-  onOpenRef.current = onOpen;
+  // Kept current in an effect, not during render (render must stay pure); it is
+  // read only from the deferred keydown handler below.
+  useEffect(() => {
+    onOpenRef.current = onOpen;
+  });
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
