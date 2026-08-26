@@ -6589,15 +6589,20 @@ function acceptanceRefusalReason(
     // advised opening an empty PR); the has-work case now says how many commits.
     noChangeWorkRefusal ??
     // R15-1: delivered work needs a healthy verdict on the delivered revision.
-    // F28-L1: a VERIFIED-empty probe result (an explicit `noChanges` claim OR the
-    // R20-2 auto-detect of an unclaimed-but-proven-empty branch) clears the "no
-    // review pull request" gate — before this the sync gate refused an unclaimed
-    // empty task and the auto-detect that was built to accept it never applied.
+    // F28-L1: the R20-2 AUTO-DETECT — a probe that REALLY checked the branch and
+    // found nothing to deliver (`branch_empty` or `no_branch`) — clears the "no
+    // review pull request" gate for an unclaimed task, exactly like an explicit
+    // `noChanges` claim. The `no_repo` basis is EXCLUDED: it verifies by the mere
+    // absence of a repo (which keeps repo-less planning projects acceptable when
+    // a human CLAIMED no-change via `fm.noChanges`), and must never AUTO-accept a
+    // task carrying a delivered work revision it could not actually inspect.
     verdictGateReason(
       fm,
       deriveValidation(fm),
       taskKey,
-      opts.noChange?.applies === true && opts.noChange.refusal == null,
+      opts.noChange?.applies === true &&
+        opts.noChange.refusal == null &&
+        opts.noChange.verification?.basis !== "no_repo",
     ) ??
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Resolving the packet clears readiness.
