@@ -2212,15 +2212,39 @@ async function executeCodexPlan(
         tool: a.tool,
         err: error instanceof Error ? error : new Error(String(error)),
       });
-      await operatorPostComment(
-        db,
-        ctx,
-        {
-          ...base,
-          text: `Coordination stopped: the \`${a.tool}\` step failed (${error instanceof Error ? error.message : String(error)}). The remaining plan was not executed.`,
-        },
-        authority,
-      ).catch(() => {});
+      // F28-O1: narrate the abort DIRECTLY, NOT through the gated
+      // `operatorPostComment` — for the same reason `narrateRefusedActions`
+      // writes straight to the timeline. When the operator's `append-typed-
+      // events` is withheld the gate returns `denied`/`noop` WITHOUT throwing,
+      // so the `.catch()` never fired and the abort notice was silently
+      // discarded, leaving an engaged-but-never-run agent (board "waiting on
+      // you") with nothing but a server log to explain it. A coordination stall
+      // is a `note`, not a governance signal.
+      try {
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "operator" },
+              title: null,
+              text: `**Coordination stopped:** the \`${a.tool}\` step failed (${error instanceof Error ? error.message : String(error)}). The remaining plan was not executed.`,
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      } catch (writeError) {
+        logger.error("codex operator plan-abort narration failed", {
+          taskKey: input.taskKey,
+          err:
+            writeError instanceof Error
+              ? writeError
+              : new Error(String(writeError)),
+        });
+      }
       break;
     }
   }
