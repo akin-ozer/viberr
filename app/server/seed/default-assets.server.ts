@@ -44,6 +44,7 @@ function readAsset(file: string): string {
 const viberrSkillMd = readAsset("viberr-app-expertise.skill.md");
 const developerSkillMd = readAsset("developer-expertise.skill.md");
 const reviewerSkillMd = readAsset("reviewer-expertise.skill.md");
+const frontendDesignSkillMd = readAsset("frontend-design-expertise.skill.md");
 const operatorDefinitionMd = readAsset("operator.definition.md");
 const developerDefinitionMd = readAsset("developer.definition.md");
 const reviewerDefinitionMd = readAsset("reviewer.definition.md");
@@ -94,6 +95,11 @@ const STATIC_ASSETS: { rel: string; content: string }[] = [
   { rel: path.join("skills", "viberr-app-expertise", "SKILL.md"), content: viberrSkillMd },
   { rel: path.join("skills", "developer-expertise", "SKILL.md"), content: developerSkillMd },
   { rel: path.join("skills", "reviewer-expertise", "SKILL.md"), content: reviewerSkillMd },
+  // The Frontend/Design specialist's skill ships to every store the same way
+  // the base specialists' skills do (STATIC_ASSETS is unconditional — unlike
+  // specialistProfileAssets() below, it does not gate on DEFAULT_SPECIALIST_IDS),
+  // even though the profile itself is not one of the auto-deployed base agents.
+  { rel: path.join("skills", "frontend-design-expertise", "SKILL.md"), content: frontendDesignSkillMd },
   // Definitions — only the OPERATOR keeps a dedicated definition file (system
   // profile). Specialist personas now live in their profile-template BODY
   // (F10-30), so developer/reviewer definition files are no longer seeded.

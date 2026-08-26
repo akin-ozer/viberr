@@ -138,7 +138,10 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
         // attaches a real MCP server and references it here.
         mcps: [],
         // Real KB folders on disk (data/kb/<dir>) so they inject into runs (F6).
-        kb: ["architecture-notes", "api-contracts"],
+        // "repo-conventions" is THIS repo's own docs (org-seed.server.ts
+        // KB_SEEDS), not a fabricated demo ADR — a developer needs the binding
+        // conventions and file formats it ships with a Developer's own hands.
+        kb: ["architecture-notes", "api-contracts", "repo-conventions"],
       },
     },
     {
@@ -165,7 +168,10 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       resources: {
         skills: ["reviewer-expertise"],
         mcps: [],
-        kb: ["api-contracts"],
+        // "repo-conventions" is this repo's own docs (see the developer
+        // profile above) — the reviewer checks a diff against the same
+        // binding conventions and CONTRIBUTING.md acceptance criteria.
+        kb: ["api-contracts", "repo-conventions"],
       },
     },
     {
@@ -184,6 +190,35 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       forbidden: ["Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
     },
     "The task's quality specialist: authors and runs the validation suite during implementation, then reviews the diff at the review boundary. Raises typed quality flags and recommends approve or request-changes. Keeps raw validation output in evidence, not the timeline, and re-anchors on the canonical task file before each pass.",
+  ),
+  profile(
+    {
+      id: "frontend-design", kind: "specialist", name: "Frontend/Design",
+      role: "Frontend implementation & visual/interaction review",
+      icon: "sparkle", backends: ["claude", "codex"], model: "sonnet",
+      scope: "Global base",
+      // Implements alongside the Developer (ready/impl) and can also weigh in
+      // at the review boundary on visual/interaction craft.
+      stages: ["ready", "impl", "review"],
+      resources: {
+        skills: ["frontend-design-expertise"],
+        mcps: [],
+        kb: [],
+      },
+    },
+    {
+      // Hybrid of the Developer's delivery grants and the Reviewer's read/flag
+      // grants, scoped to app/features/** and app/ui/**: it can implement a UI
+      // change on the branch, AND raise quality flags on someone else's diff.
+      // It withholds the verdict-outcome grants ("Report a validation verdict",
+      // "Approve the review", "Request changes") — those stay the required
+      // Reviewer's job; this specialist's review is craft feedback, not the
+      // acceptance gate.
+      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Read the repository & diff", "Post quality-flag events", "Attach evidence references", "Post mid-run comments", "Ask the human a question", "Move the task to Review"],
+      recommend: [],
+      forbidden: ["Merge a pull request", "Transition a task to Done"],
+    },
+    "Frontend implementation and visual/interaction review for the React Router UI (app/features/** and app/ui/**): builds and polishes UI on the task-key branch, and can weigh in on another task's diff for motion, layout and accessibility craft. Not the required quality gate — the Reviewer holds that.",
   ),
 ];
 
