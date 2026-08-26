@@ -707,9 +707,15 @@ export function ExecutionProfile({
   const spGhost = !!sp && !deployedById.has(sp.profileId);
   // Owner ruling 2026-08-21: the delivering agent's model was shown unavailable
   // on the account by a real run — surface it HERE, before a run is spent.
-  const spUnavailable = sp
-    ? deployedById.get(sp.profileId)?.modelUnavailable
-    : undefined;
+  // F28-P2: `modelUnavailable` is for the LIVE deployment's model. When a retry
+  // PIN (F27-B1) runs the engagement on the OTHER backend, `sp.backend` (which
+  // is pin-aware) diverges from the deployment, so that flag describes a model
+  // this run won't use — suppress it rather than warn about the wrong model.
+  const spDep = sp ? deployedById.get(sp.profileId) : undefined;
+  const spUnavailable =
+    sp && spDep && spDep.backend === sp.backend
+      ? spDep.modelUnavailable
+      : undefined;
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
   // G9: a task at the terminal (Done) stage is closed — its runtime action

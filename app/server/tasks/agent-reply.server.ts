@@ -334,12 +334,20 @@ export function resolveMentionedAgent(
   if (handleSet.has("agent") && primaryRef) {
     const sp =
       specialists.find((s) => s.id === primaryRef.profileId) ?? null;
-    // Prefer the CURRENT deployment's backend over the assign-time snapshot —
-    // a profile switched to the other backend replies there. Sessions never
-    // match across backends, so the first reply after a switch starts a fresh
-    // run (fresh context) instead of resuming the dead backend's session.
+    // Backend precedence MUST match the fresh-run resolver
+    // (specialist-run.server `backendOverride ?? pinnedBackend ?? live ?? snapshot`)
+    // so an @mention resume goes to the SAME backend a new Run would. F28-P1: a
+    // STUCK retry pin (F27-B1) wins over the live deployment — otherwise a
+    // "Retry on the other backend" packet switches the engagement, but the next
+    // `@agent` comment silently resumes the backend the retry existed to escape,
+    // while every surface shows the pinned one. Absent a pin, prefer the current
+    // deployment's backend over the assign-time snapshot (a redeployed profile
+    // replies there). Sessions never match across backends, so the first reply
+    // after a switch starts a fresh run instead of resuming a dead session.
     const backend: RealBackend =
-      sp?.backend ?? (primaryRef.backend === "codex" ? "codex" : "claude");
+      primaryRef.pinnedBackend ??
+      sp?.backend ??
+      (primaryRef.backend === "codex" ? "codex" : "claude");
     const role = sp?.role ?? primaryRef.role;
     return {
       profileId: primaryRef.profileId,
@@ -367,20 +375,32 @@ export function resolveMentionedAgent(
     (backendCandidates.length === 1 ? backendCandidates[0] : undefined);
   if (matched) {
     const isPrimary = primaryRef?.profileId === matched.id;
+    // F28-P1: a by-NAME mention of the pinned delivering agent resumes on the
+    // pin (matching the @agent path and a fresh Run). An explicit `@claude` /
+    // `@codex` backend handle is the user's OWN backend choice and is never
+    // overridden — so the pin applies only when the mention actually names the
+    // specialist. When the pin diverges from the live deployment, the model /
+    // effort snapshot is for the wrong backend, so fall back to a default.
+    const pinned =
+      isPrimary && handleNamesSpecialist(handleSet, matched)
+        ? (primaryRef?.pinnedBackend ?? null)
+        : null;
+    const backend: RealBackend = pinned ?? matched.backend;
+    const sameAsDeployment = backend === matched.backend;
     return {
       profileId: matched.id,
       name: matched.name,
       role: matched.role,
-      backend: matched.backend,
-      model: matched.model,
-      effort: matched.effort,
-      actorRef: agentActorRef(matched.backend, matched.id, matched.role),
+      backend,
+      model: sameAsDeployment ? matched.model : defaultModelFor(backend),
+      effort: sameAsDeployment ? matched.effort : "",
+      actorRef: agentActorRef(backend, matched.id, matched.role),
       isPrimary,
       isOperator: false,
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: matched.id,
         isPrimary,
-        backend: matched.backend,
+        backend,
       }),
     };
   }

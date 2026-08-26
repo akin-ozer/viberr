@@ -102,8 +102,12 @@ export function listAgentDeployments(
   // deployment's current backend wins, an undeployed profile keeps the
   // snapshot (the run path's own fallback).
   const liveBackends = deployedSpecialistBackends(projectSlug, opts.dataRoot);
+  // F28-P2: a STUCK retry pin (F27-B1) wins over the live-deployment overlay,
+  // exactly as `withLiveAgentBackends` (the task/board queries' helper) does —
+  // otherwise the per-task engagement chip here contradicts the task page,
+  // showing the profile's backend for an engagement the retry pinned elsewhere.
   const liveBackend = (ref: AgentRef): "codex" | "claude" =>
-    liveBackends.get(ref.profileId) ?? ref.backend;
+    ref.pinnedBackend ?? liveBackends.get(ref.profileId) ?? ref.backend;
 
   // SAFETY: the SELECT names exactly DeploymentTaskRow's members, and
   // 0001_baseline declares every one of them NOT NULL on `task_projections`

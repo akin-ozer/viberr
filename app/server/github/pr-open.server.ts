@@ -516,9 +516,10 @@ export async function openTaskPr(
   if (created.ok) {
     await writePrToTask(db, ref, input, gh, created.data, actor, true, ctx, fm.pr);
     // F27-U2: a fresh PR just opened — a real, solicited write that PROVES
-    // `pull_request:write` on the bound credential, so its cached scope stops
-    // reading "unproven (verified on first use)" after the first actual use.
-    markWriteScopeProven(db, input.projectSlug);
+    // `pull_request:write`, so its cached scope stops reading "unproven
+    // (verified on first use)" after the first actual use. F28-U2b: prove it on
+    // the credential that MADE the call (`gh.patId`), not whatever is bound now.
+    markWriteScopeProven(db, gh.patId);
     return {
       status: "ok",
       prNumber: created.data.number,
@@ -565,6 +566,9 @@ export async function openTaskPr(
       ctx,
       fm.pr,
     );
+    // F28-U2a: GitHub still CREATED the PR (2xx) — a real write proves the
+    // scope here too, not only on the cleanly-decoded success path above.
+    markWriteScopeProven(db, gh.patId);
     return { status: "ok", prNumber: pr.number, created: true, url };
   }
   if (created.kind === "network") {

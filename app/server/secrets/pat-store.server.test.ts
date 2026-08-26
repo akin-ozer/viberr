@@ -146,11 +146,53 @@ describe("pat-store", () => {
     expect(scopeOf()).toMatchObject({ source: "assumed" });
 
     // A real PR opened → the write proves the scope; the cached chip flips.
-    markWriteScopeProven(store.db, store.slug);
+    // F28-U2b: proven BY the credential id that made the call, not by slug.
+    markWriteScopeProven(store.db, pat.id);
     expect(scopeOf()).toMatchObject({ ok: true, source: "probe" });
 
-    // No-op when nothing is bound (must never throw).
-    markWriteScopeProven(store.db, "no-such-project");
+    // No-op for an unknown credential (must never throw).
+    markWriteScopeProven(store.db, "no-such-pat");
+  });
+
+  it("F28-U2b: proves the SPECIFIC credential, never whichever is bound now", () => {
+    const store = setupTestStore(ctx);
+    const mk = (label: string, token: string) => {
+      const pat = createPat(
+        store.db,
+        { userId: store.users.arda.id, label, token },
+        ACTOR,
+      );
+      recordPatValidation(store.db, pat.id, {
+        status: "valid",
+        checkedAt: "2026-08-24T00:00:00.000Z",
+        login: `viberr-${label}`,
+        tokenKind: "fine_grained",
+        expiresAt: null,
+        repo: "akin-ozer/viberr",
+        scopes: [
+          { id: "repo", ok: true, source: "probe" },
+          { id: "pull_request:write", ok: true, source: "assumed" },
+        ],
+        missingScopes: [],
+        detail: "Authenticated.",
+      });
+      return pat;
+    };
+    const a = mk("a", "ghp_aaaaaaaaaaaa1111");
+    const b = mk("b", "ghp_bbbbbbbbbbbb2222");
+    // B is the project's CURRENTLY-bound credential; A is the one that actually
+    // made an in-flight PR-open call before a rotation to B.
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: b.id }, ACTOR);
+    const scope = (patId: string) =>
+      getPatMetadata(store.db, patId)!.validation!.scopes.find(
+        (s) => s.id === "pull_request:write",
+      );
+
+    // The call that authenticated with A proves A — even though B is bound now.
+    markWriteScopeProven(store.db, a.id);
+    expect(scope(a.id)).toMatchObject({ ok: true, source: "probe" });
+    // B — which made no GitHub call — is untouched (still the honest "assumed").
+    expect(scope(b.id)).toMatchObject({ source: "assumed" });
   });
 
   it("binds one credential per project; delete cascades the binding", () => {
