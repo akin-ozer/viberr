@@ -528,18 +528,23 @@ describe("D1: mirrorIsCold + cloneStepLabel (first-task clone honesty)", () => {
     expect(cloneStepLabel("acme/widgets", false)).toBe("Cloning acme/widgets");
   });
 
-  it("F27-U1: cloneProgressStep folds the live transfer percentage into the cold label", () => {
+  it("F27-U1/F28-U1: cloneProgressStep folds the live percentage in, leading before the context", () => {
+    // F28-U1: the percentage comes right after the repo, BEFORE the "first task"
+    // context, so the narrow ellipsis-truncated run strip keeps it visible.
     expect(cloneProgressStep("acme/widgets", 0)).toBe(
-      "Cloning acme/widgets · first task in this project · 0%",
+      "Cloning acme/widgets · 0% · first task in this project",
     );
     expect(cloneProgressStep("acme/widgets", 0.387)).toBe(
-      "Cloning acme/widgets · first task in this project · 39%",
+      "Cloning acme/widgets · 39% · first task in this project",
     );
     expect(cloneProgressStep("acme/widgets", 1)).toBe(
-      "Cloning acme/widgets · first task in this project · 100%",
+      "Cloning acme/widgets · 100% · first task in this project",
     );
+    // The percentage precedes the context suffix — so it survives truncation.
+    const step = cloneProgressStep("acme/widgets", 0.5);
+    expect(step.indexOf("50%")).toBeLessThan(step.indexOf("first task"));
     // A stray out-of-range fraction clamps rather than printing "-10%"/"120%".
-    expect(cloneProgressStep("acme/widgets", -0.1)).toContain("· 0%");
-    expect(cloneProgressStep("acme/widgets", 1.2)).toContain("· 100%");
+    expect(cloneProgressStep("acme/widgets", -0.1)).toContain("· 0% ·");
+    expect(cloneProgressStep("acme/widgets", 1.2)).toContain("· 100% ·");
   });
 });

@@ -160,9 +160,12 @@ export function rebuildProjectFile(
       .prepare(`SELECT slug FROM projects WHERE slug = ?`)
       .get(slug);
     if (existed) {
-      db.prepare(`DELETE FROM projects WHERE slug = ?`).run(slug);
+      // F28-D3: drop dependents first and the `projects` row (the `existed`
+      // probe's target, which cascades project_members) LAST, so an interrupted
+      // removal is finished by the next rebuild rather than left half-done.
       db.prepare(`DELETE FROM diagnostics WHERE source_path = ?`).run(sourcePath);
       recordProvenance(db, { sourcePath, contentHash: null, action: "removed" });
+      db.prepare(`DELETE FROM projects WHERE slug = ?`).run(slug);
       emitProjectionEvent({
         type: "project.removed",
         projectSlug: slug,
@@ -220,7 +223,10 @@ export function rebuildProjectFile(
     fm.credentialPolicy ? JSON.stringify(fm.credentialPolicy) : null,
     JSON.stringify(fm.guardrails),
     sourcePath,
-    contentHash,
+    // F28-D3: sentinel hash; the real content_hash is the LAST write below, so a
+    // crash between here and the project_members / diagnostics rewrite leaves it
+    // unmatched and the next rebuild re-runs instead of skipping "unchanged".
+    "",
     nowIso(),
   );
 
@@ -244,6 +250,12 @@ export function rebuildProjectFile(
     action: "projected",
     details: { diagnostics: diagnostics.length, members: fm.members.length },
   });
+  // F28-D3: commit marker — the true content_hash lands only after the projects
+  // row, project_members and diagnostics have all been written.
+  db.prepare(`UPDATE projects SET content_hash = ? WHERE slug = ?`).run(
+    contentHash,
+    fm.slug,
+  );
   emitProjectionEvent({
     type: "project.updated",
     projectSlug: fm.slug,
@@ -368,14 +380,19 @@ export function rebuildTaskFile(
       )
       .get(slug, key);
     if (existed) {
-      db.prepare(
-        `DELETE FROM task_projections WHERE project_slug = ? AND task_key = ?`,
-      ).run(slug, key);
+      // F28-D3: drop the dependent rows FIRST and the `task_projections` row
+      // (the `existed` probe's target) LAST. A crash mid-removal then leaves
+      // the projection row present, so the next rebuild re-enters this branch
+      // and finishes the delete — instead of orphaning `task_events` that no
+      // later rebuild revisits (the probe would report the task already gone).
       db.prepare(
         `DELETE FROM task_events WHERE project_slug = ? AND task_key = ?`,
       ).run(slug, key);
       db.prepare(`DELETE FROM diagnostics WHERE source_path = ?`).run(sourcePath);
       recordProvenance(db, { sourcePath, contentHash: null, action: "removed" });
+      db.prepare(
+        `DELETE FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+      ).run(slug, key);
       emitProjectionEvent({
         type: "task.removed",
         projectSlug: slug,
@@ -588,7 +605,12 @@ export function rebuildTaskFile(
     fm.updatedAt,
     fm.boardRank,
     sourcePath,
-    contentHash,
+    // F28-D3: write a sentinel hash first; the REAL content_hash is the LAST
+    // write below (a commit marker). `""` is never a real sha256, so a crash
+    // between here and the task_events/diagnostics rewrite leaves the hash
+    // unmatched and the next rebuild re-runs — instead of short-circuiting
+    // "unchanged" on a torn projection whose events never got rewritten.
+    "",
     nowIso(),
   );
 
@@ -659,6 +681,13 @@ export function rebuildTaskFile(
       downgraded: derivation.downgraded,
     },
   });
+  // F28-D3: commit marker — flip the sentinel to the true content_hash only now
+  // that the projection row, the task_events rewrite and the diagnostics have
+  // all landed. Everything above is a single synchronous statement sequence, so
+  // this row is consistent by the time the hash lets a later rebuild skip it.
+  db.prepare(
+    `UPDATE task_projections SET content_hash = ? WHERE project_slug = ? AND task_key = ?`,
+  ).run(contentHash, slug, fm.key);
   emitProjectionEvent({
     type: "task.updated",
     projectSlug: slug,

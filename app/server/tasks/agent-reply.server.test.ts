@@ -397,6 +397,64 @@ describe("resolveMentionedAgent", () => {
     expect(switched!.session).toBeNull();
   });
 
+  it("resumes on the STUCK retry pin, not the live profile backend (F28-P1)", () => {
+    // `dev` ran on Claude and has a live Claude session…
+    upsertRun(store.db, {
+      id: "run_claude_prepin",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "claude-session-prepin",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    expect(call("@dev continue")!.session?.session_id).toBe(
+      "claude-session-prepin",
+    );
+
+    // …then a "Retry on the other backend" resolution PINS the delivering
+    // ENGAGEMENT to Codex (F27-B1) while the PROFILE stays Claude. The pin lives
+    // on the engagement, not the profile — a plain profile edit would still win,
+    // but a deliberate retry pin must be honored by a later @mention resume the
+    // same way `specialist-run`'s resolver (`… ?? pinnedBackend ?? live …`) and
+    // a fresh Run do. Before F28-P1 the resolver read only the live profile
+    // backend, so `@agent` silently resumed the Claude session the pin escaped.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "Attach execution workspace",
+        engagements: [
+          {
+            profileId: "dev",
+            backend: "claude",
+            role: "developer",
+            delivers: true,
+            verdictCapable: false,
+            pinnedBackend: "codex",
+          },
+        ],
+      }),
+      goal: "Let the operator attach a repo and run the specialist.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // Both the generic `@agent` and the by-name `@dev` follow the pin (Codex),
+    // not the live Claude deployment, and find no Codex session — so they start
+    // fresh instead of resuming the dead-for-this-backend Claude one.
+    for (const mention of ["@agent continue", "@dev continue"]) {
+      const resolved = call(mention);
+      expect(resolved).toMatchObject({ backend: "codex", profileId: "dev" });
+      expect(resolved!.session).toBeNull();
+    }
+  });
+
   it("skips a run whose provider session is PROVEN gone (P13-D-2 stranding)", () => {
     // Two Claude sessions for `dev`: an older live one and the newest, whose
     // transcript the provider has since swept.

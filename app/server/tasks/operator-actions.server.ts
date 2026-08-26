@@ -2846,10 +2846,23 @@ export async function operatorAcceptCompletion(
   // in wording and would drift in behavior next. Checked before BOTH branches
   // below, so a supervised operator never posts a card acceptance would refuse
   // and a full-autonomy one never closes a task off-gate.
+  // F28-L1: run the live no-change probe BEFORE the shared gate so a verified-
+  // empty completion (the R20-2 auto-detect of a task the deliverer never
+  // explicitly claimed `noChanges`) isn't refused "no review pull request" here
+  // — the same fix the human accept path carries. Cheap for a task WITH a PR
+  // (fails noChangeCandidate, no GitHub call). A stale claim on a branch that
+  // gained commits still fails closed at the full-autonomy write below.
+  const noChange = await acceptanceNoChangeCheck(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+  );
   {
     const refusal = acceptanceRefusalFor(
       { projectSlug: input.projectSlug, taskKey: input.taskKey },
       ctx,
+      noChange,
     );
     if (refusal) return { outcome: "noop", message: refusal };
   }
@@ -2868,8 +2881,10 @@ export async function operatorAcceptCompletion(
     const doneName = stageNameOf(ctx, input.projectSlug, doneStageId);
     // R19-8: a task with nothing to deliver merges nothing, so the card must not
     // promise a merge — the old single sentence told a human that applying it
-    // "merges the review PR", for a task that has no PR and never will.
-    const noChange = noChangeApplies(file.parsed.frontmatter);
+    // "merges the review PR", for a task that has no PR and never will. The card
+    // wording keys on the DURABLE claim (unchanged by F28-L1, which only reorders
+    // the acceptance GATE so a verified-empty completion is not refused).
+    const isNoChange = noChangeApplies(file.parsed.frontmatter);
     await addRecommendation(
       db,
       ctx,
@@ -2878,11 +2893,11 @@ export async function operatorAcceptCompletion(
       {
         kind: "accept_completion",
         toStageId: doneStageId,
-        label: noChange
+        label: isNoChange
           ? `Complete ${input.taskKey} with no changes and move it to ${doneName}`
           : `Accept completion and move ${input.taskKey} to ${doneName}`,
       },
-      noChange
+      isNoChange
         ? `The review is clean and there is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
         : `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`,
     );
@@ -2913,12 +2928,7 @@ export async function operatorAcceptCompletion(
   // R19-8: the operator closes a no-change task through the SAME live, fail-
   // closed re-check the humans do — it has no force override, so an unverifiable
   // remote (or a branch that gained commits) is a plain noop with the reason.
-  const noChange = await acceptanceNoChangeCheck(
-    db,
-    ctx,
-    input.projectSlug,
-    input.taskKey,
-  );
+  // The probe was hoisted above the gate (F28-L1); reuse it here.
   if (noChange.refusal) return { outcome: "noop", message: noChange.refusal };
   // R17-1 (F17-L12): name any reviewed-revision drift on the completion record.
   const driftNote = revisionDriftNote(file.parsed.frontmatter);

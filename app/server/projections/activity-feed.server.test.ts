@@ -94,6 +94,46 @@ describe("listActivityStream", () => {
     );
   });
 
+  it("F28-D1: same-occurred_at events agree with the task page's file order", () => {
+    const store = setupTestStore(ctx);
+    const at = "2026-08-26T12:00:00.000Z";
+    // Two events at the IDENTICAL timestamp — plausible when one reconcile pass
+    // stamps several `new Date().toISOString()` events in a single tick. File
+    // order is newest-first, so the "newer" event is listed first (position 0).
+    const ev = (text: string) => ({
+      occurredAt: at,
+      type: "policy" as const,
+      actor: { kind: "system" as const, systemId: "policy-engine" },
+      title: null,
+      text,
+      toAgent: false,
+      evidence: null,
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review" }),
+      timeline: [ev("newer"), ev("older")],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    // The task page reads task_events `position ASC` → [newer, older].
+    // SAFETY: the SELECT names exactly `text`, which 0001_baseline declares
+    // NOT NULL on task_events, so every row is `{ text: string }`.
+    const rows = store.db
+      .prepare(
+        `SELECT text FROM task_events WHERE project_slug = ? AND task_key = ? ORDER BY position ASC`,
+      )
+      .all(store.slug, "VIB-9") as { text: string }[];
+    const taskPage = rows.map((r) => r.text);
+    expect(taskPage).toEqual(["newer", "older"]);
+
+    // The activity stream must AGREE on the tie. Before F28-D1 its `id DESC`
+    // tie-break reversed these two relative to the task page.
+    const stream = listActivityStream(store.db, store.slug)
+      .filter((r) => r.taskKey === "VIB-9")
+      .map((r) => r.text);
+    expect(stream).toEqual(["newer", "older"]);
+  });
+
   it("is empty for a project with no events", () => {
     const store = setupTestStore(ctx);
     rebuildAll(store.db, { dataRoot: store.dataRoot });

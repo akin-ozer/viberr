@@ -128,6 +128,44 @@ describe("listAgentDeployments", () => {
     expect(byKey("VIB-2")[0]!.backend).toBeNull();
   });
 
+  it("shows the STUCK retry pin, not the live deployment backend, on the chip (F28-P2)", () => {
+    const store = setupTestStore(ctx);
+    // The `developer` profile still deploys on Claude (the other tests pin its
+    // live backend to claude), but a "Retry on the other backend" resolution
+    // PINNED this engagement to Codex (F27-B1). The per-task chip here must
+    // follow the pin — exactly as the task page's `withLiveAgentBackends` does —
+    // not the live Claude deployment the retry moved away from. Before F28-P2
+    // this private copy of the live-overlay ignored the pin and contradicted
+    // the task page.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        waiting: "agent",
+        operator: { assignedAtStageId: "triage" },
+        engagements: [
+          {
+            profileId: "developer",
+            backend: "claude",
+            role: "Developer",
+            delivers: true,
+            verdictCapable: false,
+            pinnedBackend: "codex",
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const deployments = listAgentDeployments(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+    });
+    const primary = deployments.find(
+      (d) => d.taskKey === "VIB-1" && d.engagement === "primary",
+    )!;
+    expect(primary.profileId).toBe("developer");
+    expect(primary.backend).toBe("codex"); // the pin, not the live "claude"
+  });
+
   it("joins agent_runs: engagements with a running run are marked running", () => {
     const store = setupTestStore(ctx);
     seedTasks(store.dataRoot, store.slug);

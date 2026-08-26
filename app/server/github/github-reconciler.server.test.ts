@@ -26,7 +26,13 @@ import {
   openScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  createPat,
+  getPatMetadata,
+  getProjectCredential,
+  recordPatValidation,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
 import {
   operatorSnapshot,
   resolveOperatorAuthority,
@@ -1452,6 +1458,52 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     });
     return { store, actor };
   }
+
+  it("F28-U2a: a merge with NO open violation still proves pull_request:write", async () => {
+    const { store, actor } = setup(); // VIB-301 owns PR #318, PAT bound, NO violation
+    // Give the bound PAT the honest "verified on first use" state: fine-grained,
+    // pull_request:write ASSUMED (never write-probed).
+    const bound = getProjectCredential(store.db, store.slug)!;
+    recordPatValidation(store.db, bound.id, {
+      status: "valid",
+      checkedAt: "2026-08-24T00:00:00.000Z",
+      login: "viberr-bot",
+      tokenKind: "fine_grained",
+      expiresAt: null,
+      repo: "akin-ozer/viberr",
+      scopes: [
+        { id: "repo", ok: true, source: "probe" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ],
+      missingScopes: [],
+      detail: "Authenticated.",
+    });
+    const scopeSource = () =>
+      getPatMetadata(store.db, bound.id)!.validation!.scopes.find(
+        (s) => s.id === "pull_request:write",
+      )!.source;
+    // The PR was opened out-of-band (e.g. an agent's own git creds), so nothing
+    // ever exercised viberr's PAT — no violation is open, chip still "assumed".
+    expect(countOpenPolicyViolations(store.db, store.slug)).toBe(0);
+    expect(scopeSource()).toBe("assumed");
+
+    const gh = fakeGithubFetch({
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "mergesha02", message: "merged" },
+      },
+      [`DELETE ${REPO_PATH}/git/refs/heads/vib-301-workspace`]: { status: 204 },
+    });
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toEqual({ status: "merged", prNumber: 318, sha: "mergesha02" });
+    // The merge — the FIRST real use of the bound PAT — proved the scope, even
+    // though there was no violation to resolve.
+    expect(scopeSource()).toBe("probe");
+  });
 
   it("merges, flips the cache, writes the github event, resolves the task's pull_request:write violation", async () => {
     const { store, actor } = setupWithPr();

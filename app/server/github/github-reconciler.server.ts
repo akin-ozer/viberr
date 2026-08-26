@@ -56,6 +56,7 @@ import {
   policyViolationText,
   resolveScopeViolationWithEvent,
 } from "./scope-flag.server";
+import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
 
 /**
  * GitHub reconciler (Phase 7): given a task, fetches live GitHub facts
@@ -1249,6 +1250,13 @@ export async function mergeTaskPr(
         { dataRoot: ctx.dataRoot },
       );
     }
+    // F28-U2a: a real merge is a solicited write just like opening a PR, so it
+    // must also flip the cached scope to proven. Resolving a violation above
+    // only helps when one was OPEN; a PR the agent opened with its OWN git
+    // credentials (bypassing viberr's PAT) leaves no violation, so without this
+    // the merge — the FIRST real use of the bound PAT — never clears "unproven".
+    // Prove it on the credential that made THIS merge call (F28-U2b), by id.
+    markWriteScopeProven(db, gh.patId);
     // R15-6: post-merge branch cleanup, per project policy (default ON). The
     // merge is done and recorded above — cleanup is housekeeping that must
     // never turn a successful merge into a failed one, so every outcome

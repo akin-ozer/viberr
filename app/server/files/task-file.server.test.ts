@@ -394,6 +394,20 @@ describe("task.md tolerant parsing", () => {
     expect(parsed.frontmatter.key).toBe("VIB-3");
     expect(diagnostics.some((d) => d.hardStop)).toBe(true);
   });
+
+  it("F28-D2: a CRLF-encoded file parses identically to LF (no frontmatter loss)", () => {
+    // A file saved by a Windows editor or `git core.autocrlf` — the data root
+    // is outside git, so nothing re-normalizes it: every LF became a CRLF.
+    const lf = serializeTaskFile(FULL);
+    const crlf = lf.replace(/\n/g, "\r\n");
+    const lfParsed = parseTaskFileContent(lf, { fallbackKey: "VIB-142" });
+    const crlfParsed = parseTaskFileContent(crlf, { fallbackKey: "VIB-142" });
+    // Before F28-D2 the leading `---\r\n` failed the opening-fence check, so the
+    // WHOLE file fell back to defaults (title→key, stage→"", Goal/Timeline lost)
+    // with a hardStop diagnostic. Now it round-trips exactly like the LF file.
+    expect(crlfParsed.diagnostics.some((d) => d.hardStop)).toBe(false);
+    expect(crlfParsed.parsed).toEqual(lfParsed.parsed);
+  });
 });
 
 describe("task.md event attachments (P21 — the producing message names its files)", () => {

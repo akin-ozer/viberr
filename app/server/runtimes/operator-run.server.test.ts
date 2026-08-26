@@ -288,6 +288,70 @@ describe("Codex structured operator completion", () => {
     expect(task().frontmatter.stage).toBe("impl");
   });
 
+  it("F28-O1: a mid-plan abort is narrated even when append-typed-events is WITHHELD", async () => {
+    // The operator can start the delivering run but CANNOT append typed events.
+    // Its plan's run_agent throws (no delivering specialist is engaged), which
+    // aborts the plan. Before F28-O1 the abort notice went through the GATED
+    // operatorPostComment, which returns denied/noop WITHOUT throwing when
+    // append-typed-events is off — so `.catch()` never fired and the abort was
+    // swallowed, leaving the task stalled with nothing on the timeline. The fix
+    // narrates the abort DIRECTLY, so it lands regardless of the gate.
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "append-typed-events", mode: "off" },
+            { capabilityId: "assign-primary-specialist", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+            autonomy: "full",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Kick off the delivering run.",
+        actions: [
+          {
+            tool: "run_agent",
+            profileId: null,
+            delivers: true,
+            toStageId: null,
+            packetType: null,
+            text: null,
+            reason: "Run the delivering agent.",
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      const abort = task().timeline.find(
+        (e) => e.type === "note" && e.text.includes("Coordination stopped"),
+      );
+      expect(abort).toBeDefined();
+      expect(abort!.text).toContain("run_agent");
+    });
+  });
+
   it("no usable plan + generate-packets WITHHELD writes a note instead of stranding (G6)", async () => {
     // The operator can post events but CANNOT open packets. Its turn is
     // unparseable, so the escalation path tries to open a blocked recovery

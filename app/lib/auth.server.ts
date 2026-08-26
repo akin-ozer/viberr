@@ -305,7 +305,20 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
       // (preserving user.id === users.id) instead of creating a duplicate.
       accountLinking: {
         enabled: true,
-        trustedProviders: ["github", "google", "credential"],
+        // F28-A1: github/google are DELIBERATELY not "trusted" here. A trusted
+        // provider is linked to an existing account by email WITHOUT checking
+        // the provider's own `emailVerified` claim — and because every viberr
+        // account is provisioned `emailVerified: 1` (needed so a whitelisted
+        // user's OAuth login can auto-link to their admin-created row), the
+        // requireLocalEmailVerified backstop (better-auth's CVE-2026-53516 fix)
+        // is moot too. Trusting github/google would leave NO gate: anyone who
+        // gets the provider to report a victim's UNVERIFIED email would be
+        // silently linked to and signed in as that victim. Leaving them
+        // untrusted keeps the intended auto-link for a provider-VERIFIED email
+        // (the normal case — a real user's primary GitHub/Google email is
+        // verified) while refusing an unverified one. `credential` never reaches
+        // the social-linking path, so it is a harmless no-op here.
+        trustedProviders: ["credential"],
       },
     },
     // Whitelist + provisioning: better-auth owns the OAuth dance; these hooks

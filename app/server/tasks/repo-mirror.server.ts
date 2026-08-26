@@ -153,10 +153,16 @@ export function cloneStepLabel(repo: string, coldClone: boolean): string {
 /** F27-U1: the same cold-clone step, with the live transfer percentage folded
  *  in. Only the cold first-task network clone reports progress (a warm mirror
  *  clone hardlinks in well under a frame), so this always reads as first-task
- *  setup; the fraction clamps into 0..100. */
+ *  setup; the fraction clamps into 0..100.
+ *
+ *  F28-U1: the percentage leads (right after the repo), BEFORE the "first task"
+ *  context — the run strip renders this step with `text-overflow: ellipsis` in a
+ *  narrow, fixed-width column, so a trailing `%` was always clipped and the
+ *  progress readout this feature exists for never reached the user. Front-loading
+ *  the number keeps it visible; the context suffix is what truncates instead. */
 export function cloneProgressStep(repo: string, fraction: number): string {
   const pct = Math.max(0, Math.min(100, Math.round(fraction * 100)));
-  return `Cloning ${repo} · first task in this project · ${pct}%`;
+  return `Cloning ${repo} · ${pct}% · first task in this project`;
 }
 
 /**
