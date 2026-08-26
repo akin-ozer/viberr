@@ -424,6 +424,47 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(await mergeMock.mock.results[0]?.value).toEqual({ status: "no_pr" });
   });
 
+  it("F28-L1: an UNCLAIMED delivered task the probe proves empty is accepted (auto-detect)", async () => {
+    // A delivered task with a branch + a work revision, but the deliverer never
+    // set `noChanges`, no PR was opened, and the branch is 0 commits ahead of
+    // main (e.g. a shallow-clone speculative mint, or an out-of-band branch
+    // reset). No required reviewer, so the only bar is the R15-1 verdict gate.
+    seedVerificationTask({
+      engagements: [],
+      branch: "vib-1-work",
+      workRevision: {
+        id: "rev_unclaimed",
+        headSha: BASE_SHA,
+        treeSha: "t".repeat(40),
+        branch: "vib-1-work",
+        createdAt: "2026-08-26T09:00:00.000Z",
+        sourceProfileId: "developer",
+        kind: "delivered",
+      },
+    });
+    // Branch exists and is verified EMPTY (0 ahead) — the R20-2 auto-detect case.
+    remote({ aheadBy: 0 });
+
+    // Before F28-L1 the SYNC verdict gate threw "has delivered work but no review
+    // pull request" here — before the async probe (the auto-detect built to
+    // accept exactly this) ever ran. Now the probe runs first and clears the gate.
+    // CANARY: drop `|| noChangeVerified` from verdictGateReason and this refuses.
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      arda(),
+      dataCtx(),
+    );
+
+    const fm = task().frontmatter;
+    expect(fm.stage).toBe("done");
+    // The server repaired the durable flag to match the proven outcome (R20-2).
+    expect(fm.noChanges).toBe(true);
+    // No PR existed, so nothing merged — it closed as a no-change completion.
+    expect(fm.pr).toBeNull();
+    expect(completionEvent()?.text).toContain("completed with no changes");
+  });
+
   it("R19-8 fails CLOSED: a branch that gained commits refuses the acceptance", async () => {
     // The whole reason the stored flag is not the evidence. CANARY: remove the
     // check from BOTH acceptCompletion and applyAcceptanceWrite — either layer

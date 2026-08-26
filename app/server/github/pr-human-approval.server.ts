@@ -311,17 +311,30 @@ export function verdictGateReason(
   },
   validation: Validation,
   taskKey: string,
+  /**
+   * F28-L1: the runtime accept path passes `true` when the LIVE no-change probe
+   * (`acceptanceNoChangeCheck`) has just proven the branch empty — the R20-2
+   * AUTO-DETECT of a task the deliverer never explicitly claimed as `noChanges`.
+   * Treat that exactly like the durable `fm.noChanges` flag: there is nothing to
+   * open a PR for, so the "no review pull request" refusal must NOT fire. The
+   * projection reader (`acceptanceBlockReason`) can't run the probe, so it omits
+   * this and stays conservative — the review queue shows the task as not-ready
+   * until accept time proves it empty (safe direction).
+   */
+  noChangeVerified?: boolean,
 ): string | null {
   if (!fm.workRevision) return null;
   // Delivered work with no PR: nothing stands for review, so acceptance would
   // close the task on work no PR ever carried (R15-1 gate 1).
   if (!fm.pr) {
-    // R17-2 (F17-L9) / R19-8: unless the branch is verified empty, or the
-    // revision IS a verification revision (a reviewer judged the base sha
-    // because there was nothing to deliver) — a "Completed — no changes"
-    // outcome. There is nothing to open a PR for; acceptance closes it to Done
-    // without a merge, after re-proving the basis live.
-    if (fm.noChanges || fm.workRevision.kind === "verified") return null;
+    // R17-2 (F17-L9) / R19-8: unless the branch is verified empty (the durable
+    // `noChanges` flag OR a live auto-detect this acceptance just proved), or the
+    // revision IS a verification revision (a reviewer judged the base sha because
+    // there was nothing to deliver) — a "Completed — no changes" outcome. There
+    // is nothing to open a PR for; acceptance closes it to Done without a merge,
+    // after re-proving the basis live.
+    if (fm.noChanges || fm.workRevision.kind === "verified" || noChangeVerified)
+      return null;
     return `${taskKey} has delivered work but no review pull request. Deliver the branch & open the PR before accepting.`;
   }
   // `healthy` clears the gate; `failing` was already named precisely by

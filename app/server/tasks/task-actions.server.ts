@@ -5662,12 +5662,21 @@ export async function resolvePacket(
       // of them; one shared helper is the fix. `blockedPacket: false` because
       // the open packet IS what this call resolves — it can't also be the reason
       // to refuse the resolution.
+      // F28-L1: run the live no-change probe BEFORE the sync gate so a verified-
+      // empty completion (the R20-2 auto-detect) isn't refused "no review pull
+      // request" here — the same reorder the direct human accept path carries.
+      const noChange = await acceptanceNoChangeCheck(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+      );
       {
         const refusal = acceptanceRefusalReason(
           project,
           existing.parsed.frontmatter,
           input.taskKey,
-          { blockedPacket: false },
+          { blockedPacket: false, noChange },
         );
         if (refusal) throw AppError.conflict(refusal);
       }
@@ -5691,13 +5700,7 @@ export async function resolvePacket(
       // no-change basis is re-proved live HERE as well — otherwise the
       // operator's own acceptance packet becomes the one door a stale
       // `noChanges` flag closes a now-non-empty branch through. No `force` on
-      // this path.
-      const noChange = await acceptanceNoChangeCheck(
-        db,
-        ctx,
-        input.projectSlug,
-        input.taskKey,
-      );
+      // this path. The probe was hoisted above the gate (F28-L1); reuse it.
       if (noChange.refusal) throw AppError.conflict(noChange.refusal);
       // F15-13: a PR already merged out of band needs no merge attempt, and the
       // completion event must not claim the merge as this human's act.
@@ -5741,7 +5744,8 @@ export async function resolvePacket(
                     project,
                     fresh.parsed.frontmatter,
                     input.taskKey,
-                    { blockedPacket: false },
+                    // F28-L1: the same verified-empty result the outer gate saw.
+                    { blockedPacket: false, noChange },
                   )
                 : null;
               if (refusal) throw AppError.conflict(refusal);
@@ -6582,11 +6586,19 @@ function acceptanceRefusalReason(
     // WORK, its sentence wins — it names the branch and the commit count.
     // `verdictGateReason`'s "deliver the branch & open the PR" is right for a
     // branch with work and was catastrophically wrong for an EMPTY one (it
-    // advised opening an empty PR); the empty case no longer reaches here at all
-    // (auto-detect routes it), and the has-work case now says how many commits.
+    // advised opening an empty PR); the has-work case now says how many commits.
     noChangeWorkRefusal ??
     // R15-1: delivered work needs a healthy verdict on the delivered revision.
-    verdictGateReason(fm, deriveValidation(fm), taskKey) ??
+    // F28-L1: a VERIFIED-empty probe result (an explicit `noChanges` claim OR the
+    // R20-2 auto-detect of an unclaimed-but-proven-empty branch) clears the "no
+    // review pull request" gate — before this the sync gate refused an unclaimed
+    // empty task and the auto-detect that was built to accept it never applied.
+    verdictGateReason(
+      fm,
+      deriveValidation(fm),
+      taskKey,
+      opts.noChange?.applies === true && opts.noChange.refusal == null,
+    ) ??
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Resolving the packet clears readiness.
     (opts.blockedPacket
@@ -6841,6 +6853,12 @@ async function evaluateAcceptancePrHead(
 export function acceptanceRefusalFor(
   input: { projectSlug: string; taskKey: string },
   ctx: TaskMutationContext = {},
+  // F28-L1: the SYNC display callers (the acceptance affordance) can't run the
+  // live probe, so they pass nothing and stay conservative — an unclaimed-empty
+  // task reads "not ready" until accept time proves it empty (safe direction).
+  // A RUNTIME caller that HAS run the probe (operatorAcceptCompletion) passes it
+  // so a verified-empty completion isn't refused "no review pull request".
+  noChange?: AcceptanceNoChangeCheck,
 ): string | null {
   let project: ProjectContext;
   try {
@@ -6858,6 +6876,7 @@ export function acceptanceRefusalFor(
       blockedPacket:
         existing.parsed.frontmatter.readiness === "blocked" &&
         existing.parsed.packet?.type === "blocked",
+      noChange,
     },
   );
 }
@@ -7387,6 +7406,23 @@ async function acceptCompletion(
     "full",
   );
 
+  // F28-L1: run the live no-change probe BEFORE the gates so its verified-empty
+  // verdict can reach them. It is cheap for a task WITH a PR (fails
+  // `noChangeCandidate` — no GitHub call); for a PR-less delivered task it
+  // decides whether the branch is truly empty (the R20-2 AUTO-DETECT of an
+  // outcome the deliverer never explicitly claimed). Passing it into the sync
+  // gate lets an unclaimed-but-proven-empty completion through — the "no review
+  // pull request" refusal used to throw here first, so the probe (and the
+  // auto-detect built to accept exactly this) never ran. R19-8 still holds: a
+  // stale `noChanges` claim on a branch that has since gained commits fails
+  // closed via `noChange.refusal` below.
+  const noChange = await acceptanceNoChangeCheck(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+  );
+
   // Every acceptance gate — graph position, required reviewers, the R15-1
   // verdict gate, blocked packet, closed/conflicting PR, archived task — comes
   // from ONE shared helper, so a fourth writer to Done can't quietly ship with
@@ -7400,6 +7436,7 @@ async function acceptCompletion(
         blockedPacket:
           existing.parsed.frontmatter.readiness === "blocked" &&
           existing.parsed.packet?.type === "blocked",
+        noChange,
       },
     );
     if (refusal) throw AppError.conflict(refusal);
@@ -7429,19 +7466,12 @@ async function acceptCompletion(
   );
   if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
 
-  // R19-8: a `noChanges` task closes WITHOUT a merge, so its basis must be
-  // re-proved LIVE at the moment of acceptance — a flag set at some past
-  // delivery attempt must never close a task whose branch has since gained
-  // commits (F19-21). Fails closed: an unreachable or uncredentialed remote
-  // refuses. `force` MAY bypass it (unlike the head gate, which guards an
-  // irreversible merge — this path merges nothing), and the completion event
+  // R19-8: a `noChanges` task closes WITHOUT a merge, so its basis is re-proved
+  // LIVE — a flag set at some past delivery attempt must never close a task whose
+  // branch has since gained commits (F19-21). The probe (hoisted above the gates
+  // for F28-L1) fails closed: an unreachable or uncredentialed remote refuses;
+  // `force` MAY bypass it (this path merges nothing), and the completion event
   // then says the check did not pass instead of claiming a verification.
-  const noChange = await acceptanceNoChangeCheck(
-    db,
-    ctx,
-    input.projectSlug,
-    input.taskKey,
-  );
   if (noChange.refusal && !input.force) throw AppError.conflict(noChange.refusal);
 
   // F15-13: a PR already merged on GitHub (out of band, reconciled into the
@@ -7486,6 +7516,8 @@ async function acceptCompletion(
                   blockedPacket:
                     fresh.parsed.frontmatter.readiness === "blocked" &&
                     fresh.parsed.packet?.type === "blocked",
+                  // F28-L1: the same verified-empty result the outer gates saw.
+                  noChange,
                 },
               );
               if (refusal) throw AppError.conflict(refusal);
