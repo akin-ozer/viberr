@@ -50,7 +50,12 @@ export function StageMeter({
     // utility (which carries 2rem padding and would inflate this 6px bar — the
     // "weird task view" bug on freshly-created projects).
     return (
-      <div className="pj-meter is-empty" title="No tasks yet. Ready for its first">
+      <div
+        className="pj-meter is-empty"
+        role="img"
+        aria-label="No tasks yet. Ready for its first"
+        title="No tasks yet. Ready for its first"
+      >
         {stages.map((s) => (
           <span
             key={s.id}
@@ -67,7 +72,9 @@ export function StageMeter({
     .map((s) => (dist[s.id] || 0) + " " + s.name.toLowerCase())
     .join(" · ");
   return (
-    <div className="pj-meter" title={label}>
+    // role=img + aria-label: the per-stage counts are otherwise conveyed by
+    // color/width segments alone (WCAG 1.1.1); `title` is a weak SR name.
+    <div className="pj-meter" role="img" aria-label={label} title={label}>
       {stages.map((s) => {
         const n = dist[s.id] || 0;
         if (!n) return null;

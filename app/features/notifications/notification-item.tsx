@@ -58,6 +58,10 @@ export function NotificationItem({
         <Icon name={m.icon} />
       </span>
       <span className="ntf-item-main">
+        {/* Unread is otherwise signalled only by the color dot (WCAG 1.4.1) —
+            lead the accessible name with a visually-hidden "Unread:" marker.
+            Sibling of `.tt` (not nested) so `.tt`'s exact textContent holds. */}
+        {n.unread && <span className="mention-vh">Unread: </span>}
         <span className="tt">{n.title || plainText(n.text)}</span>
         {n.title && <span className="tx">{plainText(n.text)}</span>}
         <span className="mt">{metaLine}</span>

@@ -976,6 +976,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 @media (prefers-reduced-motion: reduce) {
   .stage-menu-pop,
   .stage-menu-btn .sm-current.changed,
+  .bell-badge,
   .card-drop-preview,
   .card-wrap.just-arrived .card { animation: none; }
 }
@@ -1507,7 +1508,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .tl-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .tl-actor { font-size: .82rem; font-weight: 800; font-family: var(--font-display); }
 .tl-time { font-size: .72rem; color: var(--placeholder); font-family: var(--font-mono); }
-.tl-text { font-size: .88rem; color: var(--muted); line-height: 1.5; margin-top: .3rem; }
+.tl-text { font-size: .88rem; color: var(--muted); line-height: 1.5; margin-top: .3rem; max-width: 70ch; }
 .tl-text strong { color: var(--fg); }
 
 /* typed event accents on node */
@@ -2012,10 +2013,15 @@ dialog[data-closing]::backdrop {
   border-radius: var(--radius-panel); box-shadow: var(--shadow-pop);
   overflow: hidden; animation: pop-center .18s var(--ease-out);
 }
-/* R15-5 — the ⌘K palette. Same top-layer <dialog> mechanics as .modal-card
-   (pop-center + the shared [data-closing] exit), anchored high instead of
-   centered: a jump list is read from its first row, and typing must not shift
-   the card as results arrive. */
+/* R15-5 — the ⌘K palette. Same top-layer <dialog> mechanics as .modal-card,
+   anchored high instead of centered: a jump list is read from its first row,
+   and typing must not shift the card as results arrive. Unlike the click-opened
+   modals it does NOT animate on open or close: this is the app's one
+   keyboard-toggled surface (⌘K, opened many times a session), and by the
+   frequency rule keyboard-initiated UI should appear instantly (Raycast has no
+   open/close animation either). [data-closing] sets transition:none so
+   useDialog.close() takes its synchronous-unmount path (the same branch already
+   used under jsdom and [data-motion="reduce"]). */
 .cmdk-card {
   position: fixed; z-index: 61;
   top: 12vh; left: 50%; transform: translate(-50%, 0);
@@ -2023,15 +2029,9 @@ dialog[data-closing]::backdrop {
   display: flex; flex-direction: column;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-panel); box-shadow: var(--shadow-pop);
-  overflow: hidden; animation: cmdk-in .18s var(--ease-out);
+  overflow: hidden;
 }
-@keyframes cmdk-in {
-  from { opacity: 0; transform: translate(-50%, -6px) scale(.985); }
-  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
-}
-/* The shared exit rule re-centers vertically (translate(-50%, -46%)); this card
-   is top-anchored, so it needs its own closing transform. */
-.cmdk-card[data-closing] { transform: translate(-50%, -6px) scale(.985); }
+.cmdk-card[data-closing] { transition: none; }
 .cmdk-head {
   display: flex; align-items: center; gap: .6rem;
   padding: .85rem 1rem; border-bottom: 1px solid var(--hairline);
@@ -4058,7 +4058,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    so the indicator still reads. */
 [data-motion="reduce"] .route-pending .rp-fill { width: 100%; }
 @media (prefers-reduced-motion: reduce) {
-  .route-pending .rp-fill { width: 100%; }
+  /* Neutralize the sweep too, not just the width — otherwise the transform
+     slide keeps looping, now full-width, which is worse than a static stub. */
+  .route-pending .rp-fill { width: 100%; animation: none; }
 }
 
 /* P13-D-11: the "load older" affordance at the top of the run console. The

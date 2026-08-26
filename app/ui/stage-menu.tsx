@@ -57,6 +57,10 @@ export function StageMenu({
   // column instead, so this is a no-op there (the card handles its own motion).
   // `changed` derives from which stage the animation last settled on, so it
   // flips true in the same render as the stage change (no flag-resetting effect).
+  // The .sm-current span is keyed on the stage id (below) so a second change
+  // landing inside the 450ms window remounts it and the keyframe replays; a CSS
+  // animation on an unchanged class-list is otherwise swallowed (same
+  // key-remount trick the notification bell badge uses for the same pulse).
   const [settledStageId, setSettledStageId] = useState(currentStageId);
   const changed = settledStageId !== currentStageId;
   useEffect(() => {
@@ -160,7 +164,7 @@ export function StageMenu({
         aria-label={`Change stage (currently ${current?.name ?? "unknown"})`}
         title="Change stage"
       >
-        <span className={`sm-current${changed ? " changed" : ""}`}>
+        <span key={currentStageId} className={`sm-current${changed ? " changed" : ""}`}>
           <span className="col-stage-dot" style={{ background: current?.color }} />
           <span className="sm-name">{current?.name ?? "−"}</span>
         </span>

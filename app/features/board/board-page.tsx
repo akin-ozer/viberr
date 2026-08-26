@@ -445,6 +445,10 @@ function ReviewerStack({ task, label }: { task: TaskSummary; label?: boolean }) 
     <span
       className="rev-stack"
       title={"Owner · human reviewer & acceptance: " + o.name}
+      // The Avatar renders initials only; expose the real name to keyboard/
+      // touch/SR users too (title alone is a weak accessible name), matching
+      // MemberStack's aria-label convention.
+      aria-label={"Owner: " + o.name}
     >
       {label && <span className="rs-lbl">owner</span>}
       <Avatar person={o} />
@@ -1194,6 +1198,12 @@ function NewTaskModal({
           className={
             "foot-hint" + (serverError || (titleTouched && !valid) ? " err" : "")
           }
+          // UX-coherence: announce the server/validation error to screen
+          // readers — the same role=alert idiom the Home "New project" modal
+          // got in the Pass-19 audit; this modal (same fetcher/serverError
+          // shape) was missed. Condition mirrors the className ternary above so
+          // the announce state can never desync from the visible error.
+          role={serverError || (titleTouched && !valid) ? "alert" : undefined}
         >
           {serverError
             ? serverError
@@ -1262,6 +1272,7 @@ function BoardHeader({
   group,
   canCreate,
   canRescan,
+  scanning,
   setParam,
   onRescan,
   onNew,
@@ -1273,6 +1284,7 @@ function BoardHeader({
   group: "stage" | "list";
   canCreate: boolean;
   canRescan: boolean;
+  scanning: boolean;
   setParam: (key: string, value: string | null) => void;
   onRescan: () => void;
   onNew: () => void;
@@ -1335,10 +1347,14 @@ function BoardHeader({
             type="button"
             className="btn ghost sm"
             onClick={onRescan}
+            disabled={scanning}
+            aria-busy={scanning || undefined}
             title="Reconcile the board with the file-native store"
           >
-            <Icon name="refresh" />
-            Re-scan
+            {/* Busy state matches the Home StoreStrip twin: spin the icon and
+                swap the label while the rescan fetcher is in flight. */}
+            <Icon name="refresh" className={scanning ? "spin" : ""} />
+            {scanning ? "Scanning…" : "Re-scan"}
           </button>
         )}
         {canCreate && (
@@ -1538,6 +1554,21 @@ function StageBoard({
 }) {
   // All stages, for the per-card keyboard "Move to stage" menu (F10-25).
   const allStages = columns.map((c) => c.stage);
+  if (columns.length === 0) {
+    // A project whose project.md `stages:` was emptied by an external edit
+    // (in-app actions can't remove the locked entry/terminal stages) would
+    // otherwise render a blank board with no explanation. Disclose it, the
+    // same way the OrphanBanner / archived-filter notices in this file do.
+    return (
+      <div className="board-orphans" role="status">
+        <Icon name="alert" />
+        <span className="board-orphans-label">
+          This project has no workflow stages yet. Add a stage in project
+          settings before tasks can be created or shown here.
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="board" onKeyDown={onCardKeyDown}>
       {columns.map((c, columnIndex) => {
@@ -2113,6 +2144,7 @@ export function BoardPage({
         group={group}
         canCreate={canCreate}
         canRescan={canRescan}
+        scanning={rescanFetcher.state !== "idle"}
         setParam={setParam}
         onRescan={rescan}
         // UI-58: `?? "triage"` was a magic literal for a project with no stages
