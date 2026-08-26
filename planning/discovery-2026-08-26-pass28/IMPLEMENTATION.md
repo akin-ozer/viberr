@@ -35,10 +35,12 @@ Container ran pass-27 main throughout discovery; fixes validated via full suite 
 - **Dead permit path** (L1): R20-2 auto-detect existed with a dedicated field + write branches, but the sync gate
   threw before the async probe ran — the whole mechanism was unreachable.
 
-## Owner decision requested
+## Owner decision — F28-A1 → KEEP (ruled 2026-08-26)
 - **F28-A1** — a real, CVE-aligned account-takeover hole once OAuth is enabled (off by default). Fixed with a
   1-line `trustedProviders` change that preserves the intended whitelist auto-link for a provider-VERIFIED email.
-  Given the "side project, skip security deep-dives" stance, flagged in the PR for the owner's call; trivial revert.
+  Flagged for the owner given the "side project, skip security deep-dives" stance. **The owner reviewed the full
+  mechanism and chose to KEEP the fix** (verified-email auto-link + admin-whitelist provisioning unaffected; the
+  change is inert while OAuth is off and closes the hole the moment it's enabled). No longer a pending question.
 
 ## Test-hygiene note (for continuity)
 An oxlint base-comparison ran `git checkout HEAD -- app`, which discarded a still-UNCOMMITTED F28-L1 refinement
