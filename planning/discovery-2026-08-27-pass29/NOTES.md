@@ -161,3 +161,11 @@ Filled the dimensions that were previously verified via code/plumbing rather tha
 - **@mention (UC5c):** `@operator` on VQP-4 with an open packet did NOT resume the operator — correct BUG-2 gating (human is pointed at the packet). Resolving the packet (confirm) made the operator cascade correctly (scoped→assigned→impl).
 - Coverage of all named dimensions enumerated in EXTENDED-COVERAGE.md (20+ UCs).
 - Test users qa-viewer/qa-contrib + VQP-4 kept per owner "keep as evidence" choice.
+
+---
+
+## Owner rulings (2026-08-27, design-choice questions)
+- **R29-1 Operator proactivity: INTENDED — keep proactive.** The multi-run cascade per human action is the desired hands-off UX. No throttle.
+- **R29-2 Developer ships the browser.** Grant the built-in Developer `use-browser: direct` (+ explicit `use-web-search-fetch: direct`, matching the editor's coupling) in SEED_AGENT_PROFILES so agents can verify their own UI work out of the box. IMPLEMENTED (agent-catalog.server.ts + pinning test). Note: per E10, existing project rosters keep their deployed grants — the change reaches new projects/first boots; an admin flips existing deployments in the editor.
+- **R29-3 Codex confinement: custom profiles run Codex too — keep that in mind.** Verified: every Codex disclosure (B1 advisory/inert tags, F4 browser note, matrix modal text) keys on `backend === "codex"`, never on built-in identity — custom Codex profiles get identical treatment, and the runtime asymmetries are backend-keyed. No change needed; recorded as a standing consideration for future Codex work.
+- **R29-4 Matrix "Reserved for humans" label: KEEP AS-IS.** Per-column semantics stand (NEW-3). F1 stays dropped.

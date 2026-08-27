@@ -150,7 +150,15 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // "Move the task to Review" ships `direct` (it used to ship `recommend`,
       // which the runtime widened to `direct` behind the matrix's back), so the
       // file now literally matches what enforcement and the Policy counts show.
-      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Post mid-run comments", "Ask the human a question", "Move the task to Review"],
+      // Owner ruling (2026-08-27, pass 29): the Developer ships WITH the live
+      // browser so it can verify its own UI work out of the box — `use-browser`
+      // was default-off on every seeded profile, which made the capability
+      // undiscoverable (nothing granted it until an admin hand-built a profile).
+      // "Search & fetch from the web" rides along EXPLICITLY: the browser IS web
+      // egress and the mount refuses without it (resolveBrowserMcp gate 2), so
+      // the pair ships the way the profile editor's own coupling would save it —
+      // never relying on the catalog default to keep the pair coherent.
+      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Post mid-run comments", "Ask the human a question", "Move the task to Review", "Drive a live web browser", "Search & fetch from the web"],
       recommend: [],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
