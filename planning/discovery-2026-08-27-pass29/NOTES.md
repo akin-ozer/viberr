@@ -151,3 +151,13 @@ From VQP-2 Claude developer run (run_enKz891dvwma) logs:
 - **F5** [browser] no health/degraded signal for browser infra (unlike Codex-auth/model). FIX: boot/health chromium probe → browserUnavailable on deployed-specialist view (complements F2).
 - **F6** [browser] no e2e/unit test drives the real Playwright child / pins default-name-vs-filename output-dir behavior. FIX: add test(s).
 - **F7** stale delivery-conflict blocked packet not superseded by a successful direct "Deliver branch & open PR"; contradictory "no PR opened" vs "PR #NNN in review"; operator can't clear a human-owned packet. FIX: auto-resolve/supersede the packet when a PR is recorded.
+
+---
+
+## Extended live round 2 (deepening the named dimensions)
+Filled the dimensions that were previously verified via code/plumbing rather than demonstrated live. NO new bugs — the app handled all correctly.
+- **RBAC LIVE (UC6):** created real qa-viewer (viewer) + qa-contrib (contributor) members on VQP. As qa-viewer, same session + valid CSRF: `owner-take`→**403**, `comment`→**200** (landed on VQP-2 timeline as QA Viewer). Permissions panel showed viewer's role-gated grants; page rendered no mutating controls. Isolates RBAC from auth/CSRF.
+- **Ownership LIVE (UC24):** owner-take → owner-assign(qa-contrib) → owner-release, all 200 as admin; timeline records "Handed ownership to QA Contributor" / "Released … (admin)".
+- **@mention (UC5c):** `@operator` on VQP-4 with an open packet did NOT resume the operator — correct BUG-2 gating (human is pointed at the packet). Resolving the packet (confirm) made the operator cascade correctly (scoped→assigned→impl).
+- Coverage of all named dimensions enumerated in EXTENDED-COVERAGE.md (20+ UCs).
+- Test users qa-viewer/qa-contrib + VQP-4 kept per owner "keep as evidence" choice.
