@@ -32,6 +32,21 @@
   --border-control: #858a9b;
   --ring: #e0e2e8;
   --hairline: color-mix(in srgb, var(--border), transparent 55%);
+  /* THE NEUTRAL TINT LADDER (pass 30). Every "grey fill" in the app is one of
+     three fixed ink strengths mixed from the theme's own --fg, so the whole
+     family recomputes per theme and no rule mints its own grey:
+       --tint-well  (3% ink)  resting wells, neutral pill fills, group bands
+       --tint-hover (5% ink)  hover fills
+       --tint-press (8% ink)  pressed / strong hover
+     One alpha family, three steps — the skill's fixed-opacity-scale rule
+     applied to derived color. Shadows keep their own literal mixes (they are
+     tokens already). */
+  --tint-well: color-mix(in srgb, var(--fg), transparent 97%);
+  --tint-hover: color-mix(in srgb, var(--fg), transparent 95%);
+  --tint-press: color-mix(in srgb, var(--fg), transparent 92%);
+  /* THE focus/selection wash — the one blue tint text never sits on. Used by
+     every focus ring and the selected-control washes. */
+  --focus-wash: color-mix(in srgb, var(--blue), transparent 86%);
 
   --blue: #5b76fe;
   --blue-pressed: #2a41b6;
@@ -190,7 +205,7 @@ select {
 }
 select:focus {
   border-color: var(--blue);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%);
+  box-shadow: 0 0 0 3px var(--focus-wash);
   outline: 0;
 }
 select:disabled { opacity: .45; cursor: default; }
@@ -245,7 +260,7 @@ input[type="checkbox"] { accent-color: var(--blue); }
 div.top-search:focus-within,
 .board-filter-input:focus-within {
   border-color: var(--blue);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%);
+  box-shadow: 0 0 0 3px var(--focus-wash);
 }
 
 .mono {
@@ -359,7 +374,7 @@ h1, h2, h3, h4 {
   gap: .25rem;
   padding: 1rem .75rem;
   border-right: 1px solid var(--hairline);
-  background: color-mix(in srgb, var(--surface), transparent 18%);
+  background: color-mix(in srgb, var(--surface), transparent 25%);
   backdrop-filter: blur(12px);
   overflow-y: auto;
 }
@@ -375,7 +390,7 @@ h1, h2, h3, h4 {
   font-family: var(--font-display);
   font-weight: 800;
   font-size: 1.05rem;
-  box-shadow: inset 0 -7px 0 color-mix(in srgb, var(--blue), transparent 60%);
+  box-shadow: inset 0 -7px 0 color-mix(in srgb, var(--blue), transparent 55%);
 }
 
 .project-switch {
@@ -419,7 +434,7 @@ h1, h2, h3, h4 {
   border: 1px solid transparent;
   transition: background .14s ease, color .14s ease;
 }
-.nav-item:hover { background: color-mix(in srgb, var(--fg), transparent 96%); color: var(--fg); }
+.nav-item:hover { background: var(--tint-hover); color: var(--fg); }
 .nav-item.active {
   background: var(--surface);
   border-color: var(--hairline);
@@ -463,7 +478,7 @@ h1, h2, h3, h4 {
   border-radius: var(--radius-button);
   font-size: .86rem; font-weight: 600; color: var(--muted);
 }
-.menu-item:hover { background: color-mix(in srgb, var(--fg), transparent 95%); color: var(--fg); }
+.menu-item:hover { background: var(--tint-hover); color: var(--fg); }
 .menu-item .ico { width: 16px; height: 16px; color: var(--faint); }
 .menu-item.danger { color: var(--coral-dark); }
 .menu-item.danger:hover { background: color-mix(in srgb, var(--coral-light), var(--surface) 55%); }
@@ -487,7 +502,7 @@ h1, h2, h3, h4 {
   gap: 1rem;
   padding: 0 1.5rem;
   border-bottom: 1px solid var(--hairline);
-  background: color-mix(in srgb, var(--surface), transparent 22%);
+  background: color-mix(in srgb, var(--surface), transparent 25%);
 }
 
 .crumbs { display: flex; align-items: center; gap: .5rem; font-size: .92rem; flex: 1 1 auto; min-width: 0; overflow: hidden; }
@@ -523,13 +538,13 @@ h1, h2, h3, h4 {
    well with placeholder text and a caret. Same shape, two readable states. */
 button.top-search {
   text-align: left; cursor: pointer;
-  background: color-mix(in srgb, var(--surface), var(--fg) 5%);
+  background: var(--tint-hover);
   transition: border-color .14s ease, background .14s ease;
 }
 button.top-search:hover {
   /* No border-color swap: resting is --border-control now, and hovering to
      the decorative --border would DIM the boundary. The tint carries hover. */
-  background: color-mix(in srgb, var(--surface), var(--fg) 8%);
+  background: var(--tint-press);
 }
 .top-search-label { flex: 1; font-size: .86rem; color: var(--muted); }
 .top-search input { border: 0; outline: 0; background: transparent; width: 100%; color: var(--fg); font-size: .86rem; }
@@ -675,7 +690,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .pill.blocked { background: var(--red-light); color: var(--coral-dark); }
 .pill.info    { background: var(--blue-soft); color: var(--blue-pressed); }
 .pill.agent   { background: var(--agent-soft); color: var(--agent-dark); }
-.pill.neutral { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--muted); }
+.pill.neutral { background: var(--tint-press); color: var(--muted); }
 .pill.done    { background: var(--success-soft); color: var(--success-dark); }
 .pill.sm { font-size: .68rem; padding: .25rem .375rem; }
 
@@ -687,7 +702,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   flex: none;
   background: var(--agent-soft);
   color: var(--agent-dark);
-  border: 1px solid color-mix(in srgb, var(--agent), transparent 72%);
+  border: 1px solid color-mix(in srgb, var(--agent), transparent 70%);
   /* angular cut corner = "machine" */
   clip-path: polygon(22% 0, 100% 0, 100% 78%, 78% 100%, 0 100%, 0 22%);
 }
@@ -710,7 +725,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border: 1px solid color-mix(in srgb, var(--blue), transparent 70%);
 }
 .avatar.lg { width: 34px; height: 34px; font-size: .86rem; }
-.avatar.rose { background: var(--rose-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 80%); }
+.avatar.rose { background: var(--rose-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); }
 .avatar.teal { background: var(--teal-light); color: var(--teal-dark); border-color: color-mix(in srgb, var(--teal-dark), transparent 78%); }
 .avatar.violet { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
 
@@ -747,7 +762,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border-radius: var(--radius-button);
   /* the recessed well every other segmented control sits in (.cap-seg,
      .mini-seg) — one family, one container treatment */
-  background: color-mix(in srgb, var(--fg), transparent 97%);
+  background: var(--tint-well);
 }
 .seg button {
   display: inline-flex; align-items: center; gap: .375rem;
@@ -864,7 +879,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   margin: 0 1.5rem .5rem;
   padding: .5rem .75rem;
   border-radius: var(--radius-box);
-  border: 1px solid color-mix(in srgb, var(--coral-dark) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 55%);
   background: var(--rose-light);
   color: var(--coral-dark);
 }
@@ -876,10 +891,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
      the body font. The token is --font-mono. */
   font-family: var(--font-mono); font-size: .74rem;
   padding: .125rem .5rem; border-radius: var(--radius-chip);
-  border: 1px solid color-mix(in srgb, var(--coral-dark) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 55%);
   color: var(--coral-dark); text-decoration: none;
 }
-.board-orphan-key:hover { background: color-mix(in srgb, var(--coral-dark) 14%, transparent); }
+.board-orphan-key:hover { background: color-mix(in srgb, var(--coral-dark), transparent 86%); }
 
 .column { display: flex; flex-direction: column; min-height: 0; }
 .col-head {
@@ -890,12 +905,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .col-head .nm { font-family: var(--font-display); font-weight: 800; font-size: .92rem; }
 .col-head .ct {
   font-family: var(--font-mono); font-size: .74rem; color: var(--faint);
-  background: color-mix(in srgb, var(--fg), transparent 95%);
+  background: var(--tint-hover);
   padding: .08rem .375rem; border-radius: var(--radius-chip);
 }
 .col-stage-dot { width: .56rem; height: .56rem; border-radius: 50%; flex: none; }
 .col-head .add { margin-left: auto; color: var(--placeholder); display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-small); background: none; border: 0; }
-.col-head .add:hover { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--fg); }
+.col-head .add:hover { background: var(--tint-press); color: var(--fg); }
 
 .col-body {
   display: flex; flex-direction: column; gap: .75rem;
@@ -919,7 +934,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
   display: flex; flex-direction: column; gap: .5rem;
 }
-.card:hover { background: color-mix(in srgb, var(--fg), transparent 96%); border-color: var(--border); }
+.card:hover { background: var(--tint-hover); border-color: var(--border); }
 /* P16-UI-01: the focus ring is the app-wide `:focus-visible` rule at the top of
    the sheet (the card face is an <a>), not a per-selector copy of it.
    P16-UI-04: `.card.wait-human, .card.wait-human.urgent { box-shadow:
@@ -959,7 +974,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 /* The column under the cursor lifts and outlines to invite the drop. */
 .column.drop-over {
-  background: color-mix(in srgb, var(--blue), transparent 94%);
+  background: color-mix(in srgb, var(--blue), transparent 92%);
   border-radius: var(--radius-card);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--blue), transparent 55%);
 }
@@ -995,13 +1010,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .stage-menu-btn {
   display: inline-flex; align-items: center; gap: .375rem;
   border: 1px solid var(--hairline);
-  background: color-mix(in srgb, var(--fg), transparent 96%);
+  background: var(--tint-hover);
   border-radius: var(--radius-button); padding: .25rem .5rem;
   color: var(--fg); font: inherit; font-size: .8rem; font-weight: 600;
   cursor: pointer;
   transition: border-color .14s ease, background .14s ease, transform .1s var(--ease-out);
 }
-.stage-menu-btn:hover { border-color: var(--border); background: color-mix(in srgb, var(--fg), transparent 92%); }
+.stage-menu-btn:hover { border-color: var(--border); background: var(--tint-press); }
 .stage-menu-btn.open { border-color: var(--blue); }
 .stage-menu-btn:disabled { opacity: .6; cursor: default; }
 .stage-menu-btn .col-stage-dot { width: .5rem; height: .5rem; border-radius: 50%; flex: none; }
@@ -1039,7 +1054,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   color: var(--fg); font: inherit; font-size: .8rem; text-align: left; width: 100%;
   transition: background .12s ease;
 }
-.stage-menu-pop .sm-item:hover:not(:disabled) { background: color-mix(in srgb, var(--blue), transparent 88%); }
+.stage-menu-pop .sm-item:hover:not(:disabled) { background: var(--focus-wash); }
 .stage-menu-pop .sm-item .col-stage-dot { width: .55rem; height: .55rem; border-radius: 50%; flex: none; }
 .stage-menu-pop .sm-item-name { flex: 1; }
 .stage-menu-pop .sm-item.current { color: var(--faint); cursor: default; }
@@ -1096,7 +1111,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: inline-flex; align-items: center;
   padding: .125rem .5rem; border-radius: var(--radius-button);
   font-size: .68rem; font-weight: 600; font-family: var(--font-mono);
-  background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--muted);
+  background: var(--tint-press); color: var(--muted);
   white-space: nowrap;
 }
 /* Mono ships no weight above 600, so the declared-700 emphasis was a no-op;
@@ -1178,7 +1193,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .goal-edit-btn:hover { border-color: var(--blue); }
 .goal-edit { max-width: 70ch; display: flex; flex-direction: column; gap: .5rem; margin-top: .25rem; }
 .goal-textarea { width: 100%; resize: vertical; font: inherit; font-size: .98rem; line-height: 1.5; color: var(--fg); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .5rem .5rem; }
-.goal-textarea:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.goal-textarea:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .goal-edit-actions { display: flex; gap: .5rem; }
 
 /* Lightweight metadata editor (priority / labels / due date) under the goal.
@@ -1198,7 +1213,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { font: inherit; font-size: .86rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .25rem .5rem; }
 .meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { width: 100%; }
 .meta-edit .meta-field select:focus, .meta-edit .meta-field input:focus,
-.meta-edit-panel .meta-field select:focus, .meta-edit-panel .meta-field input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.meta-edit-panel .meta-field select:focus, .meta-edit-panel .meta-field input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .meta-edit-actions { display: flex; gap: .5rem; align-items: center; }
 /* The labels row in the Details panel wraps its chips. */
 .meta-chips { display: flex; flex-wrap: wrap; gap: .25rem; justify-content: flex-end; }
@@ -1225,13 +1240,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .datepick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .datepick-trigger.dp-empty .datepick-value { color: var(--muted); }
 .datepick-trigger:hover { border-color: var(--blue); }
-.datepick-trigger:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.datepick-trigger:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .datepick-clear {
   position: absolute; top: 50%; right: .5rem; transform: translateY(-50%);
   display: inline-flex; padding: .25rem; border: 0; border-radius: var(--radius-small); color: var(--muted);
   background: transparent; cursor: pointer;
 }
-.datepick-clear:hover { color: var(--fg); background: color-mix(in srgb, var(--fg), transparent 92%); }
+.datepick-clear:hover { color: var(--fg); background: var(--tint-press); }
 .datepick-clear .ico { width: 13px; height: 13px; }
 .datepick-pop {
   margin-top: .375rem; width: max-content; max-width: 100%;
@@ -1249,14 +1264,14 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    clears background but NOT the UA border, so every un-declared button ships
    a box — 42 bordered day cells read as a cage. */
 .cal-nav { display: inline-flex; padding: .25rem; border: 0; border-radius: var(--radius-small); color: var(--muted); background: transparent; cursor: pointer; }
-.cal-nav:hover { color: var(--fg); background: color-mix(in srgb, var(--fg), transparent 92%); }
+.cal-nav:hover { color: var(--fg); background: var(--tint-press); }
 .cal-nav .ico { width: 15px; height: 15px; }
 .cal-prev { transform: rotate(180deg); }
 .cal-grid { border-collapse: collapse; }
 .cal-grid th { padding: .25rem 0; font-size: .68rem; font-weight: 700; color: var(--muted); }
 .cal-grid td { padding: 1px; text-align: center; }
 .cal-day { width: 34px; height: 32px; border: 0; border-radius: var(--radius-small); font-size: .8rem; color: var(--fg); background: transparent; cursor: pointer; }
-.cal-day:hover { background: color-mix(in srgb, var(--fg), transparent 92%); }
+.cal-day:hover { background: var(--tint-press); }
 .cal-day:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--blue); }
 .cal-day.out { color: var(--muted); }
 .cal-day.today:not(.sel) { box-shadow: inset 0 0 0 1px var(--blue); color: var(--blue-pressed); }
@@ -1274,12 +1289,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .25rem .375rem; border: 1px solid var(--border-control); border-radius: var(--radius-button);
   background: var(--surface); cursor: text;
 }
-.label-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.label-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .label-token {
   display: inline-flex; align-items: center;
   padding: .125rem .5rem; border-radius: var(--radius-button);
   font-size: .74rem; font-weight: 600; font-family: var(--font-mono);
-  background: color-mix(in srgb, var(--fg), transparent 92%); color: var(--fg);
+  background: var(--tint-press); color: var(--fg);
 }
 .label-input-field { flex: 1; min-width: 6rem; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: .86rem; padding: .125rem .125rem; }
 
@@ -1295,7 +1310,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .375rem .5rem; border-radius: var(--radius-button); cursor: pointer;
   font-size: .8rem; color: var(--fg);
 }
-.label-opt[data-active="true"] { background: color-mix(in srgb, var(--blue), transparent 90%); }
+.label-opt[data-active="true"] { background: color-mix(in srgb, var(--blue), transparent 92%); }
 .label-opt-name { font-family: var(--font-mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .label-opt.create { color: var(--muted); }
 .label-opt.create .label-opt-name { font-family: var(--font-body); }
@@ -1320,7 +1335,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: inline-flex; align-items: center; gap: .375rem;
   font-family: var(--font-mono); font-size: .74rem; color: var(--faint);
   padding: .25rem .5rem; border-radius: var(--radius-small);
-  background: color-mix(in srgb, var(--fg), transparent 96%);
+  background: var(--tint-hover);
   border: 1px solid var(--hairline);
 }
 .hero-file .ico { width: 12px; height: 12px; }
@@ -1391,7 +1406,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   /* The tint alone separates the row (border-plus-background was the boxed-in
      double signal); .obs.warn declares its own full border below because it IS
      semantic. */
-  background: color-mix(in srgb, var(--fg), transparent 97%);
+  background: var(--tint-well);
 }
 .obs .k { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); padding-top: .125rem; }
 .obs code { font-family: var(--font-mono); font-size: .8rem; }
@@ -1529,7 +1544,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: flex; align-items: center; gap: .75rem;
   padding: .75rem .75rem; border-radius: var(--radius-button);
   background: color-mix(in srgb, var(--agent), transparent 92%);
-  border: 1px solid color-mix(in srgb, var(--agent), transparent 78%);
+  border: 1px solid color-mix(in srgb, var(--agent), transparent 80%);
 }
 .op-rec-main { flex: 1; min-width: 0; }
 .op-rec-label { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
@@ -1539,7 +1554,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   text-transform: uppercase; letter-spacing: .05em;
   color: var(--agent-dark);
   padding: .125rem .375rem; border-radius: var(--radius-chip);
-  background: color-mix(in srgb, var(--agent), transparent 82%);
+  background: color-mix(in srgb, var(--agent), transparent 80%);
 }
 .op-rec-kind svg { width: 12px; height: 12px; }
 .op-rec-title { font-family: var(--font-display); font-weight: 600; font-size: .92rem; color: var(--fg); }
@@ -1565,7 +1580,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border-radius: var(--radius-button); padding: .25rem .5rem;
 }
 .op-steer::placeholder { color: var(--placeholder); }
-.op-steer:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); outline: 0; }
+.op-steer:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); outline: 0; }
 .op-steer:disabled { opacity: .45; }
 
 /* timeline */
@@ -1628,7 +1643,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: color-mix(in srgb, var(--surface), transparent 30%);
   padding: .5rem .75rem;
 }
-.tl-card.evidence { font-family: var(--font-mono); font-size: .74rem; color: var(--muted); background: color-mix(in srgb, var(--fg), transparent 96%); }
+.tl-card.evidence { font-family: var(--font-mono); font-size: .74rem; color: var(--muted); background: var(--tint-hover); }
 .tl-card .ev-row { display: flex; justify-content: space-between; gap: 1rem; padding: .125rem 0; }
 .tl-card .ev-row .add { color: var(--teal-dark); }
 .tl-card .ev-row .del { color: var(--coral-dark); }
@@ -1662,7 +1677,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 .composer-input { position: relative; }
-.composer-box:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.composer-box:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 /* The Lexical plain-text editor renders styled @mentions inline — no
    transparent-textarea/backdrop mirroring, so no glyph-alignment constraints
    to defend. Metrics match the old textarea exactly. */
@@ -1824,6 +1839,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 .empty { color: var(--placeholder); font-size: .86rem; text-align: center; padding: 2rem 1rem; max-width: 60ch; margin-inline: auto; }
+/* The teaching CTA under a virgin entry lane's empty copy (pass 30) — its own
+   row, centered under the sentence. */
+.empty .empty-cta { display: flex; width: fit-content; margin: .75rem auto 0; }
 /* P16-F3: the empty state inside a side panel or a card is tighter than the
    page-level one. Eight sites re-typed one of these three paddings as an inline
    style; the values are unchanged, only their home is. */
@@ -1872,7 +1890,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
 }
 .ag-item:hover { border-color: var(--border); transform: translateY(-1px); }
-.ag-item.on { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.ag-item.on { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .ag-item-main { flex: 1; min-width: 0; }
 .ag-item-main .nm { display: block; font-family: var(--font-display); font-weight: 800; font-size: .92rem; }
 .ag-item-main .sub { display: block; font-size: .74rem; color: var(--faint); margin-top: .125rem; }
@@ -1916,7 +1934,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border: 1px solid var(--hairline); border-radius: var(--radius-box); padding: .75rem 1rem;
   background: color-mix(in srgb, var(--surface), transparent 30%);
 }
-.cap-col.direct { background: color-mix(in srgb, var(--teal-light), var(--surface) 72%); border-color: color-mix(in srgb, var(--teal-dark), transparent 80%); }
+.cap-col.direct { background: color-mix(in srgb, var(--teal-light), var(--surface) 72%); border-color: color-mix(in srgb, var(--teal-dark), transparent 78%); }
 .cap-col.recommend { background: color-mix(in srgb, var(--blue-soft), var(--surface) 40%); border-color: color-mix(in srgb, var(--blue), transparent 80%); }
 .cap-col.forbidden { background: color-mix(in srgb, var(--red-light), var(--surface) 55%); border-color: color-mix(in srgb, var(--coral-dark), transparent 84%); }
 .cap-col-head {
@@ -1948,7 +1966,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* P14-KM-11: a grant naming a resource the store no longer holds. It reaches the
    run as nothing at all, so it must not read like a healthy attachment. */
 .res-chip.missing {
-  border-color: color-mix(in srgb, var(--coral-dark), transparent 60%);
+  border-color: color-mix(in srgb, var(--coral-dark), transparent 55%);
   background: color-mix(in srgb, var(--coral-light), var(--surface) 60%);
   color: var(--coral-dark);
 }
@@ -2021,11 +2039,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .live-wrap .live-head, .live-wrap .live-row { grid-template-columns: 1.5fr .9fr 2fr .9fr 1.1fr; }
 .live-head {
   font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder);
-  border-bottom: 1px solid var(--hairline); background: color-mix(in srgb, var(--fg), transparent 97%);
+  border-bottom: 1px solid var(--hairline); background: var(--tint-well);
 }
 .live-row { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--hairline); background: var(--surface); font-size: .86rem; }
 .live-row:last-child { border-bottom: 0; }
-.live-row:hover { background: color-mix(in srgb, var(--fg), transparent 97%); }
+.live-row:hover { background: var(--tint-well); }
 .live-agent { display: flex; align-items: center; gap: .5rem; min-width: 0; }
 /* F10-20: profile identity (name) over the task role sub-label. */
 .live-ident { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
@@ -2092,7 +2110,7 @@ dialog[data-closing]::backdrop {
   width: 22px; height: 22px; border-radius: var(--radius-small);
   border: 0; background: none; color: var(--placeholder);
 }
-.ag-add:hover { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--fg); }
+.ag-add:hover { background: var(--tint-press); color: var(--fg); }
 .ag-add .ico { width: 15px; height: 15px; }
 .ag-newbtn {
   display: flex; align-items: center; justify-content: center; gap: .5rem;
@@ -2206,7 +2224,7 @@ dialog[data-closing]::backdrop {
   transition: border-color .14s ease, box-shadow .14s ease;
 }
 .field textarea { resize: vertical; min-height: 56px; line-height: 1.5; }
-.field input:focus, .field textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); outline: 0; }
+.field input:focus, .field textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); outline: 0; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 
 .pick-chips { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -2237,9 +2255,9 @@ dialog[data-closing]::backdrop {
 .cap-mgroup.open { border-color: var(--border); }
 .cap-mghead {
   display: flex; align-items: center; gap: .5rem; width: 100%;
-  padding: .5rem .75rem; border: 0; background: color-mix(in srgb, var(--fg), transparent 97%); text-align: left;
+  padding: .5rem .75rem; border: 0; background: var(--tint-well); text-align: left;
 }
-.cap-mghead:hover { background: color-mix(in srgb, var(--fg), transparent 95%); }
+.cap-mghead:hover { background: var(--tint-hover); }
 .cap-chev { width: 15px; height: 15px; color: var(--placeholder); transform: rotate(0deg); transition: transform .15s ease; flex: none; }
 .cap-mghead.open .cap-chev { transform: rotate(90deg); }
 .cap-mglabel { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
@@ -2258,7 +2276,7 @@ dialog[data-closing]::backdrop {
    so a sighted admin sees why the control won't move — not only a screen
    reader via the aria-label. */
 .cap-mnote { flex-basis: 100%; margin: .125rem 0 0; font-size: .74rem; color: var(--muted); }
-.cap-seg { display: inline-flex; padding: .125rem; gap: .125rem; flex: none; border: 1px solid var(--hairline); border-radius: var(--radius-button); background: color-mix(in srgb, var(--fg), transparent 97%); }
+.cap-seg { display: inline-flex; padding: .125rem; gap: .125rem; flex: none; border: 1px solid var(--hairline); border-radius: var(--radius-button); background: var(--tint-well); }
 .cap-seg button { border: 0; background: none; padding: .25rem .5rem; border-radius: var(--radius-small); font-family: var(--font-display); font-weight: 700; font-size: .74rem; color: var(--faint); transition: background .12s ease, color .12s ease, transform .1s var(--ease-out); }
 .cap-seg button:hover:not(:disabled) { color: var(--fg); }
 .cap-seg button.direct.on { background: var(--teal-light); color: var(--teal-dark); }
@@ -2311,7 +2329,7 @@ dialog[data-closing]::backdrop {
 .tag {
   display: inline-flex; align-items: center; gap: .125rem;
   padding: .25rem .25rem .25rem .5rem; border-radius: var(--radius-small);
-  background: color-mix(in srgb, var(--fg), transparent 95%); color: var(--muted);
+  background: var(--tint-hover); color: var(--muted);
   font-family: var(--font-mono); font-size: .74rem;
 }
 .tag button { border: 0; background: none; display: grid; place-items: center; width: 16px; height: 16px; color: var(--placeholder); border-radius: 4px; }
@@ -2339,11 +2357,11 @@ dialog[data-closing]::backdrop {
 .cap-matrix-table td.rowlabel { position: sticky; left: 0; background: var(--surface); text-align: left; z-index: 1; min-width: 230px; font-size: .8rem; color: var(--fg); }
 /* Text partner on a blue wash is --blue-pressed (the token block documents
    --blue as an accent, not a text color): 3.34:1 -> ~7:1 light, ~8:1 dark. */
-.mx-scope { display: inline-block; margin-left: .5rem; padding: .05rem .375rem; border-radius: var(--radius-small); font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--blue-pressed); background: color-mix(in srgb, var(--blue), transparent 88%); vertical-align: middle; cursor: help; }
+.mx-scope { display: inline-block; margin-left: .5rem; padding: .05rem .375rem; border-radius: var(--radius-small); font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--blue-pressed); background: var(--focus-wash); vertical-align: middle; cursor: help; }
 .mx-legend .mx-scope-legend { color: var(--muted); }
 .mx-col { display: flex; flex-direction: column; align-items: center; gap: .375rem; font-family: var(--font-display); font-weight: 700; font-size: .8rem; }
 .mx-col .agent-glyph { width: 26px; height: 26px; }
-.cap-matrix-table tr.grp td { text-align: left; font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); background: color-mix(in srgb, var(--fg), transparent 97%); }
+.cap-matrix-table tr.grp td { text-align: left; font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); background: var(--tint-well); }
 /* The full-width td is the containing block; the inline label inside it has
    real travel, so group names stay visible during horizontal scroll. */
 .cap-matrix-table tr.grp .grp-label { position: sticky; left: .5rem; display: inline-block; }
@@ -2395,7 +2413,7 @@ dialog[data-closing]::backdrop {
 .mini-seg {
   display: inline-flex; padding: .125rem; gap: .125rem; flex: none;
   border: 1px solid var(--hairline); border-radius: var(--radius-button);
-  background: color-mix(in srgb, var(--fg), transparent 97%);
+  background: var(--tint-well);
 }
 .mini-seg button {
   border: 0; background: none;
@@ -2420,7 +2438,7 @@ dialog[data-closing]::backdrop {
 .rbac-table thead th:not(:first-child) { width: 5.75rem; }
 .rbac-table tr:last-child td { border-bottom: 0; }
 .rbac-table thead th {
-  background: color-mix(in srgb, var(--fg), transparent 97%);
+  background: var(--tint-well);
   font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
   white-space: nowrap;
 }
@@ -2446,7 +2464,7 @@ dialog[data-closing]::backdrop {
 .tgl {
   position: relative; width: 36px; height: 21px; flex: none;
   border-radius: var(--radius-chip); border: 1px solid var(--border-control); padding: 0;
-  background: color-mix(in srgb, var(--fg), transparent 92%);
+  background: var(--tint-press);
   transition: background .15s ease, border-color .15s ease;
 }
 .tgl .knob {
@@ -2526,7 +2544,7 @@ dialog[data-closing]::backdrop {
 .cred-card {
   border: 1px solid var(--hairline); border-radius: var(--radius-box);
   padding: .75rem 1rem;
-  background: color-mix(in srgb, var(--fg), transparent 97%);
+  background: var(--tint-well);
   margin-top: 1rem;
 }
 .cred-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
@@ -2603,7 +2621,7 @@ dialog[data-closing]::backdrop {
 .pev-ico.violation { background: var(--amber-light); color: var(--amber-dark); border-color: color-mix(in srgb, var(--amber-dark), transparent 72%); }
 .pev-ico.blockedact { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .pev-ico.change { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
-.pev-ico.audit { background: color-mix(in srgb, var(--fg), transparent 96%); color: var(--muted); }
+.pev-ico.audit { background: var(--tint-hover); color: var(--muted); }
 .pev-main { flex: 1; min-width: 0; font-size: .86rem; color: var(--muted); line-height: 1.5; padding-top: .125rem; }
 .pev-main strong { color: var(--fg); }
 /* F10-19: collapsed long activity report — one-line preview + Show more. */
@@ -2632,16 +2650,16 @@ dialog[data-closing]::backdrop {
 .panel > div:first-of-type .act-day { padding-top: .125rem; }
 .act-actor { color: var(--fg); font-family: var(--font-display); font-weight: 800; }
 .act-sep { color: var(--placeholder); margin: 0 .375rem; }
-.pev-ico.act-comment { background: color-mix(in srgb, var(--fg), transparent 96%); color: var(--muted); }
+.pev-ico.act-comment { background: var(--tint-hover); color: var(--muted); }
 .pev-ico.act-completion { background: var(--teal-light); color: var(--teal-dark); border-color: color-mix(in srgb, var(--teal-dark), transparent 78%); }
-.pev-ico.act-github { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--fg); }
+.pev-ico.act-github { background: var(--tint-press); color: var(--fg); }
 .pev-ico.act-policy { background: var(--amber-light); color: var(--amber-dark); border-color: color-mix(in srgb, var(--amber-dark), transparent 72%); }
 /* P14-UI-62: `note` is the NEUTRAL half of what `policy` used to carry, so it
    takes the quiet comment tint — the whole point of the split is that a goal
    edit must not look like a governance violation. `assign` was missing for the
    same reason (never added to the tint set); it shares the transition tint its
    timeline node already uses. */
-.pev-ico.act-note { background: color-mix(in srgb, var(--fg), transparent 96%); color: var(--muted); }
+.pev-ico.act-note { background: var(--tint-hover); color: var(--muted); }
 .pev-ico.act-assign { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-quality { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
 /* G8: continuity reset — amber warning tone (context lost + recovered). */
@@ -2693,13 +2711,13 @@ dialog[data-closing]::backdrop {
   border-radius: var(--radius-small); text-align: left;
   transition: background .12s ease;
 }
-.stg-name:hover { background: color-mix(in srgb, var(--fg), transparent 94%); }
+.stg-name:hover { background: var(--tint-press); }
 .stg-input {
   font-family: var(--font-display); font-weight: 800; font-size: .86rem; color: var(--fg);
   border: 1px solid var(--blue); border-radius: var(--radius-small);
   padding: .125rem .375rem; margin: 0 -.35rem;
   background: var(--surface); outline: none; min-width: 0; width: 150px;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%);
+  box-shadow: 0 0 0 3px var(--focus-wash);
 }
 /* Name-first "Add stage" row — the field replaces the button in place, so the
    panel does not jump when the control expands. */
@@ -2726,7 +2744,7 @@ dialog[data-closing]::backdrop {
   color: var(--placeholder);
   transition: background .12s ease, color .12s ease;
 }
-.stg-x:hover { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--fg); }
+.stg-x:hover { background: var(--tint-press); color: var(--fg); }
 .stg-x.off { opacity: .35; }
 .stg-x.off:hover { background: none; color: var(--placeholder); }
 .stg-x .ico { width: 13px; height: 13px; }
@@ -2815,13 +2833,13 @@ dialog[data-closing]::backdrop {
   font-family: var(--font-body); font-size: .92rem;
   transition: border-color .14s ease, box-shadow .14s ease;
 }
-.invite-row input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.invite-row input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .invite-row input::placeholder { color: var(--placeholder); }
 @media (max-width: 1300px) {
   .invite-row { grid-template-columns: 1fr; }
 }
 
-.danger-panel { border-color: color-mix(in srgb, var(--coral-dark), transparent 75%); }
+.danger-panel { border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); }
 .danger-panel .panel-head .ico { color: var(--coral-dark); }
 .dz-row {
   display: flex; align-items: center; gap: 1rem;
@@ -2844,7 +2862,7 @@ dialog[data-closing]::backdrop {
 
 .profile-id { display: flex; gap: 1rem; align-items: flex-start; }
 .profile-id .profile-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1rem; }
-.field input[disabled] { color: var(--faint); background: color-mix(in srgb, var(--fg), transparent 97%); cursor: not-allowed; }
+.field input[disabled] { color: var(--faint); background: var(--tint-well); cursor: not-allowed; }
 
 .pref-row {
   display: flex; align-items: center; gap: 1rem;
@@ -2878,7 +2896,7 @@ dialog[data-closing]::backdrop {
 .unread-dot.in { display: inline-block; margin: 0 0 1px .5rem; vertical-align: middle; }
 
 .ntf-ev { cursor: pointer; border-radius: var(--radius-button); margin-inline: -.45rem; padding-inline: .5rem; transition: background .12s ease; }
-.ntf-ev:hover { background: color-mix(in srgb, var(--fg), transparent 97%); }
+.ntf-ev:hover { background: var(--tint-well); }
 .ntf-ev.unread .pev-main { color: var(--fg); }
 /* P16-UI-02: the "showing the most recent N" footer on the notifications page,
    shown when the loader's over-fetch proves the inbox is longer than the page.
@@ -3003,7 +3021,7 @@ dialog[data-closing]::backdrop {
 .ntf-pop-head .btn { margin-left: auto; }
 .ntf-pop-list { max-height: 420px; overflow-y: auto; padding: .25rem .375rem; }
 .ntf-item { display: flex; gap: .5rem; width: 100%; text-align: left; background: none; border: 0; padding: .5rem .5rem; border-radius: var(--radius-button); align-items: flex-start; transition: background .12s ease; }
-.ntf-item:hover { background: color-mix(in srgb, var(--fg), transparent 96%); }
+.ntf-item:hover { background: var(--tint-hover); }
 .ntf-item .pev-ico { flex: none; margin-top: .125rem; }
 .ntf-item-main { flex: 1; min-width: 0; }
 .ntf-item-main .tt { display: block; font-size: .86rem; font-weight: 700; font-family: var(--font-display); color: var(--fg); line-height: 1.3; }
@@ -3078,11 +3096,11 @@ dialog[data-closing]::backdrop {
 .run-phase { display: flex; align-items: center; gap: .75rem; flex: 1 1 250px; min-width: 0; }
 .run-phase .ph { font-family: var(--font-display); font-weight: 800; font-size: .98rem; }
 .run-phase .step { margin-top: .125rem; color: var(--muted); font-size: .74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 44ch; }
-.run-spin { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--agent), transparent 72%); border-top-color: var(--agent); animation: runSpin .9s linear infinite; }
+.run-spin { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--agent), transparent 70%); border-top-color: var(--agent); animation: runSpin .9s linear infinite; }
 @keyframes runSpin { to { transform: rotate(360deg); } }
 .run-stats { display: flex; gap: .5rem; flex-wrap: wrap; }
 .run-cell {
-  border: 1px solid color-mix(in srgb, var(--agent), transparent 78%);
+  border: 1px solid color-mix(in srgb, var(--agent), transparent 80%);
   background: color-mix(in srgb, var(--surface), transparent 25%);
   border-radius: var(--radius-box); padding: .375rem .5rem; min-width: 72px;
 }
@@ -3147,7 +3165,7 @@ dialog[data-closing]::backdrop {
   border: 0; border-radius: var(--radius-button); background: none; text-align: left;
   transition: background .12s ease;
 }
-.rsel-item:hover { background: color-mix(in srgb, var(--fg), transparent 96%); }
+.rsel-item:hover { background: var(--tint-hover); }
 .rsel-item.on { background: color-mix(in srgb, var(--agent-soft), var(--surface) 45%); }
 .ri-txt { flex: 1; min-width: 0; }
 .ri-nm { display: block; font-family: var(--font-display); font-weight: 700; font-size: .8rem; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3232,7 +3250,7 @@ dialog[data-closing]::backdrop {
 .rev-add .ico { width: 13px; height: 13px; }
 .rev-add:hover { border-color: var(--blue); border-style: solid; color: var(--blue-pressed); background: color-mix(in srgb, var(--blue), transparent 93%); }
 .rev-add.leave:hover { border-color: var(--coral-dark); color: var(--coral-dark); background: var(--rose-light); }
-.pev-ico.act-assign { background: color-mix(in srgb, var(--blue), transparent 88%); color: var(--blue-pressed); }
+.pev-ico.act-assign { background: var(--focus-wash); color: var(--blue-pressed); }
 
 /* reviewer visibility on cards + sidebar */
 .owner-row { display: flex; align-items: center; gap: .5rem; min-width: 0; }
@@ -3307,7 +3325,7 @@ dialog[data-closing]::backdrop {
   font-family: var(--font-display); font-weight: 700; font-size: .8rem;
   transition: border-color .14s ease, background .14s ease;
 }
-.handoff-chip:hover { border-color: var(--blue); background: color-mix(in srgb, var(--blue), transparent 94%); }
+.handoff-chip:hover { border-color: var(--blue); background: color-mix(in srgb, var(--blue), transparent 92%); }
 .handoff-chip .avatar { width: 22px; height: 22px; font-size: .62rem; }
 .handoff-chip .rl { font-size: .68rem; font-weight: 600; color: var(--faint); }
 
@@ -3405,7 +3423,7 @@ dialog[data-closing]::backdrop {
   background: none; border: none; padding: 1px; margin: 0; cursor: pointer;
   color: var(--faint); border-radius: var(--radius-small);
 }
-.session-id-copy:hover { color: var(--fg); background: color-mix(in srgb, var(--fg), transparent 94%); }
+.session-id-copy:hover { color: var(--fg); background: var(--tint-press); }
 .session-id-copy .ico { width: 13px; height: 13px; }
 .session-id-export {
   display: inline-flex; align-items: center; gap: .125rem;
@@ -3443,7 +3461,7 @@ dialog[data-closing]::backdrop {
 .md-body strong { color: var(--fg); font-weight: 700; }
 .md-body a { color: var(--blue-pressed); text-decoration: underline; }
 .md-body code.mono {
-  background: color-mix(in srgb, var(--fg), transparent 94%);
+  background: var(--tint-press);
   padding: .04rem .25rem;
   border-radius: var(--radius-small);
   font-size: .8rem;
@@ -3453,7 +3471,7 @@ dialog[data-closing]::backdrop {
   padding: .5rem .75rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-button);
-  background: color-mix(in srgb, var(--fg), transparent 96%);
+  background: var(--tint-hover);
   overflow-x: auto;
 }
 .md-body pre code.mono { background: none; padding: 0; border-radius: 0; }
@@ -3472,7 +3490,7 @@ dialog[data-closing]::backdrop {
   padding: .375rem .5rem;
   text-align: left;
 }
-.md-body th { background: color-mix(in srgb, var(--fg), transparent 96%); font-weight: 700; color: var(--fg); }
+.md-body th { background: var(--tint-hover); font-weight: 700; color: var(--fg); }
 
 /* Collapsible long comments — a very tall agent reply clamps by default and a
    soft fade signals more below; the toggle expands to the full output. */
@@ -3518,7 +3536,7 @@ dialog[data-closing]::backdrop {
   padding: .75rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-button);
-  background: color-mix(in srgb, var(--fg), transparent 96%);
+  background: var(--tint-hover);
 }
 
 /* Login surface. */
@@ -3549,10 +3567,12 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   .login-aside-mark {
     display: inline-grid; place-items: center;
     width: 44px; height: 44px; border-radius: var(--radius-box);
-    /* P13-D-18: was var(--accent, …) — --accent is defined nowhere, so only the
-       fallback ever painted. Resolved to that token. */
-    background: var(--teal-dark); color: var(--surface);
+    /* Pass 30: the SAME product mark as the sign-in card beside it — the aside
+       used a teal one-off (P13-D-18's --accent fallback), so the one screen a
+       new user sees first showed two different brand identities. */
+    background: var(--fg); color: var(--surface);
     font-weight: 600; font-size: 1.3rem; font-family: var(--font-mono);
+    box-shadow: inset 0 -9px 0 color-mix(in srgb, var(--blue), transparent 55%);
   }
   .login-aside h2 { font-size: 1.5rem; line-height: 1.2; color: var(--fg); margin: 0; }
   .login-aside p { font-size: .92rem; line-height: 1.6; color: var(--muted); margin: 0; }
@@ -3668,7 +3688,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .sec-h .ico { width: 15px; height: 15px; color: var(--placeholder); }
 .sec-h .ct {
   font-family: var(--font-mono); font-size: .74rem; color: var(--faint);
-  background: color-mix(in srgb, var(--fg), transparent 95%);
+  background: var(--tint-hover);
   padding: .08rem .375rem; border-radius: var(--radius-chip);
 }
 
@@ -3738,7 +3758,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 /* Empty pipeline preview on a 0-task card: faint ghost stage segments over a
  * barely-there track. Scoped modifier — must NOT reuse the global `.empty`
  * utility (2rem padding) which would inflate this 6px bar. */
-.pj-meter.is-empty { background: color-mix(in srgb, var(--fg), transparent 96%); }
+.pj-meter.is-empty { background: var(--tint-hover); }
 .pj-meter.is-empty span { opacity: .9; }
 
 .pj-stats {
@@ -3777,7 +3797,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   color: var(--placeholder);
   transition: color .14s ease, background .14s ease, transform .14s ease;
 }
-.pj-star:hover { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--fg); transform: scale(1.08); }
+.pj-star:hover { background: var(--tint-press); color: var(--fg); transform: scale(1.08); }
 .pj-star.on { color: var(--pin-star); }
 .pj-star .ico { width: 16px; height: 16px; }
 
@@ -3797,7 +3817,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   display: grid; place-items: center;
   width: 34px; height: 34px;
   border-radius: var(--radius-button);
-  background: color-mix(in srgb, var(--fg), transparent 95%);
+  background: var(--tint-hover);
 }
 .pj-new:hover .plus { background: color-mix(in srgb, var(--blue-soft), transparent 20%); }
 /* P13-D-19: `.hint` is now a global utility (declared next to `.mono`); the
@@ -3920,7 +3940,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 /* ---------- Modal fields ---------- */
 .key-row { display: grid; grid-template-columns: 1fr 130px; gap: 1rem; }
 .repo-input { display: flex; align-items: center; border: 1px solid var(--border-control); border-radius: var(--radius-button); background: var(--surface); transition: border-color .14s ease, box-shadow .14s ease; }
-.repo-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.repo-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .repo-input .pre { font-family: var(--font-mono); font-size: .8rem; color: var(--faint); padding: .5rem 0 .5rem .75rem; white-space: nowrap; }
 .repo-input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font-family: var(--font-mono); font-size: .8rem; padding: .5rem .75rem .5rem .125rem; }
 .repo-input input[disabled] { color: var(--faint); cursor: not-allowed; }
@@ -3989,7 +4009,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease, background .14s ease;
 }
 .be-opt:hover { border-color: var(--border); transform: translateY(-1px); }
-.be-opt.on { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); background: color-mix(in srgb, var(--blue-soft), transparent 68%); }
+.be-opt.on { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); background: color-mix(in srgb, var(--blue-soft), transparent 68%); }
 .be-opt .agent-glyph { width: 32px; height: 32px; }
 .be-opt .agent-glyph .ico { width: 16px; height: 16px; }
 .be-opt .bnm { display: block; font-family: var(--font-display); font-weight: 800; font-size: .92rem; }
@@ -3997,10 +4017,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .be-opt.on .bcheck { opacity: 1; transform: scale(1); }
 .be-opt .bcheck .ico { width: 15px; height: 15px; }
 .be-pick.three .be-opt { min-width: 140px; padding: .5rem .75rem; }
-.be-ic { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: var(--radius-button); background: color-mix(in srgb, var(--fg), transparent 95%); color: var(--muted); }
+.be-ic { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: var(--radius-button); background: var(--tint-hover); color: var(--muted); }
 .be-ic .ico { width: 15px; height: 15px; }
 
-.dom-ic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--radius-button); background: color-mix(in srgb, var(--fg), transparent 95%); border: 1px solid var(--hairline); }
+.dom-ic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--radius-button); background: var(--tint-hover); border: 1px solid var(--hairline); }
 
 /* ---------- KB file browser ---------- */
 /* P14-KM-08: a text doc row opens the in-place editor. */
@@ -4015,14 +4035,14 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .fm-gh { display: flex; gap: .5rem; margin-top: -.5rem; }
 .fm-gh input { flex: 1; min-width: 0; border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .5rem .75rem; background: var(--surface); color: var(--fg); font-size: .92rem; }
 .fm-gh input.mono { font-family: var(--font-mono); }
-.fm-gh input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.fm-gh input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .fm-tree { border: 1px solid var(--hairline); border-radius: var(--radius-box); overflow: hidden; background: color-mix(in srgb, var(--surface), transparent 30%); }
 .fm-row { display: flex; align-items: center; gap: .5rem; padding: .375rem .5rem; font-size: .86rem; min-height: 36px; }
 .fm-row + .fm-row { border-top: 1px solid var(--hairline); }
 .fm-row.droptgt { background: color-mix(in srgb, var(--blue-soft), transparent 30%); box-shadow: inset 0 0 0 1.5px var(--blue); }
 .fm-tree.droptgt { box-shadow: inset 0 0 0 2px var(--blue); background: color-mix(in srgb, var(--blue-soft), transparent 72%); }
 .fm-row.dir { cursor: pointer; }
-.fm-row:hover { background: color-mix(in srgb, var(--fg), transparent 97%); }
+.fm-row:hover { background: var(--tint-well); }
 .fm-row .twist { width: 16px; flex: none; display: grid; place-items: center; color: var(--placeholder); }
 .fm-row .twist .ico { width: 13px; height: 13px; transition: transform .12s ease; }
 .fm-row > .ico { color: var(--faint); flex: none; }
@@ -4042,14 +4062,14 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   border-radius: var(--radius-small);
   background: var(--surface);
   color: var(--muted);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--fg), transparent 92%);
+  box-shadow: 0 1px 2px var(--tint-press);
   transition: border-color .12s ease, color .12s ease, background .12s ease, transform .12s ease;
 }
 .fm-act .ico { width: 13px; height: 13px; }
 .fm-act:hover { border-color: var(--blue); color: var(--blue-pressed); background: color-mix(in srgb, var(--blue-soft), transparent 40%); transform: translateY(-1px); }
-.fm-act.del { color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 75%); }
+.fm-act.del { color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); }
 .fm-act.del:hover { border-color: var(--coral-dark); background: color-mix(in srgb, var(--coral-light), var(--surface) 45%); color: var(--coral-dark); }
-.fm-newinp { border: 1px solid var(--blue); border-radius: var(--radius-small); padding: .25rem .5rem; font-size: .8rem; background: var(--surface); color: var(--fg); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); width: 200px; font-family: var(--font-mono); }
+.fm-newinp { border: 1px solid var(--blue); border-radius: var(--radius-small); padding: .25rem .5rem; font-size: .8rem; background: var(--surface); color: var(--fg); outline: none; box-shadow: 0 0 0 3px var(--focus-wash); width: 200px; font-family: var(--font-mono); }
 .fm-empty { padding: 1.5rem 1rem; text-align: center; color: var(--placeholder); font-size: .8rem; }
 
 .modal-wide .modal-foot .foot-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -4313,7 +4333,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   border: 1px solid var(--border-control); border-radius: var(--radius-button);
   background: var(--surface); padding: .375rem .5rem;
 }
-.feed-filters .ff-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.feed-filters .ff-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .feed-filters .ff-search .ico { width: 13px; height: 13px; color: var(--placeholder); flex: none; }
 .feed-filters .ff-search input {
   border: 0; outline: 0; background: none; width: 100%;
@@ -4336,7 +4356,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .feed-filters .ff-datepick .datepick-trigger { width: auto; padding: .25rem .5rem; font-size: .74rem; gap: .375rem; }
 .feed-filters .ff-datepick .datepick-trigger .ico { width: 12px; height: 12px; }
 .feed-filters .ff-task:focus {
-  border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); outline: 0;
+  border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); outline: 0;
 }
 .feed-filters .ff-dash { font-size: .74rem; color: var(--placeholder); }
 
@@ -4405,7 +4425,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .conc-edit { display: inline-flex; align-items: center; gap: .5rem; margin-left: auto; }
 .conc-label { color: var(--muted); font-size: .8rem; }
 .conc-edit input { width: 4.5rem; font: inherit; font-size: .86rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .25rem .5rem; }
-.conc-edit input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
+.conc-edit input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .conc-hint { color: var(--muted); }
 
 /* Audit-log export card (org settings footer). */
@@ -4429,8 +4449,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .audit-action { font-family: var(--font-mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .audit-scope { display: inline-flex; align-items: center; gap: .375rem; justify-self: end; color: var(--muted); }
 .audit-scope-tag { font-family: var(--font-mono); font-size: .68rem; padding: .06rem .375rem; border-radius: var(--radius-small);
-  background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--muted); white-space: nowrap; }
-.audit-scope-tag.org { background: color-mix(in srgb, var(--blue), transparent 86%); color: var(--blue-pressed); }
+  background: var(--tint-press); color: var(--muted); white-space: nowrap; }
+.audit-scope-tag.org { background: var(--focus-wash); color: var(--blue-pressed); }
 .audit-subject { font-family: var(--font-mono); font-size: .74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
 .audit-browse-foot { margin-top: .5rem; }
 .audit-dl { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
@@ -4463,7 +4483,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .bar-list { display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }
 .bar-row { display: grid; grid-template-columns: 8rem 1fr auto; align-items: center; gap: .5rem; }
 .bar-label { font-size: .8rem; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); }
-.bar-track { height: .55rem; background: color-mix(in srgb, var(--fg), transparent 92%); border-radius: var(--radius-chip); overflow: hidden; }
+.bar-track { height: .55rem; background: var(--tint-press); border-radius: var(--radius-chip); overflow: hidden; }
 .bar-fill { display: block; height: 100%; background: var(--blue); border-radius: var(--radius-chip); }
 .bar-val { font-size: .8rem; font-weight: 700; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: .5rem; }
 .bar-cost { font-size: .74rem; font-weight: 500; color: var(--muted); }
@@ -4793,7 +4813,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   height: 120px;
   object-fit: cover;
   object-position: top;
-  background: color-mix(in srgb, var(--fg), transparent 96%);
+  background: var(--tint-hover);
 }
 .attach-meta {
   display: flex;
@@ -4875,7 +4895,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   gap: .25rem;
   width: 100%;
   min-height: 120px;
-  background: color-mix(in srgb, var(--fg), transparent 96%);
+  background: var(--tint-hover);
   color: var(--muted);
 }
 .attach-broken svg { width: 20px; height: 20px; color: var(--muted); }

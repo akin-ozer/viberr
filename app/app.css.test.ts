@@ -414,7 +414,8 @@ describe("app.css select treatment (P16-UI-05)", () => {
     const focus = CODE.match(/(?:^|[};])\s*select:focus\s*\{([^}]*)\}/);
     expect(focus, "`select:focus` must exist").toBeTruthy();
     expect(focus![1]).toMatch(/border-color:\s*var\(--blue\)/);
-    expect(focus![1]).toMatch(/box-shadow:\s*0 0 0 3px color-mix\(/);
+    // Pass 30: the ring's wash is the named --focus-wash token.
+    expect(focus![1]).toMatch(/box-shadow:\s*0 0 0 3px var\(--focus-wash\)/);
   });
 
   it("leaves the remaining select rules as variants, not re-inventions", () => {
@@ -791,9 +792,9 @@ describe("app.css search field vs palette trigger (P16-F6)", () => {
     // text. Filled = a control, plain well = a field, which is the distinction
     // the rest of the sheet already draws.
     expect(box![1]).toMatch(/background:\s*var\(--surface\)/);
-    expect(trigger![1]).toMatch(
-      /background:\s*color-mix\(in srgb, var\(--surface\), var\(--fg\) \d+%\)/,
-    );
+    // Pass 30: the fill comes from the neutral tint ladder (same composite the
+    // old surface+fg mix produced, spelled as the token).
+    expect(trigger![1]).toMatch(/background:\s*var\(--tint-(well|hover|press)\)/);
   });
 
   it("labels the trigger instead of faking a placeholder", () => {
@@ -1460,7 +1461,10 @@ function cssRules(css: string, parent = "", at: string[] = []): CssRule[] {
       const colon = d.indexOf(":");
       if (colon < 0) continue;
       const prop = d.slice(0, colon).trim();
-      if (!/^[a-z-]+$/i.test(prop)) continue;
+      // Standard properties are letters/hyphens; custom properties may carry
+      // digits (a digit-bearing token used to be silently INVISIBLE to every
+      // gate built on this parser — found when --tint-1 resolved nowhere).
+      if (!/^[a-z-]+$/i.test(prop) && !/^--[\w-]+$/.test(prop)) continue;
       decls.set(prop, d.slice(colon + 1).trim());
     }
     if (decls.size) out.push({ selector, decls, at });

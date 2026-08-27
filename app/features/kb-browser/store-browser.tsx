@@ -128,7 +128,10 @@ function BrowserToolbar({
   return (
     <>
       <div className="fm-toolbar">
-        <button type="button" className="btn sm" onClick={onUploadFiles}>
+        {/* Pass 30: adding files is the dialog's job, so it carries the one
+            primary; Done below is a plain exit. Five equal-weight secondaries
+            gave the toolbar no ranking. */}
+        <button type="button" className="btn primary sm" onClick={onUploadFiles}>
           <UploadIco />
           Upload files
         </button>
@@ -1187,7 +1190,7 @@ export function StoreBrowser({
             {metaTail ? " · " + metaTail : ""}
           </span>
           <span className="foot-actions">
-            <button type="button" className="btn primary" onClick={close}>
+            <button type="button" className="btn" onClick={close}>
               Done
             </button>
           </span>

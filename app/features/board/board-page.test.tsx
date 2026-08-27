@@ -2090,3 +2090,58 @@ describe("D9: the board announces moves to a screen reader", () => {
     );
   });
 });
+
+describe("pass 30: the state-pill stack ranks instead of shouting", () => {
+  const stormy = () =>
+    task({
+      pr: { number: 124, state: "closed", title: "Attach a credential" },
+      prChecks: { total: 5, passing: 3, failing: 2, pending: 0, state: "failing" },
+      prReview: "changes_requested",
+      validation: "failing",
+      continuity: "degraded",
+    });
+
+  it("shows the two leading state pills and folds the rest into +N", () => {
+    const { container } = renderBoard([stormy()]);
+    const card = container.querySelector(".card")!;
+    const fold = [...card.querySelectorAll(".pill.neutral.sm")].find((p) =>
+      /^\+\d+$/.test(p.textContent ?? ""),
+    )!;
+    expect(fold).toBeTruthy();
+    expect(fold.textContent).toBe("+3");
+    // Every folded fact stays reachable — named in the title, one hover away
+    // (rulings 40/12/14: visible, not merely stored).
+    const title = fold.getAttribute("title")!;
+    expect(title).toContain("changes requested");
+    expect(title).toContain("validation failing");
+    expect(title).toContain("degraded continuity");
+  });
+
+  it("leaves a two-signal card unfolded", () => {
+    const { container } = renderBoard([
+      task({ validation: "failing", continuity: "degraded" }),
+    ]);
+    const card = container.querySelector(".card")!;
+    expect(
+      [...card.querySelectorAll(".pill")].some((p) =>
+        /^\+\d+$/.test(p.textContent ?? ""),
+      ),
+    ).toBe(false);
+    expect(card.textContent).toContain("validation failing");
+    expect(card.textContent).toContain("degraded continuity");
+  });
+});
+
+describe("pass 30: the virgin entry lane teaches with a CTA", () => {
+  it("renders New task under the teaching line when the board is empty", () => {
+    const { container } = renderBoard([]);
+    const cta = container.querySelector(".empty .empty-cta")!;
+    expect(cta).toBeTruthy();
+    expect(cta.textContent).toContain("New task");
+  });
+
+  it("keeps the CTA out of a filtered empty view", () => {
+    const { container } = renderBoard([task()], { search: "zzz-no-match" });
+    expect(container.querySelector(".empty .empty-cta")).toBeNull();
+  });
+});
