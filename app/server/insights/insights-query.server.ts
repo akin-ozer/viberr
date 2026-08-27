@@ -49,7 +49,7 @@ export interface DailyPoint {
  * computed from the projections + audit trail the app already keeps; nothing
  * new is recorded. All-time (like the totals above), not windowed.
  */
-export interface GovernanceSummary {
+export interface OversightSummary {
   /** Active (non-archived, non-terminal-stage) tasks with a definite next
    *  actor: `waiting` names human/agent, or a human owns the task. */
   clarity: { activeTasks: number; clearTasks: number; pct: number | null };
@@ -92,7 +92,7 @@ export interface InsightsSummary {
   avgDurationMs: number | null;
   /** Runs + cost per day over the last WINDOW_DAYS, oldest first, gap-filled. */
   daily: DailyPoint[];
-  governance: GovernanceSummary;
+  oversight: OversightSummary;
   /** Latest observed provider rate-limit reading per backend (null = none yet). */
   backendQuota: BackendQuotaRow[];
   windowDays: number;
@@ -212,10 +212,10 @@ function avg(values: number[]): number | null {
     : null;
 }
 
-function governanceSummary(
+function oversightSummary(
   db: DatabaseSync,
   filter: InsightsFilter,
-): GovernanceSummary {
+): OversightSummary {
   const { clause, params } = scope(filter);
 
   const tasks = z.array(govTaskSchema).parse(
@@ -485,7 +485,7 @@ export function getInsightsSummary(
     byModel: group("model"),
     avgDurationMs: duration.avg_ms,
     daily,
-    governance: governanceSummary(db, filter),
+    oversight: oversightSummary(db, filter),
     backendQuota: latestBackendRateLimits(db),
     windowDays: WINDOW_DAYS,
     generatedAt: nowIso,

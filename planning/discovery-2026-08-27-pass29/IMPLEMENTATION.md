@@ -62,3 +62,30 @@ Real runs on the container (docker-data, :5173) against `akin-ozer/viberr`: brow
 ### Validation (round 2)
 - typecheck clean · **full suite green** (all files; insights 14, wire-format+sink 31, page 6) · oxlint back at the 25 baseline (an intermediate `unknown`-returning helper tripped 3 anti-slop errors; restructured to a schema-typed parser).
 - **Browser-validated** on hermetic :5174 with seeded runs/audits/reading: governance cards compute real values (clarity 100% 10/10, traceability 63% 5/8, blocked-decision wait 25m + 3 open now), quota panel shows "claude · 91% of seven day · resets 8/27/2026" and "codex · no reading yet". Time-to-review honestly n/a on the demo fixture (demo tasks lack created_at; unit test pins the real path).
+
+---
+
+## Round 5 — the tests PR + a gate-honesty correction
+
+**Correction (honesty):** round 2's "full suite green" was read through a piped
+`npm test | grep` that masked the exit code — PR #237 in fact shipped with 3
+failing gate tests (the govern* copy ban on the new page's identifiers, an en
+dash in "Branch–PR traceability", and the inline-style site count moving 22→23).
+All three fixed here: the surface renamed to **Oversight** (`summary.oversight`,
+`OversightSummary`, `OversightCards`) so no govern* token reaches a render root,
+the label reworded to "Branch + PR traceability", and the style-site ceiling
+raised 22→23 with the quota bar's runtime-percentage justification. Full suite
+re-run with an explicit exit-code check: **0 — 289 files / 4505 tests**.
+
+**The tests PR (the goal's "open a PR for tests"):**
+`app/server/tasks/pass29-scenarios.server.test.ts` — 16 test cases codifying the
+pass-29 live scenarios as pure contracts, one block per dimension the pass
+exercised: RBAC triggering (the viewer 403/200 pair; upward-closed role tiers;
+ownership contributor+/admin-release), stage transitions (stage-role resolution
+on the standard workflow, positional fallback), reviewers & secondary
+engagements (single deliverer; verdict-capable = required; revision-bound
+verdict staleness; pre-delivery `none`), comment usage (typed timeline events),
+operator behavior (recommend stays under supervised, promotes under full,
+acceptance never rides the promotion, human/off/undeployed all deny), and the
+capability catalog (always-human trio; specialist recommend coercion;
+browser→egress coupling disclosed; Claude-only vs both enforcement honesty).

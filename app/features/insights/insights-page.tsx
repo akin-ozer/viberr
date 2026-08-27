@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import type {
   CountRow,
-  GovernanceSummary,
+  OversightSummary,
   InsightsSummary,
 } from "~/server/insights/insights-query.server";
 import { Icon } from "~/ui/icon";
@@ -108,7 +108,7 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
 
           <DailyChart summary={summary} />
 
-          <GovernanceCards governance={summary.governance} />
+          <OversightCards oversight={summary.oversight} />
 
           <div className="insights-cols">
             <BreakdownCard title="By backend" rows={summary.byBackend} />
@@ -125,13 +125,13 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
 }
 
 /**
- * Governance outcomes (pass 29): the PRD's own measurable-outcome criteria,
+ * Delivery-oversight outcomes (pass 29): the PRD's own measurable-outcome criteria,
  * finally measured — ownership/state clarity, key↔branch↔PR traceability,
  * blocked-decision latency and time-to-review — from the projections and the
  * audit trail the product already keeps.
  */
-function GovernanceCards({ governance }: { governance: GovernanceSummary }) {
-  const g = governance;
+function OversightCards({ oversight }: { oversight: OversightSummary }) {
+  const g = oversight;
   return (
     <div className="stat-grid">
       <StatCard
@@ -145,7 +145,7 @@ function GovernanceCards({ governance }: { governance: GovernanceSummary }) {
         }
       />
       <StatCard
-        label="Branch–PR traceability"
+        label="Branch + PR traceability"
         value={fmtPercent(g.traceability.pct)}
         icon="branch"
         sub={
