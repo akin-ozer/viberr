@@ -660,7 +660,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "transition_stage",
-        "Move the task to an allowed next stage (see get_task's nextStages) with a short reason. Do NOT move to the final Done stage here — use accept_completion. Supervised → recommendation card; full autonomy → moves directly.",
+        "Move the task to a stage in get_task: FORWARD to any stage in `nextStages`, or BACKWARD to any stage in `reworkStages` to send failed work back. Give a short reason. `reworkStages` is populated only while validation is failing, and a move to one of them is REWORK ROUTING: you perform it directly, no human and no recommendation card, even under supervised autonomy, because the workflow graph is forward-only and a rejected task has to reach the developer somehow. That is the move to make when a reviewer requests changes and the delivering profile does not work the review stage: send the task back to its work stage, then summon the specialist. Do NOT ask a human to move it for you while `reworkStages` offers it. Do NOT move to the final Done stage here — use accept_completion. Forward moves: supervised → recommendation card; full autonomy → moves directly.",
         {
           toStageId: z.string().describe("The target stage id (must be a declared next stage)."),
           reason: z.string().optional().describe("Why advance now — shown on the recommendation card."),
