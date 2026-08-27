@@ -1302,9 +1302,12 @@ describe("app.css owns the shared idioms — hoisting is not an escape hatch (F1
     // Delete these and the counts/notes lose their type scale and spacing with
     // nothing in the markup to fall back on.
     const fine = utilities.find((u) => u.selector === ".fine")!.decls;
-    expect(fine.get("font-size")).toBe(".76rem");
+    // Pass 30 snapped the whole sheet onto the 13-step type scale; .fine's
+    // step is .74rem (11.8px, a 0.3px move from the old .76).
+    expect(fine.get("font-size")).toBe(".74rem");
     expect(fine.get("color")).toBe("var(--faint)");
-    expect(CODE).toMatch(/\.pol-note\.after\s*\{[^}]*margin-top:\s*\.85rem/);
+    // .75rem since the pass-30 spacing snap (.85 was off-scale).
+    expect(CODE).toMatch(/\.pol-note\.after\s*\{[^}]*margin-top:\s*\.75rem/);
     expect(CODE).toMatch(/\.pol-note\.last\s*\{[^}]*margin-bottom:\s*0/);
   });
 
@@ -2495,5 +2498,35 @@ describe("app.css field chrome covers every text-like input type (P21)", () => {
     // input in the app back to the body face.
     expect(fieldSelector).not.toContain(":not(");
     expect(CODE).toMatch(/\.field input\.mono\s*\{[^}]*font-family:\s*var\(--font-mono\)/);
+  });
+});
+
+/* --------------------------------------------------------- the type scale */
+
+describe("app.css type scale (pass 30)", () => {
+  // The whole sheet was snapped onto 13 hand-picked steps (documented at the
+  // token block). This is the lock that keeps the next `.73rem` from creeping
+  // back in: a new size is a deliberate widening of the scale, made here.
+  const TYPE_SCALE = [
+    ".62rem", ".68rem", ".74rem", ".8rem", ".86rem", ".92rem", ".98rem",
+    "1.05rem", "1.18rem", "1.3rem", "1.5rem", "1.7rem", "1.9rem",
+  ];
+
+  it("every font-size is a scale step (or the sanctioned 0/inherit)", () => {
+    const offScale = [...CODE.matchAll(/font-size:\s*([^;}]+)/g)]
+      .map((m) => m[1].trim())
+      .filter((v) => !TYPE_SCALE.includes(v) && v !== "0" && v !== "inherit");
+    expect([...new Set(offScale)].sort()).toEqual([]);
+  });
+
+  it("declares only weights the loaded fonts ship", () => {
+    // root.tsx loads Noto Sans 400/500/600/700, Manrope 500/600/700/800,
+    // JetBrains Mono 400/500/600. Declared weights above a family's ceiling
+    // silently render one step down (and flash heavier in font fallback), so
+    // the sheet declares only real ones; 800 is legal only where the display
+    // face applies. 900/650 are gone for good.
+    const weights = [...CODE.matchAll(/font-weight:\s*([^;}]+)/g)].map((m) => m[1].trim());
+    const allowed = new Set(["400", "500", "600", "700", "800", "inherit"]);
+    expect([...new Set(weights.filter((w) => !allowed.has(w)))]).toEqual([]);
   });
 });
