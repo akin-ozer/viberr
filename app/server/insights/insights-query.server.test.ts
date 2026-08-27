@@ -267,7 +267,7 @@ function insertAudit(
   );
 }
 
-describe("governance outcomes (pass 29 — the PRD's own success criteria, measured)", () => {
+describe("oversight outcomes (pass 29 — the PRD's own success criteria, measured)", () => {
   it("computes ownership clarity over ACTIVE tasks only (archived + terminal excluded)", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
@@ -277,7 +277,7 @@ describe("governance outcomes (pass 29 — the PRD's own success criteria, measu
     insertTask(db, { key: "VIB-4", stage: "done", waiting: "none" }); // terminal → excluded
     insertTask(db, { key: "VIB-5", archived: 1, waiting: "none" }); // archived → excluded
 
-    const g = getInsightsSummary(db, NOW).governance;
+    const g = getInsightsSummary(db, NOW).oversight;
     expect(g.clarity.activeTasks).toBe(3);
     expect(g.clarity.clearTasks).toBe(2);
     expect(g.clarity.pct).toBeCloseTo(2 / 3, 5);
@@ -293,7 +293,7 @@ describe("governance outcomes (pass 29 — the PRD's own success criteria, measu
     // No footprint at all → out of the denominator.
     insertTask(db, { key: "VIB-3" });
 
-    const g = getInsightsSummary(db, NOW).governance;
+    const g = getInsightsSummary(db, NOW).oversight;
     expect(g.traceability.deliveredTasks).toBe(2);
     expect(g.traceability.tracedTasks).toBe(1);
     expect(g.traceability.pct).toBeCloseTo(0.5, 5);
@@ -310,7 +310,7 @@ describe("governance outcomes (pass 29 — the PRD's own success criteria, measu
     insertTask(db, { key: "VIB-2", packetJson: '{"id":"pkt_x"}' });
     insertAudit(db, { task: "VIB-2", action: "task.agent.packet_opened", at: "2026-08-23T09:00:00.000Z" });
 
-    const g = getInsightsSummary(db, NOW).governance;
+    const g = getInsightsSummary(db, NOW).oversight;
     expect(g.packetResolution.resolved).toBe(1);
     expect(g.packetResolution.avgMs).toBe(600_000);
     expect(g.packetResolution.medianMs).toBe(600_000);
@@ -327,7 +327,7 @@ describe("governance outcomes (pass 29 — the PRD's own success criteria, measu
     insertAudit(db, { task: "VIB-1", action: "task.transition", at: "2026-08-22T12:00:00.000Z", details: { from: "impl", to: "review" } });
     insertAudit(db, { task: "VIB-1", action: "task.transition", at: "2026-08-22T15:00:00.000Z", details: { from: "impl", to: "review" } });
 
-    const g = getInsightsSummary(db, NOW).governance;
+    const g = getInsightsSummary(db, NOW).oversight;
     expect(g.timeToReview.tasks).toBe(1);
     expect(g.timeToReview.medianMs).toBe(2 * 60 * 60 * 1000);
   });
@@ -340,9 +340,9 @@ describe("governance outcomes (pass 29 — the PRD's own success criteria, measu
     insertTask(db, { key: "VIB-2", eventCount: 39 });
     insertTask(db, { project: "other", key: "OT-1", eventCount: 99, waiting: "agent" });
 
-    const all = getInsightsSummary(db, NOW).governance;
+    const all = getInsightsSummary(db, NOW).oversight;
     expect(all.longTimelines).toBe(2);
-    const scoped = getInsightsSummary(db, NOW, { projectSlug: "gp" }).governance;
+    const scoped = getInsightsSummary(db, NOW, { projectSlug: "gp" }).oversight;
     expect(scoped.longTimelines).toBe(1);
     expect(scoped.clarity.activeTasks).toBe(2);
   });

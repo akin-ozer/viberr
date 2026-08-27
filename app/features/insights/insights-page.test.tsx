@@ -48,7 +48,7 @@ const FULL: InsightsSummary = {
     runs: i === 29 ? 5 : 0,
     cost: i === 29 ? 1.2 : 0,
   })),
-  governance: {
+  oversight: {
     clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 },
     traceability: { deliveredTasks: 5, tracedTasks: 5, pct: 1 },
     packetResolution: {
@@ -107,12 +107,12 @@ describe("InsightsPage", () => {
     expect(fills[0]?.style.width).toBe("100%"); // claude (28, the max)
   });
 
-  it("renders the governance outcomes (pass 29)", () => {
+  it("renders the oversight outcomes (pass 29)", () => {
     const { getByText } = renderPage(FULL);
     expect(getByText("Owner & state clarity")).toBeTruthy();
     // 7/8 active tasks clear → 88% (fmtPercent rounds).
     expect(getByText("88%")).toBeTruthy();
-    expect(getByText("Branch–PR traceability")).toBeTruthy();
+    expect(getByText("Branch + PR traceability")).toBeTruthy();
     expect(getByText("100%")).toBeTruthy();
     expect(getByText("Blocked-decision wait")).toBeTruthy();
     expect(getByText("Time to review-ready")).toBeTruthy();
