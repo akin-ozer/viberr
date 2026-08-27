@@ -12,6 +12,7 @@ import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
+import { EVIDENCE_EMPTY_COLUMN } from "~/schemas/task-file.schema";
 import { eventMeta, typedKind } from "./event-meta";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import {
@@ -268,19 +269,37 @@ export function TimelineItem({
             </div>
             {ev.evidence && (
               <div className="tl-card evidence">
-                {ev.evidence.map((e, i) => (
-                  <div className="ev-row" key={i}>
-                    <EvidenceLabel
-                      label={e.label}
-                      {...(attachmentNames ? { attachments: attachmentNames } : {})}
-                      {...(attachmentsBase ? { base: attachmentsBase } : {})}
-                    />
-                    <span>
-                      <span className="add">{e.add}</span>{" "}
-                      <span className="del">{e.del}</span>
-                    </span>
-                  </div>
-                ))}
+                {/* The add/del columns are a DIFF shape. A verdict's rows are
+                    usually citations with no counts, and the normalizer fills
+                    both cells with the `—` placeholder so the `label · add ·
+                    del` line still round-trips through task.md — which rendered
+                    as two meaningless dashes pinned to the right of every row.
+                    The placeholder stays in the FILE (the parser pops the last
+                    two segments); it just stops being drawn when no row in the
+                    block cites a real count. Block-level, not per-row, so rows
+                    stay aligned when only some carry numbers. */}
+                {(() => {
+                  const counted = ev.evidence.some(
+                    (e) =>
+                      (e.add && e.add !== EVIDENCE_EMPTY_COLUMN) ||
+                      (e.del && e.del !== EVIDENCE_EMPTY_COLUMN),
+                  );
+                  return ev.evidence.map((e, i) => (
+                    <div className="ev-row" key={i}>
+                      <EvidenceLabel
+                        label={e.label}
+                        {...(attachmentNames ? { attachments: attachmentNames } : {})}
+                        {...(attachmentsBase ? { base: attachmentsBase } : {})}
+                      />
+                      {counted && (
+                        <span className="ev-counts">
+                          <span className="add">{e.add}</span>{" "}
+                          <span className="del">{e.del}</span>
+                        </span>
+                      )}
+                    </div>
+                  ));
+                })()}
               </div>
             )}
           </>

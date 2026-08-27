@@ -192,6 +192,8 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
     "67b14be125a5f8b213a9ad3de6682c4762bdef703a40dc32ba1c907a267e1c31",
     "7aa79a7c54156f0556f437f525a31a5c12b2dd89a5465282974da61337bc041c",
+    // outgoing before the evidence-rows-are-citations guidance
+    "b2fdfb7f86bb294beabf836f59050d1d57eb429a9d787937783eb972b5a33c85",
     "c32401d03e628093ddaec888efdac35ad79e4ee3604502104fb5bf016adda025",
   ],
 };

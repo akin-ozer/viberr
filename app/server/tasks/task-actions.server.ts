@@ -2660,9 +2660,15 @@ export async function recordAgentCompletion(
         }
         validation = deriveValidation(parsed.frontmatter);
         parsed.frontmatter.validation = validation;
+        // The summary sits under the title in the timeline AND is the whole of
+        // the notification, so restating the title ("Changes requested" ·
+        // "… requested changes.") spends the one informative line on nothing.
+        // Name the revision the verdict binds to instead — the fact a reader
+        // needs next, and the one that makes a stale verdict visible.
+        const onRevision = rev ? ` on \`${rev.headSha.slice(0, 12)}\`` : "";
         if (verdict === "request_changes") {
           title = "Changes requested";
-          summary = `${roleDisplay} requested changes.`;
+          summary = `${roleDisplay} requested changes${onRevision}.`;
         } else if (!rev || !reviewerProfileId) {
           // Approve with nothing to bind to — no delivered revision yet. Record
           // the prose but never claim a pass.
@@ -2680,7 +2686,7 @@ export async function recordAgentCompletion(
                 ? `No \`${noChangeMint.branch}\` branch exists on the remote`
                 : `\`${noChangeMint.branch}\` carries no commits ahead of \`${noChangeMint.baseBranch}\``) +
               `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. Accepting completes this task with no changes.`
-            : `${roleDisplay} approved the work.`;
+            : `${roleDisplay} approved the work${onRevision}.`;
         } else {
           // Approved, but not yet cleared: another required reviewer is
           // outstanding or has requested changes on the current revision.
