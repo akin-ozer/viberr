@@ -86,6 +86,17 @@ describe("seeded specialist capability modes (F20-21 / R20-6 — direct or withh
     expect(modeOf("developer", "move-task-to-review")).toBe("direct");
   });
 
+  it("the Developer ships the live browser WITH explicit web egress (owner ruling, pass 29)", () => {
+    // `use-browser` is catalog-default OFF, and before this ruling no seeded
+    // profile granted it — the capability was undiscoverable without a
+    // hand-built profile. The Developer now ships it so it can verify its own
+    // UI work. Egress rides along explicitly: the mount refuses a browser
+    // without `use-web-search-fetch: direct` (resolveBrowserMcp gate 2), so the
+    // seed stores the coherent pair rather than leaning on the catalog default.
+    expect(modeOf("developer", "use-browser")).toBe("direct");
+    expect(modeOf("developer", "use-web-search-fetch")).toBe("direct");
+  });
+
   it("the Reviewer's former `recommend` verdict outcomes now ship `direct`", () => {
     expect(modeOf("reviewer", "approve-review")).toBe("direct");
     expect(modeOf("reviewer", "request-changes")).toBe("direct");

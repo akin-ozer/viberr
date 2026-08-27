@@ -151,3 +151,21 @@ From VQP-2 Claude developer run (run_enKz891dvwma) logs:
 - **F5** [browser] no health/degraded signal for browser infra (unlike Codex-auth/model). FIX: boot/health chromium probe → browserUnavailable on deployed-specialist view (complements F2).
 - **F6** [browser] no e2e/unit test drives the real Playwright child / pins default-name-vs-filename output-dir behavior. FIX: add test(s).
 - **F7** stale delivery-conflict blocked packet not superseded by a successful direct "Deliver branch & open PR"; contradictory "no PR opened" vs "PR #NNN in review"; operator can't clear a human-owned packet. FIX: auto-resolve/supersede the packet when a PR is recorded.
+
+---
+
+## Extended live round 2 (deepening the named dimensions)
+Filled the dimensions that were previously verified via code/plumbing rather than demonstrated live. NO new bugs — the app handled all correctly.
+- **RBAC LIVE (UC6):** created real qa-viewer (viewer) + qa-contrib (contributor) members on VQP. As qa-viewer, same session + valid CSRF: `owner-take`→**403**, `comment`→**200** (landed on VQP-2 timeline as QA Viewer). Permissions panel showed viewer's role-gated grants; page rendered no mutating controls. Isolates RBAC from auth/CSRF.
+- **Ownership LIVE (UC24):** owner-take → owner-assign(qa-contrib) → owner-release, all 200 as admin; timeline records "Handed ownership to QA Contributor" / "Released … (admin)".
+- **@mention (UC5c):** `@operator` on VQP-4 with an open packet did NOT resume the operator — correct BUG-2 gating (human is pointed at the packet). Resolving the packet (confirm) made the operator cascade correctly (scoped→assigned→impl).
+- Coverage of all named dimensions enumerated in EXTENDED-COVERAGE.md (20+ UCs).
+- Test users qa-viewer/qa-contrib + VQP-4 kept per owner "keep as evidence" choice.
+
+---
+
+## Owner rulings (2026-08-27, design-choice questions)
+- **R29-1 Operator proactivity: INTENDED — keep proactive.** The multi-run cascade per human action is the desired hands-off UX. No throttle.
+- **R29-2 Developer ships the browser.** Grant the built-in Developer `use-browser: direct` (+ explicit `use-web-search-fetch: direct`, matching the editor's coupling) in SEED_AGENT_PROFILES so agents can verify their own UI work out of the box. IMPLEMENTED (agent-catalog.server.ts + pinning test). Note: per E10, existing project rosters keep their deployed grants — the change reaches new projects/first boots; an admin flips existing deployments in the editor.
+- **R29-3 Codex confinement: custom profiles run Codex too — keep that in mind.** Verified: every Codex disclosure (B1 advisory/inert tags, F4 browser note, matrix modal text) keys on `backend === "codex"`, never on built-in identity — custom Codex profiles get identical treatment, and the runtime asymmetries are backend-keyed. No change needed; recorded as a standing consideration for future Codex work.
+- **R29-4 Matrix "Reserved for humans" label: KEEP AS-IS.** Per-column semantics stand (NEW-3). F1 stays dropped.
