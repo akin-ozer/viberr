@@ -23,6 +23,13 @@
   --faint: #616575;
   --placeholder: #6a6e81;
   --border: #c7cad5;
+  /* WCAG 1.4.11 splits borders into two tokens: a hairline that merely divides
+     content may be soft, but a border that is the ONLY thing identifying a
+     control (input outline, toggle track, search box) needs 3:1 against its
+     surface. --border (1.64:1) stays on decorative frames; --border-control is
+     3.44:1 on --surface in BOTH themes (dark #6a708a on #1b1d25) and is locked
+     in app.css.test.ts beside the focus-ring and CTA-boundary checks. */
+  --border-control: #858a9b;
   --ring: #e0e2e8;
   --hairline: color-mix(in srgb, var(--border), transparent 55%);
 
@@ -42,6 +49,12 @@
   --cta-bg: #3f5efd;
   --cta-fg: #ffffff;
   --success: #00b473;
+  /* The success state family, named like the other accent pairs. --success-soft
+     recomputes from the theme's own --success/--surface, so one definition
+     serves both themes; --success-dark is the text partner (5.3:1 on the soft
+     wash in light) and flips in the dark block. */
+  --success-soft: color-mix(in srgb, var(--success), var(--surface) 78%);
+  --success-dark: #0a6a47;
   --coral-light: #ffc6c6;
   --coral-dark: #600000;
   --rose-light: #ffd8f4;
@@ -111,6 +124,9 @@ body {
    one place the next such button is covered too. */
 button { font: inherit; color: inherit; cursor: pointer; background: none; }
 input, textarea { font: inherit; }
+/* One placeholder color for every input idiom — without this the most common
+   .field inputs fell back to UA grey (~2.35:1); the token is AA-locked. */
+input::placeholder, textarea::placeholder { color: var(--placeholder); }
 svg.ico { width: 16px; height: 16px; flex: none; }
 
 /* ---------------------------------------------------------------------------
@@ -128,7 +144,7 @@ svg.ico { width: 16px; height: 16px; flex: none; }
    only way the popup itself themes correctly. Overriding it would mean shipping
    a hard-coded arrow colour, which the porting rules forbid. */
 select {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-button);
   padding: .34rem .45rem;
   background: var(--surface);
@@ -143,7 +159,14 @@ select:focus {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%);
   outline: 0;
 }
-select:disabled { opacity: .5; cursor: default; }
+select:disabled { opacity: .45; cursor: default; }
+/* The app's two opacity steps for unavailable controls: .45 disabled (P14-LV-08),
+   .7 busy. Every busy button already sets aria-busy, so the inline per-site
+   opacities are gone. */
+.btn[aria-busy="true"] { opacity: .7; pointer-events: none; }
+/* Native checkboxes keep UA rendering (same stance as the select rule above)
+   but check in the brand color in both themes. */
+input[type="checkbox"] { accent-color: var(--blue); }
 ::selection { background: color-mix(in srgb, var(--blue), transparent 70%); }
 
 /* ---------------------------------------------------------------------------
@@ -338,7 +361,7 @@ h1, h2, h3, h4 {
 
 .rail-label {
   font-size: .68rem;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: .09em;
   text-transform: uppercase;
   color: var(--placeholder);
@@ -443,7 +466,7 @@ h1, h2, h3, h4 {
   min-width: 150px;
   margin-left: auto;
   padding: .42rem .7rem;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-button);
   background: var(--surface);
   color: var(--placeholder);
@@ -498,7 +521,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   align-items: center;
   gap: .42rem;
   font-size: .76rem;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--teal-dark);
   padding: .34rem .6rem;
   border-radius: var(--radius-chip);
@@ -595,7 +618,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .26rem .5rem;
   border-radius: var(--radius-chip);
   font-size: .72rem;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
   background: var(--teal-light);
@@ -609,7 +632,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .pill.info    { background: var(--blue-soft); color: var(--blue-pressed); }
 .pill.agent   { background: var(--agent-soft); color: var(--agent-dark); }
 .pill.neutral { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--muted); }
-.pill.done    { background: color-mix(in srgb, var(--success), var(--surface) 78%); color: #0a6a47; }
+.pill.done    { background: var(--success-soft); color: var(--success-dark); }
 .pill.sm { font-size: .66rem; padding: .2rem .42rem; }
 
 /* ---------- Agent / human identity ---------- */
@@ -721,7 +744,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: inline-flex; align-items: center; gap: .4rem;
   flex: 0 1 260px; min-width: 140px;
   padding: .3rem .62rem;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-chip);
   background: var(--surface);
   color: var(--placeholder);
@@ -905,7 +928,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    The preview sits in the narrow drop column, which is where a squeeze happens. */
 .card-drop-preview .key { font-family: var(--font-mono); font-size: .72rem; color: var(--blue-pressed); white-space: nowrap; }
 .card-drop-preview .dp-title {
-  font-size: .95rem; line-height: 1.18; font-weight: 800;
+  /* The preview IS the card mid-drag: same face, weight and size as .card h3
+     (it used to inherit Noto and clamp to 700, visibly swapping typeface). */
+  font-family: var(--font-display);
+  font-size: .98rem; line-height: 1.18; font-weight: 800;
   color: color-mix(in srgb, var(--fg), transparent 15%);
 }
 @keyframes dropPreviewIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
@@ -954,7 +980,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 @keyframes smPop { from { opacity: 0; transform: translateY(-4px) scale(.985); } to { opacity: 1; transform: none; } }
 .stage-menu-pop .sm-head {
-  font-size: .62rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase;
+  font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
   color: var(--placeholder); padding: .3rem .5rem .35rem;
 }
 .stage-menu-pop .sm-item {
@@ -1024,12 +1050,14 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--muted);
   white-space: nowrap;
 }
-.label-chip.more { font-weight: 700; }
+/* Mono ships no weight above 600, so the declared-700 emphasis was a no-op;
+   the "+N" overflow chip earns its distinction through color instead. */
+.label-chip.more { color: var(--fg); }
 
 .wait-tag {
   display: inline-flex; align-items: center; gap: .35rem;
   margin-left: auto;
-  font-size: .72rem; font-weight: 800;
+  font-size: .72rem; font-weight: 700;
 }
 .wait-tag.human { color: var(--blue-pressed); }
 .wait-tag.agent { color: var(--agent-dark); }
@@ -1094,11 +1122,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .task-hero .key { font-family: var(--font-mono); font-size: .78rem; color: var(--faint); }
 .task-hero h1 { font-size: 1.7rem; line-height: 1.08; }
 .task-hero .goal { color: var(--muted); font-size: .95rem; line-height: 1.5; max-width: 70ch; }
-.goal-edit-btn { margin-left: .5rem; padding: .05rem .4rem; font-size: .75rem; color: var(--blue); background: transparent; border: 1px solid var(--border); border-radius: .35rem; cursor: pointer; vertical-align: middle; }
+.goal-edit-btn { margin-left: .5rem; padding: .05rem .4rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; vertical-align: middle; }
 .goal-edit-btn:hover { border-color: var(--blue); }
 .goal-edit { max-width: 70ch; display: flex; flex-direction: column; gap: .5rem; margin-top: .25rem; }
-.goal-textarea { width: 100%; resize: vertical; font: inherit; font-size: .95rem; line-height: 1.5; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .5rem .6rem; }
-.goal-textarea:focus { outline: none; border-color: var(--blue); }
+.goal-textarea { width: 100%; resize: vertical; font: inherit; font-size: .95rem; line-height: 1.5; color: var(--fg); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .5rem .6rem; }
+.goal-textarea:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .goal-edit-actions { display: flex; gap: .5rem; }
 
 /* Lightweight metadata editor (priority / labels / due date) under the goal.
@@ -1115,10 +1143,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .meta-field { display: flex; flex-direction: column; gap: .25rem; }
 .meta-label { font-size: .72rem; color: var(--muted); font-weight: 600; }
 .meta-edit .meta-field select, .meta-edit .meta-field input,
-.meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .3rem .5rem; }
+.meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .3rem .5rem; }
 .meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { width: 100%; }
 .meta-edit .meta-field select:focus, .meta-edit .meta-field input:focus,
-.meta-edit-panel .meta-field select:focus, .meta-edit-panel .meta-field input:focus { outline: none; border-color: var(--blue); }
+.meta-edit-panel .meta-field select:focus, .meta-edit-panel .meta-field input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .meta-edit-actions { display: flex; gap: .5rem; align-items: center; }
 /* The labels row in the Details panel wraps its chips. */
 .meta-chips { display: flex; flex-wrap: wrap; gap: .3rem; justify-content: flex-end; }
@@ -1136,7 +1164,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .datepick-control { position: relative; }
 .datepick-trigger {
   display: inline-flex; align-items: center; gap: .5rem; width: 100%;
-  padding: .5rem .7rem; border: 1px solid var(--border); border-radius: var(--radius-button);
+  padding: .5rem .7rem; border: 1px solid var(--border-control); border-radius: var(--radius-button);
   background: var(--surface); color: var(--fg); font: inherit; font-size: .9rem;
   cursor: pointer; text-align: left;
   transition: border-color .14s ease, box-shadow .14s ease;
@@ -1182,7 +1210,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .label-combo { position: relative; }
 .label-input {
   display: flex; flex-wrap: wrap; align-items: center; gap: .3rem;
-  padding: .3rem .4rem; border: 1px solid var(--border); border-radius: var(--radius-button);
+  padding: .3rem .4rem; border: 1px solid var(--border-control); border-radius: var(--radius-button);
   background: var(--surface); cursor: text;
 }
 .label-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
@@ -1210,7 +1238,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .label-opt-name { font-family: var(--font-mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .label-opt.create { color: var(--muted); }
 .label-opt.create .label-opt-name { font-family: var(--font-body); }
-.label-opt-hint { margin-left: auto; font-size: .68rem; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--placeholder); }
+.label-opt-hint { margin-left: auto; font-size: .68rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 /* shadcn-style checkbox: a rounded square that fills with the accent + a check
    when its label is selected. The check is hidden by opacity (not a transparent
    text colour) so the contrast sweep never reads a 1:1 phantom glyph. */
@@ -1302,12 +1330,15 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: color-mix(in srgb, var(--fg), transparent 97%);
   border: 1px solid color-mix(in srgb, var(--border), transparent 60%);
 }
-.obs .k { font-size: .66rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); padding-top: .14rem; }
+.obs .k { font-size: .66rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); padding-top: .14rem; }
 .obs code { font-family: var(--font-mono); font-size: .78rem; }
 /* R17-1: a divergence warning row inside an acceptance dialog — the reviewed
    revision moved on, so the value reads in the warning tone. */
 .obs.warn { border-color: color-mix(in srgb, var(--coral-dark), transparent 55%); background: var(--rose-light); }
 .obs.warn > span:last-child { color: var(--coral-dark); }
+/* Hard rule: never grey text on a colored background — on the pink warning
+   wash the kicker label takes the wash's own dark text partner. */
+.obs.warn .k { color: var(--coral-dark); }
 
 .options { display: grid; gap: .3rem; margin-top: .55rem; }
 /* A choice row is dense and quiet (the questionnaire's whole card fits in one
@@ -1326,16 +1357,20 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .opt:hover { border-color: var(--border); }
 .opt.recommend { border-color: color-mix(in srgb, var(--blue), transparent 55%); }
 .opt.sel { border-color: var(--blue); background: var(--blue-soft); }
-.opt .radio { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--border); flex: none; display: grid; place-items: center; margin-top: .1rem; }
+/* Same 3:1 control-edge treatment the .lc-check checkbox already uses —
+   the unselected circle is the only rendering of "not selected". */
+.opt .radio { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--placeholder); flex: none; display: grid; place-items: center; margin-top: .1rem; }
 .opt.sel .radio { border-color: var(--blue); }
 .opt.sel .radio::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
-.opt .ot { font-weight: 650; font-family: var(--font-display); font-size: .82rem; line-height: 1.35; }
+.opt .ot { font-weight: 700; font-family: var(--font-display); font-size: .82rem; line-height: 1.35; }
 .opt .od { font-size: .72rem; color: var(--faint); margin-top: .08rem; line-height: 1.4; }
 .opt .rec-tag { margin-left: auto; flex: none; margin-top: .05rem; }
 /* Questionnaire shortcut chip (digit selects the choice). `margin-left: auto`
    pushes it right; a rec-tag already claiming the auto margin leaves the chip
    just trailing it, which is the intended order: pill, then key. */
-.opt .opt-kbd { margin-left: auto; flex: none; opacity: .65; margin-top: .05rem; }
+/* De-emphasis via the AA ladder, not alpha: opacity .65 composited the .kbd
+   chip's --muted down to ~3:1, defeating that class's own documented AA fix. */
+.opt .opt-kbd { margin-left: auto; flex: none; color: var(--faint); margin-top: .05rem; }
 .opt .rec-tag ~ .opt-kbd, .opt .rec-tag + .opt-kbd { margin-left: 0; }
 /* The composed free-text choice deliberately wears the SAME frame as every
    offered option — an earlier dashed border made one row speak a second
@@ -1391,7 +1426,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .7rem .8rem;
   background: color-mix(in srgb, var(--surface), transparent 30%);
 }
-.profile-cell .lbl { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
+.profile-cell .lbl { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .profile-cell .val { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; }
 .profile-cell .val .nm { font-family: var(--font-display); font-weight: 800; font-size: .9rem; }
 .profile-cell .val .sub { font-size: .72rem; color: var(--faint); }
@@ -1438,7 +1473,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .op-rec-kind {
   display: inline-flex; align-items: center; gap: .3rem;
   font-family: var(--font-display); font-weight: 700; font-size: .68rem;
-  text-transform: uppercase; letter-spacing: .03em;
+  text-transform: uppercase; letter-spacing: .05em;
   color: var(--agent-dark);
   padding: .12rem .4rem; border-radius: var(--radius-chip);
   background: color-mix(in srgb, var(--agent), transparent 82%);
@@ -1459,16 +1494,16 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    takes an optional steer — the per-run backend/autonomy selects (`.op-sel`)
    are gone; both are configured on the operator profile and the run resolves
    the live deployment. */
-.op-backend { font-size: .78rem; font-weight: 650; font-family: var(--font-display); color: var(--muted); }
+.op-backend { font-size: .78rem; font-weight: 700; font-family: var(--font-display); color: var(--muted); }
 .op-steer {
   flex: 1 1 180px; min-width: 0;
   font: inherit; font-size: .78rem; color: var(--fg);
-  background: var(--surface); border: 1px solid var(--border);
+  background: var(--surface); border: 1px solid var(--border-control);
   border-radius: var(--radius-button); padding: .3rem .55rem;
 }
 .op-steer::placeholder { color: var(--placeholder); }
 .op-steer:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); outline: 0; }
-.op-steer:disabled { opacity: .55; }
+.op-steer:disabled { opacity: .45; }
 
 /* timeline */
 .tl-filter { display: flex; gap: .35rem; flex-wrap: wrap; }
@@ -1515,12 +1550,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .tl-node.quality { background: var(--rose-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); }
 .tl-node.transition { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .tl-node.blocked { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
-.tl-node.completion { background: color-mix(in srgb, var(--success), var(--surface) 76%); color: #0a6a47; border-color: color-mix(in srgb, var(--success), transparent 70%); }
+.tl-node.completion { background: var(--success-soft); color: var(--success-dark); border-color: color-mix(in srgb, var(--success), transparent 70%); }
 .tl-node.policy { background: var(--orange-light); color: var(--yellow-dark); border-color: color-mix(in srgb, var(--yellow-dark), transparent 72%); }
 /* neutral lifecycle note (goal edits, divergence, scheduling) — deliberately
    quiet: the alarming orange stays reserved for real policy violations. */
 .tl-node.note { background: var(--surface); color: var(--muted); border-color: var(--hairline); }
-.tl-node.github { background: var(--fg); color: #fff; border-color: var(--fg); }
+.tl-node.github { background: var(--fg); color: var(--surface); border-color: var(--fg); }
 .tl-node.agent { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
 
 .tl-card {
@@ -1557,14 +1592,14 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    wrapper is ever removed. */
 .composer-box {
   position: relative;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: 14px;
   background: var(--surface);
   padding: .7rem .8rem;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 .composer-input { position: relative; }
-.composer-box:focus-within { border-color: var(--blue); box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue), transparent 86%); }
+.composer-box:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 /* The Lexical plain-text editor renders styled @mentions inline — no
    transparent-textarea/backdrop mirroring, so no glyph-alignment constraints
    to defend. Metrics match the old textarea exactly. */
@@ -1602,7 +1637,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    form controls, matching `.field input`. */
 .sched-list { list-style: none; margin: 0 0 .6rem; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
 .sched-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .5rem .7rem; padding: .5rem .6rem; border: 1px solid var(--hairline); border-radius: 8px; }
-.sched-when { display: inline-flex; align-items: center; gap: .35rem; font-family: var(--font-mono); font-size: .78rem; font-weight: 700; }
+.sched-when { display: inline-flex; align-items: center; gap: .35rem; font-family: var(--font-mono); font-size: .78rem; font-weight: 600; }
 .sched-when .ico, .sched-when svg { width: 13px; height: 13px; color: var(--agent-dark); }
 .sched-meta { grid-column: 1 / -1; font-size: .76rem; color: var(--placeholder); }
 .sched-cancel { grid-row: 1; grid-column: 3; }
@@ -1614,7 +1649,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .sched-note-inline { margin: 0; color: var(--muted); font-size: .85rem; }
 /* P16-UI-05: the three selects in this panel are the base `select` rule now —
    the border/surface pair D-18 restored here is declared once, at the top. */
-.sched-note { padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: inherit; }
+.sched-note { padding: .4rem .5rem; border-radius: var(--radius-button); border: 1px solid var(--border-control); background: var(--surface); color: inherit; }
 .sched-note::placeholder { color: var(--placeholder); }
 .mention { color: var(--agent-dark); font-weight: 700; background: var(--agent-soft); padding: .02rem .26rem; border-radius: 5px; }
 /* P16-UI-20: the chip carries its meaning in COLOUR alone — in a comment body
@@ -1665,7 +1700,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
      faili"). Wrapping drops the pill group onto its own row instead. */
   flex-wrap: wrap;
   padding: .7rem .85rem;
-  background: var(--fg); color: #fff;
+  background: var(--fg); color: var(--surface);
 }
 .gh-bar .ico { width: 18px; height: 18px; flex: none; }
 .gh-bar .repo { font-family: var(--font-mono); font-size: .78rem; min-width: 0; overflow-wrap: anywhere; }
@@ -1701,12 +1736,16 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: flex; align-items: center; gap: .6rem;
   padding: .7rem 1rem;
   border-radius: 12px;
-  background: var(--fg); color: #fff;
+  background: var(--fg); color: var(--surface);
   box-shadow: var(--shadow-pop);
   font-size: .86rem; font-weight: 600;
   animation: rise .3s var(--ease-out);
 }
 .toast .ico { width: 16px; height: 16px; color: var(--teal-light); }
+/* P13-D-10 promised data-kind was stylable; failures no longer wear the
+   success accent. --coral-light flips per theme and clears 3:1 on the
+   inverted toast chrome in both. */
+.toast[data-kind="error"] .ico { color: var(--coral-light); }
 /* Exit mirrors the rise entrance path (same edge), faster than the enter. */
 .toast.leaving {
   opacity: 0;
@@ -1756,7 +1795,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .profile-list { display: flex; flex-direction: column; gap: .35rem; overflow-y: auto; padding: .1rem .3rem 1rem 0; }
 .ag-group-label {
-  font-size: .68rem; font-weight: 900; letter-spacing: .09em; text-transform: uppercase;
+  font-size: .68rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
   color: var(--placeholder); padding: .9rem .3rem .35rem;
 }
 .ag-group-label:first-child { padding-top: .2rem; }
@@ -1792,7 +1831,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .ag-hero-actions { display: flex; gap: .5rem; flex: none; }
 .ag-running {
   display: inline-flex; align-items: center; gap: .4rem;
-  font-size: .78rem; font-weight: 800; color: var(--agent-dark);
+  font-size: .78rem; font-weight: 700; color: var(--agent-dark);
 }
 .ag-desc { color: var(--muted); font-size: .95rem; line-height: 1.55; margin: -.2rem 0 0; max-width: 78ch; }
 
@@ -1819,7 +1858,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .cap-col.forbidden { background: color-mix(in srgb, var(--red-light), var(--surface) 55%); border-color: color-mix(in srgb, var(--coral-dark), transparent 84%); }
 .cap-col-head {
   display: flex; align-items: center; gap: .45rem;
-  font-size: .7rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase;
+  font-size: .7rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
 }
 .cap-col-head .ico { width: 14px; height: 14px; }
 .cap-col.direct .cap-col-head { color: var(--teal-dark); }
@@ -1834,7 +1873,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 
 /* resources + runtime */
 .res-groups { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-.res-group .lbl { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
+.res-group .lbl { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .res-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
 .res-chip {
   display: inline-flex; align-items: center; gap: .35rem;
@@ -1851,10 +1890,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   color: var(--coral-dark);
 }
 .res-chip.missing .ico { color: var(--coral-dark); }
-.res-chip-note { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
+.res-chip-note { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
 
 .runtime-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid var(--hairline); }
-.rt-cell .lbl { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
+.rt-cell .lbl { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .rt-val { margin-top: .5rem; }
 /* Model cell: the resolved model name, plus a substitution flag when the saved
  * profile model isn't a recognized id (runs fall back to the default). */
@@ -1866,7 +1905,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   /* P13-D-18: was var(--font-sans) — undefined, so the badge inherited the
      mono face from its `.model-val.mono` parent. The token is --font-body. */
   font-family: var(--font-body);
-  font-size: .66rem; font-weight: 700; letter-spacing: .02em;
+  font-size: .66rem; font-weight: 700; letter-spacing: .05em;
   text-transform: uppercase;
   color: var(--yellow-dark);
   background: var(--orange-light);
@@ -1895,7 +1934,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .deploy-row:hover { border-color: var(--blue); transform: translateX(2px); }
 .deploy-eng {
   flex: none; width: 84px;
-  font-size: .68rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--faint);
+  font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
 }
 .deploy-task { flex: 1; min-width: 0; font-size: .86rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .deploy-task .key { color: var(--faint); margin-right: .4rem; }
@@ -1918,7 +1957,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .live-wrap .live-head, .live-wrap .live-row { grid-template-columns: 1.5fr .9fr 2fr .9fr 1.1fr; }
 .live-head {
-  font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder);
+  font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder);
   border-bottom: 1px solid var(--hairline); background: color-mix(in srgb, var(--fg), transparent 97%);
 }
 .live-row { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--hairline); background: var(--surface); font-size: .85rem; }
@@ -1935,11 +1974,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .live-task .ttl { color: var(--muted); }
 
 /* delete confirmation */
-.confirm-scrim { position: fixed; inset: 0; z-index: 60; background: color-mix(in srgb, var(--fg), transparent 70%); animation: fade-in .14s ease; }
 /* Native <dialog> cards: element-level reset (loses to any card class) so the
    UA styles — inset:0, margin:auto, border, padding, background, max-w/h,
    fit-content sizing — never fight the card classes' own box. The scrim look
-   moves from the old `.confirm-scrim` div to the top-layer ::backdrop. */
+   lives on the top-layer ::backdrop (the old `.confirm-scrim` div is gone). */
 dialog { margin: 0; padding: 0; border: 0; background: none; color: inherit; inset: auto; width: auto; height: auto; max-width: none; max-height: none; }
 dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); animation: fade-in .14s ease; }
 .confirm-card {
@@ -2048,7 +2086,7 @@ dialog[data-closing]::backdrop {
 .cmdk-empty { padding: 1.1rem 1rem; font-size: .84rem; color: var(--faint); }
 .cmdk-group {
   padding: .55rem .6rem .25rem;
-  font-size: .66rem; font-weight: 900; letter-spacing: .09em;
+  font-size: .66rem; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--placeholder);
 }
 .cmdk-row {
@@ -2085,7 +2123,7 @@ dialog[data-closing]::backdrop {
 .modal-foot .foot-actions { margin-left: auto; display: flex; gap: .55rem; }
 
 .field { display: flex; flex-direction: column; gap: .5rem; }
-.flabel { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
+.flabel { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .flabel .req { color: var(--coral-dark); margin-left: .15rem; }
 .fhint { font-size: .76rem; color: var(--faint); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: .5rem; }
 /* Q26-3: a warn-toned field hint (the same caution colour the timeline/pills use)
@@ -2099,7 +2137,7 @@ dialog[data-closing]::backdrop {
    order, and a :not() chain here would outrank it. */
 .field input[type="text"], .field input[type="password"], .field input[type="email"],
 .field input[type="search"], .field input[type="date"], .field input[type="number"], .field textarea {
-  width: 100%; border: 1px solid var(--border); border-radius: var(--radius-button);
+  width: 100%; border: 1px solid var(--border-control); border-radius: var(--radius-button);
   padding: .55rem .7rem; background: var(--surface); color: var(--fg);
   font-family: var(--font-body); font-size: .9rem; outline: 0;
   transition: border-color .14s ease, box-shadow .14s ease;
@@ -2141,7 +2179,7 @@ dialog[data-closing]::backdrop {
 .cap-mghead:hover { background: color-mix(in srgb, var(--fg), transparent 95%); }
 .cap-chev { width: 15px; height: 15px; color: var(--placeholder); transform: rotate(0deg); transition: transform .15s ease; flex: none; }
 .cap-mghead.open .cap-chev { transform: rotate(90deg); }
-.cap-mglabel { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.cap-mglabel { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .cap-msum { margin-left: auto; display: inline-flex; gap: .55rem; }
 .cap-msum .cs { display: inline-flex; align-items: center; gap: .28rem; font-family: var(--font-mono); font-size: .72rem; color: var(--faint); }
 .cap-msum .cs .d { width: .5rem; height: .5rem; border-radius: 50%; }
@@ -2229,11 +2267,13 @@ dialog[data-closing]::backdrop {
 .cap-matrix-table thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; border-bottom: 1px solid var(--border); }
 .cap-matrix-table th.corner { left: 0; z-index: 3; text-align: left; }
 .cap-matrix-table td.rowlabel { position: sticky; left: 0; background: var(--surface); text-align: left; z-index: 1; min-width: 230px; font-size: .82rem; color: var(--fg); }
-.mx-scope { display: inline-block; margin-left: .5rem; padding: .05rem .34rem; border-radius: 5px; font-size: .6rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: var(--blue); background: color-mix(in srgb, var(--blue), transparent 88%); vertical-align: middle; cursor: help; }
+/* Text partner on a blue wash is --blue-pressed (the token block documents
+   --blue as an accent, not a text color): 3.34:1 -> ~7:1 light, ~8:1 dark. */
+.mx-scope { display: inline-block; margin-left: .5rem; padding: .05rem .34rem; border-radius: 5px; font-size: .6rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--blue-pressed); background: color-mix(in srgb, var(--blue), transparent 88%); vertical-align: middle; cursor: help; }
 .mx-legend .mx-scope-legend { color: var(--muted); }
 .mx-col { display: flex; flex-direction: column; align-items: center; gap: .35rem; font-family: var(--font-display); font-weight: 700; font-size: .78rem; }
 .mx-col .agent-glyph { width: 26px; height: 26px; }
-.cap-matrix-table tr.grp td { position: sticky; left: 0; text-align: left; font-size: .66rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); background: color-mix(in srgb, var(--fg), transparent 97%); }
+.cap-matrix-table tr.grp td { position: sticky; left: 0; text-align: left; font-size: .66rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); background: color-mix(in srgb, var(--fg), transparent 97%); }
 .mx-cell { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; }
 .mx-cell .d { width: .55rem; height: .55rem; border-radius: 50%; }
 .mx-cell.direct { background: color-mix(in srgb, var(--teal-light), transparent 25%); }
@@ -2300,7 +2340,7 @@ dialog[data-closing]::backdrop {
 .rbac-table tr:last-child td { border-bottom: 0; }
 .rbac-table thead th {
   background: color-mix(in srgb, var(--fg), transparent 97%);
-  font-size: .64rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
+  font-size: .64rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
   white-space: nowrap;
 }
 .rbac-table thead th:first-child, .rbac-table td.act { text-align: left; }
@@ -2312,7 +2352,10 @@ dialog[data-closing]::backdrop {
   color: var(--teal-dark);
 }
 .rbac-yes .ico { width: 12px; height: 12px; }
-.rbac-no { color: var(--ring); }
+/* The absence marker must be readable — a denied cell is information, not
+   decoration (was --ring at 1.30:1, invisible). --placeholder is AA in both
+   themes per the P13-D-12 ladder. */
+.rbac-no { color: var(--placeholder); }
 /* Read-only profile (no gated capabilities) — honest label vs "0/0/0". */
 .pcap-counts .pcap-readonly {
   font-style: italic; color: var(--faint);
@@ -2321,7 +2364,7 @@ dialog[data-closing]::backdrop {
 /* toggle */
 .tgl {
   position: relative; width: 36px; height: 21px; flex: none;
-  border-radius: 999px; border: 1px solid var(--border); padding: 0;
+  border-radius: 999px; border: 1px solid var(--border-control); padding: 0;
   background: color-mix(in srgb, var(--fg), transparent 92%);
   transition: background .15s ease, border-color .15s ease;
 }
@@ -2394,7 +2437,7 @@ dialog[data-closing]::backdrop {
 .trans-path .sdot { width: .5rem; height: .5rem; border-radius: 50%; flex: none; }
 .trans-path .ico { width: 14px; height: 14px; color: var(--placeholder); }
 .trans-by { flex: 1; min-width: 200px; font-size: .8rem; color: var(--faint); line-height: 1.4; }
-.trans-lock { display: inline-flex; align-items: center; gap: .35rem; font-size: .72rem; font-weight: 800; color: var(--coral-dark); }
+.trans-lock { display: inline-flex; align-items: center; gap: .35rem; font-size: .72rem; font-weight: 700; color: var(--coral-dark); }
 .trans-lock .ico { width: 13px; height: 13px; }
 .cap-seg.locked { opacity: .55; pointer-events: none; }
 
@@ -2501,7 +2544,7 @@ dialog[data-closing]::backdrop {
    ============================================================ */
 .activity-cols { display: grid; grid-template-columns: 1.55fr 1fr; gap: 1.1rem; align-items: start; }
 .act-day {
-  font-size: .66rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase;
+  font-size: .66rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
   color: var(--placeholder);
   padding: .85rem 0 .3rem;
 }
@@ -2660,7 +2703,7 @@ dialog[data-closing]::backdrop {
   transition: color .14s ease, transform .14s ease;
 }
 .rq-go svg { width: 14px; height: 14px; }
-.rq-row:hover .rq-go { color: var(--blue); transform: translateX(2px); }
+.rq-row:hover .rq-go { color: var(--blue-pressed); transform: translateX(2px); }
 @media (prefers-reduced-motion: reduce) {
   .rq-go { transition: color .14s ease; }
   .rq-row:hover .rq-go { transform: none; }
@@ -2681,9 +2724,9 @@ dialog[data-closing]::backdrop {
 }
 .invite-row input {
   width: 100%; min-width: 0;
-  border: 1px solid var(--border); border-radius: var(--radius-button);
-  padding: .45rem .6rem; background: var(--surface); color: var(--fg);
-  font-family: var(--font-body); font-size: .84rem;
+  border: 1px solid var(--border-control); border-radius: var(--radius-button);
+  padding: .55rem .7rem; background: var(--surface); color: var(--fg);
+  font-family: var(--font-body); font-size: .9rem;
   transition: border-color .14s ease, box-shadow .14s ease;
 }
 .invite-row input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
@@ -2738,7 +2781,7 @@ dialog[data-closing]::backdrop {
   display: grid; place-items: center;
   /* P13-D-12: same reason as .btn.primary — .64rem digits on the accent blue. */
   background: var(--cta-bg); color: var(--cta-fg);
-  font-family: var(--font-mono); font-size: .64rem; font-weight: 700; line-height: 1;
+  font-family: var(--font-mono); font-size: .64rem; font-weight: 600; line-height: 1;
   border: 2px solid var(--bg);
   /* Passive state change (SSE) — the pulse is the only signal something
      arrived; keyed on the unread count so each change re-triggers it. */
@@ -2776,6 +2819,7 @@ dialog[data-closing]::backdrop {
   --faint: #969bac;
   --placeholder: #868d9f;
   --border: #3d4152;
+  --border-control: #6a708a;
   --ring: #2b2e3a;
   --pin-star: #f2b616; /* a touch brighter on dark (TD-2) */
 
@@ -2787,6 +2831,7 @@ dialog[data-closing]::backdrop {
   --cta-bg: #6f87ff;
   --cta-fg: #131419;
   --success: #2fd394;
+  --success-dark: #74e8b8;
   --coral-light: #4d2222;
   --coral-dark: #ff9e9e;
   --rose-light: #4a2140;
@@ -2803,15 +2848,14 @@ dialog[data-closing]::backdrop {
   --shadow-card: 0 1px 2px rgba(0, 0, 0, .35), 0 8px 24px rgba(0, 0, 0, .4);
   --shadow-pop: 0 18px 50px rgba(0, 0, 0, .6), var(--shadow-ring);
 }
-/* inverted-chrome + hardcoded-color fixups */
-:root[data-theme="dark"] .gh-bar { color: var(--surface); }
-:root[data-theme="dark"] .toast { color: var(--surface); }
-:root[data-theme="dark"] .tl-node.github { color: var(--surface); }
-:root[data-theme="dark"] .pill.done { color: #74e8b8; }
-:root[data-theme="dark"] .tl-node.completion { color: #74e8b8; }
-:root[data-theme="dark"] .confirm-scrim { background: rgba(5, 6, 10, .65); }
+/* inverted-chrome + hardcoded-color fixups. The gh-bar/toast/tl-node.github
+   trio now writes color: var(--surface) at the source rule, which resolves
+   correctly in both themes, so their per-selector fixups are gone. The dark
+   primary-CTA hover override is gone too: it hand-minted #4a5fe0 under the
+   token-pair's back (dark --cta-fg #131419 on #4a5fe0 = 3.51:1, below AA),
+   while the documented pair — --cta-fg on --blue-pressed — is 10.42:1 and
+   test-locked. */
 :root[data-theme="dark"] dialog::backdrop { background: rgba(5, 6, 10, .65); }
-:root[data-theme="dark"] .btn.primary:hover { background: #4a5fe0; border-color: #4a5fe0; }
 :root[data-theme="dark"] .agent-glyph.codex { background: #2b2450; }
 :root[data-theme="dark"] .agent-glyph.claude { background: #40261a; color: #ffb98a; border-color: rgba(255, 185, 138, .35); }
 
@@ -2952,7 +2996,7 @@ dialog[data-closing]::backdrop {
   background: color-mix(in srgb, var(--surface), transparent 25%);
   border-radius: 12px; padding: .4rem .62rem; min-width: 72px;
 }
-.run-cell .lbl { font-size: .6rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+.run-cell .lbl { font-size: .6rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
 .run-cell .val { font-size: .78rem; margin-top: .14rem; color: var(--fg); white-space: nowrap; }
 .run-actions { display: flex; gap: .5rem; margin-left: auto; }
 
@@ -3045,8 +3089,11 @@ dialog[data-closing]::backdrop {
 }
 .log-line { display: grid; grid-template-columns: 60px 126px minmax(0, 1fr); gap: .55rem; padding: .17rem .85rem; font-size: .73rem; line-height: 1.45; }
 .log-line:hover { background: rgba(255, 255, 255, .03); }
-.log-line .lt { color: #4d566b; font-size: .66rem; padding-top: .12em; }
-.log-line .ltag { color: #6b7590; font-size: .64rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: .1em; }
+/* Dim ladder lifted to AA on the fixed #0e1117/#0b0d12 console fills while
+   keeping the terminal look and the brightness ordering (lx > out > think >
+   ltag > meta > lt): timestamps 2.57:1 -> 5.26:1, tags 4.11:1 -> 6.31:1. */
+.log-line .lt { color: #7c87a2; font-size: .66rem; padding-top: .12em; }
+.log-line .ltag { color: #8a95b1; font-size: .64rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: .1em; }
 .log-line .lx { color: #c9d1e3; word-break: break-word; white-space: pre-wrap; }
 .log-line .ln { color: #e6dcff; font-weight: 600; }
 .log-line.init .ltag, .log-line.init .lx { color: #8fb2ff; }
@@ -3057,7 +3104,7 @@ dialog[data-closing]::backdrop {
 .log-line.err .ltag, .log-line.err .lx { color: #ff9a94; }
 .log-line.diff .ltag, .log-line.diff .lx { color: #ffd28f; }
 .log-line.result .ltag, .log-line.result .lx { color: #7fe6bd; }
-.log-line.meta .ltag, .log-line.meta .lx { color: #5f6a85; }
+.log-line.meta .ltag, .log-line.meta .lx { color: #828da9; }
 /* P16-UI-02: the trailing caret row. It is a position marker, not output — it
    carries no timestamp, no tag and no text — so it must not offer `.log-line`'s
    hover highlight, which says "this row is a thing you can read". Had no rule
@@ -3104,9 +3151,9 @@ dialog[data-closing]::backdrop {
 .owner-row .card-owner .nm { flex: none; }
 .owner-row .card-owner .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .rev-stack { display: inline-flex; align-items: center; flex: none; }
-.rev-stack .avatar { width: 22px; height: 22px; font-size: .6rem; font-weight: 800; margin-left: -8px; box-shadow: 0 0 0 2px var(--surface); position: relative; }
+.rev-stack .avatar { width: 22px; height: 22px; font-size: .6rem; font-weight: 700; margin-left: -8px; box-shadow: 0 0 0 2px var(--surface); position: relative; }
 .rev-stack .avatar:first-of-type { margin-left: 0; }
-.rev-stack .rs-lbl { font-size: .62rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); margin-right: .4rem; }
+.rev-stack .rs-lbl { font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); margin-right: .4rem; }
 .rev-stack .rs-names { margin-left: .45rem; font-family: var(--font-display); font-weight: 700; font-size: .8rem; color: var(--fg); }
 .rev-add.sm { padding: .18rem .55rem; font-size: .72rem; }
 .rev-add.sm .ico { width: 11px; height: 11px; }
@@ -3142,7 +3189,7 @@ dialog[data-closing]::backdrop {
 .own-menu.to-right { left: auto; right: 0; transform-origin: top right; }
 .own-menu .menu-item { width: 100%; border-radius: 10px; }
 .own-menu .avatar { width: 22px; height: 22px; font-size: .6rem; flex: none; }
-.own-lbl { font-size: .62rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); padding: .45rem .6rem .25rem; }
+.own-lbl { font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); padding: .45rem .6rem .25rem; }
 .own-role { margin-left: auto; font-size: .68rem; font-weight: 600; color: var(--faint); }
 .own-x {
   display: grid; place-items: center;
@@ -3156,11 +3203,11 @@ dialog[data-closing]::backdrop {
 /* release-ownership dialog */
 .agent-glyph.warn { background: var(--rose-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .release-card { width: min(560px, calc(100vw - 2rem)); }
-.release-card .mh-sub .mono { font-weight: 700; }
+.release-card .mh-sub .mono { font-weight: 600; }
 .rel-owner { display: inline-flex; align-items: center; gap: .45rem; font-family: var(--font-display); }
 .rel-owner .avatar { width: 22px; height: 22px; font-size: .6rem; }
 .rel-open { display: inline-flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
-.rel-lbl { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin-bottom: .55rem; }
+.rel-lbl { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin-bottom: .55rem; }
 .rel-row { display: flex; flex-wrap: wrap; gap: .45rem; }
 .handoff-chip {
   display: inline-flex; align-items: center; gap: .45rem;
@@ -3307,7 +3354,7 @@ dialog[data-closing]::backdrop {
   background: color-mix(in srgb, var(--fg), transparent 94%);
   padding: .04rem .3rem;
   border-radius: 5px;
-  font-size: .8em;
+  font-size: .78rem;
 }
 .md-body pre {
   margin: .5rem 0;
@@ -3412,8 +3459,8 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
     width: 44px; height: 44px; border-radius: 12px;
     /* P13-D-18: was var(--accent, …) — --accent is defined nowhere, so only the
        fallback ever painted. Resolved to that token. */
-    background: var(--teal-dark); color: #fff;
-    font-weight: 800; font-size: 1.3rem; font-family: var(--font-mono);
+    background: var(--teal-dark); color: var(--surface);
+    font-weight: 600; font-size: 1.3rem; font-family: var(--font-mono);
   }
   .login-aside h2 { font-size: 1.5rem; line-height: 1.2; color: var(--fg); margin: 0; }
   .login-aside p { font-size: .92rem; line-height: 1.6; color: var(--muted); margin: 0; }
@@ -3711,7 +3758,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 }
 .org-tile .lbl {
   display: flex; align-items: center; gap: .45rem;
-  font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase;
+  font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
   color: var(--placeholder);
 }
 .org-tile .lbl .ico { width: 14px; height: 14px; }
@@ -3770,7 +3817,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 
 /* ---------- Modal fields ---------- */
 .key-row { display: grid; grid-template-columns: 1fr 130px; gap: 1rem; }
-.repo-input { display: flex; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--surface); transition: border-color .14s ease, box-shadow .14s ease; }
+.repo-input { display: flex; align-items: center; border: 1px solid var(--border-control); border-radius: var(--radius-button); background: var(--surface); transition: border-color .14s ease, box-shadow .14s ease; }
 .repo-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .repo-input .pre { font-family: var(--font-mono); font-size: .82rem; color: var(--faint); padding: .55rem 0 .55rem .7rem; white-space: nowrap; }
 .repo-input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font-family: var(--font-mono); font-size: .82rem; padding: .55rem .7rem .55rem .15rem; }
@@ -3864,7 +3911,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .fm-toolbar { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .fm-hint { font-size: .74rem; color: var(--placeholder); margin-left: auto; }
 .fm-gh { display: flex; gap: .5rem; margin-top: -.5rem; }
-.fm-gh input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-button); padding: .5rem .65rem; background: var(--surface); color: var(--fg); font-size: .8rem; }
+.fm-gh input { flex: 1; min-width: 0; border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .55rem .7rem; background: var(--surface); color: var(--fg); font-size: .9rem; }
 .fm-gh input.mono { font-family: var(--font-mono); }
 .fm-gh input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .fm-tree { border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden; background: color-mix(in srgb, var(--surface), transparent 30%); }
@@ -4078,7 +4125,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .log-more:disabled { color: #6b7590; cursor: default; }
 /* P16-UI-01: the focus ring comes from the app-wide `:focus-visible` rule —
    --blue reads against the console's fixed dark surface in both themes. */
-.log-more-note { color: #5f6a85; }
+.log-more-note { color: #828da9; }
 
 /* ============================================================
    P16-F3 — declarations reclaimed from JSX `style={{…}}`
@@ -4139,7 +4186,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 }
 .feed-filters .ff-search {
   flex: 1 1 150px; min-width: 130px; display: flex; align-items: center; gap: .4rem;
-  border: 1px solid var(--border); border-radius: var(--radius-button);
+  border: 1px solid var(--border-control); border-radius: var(--radius-button);
   background: var(--surface); padding: .32rem .55rem;
 }
 .feed-filters .ff-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
@@ -4151,7 +4198,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .feed-filters .ff-search input::placeholder { color: var(--placeholder); }
 .feed-filters .ff-sel { font-size: .74rem; padding: .3rem .45rem; max-width: 150px; }
 .feed-filters .ff-task {
-  width: 84px; border: 1px solid var(--border); border-radius: var(--radius-button);
+  width: 84px; border: 1px solid var(--border-control); border-radius: var(--radius-button);
   background: var(--surface); color: var(--fg); padding: .3rem .5rem; font-size: .74rem;
 }
 .feed-filters .ff-date {
@@ -4209,7 +4256,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .avatar.ghost { opacity: .5; }
 /* The board filter chips' counts sit a shade stronger than `.tally`'s default —
    they are the only number on the chip. */
-.fchip .tally { opacity: .7; }
+/* .7 composited the light-theme count to 3.36:1; .85 clears AA and stays
+   subordinate on both chip states. */
+.fchip .tally { opacity: .85; }
 .modal-card.modal-narrow { width: min(560px, calc(100vw - 2rem)); }
 
 /* --- policy / GitHub view / project settings --- */
@@ -4223,8 +4272,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .conc-lead { color: var(--muted); }
 .conc-edit { display: inline-flex; align-items: center; gap: .5rem; margin-left: auto; }
 .conc-label { color: var(--muted); font-size: .78rem; }
-.conc-edit input { width: 4.5rem; font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .25rem .45rem; }
-.conc-edit input:focus { outline: none; border-color: var(--blue); }
+.conc-edit input { width: 4.5rem; font: inherit; font-size: .85rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .25rem .45rem; }
+.conc-edit input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .conc-hint { color: var(--muted); }
 
 /* Audit-log export card (org settings footer). */
@@ -4477,7 +4526,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   font-size: .68rem;
   color: #b7c0d4;
 }
-.log-file .lf-kind { font-weight: 700; }
+.log-file .lf-kind { font-weight: 600; }
 .log-file.lf-add { border-color: #2f5d45; color: #86e0b4; }
 .log-file.lf-update { border-color: #5c5330; color: #e8cf92; }
 .log-file.lf-delete { border-color: #5f333a; color: #f0a3a3; }

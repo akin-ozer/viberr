@@ -147,7 +147,11 @@ describe("app.css custom properties (P13-D-18)", () => {
         new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
       );
       expect(rule, `${selector} must have a rule`).toBeTruthy();
-      expect(rule![1]).toMatch(/border(-top)?:\s*1px solid var\(--(hairline|border)\)/);
+      expect(rule![1]).toMatch(
+        // Pass 30: .sched-note is a textarea, so its resting boundary moved to
+        // the 3:1 --border-control token; the row/form frames stay decorative.
+        /border(-top)?:\s*1px solid var\(--(hairline|border|border-control)\)/,
+      );
     }
   });
 });
@@ -394,7 +398,9 @@ describe("app.css select treatment (P16-UI-05)", () => {
     // `selectStyle` in create-profile-modal.tsx whose comment said the design
     // system had no select rule.
     expect(base, "a base `select` rule must exist").toBeTruthy();
-    expect(base![1]).toMatch(/border:\s*1px solid var\(--border\)/);
+    // Pass 30: functional control boundaries moved to --border-control (the
+    // 3:1 non-text token); --border stays on decorative frames.
+    expect(base![1]).toMatch(/border:\s*1px solid var\(--border-control\)/);
     expect(base![1]).toMatch(/border-radius:\s*var\(--radius-button\)/);
     expect(base![1]).toMatch(/background:\s*var\(--surface\)/);
     expect(base![1]).toMatch(/color:\s*var\(--fg\)/);
@@ -506,6 +512,20 @@ describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
       expect(
         contrastRatio(tokenIn(block, "--cta-bg"), tokenIn(block, "--surface")),
         `${theme} CTA background vs --surface`,
+      ).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("keeps the control-boundary token at 3:1 on the surface in both themes", () => {
+    // Pass 30: WCAG 1.4.11 splits borders into two tokens. --border (1.64:1)
+    // may divide content; --border-control is the RESTING boundary of inputs,
+    // selects, the toggle track and the search boxes — the only thing that
+    // identifies those controls — so it must clear 3:1 like the focus ring
+    // and the CTA boundary above.
+    for (const [theme, block] of [["light", LIGHT_ROOT], ["dark", DARK_ROOT]] as const) {
+      expect(
+        contrastRatio(tokenIn(block, "--border-control"), tokenIn(block, "--surface")),
+        `${theme} --border-control vs --surface`,
       ).toBeGreaterThanOrEqual(3);
     }
   });
@@ -1641,51 +1661,21 @@ const BELOW_AA_BY_DESIGN = {
  * the themes each one fails in. This is a BASELINE, asserted as an exact SET:
  * adding a violation fails, and so does FIXING one without deleting its line
  * here, which is what keeps the list shrinking instead of becoming the
- * suppression file every such list becomes. `app/app.css` belongs to another
- * workstream this pass, so these are recorded rather than edited.
+ * suppression file every such list becomes.
+ *
+ * Pass 30 (the refactoring-ui design pass) fixed every recorded pair and the
+ * list is now EMPTY — the sweep enforces AA outright. For the record, the
+ * fixes were: .goal-edit-btn and .rq-row:hover .rq-go --blue -> --blue-pressed;
+ * .mx-scope --blue -> --blue-pressed on its wash; .rbac-no --ring ->
+ * --placeholder; .login-aside-mark #fff -> var(--surface) (flips with the
+ * theme); and the run-console dim ladder lifted in place (#4d566b -> #7c87a2,
+ * #6b7590 -> #8a95b1, #5f6a85 -> #828da9) keeping the terminal look and the
+ * ladder's brightness ordering.
  */
-const UNFIXED_BELOW_AA = {
-  ".goal-edit-btn": {
-    themes: ["light"],
-    why: "the board goal's `edit` control puts --blue on the page at .75rem — 3.84:1. --blue is the ACCENT token (borders, rings, washes); --blue-pressed (8.30:1) is the one that carries text, and 30 other rules already use it that way. Dark's lighter --blue clears the bar, so this is a light-theme-only fix.",
-  },
-  ".rq-row:hover .rq-go": {
-    themes: ["light"],
-    why: "the review queue row's `open` label turns --blue on hover at .78rem/700 — 3.84:1. The resting state (--muted, 6.87:1) is fine, so hovering a row makes its own call-to-action HARDER to read. Same fix: --blue-pressed.",
-  },
-  ".mx-scope": {
-    themes: ["light", "dark"],
-    why: "the capability-matrix scope chip is --blue text on a 12% --blue wash at .6rem/800 uppercase — 3.34:1 light, 4.45:1 dark. Small uppercase on a tint of its own colour is the least legible combination in the sheet.",
-  },
-  ".rbac-no": {
-    themes: ["light", "dark"],
-    why: "the RBAC matrix writes `—` in --ring for every action a role may NOT take: 1.30:1 light, 1.24:1 dark. The absence marker is invisible, so a denied cell reads as an empty cell — on the two surfaces (policy, profile) whose whole job is saying what you may and may not do.",
-  },
-  ".login-aside-mark": {
-    themes: ["dark"],
-    why: "the login brand mark is `#fff` on --teal-dark, which dark flips from #187574 to the LIGHT cyan #6ce4dc: white-on-cyan at 1.53:1. WCAG 1.4.3 exempts logotypes, so this is not an AA failure — it is a legibility one the token flip introduced, and exempting the element outright would teach the gate to ignore a whole element.",
-  },
-  ".log-line .lt": {
-    themes: ["light", "dark"],
-    why: "the run console's per-line timestamp, #4d566b on the console's fixed #0e1117 — 2.57:1, the worst text pair in the sheet. The console ladder was drawn to look like a terminal and never measured; its dim end is below AA in both themes because the surface does not change with the theme.",
-  },
-  ".log-line .ltag": {
-    themes: ["light", "dark"],
-    why: "the event-kind tag column of the run console, #6b7590 on #0e1117 — 4.11:1. Same fixed console fill, same unmeasured ladder.",
-  },
-  ".log-line.meta .ltag": {
-    themes: ["light", "dark"],
-    why: "the dimmest console tier, used for telemetry and history rows, #5f6a85 on #0e1117 — 3.50:1.",
-  },
-  ".log-line.meta .lx": {
-    themes: ["light", "dark"],
-    why: "the body half of the same dim console tier — 3.50:1, and this one carries the withheld-line sentence a reader has to act on.",
-  },
-  ".log-more-note": {
-    themes: ["light", "dark"],
-    why: "` · N earlier lines not loaded` next to the load-older button, #5f6a85 on #0e1117 — 3.50:1. It is the console's only statement about what the reader is NOT seeing, so dimness costs more here than anywhere else in the ladder.",
-  },
-} satisfies Record<string, { themes: readonly string[]; why: string }>;
+const UNFIXED_BELOW_AA = {} satisfies Record<
+  string,
+  { themes: readonly string[]; why: string }
+>;
 
 /** `${theme} ${selector}` for every pair the baseline records. */
 const UNFIXED_KEYS = Object.entries(UNFIXED_BELOW_AA).flatMap(([selector, entry]) =>
