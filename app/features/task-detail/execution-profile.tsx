@@ -766,12 +766,11 @@ export function ExecutionProfile({
                 <Icon name="shield" />
               </span>
               <span>
-                <div className="nm">Operator</div>
-                <div className="sub">
-                  {task.operator
-                    ? `coordinator · ${task.operator.sinceLabel}`
-                    : "coordinator"}
-                </div>
+                {/* The cell's kicker already says OPERATOR — repeating the
+                    same word as the value was a label:label dump. The value
+                    slot promotes what the sub-line carried. */}
+                <div className="nm">Coordinator</div>
+                {task.operator && <div className="sub">{task.operator.sinceLabel}</div>}
               </span>
             </div>
             {canRunAgents && (

@@ -807,10 +807,30 @@ function ListRow({
           onSelect={(stageId) => onMoveTask(task.key, stageId)}
         />
       ) : (
-        <span className="pill neutral sm">{stageName}</span>
+        // Same read-only rendering the task page uses (stage-colored dot +
+        // name), not a bare neutral pill — one fact, one treatment.
+        <span className="stage-static">
+          <span
+            className="col-stage-dot sm"
+            style={{
+              background: stages.find((s) => s.id === task.stage)?.color,
+            }}
+          />
+          {stageName}
+        </span>
       )}
       <OwnerLine task={task} />
       <ReviewerStack task={task} label />
+      {/* F19-13's own rule, finished: the list used to silently drop the
+          priority/labels/due-date trio the stage layout draws — an `urgent` +
+          `overdue` task showed zero urgency cue one toggle away. */}
+      {!archived && hasVisibleMeta(task) && (
+        <span className="card-meta">
+          <PriorityFlag priority={task.priority} sm />
+          <LabelChips labels={task.labels} max={2} />
+          <DueDatePill dueDate={task.dueDate} sm />
+        </span>
+      )}
       {/* F15-09: same duplicate as the card — the row's own WaitTag
           below already says "agent working". F19-8: and the same
           readiness → "archived" swap the card makes. R21-8: and the same
@@ -1244,6 +1264,9 @@ function NewTaskModal({
 
 /* ---------- Board ---------- */
 
+/** Visible label filter chips before the "+N more" overflow chip. */
+const LABEL_CHIP_CAP = 6;
+
 const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "all", label: "All tasks", icon: "board" },
   { id: "human", label: "Waiting on me", icon: "hand" },
@@ -1412,6 +1435,18 @@ function FilterBar({
   setParam: (key: string, value: string | null) => void;
   onClear: () => void;
 }) {
+  // Label-chip overflow: active label first, then the vocabulary order.
+  const [labelsExpanded, setLabelsExpanded] = useState(false);
+  const orderedLabels = labelFilter
+    ? [
+        ...projectLabels.filter(
+          (l) => l.toLowerCase() === labelFilter.toLowerCase(),
+        ),
+        ...projectLabels.filter(
+          (l) => l.toLowerCase() !== labelFilter.toLowerCase(),
+        ),
+      ]
+    : projectLabels;
   return (
     <div className="filter-bar">
       {FILTERS.filter(
@@ -1453,7 +1488,14 @@ function FilterBar({
           narrows the board to its tasks; clicking the active one clears it. They
           AND with the readiness chips and the term, and only render when the
           project has labels — a board that never tagged anything stays clean. */}
-      {projectLabels.map((l) => {
+      {/* Cap the visible label chips (active-first) — a many-label project
+          pushed the search input down several wrapped rows. The overflow
+          stays reachable: expand in place, and the search box already
+          matches labels. Mirrors the card's own LabelChips "+N" rule. */}
+      {(labelsExpanded
+        ? orderedLabels
+        : orderedLabels.slice(0, LABEL_CHIP_CAP)
+      ).map((l) => {
         const active = labelFilter?.toLowerCase() === l.toLowerCase();
         return (
           <button
@@ -1468,6 +1510,23 @@ function FilterBar({
           </button>
         );
       })}
+      {orderedLabels.length > LABEL_CHIP_CAP && (
+        <button
+          type="button"
+          className="fchip lbl"
+          aria-expanded={labelsExpanded}
+          onClick={() => setLabelsExpanded((v) => !v)}
+          title={
+            labelsExpanded
+              ? "Collapse the label list"
+              : `Show all ${orderedLabels.length} labels`
+          }
+        >
+          {labelsExpanded
+            ? "fewer labels"
+            : `+${orderedLabels.length - LABEL_CHIP_CAP} more`}
+        </button>
+      )}
       <label className="board-filter-input">
         <Icon name="filter" />
         <input
@@ -2172,18 +2231,27 @@ export function BoardPage({
         }}
       />
 
-      <FilterBar
-        filter={filter}
-        query={query}
-        labelFilter={labelFilter}
-        projectLabels={labelSuggestions}
-        waitingOnMe={waitingOnMe}
-        quiet={quietCount}
-        continuity={continuityCount}
-        archived={archivedCount}
-        setParam={setParam}
-        onClear={clearFilters}
-      />
+      {/* A brand-new board has nothing to filter or search — the machinery
+          renders once there is anything for it to act on (the Archived chip is
+          the only road back, so any archived count keeps the bar). */}
+      {(allTasks.length > 0 ||
+        archivedCount > 0 ||
+        filter !== "all" ||
+        query !== "" ||
+        labelFilter != null) && (
+        <FilterBar
+          filter={filter}
+          query={query}
+          labelFilter={labelFilter}
+          projectLabels={labelSuggestions}
+          waitingOnMe={waitingOnMe}
+          quiet={quietCount}
+          continuity={continuityCount}
+          archived={archivedCount}
+          setParam={setParam}
+          onClear={clearFilters}
+        />
+      )}
 
       {filter === "archived" && (
         <div className="board-orphans" role="status">

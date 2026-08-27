@@ -817,6 +817,7 @@ const BREAKPOINTS = {
   "min-width: 900px": "the login page earns its brand aside (the one min-width)",
   "max-width: 760px": "topbar tier 2 — the middle crumb",
   "max-width: 720px": "MOBILE SHELL — the project rail becomes an overlay",
+  "max-width: 560px": "phone-width home rows — the pipeline meter yields",
 } satisfies Record<string, string>;
 
 describe("app.css breakpoints (P16-F8)", () => {
@@ -1216,7 +1217,10 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     // this rule exempts. Raised 22 → 23 (pass 29) for the Backend-quota
     // utilization bar on the same dashboard: the same runtime-percentage
     // bar-fill width as its two Insights siblings, under the same exemption.
-    expect(sites.length).toBeLessThanOrEqual(23);
+    // Raised 23 → 24 (pass 30) for the board list row's read-only stage dot:
+    // the STAGE's own colour, the exact dynamic-value case already exempted
+    // for the task page's identical `.stage-static` dot.
+    expect(sites.length).toBeLessThanOrEqual(24);
   });
 });
 
@@ -1675,10 +1679,8 @@ const BELOW_AA_BY_DESIGN = {
  * #6b7590 -> #8a95b1, #5f6a85 -> #828da9) keeping the terminal look and the
  * ladder's brightness ordering.
  */
-const UNFIXED_BELOW_AA = {} satisfies Record<
-  string,
-  { themes: readonly string[]; why: string }
->;
+const UNFIXED_BELOW_AA: Record<string, { themes: readonly string[]; why: string }> =
+  {};
 
 /** `${theme} ${selector}` for every pair the baseline records. */
 const UNFIXED_KEYS = Object.entries(UNFIXED_BELOW_AA).flatMap(([selector, entry]) =>

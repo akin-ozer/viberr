@@ -156,14 +156,16 @@ describe("UI-58: the list view has a keyboard move control", () => {
     expect(container.querySelector(".stage-menu-btn, button.stage-static, .own-btn")).toBeTruthy();
   });
 
-  it("falls back to a static pill for a viewer who cannot move tasks", () => {
+  it("falls back to the task page's read-only stage rendering (dot + name)", () => {
+    // Pass 30: same fact, same treatment — the read-only stage shows the
+    // stage-colored dot + name (`.stage-static`), not a bare neutral pill.
     const { container } = renderBoard([task()], {
       view: "list",
       canTransition: false,
     });
-    expect(container.querySelector(".pill.neutral.sm")!.textContent).toBe(
-      "In Progress",
-    );
+    const stage = container.querySelector(".stage-static")!;
+    expect(stage.textContent).toBe("In Progress");
+    expect(stage.querySelector(".col-stage-dot")).toBeTruthy();
   });
 });
 

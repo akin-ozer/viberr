@@ -58,8 +58,10 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
             <LocalDayDotTime iso={summary.generatedAt} />.
           </p>
         </div>
+        {/* Back-navigation points BACK — same idiom as org settings'
+            "← Projects" (a forward arrow on a back link reads reversed). */}
         <Link to="/" className="btn sm">
-          <Icon name="arrow" />
+          <Icon name="arrow" className="r180" />
           Home
         </Link>
       </div>
@@ -133,7 +135,15 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
 function OversightCards({ oversight }: { oversight: OversightSummary }) {
   const g = oversight;
   return (
-    <div className="stat-grid">
+    // Pass 30: this second stat band was visually identical to the run totals
+    // above with nothing introducing it — every other band on the page has a
+    // heading, so this one gets the same section-label idiom.
+    <section>
+      <div className="sec-h">
+        <Icon name="check" />
+        <h2>Delivery oversight</h2>
+      </div>
+      <div className="stat-grid">
       <StatCard
         label="Owner & state clarity"
         value={fmtPercent(g.clarity.pct)}
@@ -145,7 +155,7 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         }
       />
       <StatCard
-        label="Branch + PR traceability"
+        label="Branch & PR traceability"
         value={fmtPercent(g.traceability.pct)}
         icon="branch"
         sub={
@@ -185,7 +195,8 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         icon="memory"
         sub="tasks past the compression threshold"
       />
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -216,23 +227,39 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                   style={{ width: `${pct ?? 0}%` }}
                 />
               </span>
-              <span className="bar-val">
+              <span className={"bar-val" + (reading == null || pct == null ? " na" : "")}>
                 {/* Three honest states: no reading ever; a reading whose
                     envelope carried no utilization number (the provider's
                     five_hour events often omit it — say so, never "no reading
-                    yet" next to a reset date); a full percentage reading. */}
+                    yet" next to a reset date); a full percentage reading.
+                    Absent states render de-emphasized (.na), never at value
+                    weight. */}
                 {reading == null
                   ? "no reading yet"
                   : pct == null
                     ? `${reading.rateLimitType.replaceAll("_", " ")} · utilization not reported`
                     : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
                 {reading && (
-                  <span className="bar-cost">
-                    {reading.isUsingOverage
-                      ? "overage"
-                      : reading.resetsAt != null
+                  <span
+                    className="bar-cost"
+                    // The reading's own age — a weeks-old 91% must be visibly
+                    // stale, not current (the server module's honesty rule).
+                    title={`observed ${new Date(reading.observedAt).toLocaleString()}`}
+                  >
+                    {[
+                      // A provider warning outranks the reset date — the panel
+                      // exists to warn BEFORE a run fails, so "allowed_warning"
+                      // must never hide behind "resets 9/18".
+                      reading.status !== "allowed"
+                        ? reading.status.replace(/^allowed_/, "").replaceAll("_", " ")
+                        : null,
+                      reading.isUsingOverage ? "overage" : null,
+                      reading.resetsAt != null
                         ? `resets ${new Date(reading.resetsAt * 1000).toLocaleDateString()}`
-                        : reading.status}
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || reading.status}
                   </span>
                 )}
               </span>
@@ -259,12 +286,15 @@ function StatCard({
   icon: Parameters<typeof Icon>[0]["name"];
   sub?: string;
 }) {
+  // An absent reading must not be the loudest thing on the card: "n/a" at
+  // full stat emphasis reads like a data point.
+  const absent = value === "n/a";
   return (
     <div className="stat-card">
       <span className="stat-ico">
         <Icon name={icon} />
       </span>
-      <span className="stat-val">{value}</span>
+      <span className={"stat-val" + (absent ? " na" : "")}>{value}</span>
       <span className="stat-label">{label}</span>
       {sub && <span className="stat-sub">{sub}</span>}
     </div>
@@ -296,7 +326,9 @@ function BreakdownCard({ title, rows }: { title: string; rows: CountRow[] }) {
                 />
               </span>
               <span className="bar-val">
-                {fmtCount(r.runs)}
+                {/* Fixed right-aligned slots: the counts and costs of a
+                    breakdown must line up vertically to be comparable. */}
+                <span className="bar-num">{fmtCount(r.runs)}</span>
                 <span className="bar-cost">{fmtCost(r.cost)}</span>
               </span>
             </li>

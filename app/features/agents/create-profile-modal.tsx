@@ -1011,7 +1011,6 @@ function ResourcePicker({
 function ModalFooter({
   hint,
   valid,
-  error,
   busy,
   editing,
   onClose,
@@ -1020,7 +1019,6 @@ function ModalFooter({
 }: {
   hint: string;
   valid: boolean;
-  error: string | null;
   busy: boolean;
   editing: boolean;
   onClose: () => void;
@@ -1388,7 +1386,6 @@ export function CreateProfileModal({
       <ModalFooter
         hint={hint}
         valid={valid}
-        error={error}
         busy={busy}
         editing={editing}
         onClose={close}

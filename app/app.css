@@ -1152,7 +1152,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: flex; align-items: center; gap: .5rem;
   margin-bottom: .75rem;
 }
-.panel-head h2 { font-size: 1.05rem; white-space: nowrap; flex: 1; min-width: 0; }
+/* nowrap without the overflow pair let a long title paint UNDER the header's
+   right-side action at narrow widths (390px audit: "+ Add connection" over
+   the panel name). */
+.panel-head h2 { font-size: 1.05rem; white-space: nowrap; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .panel-head .ico { width: 16px; height: 16px; color: var(--faint); }
 .panel-head .right { margin-left: auto; flex: none; }
 
@@ -2306,11 +2309,18 @@ dialog[data-closing]::backdrop {
 .mx-legend { display: flex; gap: 1rem; flex-wrap: wrap; padding: .75rem 1.5rem 0; }
 .mx-legend .lg { display: inline-flex; align-items: center; gap: .375rem; font-size: .74rem; color: var(--muted); }
 .mx-legend .d { width: .6rem; height: .6rem; border-radius: 50%; flex: none; }
+/* Legend dots wear the same FORMS the matrix cells do (ring / square) so the
+   mapping is shape+color, never color alone. The cap-msum count dots keep
+   plain discs — each already sits beside its word (UX-23). */
+.mx-legend .d.recommend { background: none; border: 2px solid var(--blue); box-sizing: border-box; }
+.mx-legend .d.human { border-radius: 2px; }
 .mx-scroll { overflow: auto; max-height: 100%; border: 1px solid var(--hairline); border-radius: var(--radius-button); }
 .cap-matrix-table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: .8rem; }
 .cap-matrix-table th, .cap-matrix-table td { padding: .5rem .5rem; text-align: center; border-bottom: 1px solid var(--hairline); }
 .cap-matrix-table thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; border-bottom: 1px solid var(--border); }
-.cap-matrix-table th.corner { left: 0; z-index: 3; text-align: left; }
+/* The corner header takes the same kicker voice as the group rows beneath it
+   (it inherited UA th-bold at data size and out-shouted the cells). */
+.cap-matrix-table th.corner { left: 0; z-index: 3; text-align: left; font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
 .cap-matrix-table td.rowlabel { position: sticky; left: 0; background: var(--surface); text-align: left; z-index: 1; min-width: 230px; font-size: .8rem; color: var(--fg); }
 /* Text partner on a blue wash is --blue-pressed (the token block documents
    --blue as an accent, not a text color): 3.34:1 -> ~7:1 light, ~8:1 dark. */
@@ -2318,15 +2328,23 @@ dialog[data-closing]::backdrop {
 .mx-legend .mx-scope-legend { color: var(--muted); }
 .mx-col { display: flex; flex-direction: column; align-items: center; gap: .375rem; font-family: var(--font-display); font-weight: 700; font-size: .8rem; }
 .mx-col .agent-glyph { width: 26px; height: 26px; }
-.cap-matrix-table tr.grp td { position: sticky; left: 0; text-align: left; font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); background: color-mix(in srgb, var(--fg), transparent 97%); }
+.cap-matrix-table tr.grp td { text-align: left; font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); background: color-mix(in srgb, var(--fg), transparent 97%); }
+/* The full-width td is the containing block; the inline label inside it has
+   real travel, so group names stay visible during horizontal scroll. */
+.cap-matrix-table tr.grp .grp-label { position: sticky; left: .5rem; display: inline-block; }
 .mx-cell { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-small); }
+/* Hard rule: color is never the only signal. Each mode is a different FORM —
+   solid disc (acts directly), hollow ring (recommends), square (reserved for
+   humans), faint disc (not granted) — mirrored on the legend dots below so
+   the two stay in lockstep (UX-23 fixed the same defect class on the create
+   modal's count dots). */
 .mx-cell .d { width: .55rem; height: .55rem; border-radius: 50%; }
 .mx-cell.direct { background: color-mix(in srgb, var(--teal-light), transparent 25%); }
 .mx-cell.direct .d { background: var(--teal-dark); }
 .mx-cell.recommend { background: var(--blue-soft); }
-.mx-cell.recommend .d { background: var(--blue); }
+.mx-cell.recommend .d { background: none; border: 2px solid var(--blue); box-sizing: border-box; }
 .mx-cell.human { background: var(--red-light); }
-.mx-cell.human .d { background: var(--coral-dark); }
+.mx-cell.human .d { background: var(--coral-dark); border-radius: 2px; }
 .mx-cell.off .d { background: var(--ring); }
 
 
@@ -3559,7 +3577,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   font-size: .8rem; color: var(--coral-dark); line-height: 1.45;
 }
 .login-err .ico, .form-err .ico { width: 14px; height: 14px; flex: none; margin-top: .125rem; }
-.login-tag { text-align: center; font-family: var(--font-mono); font-size: .68rem; color: var(--placeholder); line-height: 1.6; }
+/* Body face, left-aligned: this is a 3-4 line explanatory paragraph — mono +
+   centering read as debug output (centered prose past two lines is the
+   diagnose-table failure). */
+.login-tag { text-align: left; font-size: .74rem; color: var(--placeholder); line-height: 1.6; }
 
 .gmark { font-family: var(--font-display); font-weight: 800; font-size: .74rem; line-height: 1; color: var(--muted); }
 .gmark.lg { font-size: .98rem; }
@@ -3835,11 +3856,13 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   display: flex; align-items: center; gap: .75rem;
   padding: .75rem .25rem 0;
   border-top: 1px solid var(--hairline);
-  font-family: var(--font-mono);
+  /* Body face for the explanatory sentence — mono prose reads as debug
+     output; the machine identifiers below keep the mono voice. */
   font-size: .74rem;
   color: var(--faint);
   flex-wrap: wrap;
 }
+.store-strip .sub { font-family: var(--font-mono); }
 .store-strip .ico { width: 14px; height: 14px; color: var(--placeholder); }
 .store-strip .path { color: var(--muted); }
 /* P16-UI-27: this was `.store-strip .btn { margin-left: auto }` — a DESCENDANT
@@ -4059,10 +4082,27 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   .pj-row .pj-stats { display: none; }
 }
 
+/* Pass 30 (390px audit): the home row's fixed middle (160px name + 110px
+   meter + avatar stack) overflowed the card — the meter painted under the
+   pinned star and the avatar cluster escaped the right edge. The meter is
+   the first thing to go on a phone; the name may shrink; the reserved right
+   gutter narrows. */
+@media (max-width: 560px) {
+  .pj-row .pj-meter { display: none; }
+  .pj-row .pj-name { min-width: 0; }
+  .pj-row .pj-link { padding-right: 4.4rem; }
+}
+
 /* Neutralize anchor defaults on link-shaped controls. */
 a.card, a.nav-item, a.menu-item, a.project-switch, a.home-brand,
 a.org-tile, a.btn { text-decoration: none; }
 a.card, a.project-switch, a.home-brand { color: inherit; }
+/* List-view rows: the key and title are links to the task page, but they are
+   CONTENT — UA link-blue + underline on every row read as a 1998 index page.
+   Emphasis stays with the title's own weight; hover restores the underline
+   as the affordance. */
+.card.list-row .key, .card.list-row h3 a { color: inherit; text-decoration: none; }
+.card.list-row h3 a:hover, .card.list-row h3 a:focus-visible { text-decoration: underline; }
 
 /* Task preview and profile panel. */
 .task-preview { padding: 1rem 1.5rem; overflow-y: auto; }
@@ -4267,12 +4307,13 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   width: 84px; border: 1px solid var(--border-control); border-radius: var(--radius-button);
   background: var(--surface); color: var(--fg); padding: .25rem .5rem; font-size: .74rem;
 }
-.feed-filters .ff-date {
-  border: 1px solid var(--border); border-radius: var(--radius-button);
-  background: var(--surface); color: var(--fg); padding: .25rem .375rem;
-  font-family: var(--font-body); font-size: .74rem;
-}
-.feed-filters .ff-task:focus, .feed-filters .ff-date:focus {
+/* Pass 30: the feeds use the app's own DatePicker (native date inputs were a
+   second visual idiom for the same act). Compact metrics for the filter bar;
+   the calendar itself is the shared one. */
+.feed-filters .ff-datepick { flex: none; }
+.feed-filters .ff-datepick .datepick-trigger { width: auto; padding: .25rem .5rem; font-size: .74rem; gap: .375rem; }
+.feed-filters .ff-datepick .datepick-trigger .ico { width: 12px; height: 12px; }
+.feed-filters .ff-task:focus {
   border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); outline: 0;
 }
 .feed-filters .ff-dash { font-size: .74rem; color: var(--placeholder); }
@@ -4354,12 +4395,15 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .audit-row:last-child { border-bottom: 0; }
 .audit-when { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .audit-actor { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.audit-action { font-family: var(--font-mono); color: var(--fg); }
+/* Same overflow guard the actor cell has: an unbounded 36-char action id or a
+   long subject widened the row and sheared every column with a horizontal
+   scrollbar. Full values live in `title`. */
+.audit-action { font-family: var(--font-mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .audit-scope { display: inline-flex; align-items: center; gap: .375rem; justify-self: end; color: var(--muted); }
 .audit-scope-tag { font-family: var(--font-mono); font-size: .68rem; padding: .06rem .375rem; border-radius: var(--radius-small);
   background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--muted); white-space: nowrap; }
 .audit-scope-tag.org { background: color-mix(in srgb, var(--blue), transparent 86%); color: var(--blue-pressed); }
-.audit-subject { font-family: var(--font-mono); font-size: .74rem; color: var(--muted); }
+.audit-subject { font-family: var(--font-mono); font-size: .74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
 .audit-browse-foot { margin-top: .5rem; }
 .audit-dl { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
 .audit-dl .btn { text-decoration: none; }
@@ -4393,6 +4437,14 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .bar-fill { display: block; height: 100%; background: var(--blue); border-radius: var(--radius-chip); }
 .bar-val { font-size: .8rem; font-weight: 700; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: .5rem; }
 .bar-cost { font-size: .74rem; font-weight: 500; color: var(--muted); }
+/* Fixed right-aligned slots so counts and costs line up as columns across
+   rows (each .bar-row is its own grid, so auto-sized values drifted). */
+.breakdown .bar-num { min-width: 2.6rem; text-align: right; display: inline-block; }
+.breakdown .bar-cost { min-width: 3.2rem; text-align: right; }
+/* Absent readings ("n/a", "no reading yet") drop to secondary emphasis — an
+   absence is not a data point. */
+.stat-val.na { color: var(--placeholder); font-weight: 600; }
+.bar-val.na { color: var(--muted); font-weight: 500; }
 .daily-chart { display: flex; align-items: flex-end; gap: 2px; height: 110px; margin-top: .5rem; }
 .daily-col { flex: 1; height: 100%; display: flex; align-items: flex-end; }
 .daily-bar { display: block; width: 100%; min-height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; }
@@ -4499,7 +4551,13 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .detail-main,
   .detail-side { grid-column: 1; grid-row: auto; }
   .detail-side { flex-direction: row; flex-wrap: wrap; }
-  .detail-side > * { flex: 1; min-width: 280px; }
+  /* Pass 30 (390px audit): min-width alone let a panel's min-content —
+     nowrap mono ids and commit titles — force it wider than the viewport,
+     clipping every value off-screen. Cap at the container and let kv values
+     wrap under their labels instead. */
+  .detail-side > * { flex: 1 1 280px; min-width: min(280px, 100%); max-width: 100%; }
+  .kv-row { flex-wrap: wrap; }
+  .kv-row .v { min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
   /* agents: the profile rail becomes a horizontal strip. The group labels ride
      along rather than hide: `.ag-group-label.ag-group-row` is not only a label,
      it CONTAINS the `New specialist profile` button (agents-page.tsx), and

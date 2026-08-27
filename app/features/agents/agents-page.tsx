@@ -218,6 +218,13 @@ function deploymentStatusLabel(status: string): string {
   return status === "waiting on human" ? "waiting on a human" : status;
 }
 
+/** F10-20 finished: ONE human-facing vocabulary for the engagement fact — the
+ *  internal "primary"/"reviewer" literals never render (the Live roster
+ *  translated them while the Active-deployments panel leaked them raw). */
+function engagementLabel(e: "operator" | "primary" | "reviewer"): string {
+  return e === "operator" ? "operator" : e === "primary" ? "delivering" : "supporting";
+}
+
 function DeploymentStatusPill({
   d,
 }: {
@@ -1005,7 +1012,7 @@ export function ProfileDetail({
                 key={`${d.taskKey}:${d.engagement}`}
                 onClick={() => onOpen(d.taskKey)}
               >
-                <span className="deploy-eng">{d.engagement}</span>
+                <span className="deploy-eng">{engagementLabel(d.engagement)}</span>
                 <span className="deploy-task">
                   <span className="key mono">{d.taskKey}</span> {d.taskTitle}
                 </span>
@@ -1195,11 +1202,7 @@ export function LiveRoster({
                 >
                   {/* F10-20: human-facing engagement, not the internal
                       primary/reviewer literals. */}
-                  {d.engagement === "operator"
-                    ? "operator"
-                    : d.engagement === "primary"
-                      ? "delivering"
-                      : "supporting"}
+                  {engagementLabel(d.engagement)}
                 </Pill>
               </span>
               <span>
