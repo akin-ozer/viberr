@@ -180,3 +180,208 @@ describe("getInsightsSummary", () => {
     expect(s.totals.cost).toBeCloseTo(0.1, 5);
   });
 });
+
+// ------------------------------------------------- governance (pass 29)
+
+const STAGES = JSON.stringify([
+  { id: "triage", name: "Triage", color: "#aaa" },
+  { id: "impl", name: "In Progress", color: "#bbb" },
+  { id: "review", name: "Review", color: "#ccc" },
+  { id: "done", name: "Done", color: "#ddd" },
+]);
+const WORKFLOW = JSON.stringify([
+  { from: "triage", to: "impl", boundary: "auto" },
+  { from: "impl", to: "review", boundary: "approval" },
+  { from: "review", to: "done", boundary: "human" },
+]);
+
+function insertProject(db: DatabaseSync, slug: string) {
+  db.prepare(
+    `INSERT INTO projects
+       (slug, name, task_prefix, stages_json, workflow_json, source_path,
+        content_hash, parsed_at)
+     VALUES (?, ?, 'VIB', ?, ?, ?, 'hash', '2026-08-01T00:00:00.000Z')`,
+  ).run(slug, slug, STAGES, WORKFLOW, `projects/${slug}/project.md`);
+}
+
+function insertTask(
+  db: DatabaseSync,
+  t: {
+    project?: string;
+    key: string;
+    stage?: string;
+    waiting?: string;
+    owner?: string | null;
+    archived?: number;
+    branch?: string | null;
+    prJson?: string | null;
+    revisionSha?: string | null;
+    packetJson?: string | null;
+    eventCount?: number;
+    createdAt?: string | null;
+  },
+) {
+  db.prepare(
+    `INSERT INTO task_projections
+       (project_slug, task_key, title, stage, readiness, waiting, urgent,
+        archived, validation, owner_user_id, branch, pr_json,
+        work_revision_sha, packet_json, event_count, created_at,
+        source_path, content_hash, parsed_at)
+     VALUES (?, ?, ?, ?, 'ready', ?, 0, ?, 'none', ?, ?, ?, ?, ?, ?, ?,
+             ?, 'hash', '2026-08-01T00:00:00.000Z')`,
+  ).run(
+    t.project ?? "gp",
+    t.key,
+    t.key,
+    t.stage ?? "impl",
+    t.waiting ?? "none",
+    t.archived ?? 0,
+    t.owner ?? null,
+    t.branch ?? null,
+    t.prJson ?? null,
+    t.revisionSha ?? null,
+    t.packetJson ?? null,
+    t.eventCount ?? 0,
+    t.createdAt ?? "2026-08-20T00:00:00.000Z",
+    `projects/${t.project ?? "gp"}/tasks/${t.key}/task.md`,
+  );
+}
+
+let auditSeq = 0;
+function insertAudit(
+  db: DatabaseSync,
+  a: { project?: string; task: string; action: string; at: string; details?: object },
+) {
+  auditSeq += 1;
+  db.prepare(
+    `INSERT INTO audit_events
+       (id, occurred_at, actor_label, action, project_slug, task_key, details_json)
+     VALUES (?, ?, 'test', ?, ?, ?, ?)`,
+  ).run(
+    `aud_${auditSeq}`,
+    a.at,
+    a.action,
+    a.project ?? "gp",
+    a.task,
+    a.details ? JSON.stringify(a.details) : null,
+  );
+}
+
+describe("governance outcomes (pass 29 — the PRD's own success criteria, measured)", () => {
+  it("computes ownership clarity over ACTIVE tasks only (archived + terminal excluded)", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertTask(db, { key: "VIB-1", waiting: "agent" }); // clear (agent working)
+    insertTask(db, { key: "VIB-2", waiting: "none", owner: "u_1" }); // clear (owned)
+    insertTask(db, { key: "VIB-3", waiting: "none" }); // AMBIGUOUS
+    insertTask(db, { key: "VIB-4", stage: "done", waiting: "none" }); // terminal → excluded
+    insertTask(db, { key: "VIB-5", archived: 1, waiting: "none" }); // archived → excluded
+
+    const g = getInsightsSummary(db, NOW).governance;
+    expect(g.clarity.activeTasks).toBe(3);
+    expect(g.clarity.clearTasks).toBe(2);
+    expect(g.clarity.pct).toBeCloseTo(2 / 3, 5);
+  });
+
+  it("computes key↔branch↔PR traceability over tasks with a delivery footprint", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // Traced: branch + PR both recorded.
+    insertTask(db, { key: "VIB-1", branch: "vib-1", prJson: '{"number":9}', revisionSha: "a".repeat(40) });
+    // Delivered but NOT traced: a branch with no PR.
+    insertTask(db, { key: "VIB-2", branch: "vib-2" });
+    // No footprint at all → out of the denominator.
+    insertTask(db, { key: "VIB-3" });
+
+    const g = getInsightsSummary(db, NOW).governance;
+    expect(g.traceability.deliveredTasks).toBe(2);
+    expect(g.traceability.tracedTasks).toBe(1);
+    expect(g.traceability.pct).toBeCloseTo(0.5, 5);
+  });
+
+  it("pairs packet-opened with the task's next packet-resolved; unresolved packets count as open, not as zero", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // A resolved packet: opened 10:00 → resolved 10:10 = 600s.
+    insertTask(db, { key: "VIB-1" });
+    insertAudit(db, { task: "VIB-1", action: "task.operator.packet_opened", at: "2026-08-22T10:00:00.000Z" });
+    insertAudit(db, { task: "VIB-1", action: "task.packet.resolved", at: "2026-08-22T10:10:00.000Z" });
+    // A still-open packet on a live task.
+    insertTask(db, { key: "VIB-2", packetJson: '{"id":"pkt_x"}' });
+    insertAudit(db, { task: "VIB-2", action: "task.agent.packet_opened", at: "2026-08-23T09:00:00.000Z" });
+
+    const g = getInsightsSummary(db, NOW).governance;
+    expect(g.packetResolution.resolved).toBe(1);
+    expect(g.packetResolution.avgMs).toBe(600_000);
+    expect(g.packetResolution.medianMs).toBe(600_000);
+    expect(g.packetResolution.openNow).toBe(1);
+  });
+
+  it("measures created → first transition into the project's REVIEW-role stage", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertTask(db, { key: "VIB-1", createdAt: "2026-08-22T10:00:00.000Z" });
+    // Into impl (not review) — ignored; into review at +2h — counted; the later
+    // re-entry is ignored (FIRST transition wins).
+    insertAudit(db, { task: "VIB-1", action: "task.transition", at: "2026-08-22T10:30:00.000Z", details: { from: "triage", to: "impl" } });
+    insertAudit(db, { task: "VIB-1", action: "task.transition", at: "2026-08-22T12:00:00.000Z", details: { from: "impl", to: "review" } });
+    insertAudit(db, { task: "VIB-1", action: "task.transition", at: "2026-08-22T15:00:00.000Z", details: { from: "impl", to: "review" } });
+
+    const g = getInsightsSummary(db, NOW).governance;
+    expect(g.timeToReview.tasks).toBe(1);
+    expect(g.timeToReview.medianMs).toBe(2 * 60 * 60 * 1000);
+  });
+
+  it("counts long timelines at the compression threshold and scopes everything by project", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertProject(db, "other");
+    insertTask(db, { key: "VIB-1", eventCount: 40 }); // at threshold → long
+    insertTask(db, { key: "VIB-2", eventCount: 39 });
+    insertTask(db, { project: "other", key: "OT-1", eventCount: 99, waiting: "agent" });
+
+    const all = getInsightsSummary(db, NOW).governance;
+    expect(all.longTimelines).toBe(2);
+    const scoped = getInsightsSummary(db, NOW, { projectSlug: "gp" }).governance;
+    expect(scoped.longTimelines).toBe(1);
+    expect(scoped.clarity.activeTasks).toBe(2);
+  });
+});
+
+describe("backend quota readings (pass 29)", () => {
+  it("returns null readings until a backend reports, then the latest reading round-trips", async () => {
+    const db = ctx.makeDb();
+    const { recordBackendRateLimit } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    const before = getInsightsSummary(db, NOW).backendQuota;
+    expect(before).toEqual([
+      { backend: "claude", reading: null },
+      { backend: "codex", reading: null },
+    ]);
+
+    recordBackendRateLimit(db, "claude", {
+      status: "allowed_warning",
+      rateLimitType: "seven_day",
+      utilization: 0.91,
+      resetsAt: 1_787_832_000,
+      isUsingOverage: false,
+      observedAt: "2026-08-23T11:00:00.000Z",
+    });
+    // A later reading REPLACES the earlier one — latest wins.
+    recordBackendRateLimit(db, "claude", {
+      status: "allowed",
+      rateLimitType: "seven_day",
+      utilization: 0.92,
+      resetsAt: 1_787_832_000,
+      isUsingOverage: false,
+      observedAt: "2026-08-23T11:30:00.000Z",
+    });
+
+    const after = getInsightsSummary(db, NOW).backendQuota;
+    const claude = after.find((q) => q.backend === "claude")!;
+    expect(claude.reading?.utilization).toBeCloseTo(0.92, 5);
+    expect(claude.reading?.observedAt).toBe("2026-08-23T11:30:00.000Z");
+    expect(after.find((q) => q.backend === "codex")!.reading).toBeNull();
+  });
+});

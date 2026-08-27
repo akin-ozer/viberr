@@ -4,6 +4,7 @@ import type { LogLine, RunBackend, RunState } from "~/features/runtime/runtime-t
 import { isDatabaseShuttingDown } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
+import { recordBackendRateLimit } from "./backend-quota.server";
 import { publishRunLogAppended, publishRunStateChanged } from "./run-events.server";
 import { CREDENTIAL_ENV_RE } from "./runtime-registry.server";
 import {
@@ -349,6 +350,16 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
           outputTokens = Math.max(outputTokens, f.usage.output_tokens);
         }
         if (f.costUsd != null) totalCostUsd = f.costUsd;
+        // Backend quota telemetry (pass 29): a rate_limit_event's reading is
+        // folded into the instance-wide store so approaching exhaustion is
+        // visible on /insights BEFORE a run fails on it. `recordBackendRateLimit`
+        // is internally best-effort — it can never fail this persist path.
+        if (f.rateLimit) {
+          recordBackendRateLimit(db, effectiveBackend, {
+            ...f.rateLimit,
+            observedAt: line.occurredAt,
+          });
+        }
 
         // 0. P13-U-1: scrub injected credentials + token-shaped secrets BEFORE
         //    anything is persisted — the raw .jsonl and the DB row are both

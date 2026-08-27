@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type {
   CountRow,
+  GovernanceSummary,
   InsightsSummary,
 } from "~/server/insights/insights-query.server";
 import { Icon } from "~/ui/icon";
@@ -107,15 +108,137 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
 
           <DailyChart summary={summary} />
 
+          <GovernanceCards governance={summary.governance} />
+
           <div className="insights-cols">
             <BreakdownCard title="By backend" rows={summary.byBackend} />
             <BreakdownCard title="By run kind" rows={summary.byKind} />
             <BreakdownCard title="By project" rows={summary.byProject} />
             <BreakdownCard title="By model" rows={summary.byModel} />
           </div>
+
+          <BackendQuotaPanel quota={summary.backendQuota} />
         </>
       )}
     </main>
+  );
+}
+
+/**
+ * Governance outcomes (pass 29): the PRD's own measurable-outcome criteria,
+ * finally measured — ownership/state clarity, key↔branch↔PR traceability,
+ * blocked-decision latency and time-to-review — from the projections and the
+ * audit trail the product already keeps.
+ */
+function GovernanceCards({ governance }: { governance: GovernanceSummary }) {
+  const g = governance;
+  return (
+    <div className="stat-grid">
+      <StatCard
+        label="Owner & state clarity"
+        value={fmtPercent(g.clarity.pct)}
+        icon="user"
+        sub={
+          g.clarity.activeTasks
+            ? `${g.clarity.clearTasks} of ${g.clarity.activeTasks} active tasks have a definite next actor`
+            : "no active tasks"
+        }
+      />
+      <StatCard
+        label="Branch–PR traceability"
+        value={fmtPercent(g.traceability.pct)}
+        icon="branch"
+        sub={
+          g.traceability.deliveredTasks
+            ? `${g.traceability.tracedTasks} of ${g.traceability.deliveredTasks} delivered tasks carry branch + PR`
+            : "no delivered tasks yet"
+        }
+      />
+      <StatCard
+        label="Blocked-decision wait"
+        value={fmtDuration(g.packetResolution.medianMs)}
+        icon="clock"
+        sub={
+          g.packetResolution.resolved
+            ? `median of ${g.packetResolution.resolved} resolved · avg ${fmtDuration(g.packetResolution.avgMs)}` +
+              (g.packetResolution.openNow
+                ? ` · ${g.packetResolution.openNow} open now`
+                : "")
+            : g.packetResolution.openNow
+              ? `${g.packetResolution.openNow} open now · none resolved yet`
+              : "no decision packets yet"
+        }
+      />
+      <StatCard
+        label="Time to review-ready"
+        value={fmtDuration(g.timeToReview.medianMs)}
+        icon="check"
+        sub={
+          g.timeToReview.tasks
+            ? `median of ${g.timeToReview.tasks} tasks · avg ${fmtDuration(g.timeToReview.avgMs)}`
+            : "no task has reached review yet"
+        }
+      />
+      <StatCard
+        label="Long timelines"
+        value={fmtCount(g.longTimelines)}
+        icon="memory"
+        sub="tasks past the compression threshold"
+      />
+    </div>
+  );
+}
+
+/**
+ * Latest provider rate-limit reading per backend (pass 29): approaching quota
+ * exhaustion is visible here BEFORE a run fails on it. A backend with no
+ * reading renders neutral — this is an observation log, never a probe.
+ */
+function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }) {
+  const pctOf = (u: number | null) =>
+    u == null ? null : Math.max(0, Math.min(100, Math.round(u * 100)));
+  return (
+    <section className="panel breakdown">
+      <div className="panel-head">
+        <h2>Backend quota</h2>
+      </div>
+      <ul className="bar-list">
+        {quota.map(({ backend, reading }) => {
+          const pct = reading ? pctOf(reading.utilization) : null;
+          return (
+            <li key={backend} className="bar-row">
+              <span className="bar-label" title={backend}>
+                {backend}
+              </span>
+              <span className="bar-track">
+                <span
+                  className="bar-fill"
+                  style={{ width: `${pct ?? 0}%` }}
+                />
+              </span>
+              <span className="bar-val">
+                {reading == null || pct == null
+                  ? "no reading yet"
+                  : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
+                {reading && (
+                  <span className="bar-cost">
+                    {reading.isUsingOverage
+                      ? "overage"
+                      : reading.resetsAt != null
+                        ? `resets ${new Date(reading.resetsAt * 1000).toLocaleDateString()}`
+                        : reading.status}
+                  </span>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="fine">
+        Latest reading each backend reported during a run. A high number here
+        means new runs may start failing when the window is exhausted.
+      </p>
+    </section>
   );
 }
 

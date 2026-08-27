@@ -73,6 +73,44 @@ describe("projectEnvelope — Claude stream-json", () => {
     expect(projectEnvelope("claude", { type: "system", subtype: "api_retry", error: "overloaded" }).display?.ev).toBe("meta");
     expect(projectEnvelope("claude", { type: "brand_new_2027" }).display?.ev).toBe("meta");
   });
+
+  it("rate_limit_event → meta line + rateLimit facts (pass 29 quota telemetry)", () => {
+    const raw = {
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed_warning",
+        resetsAt: 1_787_832_000,
+        rateLimitType: "seven_day",
+        utilization: 0.91,
+        isUsingOverage: false,
+      },
+    };
+    const { display, facts } = projectEnvelope("claude", raw);
+    // Same telemetry tag the client already groups; a human-readable summary.
+    expect(display).toMatchObject({ ev: "meta", tag: "rate_limit_event" });
+    expect(display?.text).toContain("91%");
+    expect(display?.text).toContain("seven_day");
+    expect(facts.rateLimit).toEqual({
+      status: "allowed_warning",
+      rateLimitType: "seven_day",
+      utilization: 0.91,
+      resetsAt: 1_787_832_000,
+      isUsingOverage: false,
+    });
+  });
+
+  it("rate_limit_event with no/malformed info → meta line, NO fabricated facts", () => {
+    const bare = projectEnvelope("claude", { type: "rate_limit_event" });
+    expect(bare.display?.tag).toBe("rate_limit_event");
+    expect(bare.facts.rateLimit).toBeUndefined();
+    // A malformed utilization must read as "not reported", never a fake 0.
+    const partial = projectEnvelope("claude", {
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: "high" },
+    });
+    expect(partial.facts.rateLimit?.utilization).toBeNull();
+    expect(partial.display?.text).toContain("?");
+  });
 });
 
 describe("projectEnvelope — Codex JSONL", () => {
