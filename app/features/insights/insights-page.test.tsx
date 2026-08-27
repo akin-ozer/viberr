@@ -48,6 +48,32 @@ const FULL: InsightsSummary = {
     runs: i === 29 ? 5 : 0,
     cost: i === 29 ? 1.2 : 0,
   })),
+  governance: {
+    clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 },
+    traceability: { deliveredTasks: 5, tracedTasks: 5, pct: 1 },
+    packetResolution: {
+      resolved: 3,
+      avgMs: 400_000,
+      medianMs: 300_000,
+      openNow: 1,
+    },
+    timeToReview: { tasks: 4, avgMs: 3_600_000, medianMs: 1_800_000 },
+    longTimelines: 2,
+  },
+  backendQuota: [
+    {
+      backend: "claude",
+      reading: {
+        status: "allowed_warning",
+        rateLimitType: "seven_day",
+        utilization: 0.91,
+        resetsAt: 1_787_832_000,
+        isUsingOverage: false,
+        observedAt: "2026-08-23T11:59:00.000Z",
+      },
+    },
+    { backend: "codex", reading: null },
+  ],
   windowDays: 30,
   generatedAt: "2026-08-23T12:00:00.000Z",
 };
@@ -69,15 +95,36 @@ describe("InsightsPage", () => {
   });
 
   it("renders the breakdown bars and the daily chart", () => {
-    const { container, getByText } = renderPage(FULL);
+    const { container, getByText, getAllByText } = renderPage(FULL);
     expect(getByText("By backend")).toBeTruthy();
-    expect(getByText("claude")).toBeTruthy();
-    expect(getByText("codex")).toBeTruthy();
+    // Backend names appear in BOTH the by-backend breakdown and the quota panel.
+    expect(getAllByText("claude").length).toBeGreaterThanOrEqual(1);
+    expect(getAllByText("codex").length).toBeGreaterThanOrEqual(1);
     // One daily column per window day.
     expect(container.querySelectorAll(".daily-col")).toHaveLength(30);
     // The busiest backend bar fills 100%, the other proportionally less.
     const fills = container.querySelectorAll<HTMLElement>(".bar-fill");
     expect(fills[0]?.style.width).toBe("100%"); // claude (28, the max)
+  });
+
+  it("renders the governance outcomes (pass 29)", () => {
+    const { getByText } = renderPage(FULL);
+    expect(getByText("Owner & state clarity")).toBeTruthy();
+    // 7/8 active tasks clear → 88% (fmtPercent rounds).
+    expect(getByText("88%")).toBeTruthy();
+    expect(getByText("Branch–PR traceability")).toBeTruthy();
+    expect(getByText("100%")).toBeTruthy();
+    expect(getByText("Blocked-decision wait")).toBeTruthy();
+    expect(getByText("Time to review-ready")).toBeTruthy();
+    expect(getByText("Long timelines")).toBeTruthy();
+  });
+
+  it("renders the backend quota readings — and a neutral 'no reading yet' for a silent backend", () => {
+    const { getByText } = renderPage(FULL);
+    expect(getByText("Backend quota")).toBeTruthy();
+    // claude carries a 91% seven_day reading; codex has never reported one.
+    expect(getByText(/91% of seven day/)).toBeTruthy();
+    expect(getByText("no reading yet")).toBeTruthy();
   });
 
   it("shows an empty state when there are no runs", () => {

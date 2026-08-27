@@ -1,5 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import {
+  latestBackendRateLimits,
+  type BackendQuotaRow,
+} from "~/server/runtimes/backend-quota.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 
 /**
  * Insights: read-only aggregate analytics over `agent_runs` — the cost, token,
@@ -36,6 +41,37 @@ export interface DailyPoint {
   cost: number;
 }
 
+/**
+ * Governance outcomes (pass 29, critique gap 3.1 — owner "build it now"): the
+ * PRD's own "Measurable outcomes" (prd.md) promise unambiguous ownership/state,
+ * task↔branch↔PR traceability, fast decisions on blocked work, and readable
+ * long timelines — and until now the product measured none of them. These are
+ * computed from the projections + audit trail the app already keeps; nothing
+ * new is recorded. All-time (like the totals above), not windowed.
+ */
+export interface GovernanceSummary {
+  /** Active (non-archived, non-terminal-stage) tasks with a definite next
+   *  actor: `waiting` names human/agent, or a human owns the task. */
+  clarity: { activeTasks: number; clearTasks: number; pct: number | null };
+  /** Of tasks with any delivery footprint (revision/branch/PR), how many carry
+   *  BOTH the task-key branch and a recorded PR — the key↔branch↔PR chain. */
+  traceability: { deliveredTasks: number; tracedTasks: number; pct: number | null };
+  /** How long an operator-opened decision/blocked packet waits for the human,
+   *  from the packet-opened audit row to its task's next packet-resolved row. */
+  packetResolution: {
+    resolved: number;
+    avgMs: number | null;
+    medianMs: number | null;
+    /** Live count of unresolved packets on active tasks — the current queue. */
+    openNow: number;
+  };
+  /** Task creation → first transition into the project's review-role stage. */
+  timeToReview: { tasks: number; avgMs: number | null; medianMs: number | null };
+  /** Tasks whose timeline passed the compression guardrail's threshold —
+   *  long-running records the readability machinery is actively managing. */
+  longTimelines: number;
+}
+
 export interface InsightsSummary {
   totals: InsightsTotals;
   /** Terminal-outcome breakdown + the success rate over terminal runs. */
@@ -56,6 +92,9 @@ export interface InsightsSummary {
   avgDurationMs: number | null;
   /** Runs + cost per day over the last WINDOW_DAYS, oldest first, gap-filled. */
   daily: DailyPoint[];
+  governance: GovernanceSummary;
+  /** Latest observed provider rate-limit reading per backend (null = none yet). */
+  backendQuota: BackendQuotaRow[];
   windowDays: number;
   generatedAt: string;
 }
@@ -100,6 +139,228 @@ function scope(filter: InsightsFilter): ScopeClause {
     return { clause: "WHERE project_slug = ?", params: [filter.projectSlug] };
   }
   return { clause: "", params: [] };
+}
+
+// ---------------------------------------------------------- governance
+
+/** The compression guardrail's default threshold (project.md `guardrails`,
+ *  `compression-threshold`): a timeline past this many events is a "long"
+ *  record the readability machinery is actively managing. */
+const LONG_TIMELINE_EVENTS = 40;
+
+const govTaskSchema = z.object({
+  project_slug: z.string(),
+  task_key: z.string(),
+  stage: z.string(),
+  waiting: z.string(),
+  owner_user_id: z.string().nullable(),
+  archived: z.number(),
+  branch: z.string().nullable(),
+  pr_json: z.string().nullable(),
+  work_revision_sha: z.string().nullable(),
+  packet_json: z.string().nullable(),
+  event_count: z.number(),
+  created_at: z.string().nullable(),
+});
+
+const govProjectSchema = z.object({
+  slug: z.string(),
+  stages_json: z.string(),
+  workflow_json: z.string(),
+});
+
+const govAuditSchema = z.object({
+  project_slug: z.string().nullable(),
+  task_key: z.string().nullable(),
+  action: z.string(),
+  occurred_at: z.string(),
+  details_json: z.string().nullable(),
+});
+
+/** Tolerant, schema-typed JSON parse of a projected column — a corrupt or
+ *  missing row reads as the fallback, never a crash on an analytics loader. */
+function parsedJson<S extends z.ZodType>(
+  schema: S,
+  text: string | null,
+  fallback: z.infer<S>,
+): z.infer<S> {
+  if (!text) return fallback;
+  try {
+    const parsed = schema.safeParse(JSON.parse(text));
+    return parsed.success ? parsed.data : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const stageDefsSchema = z.array(z.object({ id: z.string() }).loose());
+const workflowDefsSchema = z.array(
+  z.object({ from: z.string(), to: z.string() }).loose(),
+);
+
+function median(sorted: number[]): number | null {
+  if (sorted.length === 0) return null;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[mid]!
+    : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+function avg(values: number[]): number | null {
+  return values.length
+    ? values.reduce((a, b) => a + b, 0) / values.length
+    : null;
+}
+
+function governanceSummary(
+  db: DatabaseSync,
+  filter: InsightsFilter,
+): GovernanceSummary {
+  const { clause, params } = scope(filter);
+
+  const tasks = z.array(govTaskSchema).parse(
+    db
+      .prepare(
+        `SELECT project_slug, task_key, stage, waiting, owner_user_id, archived,
+                branch, pr_json, work_revision_sha, packet_json, event_count,
+                created_at
+         FROM task_projections ${clause}`,
+      )
+      .all(...params),
+  );
+  const projects = z.array(govProjectSchema).parse(
+    db
+      .prepare(
+        `SELECT slug, stages_json, workflow_json FROM projects` +
+          (filter.projectSlug ? ` WHERE slug = ?` : ``),
+      )
+      .all(...(filter.projectSlug ? [filter.projectSlug] : [])),
+  );
+
+  // Per-project stage roles, from the same resolver every governed surface uses.
+  const roles = new Map(
+    projects.map((p) => [
+      p.slug,
+      resolveStageRoles(
+        parsedJson(stageDefsSchema, p.stages_json, []),
+        parsedJson(workflowDefsSchema, p.workflow_json, []),
+      ),
+    ]),
+  );
+
+  // 1. Ownership/state clarity over ACTIVE tasks (not archived, not terminal).
+  const active = tasks.filter((t) => {
+    if (t.archived) return false;
+    const terminal = roles.get(t.project_slug)?.terminalId ?? null;
+    return terminal == null || t.stage !== terminal;
+  });
+  const clearTasks = active.filter(
+    (t) => t.waiting !== "none" || t.owner_user_id != null,
+  ).length;
+
+  // 2. Key↔branch↔PR traceability over tasks with any delivery footprint.
+  const delivered = tasks.filter(
+    (t) => t.work_revision_sha != null || t.branch != null || t.pr_json != null,
+  );
+  const traced = delivered.filter(
+    (t) => t.branch != null && t.pr_json != null,
+  ).length;
+
+  // 3. Blocked-decision resolution: pair each packet-opened audit row with the
+  // task's NEXT packet-resolved row. Withdrawn/superseded packets never resolve
+  // and simply don't contribute a duration — honest, not a fabricated zero.
+  const auditRows = z.array(govAuditSchema).parse(
+    db
+      .prepare(
+        `SELECT project_slug, task_key, action, occurred_at, details_json
+         FROM audit_events
+         WHERE action IN ('task.operator.packet_opened',
+                          'task.agent.packet_opened',
+                          'task.packet.resolved',
+                          'task.transition')
+           ${filter.projectSlug ? "AND project_slug = ?" : ""}
+         ORDER BY occurred_at ASC`,
+      )
+      .all(...(filter.projectSlug ? [filter.projectSlug] : [])),
+  );
+  const packetDurations: number[] = [];
+  const pendingOpen = new Map<string, number>();
+  for (const row of auditRows) {
+    if (!row.task_key) continue;
+    const key = `${row.project_slug}/${row.task_key}`;
+    const at = Date.parse(row.occurred_at);
+    if (Number.isNaN(at)) continue;
+    if (row.action.endsWith("packet_opened")) {
+      // A re-opened packet before a resolve replaces the pending mark — the
+      // human answers the packet that is actually in front of them.
+      pendingOpen.set(key, at);
+    } else if (row.action === "task.packet.resolved") {
+      const opened = pendingOpen.get(key);
+      if (opened != null && at >= opened) {
+        packetDurations.push(at - opened);
+        pendingOpen.delete(key);
+      }
+    }
+  }
+  packetDurations.sort((a, b) => a - b);
+  const openNow = tasks.filter(
+    (t) => !t.archived && t.packet_json != null,
+  ).length;
+
+  // 4. Time to review-ready: task created → its FIRST transition into the
+  // project's review-role stage (from the same audit trail).
+  const firstReviewAt = new Map<string, number>();
+  for (const row of auditRows) {
+    if (row.action !== "task.transition" || !row.task_key) continue;
+    const key = `${row.project_slug}/${row.task_key}`;
+    if (firstReviewAt.has(key)) continue;
+    const details = parsedJson(
+      z.object({ to: z.string().catch("") }).loose(),
+      row.details_json,
+      { to: "" },
+    );
+    const reviewId = row.project_slug
+      ? (roles.get(row.project_slug)?.reviewId ?? null)
+      : null;
+    if (reviewId == null || details.to !== reviewId) continue;
+    const at = Date.parse(row.occurred_at);
+    if (!Number.isNaN(at)) firstReviewAt.set(key, at);
+  }
+  const reviewDurations: number[] = [];
+  for (const t of tasks) {
+    const reached = firstReviewAt.get(`${t.project_slug}/${t.task_key}`);
+    if (reached == null || t.created_at == null) continue;
+    const created = Date.parse(t.created_at);
+    if (Number.isNaN(created) || reached < created) continue;
+    reviewDurations.push(reached - created);
+  }
+  reviewDurations.sort((a, b) => a - b);
+
+  return {
+    clarity: {
+      activeTasks: active.length,
+      clearTasks,
+      pct: active.length ? clearTasks / active.length : null,
+    },
+    traceability: {
+      deliveredTasks: delivered.length,
+      tracedTasks: traced,
+      pct: delivered.length ? traced / delivered.length : null,
+    },
+    packetResolution: {
+      resolved: packetDurations.length,
+      avgMs: avg(packetDurations),
+      medianMs: median(packetDurations),
+      openNow,
+    },
+    timeToReview: {
+      tasks: reviewDurations.length,
+      avgMs: avg(reviewDurations),
+      medianMs: median(reviewDurations),
+    },
+    longTimelines: tasks.filter((t) => t.event_count >= LONG_TIMELINE_EVENTS)
+      .length,
+  };
 }
 
 export function getInsightsSummary(
@@ -224,6 +485,8 @@ export function getInsightsSummary(
     byModel: group("model"),
     avgDurationMs: duration.avg_ms,
     daily,
+    governance: governanceSummary(db, filter),
+    backendQuota: latestBackendRateLimits(db),
     windowDays: WINDOW_DAYS,
     generatedAt: nowIso,
   };

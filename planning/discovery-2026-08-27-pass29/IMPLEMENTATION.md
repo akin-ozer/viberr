@@ -39,3 +39,26 @@ Real runs on the container (docker-data, :5173) against `akin-ozer/viberr`: brow
 ## Cleanup
 - Removed the `qa-tester@viberr.dev` RBAC test user + its VQP viewer membership (docker-data).
 - Left as intended test artifacts: the VQP project + VQP-1/2/3 tasks, the Web QA profile, the Pass29 KB, the qa-echo MCP, and the merged 1-line `docs/qa/pass29-codex.md` (a permitted small test file). Offered to the owner for removal.
+
+---
+
+## Round 2 (owner "build it now" on the critique's two genuine gaps)
+
+### G1 — Governance outcomes on /insights (critique 3.1)
+`app/server/insights/insights-query.server.ts` (+`GovernanceSummary`), `app/features/insights/insights-page.tsx`
+- The PRD's five measurable outcomes, finally measured, from data the app already keeps (projections + audit trail; nothing new recorded; all-time like the totals):
+  - **Owner & state clarity** — % of active (non-archived, non-terminal) tasks with a definite next actor (`waiting` names one, or a human owns it).
+  - **Branch–PR traceability** — of tasks with a delivery footprint, % carrying both branch + PR.
+  - **Blocked-decision wait** — packet-opened → next packet-resolved per task (audit pairs), median/avg + live open count.
+  - **Time to review-ready** — task created → first transition into the project's review-role stage (via `resolveStageRoles`, honoring custom workflows).
+  - **Long timelines** — tasks past the compression guardrail threshold (40 events).
+- Honest empties everywhere (null pct/duration → "n/a" + explanatory sub-label).
+
+### G2 — Proactive backend quota surfacing (critique 3.2)
+`app/server/runtimes/backend-quota.server.ts` (new), `wire-format.server.ts`, `run-sink.server.ts`, insights query/page
+- The Claude SDK's `rate_limit_event` (live utilization) used to fall through as an unread raw log line. Now: wire-format decodes `rate_limit_info` into line facts (a readable "rate limit · seven_day at 91%" meta line under the same telemetry tag) → the run-sink folds the latest reading per backend into the generic `instance_settings` KV (best-effort, never fails the persist path) → /insights renders a **Backend quota** panel (utilization bar, window, reset date/overage; "no reading yet" = neutral, R17-5). Approaching exhaustion is now visible BEFORE a run fails on it.
+- Codex reports no live utilization today → renders "no reading yet" honestly; the store is backend-generic for when it does.
+
+### Validation (round 2)
+- typecheck clean · **full suite green** (all files; insights 14, wire-format+sink 31, page 6) · oxlint back at the 25 baseline (an intermediate `unknown`-returning helper tripped 3 anti-slop errors; restructured to a schema-typed parser).
+- **Browser-validated** on hermetic :5174 with seeded runs/audits/reading: governance cards compute real values (clarity 100% 10/10, traceability 63% 5/8, blocked-decision wait 25m + 3 open now), quota panel shows "claude · 91% of seven day · resets 8/27/2026" and "codex · no reading yet". Time-to-review honestly n/a on the demo fixture (demo tasks lack created_at; unit test pins the real path).

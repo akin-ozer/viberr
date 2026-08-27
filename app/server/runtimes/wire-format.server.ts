@@ -30,6 +30,16 @@ export interface EnvelopeFacts {
   isError?: boolean;
   /** True when this is a terminal result envelope (claude result). */
   isResult?: boolean;
+  /** A `rate_limit_event`'s live quota reading (claude only today) — folded
+   *  into the instance-wide backend-quota store by the sink, so approaching
+   *  exhaustion is visible BEFORE a run fails on it (pass-29 gap 3.2). */
+  rateLimit?: {
+    status: string;
+    rateLimitType: string;
+    utilization: number | null;
+    resetsAt: number | null;
+    isUsingOverage: boolean;
+  } | null;
 }
 
 /** What the normalizer returns: the display line + any facts to fold into the run row. */
@@ -155,6 +165,19 @@ const claudeEnvelopeFields = z.object({
   duration_ms: wireCount,
   duration_api_ms: wireCount,
   is_error: wireFlag,
+  /** `rate_limit_event` payload — the SDK's live utilization report. Nullable
+   *  numbers (not wireCount) on purpose: a missing utilization must read as
+   *  "not reported", never as a fabricated 0% that looks like a fresh quota. */
+  rate_limit_info: z
+    .object({
+      status: wireText,
+      rateLimitType: wireText,
+      utilization: z.number().nullable().catch(null),
+      resetsAt: z.number().nullable().catch(null),
+      isUsingOverage: wireFlag,
+    })
+    .nullable()
+    .catch(null),
 });
 /** A payload that is not a keyed object at all decodes to the empty envelope,
  *  which carries no type and therefore lands on the unknown-envelope row. */
@@ -257,6 +280,27 @@ function unknownEnvelope(type: string, text: string, t: string): ProjectedEnvelo
 /** `null` → the envelope type is unrecognized; the caller renders it raw. */
 function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
   switch (e.type) {
+    case "rate_limit_event": {
+      // The SDK's live quota report. Previously fell through to the
+      // unknown-envelope row (raw JSON, client-side telemetry bucket) and was
+      // read by nobody; the reading now rides facts so the sink can fold it
+      // into the backend-quota store. The display stays a dim meta line under
+      // the SAME tag the client already groups as telemetry.
+      const info = e.rate_limit_info;
+      const pct =
+        info?.utilization != null ? `${Math.round(info.utilization * 100)}%` : "?";
+      return {
+        display: {
+          t,
+          ev: "meta",
+          tag: "rate_limit_event",
+          text: info
+            ? `rate limit · ${info.rateLimitType || "window"} at ${pct}${info.isUsingOverage ? " · overage" : ""}`
+            : "rate limit event",
+        },
+        facts: info ? { rateLimit: info } : {},
+      };
+    }
     case "system": {
       if (e.subtype === "init") {
         const mcp = e.mcp_servers.flatMap((m) => (m.name ? [m.name] : []));
