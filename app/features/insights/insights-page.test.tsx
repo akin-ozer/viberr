@@ -112,7 +112,7 @@ describe("InsightsPage", () => {
     expect(getByText("Owner & state clarity")).toBeTruthy();
     // 7/8 active tasks clear → 88% (fmtPercent rounds).
     expect(getByText("88%")).toBeTruthy();
-    expect(getByText("Branch + PR traceability")).toBeTruthy();
+    expect(getByText("Branch & PR traceability")).toBeTruthy();
     expect(getByText("100%")).toBeTruthy();
     expect(getByText("Blocked-decision wait")).toBeTruthy();
     expect(getByText("Time to review-ready")).toBeTruthy();

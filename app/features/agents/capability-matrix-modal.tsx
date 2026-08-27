@@ -150,7 +150,13 @@ export function CapabilityMatrixModal({
               {groups.map((g) => (
                 <Fragment key={g.group}>
                   <tr className="grp">
-                    <td colSpan={profiles.length + 1}>{g.group}</td>
+                    {/* The sticky must live on an INLINE child: the td spans
+                        the full row (colSpan), so sticking the td itself had
+                        zero travel and group names scrolled away while row
+                        labels stayed pinned. */}
+                    <td colSpan={profiles.length + 1}>
+                      <span className="grp-label">{g.group}</span>
+                    </td>
                   </tr>
                   {g.labels.map((label) => {
                     const capId = capabilityByLabel(label)?.id;

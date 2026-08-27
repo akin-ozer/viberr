@@ -702,12 +702,19 @@ describe("hydration first pass (SSR)", () => {
 
 describe("per-panel feed filters (P21)", () => {
   it("renders one filter bar per panel, with the panel's own vocabulary", () => {
-    const { getByLabelText } = renderActivity();
+    const { getByLabelText, getAllByText } = renderActivity();
     // Stream bar.
     expect(getByLabelText("Search the activity stream")).not.toBeNull();
     expect(getByLabelText("Filter the activity stream by type")).not.toBeNull();
     expect(getByLabelText("Filter the activity stream by task id")).not.toBeNull();
+    // Pass 30: the date ranges use the app's shared DatePicker, not native
+    // date inputs — one From/To pair per panel, each trigger keeping the
+    // panel-scoped accessible name (the visible text becomes the picked DATE,
+    // which cannot name the control once a page has four pickers).
+    expect(getAllByText("From")).toHaveLength(2);
+    expect(getAllByText("To")).toHaveLength(2);
     expect(getByLabelText("From date for the activity stream")).not.toBeNull();
+    expect(getByLabelText("To date for the audit logs")).not.toBeNull();
     // Audit bar — its type filter speaks in the panel's four display kinds.
     // SAFETY: the aria-label belongs to the audit bar's kind <select>
     // (FeedFilters); the bound query cannot state the element type.

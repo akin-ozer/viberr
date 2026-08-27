@@ -28,8 +28,6 @@ import { useDialog } from "~/ui/use-dialog";
 
 /** Ties the Confirm button to its visible refusal reason (E4). */
 const BLOCK_REASON_ID = "pkt-block-reason";
-const DENY_NOTE_STYLE = { marginTop: ".75rem" } as const;
-const REDELIVER_NOTE_STYLE = { marginTop: ".85rem" } as const;
 /**
  * UX19-4 — the exact label of the GitHub panel's delivery button
  * (`task-side-panels.tsx`). The note below points a human at a control BY NAME,
@@ -772,7 +770,7 @@ export function DecisionPacket({
           // Body copy, not a footnote: it is a recovery path the options list
           // left out, and the last clause is decision-relevant to the option
           // sitting right above it.
-          <p className="packet-lede" style={REDELIVER_NOTE_STYLE}>
+          <p className="packet-lede spaced">
             Not in this list: the GitHub panel on this page still offers{" "}
             <strong>{DELIVER_LABEL}</strong>. It pushes this task&rsquo;s branch
             again and opens a new review pull request (Viberr never reopens a
@@ -807,7 +805,7 @@ export function DecisionPacket({
         )}
 
         {canResolve && blockReason && (
-          <p className="deny-note" id={BLOCK_REASON_ID} style={DENY_NOTE_STYLE}>
+          <p className="deny-note spaced" id={BLOCK_REASON_ID}>
             <Icon name="lock" />
             {blockReason}
           </p>
@@ -816,7 +814,7 @@ export function DecisionPacket({
         {/* F20-17: the viewer cannot resolve this packet at all — say who can,
             once, instead of leaving a live-looking radiogroup with no Confirm. */}
         {!canResolve && (
-          <p className="deny-note" style={DENY_NOTE_STYLE}>
+          <p className="deny-note spaced">
             <Icon name="lock" />
             You can&rsquo;t resolve this decision: a maintainer, an admin, or
             this task&rsquo;s owner can. You can still comment or ask the operator
@@ -829,7 +827,7 @@ export function DecisionPacket({
             settle. Name that, and hand the decision UP to a maintainer instead
             of leaving them stranded (server: requestPacketMaintainerDecision). */}
         {everyOptionForbidden && (
-          <div className="deny-note" style={DENY_NOTE_STYLE}>
+          <div className="deny-note spaced">
             <Icon name="lock" />
             <span>
               Every listed option needs maintainer or admin authority. You own{" "}

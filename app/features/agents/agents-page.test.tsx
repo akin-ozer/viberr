@@ -1105,7 +1105,11 @@ describe("CreateProfileModal", () => {
     fireEvent.click(getByText("Claude"));
     // The Codex id is gone on the click — not "still shown but about to change".
     expect(modelSel().value).toBe("");
-    expect(save().disabled).toBe(true);
+    // Pass 30: the hold is announced (aria-disabled) and ENFORCED by submit's
+    // refusal guard rather than a hard `disabled` — a hard-disabled button
+    // (pointer-events none) made the explain-on-click state unreachable.
+    expect(save().disabled).toBe(false);
+    expect(save().getAttribute("aria-disabled")).toBe("true");
     expect(getByText(/Loading the models available on Claude/)).toBeTruthy();
     // The exact race: a save inside the window submits nothing at all.
     fireEvent.click(save());

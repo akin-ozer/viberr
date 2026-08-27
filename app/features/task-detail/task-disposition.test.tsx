@@ -1806,7 +1806,7 @@ describe("UX19-12: an engagement whose profile is gone says so, and cannot be ru
     expect(cell.querySelector(".nm")!.textContent).toBe("profile no longer here");
     expect(cell.textContent).toMatch(GONE_NOTE);
     expect(cell.textContent).toContain("no branch, PR, comment or verdict");
-    const run = cell.querySelector<HTMLButtonElement>(".btn.primary")!;
+    const run = cell.querySelector<HTMLButtonElement>(".btn")!;
     // Canary: drop `|| spGhost` from the disabled expression and this fails —
     // the button that delivers nothing goes live again.
     expect(run.disabled).toBe(true);
@@ -1821,7 +1821,7 @@ describe("UX19-12: an engagement whose profile is gone says so, and cannot be ru
     expect(row.querySelector(".nm")!.textContent).toBe("profile no longer here");
     expect(row.textContent).toMatch(GONE_NOTE);
     expect(row.textContent).toContain("no verdict, comment or evidence");
-    expect(row.querySelector<HTMLButtonElement>(".btn.primary")!.disabled).toBe(true);
+    expect(row.querySelector<HTMLButtonElement>(".btn")!.disabled).toBe(true);
     // Letting go of a dead engagement is the recovery — it must not be disabled
     // alongside the run.
     const release = row.querySelector<HTMLButtonElement>(".rev-x")!;
@@ -1842,7 +1842,7 @@ describe("UX19-12: an engagement whose profile is gone says so, and cannot be ru
     ).find((c) => c.querySelector(".lbl")?.textContent === "Delivering agent")!;
     expect(cell.querySelector(".nm")!.textContent).toBe("Developer");
     expect(cell.textContent).not.toMatch(GONE_NOTE);
-    const run = cell.querySelector<HTMLButtonElement>(".btn.primary")!;
+    const run = cell.querySelector<HTMLButtonElement>(".btn")!;
     expect(run.disabled).toBe(false);
     fireEvent.click(run);
     expect(calls.runSpecialist).toEqual(["run"]);

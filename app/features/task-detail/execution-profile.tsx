@@ -550,10 +550,13 @@ function OperatorRunControl({
       />
       {/* The operator coordinates ongoing work, so it stays runnable even while
           a specialist run streams — only its own in-flight run disables it.
-          A closed (terminal-stage) task disables it too (G9). */}
+          A closed (terminal-stage) task disables it too (G9).
+          Pass 30: routine starters are SECONDARY — the page's one solid
+          primary is the decision-stakes commit of the current state (Accept
+          completion / Confirm decision / Complete merge). */}
       <button
         type="button"
-        className="btn primary sm"
+        className="btn sm"
         disabled={off}
         onClick={run}
         title={
@@ -763,12 +766,11 @@ export function ExecutionProfile({
                 <Icon name="shield" />
               </span>
               <span>
-                <div className="nm">Operator</div>
-                <div className="sub">
-                  {task.operator
-                    ? `coordinator · ${task.operator.sinceLabel}`
-                    : "coordinator"}
-                </div>
+                {/* The cell's kicker already says OPERATOR — repeating the
+                    same word as the value was a label:label dump. The value
+                    slot promotes what the sub-line carried. */}
+                <div className="nm">Coordinator</div>
+                {task.operator && <div className="sub">{task.operator.sinceLabel}</div>}
               </span>
             </div>
             {canRunAgents && (
@@ -825,7 +827,7 @@ export function ExecutionProfile({
                   <span className="right">
                     <button
                       type="button"
-                      className="btn primary sm"
+                      className="btn sm"
                       disabled={runBusy || deliveringActive || closed || spGhost}
                       onClick={onRunSpecialist}
                       title={
@@ -908,7 +910,7 @@ export function ExecutionProfile({
                       <span className="right">
                         <button
                           type="button"
-                          className="btn primary sm"
+                          className="btn sm"
                           disabled={reviewerBusy || running || closed || ghost}
                           onClick={() => onRunReviewer(c.profileId)}
                           title={

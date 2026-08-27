@@ -525,7 +525,7 @@ export function Timeline({
             </span>
             <button
               type="button"
-              className="btn primary sm"
+              className="btn sm"
               onClick={send}
               disabled={busy}
               aria-busy={busy}

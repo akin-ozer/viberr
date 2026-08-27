@@ -34,12 +34,18 @@ export function DatePicker({
   onChange,
   id,
   placeholder = "Pick a date",
+  ariaLabel,
 }: {
   /** `YYYY-MM-DD` or null. */
   value: string | null;
   onChange: (iso: string | null) => void;
   id?: string;
   placeholder?: string;
+  /** Stable accessible name for the trigger. Without it the name is the
+   *  trigger's text — the placeholder at rest, then the PICKED DATE, which is
+   *  ambiguous the moment a page has more than one picker (the feed filters
+   *  have four). */
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -77,6 +83,7 @@ export function DatePicker({
           className={"datepick-trigger" + (value ? "" : " dp-empty")}
           aria-haspopup="dialog"
           aria-expanded={open}
+          aria-label={ariaLabel}
           onClick={() => setOpen((o) => !o)}
         >
           <Icon name="clock" />

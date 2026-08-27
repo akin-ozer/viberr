@@ -4,6 +4,8 @@ import { Icon, type IconName } from "~/ui/icon";
 import { useHydrated } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
+import { plainText } from "~/features/notifications/notification-meta";
+import { DatePicker } from "~/ui/date-picker";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { TIMELINE_EVENT_TYPES } from "~/schemas/task-file.schema";
 import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
@@ -34,7 +36,10 @@ function ActivityText({ text }: { text: string }) {
     return <RichText text={text} mentions={false} />;
   }
   if (!expanded) {
-    const preview = text
+    // The collapsed line is plain text, so markdown marks must not leak into
+    // it as literal ** and backticks — same stripper the notification
+    // previews use.
+    const preview = plainText(text)
       .slice(0, ACTIVITY_TEXT_PREVIEW_LIMIT)
       .replace(/\s+\S*$/, "")
       .trim();
@@ -573,23 +578,28 @@ function FeedFilters({
         aria-label={`Filter the ${legend} by task id`}
         onChange={(e) => setParam(params.task, e.target.value)}
       />
-      <input
-        className="ff-date"
-        type="date"
-        value={get(params.from)}
-        aria-label={`From date for the ${legend}`}
-        onChange={(e) => setParam(params.from, e.target.value)}
-      />
+      {/* Pass 30: the app's ONE date-entry control (the task pages' custom
+          DatePicker) — the feeds were the only surface still shipping native
+          date inputs, a second visual idiom for the same act. */}
+      <span className="ff-datepick">
+        <DatePicker
+          value={get(params.from) || null}
+          placeholder="From"
+          ariaLabel={`From date for the ${legend}`}
+          onChange={(iso) => setParam(params.from, iso ?? "")}
+        />
+      </span>
       <span className="ff-dash" aria-hidden="true">
         to
       </span>
-      <input
-        className="ff-date"
-        type="date"
-        value={get(params.to)}
-        aria-label={`To date for the ${legend}`}
-        onChange={(e) => setParam(params.to, e.target.value)}
-      />
+      <span className="ff-datepick">
+        <DatePicker
+          value={get(params.to) || null}
+          placeholder="To"
+          ariaLabel={`To date for the ${legend}`}
+          onChange={(iso) => setParam(params.to, iso ?? "")}
+        />
+      </span>
       {active && (
         <button
           type="button"

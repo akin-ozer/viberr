@@ -142,12 +142,20 @@ describe("app.css custom properties (P13-D-18)", () => {
     // The panel that D-18 found rendering completely unstyled.
     // `.sched-controls select` used to be checked here too; P16-UI-05 folded it
     // into the one app-wide `select` rule, which the next test locks instead.
-    for (const selector of [".sched-row", ".sched-form", ".sched-note"]) {
+    // Pass 30 split the pin: .sched-note is a textarea, so its resting
+    // boundary is EXACTLY the 3:1 --border-control token (a 3-way alternation
+    // would let it silently fall back to the decorative 1.64:1 --border); the
+    // row/form frames stay decorative.
+    for (const [selector, borderRe] of [
+      [".sched-row", /border(-top)?:\s*1px solid var\(--(hairline|border)\)/],
+      [".sched-form", /border(-top)?:\s*1px solid var\(--(hairline|border)\)/],
+      [".sched-note", /border:\s*1px solid var\(--border-control\)/],
+    ] as const) {
       const rule = CODE.match(
         new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
       );
       expect(rule, `${selector} must have a rule`).toBeTruthy();
-      expect(rule![1]).toMatch(/border(-top)?:\s*1px solid var\(--(hairline|border)\)/);
+      expect(rule![1]).toMatch(borderRe);
     }
   });
 });
@@ -394,7 +402,9 @@ describe("app.css select treatment (P16-UI-05)", () => {
     // `selectStyle` in create-profile-modal.tsx whose comment said the design
     // system had no select rule.
     expect(base, "a base `select` rule must exist").toBeTruthy();
-    expect(base![1]).toMatch(/border:\s*1px solid var\(--border\)/);
+    // Pass 30: functional control boundaries moved to --border-control (the
+    // 3:1 non-text token); --border stays on decorative frames.
+    expect(base![1]).toMatch(/border:\s*1px solid var\(--border-control\)/);
     expect(base![1]).toMatch(/border-radius:\s*var\(--radius-button\)/);
     expect(base![1]).toMatch(/background:\s*var\(--surface\)/);
     expect(base![1]).toMatch(/color:\s*var\(--fg\)/);
@@ -404,7 +414,8 @@ describe("app.css select treatment (P16-UI-05)", () => {
     const focus = CODE.match(/(?:^|[};])\s*select:focus\s*\{([^}]*)\}/);
     expect(focus, "`select:focus` must exist").toBeTruthy();
     expect(focus![1]).toMatch(/border-color:\s*var\(--blue\)/);
-    expect(focus![1]).toMatch(/box-shadow:\s*0 0 0 3px color-mix\(/);
+    // Pass 30: the ring's wash is the named --focus-wash token.
+    expect(focus![1]).toMatch(/box-shadow:\s*0 0 0 3px var\(--focus-wash\)/);
   });
 
   it("leaves the remaining select rules as variants, not re-inventions", () => {
@@ -479,6 +490,21 @@ describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
     }
   });
 
+  it("holds 4.5:1 for --faint on the --blue-soft selection fill", () => {
+    // Pass 30: a selected decision-packet option (`.opt.sel`) paints
+    // --blue-soft under --faint text (`.opt .od`, `.opt .opt-kbd`). The R19-12
+    // sweep pairs text only with its own selector part's backdrop, so this
+    // sibling-state combination is invisible to it — and the dark pair clears
+    // AA by just 0.17, the thinnest real margin in the sheet. Enumerated here
+    // so the margin is guarded rather than commented.
+    for (const [theme, block] of [["light", LIGHT_ROOT], ["dark", DARK_ROOT]] as const) {
+      expect(
+        contrastRatio(tokenIn(block, "--faint"), tokenIn(block, "--blue-soft")),
+        `${theme} --faint on --blue-soft`,
+      ).toBeGreaterThanOrEqual(AA_SMALL_TEXT);
+    }
+  });
+
   it("the primary CTA and its hover clear 4.5:1 in both themes", () => {
     // The brand accent cannot carry text: white on light --blue is 3.84:1 and
     // on dark --blue 3.19:1, and `.btn.primary` is every primary CTA in the app
@@ -506,6 +532,20 @@ describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
       expect(
         contrastRatio(tokenIn(block, "--cta-bg"), tokenIn(block, "--surface")),
         `${theme} CTA background vs --surface`,
+      ).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("keeps the control-boundary token at 3:1 on the surface in both themes", () => {
+    // Pass 30: WCAG 1.4.11 splits borders into two tokens. --border (1.64:1)
+    // may divide content; --border-control is the RESTING boundary of inputs,
+    // selects, the toggle track and the search boxes — the only thing that
+    // identifies those controls — so it must clear 3:1 like the focus ring
+    // and the CTA boundary above.
+    for (const [theme, block] of [["light", LIGHT_ROOT], ["dark", DARK_ROOT]] as const) {
+      expect(
+        contrastRatio(tokenIn(block, "--border-control"), tokenIn(block, "--surface")),
+        `${theme} --border-control vs --surface`,
       ).toBeGreaterThanOrEqual(3);
     }
   });
@@ -752,9 +792,9 @@ describe("app.css search field vs palette trigger (P16-F6)", () => {
     // text. Filled = a control, plain well = a field, which is the distinction
     // the rest of the sheet already draws.
     expect(box![1]).toMatch(/background:\s*var\(--surface\)/);
-    expect(trigger![1]).toMatch(
-      /background:\s*color-mix\(in srgb, var\(--surface\), var\(--fg\) \d+%\)/,
-    );
+    // Pass 30: the fill comes from the neutral tint ladder (same composite the
+    // old surface+fg mix produced, spelled as the token).
+    expect(trigger![1]).toMatch(/background:\s*var\(--tint-(well|hover|press)\)/);
   });
 
   it("labels the trigger instead of faking a placeholder", () => {
@@ -797,6 +837,7 @@ const BREAKPOINTS = {
   "min-width: 900px": "the login page earns its brand aside (the one min-width)",
   "max-width: 760px": "topbar tier 2 — the middle crumb",
   "max-width: 720px": "MOBILE SHELL — the project rail becomes an overlay",
+  "max-width: 560px": "phone-width home rows — the pipeline meter yields",
 } satisfies Record<string, string>;
 
 describe("app.css breakpoints (P16-F8)", () => {
@@ -1186,7 +1227,7 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     expect(staticSites).toEqual([]);
   });
 
-  it("holds the line at 23 sites", () => {
+  it("holds the line at 24 sites", () => {
     // A ceiling, not a target. It exists because the previous pass moved the
     // `<select>` half of this finding and left the inline-style half, and
     // nothing noticed the count climbing back for three passes. Raised 20 → 22
@@ -1196,7 +1237,10 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     // this rule exempts. Raised 22 → 23 (pass 29) for the Backend-quota
     // utilization bar on the same dashboard: the same runtime-percentage
     // bar-fill width as its two Insights siblings, under the same exemption.
-    expect(sites.length).toBeLessThanOrEqual(23);
+    // Raised 23 → 24 (pass 30) for the board list row's read-only stage dot:
+    // the STAGE's own colour, the exact dynamic-value case already exempted
+    // for the task page's identical `.stage-static` dot.
+    expect(sites.length).toBeLessThanOrEqual(24);
   });
 });
 
@@ -1282,9 +1326,12 @@ describe("app.css owns the shared idioms — hoisting is not an escape hatch (F1
     // Delete these and the counts/notes lose their type scale and spacing with
     // nothing in the markup to fall back on.
     const fine = utilities.find((u) => u.selector === ".fine")!.decls;
-    expect(fine.get("font-size")).toBe(".76rem");
+    // Pass 30 snapped the whole sheet onto the 13-step type scale; .fine's
+    // step is .74rem (11.8px, a 0.3px move from the old .76).
+    expect(fine.get("font-size")).toBe(".74rem");
     expect(fine.get("color")).toBe("var(--faint)");
-    expect(CODE).toMatch(/\.pol-note\.after\s*\{[^}]*margin-top:\s*\.85rem/);
+    // .75rem since the pass-30 spacing snap (.85 was off-scale).
+    expect(CODE).toMatch(/\.pol-note\.after\s*\{[^}]*margin-top:\s*\.75rem/);
     expect(CODE).toMatch(/\.pol-note\.last\s*\{[^}]*margin-bottom:\s*0/);
   });
 
@@ -1414,7 +1461,10 @@ function cssRules(css: string, parent = "", at: string[] = []): CssRule[] {
       const colon = d.indexOf(":");
       if (colon < 0) continue;
       const prop = d.slice(0, colon).trim();
-      if (!/^[a-z-]+$/i.test(prop)) continue;
+      // Standard properties are letters/hyphens; custom properties may carry
+      // digits (a digit-bearing token used to be silently INVISIBLE to every
+      // gate built on this parser — found when --tint-1 resolved nowhere).
+      if (!/^[a-z-]+$/i.test(prop) && !/^--[\w-]+$/.test(prop)) continue;
       decls.set(prop, d.slice(colon + 1).trim());
     }
     if (decls.size) out.push({ selector, decls, at });
@@ -1578,11 +1628,21 @@ function paintMap(dark: boolean): Map<string, string> {
     const bg = rule.decls.get("background") ?? rule.decls.get("background-color");
     if (!bg) continue;
     for (const part of rule.selector.split(",")) {
+      // Test the RAW part for the dark scope BEFORE bareSelector strips the
+      // `:root` pseudo-class — the stripped key could never match, so the
+      // dark-override branch was dead and both theme sweeps measured e.g. the
+      // console against its LIGHT fill only.
+      const raw = part.trim();
+      if (raw.startsWith(DARK_SCOPE)) {
+        if (dark) {
+          const key = bareSelector(raw.slice(DARK_SCOPE.length));
+          if (key) scoped.set(key, bg);
+        }
+        continue;
+      }
       const key = bareSelector(part);
       if (!key) continue;
-      if (key.startsWith(DARK_SCOPE)) {
-        if (dark) scoped.set(key.slice(DARK_SCOPE.length), bg);
-      } else if (!paints.has(key)) paints.set(key, bg);
+      if (!paints.has(key)) paints.set(key, bg);
     }
   }
   return new Map([...paints, ...scoped]);
@@ -1641,51 +1701,19 @@ const BELOW_AA_BY_DESIGN = {
  * the themes each one fails in. This is a BASELINE, asserted as an exact SET:
  * adding a violation fails, and so does FIXING one without deleting its line
  * here, which is what keeps the list shrinking instead of becoming the
- * suppression file every such list becomes. `app/app.css` belongs to another
- * workstream this pass, so these are recorded rather than edited.
+ * suppression file every such list becomes.
+ *
+ * Pass 30 (the refactoring-ui design pass) fixed every recorded pair and the
+ * list is now EMPTY — the sweep enforces AA outright. For the record, the
+ * fixes were: .goal-edit-btn and .rq-row:hover .rq-go --blue -> --blue-pressed;
+ * .mx-scope --blue -> --blue-pressed on its wash; .rbac-no --ring ->
+ * --placeholder; .login-aside-mark #fff -> var(--surface) (flips with the
+ * theme); and the run-console dim ladder lifted in place (#4d566b -> #7c87a2,
+ * #6b7590 -> #8a95b1, #5f6a85 -> #828da9) keeping the terminal look and the
+ * ladder's brightness ordering.
  */
-const UNFIXED_BELOW_AA = {
-  ".goal-edit-btn": {
-    themes: ["light"],
-    why: "the board goal's `edit` control puts --blue on the page at .75rem — 3.84:1. --blue is the ACCENT token (borders, rings, washes); --blue-pressed (8.30:1) is the one that carries text, and 30 other rules already use it that way. Dark's lighter --blue clears the bar, so this is a light-theme-only fix.",
-  },
-  ".rq-row:hover .rq-go": {
-    themes: ["light"],
-    why: "the review queue row's `open` label turns --blue on hover at .78rem/700 — 3.84:1. The resting state (--muted, 6.87:1) is fine, so hovering a row makes its own call-to-action HARDER to read. Same fix: --blue-pressed.",
-  },
-  ".mx-scope": {
-    themes: ["light", "dark"],
-    why: "the capability-matrix scope chip is --blue text on a 12% --blue wash at .6rem/800 uppercase — 3.34:1 light, 4.45:1 dark. Small uppercase on a tint of its own colour is the least legible combination in the sheet.",
-  },
-  ".rbac-no": {
-    themes: ["light", "dark"],
-    why: "the RBAC matrix writes `—` in --ring for every action a role may NOT take: 1.30:1 light, 1.24:1 dark. The absence marker is invisible, so a denied cell reads as an empty cell — on the two surfaces (policy, profile) whose whole job is saying what you may and may not do.",
-  },
-  ".login-aside-mark": {
-    themes: ["dark"],
-    why: "the login brand mark is `#fff` on --teal-dark, which dark flips from #187574 to the LIGHT cyan #6ce4dc: white-on-cyan at 1.53:1. WCAG 1.4.3 exempts logotypes, so this is not an AA failure — it is a legibility one the token flip introduced, and exempting the element outright would teach the gate to ignore a whole element.",
-  },
-  ".log-line .lt": {
-    themes: ["light", "dark"],
-    why: "the run console's per-line timestamp, #4d566b on the console's fixed #0e1117 — 2.57:1, the worst text pair in the sheet. The console ladder was drawn to look like a terminal and never measured; its dim end is below AA in both themes because the surface does not change with the theme.",
-  },
-  ".log-line .ltag": {
-    themes: ["light", "dark"],
-    why: "the event-kind tag column of the run console, #6b7590 on #0e1117 — 4.11:1. Same fixed console fill, same unmeasured ladder.",
-  },
-  ".log-line.meta .ltag": {
-    themes: ["light", "dark"],
-    why: "the dimmest console tier, used for telemetry and history rows, #5f6a85 on #0e1117 — 3.50:1.",
-  },
-  ".log-line.meta .lx": {
-    themes: ["light", "dark"],
-    why: "the body half of the same dim console tier — 3.50:1, and this one carries the withheld-line sentence a reader has to act on.",
-  },
-  ".log-more-note": {
-    themes: ["light", "dark"],
-    why: "` · N earlier lines not loaded` next to the load-older button, #5f6a85 on #0e1117 — 3.50:1. It is the console's only statement about what the reader is NOT seeing, so dimness costs more here than anywhere else in the ladder.",
-  },
-} satisfies Record<string, { themes: readonly string[]; why: string }>;
+const UNFIXED_BELOW_AA: Record<string, { themes: readonly string[]; why: string }> =
+  {};
 
 /** `${theme} ${selector}` for every pair the baseline records. */
 const UNFIXED_KEYS = Object.entries(UNFIXED_BELOW_AA).flatMap(([selector, entry]) =>
@@ -2505,5 +2533,52 @@ describe("app.css field chrome covers every text-like input type (P21)", () => {
     // input in the app back to the body face.
     expect(fieldSelector).not.toContain(":not(");
     expect(CODE).toMatch(/\.field input\.mono\s*\{[^}]*font-family:\s*var\(--font-mono\)/);
+  });
+});
+
+/* --------------------------------------------------------- the type scale */
+
+describe("app.css type scale (pass 30)", () => {
+  // The whole sheet was snapped onto 13 hand-picked steps (documented at the
+  // token block). This is the lock that keeps the next `.73rem` from creeping
+  // back in: a new size is a deliberate widening of the scale, made here.
+  const TYPE_SCALE = [
+    ".62rem", ".68rem", ".74rem", ".8rem", ".86rem", ".92rem", ".98rem",
+    "1.05rem", "1.18rem", "1.3rem", "1.5rem", "1.7rem", "1.9rem",
+  ];
+
+  it("every font-size is a scale step (or the sanctioned 0/inherit)", () => {
+    const offScale = [...CODE.matchAll(/font-size:\s*([^;}]+)/g)]
+      .map((m) => m[1].trim())
+      .filter((v) => !TYPE_SCALE.includes(v) && v !== "0" && v !== "inherit");
+    expect([...new Set(offScale)].sort()).toEqual([]);
+  });
+
+  it("declares only weights the loaded fonts ship", () => {
+    // root.tsx loads Noto Sans 400/500/600/700, Manrope 500/600/700/800,
+    // JetBrains Mono 400/500/600. Declared weights above a family's ceiling
+    // silently render one step down (and flash heavier in font fallback), so
+    // the sheet declares only real ones; 800 is legal only where the display
+    // face applies. 900/650 are gone for good.
+    const weights = [...CODE.matchAll(/font-weight:\s*([^;}]+)/g)].map((m) => m[1].trim());
+    const allowed = new Set(["400", "500", "600", "700", "800", "inherit"]);
+    expect([...new Set(weights.filter((w) => !allowed.has(w)))]).toEqual([]);
+  });
+
+  it("scopes font-weight: 800 to rules that resolve the display face", () => {
+    // 800 exists only in Manrope. A body/mono-face rule declaring 800 silently
+    // clamps to 700/600 — the exact fiction the pass removed (and the
+    // drop-preview's visible mid-drag typeface swap). Each 800 rule must
+    // either declare the display family itself or select an h1-h4 element,
+    // which the global heading rule puts on the display face.
+    const offenders: string[] = [];
+    for (const rule of CODE.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const [, selector, body] = rule;
+      if (!/font-weight:\s*800\b/.test(body)) continue;
+      const declaresDisplay = /font-family:\s*var\(--font-display\)/.test(body);
+      const headingSelector = /(^|[\s.>+~])h[1-4]\b/.test(selector);
+      if (!declaresDisplay && !headingSelector) offenders.push(selector.trim());
+    }
+    expect(offenders).toEqual([]);
   });
 });

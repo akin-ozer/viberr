@@ -156,14 +156,16 @@ describe("UI-58: the list view has a keyboard move control", () => {
     expect(container.querySelector(".stage-menu-btn, button.stage-static, .own-btn")).toBeTruthy();
   });
 
-  it("falls back to a static pill for a viewer who cannot move tasks", () => {
+  it("falls back to the task page's read-only stage rendering (dot + name)", () => {
+    // Pass 30: same fact, same treatment — the read-only stage shows the
+    // stage-colored dot + name (`.stage-static`), not a bare neutral pill.
     const { container } = renderBoard([task()], {
       view: "list",
       canTransition: false,
     });
-    expect(container.querySelector(".pill.neutral.sm")!.textContent).toBe(
-      "In Progress",
-    );
+    const stage = container.querySelector(".stage-static")!;
+    expect(stage.textContent).toBe("In Progress");
+    expect(stage.querySelector(".col-stage-dot")).toBeTruthy();
   });
 });
 
@@ -678,9 +680,33 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     expect(hint.className).not.toContain("err");
   });
 
-  it("states the requirement once the field is left empty", () => {
+  it("keeps guidance neutral on an empty blur (showModal steals focus at open)", () => {
+    // dialog.showModal() moves focus right after the title's autoFocus, so an
+    // unconditional blur handler fired on FIRST PAINT and the footer opened
+    // red — the exact premature error this dialog exists to avoid. An empty
+    // blur therefore stays quiet; only real interaction may accuse.
     const { container } = openDialog();
     fireEvent.blur(container.querySelector("#new-task-title")!);
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("The task key is assigned automatically.");
+    expect(hint.className).not.toContain("err");
+  });
+
+  it("states the requirement on a submit attempt with no title", () => {
+    const { container } = openDialog();
+    fireEvent.keyDown(container.querySelector("#new-task-title")!, {
+      key: "Enter",
+    });
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("A title is required.");
+    expect(hint.className).toContain("err");
+  });
+
+  it("states the requirement when typed content is left behind", () => {
+    const { container } = openDialog();
+    const input = container.querySelector("#new-task-title")!;
+    fireEvent.change(input, { target: { value: "ab" } });
+    fireEvent.blur(input);
     const hint = container.querySelector(".foot-hint")!;
     expect(hint.textContent).toBe("A title is required.");
     expect(hint.className).toContain("err");
@@ -2062,5 +2088,60 @@ describe("D9: the board announces moves to a screen reader", () => {
         "Accepted VIB-1, moved to Done",
       ),
     );
+  });
+});
+
+describe("pass 30: the state-pill stack ranks instead of shouting", () => {
+  const stormy = () =>
+    task({
+      pr: { number: 124, state: "closed", title: "Attach a credential" },
+      prChecks: { total: 5, passing: 3, failing: 2, pending: 0, state: "failing" },
+      prReview: "changes_requested",
+      validation: "failing",
+      continuity: "degraded",
+    });
+
+  it("shows the two leading state pills and folds the rest into +N", () => {
+    const { container } = renderBoard([stormy()]);
+    const card = container.querySelector(".card")!;
+    const fold = [...card.querySelectorAll(".pill.neutral.sm")].find((p) =>
+      /^\+\d+$/.test(p.textContent ?? ""),
+    )!;
+    expect(fold).toBeTruthy();
+    expect(fold.textContent).toBe("+3");
+    // Every folded fact stays reachable — named in the title, one hover away
+    // (rulings 40/12/14: visible, not merely stored).
+    const title = fold.getAttribute("title")!;
+    expect(title).toContain("changes requested");
+    expect(title).toContain("validation failing");
+    expect(title).toContain("degraded continuity");
+  });
+
+  it("leaves a two-signal card unfolded", () => {
+    const { container } = renderBoard([
+      task({ validation: "failing", continuity: "degraded" }),
+    ]);
+    const card = container.querySelector(".card")!;
+    expect(
+      [...card.querySelectorAll(".pill")].some((p) =>
+        /^\+\d+$/.test(p.textContent ?? ""),
+      ),
+    ).toBe(false);
+    expect(card.textContent).toContain("validation failing");
+    expect(card.textContent).toContain("degraded continuity");
+  });
+});
+
+describe("pass 30: the virgin entry lane teaches with a CTA", () => {
+  it("renders New task under the teaching line when the board is empty", () => {
+    const { container } = renderBoard([]);
+    const cta = container.querySelector(".empty .empty-cta")!;
+    expect(cta).toBeTruthy();
+    expect(cta.textContent).toContain("New task");
+  });
+
+  it("keeps the CTA out of a filtered empty view", () => {
+    const { container } = renderBoard([task()], { search: "zzz-no-match" });
+    expect(container.querySelector(".empty .empty-cta")).toBeNull();
   });
 });

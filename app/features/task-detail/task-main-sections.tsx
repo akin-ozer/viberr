@@ -10,6 +10,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
 import { LocalDayDotTime } from "~/ui/local-time";
+import { Markdown } from "~/ui/markdown";
 import {
   ExecutionProfile,
   type DeployedSpecialistView,
@@ -264,8 +265,11 @@ export function TaskHero({
           </div>
         </goalFetcher.Form>
       ) : (
-        <p className="goal">
-          {task.goal}
+        <div className="goal md-body">
+          {/* Pass 30 (owner-approved): the goal renders as markdown like every
+              timeline comment — literal ** and backticks read as unfinished.
+              task.md on disk stays canonical; the editor still edits raw text. */}
+          <Markdown text={task.goal} />
           {canEditGoal && (
             <button
               type="button"
@@ -279,7 +283,7 @@ export function TaskHero({
               Edit
             </button>
           )}
-        </p>
+        </div>
       )}
     </div>
   );
@@ -416,8 +420,8 @@ export function ScheduledActions({
             placeholder="Why re-run later? (optional)"
             maxLength={140}
           />
-          {/* P13-D-19: `btn btn-primary` -> `btn primary` (see Save goal). */}
-          <button type="submit" className="btn primary" disabled={busy}>
+          {/* Pass 30: a routine starter, not the page's primary commit. */}
+          <button type="submit" className="btn" disabled={busy}>
             <Icon name="clock" /> Schedule operator re-run
           </button>
         </fetcher.Form>

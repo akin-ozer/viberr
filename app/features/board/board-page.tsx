@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
@@ -46,7 +47,7 @@ import { DatePicker } from "~/ui/date-picker";
 import { Icon, type IconName } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
 import { AgentGlyph } from "~/ui/identity";
-import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
+import { Pill, ReadinessPill, ValidationPill, validationLabel } from "~/ui/pill";
 import {
   DueDatePill,
   LabelChips,
@@ -275,65 +276,97 @@ function StateSignals({ task }: { task: BoardTask }) {
   // card top, whose value IS the terminal status.
   const terminal =
     task.displayReadiness === "accepted" || task.displayReadiness === "merged";
+  // Pass 30 (audit: "worst-case card stacks ~8 equal-weight pills"): the five
+  // STATE pills below keep their individually-ruled gates, but at most
+  // STATE_PILL_CAP render full-strength; the rest fold into one neutral "+N"
+  // whose title lists them (the exact LabelChips pattern, task-meta.tsx).
+  // Every fact stays visible — on hover here, in full on the task page —
+  // which is what rulings 40/12/14 require; what changes is that five
+  // near-identical coral chips no longer compete as equals. The quiet/wait
+  // tags stay outside the fold: they are the card's status line, not the
+  // red stack.
+  const statePills: { key: string; label: string; node: ReactNode }[] = [];
+  // R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
+  // full-autonomy task reaches the done stage with its PR still open —
+  // `pr.state: "accepted"` is exactly "a human accepted the completion but the
+  // real merge is still pending". The closed case is the same omission from
+  // the other side (live finding H10). Both earn a pill under this block's
+  // density rule (only ACTIONABLE state); `merged` and `review` stay silent —
+  // the readiness pill and the PR chip already carry those. The vocabulary
+  // comes from `prStatePill`, the one PR-state → pill mapping the GitHub view
+  // and the task branch panel already read.
+  if (task.pr?.state === "accepted" || task.pr?.state === "closed") {
+    const p = prStatePill(task.pr.state);
+    statePills.push({
+      key: "pr",
+      label: p.label,
+      node: (
+        <Pill kind={p.kind} sm>
+          {p.label}
+        </Pill>
+      ),
+    });
+  }
+  // P13-D-28: CI health, but only when it is ACTIONABLE — a failing build on a
+  // task sitting in Review is news; "N checks passing" is not.
+  if (task.prChecks?.state === "failing") {
+    const p = checksPill(task.prChecks);
+    statePills.push({
+      key: "checks",
+      label: p.label,
+      node: (
+        <Pill kind={p.kind} sm>
+          {p.label}
+        </Pill>
+      ),
+    });
+  }
+  // Same rule for GitHub's own review state — a teammate asking for changes on
+  // the PR is the case a supervisor needs off the board.
+  if (task.prReview === "changes_requested") {
+    const p = reviewPill(task.prReview);
+    statePills.push({
+      key: "review",
+      label: p.label,
+      node: (
+        <Pill kind={p.kind} sm>
+          {p.label}
+        </Pill>
+      ),
+    });
+  }
+  // P13-D-6 (FR24): validation renders (the "Blocked or waiting" filter
+  // matches on it); "none" stays silent; C2: withdrawn once terminal.
+  if (!terminal && task.validation !== "none") {
+    statePills.push({
+      key: "validation",
+      label: validationLabel(task.validation),
+      node: <ValidationPill value={task.validation} sm />,
+    });
+  }
+  // D4: the continuity cue sits with the other supervision signals.
+  if (task.continuity === "degraded") {
+    statePills.push({
+      key: "continuity",
+      label: "degraded continuity",
+      node: <ContinuityTag task={task} />,
+    });
+  }
+  const shown = statePills.slice(0, STATE_PILL_CAP);
+  const folded = statePills.slice(STATE_PILL_CAP);
   return (
     <>
-      {/* R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
-          full-autonomy task reaches the done stage with its PR still open —
-          `pr.state: "accepted"` is exactly "a human accepted the completion
-          but the real merge is still pending". The card drew that as the
-          green "accepted" readiness pill and a stateless "#124" chip, which
-          is what a merged task looks like too. Done meant two things and the
-          card showed one.
-
-          The closed case is the same omission from the other side (live
-          finding H10): closing PR #124 unmerged produced a decision packet,
-          a "PR closed" badge and a divergence notification on the DETAIL
-          page, while the card still read "ready · awaiting verdict".
-
-          Both earn a pill under this block's density rule (only ACTIONABLE
-          state, per the checks/review pills below): each names work that
-          cannot finish without a human. `merged` and `review` stay silent —
-          the readiness pill and the PR chip already carry those.
-
-          The vocabulary comes from `prStatePill`, the one PR-state → pill
-          mapping the GitHub view and the task branch panel already read.
-          Restating it here is how "merge pending" would come to mean one
-          thing on the card and another two screens away. */}
-      {(task.pr?.state === "accepted" || task.pr?.state === "closed") && (
-        <Pill kind={prStatePill(task.pr.state).kind} sm>
-          {prStatePill(task.pr.state).label}
-        </Pill>
+      {shown.map((p) => (
+        <Fragment key={p.key}>{p.node}</Fragment>
+      ))}
+      {folded.length > 0 && (
+        <span
+          className="pill neutral sm"
+          title={folded.map((p) => p.label).join(" · ")}
+        >
+          +{folded.length}
+        </span>
       )}
-      {/* P13-D-28: CI health, but only when it is ACTIONABLE. The card is
-          already dense and "N checks passing" is not news; a failing build
-          on a task sitting in Review is. The full passing/running/failing
-          set renders on the task page and the GitHub view. */}
-      {task.prChecks?.state === "failing" && (
-        <Pill kind={checksPill(task.prChecks).kind} sm>
-          {checksPill(task.prChecks).label}
-        </Pill>
-      )}
-      {/* Same rule for GitHub's own review state — a teammate asking for
-          changes on the PR is the case a supervisor needs off the board. */}
-      {task.prReview === "changes_requested" && (
-        <Pill kind={reviewPill(task.prReview).kind} sm>
-          {reviewPill(task.prReview).label}
-        </Pill>
-      )}
-      {/* P13-D-6 (FR24): the card drew stage, agent and waiting state but
-          NOT validation — while the "Blocked or waiting" filter matched on it.
-          A reviewer's request_changes sets validation:"failing" and the card
-          was pixel-identical to a healthy one. Deliberate departure from the
-          HTML mock (design/html-app/app/board.jsx), which omits it too.
-          "none" stays silent so the card keeps its density; placement
-          mirrors the review queue's `.rq-meta` (PR → validation → wait).
-          C2: withdrawn once the task is terminal — see `terminal` above. */}
-      {!terminal && task.validation !== "none" && (
-        <ValidationPill value={task.validation} sm />
-      )}
-      {/* D4: the continuity cue sits with the other supervision signals, before
-          the quiet/wait tags. Same component the list row shares (below). */}
-      <ContinuityTag task={task} />
       {/* Gap-10: the quiet cue sits after validation and before the wait tag,
           the order both board views share. */}
       <QuietTag task={task} />
@@ -508,9 +541,11 @@ function TaskCard({
       Feedback.configure({ feedback: "clone" }),
     ],
   });
+  // Pass 30: the wait-human/urgent class pushes are gone — ruling 16 removed
+  // the card-level accent layer and no rule has styled either class since
+  // (the P16-UI-04 comment in app.css records the removal). The facts render
+  // as the wait tag and the priority flag.
   const cls = ["card"];
-  if (task.waiting === "human" && !archived) cls.push("wait-human");
-  if (task.urgent && !archived) cls.push("urgent");
   const wrapCls = ["card-wrap"];
   if (canTransition && !archived) wrapCls.push("draggable");
   if (isDragSource) wrapCls.push("dragging");
@@ -637,6 +672,7 @@ function Column({
   isDone,
   isEntry,
   canCreate,
+  createCta,
   canTransition,
   onNew,
   arrivedKey,
@@ -661,6 +697,8 @@ function Column({
   /** R19-14: first stage — the only lane allowed to offer task creation. */
   isEntry: boolean;
   canCreate: boolean;
+  /** Pass 30: the virgin-board teaching CTA in the entry lane. */
+  createCta: boolean;
   canTransition: boolean;
   onNew: () => void;
   arrivedKey: string | null;
@@ -729,7 +767,27 @@ function Column({
         tabIndex={tasks.length > 0 ? 0 : undefined}
       >
         {tasks.length === 0 ? (
-          showPreview ? preview : <div className="empty">{emptyCopy}</div>
+          showPreview ? (
+            preview
+          ) : (
+            <div className="empty">
+              {emptyCopy}
+              {/* Pass 30: the teaching moment gets its call to action IN the
+                  empty lane (diagnose: headline + emphasized CTA), not only up
+                  in the header. Virgin boards only — a busy board already has
+                  two create affordances. */}
+              {createCta && isEntry && canCreate && (
+                <button
+                  type="button"
+                  className="btn primary sm empty-cta"
+                  onClick={onNew}
+                >
+                  <Icon name="plus" />
+                  New task
+                </button>
+              )}
+            </div>
+          )
         ) : (
           <>
             {tasks.map((t, i) => (
@@ -807,10 +865,30 @@ function ListRow({
           onSelect={(stageId) => onMoveTask(task.key, stageId)}
         />
       ) : (
-        <span className="pill neutral sm">{stageName}</span>
+        // Same read-only rendering the task page uses (stage-colored dot +
+        // name), not a bare neutral pill — one fact, one treatment.
+        <span className="stage-static">
+          <span
+            className="col-stage-dot sm"
+            style={{
+              background: stages.find((s) => s.id === task.stage)?.color,
+            }}
+          />
+          {stageName}
+        </span>
       )}
       <OwnerLine task={task} />
       <ReviewerStack task={task} label />
+      {/* F19-13's own rule, finished: the list used to silently drop the
+          priority/labels/due-date trio the stage layout draws — an `urgent` +
+          `overdue` task showed zero urgency cue one toggle away. */}
+      {!archived && hasVisibleMeta(task) && (
+        <span className="card-meta">
+          <PriorityFlag priority={task.priority} sm />
+          <LabelChips labels={task.labels} max={2} />
+          <DueDatePill dueDate={task.dueDate} sm />
+        </span>
+      )}
       {/* F15-09: same duplicate as the card — the row's own WaitTag
           below already says "agent working". F19-8: and the same
           readiness → "archived" swap the card makes. R21-8: and the same
@@ -1121,7 +1199,15 @@ function NewTaskModal({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => setTitleTouched(true)}
+            // Empty-blur stays quiet: dialog.showModal() steals focus right
+            // after autoFocus, so an unconditional blur handler marked the
+            // field touched on FIRST PAINT and the footer opened red (the
+            // exact premature-error this state exists to prevent). A person
+            // who typed something and left the field still gets the check;
+            // submit() flags it regardless.
+            onBlur={(e) => {
+              if (e.target.value.trim() !== "") setTitleTouched(true);
+            }}
             placeholder="e.g. Reconcile PR state after force-push"
             autoFocus
             onKeyDown={(e) => {
@@ -1235,6 +1321,12 @@ function NewTaskModal({
 }
 
 /* ---------- Board ---------- */
+
+/** Visible label filter chips before the "+N more" overflow chip. */
+const LABEL_CHIP_CAP = 6;
+
+/** Full-strength state pills on one card before the "+N" fold (pass 30). */
+const STATE_PILL_CAP = 2;
 
 const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "all", label: "All tasks", icon: "board" },
@@ -1404,6 +1496,18 @@ function FilterBar({
   setParam: (key: string, value: string | null) => void;
   onClear: () => void;
 }) {
+  // Label-chip overflow: active label first, then the vocabulary order.
+  const [labelsExpanded, setLabelsExpanded] = useState(false);
+  const orderedLabels = labelFilter
+    ? [
+        ...projectLabels.filter(
+          (l) => l.toLowerCase() === labelFilter.toLowerCase(),
+        ),
+        ...projectLabels.filter(
+          (l) => l.toLowerCase() !== labelFilter.toLowerCase(),
+        ),
+      ]
+    : projectLabels;
   return (
     <div className="filter-bar">
       {FILTERS.filter(
@@ -1445,7 +1549,14 @@ function FilterBar({
           narrows the board to its tasks; clicking the active one clears it. They
           AND with the readiness chips and the term, and only render when the
           project has labels — a board that never tagged anything stays clean. */}
-      {projectLabels.map((l) => {
+      {/* Cap the visible label chips (active-first) — a many-label project
+          pushed the search input down several wrapped rows. The overflow
+          stays reachable: expand in place, and the search box already
+          matches labels. Mirrors the card's own LabelChips "+N" rule. */}
+      {(labelsExpanded
+        ? orderedLabels
+        : orderedLabels.slice(0, LABEL_CHIP_CAP)
+      ).map((l) => {
         const active = labelFilter?.toLowerCase() === l.toLowerCase();
         return (
           <button
@@ -1460,6 +1571,23 @@ function FilterBar({
           </button>
         );
       })}
+      {orderedLabels.length > LABEL_CHIP_CAP && (
+        <button
+          type="button"
+          className="fchip lbl"
+          aria-expanded={labelsExpanded}
+          onClick={() => setLabelsExpanded((v) => !v)}
+          title={
+            labelsExpanded
+              ? "Collapse the label list"
+              : `Show all ${orderedLabels.length} labels`
+          }
+        >
+          {labelsExpanded
+            ? "fewer labels"
+            : `+${orderedLabels.length - LABEL_CHIP_CAP} more`}
+        </button>
+      )}
       <label className="board-filter-input">
         <Icon name="filter" />
         <input
@@ -1519,6 +1647,7 @@ function StageBoard({
   visible,
   doneStageId,
   canCreate,
+  createCta,
   canTransition,
   onNew,
   drag,
@@ -1541,6 +1670,8 @@ function StageBoard({
   emptyCopyFor: (total: number, isEntryColumn?: boolean) => string;
   doneStageId: string | undefined;
   canCreate: boolean;
+  /** Pass 30: virgin-board teaching CTA in the entry lane. */
+  createCta: boolean;
   canTransition: boolean;
   /** R19-14: creation lands at the entry stage, so no stage argument here. */
   onNew: () => void;
@@ -1591,6 +1722,7 @@ function StageBoard({
             isDone={c.stage.id === doneStageId}
             isEntry={columnIndex === 0}
             canCreate={canCreate}
+            createCta={createCta}
             canTransition={canTransition}
             onNew={onNew}
             arrivedKey={arrivedKey}
@@ -2164,18 +2296,27 @@ export function BoardPage({
         }}
       />
 
-      <FilterBar
-        filter={filter}
-        query={query}
-        labelFilter={labelFilter}
-        projectLabels={labelSuggestions}
-        waitingOnMe={waitingOnMe}
-        quiet={quietCount}
-        continuity={continuityCount}
-        archived={archivedCount}
-        setParam={setParam}
-        onClear={clearFilters}
-      />
+      {/* A brand-new board has nothing to filter or search — the machinery
+          renders once there is anything for it to act on (the Archived chip is
+          the only road back, so any archived count keeps the bar). */}
+      {(allTasks.length > 0 ||
+        archivedCount > 0 ||
+        filter !== "all" ||
+        query !== "" ||
+        labelFilter != null) && (
+        <FilterBar
+          filter={filter}
+          query={query}
+          labelFilter={labelFilter}
+          projectLabels={labelSuggestions}
+          waitingOnMe={waitingOnMe}
+          quiet={quietCount}
+          continuity={continuityCount}
+          archived={archivedCount}
+          setParam={setParam}
+          onClear={clearFilters}
+        />
+      )}
 
       {filter === "archived" && (
         <div className="board-orphans" role="status">
@@ -2205,6 +2346,12 @@ export function BoardPage({
             emptyCopyFor={emptyCopyFor}
             doneStageId={doneStageId}
             canCreate={canCreate}
+            createCta={
+              liveTasks.length === 0 &&
+              filter === "all" &&
+              query === "" &&
+              labelFilter == null
+            }
             canTransition={canTransition}
             onNew={() => setCreating(true)}
             drag={drag}

@@ -35,6 +35,9 @@ const VISIBLE: CSSProperties = {
   font: "inherit",
   fontWeight: 700,
   textDecoration: "none",
+  // The element is itself a focus indicator (border, surface, position); the
+  // app-wide :focus-visible ring would stack a second concentric blue ring.
+  outline: "none",
 };
 
 export function SkipLink({

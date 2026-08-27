@@ -234,13 +234,19 @@ function AuditBrowse({ events }: { events: AuditBrowseRow[] }) {
               <span className="audit-when">
                 <LocalDayDotTime iso={e.occurredAt} />
               </span>
-              <span className="audit-actor">{e.actorLabel}</span>
-              <span className="audit-action">{e.action}</span>
+              {/* Truncated cells carry their full value in `title` — a clipped
+                  email/id was unrecoverable by hover before. */}
+              <span className="audit-actor" title={e.actorLabel}>{e.actorLabel}</span>
+              <span className="audit-action" title={e.action}>{e.action}</span>
               <span className="audit-scope">
                 <span className={e.projectSlug ? "audit-scope-tag" : "audit-scope-tag org"}>
                   {e.projectSlug ?? "org"}
                 </span>
-                {e.subjectId ? <span className="audit-subject">{e.subjectId}</span> : null}
+                {e.subjectId ? (
+                  <span className="audit-subject" title={e.subjectId}>
+                    {e.subjectId}
+                  </span>
+                ) : null}
               </span>
             </li>
           ))}

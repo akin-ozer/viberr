@@ -207,6 +207,11 @@ export function HomeHero({
           )}
         </p>
       </div>
+      {/* Zero projects: EmptyHero below carries the page's single primary CTA;
+          a second identical "New project" up here plus a view toggle over a
+          grid that does not exist read as chrome for content that is not
+          there. */}
+      {projectCount > 0 && (
       <div className="hero-actions">
         {/* UI-13: selection was conveyed by the `on` class alone — invisible to
             assistive tech. `aria-pressed` carries it now. */}
@@ -235,6 +240,7 @@ export function HomeHero({
           New project
         </button>
       </div>
+      )}
     </div>
   );
 }
@@ -653,7 +659,10 @@ export function RebuildConfirm({
         <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
-        <button type="button" className="btn primary" onClick={onConfirm}>
+        {/* The trigger is tertiary-destructive; inside the confirmation the
+            commit IS the primary action, so it carries the danger tone here —
+            not out on the page (skill: destructive placement). */}
+        <button type="button" className="btn danger" onClick={onConfirm}>
           Rebuild projections
         </button>
       </div>

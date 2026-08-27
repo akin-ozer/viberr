@@ -290,13 +290,6 @@ function ProviderButtons({
             ? undefined
             : "GitHub OAuth isn't configured on this deployment"
         }
-        style={
-          !providers.github
-            ? { opacity: 0.55, cursor: "not-allowed" }
-            : busy === "github"
-              ? { opacity: 0.7, pointerEvents: "none" }
-              : undefined
-        }
       >
         <Icon
           name={busy === "github" ? "refresh" : "github"}
@@ -318,13 +311,6 @@ function ProviderButtons({
           providers.google
             ? undefined
             : "Google OAuth isn't configured on this deployment"
-        }
-        style={
-          !providers.google
-            ? { opacity: 0.55, cursor: "not-allowed" }
-            : busy === "google"
-              ? { opacity: 0.7, pointerEvents: "none" }
-              : undefined
         }
       >
         {busy === "google" ? (
@@ -538,7 +524,6 @@ export default function Login({
               type="password"
               autoComplete="current-password"
               value={pw}
-              placeholder="••••"
               onChange={(e) => {
                 setPw(e.target.value);
                 setClientErr(null);
@@ -556,11 +541,6 @@ export default function Login({
             className="btn primary provider"
             type="submit"
             aria-busy={busy === "local" || undefined}
-            style={
-              busy === "local"
-                ? { opacity: 0.7, pointerEvents: "none" }
-                : undefined
-            }
           >
             {busy === "local" ? "Signing in…" : "Sign in"}
           </button>
