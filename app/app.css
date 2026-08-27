@@ -60,8 +60,12 @@
   --rose-light: #ffd8f4;
   --teal-light: #c3faf5;
   --teal-dark: #187574;
-  --orange-light: #ffe6cd;
-  --yellow-dark: #746019;
+  /* ONE amber pair (was --orange-light + --yellow-dark, a de-facto pair named
+     across two hue families that invited a wrong partner). Note: --red-light
+     and --coral-light both pair with --coral-dark and converge in dark —
+     documented as the pastel-pairs-invert-together convention, not a bug. */
+  --amber-light: #ffe6cd;
+  --amber-dark: #746019;
   --red-light: #fbd4d4;
 
   /* agent identity tint — violet, distinct from human blue */
@@ -660,7 +664,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .pill .pdot { width: .42rem; height: .42rem; border-radius: 50%; background: currentColor; }
 .pill.ready   { background: var(--teal-light); color: var(--teal-dark); }
-.pill.input   { background: var(--orange-light); color: var(--yellow-dark); }
+.pill.input   { background: var(--amber-light); color: var(--amber-dark); }
 .pill.risk    { background: var(--rose-light); color: var(--coral-dark); }
 .pill.blocked { background: var(--red-light); color: var(--coral-dark); }
 .pill.info    { background: var(--blue-soft); color: var(--blue-pressed); }
@@ -1323,7 +1327,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    tags (options); everything else is one left-aligned column. */
 .packet {
   border: 1px solid var(--hairline);
-  border-left: 3px solid color-mix(in srgb, var(--yellow-dark), transparent 30%);
+  border-left: 3px solid color-mix(in srgb, var(--amber-dark), transparent 30%);
   border-radius: var(--radius-panel);
   background: var(--surface);
   overflow: hidden;
@@ -1443,10 +1447,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    stuck and nothing was violated; context was lost and recovered, and the spec
    requires warning and failure to stay distinguishable. */
 .continuity-panel {
-  border-color: color-mix(in srgb, var(--yellow-dark), transparent 62%);
-  background: linear-gradient(color-mix(in srgb, var(--orange-light), transparent 72%), var(--surface) 60%);
+  border-color: color-mix(in srgb, var(--amber-dark), transparent 62%);
+  background: linear-gradient(color-mix(in srgb, var(--amber-light), transparent 72%), var(--surface) 60%);
 }
-.continuity-panel .panel-head .ico { color: var(--yellow-dark); }
+.continuity-panel .panel-head .ico { color: var(--amber-dark); }
 .continuity-panel .hint { margin-top: .75rem; }
 /* The announcement node: reachable by a screen reader, out of the layout for
    everyone else. Same technique as `.mention-vh`, kept separate because that
@@ -1599,7 +1603,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .tl-node.transition { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .tl-node.blocked { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .tl-node.completion { background: var(--success-soft); color: var(--success-dark); border-color: color-mix(in srgb, var(--success), transparent 70%); }
-.tl-node.policy { background: var(--orange-light); color: var(--yellow-dark); border-color: color-mix(in srgb, var(--yellow-dark), transparent 72%); }
+.tl-node.policy { background: var(--amber-light); color: var(--amber-dark); border-color: color-mix(in srgb, var(--amber-dark), transparent 72%); }
 /* neutral lifecycle note (goal edits, divergence, scheduling) — deliberately
    quiet: the alarming orange stays reserved for real policy violations. */
 .tl-node.note { background: var(--surface); color: var(--muted); border-color: var(--hairline); }
@@ -1955,9 +1959,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   font-family: var(--font-body);
   font-size: .68rem; font-weight: 700; letter-spacing: .05em;
   text-transform: uppercase;
-  color: var(--yellow-dark);
-  background: var(--orange-light);
-  border: 1px solid color-mix(in srgb, var(--yellow-dark), transparent 68%);
+  color: var(--amber-dark);
+  background: var(--amber-light);
+  border: 1px solid color-mix(in srgb, var(--amber-dark), transparent 68%);
   border-radius: var(--radius-chip); padding: .125rem .375rem;
   cursor: help;
 }
@@ -2176,7 +2180,7 @@ dialog[data-closing]::backdrop {
 .fhint { font-size: .74rem; color: var(--faint); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: .5rem; }
 /* Q26-3: a warn-toned field hint (the same caution colour the timeline/pills use)
    — e.g. the new-project key already belongs to another project. */
-.fhint.warn { color: var(--yellow-dark); }
+.fhint.warn { color: var(--amber-dark); }
 /* Typing fields opt in per TYPE (checkboxes and file pickers keep native
    chrome), so this list must name every text-like type the markup uses — pass
    20 flipped the login email to type="email" and the field silently fell back
@@ -2208,9 +2212,9 @@ dialog[data-closing]::backdrop {
    profile still references) — amber so it reads as broken, and still clickable
    to remove the dangling grant. */
 .pick-chip.missing, .pick-chip.missing.on {
-  border-color: color-mix(in srgb, var(--yellow-dark), transparent 55%);
-  background: color-mix(in srgb, var(--yellow-dark), transparent 90%);
-  color: var(--yellow-dark);
+  border-color: color-mix(in srgb, var(--amber-dark), transparent 55%);
+  background: color-mix(in srgb, var(--amber-dark), transparent 90%);
+  color: var(--amber-dark);
 }
 .pick-chip .sdot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--placeholder); flex: none; }
 .pick-chip.mono { font-family: var(--font-mono); font-weight: 500; font-size: .8rem; }
@@ -2531,9 +2535,9 @@ dialog[data-closing]::backdrop {
   display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
   margin-top: .75rem; padding: .5rem .75rem;
   border-radius: var(--radius-box);
-  border: 1px solid color-mix(in srgb, var(--yellow-dark), transparent 72%);
-  background: color-mix(in srgb, var(--orange-light), var(--surface) 45%);
-  font-size: .8rem; color: var(--yellow-dark); line-height: 1.4;
+  border: 1px solid color-mix(in srgb, var(--amber-dark), transparent 72%);
+  background: color-mix(in srgb, var(--amber-light), var(--surface) 45%);
+  font-size: .8rem; color: var(--amber-dark); line-height: 1.4;
 }
 .cred-warn .ico { width: 14px; height: 14px; flex: none; }
 
@@ -2542,9 +2546,9 @@ dialog[data-closing]::backdrop {
 .archived-banner {
   display: flex; align-items: center; gap: .5rem;
   padding: .5rem 1.5rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--yellow-dark), transparent 72%);
-  background: color-mix(in srgb, var(--orange-light), var(--surface) 40%);
-  font-size: .8rem; color: var(--yellow-dark); line-height: 1.4;
+  border-bottom: 1px solid color-mix(in srgb, var(--amber-dark), transparent 72%);
+  background: color-mix(in srgb, var(--amber-light), var(--surface) 40%);
+  font-size: .8rem; color: var(--amber-dark); line-height: 1.4;
 }
 .archived-banner .ico { width: 15px; height: 15px; flex: none; }
 .archived-banner strong { color: var(--fg); }
@@ -2585,7 +2589,7 @@ dialog[data-closing]::backdrop {
   background: var(--surface); border: 1px solid var(--hairline); color: var(--muted);
 }
 .pev-ico .ico { width: 13px; height: 13px; }
-.pev-ico.violation { background: var(--orange-light); color: var(--yellow-dark); border-color: color-mix(in srgb, var(--yellow-dark), transparent 72%); }
+.pev-ico.violation { background: var(--amber-light); color: var(--amber-dark); border-color: color-mix(in srgb, var(--amber-dark), transparent 72%); }
 .pev-ico.blockedact { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .pev-ico.change { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.audit { background: color-mix(in srgb, var(--fg), transparent 96%); color: var(--muted); }
@@ -2620,7 +2624,7 @@ dialog[data-closing]::backdrop {
 .pev-ico.act-comment { background: color-mix(in srgb, var(--fg), transparent 96%); color: var(--muted); }
 .pev-ico.act-completion { background: var(--teal-light); color: var(--teal-dark); border-color: color-mix(in srgb, var(--teal-dark), transparent 78%); }
 .pev-ico.act-github { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--fg); }
-.pev-ico.act-policy { background: var(--orange-light); color: var(--yellow-dark); border-color: color-mix(in srgb, var(--yellow-dark), transparent 72%); }
+.pev-ico.act-policy { background: var(--amber-light); color: var(--amber-dark); border-color: color-mix(in srgb, var(--amber-dark), transparent 72%); }
 /* P14-UI-62: `note` is the NEUTRAL half of what `policy` used to carry, so it
    takes the quiet comment tint — the whole point of the split is that a goal
    edit must not look like a governance violation. `assign` was missing for the
@@ -2630,7 +2634,7 @@ dialog[data-closing]::backdrop {
 .pev-ico.act-assign { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-quality { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
 /* G8: continuity reset — amber warning tone (context lost + recovered). */
-.pev-ico.act-continuity { background: var(--orange-light); color: var(--yellow-dark); border-color: color-mix(in srgb, var(--yellow-dark), transparent 72%); }
+.pev-ico.act-continuity { background: var(--amber-light); color: var(--amber-dark); border-color: color-mix(in srgb, var(--amber-dark), transparent 72%); }
 .pev-ico.act-transition { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-blocked { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .pev-ico.act-agent { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
@@ -2908,8 +2912,8 @@ dialog[data-closing]::backdrop {
   --rose-light: #4a2140;
   --teal-light: #123f3d;
   --teal-dark: #6ce4dc;
-  --orange-light: #45311a;
-  --yellow-dark: #eccd72;
+  --amber-light: #45311a;
+  --amber-dark: #eccd72;
   --red-light: #47211f;
 
   --agent: #957fff;
@@ -3863,6 +3867,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   flex-wrap: wrap;
 }
 .store-strip .sub { font-family: var(--font-mono); }
+/* The explanatory sentence flexes beside its icon instead of wrapping the
+   icon onto a lonely row of its own. */
+.store-strip > span:first-of-type { flex: 1 1 30ch; min-width: 0; }
 .store-strip .ico { width: 14px; height: 14px; color: var(--placeholder); }
 .store-strip .path { color: var(--muted); }
 /* P16-UI-27: this was `.store-strip .btn { margin-left: auto }` — a DESCENDANT
@@ -4039,7 +4046,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .stat-dot.up { background: var(--success); }
 /* Last health check passed but is old — amber, so a stale check never reads as
    "healthy now" (a stdio MCP is only re-checked on save/test). */
-.stat-dot.stale { background: var(--yellow-dark); }
+.stat-dot.stale { background: var(--amber-dark); }
 
 @media (max-width: 1000px) {
   .set-layout { grid-template-columns: 1fr; }
@@ -4388,8 +4395,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* PG26-A: in-app audit browse (recent events + filter, above the export controls). */
 .audit-browse { margin: .5rem 0 1rem; }
 .audit-browse-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+/* --radius-button, NOT --radius-chip: the chip token (999px) on a scrolling
+   list clipped the first and last rows inside giant corner arcs (matches
+   .mx-scroll/.rbac-table, the other bordered scroll boxes). */
 .audit-list { list-style: none; margin: 0; padding: 0; max-height: 15rem; overflow-y: auto;
-  border: 1px solid var(--hairline); border-radius: var(--radius-chip); }
+  border: 1px solid var(--hairline); border-radius: var(--radius-button); }
 .audit-row { display: grid; grid-template-columns: 8.5rem 9rem 1fr auto; gap: .5rem; align-items: baseline;
   padding: .375rem .5rem; border-bottom: 1px solid var(--hairline); font-size: .8rem; }
 .audit-row:last-child { border-bottom: 0; }
@@ -4549,7 +4559,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
      the half of D2 U7 reopened. Nothing here may reintroduce `order`: it would
      re-split what the eye and the focus ring see. */
   .detail-main,
-  .detail-side { grid-column: 1; grid-row: auto; }
+  .detail-side { grid-column: 1; grid-row: auto; min-width: 0; }
   .detail-side { flex-direction: row; flex-wrap: wrap; }
   /* Pass 30 (390px audit): min-width alone let a panel's min-content —
      nowrap mono ids and commit titles — force it wider than the viewport,
