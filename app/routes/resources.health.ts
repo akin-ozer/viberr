@@ -8,6 +8,7 @@ import { getBuildInfo } from "~/server/ops/build-info.server";
 import { cachedDataRootSpace } from "~/server/ops/disk-space.server";
 import { maintenanceState } from "~/server/ops/maintenance.server";
 import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
+import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.server";
 
 /**
  * GET /resources/health — ops probe (Phase 10, docs/architecture/decisions.md route map).
@@ -118,6 +119,18 @@ export async function loader(args?: { request?: Request }) {
           claude: isBackendAvailable("claude") ? "real" : "unavailable",
           codex: isBackendAvailable("codex") ? "real" : "unavailable",
         },
+        // Whether the `use-browser` capability's runtime (chromium + the
+        // Playwright MCP CLI) is actually installed. Informational, NOT a
+        // `degraded` fault — same stance as `backends`: a deployment that never
+        // grants the browser is correct, but when chromium is missing this now
+        // says so BEFORE a browser-granted run is spent, instead of the run
+        // failing deep inside its first tool call (the ex-invisible gap).
+        browser: (() => {
+          const b = browserRuntimeStatus();
+          return b.available
+            ? ({ status: "ready" as const } as const)
+            : ({ status: "unavailable" as const, reason: b.reason } as const);
+        })(),
         // Free space on the data root, with the thresholds in force. null when
         // the filesystem could not be measured — never a fabricated 0.
         disk,

@@ -87,6 +87,41 @@ function playwrightMcpCliPath(): string | null {
   }
 }
 
+export interface BrowserRuntimeStatus {
+  available: boolean;
+  /** Present only when unavailable — the human-readable reason. */
+  reason?: string;
+}
+
+/**
+ * Is the browser capability's RUNTIME actually installed in this deployment?
+ * Instance-level and capability-agnostic: the `@playwright/mcp` CLI must be on
+ * disk, and IF a browser executable is pinned it must exist too — the exact
+ * gates `resolveBrowserMcp` applies per run, hoisted so a health/ops surface can
+ * report the same verdict BEFORE a run is spent (the deployed-specialist view's
+ * `modelUnavailable` and the boot Codex-availability report have this; the
+ * browser had none, so a broken/missing chromium looked identical to a healthy
+ * one until a run failed deep inside). Like `backends` on /resources/health this
+ * is informational, never a `degraded` fault: a deployment that never grants the
+ * browser is a correct deployment (the R17-5 never-checked-renders-neutral rule).
+ */
+export function browserRuntimeStatus(): BrowserRuntimeStatus {
+  if (!playwrightMcpCliPath()) {
+    return {
+      available: false,
+      reason: "the @playwright/mcp package is not installed in this deployment",
+    };
+  }
+  const executable = getEnv().VIBERR_BROWSER_EXECUTABLE ?? null;
+  if (executable && !existsSync(executable)) {
+    return {
+      available: false,
+      reason: `the pinned browser executable (VIBERR_BROWSER_EXECUTABLE=${executable}) is not on disk`,
+    };
+  }
+  return { available: true };
+}
+
 /**
  * Resolve one run's browser mount from its capability grants.
  *
@@ -128,9 +163,25 @@ export function resolveBrowserMcp(input: {
     );
   }
 
+  // A deployment that pins a browser executable must actually have it on disk.
+  // `--executable-path` to a missing binary does NOT fail here — it fails deep
+  // inside the run's first browser tool call, with none of the disclosure the
+  // rest of this resolver gives, which is exactly the "chromium layer pending"
+  // gap the R19-19 rollout survived only by luck (the binary happened to be
+  // present). A pinned-but-absent executable is a refusal, on the same
+  // disclosure channel as a withheld egress or an uninstalled @playwright/mcp —
+  // legible before a run is spent, never a silent deep failure.
+  const executable = getEnv().VIBERR_BROWSER_EXECUTABLE ?? null;
+  if (executable && !existsSync(executable)) {
+    return refuse(
+      `the pinned browser executable (VIBERR_BROWSER_EXECUTABLE=${executable}) ` +
+        "is not on disk — chromium is not installed in this deployment; the " +
+        "browser is not mounted (rebuild the image or install chromium)",
+    );
+  }
+
   mkdirSync(input.attachmentsDir, { recursive: true });
 
-  const executable = getEnv().VIBERR_BROWSER_EXECUTABLE ?? null;
   const args = [
     cli,
     "--headless",

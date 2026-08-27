@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
 import {
   BROWSER_MCP_NAME,
+  browserPersonaSection,
+  browserRuntimeStatus,
   resolveBrowserMcp,
 } from "./specialist-browser-mcp.server";
 
@@ -119,7 +121,10 @@ describe("R19-19 resolveBrowserMcp", () => {
 
   it("drives the deployment's chromium when VIBERR_BROWSER_EXECUTABLE is set — and only then drops the sandbox", () => {
     const dir = tmpAttachments();
-    process.env.VIBERR_BROWSER_EXECUTABLE = "/usr/bin/chromium";
+    // A REAL executable on disk: the resolver now pre-flights the pinned binary
+    // (a missing one is a refusal, below), so the passthrough test can only use
+    // a path that actually exists. process.execPath is the portable stand-in.
+    process.env.VIBERR_BROWSER_EXECUTABLE = process.execPath;
     resetEnvCacheForTests();
     const server = resolveBrowserMcp({
       grants: [g("use-browser", "direct")],
@@ -127,11 +132,70 @@ describe("R19-19 resolveBrowserMcp", () => {
       backend: "claude",
     }).server!;
     expect(server.args[server.args.indexOf("--executable-path") + 1]).toBe(
-      "/usr/bin/chromium",
+      process.execPath,
     );
     // docker's default seccomp blocks the user-namespace sandbox for the
     // non-root node user; the flag rides ONLY with the container executable.
     expect(server.args).toContain("--no-sandbox");
     rmSync(path.dirname(dir), { recursive: true, force: true });
+  });
+
+  it("REFUSES the mount when the pinned browser executable is not on disk — a clean refusal, not a deep runtime failure", () => {
+    const dir = tmpAttachments();
+    process.env.VIBERR_BROWSER_EXECUTABLE =
+      "/nonexistent/chromium-not-installed";
+    resetEnvCacheForTests();
+    const r = resolveBrowserMcp({
+      grants: [g("use-browser", "direct")],
+      attachmentsDir: dir,
+      backend: "claude",
+    });
+    expect(r.server).toBeNull();
+    expect(r.refused).not.toBeNull();
+    expect(r.refused!.name).toContain(BROWSER_MCP_NAME);
+    expect(r.refused!.reason).toContain("VIBERR_BROWSER_EXECUTABLE");
+    expect(r.refused!.reason).toContain("chromium is not installed");
+    // A refused mount creates nothing — no empty attachments dir left behind.
+    expect(existsSync(dir)).toBe(false);
+    rmSync(path.dirname(dir), { recursive: true, force: true });
+  });
+});
+
+describe("browserRuntimeStatus — the same gates as the mount, before a run is spent", () => {
+  it("is available on a host with @playwright/mcp installed and no executable pinned", () => {
+    // @playwright/mcp is a production dependency, so the CLI resolves; with no
+    // VIBERR_BROWSER_EXECUTABLE the host uses Playwright's own resolution.
+    expect(browserRuntimeStatus()).toEqual({ available: true });
+  });
+
+  it("is unavailable, with a reason, when the pinned executable is missing", () => {
+    process.env.VIBERR_BROWSER_EXECUTABLE =
+      "/nonexistent/chromium-not-installed";
+    resetEnvCacheForTests();
+    const s = browserRuntimeStatus();
+    expect(s.available).toBe(false);
+    expect(s.reason).toContain("VIBERR_BROWSER_EXECUTABLE");
+  });
+});
+
+describe("browserPersonaSection — the load-bearing screenshot contract", () => {
+  // The whole default-name-vs-filename strategy hinges on the agent NOT passing
+  // a filename (a self-named screenshot lands in the run workspace where no
+  // human sees it). Pin the instruction so a persona reword can't silently drop
+  // it, on both backends.
+  it("always instructs a filename-less screenshot and points at the attachments dir", () => {
+    for (const backend of ["claude", "codex"] as const) {
+      const p = browserPersonaSection("tasks/VQP-1/attachments", backend);
+      expect(p).toContain("WITHOUT a `filename`");
+      expect(p).toContain("tasks/VQP-1/attachments");
+    }
+  });
+
+  it("tells a Codex agent screenshots are not visible to it — and does NOT tell a Claude agent that", () => {
+    const codex = browserPersonaSection("a/b", "codex");
+    const claude = browserPersonaSection("a/b", "claude");
+    expect(codex).toContain("does NOT return to you as an image");
+    expect(codex).toContain("never claim you visually inspected");
+    expect(claude).not.toContain("does NOT return to you as an image");
   });
 });
