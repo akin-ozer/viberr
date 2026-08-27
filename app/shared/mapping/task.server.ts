@@ -126,17 +126,27 @@ export interface PacketRender {
   options: PacketOption[];
 }
 
-/** Board-card / summary shape. `readiness` is always the canonical enum;
- * `displayReadiness` adds the derived terminal-stage states — "accepted"
- * (human accepted; PR merge may still be pending) and "merged" (the review
- * PR really merged, F7-UI3) — feed it straight into ReadinessPill. */
+/** What a surface renders for readiness: the canonical stored enum plus the
+ * derived states no file holds — the terminal pair "accepted" (human accepted;
+ * PR merge may still be pending) and "merged" (the review PR really merged,
+ * F7-UI3), and "agent_working" (an agent is carrying the task; see
+ * `deriveDisplayReadiness`). Feed it straight into ReadinessPill. */
+export type DisplayReadiness =
+  | Readiness
+  | "accepted"
+  | "merged"
+  | "agent_working";
+
+/** Board-card / summary shape. `readiness` is always the canonical stored enum
+ * — the acceptance gate and the board attention filter read THAT; only
+ * rendering reads `displayReadiness`. */
 export interface TaskSummary {
   projectSlug: string;
   key: string;
   title: string;
   stage: string;
   readiness: Readiness;
-  displayReadiness: Readiness | "accepted" | "merged";
+  displayReadiness: DisplayReadiness;
   waiting: Waiting;
   /** R8-3: does an open decision on this task require THE VIEWING USER's action?
    * Loader-annotated (the projection has no viewer context) — the board's
@@ -434,26 +444,58 @@ export function mapOperatorRef(
 }
 
 /**
- * DISPLAY readiness when an OPEN input packet is awaiting the human.
+ * THE display-readiness derivation — the one place a stored readiness becomes
+ * the value every surface renders.
  *
- * An `input` packet ("Decision required" / an agent's ask-human) is a request
- * for human input, but the operator leaves `readiness` as-is when it opens one —
- * only a `blocked` packet flips readiness to "blocked" (operator-actions.server:
- * "Blocked-ness lives on readiness alone"). That left the hero and the board card
- * showing green "ready" beside a "Decision required" packet, which reads as a
- * contradiction: the task is NOT ready, it needs your input.
+ * Stored readiness answers "what does the FILE say", which is not always what
+ * is true of the task right now. Two lifts close that gap, in this precedence:
  *
- * So for the DISPLAY only, a task waiting on a human with an open input packet
- * reads "input required". The STORED readiness, the acceptance gate, and the
- * board attention filter (which all read `readiness`, never `displayReadiness`)
- * are untouched — only the "ready" case is lifted, so a blocked/risk task keeps
- * its stronger signal.
+ * 1. AN AGENT IS CARRYING IT (R21-8, generalised). `waiting: "agent"` is the
+ *    stored fact that an agent — not a human — is the task's next actor, and
+ *    the same task actions that hand work to an agent write the pair together
+ *    (`fm.waiting = "agent"; fm.readiness = "ready"` — retry-on-other-backend,
+ *    re-engage-specialist, unblock-on-policy in task-actions.server.ts). So the
+ *    readiness slot claimed a state the run contradicted:
+ *      · `input_required` claimed a human was needed RIGHT NOW — the case the
+ *        owner reported, fixed by R21-8;
+ *      · `ready` painted the app's green all-clear over work whose outcome is
+ *        not known yet — the SAME defect, in the state that actually dominates
+ *        (the triage gate clears `input_required` on leaving the entry stage,
+ *        which is exactly when agents start working), left behind because
+ *        R21-8 was written against the one value the report happened to show.
+ *    Both now read "agent working". `blocked` and `inconsistency_risk_detected`
+ *    never yield — a run does not answer those (R21-8, unchanged).
+ *
+ * 2. A HUMAN OWES AN ANSWER. An `input` packet ("Decision required" / an
+ *    agent's ask-human) is a request for human input, but the operator leaves
+ *    `readiness` as-is when it opens one — only a `blocked` packet flips
+ *    readiness to "blocked" (operator-actions.server: "Blocked-ness lives on
+ *    readiness alone"). That left a green "ready" beside a "Decision required"
+ *    packet. Raising a packet flips `waiting` to "human", so this lift is also
+ *    the reassertion path out of lift 1: the human's turn outranks a run that
+ *    is still winding down.
+ *
+ * Deriving here rather than per-surface is the point (rulings 12/14: a mapping
+ * is never forked per surface). Both lifts used to live in the components —
+ * one of them copy-pasted across three render sites with two different gates —
+ * so extending either meant finding every copy, and a new surface inherited
+ * whichever bug it forgot to reproduce. Surfaces now choose how to RENDER the
+ * derived value; they no longer re-decide it.
+ *
+ * The STORED readiness, the acceptance gate and the board attention filter all
+ * read `readiness`, never `displayReadiness`, and are untouched.
  */
-function displayReadinessWithPacket(
+export function deriveDisplayReadiness(
   readiness: Readiness,
   waiting: Waiting,
   packet: TaskPacket | null,
-): Readiness {
+): DisplayReadiness {
+  if (
+    waiting === "agent" &&
+    (readiness === "ready" || readiness === "input_required")
+  ) {
+    return "agent_working";
+  }
   if (readiness === "ready" && waiting === "human" && packet?.type === "input") {
     return "input_required";
   }
@@ -559,7 +601,7 @@ export function mapTaskProjectionRow(
       ? pr?.state === "merged"
         ? "merged"
         : "accepted"
-      : displayReadinessWithPacket(row.readiness, row.waiting, columns.packet),
+      : deriveDisplayReadiness(row.readiness, row.waiting, columns.packet),
     waiting: row.waiting,
     urgent: row.urgent === 1,
     priority: row.priority,

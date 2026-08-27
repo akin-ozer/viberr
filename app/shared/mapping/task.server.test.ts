@@ -160,9 +160,65 @@ describe("displayReadiness derivation (F7-UI3)", () => {
     expect(summarize(r, false).displayReadiness).toBe("blocked");
   });
 
-  it("an input packet not waiting on a human is left alone (agent's turn)", () => {
+  it("an input packet on the agent's turn does not raise 'input required'", () => {
+    // The packet lift is for a HUMAN who owes an answer. On the agent's turn
+    // the agent-working lift below owns the slot instead — what this must never
+    // do is claim a human is needed.
     const r = row({ readiness: "ready", waiting: "agent", packet_json: inputPacket });
-    expect(summarize(r, false).displayReadiness).toBe("ready");
+    expect(summarize(r, false).displayReadiness).not.toBe("input_required");
+  });
+});
+
+/**
+ * R21-8, generalised (pass 30). The ruling's own rule — while an agent carries
+ * the task the slot says so — shipped as a UI special case for `input_required`
+ * only, re-derived on three surfaces with two different gates. `ready` was left
+ * behind, and `ready` is the state that actually dominates: the triage gate
+ * clears `input_required` on leaving the entry stage, which is exactly when
+ * agents start working, and three task actions write `waiting: "agent"` and
+ * `readiness: "ready"` together as one "an agent now carries this" state. The
+ * result was the app's green all-clear painted over work in flight.
+ */
+describe("R21-8: while an agent carries the task, readiness reads 'agent working'", () => {
+  it("'ready' + waiting:agent no longer paints a green all-clear", () => {
+    const s = summarize(row({ readiness: "ready", waiting: "agent" }), false);
+    expect(s.displayReadiness).toBe("agent_working");
+    // The STORED value is untouched: the acceptance gate and the board's
+    // attention filter read `readiness`, never `displayReadiness`.
+    expect(s.readiness).toBe("ready");
+  });
+
+  it("'input required' + waiting:agent yields, exactly as R21-8 shipped it", () => {
+    const r = row({ readiness: "input_required", waiting: "agent" });
+    expect(summarize(r, false).displayReadiness).toBe("agent_working");
+  });
+
+  it("a human's turn reasserts the readiness value immediately", () => {
+    // Raising a packet flips `waiting` to "human" — the human's turn outranks
+    // a run that is still winding down.
+    const r = row({ readiness: "input_required", waiting: "human" });
+    expect(summarize(r, false).displayReadiness).toBe("input_required");
+  });
+
+  it("'blocked' and 'inconsistency risk' never yield — a run does not answer them", () => {
+    for (const readiness of ["blocked", "inconsistency_risk_detected"] as const) {
+      expect(
+        summarize(row({ readiness, waiting: "agent" }), false).displayReadiness,
+      ).toBe(readiness);
+    }
+  });
+
+  it("waiting:none is not an agent turn", () => {
+    expect(
+      summarize(row({ readiness: "ready", waiting: "none" }), false).displayReadiness,
+    ).toBe("ready");
+  });
+
+  it("a terminal task keeps its terminal status even with waiting:agent", () => {
+    // "accepted"/"merged" are the STATUS of finished work; a stale waiting flag
+    // must not relabel a done task as in-flight.
+    const r = row({ stage: "done", readiness: "ready", waiting: "agent" });
+    expect(summarize(r, true).displayReadiness).toBe("accepted");
   });
 });
 
