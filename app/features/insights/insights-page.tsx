@@ -5,7 +5,7 @@ import type {
   InsightsSummary,
 } from "~/server/insights/insights-query.server";
 import { Icon } from "~/ui/icon";
-import { LocalDayDotTime } from "~/ui/local-time";
+import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 
 /**
  * Insights: a read-only analytics dashboard over agent runs — totals, outcomes,
@@ -206,6 +206,7 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
  * reading renders neutral — this is an observation log, never a probe.
  */
 function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }) {
+  const hydrated = useHydrated();
   const pctOf = (u: number | null) =>
     u == null ? null : Math.max(0, Math.min(100, Math.round(u * 100)));
   return (
@@ -244,7 +245,14 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     className="bar-cost"
                     // The reading's own age — a weeks-old 91% must be visibly
                     // stale, not current (the server module's honesty rule).
-                    title={`observed ${new Date(reading.observedAt).toLocaleString()}`}
+                    // Hydration-gated: SSR would bake the SERVER's
+                    // locale/timezone into the attribute and React never
+                    // patches the mismatch (the app's local-time discipline).
+                    title={
+                      hydrated
+                        ? `observed ${new Date(reading.observedAt).toLocaleString()}`
+                        : undefined
+                    }
                   >
                     {[
                       // A provider warning outranks the reset date — the panel

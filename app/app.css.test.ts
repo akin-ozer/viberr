@@ -142,16 +142,20 @@ describe("app.css custom properties (P13-D-18)", () => {
     // The panel that D-18 found rendering completely unstyled.
     // `.sched-controls select` used to be checked here too; P16-UI-05 folded it
     // into the one app-wide `select` rule, which the next test locks instead.
-    for (const selector of [".sched-row", ".sched-form", ".sched-note"]) {
+    // Pass 30 split the pin: .sched-note is a textarea, so its resting
+    // boundary is EXACTLY the 3:1 --border-control token (a 3-way alternation
+    // would let it silently fall back to the decorative 1.64:1 --border); the
+    // row/form frames stay decorative.
+    for (const [selector, borderRe] of [
+      [".sched-row", /border(-top)?:\s*1px solid var\(--(hairline|border)\)/],
+      [".sched-form", /border(-top)?:\s*1px solid var\(--(hairline|border)\)/],
+      [".sched-note", /border:\s*1px solid var\(--border-control\)/],
+    ] as const) {
       const rule = CODE.match(
         new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
       );
       expect(rule, `${selector} must have a rule`).toBeTruthy();
-      expect(rule![1]).toMatch(
-        // Pass 30: .sched-note is a textarea, so its resting boundary moved to
-        // the 3:1 --border-control token; the row/form frames stay decorative.
-        /border(-top)?:\s*1px solid var\(--(hairline|border|border-control)\)/,
-      );
+      expect(rule![1]).toMatch(borderRe);
     }
   });
 });
@@ -1222,7 +1226,7 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     expect(staticSites).toEqual([]);
   });
 
-  it("holds the line at 23 sites", () => {
+  it("holds the line at 24 sites", () => {
     // A ceiling, not a target. It exists because the previous pass moved the
     // `<select>` half of this finding and left the inline-style half, and
     // nothing noticed the count climbing back for three passes. Raised 20 → 22
@@ -1620,11 +1624,21 @@ function paintMap(dark: boolean): Map<string, string> {
     const bg = rule.decls.get("background") ?? rule.decls.get("background-color");
     if (!bg) continue;
     for (const part of rule.selector.split(",")) {
+      // Test the RAW part for the dark scope BEFORE bareSelector strips the
+      // `:root` pseudo-class — the stripped key could never match, so the
+      // dark-override branch was dead and both theme sweeps measured e.g. the
+      // console against its LIGHT fill only.
+      const raw = part.trim();
+      if (raw.startsWith(DARK_SCOPE)) {
+        if (dark) {
+          const key = bareSelector(raw.slice(DARK_SCOPE.length));
+          if (key) scoped.set(key, bg);
+        }
+        continue;
+      }
       const key = bareSelector(part);
       if (!key) continue;
-      if (key.startsWith(DARK_SCOPE)) {
-        if (dark) scoped.set(key.slice(DARK_SCOPE.length), bg);
-      } else if (!paints.has(key)) paints.set(key, bg);
+      if (!paints.has(key)) paints.set(key, bg);
     }
   }
   return new Map([...paints, ...scoped]);
@@ -2545,5 +2559,22 @@ describe("app.css type scale (pass 30)", () => {
     const weights = [...CODE.matchAll(/font-weight:\s*([^;}]+)/g)].map((m) => m[1].trim());
     const allowed = new Set(["400", "500", "600", "700", "800", "inherit"]);
     expect([...new Set(weights.filter((w) => !allowed.has(w)))]).toEqual([]);
+  });
+
+  it("scopes font-weight: 800 to rules that resolve the display face", () => {
+    // 800 exists only in Manrope. A body/mono-face rule declaring 800 silently
+    // clamps to 700/600 — the exact fiction the pass removed (and the
+    // drop-preview's visible mid-drag typeface swap). Each 800 rule must
+    // either declare the display family itself or select an h1-h4 element,
+    // which the global heading rule puts on the display face.
+    const offenders: string[] = [];
+    for (const rule of CODE.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const [, selector, body] = rule;
+      if (!/font-weight:\s*800\b/.test(body)) continue;
+      const declaresDisplay = /font-family:\s*var\(--font-display\)/.test(body);
+      const headingSelector = /(^|[\s.>+~])h[1-4]\b/.test(selector);
+      if (!declaresDisplay && !headingSelector) offenders.push(selector.trim());
+    }
+    expect(offenders).toEqual([]);
   });
 });

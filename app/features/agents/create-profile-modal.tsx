@@ -1041,13 +1041,18 @@ function ModalFooter({
         </button>
         {/* P13-UI-58 residual: the submit had no busy state for assistive tech —
             a save in flight looked idle to a screen reader. */}
+        {/* Invalid is DIMMED but still clickable: the click reaches submit()'s
+            refusal guard, which flips the requirements line red (the attempted
+            gate) — a hard-disabled button made that state unreachable and the
+            refusal silent. Busy stays a real disable. */}
         <button
           type="button"
           className="btn primary"
           onClick={onSubmitClick}
-          disabled={!valid || busy}
+          disabled={busy}
+          aria-disabled={!valid || busy || undefined}
           aria-busy={busy}
-          style={!valid ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+          style={!valid ? { opacity: 0.5 } : undefined}
         >
           <Icon name="check" />
           {busy ? "Saving…" : editing ? "Save changes" : "Create profile"}

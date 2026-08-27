@@ -325,8 +325,13 @@ div.top-search:focus-within,
 .self-center { align-self: center; }
 /* Icon + label on one line — the app's most-repeated ad-hoc flex row. */
 .inline-row { display: inline-flex; align-items: center; gap: .5rem; }
-/* A count appended to a control's own label ("Live · 4"), subordinate to it. */
-.tally { opacity: .6; }
+/* A count appended to a control's own label ("Live · 4"), subordinate to it.
+   De-emphasis via the AA ladder, not alpha: the old opacity .6 composited
+   --muted parents to ~2.7:1 in light, and alpha composites are invisible to
+   the contrast gate. Inverted/accent parents keep an explicit composite with
+   huge margins (below). */
+.tally { color: var(--faint); }
+.seg button.on .tally, .pick-chip.on .tally { color: inherit; opacity: .85; }
 /* A file picker driven by a button elsewhere; never rendered itself. */
 .file-input { display: none; }
 
@@ -522,7 +527,8 @@ button.top-search {
   transition: border-color .14s ease, background .14s ease;
 }
 button.top-search:hover {
-  border-color: var(--border);
+  /* No border-color swap: resting is --border-control now, and hovering to
+     the decorative --border would DIM the boundary. The tint carries hover. */
   background: color-mix(in srgb, var(--surface), var(--fg) 8%);
 }
 .top-search-label { flex: 1; font-size: .86rem; color: var(--muted); }
@@ -1255,6 +1261,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .cal-day.out { color: var(--muted); }
 .cal-day.today:not(.sel) { box-shadow: inset 0 0 0 1px var(--blue); color: var(--blue-pressed); }
 .cal-day.sel { background: var(--blue-soft); color: var(--blue-pressed); box-shadow: inset 0 0 0 1px var(--blue); }
+/* box-shadow is one property, so the state rings above would REPLACE the
+   focus ring (and the calendar's roving focus opens ON the selected day) —
+   the focused state layers both. */
+.cal-day.sel:focus-visible,
+.cal-day.today:not(.sel):focus-visible { box-shadow: inset 0 0 0 1px var(--blue), 0 0 0 2px var(--blue); }
 
 /* --- Label multi-select (chips + checkbox list) --- */
 .label-combo { position: relative; }
@@ -1835,7 +1846,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: var(--surface); padding: .75rem 1rem; box-shadow: var(--shadow-card);
 }
 .ag-stat .n { font-family: var(--font-display); font-weight: 800; font-size: 1.7rem; line-height: 1; }
-.ag-stat .l { font-size: .74rem; color: var(--faint); margin-top: .375rem; }
+.ag-stat .l { font-size: .74rem; color: var(--muted); font-weight: 600; margin-top: .375rem; }
 
 /* master-detail layout */
 .agents-layout {
@@ -2603,9 +2614,9 @@ dialog[data-closing]::backdrop {
 .act-toggle { font-size: .8rem; font-weight: 600; color: var(--teal-dark); }
 /* R19-7: the rows an "N runtime sessions opened" summary stands for, revealed
    in place. Indented to the summary's TEXT column — the `.pev-ico` box (26px)
-   plus the `.pol-ev` gap (.65rem) — so the run reads as belonging to the line
+   plus the `.pol-ev` gap (.75rem) — so the run reads as belonging to the line
    that folded it rather than as N new top-level entries. */
-.pol-ev.pev-sub { padding-left: 2rem; }
+.pol-ev.pev-sub { padding-left: calc(26px + .75rem); }
 .pev-t { font-family: var(--font-mono); font-size: .68rem; color: var(--placeholder); flex: none; padding-top: .25rem; white-space: nowrap; }
 
 
@@ -4317,7 +4328,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* Pass 30: the feeds use the app's own DatePicker (native date inputs were a
    second visual idiom for the same act). Compact metrics for the filter bar;
    the calendar itself is the shared one. */
-.feed-filters .ff-datepick { flex: none; }
+.feed-filters .ff-datepick { flex: none; position: relative; }
+/* In the toolbar the calendar is a real POPOVER: the DatePicker's in-flow
+   calendar (right for modal bodies, where it must not clip) would grow the
+   filter row by its full height and shove the whole feed down. */
+.feed-filters .ff-datepick .datepick-pop { position: absolute; top: calc(100% + .375rem); left: 0; z-index: 60; margin-top: 0; max-width: none; width: max-content; }
 .feed-filters .ff-datepick .datepick-trigger { width: auto; padding: .25rem .5rem; font-size: .74rem; gap: .375rem; }
 .feed-filters .ff-datepick .datepick-trigger .ico { width: 12px; height: 12px; }
 .feed-filters .ff-task:focus {
@@ -4436,10 +4451,12 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .stat-card { display: flex; flex-direction: column; gap: .125rem; padding: 1rem 1rem; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-card); box-shadow: var(--shadow-card); }
 .stat-ico { color: var(--blue-pressed); }
 .stat-ico .ico { width: 16px; height: 16px; }
-/* One big-number stat-tile treatment app-wide: these match .ag-stat's
-   number/label pair, so Agents and Insights read as the same component. */
+/* One big-number stat-tile treatment app-wide (matches .ag-stat's number).
+   The tile has THREE rungs — value, label, qualifier — so the label keeps a
+   step above the sub (weight+color, not size): collapsing them to one style
+   erased the name/qualifier hierarchy on the eight two-line cards. */
 .stat-val { font-size: 1.7rem; font-weight: 800; font-family: var(--font-display); line-height: 1.1; }
-.stat-label { font-size: .74rem; color: var(--faint); font-weight: 400; }
+.stat-label { font-size: .74rem; color: var(--muted); font-weight: 600; }
 .stat-sub { font-size: .74rem; color: var(--faint); }
 .insights-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .breakdown, .daily { margin-bottom: 1rem; }
