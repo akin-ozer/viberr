@@ -217,9 +217,15 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                 />
               </span>
               <span className="bar-val">
-                {reading == null || pct == null
+                {/* Three honest states: no reading ever; a reading whose
+                    envelope carried no utilization number (the provider's
+                    five_hour events often omit it — say so, never "no reading
+                    yet" next to a reset date); a full percentage reading. */}
+                {reading == null
                   ? "no reading yet"
-                  : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
+                  : pct == null
+                    ? `${reading.rateLimitType.replaceAll("_", " ")} · utilization not reported`
+                    : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
                 {reading && (
                   <span className="bar-cost">
                     {reading.isUsingOverage
