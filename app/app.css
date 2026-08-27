@@ -4370,9 +4370,12 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .avatar.ghost { opacity: .5; }
 /* The board filter chips' counts sit a shade stronger than `.tally`'s default —
    they are the only number on the chip. */
-/* .7 composited the light-theme count to 3.36:1; .85 clears AA and stays
-   subordinate on both chip states. */
-.fchip .tally { opacity: .85; }
+/* De-emphasis via the AA ladder, not alpha (the old .7 opacity composited the
+   light-theme count to 3.36:1, and an opacity composite is invisible to the
+   contrast gate). --faint is 5.79:1 resting and test-measured. The inverted
+   .on chip keeps its own inherited color. */
+.fchip .tally { opacity: 1; color: var(--faint); }
+.fchip.on .tally { color: inherit; opacity: .85; }
 .modal-card.modal-narrow { width: min(560px, calc(100vw - 2rem)); }
 
 /* --- policy / GitHub view / project settings --- */

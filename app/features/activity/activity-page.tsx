@@ -585,6 +585,7 @@ function FeedFilters({
         <DatePicker
           value={get(params.from) || null}
           placeholder="From"
+          ariaLabel={`From date for the ${legend}`}
           onChange={(iso) => setParam(params.from, iso ?? "")}
         />
       </span>
@@ -595,6 +596,7 @@ function FeedFilters({
         <DatePicker
           value={get(params.to) || null}
           placeholder="To"
+          ariaLabel={`To date for the ${legend}`}
           onChange={(iso) => setParam(params.to, iso ?? "")}
         />
       </span>

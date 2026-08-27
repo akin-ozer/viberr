@@ -485,6 +485,21 @@ describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
     }
   });
 
+  it("holds 4.5:1 for --faint on the --blue-soft selection fill", () => {
+    // Pass 30: a selected decision-packet option (`.opt.sel`) paints
+    // --blue-soft under --faint text (`.opt .od`, `.opt .opt-kbd`). The R19-12
+    // sweep pairs text only with its own selector part's backdrop, so this
+    // sibling-state combination is invisible to it — and the dark pair clears
+    // AA by just 0.17, the thinnest real margin in the sheet. Enumerated here
+    // so the margin is guarded rather than commented.
+    for (const [theme, block] of [["light", LIGHT_ROOT], ["dark", DARK_ROOT]] as const) {
+      expect(
+        contrastRatio(tokenIn(block, "--faint"), tokenIn(block, "--blue-soft")),
+        `${theme} --faint on --blue-soft`,
+      ).toBeGreaterThanOrEqual(AA_SMALL_TEXT);
+    }
+  });
+
   it("the primary CTA and its hover clear 4.5:1 in both themes", () => {
     // The brand accent cannot carry text: white on light --blue is 3.84:1 and
     // on dark --blue 3.19:1, and `.btn.primary` is every primary CTA in the app
