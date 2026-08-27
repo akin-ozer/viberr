@@ -88,7 +88,6 @@ export function TaskHero({
   stage,
   canEditGoal,
   archived = false,
-  agentWorking = false,
   editGoalSignal = 0,
   editGoalDraft = null,
 }: {
@@ -98,10 +97,6 @@ export function TaskHero({
   /** R14-3: archived tasks are off the board and out of the review queue —
    *  say so at the top, or the page reads like ordinary open work. */
   archived?: boolean;
-  /** A live run is in flight — the triage "input required" pill would read as
-   *  "waiting on you RIGHT NOW", which is false mid-run, so it yields to an
-   *  agent-working pill (R21-8). Real states (blocked / risk) still show. */
-  agentWorking?: boolean;
   /** Increments when a packet's `edit_goal` decision is confirmed — opens the
    *  goal editor so the human can start typing immediately. */
   editGoalSignal?: number;
@@ -186,26 +181,12 @@ export function TaskHero({
             stands in its place. A terminal (accepted/merged) task keeps its
             readiness pill: that value IS the terminal status, not a live claim.
 
-            R21-8 (supersedes C3's both-pills arrangement): "input required"
-            claims a human is needed RIGHT NOW — false while an agent is
-            actively carrying the work, so during a live run it yields and the
-            agent-working pill takes the slot. C3's real complaint — the hero
-            and the board card disagreeing mid-run — stands: the card top makes
-            the identical yield (board-page.tsx). The `waiting !== "human"`
-            guard is the reassertion path: an open packet flips `waiting` to
-            "human", and the human's turn outranks any still-live run. Blocked /
-            inconsistency-risk never yield — those are standing states a run
-            does not answer. */}
-        {!archived &&
-          (agentWorking &&
-          task.displayReadiness === "input_required" &&
-          task.waiting !== "human" ? (
-            <Pill kind="agent" dot>
-              agent working
-            </Pill>
-          ) : (
-            <ReadinessPill value={task.displayReadiness} />
-          ))}
+            R21-8's agent-working yield used to be re-derived here (and again on
+            the board card, and again on the list row, with two different
+            gates). It is one server-side derivation now —
+            `deriveDisplayReadiness` — so this surface renders the value and
+            does not re-decide it. */}
+        {!archived && <ReadinessPill value={task.displayReadiness} />}
         {/* C2 (⇄ N20-14/UXO-1): the validation pill is a live obligation and is
             withdrawn on every terminal task, not just archived ones — see the
             `terminal` note above. */}
