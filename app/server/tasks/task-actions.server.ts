@@ -2323,6 +2323,84 @@ async function withdrawSupersededStuckPacket(
 }
 
 /**
+ * Withdraw a stale delivery/branch-conflict blocked packet once a PR now stands
+ * for the task (F29-7). When server-owned delivery fails on a non-fast-forward
+ * push conflict, the operator opens a blocked "Delivery push conflict … no PR
+ * opened" decision packet. If a human then resolves the branch out-of-band and
+ * re-delivers with the GitHub panel's "Deliver branch & open PR" button, the
+ * push+PR succeed — but the packet is HUMAN-owned, so the operator cannot clear
+ * it and an operator re-run won't either. The task then sits `blocked` with a
+ * packet whose "no PR opened" text flatly contradicts the "PR #N · in review"
+ * panel beside it. A successful delivery is exactly what falsifies its premise,
+ * so supersede it here (readiness lifts with it), the same shape as the
+ * retry-packet supersession after a successful agent run.
+ *
+ * Scoped by the packet's `discard_branch` option — the structured marker of the
+ * branch/delivery-conflict family (delete/rename the branch, or discard it and
+ * re-deliver under a new name). A reject-recovery packet ("PR closed without
+ * merging") uses `archive_task` instead and is deliberately left alone, as is
+ * any `accept_completion` packet. Best-effort; never turns the open PR into an
+ * error.
+ */
+async function withdrawSupersededDeliveryPacket(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<void> {
+  const isConflictPacket = (p: {
+    type: string;
+    options: readonly { kind: string }[];
+  }): boolean =>
+    p.type === "blocked" &&
+    !p.options.some((o) => o.kind === "accept_completion") &&
+    p.options.some((o) => o.kind === "discard_branch");
+  try {
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    const packet = existing?.parsed.packet;
+    if (!packet || !isConflictPacket(packet)) return;
+    let withdrawn = false;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      const p = parsed.packet;
+      // Re-check inside the write — the read above raced other writers.
+      if (!p || !isConflictPacket(p)) return;
+      parsed.packet = null;
+      // A blocked packet held the readiness gate down with it.
+      if (parsed.frontmatter.readiness === "blocked") {
+        parsed.frontmatter.readiness = "ready";
+      }
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "transition",
+        actor: { kind: "operator" },
+        title: null,
+        text: `**Packet withdrawn:** "${p.title}" is moot — delivery succeeded and a review pull request now stands for this task.`,
+        toAgent: false,
+        evidence: null,
+      });
+      withdrawn = true;
+    });
+    if (!withdrawn) return;
+    markTaskPacketApprovalRead(db, projectSlug, taskKey);
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.packet.withdrawn_superseded",
+      actor: OPERATOR_AUDIT_ACTOR,
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: { reason: "delivery_succeeded" },
+    });
+  } catch (error) {
+    logger.warn("superseded delivery-packet withdrawal failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
  * Classify a reviewer's reply into a verdict (FR15/FR35). Conservative: returns
  * a verdict only on a clear signal, else null (no validation change). Pure —
  * exported for tests.
@@ -4747,6 +4825,11 @@ export async function performDelivery(
         });
         reprojectTask(db, ctx, projectSlug, taskKey);
       }
+      // F29-7: a real PR now stands, so a stale "Delivery push conflict … no PR
+      // opened" blocked packet from an earlier failed push is moot. It is
+      // human-owned (the operator can't clear it), so clear it here or the task
+      // sits `blocked` with a packet that contradicts the live PR panel.
+      await withdrawSupersededDeliveryPacket(db, ctx, projectSlug, taskKey);
       // R18-2 (F18-10): opening the review PR is delivery, NOT a stage transition, so
       // the P11-70 every-transition re-trigger (and the auto-boundary stranded backstop)
       // never fires here — an autonomous task would sit `waiting:human` with no packet,

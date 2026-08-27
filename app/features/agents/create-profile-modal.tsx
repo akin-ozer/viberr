@@ -841,6 +841,21 @@ function CapabilityGrants({
                             change this.
                           </p>
                         )}
+                        {backend === "codex" &&
+                          capDef.id === BROWSER_CAP_ID && (
+                            // The Codex screenshot-invisibility asymmetry was
+                            // disclosed on the capability-matrix modal and in the
+                            // run persona, but NOT here — where the grant is
+                            // actually made. An admin who ticks the browser on a
+                            // Codex profile and never opens the matrix could be
+                            // surprised the agent cannot "see" what it captures.
+                            <p className="cap-mnote">
+                              On Codex, screenshots are not returned to the model:
+                              a Codex agent captures and attaches them as evidence
+                              but cannot visually inspect them, and judges pages
+                              from the accessibility tree and text tools instead.
+                            </p>
+                          )}
                       </div>
                     );
                   })}

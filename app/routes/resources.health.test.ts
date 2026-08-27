@@ -37,6 +37,7 @@ interface HealthBody {
   kbWatcher?: boolean;
   lock?: unknown;
   backends?: { claude: string; codex: string };
+  browser?: { status: "ready" | "unavailable"; reason?: string };
   disk?: DiskSpace | null;
   maintenance?: { intervalMs: number; lastPassAt: string | null };
   build?: { version: string | null; revision: string | null };
@@ -188,6 +189,37 @@ describe("/resources/health — honest status (gap 17)", () => {
       ).toBe(200);
     } finally {
       setBackendAvailability("codex", true);
+    }
+  });
+
+  it("reports the browser runtime status — ready when installed, unavailable (never degraded) when chromium is missing", async () => {
+    // @playwright/mcp is a production dependency, so on a default host with no
+    // executable pinned the browser runtime is ready.
+    const ready = await probe();
+    expect(ready.body.browser?.status).toBe("ready");
+    expect(ready.body.degraded).toEqual([]);
+
+    // A pinned-but-absent executable makes the runtime unavailable, with a
+    // reason — but it is NOT a degraded fault (the same R17-5 stance as
+    // backends: a deployment that never grants the browser is still correct;
+    // this just makes a broken chromium visible before a run is spent).
+    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
+    process.env.VIBERR_BROWSER_EXECUTABLE =
+      "/nonexistent/chromium-not-installed";
+    resetEnvCacheForTests();
+    try {
+      const { body, status } = await probe();
+      expect(body.browser?.status).toBe("unavailable");
+      expect(body.browser?.reason).toContain("VIBERR_BROWSER_EXECUTABLE");
+      expect(body.status).toBe("ok");
+      expect(body.degraded).toEqual([]);
+      expect(status).toBe(200);
+      expect((await probe("/resources/health?probe=readiness")).status).toBe(
+        200,
+      );
+    } finally {
+      process.env.VIBERR_BROWSER_EXECUTABLE = "";
+      resetEnvCacheForTests();
     }
   });
 });

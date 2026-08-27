@@ -269,6 +269,99 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(outcome).toMatchObject({ status: "delivered", prNumber: 9, created: true });
   });
 
+  it("F29-7: a successful delivery supersedes a stale delivery-conflict blocked packet", async () => {
+    // A prior server-owned push conflicted; the operator opened a blocked
+    // "push conflict … no PR opened" packet (its branch/delivery family is
+    // marked by the `discard_branch` option) and readiness floored to blocked.
+    // The human then clears the remote branch and re-delivers from the panel —
+    // the packet's premise is now moot and must not persist next to a live PR.
+    const CONFLICT_PACKET: TaskPacket = {
+      id: "pkt_conflict",
+      type: "blocked",
+      kind: "Blocked decision",
+      from: "operator",
+      title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
+      body: "No review PR was opened.",
+      observations: [],
+      options: [
+        { kind: "custom", t: "Delete or rename the remote branch, then retry delivery", d: "", rec: true },
+        { kind: "discard_branch", t: "Give this task a different branch name and re-deliver", d: "", rec: false },
+        { kind: "custom", t: "Deliberate force-push to `vib-1`", d: "", rec: false },
+      ],
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        readiness: "blocked",
+      }),
+      packet: CONFLICT_PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    openPrMock.mockResolvedValue({
+      status: "ok",
+      prNumber: 11,
+      created: true,
+      url: "https://github.com/x/y/pull/11",
+    });
+
+    const outcome = await performDelivery(
+      store.db,
+      dataCtx(),
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    expect(outcome).toMatchObject({ status: "delivered", prNumber: 11 });
+
+    const after = fm();
+    expect(after.packet).toBeNull();
+    expect(after.frontmatter.readiness).not.toBe("blocked");
+    expect(after.timeline.some((e) => /Packet withdrawn/.test(e.text ?? ""))).toBe(
+      true,
+    );
+  });
+
+  it("F29-7: a successful delivery does NOT touch a reject-recovery packet (archive_task, not a branch conflict)", async () => {
+    // A "PR closed without merging → choose recovery path" packet uses
+    // archive_task options; it is a different question and stays for the human.
+    const REJECT_PACKET: TaskPacket = {
+      id: "pkt_reject",
+      type: "input",
+      kind: "Decision required",
+      from: "operator",
+      title: "PR #9 closed without merging — choose recovery path",
+      body: "",
+      observations: [],
+      options: [
+        { kind: "custom", t: "Rework and reopen", d: "", rec: true },
+        { kind: "archive_task", t: "Archive task and delete branch", d: "", rec: false },
+      ],
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", branch: "vib-1" }),
+      packet: REJECT_PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    openPrMock.mockResolvedValue({
+      status: "ok",
+      prNumber: 12,
+      created: true,
+      url: "https://github.com/x/y/pull/12",
+    });
+
+    await performDelivery(
+      store.db,
+      dataCtx(),
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    expect(fm().packet?.id).toBe("pkt_reject");
+  });
+
   // A3: `grant_withheld` / `push_conflict` / `push_failed` refused; the other
   // four push outcomes fell straight through to `openTaskPr` and opened a
   // review PR over a remote nobody had just written to. Each has to name its
