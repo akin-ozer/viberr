@@ -127,6 +127,32 @@ describe("InsightsPage", () => {
     expect(getByText("no reading yet")).toBeTruthy();
   });
 
+  it("a reading WITHOUT a utilization number says so — never 'no reading yet' beside a reset date", () => {
+    // Live-caught (pass 29): the provider's five_hour envelopes often omit
+    // `utilization`; the row used to render the contradiction
+    // "no reading yet · resets 8/27/2026".
+    const { getByText, queryByText } = renderPage({
+      ...FULL,
+      backendQuota: [
+        {
+          backend: "claude",
+          reading: {
+            status: "allowed",
+            rateLimitType: "five_hour",
+            utilization: null,
+            resetsAt: 1_787_848_800,
+            isUsingOverage: false,
+            observedAt: "2026-08-27T12:59:20.000Z",
+          },
+        },
+        { backend: "codex", reading: null },
+      ],
+    });
+    expect(getByText(/five hour · utilization not reported/)).toBeTruthy();
+    // "no reading yet" belongs ONLY to codex (truly silent), not to claude.
+    expect(queryByText("no reading yet")).toBeTruthy();
+  });
+
   it("shows an empty state when there are no runs", () => {
     const { getByText, container } = renderPage({
       ...FULL,
