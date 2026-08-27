@@ -416,8 +416,8 @@ export function ScheduledActions({
             placeholder="Why re-run later? (optional)"
             maxLength={140}
           />
-          {/* P13-D-19: `btn btn-primary` -> `btn primary` (see Save goal). */}
-          <button type="submit" className="btn primary" disabled={busy}>
+          {/* Pass 30: a routine starter, not the page's primary commit. */}
+          <button type="submit" className="btn" disabled={busy}>
             <Icon name="clock" /> Schedule operator re-run
           </button>
         </fetcher.Form>

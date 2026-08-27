@@ -200,7 +200,6 @@ function BrowserToolbar({
             onClick={onImport}
             disabled={importing}
             aria-busy={importing || undefined}
-            style={importing ? { opacity: 0.6 } : undefined}
           >
             <Icon
               name={importing ? "refresh" : "arrow"}

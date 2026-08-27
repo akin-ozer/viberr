@@ -112,7 +112,7 @@ export function OperatorRecommendations({
               <div className="op-rec-actions">
                 <button
                   type="button"
-                  className="btn primary sm"
+                  className="btn sm"
                   disabled={busy}
                   onClick={() => onApply(r.id)}
                   title={

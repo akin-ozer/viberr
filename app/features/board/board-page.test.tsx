@@ -678,9 +678,33 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     expect(hint.className).not.toContain("err");
   });
 
-  it("states the requirement once the field is left empty", () => {
+  it("keeps guidance neutral on an empty blur (showModal steals focus at open)", () => {
+    // dialog.showModal() moves focus right after the title's autoFocus, so an
+    // unconditional blur handler fired on FIRST PAINT and the footer opened
+    // red — the exact premature error this dialog exists to avoid. An empty
+    // blur therefore stays quiet; only real interaction may accuse.
     const { container } = openDialog();
     fireEvent.blur(container.querySelector("#new-task-title")!);
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("The task key is assigned automatically.");
+    expect(hint.className).not.toContain("err");
+  });
+
+  it("states the requirement on a submit attempt with no title", () => {
+    const { container } = openDialog();
+    fireEvent.keyDown(container.querySelector("#new-task-title")!, {
+      key: "Enter",
+    });
+    const hint = container.querySelector(".foot-hint")!;
+    expect(hint.textContent).toBe("A title is required.");
+    expect(hint.className).toContain("err");
+  });
+
+  it("states the requirement when typed content is left behind", () => {
+    const { container } = openDialog();
+    const input = container.querySelector("#new-task-title")!;
+    fireEvent.change(input, { target: { value: "ab" } });
+    fireEvent.blur(input);
     const hint = container.querySelector(".foot-hint")!;
     expect(hint.textContent).toBe("A title is required.");
     expect(hint.className).toContain("err");

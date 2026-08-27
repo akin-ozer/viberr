@@ -1121,7 +1121,15 @@ function NewTaskModal({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => setTitleTouched(true)}
+            // Empty-blur stays quiet: dialog.showModal() steals focus right
+            // after autoFocus, so an unconditional blur handler marked the
+            // field touched on FIRST PAINT and the footer opened red (the
+            // exact premature-error this state exists to prevent). A person
+            // who typed something and left the field still gets the check;
+            // submit() flags it regardless.
+            onBlur={(e) => {
+              if (e.target.value.trim() !== "") setTitleTouched(true);
+            }}
             placeholder="e.g. Reconcile PR state after force-push"
             autoFocus
             onKeyDown={(e) => {

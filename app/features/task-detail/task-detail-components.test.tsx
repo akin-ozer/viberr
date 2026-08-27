@@ -673,7 +673,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
     });
     const { container, onRun } = renderExec(task);
     // The primary specialist's Run button — not the operator "Run operator" one.
-    const runBtn = Array.from(container.querySelectorAll<HTMLButtonElement>("button.btn.primary")).find(
+    const runBtn = Array.from(container.querySelectorAll<HTMLButtonElement>("button.btn")).find(
       (b) => b.textContent?.includes("Run") && !b.textContent?.includes("operator"),
     )!;
     expect(runBtn).toBeDefined();
@@ -693,7 +693,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
       },
     });
     const { container } = renderExec(task, { deliveringActive: true });
-    const runBtn = Array.from(container.querySelectorAll<HTMLButtonElement>("button.btn.primary")).find(
+    const runBtn = Array.from(container.querySelectorAll<HTMLButtonElement>("button.btn")).find(
       (b) => b.textContent?.includes("Running"),
     )!;
     expect(runBtn.disabled).toBe(true);
@@ -709,7 +709,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
     );
     expect(assignBtn).toBeUndefined();
     expect(
-      Array.from(container.querySelectorAll("button.btn.primary")).some((b) =>
+      Array.from(container.querySelectorAll("button.btn")).some((b) =>
         b.textContent?.includes("Run"),
       ),
     ).toBe(false);
@@ -827,7 +827,7 @@ describe("ExecutionProfile — reviewers", () => {
     const chip = container.querySelector(".rev-agent")!;
     expect(chip).not.toBeNull();
     expect(chip.textContent).toContain("Code review");
-    fireEvent.click(chip.querySelector(".btn.primary")!);
+    fireEvent.click(chip.querySelector(".btn")!);
     expect(onRunReviewer).toHaveBeenCalledWith("reviewer");
     fireEvent.click(chip.querySelector(".rev-x")!);
     expect(onRemoveReviewer).toHaveBeenCalledWith("reviewer");
@@ -884,7 +884,7 @@ describe("ExecutionProfile — reviewers", () => {
       activeReviewerIds: ["reviewer"],
     });
     const runBtn = container.querySelector<HTMLButtonElement>(
-      ".rev-agent .btn.primary",
+      ".rev-agent .btn",
     )!;
     expect(runBtn.disabled).toBe(true);
     expect(runBtn.textContent).toContain("Running");
@@ -898,7 +898,7 @@ describe("ExecutionProfile — reviewers", () => {
       activeReviewerIds: ["some-other-reviewer"],
     });
     const runBtn = container.querySelector<HTMLButtonElement>(
-      ".rev-agent .btn.primary",
+      ".rev-agent .btn",
     )!;
     expect(runBtn.disabled).toBe(false);
     expect(runBtn.textContent).toContain("Run");
@@ -910,7 +910,7 @@ describe("ExecutionProfile — reviewers", () => {
       canRunAgents: false,
     });
     expect(container.querySelector(".rev-agent")).not.toBeNull();
-    expect(container.querySelector(".rev-agent .btn.primary")).toBeNull();
+    expect(container.querySelector(".rev-agent .btn")).toBeNull();
     expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
     expect(
       Array.from(container.querySelectorAll(".rev-add")).some((b) =>
@@ -2267,7 +2267,10 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
       expect(b.className).not.toMatch(/\bbtn-(primary|ghost)\b/);
     }
     const submit = buttons.find((b) => b.textContent?.includes("Schedule operator re-run"))!;
-    expect(submit.classList.contains("primary")).toBe(true);
+    // Pass 30: routine starters are secondary — the page's one solid primary
+    // is the decision-stakes commit of the current state.
+    expect(submit.classList.contains("btn")).toBe(true);
+    expect(submit.classList.contains("primary")).toBe(false);
     const cancel = buttons.find((b) => b.textContent?.trim() === "Cancel")!;
     expect(cancel.classList.contains("ghost")).toBe(true);
   });

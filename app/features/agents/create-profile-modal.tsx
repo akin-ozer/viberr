@@ -1016,6 +1016,7 @@ function ModalFooter({
   editing,
   onClose,
   onSubmitClick,
+  showError,
 }: {
   hint: string;
   valid: boolean;
@@ -1024,10 +1025,18 @@ function ModalFooter({
   editing: boolean;
   onClose: () => void;
   onSubmitClick: () => void;
+  /* The requirements line turns red only after a save was actually attempted
+     (or the server errored) — never on a pristine form. */
+  showError: boolean;
 }) {
   return (
     <div className="modal-foot">
-      <span className={"foot-hint" + (valid && !error ? "" : " err")}>{hint}</span>
+      <span
+        className={"foot-hint" + (showError ? " err" : "")}
+        role={showError ? "alert" : undefined}
+      >
+        {hint}
+      </span>
       <div className="foot-actions">
         <button type="button" className="btn ghost" onClick={onClose}>
           Cancel
@@ -1237,11 +1246,18 @@ export function CreateProfileModal({
   // with its own backend must not lock Save behind a round-trip.
   const modelPending = Boolean(backend) && model === "";
   const valid = fieldsValid && !modelPending;
+  // The requirements line is neutral guidance until the person actually tries
+  // to save an invalid form — a modal that opens with red error text is
+  // scolding them for something they haven't had a chance to do yet.
+  const [attempted, setAttempted] = useState(false);
 
   const submit = () => {
     // `valid` already requires a picked backend; naming it in the guard is what
     // rules out the picker's initial "" for the payload below.
-    if (!valid || busy || !backend) return;
+    if (!valid || busy || !backend) {
+      setAttempted(true);
+      return;
+    }
     const payload: ProfileFormPayload = {
       name: name.trim(),
       role: role.trim(),
@@ -1377,6 +1393,7 @@ export function CreateProfileModal({
         editing={editing}
         onClose={close}
         onSubmitClick={submit}
+        showError={Boolean(error) || (attempted && !valid)}
       />
     </dialog>
   );

@@ -255,8 +255,12 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
       />
       {/* UI-12: a real `main` landmark. The eight workspace routes rendered
           this as a bare <div>, so screen-reader users had no landmark to jump
-          to (Home and org settings already used <main>). */}
-      <main className="main" id="main-content" tabIndex={-1}>
+          to (Home and org settings already used <main>). The skip TARGET is a
+          sentinel BELOW the topbar (pass 30): focusing the <main> itself put
+          the topbar's own 6+ tab stops still ahead of the content, so the
+          "skip" only skipped the rail — Home's identical link skips its whole
+          header. */}
+      <main className="main">
         <Topbar
           projectSlug={board.project.slug}
           projectName={board.project.name}
@@ -282,6 +286,7 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
             canRestore={roleCan(loaderData.myRole, "edit-policy")}
           />
         ) : null}
+        <div id="main-content" tabIndex={-1} />
         <Outlet />
       </main>
     </div>
