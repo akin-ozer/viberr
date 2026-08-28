@@ -132,6 +132,8 @@ interface PriorShippedHashes {
 
 export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "operator.md")]: [
+    // outgoing before the rework-routing guidance (reworkStages)
+    "6c67b50034ccc80b28563c8415722d5efb9b8da2f854d6339461036f1a46e71d",
     "03a4f8b7a1c2ed9e7414654e5086288e6dcc187b48f9bd16b1ef141b3eca4f34",
     "128c0e733d181ce93c6b3c15c71e890fc629c592f39b08d03a44b6b77afd0d1c",
     "197eaf0b400f61d690d0ec32198fafbd120fa518ef27f00e13b4b427f8bf5856",

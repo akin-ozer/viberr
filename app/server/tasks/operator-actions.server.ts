@@ -1232,6 +1232,16 @@ export interface OperatorTaskSnapshot {
   }[];
   /** Stages the task may move to next (declared workflow boundaries). */
   nextStages: { id: string; name: string; boundary: string }[];
+  /** R7-4 rework routing, made VISIBLE. The governed workflow graph is
+   *  forward-only, so `nextStages` never contains an earlier stage — and an
+   *  operator reading only that field concludes it cannot send failed work
+   *  back, which is exactly what happened live: a reviewer requested changes,
+   *  the operator reported "there is no Review → In Progress transition
+   *  available to me" and parked the task on a human, while the move was
+   *  legal all along. These are the earlier stages the operator MAY move the
+   *  task to directly, no human and no recommendation. Non-empty only while
+   *  the latest review is `failing` — the same gate `transitionStage` vets. */
+  reworkStages: { id: string; name: string }[];
   /** All stage ids in workflow order (first → done). Lets a coordinator tell a
    *  pre-work stage from the implementation stage from the review stage. */
   stageIds: string[];
@@ -1546,6 +1556,16 @@ export function operatorSnapshot(
       ? [{ id: w.to, name: stageName(w.to), boundary: w.boundary }]
       : [],
   );
+  // R7-4: the rework license, listed rather than left to be inferred. Same
+  // predicate `isReworkMove` vets on the way in (backward + validation
+  // failing), so what this offers is exactly what transition_stage accepts.
+  const currentStageIndex = stages.findIndex((s) => s.id === fm.stage);
+  const reworkStages =
+    fm.validation === "failing" && currentStageIndex > 0
+      ? stages
+          .slice(0, currentStageIndex)
+          .map((s) => ({ id: s.id, name: s.name }))
+      : [];
 
   const ownerName = fm.ownerUserId
     ? (userNameSchema.safeParse(
@@ -1595,6 +1615,7 @@ export function operatorSnapshot(
       }));
     })(),
     nextStages,
+    reworkStages,
     stageIds: stages.map((s) => s.id),
     doneStageId,
     reviewStageId: roles.reviewId,
