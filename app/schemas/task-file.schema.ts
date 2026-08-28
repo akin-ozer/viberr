@@ -1414,7 +1414,12 @@ export interface EvidenceRow {
 /** Row/field caps. The rows are serialized into task.md and re-read into every
  *  agent prompt, so they stay small by construction. */
 export const EVIDENCE_MAX_ROWS = 8;
-const EVIDENCE_LABEL_MAX_CHARS = 120;
+/** Long enough for a real citation sentence ("app/app.css.test.ts — 89/89
+ *  passed (vitest, node environment)") without becoming a dump: at 120 the
+ *  cap chopped verdict rows mid-word and the tail was lost from the FILE, so
+ *  no surface could recover it. Rows re-enter every agent prompt, so the
+ *  ceiling stays bounded — 8 rows x 200 is the worst case. */
+const EVIDENCE_LABEL_MAX_CHARS = 200;
 const EVIDENCE_COUNT_MAX_CHARS = 16;
 
 /**

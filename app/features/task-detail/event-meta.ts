@@ -32,7 +32,12 @@ export const EVENT_META: EventMetaTable = {
   // Neutral governance/lifecycle notes: a goal edit, a divergence note, a
   // scheduled re-run. Same "note" node styling as a comment row, no shield.
   note: { node: "note", icon: "message", label: "Note" },
-  quality: { node: "quality", icon: "flag", label: "Quality flag" },
+  // The reviewer's verdict record. Named for the CATEGORY, not for one of its
+  // outcomes: "Quality flag" put a flag-shaped, risk-toned chip on "Review
+  // passed" too, which reads as "something is wrong here" on good news. The
+  // outcome is the event's own bold title (Review passed / Changes requested /
+  // Approval noted …), so the chip stays neutral like `note` and `github`.
+  quality: { node: "quality", icon: "flag", label: "Review verdict" },
   // G8: runtime-continuity reset — warning-toned (amber), refresh icon (the
   // agent re-anchored on a fresh session). Distinct from a neutral `note` so a
   // scanning supervisor sees that context was lost and recovered.
@@ -69,7 +74,7 @@ const TYPED_KIND: TypedKindTable = {
   github: "neutral",
   policy: "input",
   note: "neutral",
-  quality: "risk",
+  quality: "neutral",
   continuity: "risk", // G8: amber warning tone
   transition: "info",
   blocked: "blocked",

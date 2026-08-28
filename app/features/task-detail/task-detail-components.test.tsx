@@ -325,7 +325,7 @@ describe("TimelineItem", () => {
       // P13-LV-03: neutral lifecycle notes (goal edits, divergence, scheduling)
       // no longer borrow the coral "Policy violation" shield.
       ["note", "note", "Note"],
-      ["quality", "quality", "Quality flag"],
+      ["quality", "quality", "Review verdict"],
       // G8: continuity reset — amber warning tone, its own label; borrows the
       // quality node styling (both are the amber/attention family).
       ["continuity", "quality", "Continuity reset"],

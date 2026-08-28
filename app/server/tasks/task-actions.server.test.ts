@@ -1527,7 +1527,11 @@ describe("reviewer quality notification (FIX #6)", () => {
     });
     const quality = file.parsed.timeline.find((e) => e.type === "quality")!;
     expect(quality.actor).toMatchObject({ kind: "agent", profileId: "reviewer" });
-    expect(quality.text).toContain("Review & validation requested changes.");
+    // The summary names the revision the verdict binds to instead of restating
+    // the title: "Changes requested" + "… requested changes." spent the one
+    // informative line (and the whole notification) on nothing.
+    expect(quality.text).toContain("Review & validation requested changes");
+    expect(quality.text).toMatch(/requested changes on `[0-9a-f]{12}`\./);
     expect(file.parsed.timeline[1]).toMatchObject({
       type: "comment",
       text: "Requesting changes — the tests fail.",
