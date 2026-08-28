@@ -2955,3 +2955,75 @@ describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () =>
     expect(packet.body).not.toContain("Disclosure");
   });
 });
+
+/* ---------------- R7-4 rework routing is DISCOVERABLE (reworkStages) --------- */
+
+describe("get_task exposes the rework license the operator was never told about", () => {
+  // Live failure this closes: a reviewer requested changes, and the operator
+  // reported "there is no Review → In Progress transition available to me" and
+  // parked the task on a human for a click. The move was legal the whole time
+  // (R7-4), but `nextStages` is built from the forward-only workflow graph, so
+  // the one field the operator reads to answer "where may this go?" said no.
+  const snapshot = () =>
+    operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("supervised"),
+    );
+
+  const seed = (validation: "failing" | "healthy") => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        validation,
+        title: "Rework discoverability",
+      }),
+      goal: "Prove the rework license is visible.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  };
+
+  it("offers the earlier stages while the review is failing", () => {
+    deployRoster(DEFAULT_POLICY);
+    seed("failing");
+    const snap = snapshot();
+    // Exactly the stages before the current one, in workflow order.
+    expect(snap.reworkStages.map((s) => s.id)).toEqual(["triage", "ready", "impl"]);
+    // And it names them, so the operator can write the move without guessing.
+    expect(snap.reworkStages.at(-1)).toMatchObject({ id: "impl" });
+    // The forward graph is untouched — this is an addition, not a widening.
+    expect(snap.nextStages.some((s) => s.id === "impl")).toBe(false);
+  });
+
+  it("offers nothing while the review is healthy (no rework license)", () => {
+    deployRoster(DEFAULT_POLICY);
+    seed("healthy");
+    expect(snapshot().reworkStages).toEqual([]);
+  });
+
+  it("what it offers is exactly what transition_stage accepts", async () => {
+    // The guard against the two drifting apart: every stage listed must be a
+    // move the operator can actually perform, directly, with no human.
+    deployRoster(DEFAULT_POLICY);
+    seed("failing");
+    const target = snapshot().reworkStages.at(-1)!;
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: target.id },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.stage,
+    ).toBe(target.id);
+  });
+});

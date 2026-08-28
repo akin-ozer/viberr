@@ -132,6 +132,8 @@ interface PriorShippedHashes {
 
 export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "operator.md")]: [
+    // outgoing before the rework-routing guidance (reworkStages)
+    "6c67b50034ccc80b28563c8415722d5efb9b8da2f854d6339461036f1a46e71d",
     "03a4f8b7a1c2ed9e7414654e5086288e6dcc187b48f9bd16b1ef141b3eca4f34",
     "128c0e733d181ce93c6b3c15c71e890fc629c592f39b08d03a44b6b77afd0d1c",
     "197eaf0b400f61d690d0ec32198fafbd120fa518ef27f00e13b4b427f8bf5856",
@@ -192,6 +194,8 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
     "67b14be125a5f8b213a9ad3de6682c4762bdef703a40dc32ba1c907a267e1c31",
     "7aa79a7c54156f0556f437f525a31a5c12b2dd89a5465282974da61337bc041c",
+    // outgoing before the evidence-rows-are-citations guidance
+    "b2fdfb7f86bb294beabf836f59050d1d57eb429a9d787937783eb972b5a33c85",
     "c32401d03e628093ddaec888efdac35ad79e4ee3604502104fb5bf016adda025",
   ],
 };

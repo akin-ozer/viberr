@@ -325,7 +325,7 @@ describe("TimelineItem", () => {
       // P13-LV-03: neutral lifecycle notes (goal edits, divergence, scheduling)
       // no longer borrow the coral "Policy violation" shield.
       ["note", "note", "Note"],
-      ["quality", "quality", "Quality flag"],
+      ["quality", "quality", "Review verdict"],
       // G8: continuity reset — amber warning tone, its own label; borrows the
       // quality node styling (both are the amber/attention family).
       ["continuity", "quality", "Continuity reset"],
@@ -2406,39 +2406,42 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
     expect(meta).not.toContain("gate bypassed");
   });
 
-  // R21-8 (supersedes C3, owner-ruled 2026-08-21): "input required" claims a
-  // human is needed RIGHT NOW, which is false while an agent actively carries
-  // the work — so during a live run it yields and the agent pill takes the
-  // slot. The board card makes the identical yield, so the two surfaces still
-  // agree mid-run (C3's actual complaint).
-  it("R21-8: during a live run, 'agent working' REPLACES the input-required pill", () => {
-    // heroTask's fixture defaults `waiting: "agent"` — the live-carry state.
+  // R21-8 (supersedes C3, owner-ruled 2026-08-21): while an agent carries the
+  // task the slot says so instead of claiming a human is needed or painting a
+  // green all-clear. The DECISION moved to `deriveDisplayReadiness` (one
+  // server-side derivation; its own tests pin every input combination), so the
+  // hero's contract here is narrower and sharper: render the derived value,
+  // never re-decide it.
+  it("R21-8: renders 'agent working' when the derivation says an agent carries it", () => {
     const { container } = renderWithRouter(
       <TaskHero
-        task={heroTask({ displayReadiness: "input_required", validation: "none" })}
+        task={heroTask({ displayReadiness: "agent_working", validation: "none" })}
         stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
         canEditGoal
-        agentWorking
       />,
     );
     const meta = container.querySelector(".hero-meta")!.textContent!;
-    expect(meta).toContain("agent working"); // the run carries the work…
-    expect(meta).not.toContain("input required"); // …so nobody is "needed now"
+    expect(meta).toContain("agent working");
+    // Neither of the two states that yield may leak through beside it.
+    expect(meta).not.toContain("input required");
+    expect(meta).not.toContain("ready");
   });
 
-  it("R21-8: an open packet (`waiting: human`) reasserts 'input required' even while a run is live", () => {
-    // Raising a packet flips `waiting` to "human"; the human's turn outranks
-    // any still-winding-down run, so the readiness pill comes straight back.
+  it("R21-8: the hero does NOT re-derive the yield from its own props", () => {
+    // The bug this guards: three surfaces each re-deriving "is an agent
+    // carrying this?" is how `ready` kept its green pill for four passes while
+    // `input_required` was fixed. A task whose derived value is `input_required`
+    // renders input_required — even though `waiting` says "agent" — because the
+    // server already had the last word.
     const { container } = renderWithRouter(
       <TaskHero
         task={heroTask({
           displayReadiness: "input_required",
           validation: "none",
-          waiting: "human",
+          waiting: "agent",
         })}
         stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
         canEditGoal
-        agentWorking
       />,
     );
     const meta = container.querySelector(".hero-meta")!.textContent!;
@@ -2446,13 +2449,12 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
     expect(meta).not.toContain("agent working");
   });
 
-  it("R21-8: 'blocked' never yields to a live run", () => {
+  it("R21-8: 'blocked' never yields", () => {
     const { container } = renderWithRouter(
       <TaskHero
         task={heroTask({ displayReadiness: "blocked", validation: "none" })}
         stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
         canEditGoal
-        agentWorking
       />,
     );
     const meta = container.querySelector(".hero-meta")!.textContent!;

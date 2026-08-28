@@ -562,9 +562,12 @@ describe("B1: accepting from the board asks first", () => {
 });
 
 describe("F15-09/R21-8: 'agent working' renders once, and input-required yields to it", () => {
-  it("the card top goes quiet while an agent carries an input-required task", () => {
+  it("the card top goes quiet while an agent carries the task", () => {
     const { container } = renderBoard([
-      task({ waiting: "agent", readiness: "input_required", displayReadiness: "input_required" }),
+      // The mapping layer derives `agent_working` from waiting: "agent" (see
+      // deriveDisplayReadiness); the card renders that value, it does not
+      // re-derive it from `waiting` + `readiness`.
+      task({ waiting: "agent", readiness: "input_required", displayReadiness: "agent_working" }),
     ]);
     // F15-09's half: the claim is made ONCE — the foot's WaitTag, never a
     // duplicate pill in the top slot.
@@ -599,7 +602,7 @@ describe("F15-09/R21-8: 'agent working' renders once, and input-required yields 
 
   it("does the same in the list view", () => {
     const { container } = renderBoard(
-      [task({ waiting: "agent", readiness: "input_required", displayReadiness: "input_required" })],
+      [task({ waiting: "agent", readiness: "input_required", displayReadiness: "agent_working" })],
       { view: "list" },
     );
     const working = [...container.querySelectorAll(".pill, .wait-tag")].filter(

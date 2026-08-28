@@ -27,6 +27,7 @@ const SNAPSHOT: OperatorTaskSnapshot = {
   specialist: null,
   reviewers: [],
   nextStages: [],
+  reworkStages: [],
   stageIds: ["triage", "impl", "review", "done"],
   doneStageId: "done",
   reviewStageId: "review",

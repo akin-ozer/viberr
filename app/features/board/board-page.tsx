@@ -588,10 +588,13 @@ function TaskCard({
               is an ACTIONABLE claim ("ready · awaiting verdict" = someone owes
               a verdict); on abandoned work nobody does, and the board drew that
               claim directly under a banner calling the work abandoned. */}
+          {/* R21-8/F15-09: an agent-carried task goes QUIET in this slot — the
+              foot's WaitTag already says "agent working", and the claim is made
+              exactly once per card. The DECISION is server-side
+              (`deriveDisplayReadiness`); this is only the rendering choice. */}
           {archived ? (
             <ArchivedPill />
-          ) : task.waiting === "agent" &&
-            task.displayReadiness === "input_required" ? null : (
+          ) : task.displayReadiness === "agent_working" ? null : (
             <ReadinessPill value={task.displayReadiness} sm />
           )}
         </div>
@@ -894,10 +897,11 @@ function ListRow({
           readiness → "archived" swap the card makes. R21-8: and the same
           input-required-yields-while-an-agent-works rule — the card top's
           comment carries the reasoning. */}
+      {/* Same quiet slot as the card, same reason (the row's own WaitTag
+          carries "agent working"). */}
       {archived ? (
         <ArchivedPill />
-      ) : task.waiting === "agent" &&
-        task.displayReadiness === "input_required" ? null : (
+      ) : task.displayReadiness === "agent_working" ? null : (
         <ReadinessPill value={task.displayReadiness} sm />
       )}
       {/* F19-13: the card's state block verbatim — the row used to draw

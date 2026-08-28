@@ -1652,7 +1652,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .5rem .75rem;
 }
 .tl-card.evidence { font-family: var(--font-mono); font-size: .74rem; color: var(--muted); background: var(--tint-hover); }
+/* A citation line, optionally followed by its diff counts. The label takes the
+   room (min-width: 0 so a long one wraps instead of shoving the counts off the
+   edge); the counts hold their own column. A block whose rows carry no counts
+   renders label-only — see the timeline's evidence block. */
 .tl-card .ev-row { display: flex; justify-content: space-between; gap: 1rem; padding: .125rem 0; }
+.tl-card .ev-row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+.tl-card .ev-row .ev-counts { flex: none; font-variant-numeric: tabular-nums; }
 .tl-card .ev-row .add { color: var(--teal-dark); }
 .tl-card .ev-row .del { color: var(--coral-dark); }
 

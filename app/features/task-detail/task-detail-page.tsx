@@ -305,13 +305,6 @@ export function TaskDetailPage({
       r.kind === "operator" &&
       (r.lifecycle === "running" || r.lifecycle === "queued"),
   );
-  // Any live run (operator, specialist, or reviewer) drives the working pill.
-  // `waiting` also covers the short window before a runtime row exists.
-  const anyRunLive =
-    task.waiting === "agent" ||
-    runtime.some(
-      (r) => r.lifecycle === "running" || r.lifecycle === "queued",
-    );
   // Terminal-stage OR archived task — closed for new work (comments stay open,
   // R7-6). F15-11: archived tasks used to keep every live control.
   const taskClosed =
@@ -693,7 +686,6 @@ export function TaskDetailPage({
           stage={stage}
           canEditGoal={canEditGoal}
           archived={archived}
-          agentWorking={anyRunLive}
           editGoalSignal={editGoalSignal}
           editGoalDraft={editGoalDraft}
         />

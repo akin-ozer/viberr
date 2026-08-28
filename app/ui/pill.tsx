@@ -48,10 +48,18 @@ export type ReadinessValue =
   | "inconsistency_risk_detected"
   | "blocked";
 
-/** Readiness plus the derived terminal-stage display states: "accepted"
- * (human accepted; merge may still be pending) and "merged" (the review PR
- * really merged — F7-UI3: "accepted" must not read stale next to GitHub). */
-export type ReadinessDisplayValue = ReadinessValue | "accepted" | "merged";
+/** Readiness plus the derived display states no file stores: the terminal pair
+ * "accepted" (human accepted; merge may still be pending) and "merged" (the
+ * review PR really merged — F7-UI3: "accepted" must not read stale next to
+ * GitHub), and "agent_working" (R21-8: an agent is carrying the task, so the
+ * slot says so instead of claiming a human is needed or painting a green
+ * all-clear). Derived in ONE place — `deriveDisplayReadiness`, the mapping
+ * layer — never re-decided here or in a component. */
+export type ReadinessDisplayValue =
+  | ReadinessValue
+  | "accepted"
+  | "merged"
+  | "agent_working";
 
 /** What a pill renders for one value: its CSS kind and its label. */
 interface PillDisplay {
@@ -66,6 +74,7 @@ const READINESS_DISPLAY = {
   blocked: { kind: "blocked", label: "blocked" },
   accepted: { kind: "done", label: "accepted" },
   merged: { kind: "done", label: "merged" },
+  agent_working: { kind: "agent", label: "agent working" },
 } satisfies Record<ReadinessDisplayValue, PillDisplay>;
 
 /** The same table, keyed for lookup by a value that has NOT been narrowed to
@@ -103,9 +112,13 @@ export function ReadinessPill({
   sm?: boolean;
 }) {
   const r = READINESS_BY_VALUE.get(value) ?? READINESS_UNKNOWN;
+  // "agent working" is the one readiness value that means something is
+  // happening RIGHT NOW, so it keeps the live dot the hero's hand-rolled
+  // version used (R21-8) rather than the static status glyph.
+  const live = value === "agent_working";
   return (
-    <Pill kind={r.kind} sm={sm}>
-      <Icon name="activity" />
+    <Pill kind={r.kind} sm={sm} dot={live}>
+      {!live && <Icon name="activity" />}
       {r.label}
     </Pill>
   );

@@ -1130,6 +1130,19 @@ it is regenerated from the filesystem rather than restated here.
     a run does not answer those. Stored readiness is untouched; the triage gate itself still
     clears only on leaving the entry stage (task-actions.server.ts).
 
+    **Completed 2026-08-27 (owner-reported again, on `ready`).** The ruling shipped as a UI
+    special case for the one value the report showed, re-derived on three surfaces with two
+    different gates — so `ready` kept the app's GREEN ALL-CLEAR while an agent worked, which is
+    the same defect with a worse tell. `ready` is also the state that dominates: the triage gate
+    clears `input_required` on leaving the entry stage, exactly when agents start working, and
+    `fm.waiting = "agent"` + `fm.readiness = "ready"` are written together by
+    retry-on-other-backend, re-engage-specialist and unblock-on-policy. The yield now covers
+    `ready` too and lives in ONE server-side derivation, `deriveDisplayReadiness`
+    (app/shared/mapping/task.server.ts), beside the packet lift it composes with; surfaces render
+    the derived `agent_working` value and no longer re-decide it (rulings 12/14). The gate is the
+    ruling's own `waiting === "agent"` — the hero's extra live-runtime check is gone, so the hero
+    and the board card cannot disagree mid-run by construction, which was C3's actual complaint.
+
 92. **R21-9 (2026-08-21): the claude backend's display label is "Claude" (not "Claude Code"),
     and the operator run control SHOWS, it does not pick.** Two owner instructions, one surface.
     The label: every backend label site (mapping `agentBackendName`, actor-ref display names,
