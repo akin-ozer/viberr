@@ -154,10 +154,18 @@ html, body {
 body {
   color: var(--fg);
   font-family: var(--font-body);
-  background:
-    radial-gradient(circle at 6% 2%, color-mix(in srgb, var(--rose-light), transparent 62%), transparent 30rem),
-    radial-gradient(circle at 98% 4%, color-mix(in srgb, var(--teal-light), transparent 60%), transparent 32rem),
-    var(--bg);
+  /* The canvas is FLAT --bg in both themes (VIB-1). It used to carry two
+     pastel radial blobs — rose at 6% 2%, teal at 98% 4% — which tinted the
+     page behind every surface with two colours the rest of the sheet uses as
+     STATUS: --rose-light is risk/quality, --teal-light is ready/direct. A
+     decorative wash in the same two hues as the status fills is exactly the
+     ambient noise that makes those fills read as decoration too, and it also
+     put an unmeasurable backdrop under every text pair (the contrast sweep in
+     app.css.test.ts could resolve every colour in the sheet EXCEPT these two).
+     Nothing replaces them: the depth in this app comes from --surface cards
+     lifted off the canvas by --shadow-card, which needs the canvas to be
+     plain. The pastels keep their jobs on the status fills, untouched. */
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;

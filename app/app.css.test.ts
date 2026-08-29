@@ -1880,13 +1880,13 @@ describe("app.css: every pair it paints clears WCAG AA, in both themes (R19-12)"
   });
 
   it("resolves every colour it meets, or names the ones it cannot", () => {
-    // Silent skips are how a sweep becomes decoration. The only unresolvable
-    // paint in the sheet is the home canvas's two-blob radial gradient, whose
-    // stops are near-transparent tints over --bg.
-    expect([...new Set(unresolved)].sort()).toEqual([
-      "dark body { background: radial-gradient(…) }",
-      "light body { background: radial-gradient(…) }",
-    ]);
+    // Silent skips are how a sweep becomes decoration. The list is EMPTY since
+    // VIB-1 flattened the page canvas to `background: var(--bg)`: the two
+    // pastel radial blobs on `body` were the sheet's only unresolvable paint,
+    // so every pair the app renders is now measured against a real backdrop.
+    // A new entry here is a new gradient/image backdrop that this sweep cannot
+    // see through — teach the resolver about it rather than listing it.
+    expect([...new Set(unresolved)].sort()).toEqual([]);
   });
 
   it("clears 4.5:1 for text and 3:1 for large text and meaningful glyphs", () => {
